@@ -42,7 +42,10 @@ export const QUESTIONS: readonly Question[] = [
     entry:
       'Bhadra is 100% Indian Robusta (S274 cherry robusta, naturally processed), always roasted dark, with about twice the caffeine of Arabica; notes of dark chocolate, tobacco and black tea. Very strong, recommended with milk; suits espresso, moka pot and drip.',
     specifics: [
-      { label: 'dark chocolate', variants: ['dark chocolate', 'chocolate', 'cocoa'] },
+      {
+        label: 'dark chocolate',
+        variants: ['dark chocolate', 'chocolate', 'cocoa'],
+      },
       { label: 'tobacco', variants: ['tobacco'] },
       { label: 'black tea', variants: ['black tea'] },
     ],
@@ -83,9 +86,15 @@ export const QUESTIONS: readonly Question[] = [
     entry:
       'Chikka (Espresso Blend 5050) is 50% Indian Arabica and 50% Robusta, dark roast, Le Mil’s strongest Arabica-Robusta blend, with notes of dark chocolate and roasted malt; heavy, creamy body, neutral acidity. Made for espresso.',
     specifics: [
-      { label: 'dark chocolate', variants: ['dark chocolate', 'chocolate', 'cocoa'] },
+      {
+        label: 'dark chocolate',
+        variants: ['dark chocolate', 'chocolate', 'cocoa'],
+      },
       { label: 'roasted malt', variants: ['malt', 'malty'] },
-      { label: 'heavy / creamy body', variants: ['heavy', 'creamy', 'full body', 'full-bodied'] },
+      {
+        label: 'heavy / creamy body',
+        variants: ['heavy', 'creamy', 'full body', 'full-bodied'],
+      },
     ],
     why: 'A yes/no-shaped taste question, which R6 also governs. Tests that answering yes/no does not crowd out the notes.',
   },
@@ -96,7 +105,10 @@ export const QUESTIONS: readonly Question[] = [
     entry:
       'The Pink Panther is made from cascara, the dried skin of the coffee fruit. By itself cascara tea is tangy and sour, like unripe tomato juice. Le Mil’s balances it with kokum syrup. It is vegan and low caffeine, and is Himanshu’s personal favourite drink on the menu.',
     specifics: [
-      { label: 'cascara', variants: ['cascara', 'coffee fruit', 'coffee cherry'] },
+      {
+        label: 'cascara',
+        variants: ['cascara', 'coffee fruit', 'coffee cherry'],
+      },
       { label: 'tangy / sour', variants: ['tangy', 'sour', 'tart'] },
       { label: 'kokum', variants: ['kokum'] },
     ],
@@ -111,7 +123,10 @@ export const QUESTIONS: readonly Question[] = [
     specifics: [
       { label: 'floral', variants: ['floral', 'flowery'] },
       { label: 'thick foam', variants: ['foam', 'froth', 'whipped'] },
-      { label: 'underrated / least ordered', variants: ['underrated', 'least ordered', 'overlooked'] },
+      {
+        label: 'underrated / least ordered',
+        variants: ['underrated', 'least ordered', 'overlooked'],
+      },
     ],
     why: 'A worth-it question, where a take is most natural and the facts are most likely to be dropped.',
   },
@@ -137,9 +152,24 @@ export const QUESTIONS: readonly Question[] = [
     entry:
       'Each bean carries its own brewing guidance. Budan: pour over, French press, drip, Indian filter and moka pot; pour over recipe is a 1:15 or 1:16 ratio, 21-22g of coffee, three pours of about 100ml, finishing under three minutes. Malenad: espresso, pour over and French press, same pour over recipe as the Budan. Chikka: made for espresso. Bhadra: espresso, moka pot or drip, and drink it with milk. Beans are sold whole or ground, and can be ground for espresso, or medium-fine for Indian filter, moka pot and Aeropress.',
     specifics: [
-      { label: 'a brew method', variants: ['pour over', 'pourover', 'french press', 'espresso', 'moka pot', 'drip', 'aeropress', 'filter'] },
+      {
+        label: 'a brew method',
+        variants: [
+          'pour over',
+          'pourover',
+          'french press',
+          'espresso',
+          'moka pot',
+          'drip',
+          'aeropress',
+          'filter',
+        ],
+      },
       { label: 'grind', variants: ['grind', 'ground', 'whole bean'] },
-      { label: 'a ratio or dose', variants: ['1:15', '1:16', '21g', '22g', '21-22', 'ratio', 'grams'] },
+      {
+        label: 'a ratio or dose',
+        variants: ['1:15', '1:16', '21g', '22g', '21-22', 'ratio', 'grams'],
+      },
     ],
     why: 'THE TICKET NAMES THIS ONE. The device reply answered where to BUY them (lemils.com or the counter) instead of how to use them.',
   },
@@ -150,7 +180,10 @@ export const QUESTIONS: readonly Question[] = [
     entry:
       'How we brew Bhadra at home: it’s 100% Robusta and the strongest thing we make. Best as espresso, in a moka pot or as drip, and drink it with milk.',
     specifics: [
-      { label: 'espresso / moka / drip', variants: ['espresso', 'moka pot', 'moka', 'drip'] },
+      {
+        label: 'espresso / moka / drip',
+        variants: ['espresso', 'moka pot', 'moka', 'drip'],
+      },
       { label: 'with milk', variants: ['with milk', 'milk'] },
     ],
     why: 'The second device case: "how do i brew that" got a description of the bean instead of the method.',
@@ -164,8 +197,14 @@ export const QUESTIONS: readonly Question[] = [
     specifics: [
       { label: 'ratio', variants: ['1:15', '1:16', '1 to 15', 'ratio'] },
       { label: 'dose', variants: ['21', '22', 'grams', 'g of coffee'] },
-      { label: 'three pours', variants: ['three pours', '3 pours', '100ml', '100 ml'] },
-      { label: 'under three minutes', variants: ['three minutes', '3 minutes', '2:45', 'under 3'] },
+      {
+        label: 'three pours',
+        variants: ['three pours', '3 pours', '100ml', '100 ml'],
+      },
+      {
+        label: 'under three minutes',
+        variants: ['three minutes', '3 minutes', '2:45', 'under 3'],
+      },
     ],
     why: 'The most precisely documented method the venue has. If any how-to reply carries numbers, this is the one.',
   },
@@ -176,9 +215,24 @@ export const QUESTIONS: readonly Question[] = [
     entry:
       'How we brew Malenad at home: it’s our all-rounder, good for espresso, pour over and French press. For pour over, use the same recipe as the Budan: 1:15 ratio, 21-22g of coffee, three pours of about 100ml, done in under three minutes.',
     specifics: [
-      { label: 'a brew method', variants: ['espresso', 'pour over', 'pourover', 'french press'] },
-      { label: 'ratio or dose', variants: ['1:15', '1:16', '21', '22', 'ratio', 'grams'] },
-      { label: 'three pours / timing', variants: ['three pours', '3 pours', '100ml', 'three minutes', '3 minutes'] },
+      {
+        label: 'a brew method',
+        variants: ['espresso', 'pour over', 'pourover', 'french press'],
+      },
+      {
+        label: 'ratio or dose',
+        variants: ['1:15', '1:16', '21', '22', 'ratio', 'grams'],
+      },
+      {
+        label: 'three pours / timing',
+        variants: [
+          'three pours',
+          '3 pours',
+          '100ml',
+          'three minutes',
+          '3 minutes',
+        ],
+      },
     ],
     why: 'Same method as the Budan, reached through a different item, so a correct answer has to carry it across.',
   },
@@ -190,8 +244,14 @@ export const QUESTIONS: readonly Question[] = [
       'Le Mil’s sells a traditional brass South Indian coffee filter that brews up to 200 ml of decoction, enough for two cups of filter coffee, for $29.99. Estate Secret is the chicory blend ground for the Indian filter.',
     specifics: [
       { label: 'decoction', variants: ['decoction'] },
-      { label: '200ml / two cups', variants: ['200 ml', '200ml', 'two cups', '2 cups'] },
-      { label: 'the grind or blend for it', variants: ['estate secret', 'ground for', 'chicory'] },
+      {
+        label: '200ml / two cups',
+        variants: ['200 ml', '200ml', 'two cups', '2 cups'],
+      },
+      {
+        label: 'the grind or blend for it',
+        variants: ['estate secret', 'ground for', 'chicory'],
+      },
     ],
     why: 'Equipment rather than coffee, and the entry holds a capacity rather than a recipe.',
   },
@@ -202,8 +262,14 @@ export const QUESTIONS: readonly Question[] = [
     entry:
       'The froth on South Indian filter coffee comes from ‘metering’: pouring the coffee back and forth between the tumbler and dabara from a height. It cools the coffee, aerates it and builds foam; the taller the pour, the foamier the cup.',
     specifics: [
-      { label: 'metering / pouring between', variants: ['metering', 'back and forth', 'between the', 'long pour'] },
-      { label: 'from a height', variants: ['from a height', 'height', 'taller', 'high'] },
+      {
+        label: 'metering / pouring between',
+        variants: ['metering', 'back and forth', 'between the', 'long pour'],
+      },
+      {
+        label: 'from a height',
+        variants: ['from a height', 'height', 'taller', 'high'],
+      },
       { label: 'tumbler and dabara', variants: ['dabara', 'tumbler'] },
     ],
     why: 'A technique question with a named method, where answering "what it is" instead of "how" is the easy miss.',
@@ -215,7 +281,14 @@ export const QUESTIONS: readonly Question[] = [
     entry:
       'Guests who prefer classic filter coffee (no masala jaggery, no modern additions) can request it plain at the counter. Saying ‘no masala jaggery’ at the counter is all it takes. Ordering at Le Mil’s is counter-only.',
     specifics: [
-      { label: 'say no masala jaggery', variants: ['no masala jaggery', 'without the masala jaggery', 'masala jaggery'] },
+      {
+        label: 'say no masala jaggery',
+        variants: [
+          'no masala jaggery',
+          'without the masala jaggery',
+          'masala jaggery',
+        ],
+      },
       { label: 'at the counter', variants: ['at the counter', 'counter'] },
     ],
     why: 'The ticket’s "order" branch of how-to. The method is a sentence to say, not a recipe.',
@@ -229,9 +302,20 @@ export const QUESTIONS: readonly Question[] = [
     entry:
       'The SoFi name stands for South Indian Filter (or South Filter). The drink has four variations. All versions include in-house masala jaggery syrup, a touch that isn’t found in India or Indian restaurants and is Le Mil’s own signature on the drink. Filter coffee outsells every other drink by six to one.',
     specifics: [
-      { label: 'south indian filter', variants: ['south indian filter', 'south filter', 'filter coffee'] },
+      {
+        label: 'south indian filter',
+        variants: ['south indian filter', 'south filter', 'filter coffee'],
+      },
       { label: 'masala jaggery', variants: ['masala jaggery', 'jaggery'] },
-      { label: 'four variations', variants: ['four variation', '4 variation', 'four version', 'variations'] },
+      {
+        label: 'four variations',
+        variants: [
+          'four variation',
+          '4 variation',
+          'four version',
+          'variations',
+        ],
+      },
     ],
     why: 'The venue’s signature drink, and the control for whether a what-is question stays a what-is answer.',
   },
@@ -244,7 +328,16 @@ export const QUESTIONS: readonly Question[] = [
     specifics: [
       { label: 'chicory', variants: ['chicory'] },
       { label: 'dandelion root', variants: ['dandelion'] },
-      { label: 'caffeine-free / no coffee', variants: ['caffeine free', 'caffeine-free', 'no caffeine', 'zero caffeine', 'no actual coffee'] },
+      {
+        label: 'caffeine-free / no coffee',
+        variants: [
+          'caffeine free',
+          'caffeine-free',
+          'no caffeine',
+          'zero caffeine',
+          'no actual coffee',
+        ],
+      },
     ],
     why: 'R25 bans a bare comma-list of ingredients, so this tests that naming the ingredients and reading as venue voice can coexist.',
   },
@@ -257,7 +350,10 @@ export const QUESTIONS: readonly Question[] = [
     specifics: [
       { label: 'chicory', variants: ['chicory'] },
       { label: '80/20', variants: ['80', '20', 'eighty'] },
-      { label: 'for the indian filter', variants: ['indian filter', 'filter coffee', 'filter'] },
+      {
+        label: 'for the indian filter',
+        variants: ['indian filter', 'filter coffee', 'filter'],
+      },
     ],
     why: 'A blend whose whole identity is its ratio, so a thin answer is obvious.',
   },
@@ -282,8 +378,14 @@ export const QUESTIONS: readonly Question[] = [
       'Just Chicory is caffeine-free roasted Indian chicory root, a traditional coffee substitute used in filter coffee. 1 lb for $9.99.',
     specifics: [
       { label: 'chicory root', variants: ['chicory root', 'chicory'] },
-      { label: 'caffeine-free', variants: ['caffeine free', 'caffeine-free', 'no caffeine'] },
-      { label: 'coffee substitute', variants: ['substitute', 'instead of coffee', 'not coffee'] },
+      {
+        label: 'caffeine-free',
+        variants: ['caffeine free', 'caffeine-free', 'no caffeine'],
+      },
+      {
+        label: 'coffee substitute',
+        variants: ['substitute', 'instead of coffee', 'not coffee'],
+      },
     ],
     why: 'A short entry, so a thin answer and a full one are close in length and the difference is the facts.',
   },
@@ -294,8 +396,19 @@ export const QUESTIONS: readonly Question[] = [
     entry:
       'Cascara is the dried skin of the coffee fruit, normally discarded or fed to cattle at Indian farms during the washed-process harvest. It has three times more antioxidants than coffee and one-third the caffeine. By itself cascara tea is tangy and sour, like unripe tomato juice.',
     specifics: [
-      { label: 'skin of the coffee fruit', variants: ['skin of the coffee', 'coffee fruit', 'coffee cherry', 'fruit of the coffee'] },
-      { label: 'antioxidants or caffeine', variants: ['antioxidant', 'caffeine'] },
+      {
+        label: 'skin of the coffee fruit',
+        variants: [
+          'skin of the coffee',
+          'coffee fruit',
+          'coffee cherry',
+          'fruit of the coffee',
+        ],
+      },
+      {
+        label: 'antioxidants or caffeine',
+        variants: ['antioxidant', 'caffeine'],
+      },
       { label: 'tangy / sour', variants: ['tangy', 'sour', 'tart'] },
     ],
     why: 'An ingredient rather than a product, and the one most likely to be answered from general knowledge instead of the entry.',

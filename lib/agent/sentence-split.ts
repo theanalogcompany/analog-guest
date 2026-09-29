@@ -21,7 +21,10 @@
 //      texting anyway.
 //   6. No categories, no carve-outs. Every scheduleAndSend body rides this.
 
-import { MAX_BUBBLES_PER_RESPONSE, collapseToSingleMessage } from './split-message'
+import {
+  MAX_BUBBLES_PER_RESPONSE,
+  collapseToSingleMessage,
+} from './split-message'
 
 /**
  * Probability that a 2–3 sentence body splits into per-sentence bubbles.
@@ -136,7 +139,10 @@ export function stripTerminalPeriod(piece: string): string {
  * delimiter markers — same contract the TAC-313 splitter had, so the caller's
  * existing "no sendable bubbles" failure path is unchanged.
  */
-export function resolveDispatchBubbles(body: string, rng: () => number): string[] {
+export function resolveDispatchBubbles(
+  body: string,
+  rng: () => number,
+): string[] {
   // Stray model-emitted [[BREAK]] markers (and near-misses) are noise now;
   // collapseToSingleMessage strips them and normalizes whitespace, keeping
   // the invariant that no delimiter ever reaches Sendblue or the database.

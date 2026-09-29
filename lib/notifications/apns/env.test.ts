@@ -30,12 +30,18 @@ describe('checkApnsEnv — happy path', () => {
   })
 
   it('accepts sandbox', () => {
-    expect(checkApnsEnv({ ...VALID_ENV, APNS_ENV: 'sandbox' })).toEqual({ ok: true })
+    expect(checkApnsEnv({ ...VALID_ENV, APNS_ENV: 'sandbox' })).toEqual({
+      ok: true,
+    })
   })
 
   it('tolerates surrounding whitespace', () => {
     expect(
-      checkApnsEnv({ ...VALID_ENV, APNS_KEY_ID: '  S4PR9KNPKA  ', APNS_ENV: ' production ' }),
+      checkApnsEnv({
+        ...VALID_ENV,
+        APNS_KEY_ID: '  S4PR9KNPKA  ',
+        APNS_ENV: ' production ',
+      }),
     ).toEqual({ ok: true })
   })
 })
@@ -68,7 +74,9 @@ describe('checkApnsEnv — APNS_AUTH_KEY shape', () => {
     const truncated = VALID_PEM.replace('-----END PRIVATE KEY-----', '')
     const problems = problemsFor({ ...VALID_ENV, APNS_AUTH_KEY: truncated })
     expect(problems).toHaveLength(1)
-    expect(problems[0]).toContain('missing the "-----END PRIVATE KEY-----" footer')
+    expect(problems[0]).toContain(
+      'missing the "-----END PRIVATE KEY-----" footer',
+    )
     expect(problems[0]).toContain('truncated on paste')
   })
 
@@ -90,19 +98,24 @@ describe('checkApnsEnv — APNS_AUTH_KEY shape', () => {
   it('catches literal backslash-n escapes', () => {
     const escaped = VALID_PEM.replace(/\n/g, '\\n')
     const problems = problemsFor({ ...VALID_ENV, APNS_AUTH_KEY: escaped })
-    expect(problems.some((p) => p.includes('literal backslash-n escapes'))).toBe(true)
+    expect(
+      problems.some((p) => p.includes('literal backslash-n escapes')),
+    ).toBe(true)
   })
 
   it('catches a quote-wrapped value', () => {
     const quoted = `"${VALID_PEM}"`
     const problems = problemsFor({ ...VALID_ENV, APNS_AUTH_KEY: quoted })
-    expect(problems.some((p) => p.includes('wrapped in quote characters'))).toBe(true)
+    expect(
+      problems.some((p) => p.includes('wrapped in quote characters')),
+    ).toBe(true)
   })
 
   it('catches a SEC1 EC key (wrong format for importPKCS8)', () => {
-    const sec1 = VALID_PEM
-      .replace('-----BEGIN PRIVATE KEY-----', '-----BEGIN EC PRIVATE KEY-----')
-      .replace('-----END PRIVATE KEY-----', '-----END EC PRIVATE KEY-----')
+    const sec1 = VALID_PEM.replace(
+      '-----BEGIN PRIVATE KEY-----',
+      '-----BEGIN EC PRIVATE KEY-----',
+    ).replace('-----END PRIVATE KEY-----', '-----END EC PRIVATE KEY-----')
     const problems = problemsFor({ ...VALID_ENV, APNS_AUTH_KEY: sec1 })
     expect(problems).toHaveLength(1)
     expect(problems[0]).toContain('PKCS#8')
@@ -123,9 +136,9 @@ describe('checkApnsEnv — identifiers and host selection', () => {
   })
 
   it('rejects a team id that is not 10 characters', () => {
-    expect(problemsFor({ ...VALID_ENV, APNS_TEAM_ID: 'W4J9A9K9YXEXTRA' })[0]).toContain(
-      'expected exactly 10 characters',
-    )
+    expect(
+      problemsFor({ ...VALID_ENV, APNS_TEAM_ID: 'W4J9A9K9YXEXTRA' })[0],
+    ).toContain('expected exactly 10 characters')
   })
 
   // The highest-probability second fault behind the fire-set bug: a TestFlight

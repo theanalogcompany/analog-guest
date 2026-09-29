@@ -1,7 +1,13 @@
 'use client'
 
 import type { TraceStage } from '../lib/select-trace-stages'
-import { KvList, KvRow, readNumber, readRecord, readString } from './_primitives'
+import {
+  KvList,
+  KvRow,
+  readNumber,
+  readRecord,
+  readString,
+} from './_primitives'
 
 // context_build drill-down. Recognition signals are intentionally NOT here —
 // PR-1 hoisted them to the top-of-panel RecognitionCard. Drill-down shows
@@ -18,9 +24,15 @@ export function ContextBuildDetail({ stage }: { stage: TraceStage }) {
 
   return (
     <KvList>
-      {recognitionState !== null ? <KvRow label="recognitionState" value={recognitionState} /> : null}
-      {recognitionScore !== null ? <KvRow label="recognitionScore" value={recognitionScore} /> : null}
-      {mechanicCount !== null ? <KvRow label="mechanicCount" value={mechanicCount} /> : null}
+      {recognitionState !== null ? (
+        <KvRow label="recognitionState" value={recognitionState} />
+      ) : null}
+      {recognitionScore !== null ? (
+        <KvRow label="recognitionScore" value={recognitionScore} />
+      ) : null}
+      {mechanicCount !== null ? (
+        <KvRow label="mechanicCount" value={mechanicCount} />
+      ) : null}
       {recentMessageCount !== null ? (
         <KvRow label="recentMessageCount" value={recentMessageCount} />
       ) : null}

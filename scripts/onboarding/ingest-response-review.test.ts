@@ -30,7 +30,9 @@ const baseRow = (overrides: Partial<ReviewRow> = {}): ReviewRow => ({
 
 describe('classifyRow', () => {
   it('returns expected_failure when comment starts with expected_failure:', () => {
-    expect(classifyRow(baseRow({ comment: 'expected_failure: THE-170' }))).toBe('expected_failure')
+    expect(classifyRow(baseRow({ comment: 'expected_failure: THE-170' }))).toBe(
+      'expected_failure',
+    )
   })
 
   it('expected_failure takes priority over verdict=edit and rule:', () => {
@@ -58,11 +60,15 @@ describe('classifyRow', () => {
   })
 
   it('returns edit when only verdict=edit', () => {
-    expect(classifyRow(baseRow({ verdict: 'edit', edited_message: 'fix' }))).toBe('edit')
+    expect(
+      classifyRow(baseRow({ verdict: 'edit', edited_message: 'fix' })),
+    ).toBe('edit')
   })
 
   it('returns rule when only comment has rule: prefix', () => {
-    expect(classifyRow(baseRow({ comment: 'rule: avoid em-dashes' }))).toBe('rule')
+    expect(classifyRow(baseRow({ comment: 'rule: avoid em-dashes' }))).toBe(
+      'rule',
+    )
   })
 
   it('returns approve when verdict=approve', () => {
@@ -80,7 +86,9 @@ describe('classifyRow', () => {
   })
 
   it('verdict matching is case-insensitive', () => {
-    expect(classifyRow(baseRow({ verdict: 'Edit', edited_message: 'x' }))).toBe('edit')
+    expect(classifyRow(baseRow({ verdict: 'Edit', edited_message: 'x' }))).toBe(
+      'edit',
+    )
   })
 
   it('rule: prefix matching is case-insensitive', () => {
@@ -98,21 +106,23 @@ describe('rulePayloadFromComment', () => {
 
 describe('normalizeForCompare', () => {
   it('lowercases, collapses whitespace, trims', () => {
-    expect(normalizeForCompare('  Rule:   Avoid  EM-Dashes  ')).toBe('rule: avoid em-dashes')
+    expect(normalizeForCompare('  Rule:   Avoid  EM-Dashes  ')).toBe(
+      'rule: avoid em-dashes',
+    )
   })
 
   it('treats whitespace-different rules as equivalent', () => {
-    expect(normalizeForCompare('rule: be   terse')).toBe(normalizeForCompare('rule: be terse'))
+    expect(normalizeForCompare('rule: be   terse')).toBe(
+      normalizeForCompare('rule: be terse'),
+    )
   })
 })
 
 describe('tagsForRow', () => {
   it('always includes phase_5_review plus category and guest_state', () => {
-    expect(tagsForRow(baseRow({ category: 'menu_fact', guest_state: 'regular' }))).toEqual([
-      'phase_5_review',
-      'menu_fact',
-      'regular',
-    ])
+    expect(
+      tagsForRow(baseRow({ category: 'menu_fact', guest_state: 'regular' })),
+    ).toEqual(['phase_5_review', 'menu_fact', 'regular'])
   })
 
   it('omits empty fields', () => {
@@ -136,8 +146,11 @@ describe('parseReviewSheet', () => {
   })
 
   it('throws on header mismatch with helpful column-index detail', () => {
-    const csv = 'sample_id,run_date,wrong_column,guest_state,scenario,inbound_message,generated_message,voice_fidelity,verdict,edited_message,comment\n'
-    expect(() => parseReviewSheet(csv)).toThrow(/column 3.*expected "category".*got "wrong_column"/)
+    const csv =
+      'sample_id,run_date,wrong_column,guest_state,scenario,inbound_message,generated_message,voice_fidelity,verdict,edited_message,comment\n'
+    expect(() => parseReviewSheet(csv)).toThrow(
+      /column 3.*expected "category".*got "wrong_column"/,
+    )
   })
 
   it('handles quoted fields with embedded commas and newlines', () => {
@@ -180,7 +193,9 @@ describe('buildPhase5Subsection', () => {
     expect(out).toContain('  - inbound: "do you have oat?"')
     expect(out).toContain('  - generated: "yeah we have oat and almond."')
     expect(out).toContain('  - edited: "yeah."')
-    expect(out).toContain('**Source:** `08-mock-central-perk-response-review` (gsheet)')
+    expect(out).toContain(
+      '**Source:** `08-mock-central-perk-response-review` (gsheet)',
+    )
   })
 
   it('omits anti-patterns block when none added', () => {
@@ -219,18 +234,28 @@ describe('appendPhase5Section', () => {
 
   it('creates a new section with leading separator when none exists', () => {
     const existing = '# Venue Spec\n\nSome content.\n'
-    const { newMarkdown, alreadyHadSection } = appendPhase5Section(existing, subsection)
+    const { newMarkdown, alreadyHadSection } = appendPhase5Section(
+      existing,
+      subsection,
+    )
     expect(alreadyHadSection).toBe(false)
-    expect(newMarkdown).toContain('# Venue Spec\n\nSome content.\n\n---\n\n## Phase 5 review additions\n\n### 2026-04-28T17:42:00Z')
+    expect(newMarkdown).toContain(
+      '# Venue Spec\n\nSome content.\n\n---\n\n## Phase 5 review additions\n\n### 2026-04-28T17:42:00Z',
+    )
   })
 
   it('appends inside existing section with --- separator before the new subsection', () => {
     const existing =
       '# Spec\n\n## Phase 5 review additions\n\n### 2026-04-27T10:00:00Z\n\n**Source:** `08-foo` (gsheet)\n'
-    const { newMarkdown, alreadyHadSection } = appendPhase5Section(existing, subsection)
+    const { newMarkdown, alreadyHadSection } = appendPhase5Section(
+      existing,
+      subsection,
+    )
     expect(alreadyHadSection).toBe(true)
     // First subsection comes before second.
-    expect(newMarkdown.indexOf('2026-04-27')).toBeLessThan(newMarkdown.indexOf('2026-04-28'))
+    expect(newMarkdown.indexOf('2026-04-27')).toBeLessThan(
+      newMarkdown.indexOf('2026-04-28'),
+    )
     expect(newMarkdown).toContain('---\n\n### 2026-04-28T17:42:00Z')
   })
 
@@ -238,7 +263,9 @@ describe('appendPhase5Section', () => {
     const existing =
       '# Spec\n\n## Phase 5 review additions\n\n### 2026-04-27T10:00:00Z\n\n**Source:** `08-foo` (gsheet)\n\n## 9. Revision history\n\n- v01\n'
     const { newMarkdown } = appendPhase5Section(existing, subsection)
-    expect(newMarkdown.indexOf('### 2026-04-28')).toBeLessThan(newMarkdown.indexOf('## 9. Revision history'))
+    expect(newMarkdown.indexOf('### 2026-04-28')).toBeLessThan(
+      newMarkdown.indexOf('## 9. Revision history'),
+    )
   })
 
   it('only matches an exact "## Phase 5 review additions" header line', () => {

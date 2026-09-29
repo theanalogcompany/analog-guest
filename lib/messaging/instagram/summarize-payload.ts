@@ -17,7 +17,11 @@
 // real traffic, so they stay.
 
 /** Per-item keys that route the event rather than name it. */
-const ROUTING_KEYS: ReadonlySet<string> = new Set(['sender', 'recipient', 'timestamp'])
+const ROUTING_KEYS: ReadonlySet<string> = new Set([
+  'sender',
+  'recipient',
+  'timestamp',
+])
 
 const MAX_TYPE_KEY_LENGTH = 64
 const MAX_TYPES_PER_ENTRY = 12
@@ -80,7 +84,9 @@ function summarizeEntry(entry: unknown): InstagramEntrySummary {
  * so every level is guarded and an unrecognizable payload degrades to empty
  * rather than to an exception.
  */
-export function summarizeInstagramPayload(parsed: unknown): InstagramPayloadSummary {
+export function summarizeInstagramPayload(
+  parsed: unknown,
+): InstagramPayloadSummary {
   if (!isRecord(parsed)) return { object: null, entryCount: 0, events: [] }
 
   const object = typeof parsed.object === 'string' ? parsed.object : null

@@ -52,18 +52,24 @@ describe('formatExpiryWindow', () => {
 
   it('renders every live definition window as days', () => {
     for (const def of INTENTION_DEFINITIONS) {
-      expect(formatExpiryWindow(def.expiresAfterMs), def.key).toMatch(/^\d+ days?$/)
+      expect(formatExpiryWindow(def.expiresAfterMs), def.key).toMatch(
+        /^\d+ days?$/,
+      )
     }
   })
 })
 
 describe('formatPromptedAt', () => {
   it('renders an absolute UTC timestamp', () => {
-    expect(formatPromptedAt('2026-09-13T10:04:00.000Z')).toBe('2026-09-13 10:04 UTC')
+    expect(formatPromptedAt('2026-09-13T10:04:00.000Z')).toBe(
+      '2026-09-13 10:04 UTC',
+    )
   })
 
   it('normalizes a non-UTC offset to UTC rather than rendering it as-is', () => {
-    expect(formatPromptedAt('2026-09-13T10:04:00+02:00')).toBe('2026-09-13 08:04 UTC')
+    expect(formatPromptedAt('2026-09-13T10:04:00+02:00')).toBe(
+      '2026-09-13 08:04 UTC',
+    )
   })
 
   // Never "Invalid Date" — an unreadable value should show what was stored.
@@ -105,6 +111,8 @@ describe('formatGate (TAC-380)', () => {
   })
 
   it('singularizes one reply', () => {
-    expect(formatGate({ kind: 'conversational', defaultMinReplies: 1 })).toContain('at least 1 reply ')
+    expect(
+      formatGate({ kind: 'conversational', defaultMinReplies: 1 }),
+    ).toContain('at least 1 reply ')
   })
 })

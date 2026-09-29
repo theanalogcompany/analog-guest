@@ -91,7 +91,7 @@ const POPULATIONS: readonly Population[] = ['opener', 'name-ask', 'why-turn']
 const EXPECTATION = {
   opener: {
     bars: ['namedSelfIntro must be 0 for every rep'],
-    ceilings: ['no rep may ask the guest\'s name INSTEAD of the order'],
+    ceilings: ["no rep may ask the guest's name INSTEAD of the order"],
   },
   'name-ask': {
     bars: [
@@ -110,7 +110,11 @@ const EXPECTATION = {
   },
 } as const satisfies Record<
   Population,
-  { bars: readonly string[]; ceilings: readonly string[]; findings?: readonly string[] }
+  {
+    bars: readonly string[]
+    ceilings: readonly string[]
+    findings?: readonly string[]
+  }
 >
 
 const WHY_TURN_REASON_FLOOR_RATIO = 0.9
@@ -148,13 +152,20 @@ interface Args {
 }
 
 function parseArgs(argv: readonly string[]): Args {
-  const out: Args = { venue: 'le-mils-coffee', reps: 20, populations: [...POPULATIONS], control: false }
+  const out: Args = {
+    venue: 'le-mils-coffee',
+    reps: 20,
+    populations: [...POPULATIONS],
+    control: false,
+  }
   for (let i = 0; i < argv.length; i += 1) {
     if (argv[i] === '--venue') out.venue = argv[++i] ?? out.venue
     else if (argv[i] === '--reps') out.reps = Number(argv[++i])
     else if (argv[i] === '--control') out.control = true
     else if (argv[i] === '--populations') {
-      const picked = (argv[++i] ?? '').split(',').filter(Boolean) as Population[]
+      const picked = (argv[++i] ?? '')
+        .split(',')
+        .filter(Boolean) as Population[]
       if (picked.length > 0) out.populations = picked
     }
   }
@@ -240,9 +251,14 @@ async function main(): Promise<void> {
     .eq('venue_id', venue.id)
     .single()
   const info = (cfg?.venue_info ?? {}) as { staff?: string[] }
-  const persona = (cfg?.brand_persona ?? {}) as { speakerFraming?: string; speakerName?: string }
+  const persona = (cfg?.brand_persona ?? {}) as {
+    speakerFraming?: string
+    speakerName?: string
+  }
   const personNames = [
-    ...(info.staff ?? []).map((line) => (line.split(/[—–-]/)[0] ?? '').trim().split(/\s+/)[0] ?? ''),
+    ...(info.staff ?? []).map(
+      (line) => (line.split(/[—–-]/)[0] ?? '').trim().split(/\s+/)[0] ?? '',
+    ),
     'Himanshu',
     'Milana',
   ].filter((n) => n.length > 2)
@@ -274,7 +290,9 @@ async function main(): Promise<void> {
         'and the run would measure a turn that cannot happen.',
     )
   }
-  const channel: 'text' | 'instagram' = guest.phone_number ? 'text' : 'instagram'
+  const channel: 'text' | 'instagram' = guest.phone_number
+    ? 'text'
+    : 'instagram'
 
   const { count: statesBefore } = await db
     .from('guest_states')
@@ -298,35 +316,55 @@ async function main(): Promise<void> {
     },
   })
 
-  console.log(`[tac541] venue=${args.venue} channel=${channel} reps=${args.reps} arm=${args.control ? 'CONTROL (pre-TAC-541 name line)' : 'shipped'}`)
-  console.log(`[tac541] persona: speakerFraming=${persona.speakerFraming} speakerName=${persona.speakerName ?? '(none)'}`)
+  console.log(
+    `[tac541] venue=${args.venue} channel=${channel} reps=${args.reps} arm=${args.control ? 'CONTROL (pre-TAC-541 name line)' : 'shipped'}`,
+  )
+  console.log(
+    `[tac541] persona: speakerFraming=${persona.speakerFraming} speakerName=${persona.speakerName ?? '(none)'}`,
+  )
   console.log(`[tac541] guest_states rows before: ${statesBefore}`)
   console.log(`[tac541] roster for the detector: ${personNames.join(', ')}`)
   console.log(`[tac541] run log: ${log.path}\n`)
 
-  const results: Record<string, {
-    n: number
-    failed: number
-    namedSelfIntro: number
-    asksName: number
-    bareNameAsk: number
-    usesByTheWay: number
-    raised: number
-    judgeFailed: number
-    whatToCallYouReason: number
-    overPromisesRecognition: number
-    namesVenue: number
-    asksOrder: number
-    twoQuestions: number
-    nameInsteadOfOrder: number
-    grounded: number
-    groundingFlagged: number
-  }> = {}
+  const results: Record<
+    string,
+    {
+      n: number
+      failed: number
+      namedSelfIntro: number
+      asksName: number
+      bareNameAsk: number
+      usesByTheWay: number
+      raised: number
+      judgeFailed: number
+      whatToCallYouReason: number
+      overPromisesRecognition: number
+      namesVenue: number
+      asksOrder: number
+      twoQuestions: number
+      nameInsteadOfOrder: number
+      grounded: number
+      groundingFlagged: number
+    }
+  > = {}
 
   const blank = () => ({
-    n: 0, failed: 0, namedSelfIntro: 0, asksName: 0, bareNameAsk: 0, usesByTheWay: 0,
-    raised: 0, judgeFailed: 0, whatToCallYouReason: 0, overPromisesRecognition: 0, namesVenue: 0, asksOrder: 0,
-    twoQuestions: 0, nameInsteadOfOrder: 0, grounded: 0, groundingFlagged: 0,
+    n: 0,
+    failed: 0,
+    namedSelfIntro: 0,
+    asksName: 0,
+    bareNameAsk: 0,
+    usesByTheWay: 0,
+    raised: 0,
+    judgeFailed: 0,
+    whatToCallYouReason: 0,
+    overPromisesRecognition: 0,
+    namesVenue: 0,
+    asksOrder: 0,
+    twoQuestions: 0,
+    nameInsteadOfOrder: 0,
+    grounded: 0,
+    groundingFlagged: 0,
   })
 
   for (const population of args.populations) {
@@ -334,7 +372,10 @@ async function main(): Promise<void> {
     results[population] = cell
 
     for (let rep = 0; rep < args.reps; rep += 1) {
-      const trace = startAgentTrace({ agentRunId: randomUUID(), name: 'tac541' } as never)
+      const trace = startAgentTrace({
+        agentRunId: randomUUID(),
+        name: 'tac541',
+      } as never)
       try {
         const now = new Date()
         let inbound: string
@@ -343,10 +384,17 @@ async function main(): Promise<void> {
         if (population === 'opener') {
           inbound = "Hi Le Mil's!"
           const ctx = await buildRuntimeContext({
-            agentRunId: randomUUID(), guestId: guest.id, venueId: venue.id, trace,
+            agentRunId: randomUUID(),
+            guestId: guest.id,
+            venueId: venue.id,
+            trace,
             currentMessage: {
-              id: randomUUID(), providerMessageId: `tac541-opener-${rep}`,
-              body: inbound, receivedAt: now, channel, referralSource: null,
+              id: randomUUID(),
+              providerMessageId: `tac541-opener-${rep}`,
+              body: inbound,
+              receivedAt: now,
+              channel,
+              referralSource: null,
             },
           })
           // The same four overrides the TAC-423 harness makes, for the same
@@ -356,17 +404,28 @@ async function main(): Promise<void> {
           ctx.recentMessages = []
           ctx.recentVisits = []
           ctx.activeCommitments = []
-          ctx.openIntentions = (['understand_order', 'learn_name'] as const).map((key) => ({
-            key, promptLine: INTENTION_DEFINITION_BY_KEY[key].promptLine, eligibleAt: now,
+          ctx.openIntentions = (
+            ['understand_order', 'learn_name'] as const
+          ).map((key) => ({
+            key,
+            promptLine: INTENTION_DEFINITION_BY_KEY[key].promptLine,
+            eligibleAt: now,
           }))
           prepared = await finishPrepare(ctx, inbound)
         } else if (population === 'name-ask') {
           inbound = 'it was thick i ended up mixing it into the drink'
           const ctx = await buildRuntimeContext({
-            agentRunId: randomUUID(), guestId: guest.id, venueId: venue.id, trace,
+            agentRunId: randomUUID(),
+            guestId: guest.id,
+            venueId: venue.id,
+            trace,
             currentMessage: {
-              id: randomUUID(), providerMessageId: `tac541-name-${rep}`,
-              body: inbound, receivedAt: now, channel, referralSource: null,
+              id: randomUUID(),
+              providerMessageId: `tac541-name-${rep}`,
+              body: inbound,
+              receivedAt: now,
+              channel,
+              referralSource: null,
             },
           })
           // THE HISTORY IS NOT DECORATION. Without it the second smoke run
@@ -379,37 +438,78 @@ async function main(): Promise<void> {
           //
           // This is the device thread of 2026-09-26, one turn before the ask.
           const nameAskHistory: RecentMessage[] = [
-            { direction: 'inbound', body: 'got the blossom tonic', createdAt: new Date(now.getTime() - 6e5), delivery: 'delivered' },
-            { direction: 'outbound', body: 'good choice. what did you think of the foam?', createdAt: new Date(now.getTime() - 5e5), delivery: 'delivered' },
+            {
+              direction: 'inbound',
+              body: 'got the blossom tonic',
+              createdAt: new Date(now.getTime() - 6e5),
+              delivery: 'delivered',
+            },
+            {
+              direction: 'outbound',
+              body: 'good choice. what did you think of the foam?',
+              createdAt: new Date(now.getTime() - 5e5),
+              delivery: 'delivered',
+            },
           ]
           ctx.recentMessages = nameAskHistory
           // learn_name ALONE. That is the configuration ruling 3 shapes, and
           // forcing it is what makes the population measure the shaping rather
           // than how often the intention happens to be open.
           const shippedLine = INTENTION_DEFINITION_BY_KEY.learn_name.promptLine
-          ctx.openIntentions = [{
-            key: 'learn_name',
-            promptLine: args.control ? preTac541NameLine(shippedLine) : shippedLine,
-            eligibleAt: now,
-          }]
+          ctx.openIntentions = [
+            {
+              key: 'learn_name',
+              promptLine: args.control
+                ? preTac541NameLine(shippedLine)
+                : shippedLine,
+              eligibleAt: now,
+            },
+          ]
           prepared = await finishPrepare(ctx, inbound)
         } else {
           inbound = 'why?'
           const ctx = await buildRuntimeContext({
-            agentRunId: randomUUID(), guestId: guest.id, venueId: venue.id, trace,
+            agentRunId: randomUUID(),
+            guestId: guest.id,
+            venueId: venue.id,
+            trace,
             currentMessage: {
-              id: randomUUID(), providerMessageId: `tac541-why-${rep}`,
-              body: inbound, receivedAt: now, channel, referralSource: null,
+              id: randomUUID(),
+              providerMessageId: `tac541-why-${rep}`,
+              body: inbound,
+              receivedAt: now,
+              channel,
+              referralSource: null,
             },
           })
           // The agent asked on the previous turn, so the history carries the
           // ask and learn_name is CLOSED. Production-faithful, and the whole
           // reason R37 cannot live on the intention.
           const whyHistory: RecentMessage[] = [
-            { direction: 'inbound', body: 'got the blossom tonic', createdAt: new Date(now.getTime() - 9e5), delivery: 'delivered' },
-            { direction: 'outbound', body: 'good choice. what did you think of the foam?', createdAt: new Date(now.getTime() - 8e5), delivery: 'delivered' },
-            { direction: 'inbound', body: 'it was thick i ended up mixing it into the drink', createdAt: new Date(now.getTime() - 7e5), delivery: 'delivered' },
-            { direction: 'outbound', body: "ha, yeah that foam is basically a topping. by the way, what's your name?", createdAt: new Date(now.getTime() - 6e5), delivery: 'delivered' },
+            {
+              direction: 'inbound',
+              body: 'got the blossom tonic',
+              createdAt: new Date(now.getTime() - 9e5),
+              delivery: 'delivered',
+            },
+            {
+              direction: 'outbound',
+              body: 'good choice. what did you think of the foam?',
+              createdAt: new Date(now.getTime() - 8e5),
+              delivery: 'delivered',
+            },
+            {
+              direction: 'inbound',
+              body: 'it was thick i ended up mixing it into the drink',
+              createdAt: new Date(now.getTime() - 7e5),
+              delivery: 'delivered',
+            },
+            {
+              direction: 'outbound',
+              body: "ha, yeah that foam is basically a topping. by the way, what's your name?",
+              createdAt: new Date(now.getTime() - 6e5),
+              delivery: 'delivered',
+            },
           ]
           ctx.recentMessages = whyHistory
           ctx.openIntentions = []
@@ -429,7 +529,8 @@ async function main(): Promise<void> {
         if (v.overPromisesRecognition) cell.overPromisesRecognition += 1
         if (ft.isOrderQuestion) cell.asksOrder += 1
         if (v.questionCount > 1) cell.twoQuestions += 1
-        if (population === 'opener' && v.asksName && !ft.isOrderQuestion) cell.nameInsteadOfOrder += 1
+        if (population === 'opener' && v.asksName && !ft.isOrderQuestion)
+          cell.nameInsteadOfOrder += 1
 
         // The judge is production's own classifier, never a regex: the
         // detector-asymmetry trap has bitten this family of harness twice.
@@ -469,22 +570,36 @@ async function main(): Promise<void> {
         }
 
         log.appendUnit({
-          population, rep, category: prepared.category, inbound, body,
-          namedSelfIntro: v.namedSelfIntro, namedSelfIntroMatch: v.namedSelfIntroMatch,
-          asksName: v.asksName, bareNameAsk: v.bareNameAsk, nameAskSentence: v.nameAskSentence,
+          population,
+          rep,
+          category: prepared.category,
+          inbound,
+          body,
+          namedSelfIntro: v.namedSelfIntro,
+          namedSelfIntroMatch: v.namedSelfIntroMatch,
+          asksName: v.asksName,
+          bareNameAsk: v.bareNameAsk,
+          nameAskSentence: v.nameAskSentence,
           usesByTheWay: v.usesByTheWay,
           whatToCallYouReason: v.whatToCallYouReason,
           whatToCallYouReasonMatch: v.whatToCallYouReasonMatch,
           overPromisesRecognition: v.overPromisesRecognition,
           overPromisesRecognitionMatch: v.overPromisesRecognitionMatch,
           namesVenue: v.namesVenue,
-          questionCount: v.questionCount, asksOrder: ft.isOrderQuestion, raised, groundingFlagged,
+          questionCount: v.questionCount,
+          asksOrder: ft.isOrderQuestion,
+          raised,
+          groundingFlagged,
         })
-        console.log(`  [${population} ${rep + 1}/${args.reps}] ${JSON.stringify(body)}`)
+        console.log(
+          `  [${population} ${rep + 1}/${args.reps}] ${JSON.stringify(body)}`,
+        )
       } catch (e) {
         cell.failed += 1
         log.appendUnit({ population, rep, failed: true, error: String(e) })
-        console.log(`  [${population} ${rep + 1}/${args.reps}] FAILED: ${String(e).slice(0, 160)}`)
+        console.log(
+          `  [${population} ${rep + 1}/${args.reps}] FAILED: ${String(e).slice(0, 160)}`,
+        )
       } finally {
         await trace.flushAsync()
       }
@@ -509,27 +624,35 @@ async function main(): Promise<void> {
     console.log(`  asksOrder          ${c.asksOrder}/${c.n}`)
     console.log(`  questionCount>1    ${c.twoQuestions}/${c.n}`)
     if (population === 'name-ask') {
-      console.log(`  raised (judge)     ${c.raised}/${c.n}  (judge failed ${c.judgeFailed})`)
+      console.log(
+        `  raised (judge)     ${c.raised}/${c.n}  (judge failed ${c.judgeFailed})`,
+      )
       console.log(`  bareNameAsk        ${c.bareNameAsk}/${c.raised} of raised`)
       console.log(`  usesByTheWay       ${c.usesByTheWay}/${c.n}`)
     }
     if (population === 'why-turn') {
       console.log(`  whatToCallYou      ${c.whatToCallYouReason}/${c.n}`)
       console.log(`  overPromises (cut) ${c.overPromisesRecognition}/${c.n}`)
-      console.log(`  grounding flagged  ${c.groundingFlagged}/${c.grounded + c.groundingFlagged}`)
+      console.log(
+        `  grounding flagged  ${c.groundingFlagged}/${c.grounded + c.groundingFlagged}`,
+      )
     }
 
     // EVALUATED IN CODE, not left to whoever reads the output.
     const verdicts: string[] = []
     const strict = c.failed === 0 && c.n === args.reps
-    if (c.namedSelfIntro > 0) verdicts.push(`FAIL bar: namedSelfIntro ${c.namedSelfIntro} > 0`)
-    else if (!strict) verdicts.push('INCONCLUSIVE: a unit failed, so "every rep" cannot be met')
+    if (c.namedSelfIntro > 0)
+      verdicts.push(`FAIL bar: namedSelfIntro ${c.namedSelfIntro} > 0`)
+    else if (!strict)
+      verdicts.push('INCONCLUSIVE: a unit failed, so "every rep" cannot be met')
     else verdicts.push('PASS bar: namedSelfIntro 0')
 
     if (population === 'opener') {
-      verdicts.push(c.nameInsteadOfOrder > 0
-        ? `FAIL ceiling: ${c.nameInsteadOfOrder} rep(s) asked the name instead of the order`
-        : 'PASS ceiling: no rep asked the name instead of the order')
+      verdicts.push(
+        c.nameInsteadOfOrder > 0
+          ? `FAIL ceiling: ${c.nameInsteadOfOrder} rep(s) asked the name instead of the order`
+          : 'PASS ceiling: no rep asked the name instead of the order',
+      )
     }
     if (population === 'name-ask') {
       // A ZERO-RAISED POPULATION IS INCONCLUSIVE, NEVER A PASS. "0 bare asks
@@ -537,27 +660,37 @@ async function main(): Promise<void> {
       // fixture produces, which the second smoke run demonstrated. The bar is
       // about the SHAPE of the ask, so it needs asks to judge.
       if (c.raised === 0) {
-        verdicts.push('INCONCLUSIVE: nothing raised, so the bareness bar has nothing to judge')
+        verdicts.push(
+          'INCONCLUSIVE: nothing raised, so the bareness bar has nothing to judge',
+        )
       } else {
-        verdicts.push(c.bareNameAsk > 0
-          ? `FAIL bar: ${c.bareNameAsk} bare name ask(s) among ${c.raised} raised`
-          : `PASS bar: 0 bare name asks among ${c.raised} raised`)
+        verdicts.push(
+          c.bareNameAsk > 0
+            ? `FAIL bar: ${c.bareNameAsk} bare name ask(s) among ${c.raised} raised`
+            : `PASS bar: 0 bare name asks among ${c.raised} raised`,
+        )
       }
-      verdicts.push(c.twoQuestions > 0
-        ? `FAIL ceiling: ${c.twoQuestions} rep(s) carried more than one question`
-        : 'PASS ceiling: no rep carried more than one question')
+      verdicts.push(
+        c.twoQuestions > 0
+          ? `FAIL ceiling: ${c.twoQuestions} rep(s) carried more than one question`
+          : 'PASS ceiling: no rep carried more than one question',
+      )
     }
     if (population === 'why-turn') {
       const floor = Math.ceil(args.reps * WHY_TURN_REASON_FLOOR_RATIO)
-      verdicts.push(c.whatToCallYouReason >= floor
-        ? `PASS bar: whatToCallYouReason ${c.whatToCallYouReason} >= ${floor}`
-        : `FAIL bar: whatToCallYouReason ${c.whatToCallYouReason} < ${floor}`)
+      verdicts.push(
+        c.whatToCallYouReason >= floor
+          ? `PASS bar: whatToCallYouReason ${c.whatToCallYouReason} >= ${floor}`
+          : `FAIL bar: whatToCallYouReason ${c.whatToCallYouReason} < ${floor}`,
+      )
       // The CUT reason. Not a pre-registered bar (it did not exist when the
       // bars were registered), so it is reported as a finding rather than
       // scored. Any hit is a drift back to a promise the venue cannot keep.
-      verdicts.push(c.overPromisesRecognition > 0
-        ? `FINDING: ${c.overPromisesRecognition} rep(s) promised recognition, which was cut on 2026-09-26`
-        : 'note: no rep promised recognition')
+      verdicts.push(
+        c.overPromisesRecognition > 0
+          ? `FINDING: ${c.overPromisesRecognition} rep(s) promised recognition, which was cut on 2026-09-26`
+          : 'note: no rep promised recognition',
+      )
     }
     for (const v of verdicts) {
       if (v.startsWith('FAIL')) anyBreach = true
@@ -565,9 +698,15 @@ async function main(): Promise<void> {
     }
   }
   console.log(`\nrun log: ${log.path}`)
-  console.log(anyBreach ? '\nAT LEAST ONE BAR OR CEILING BREACHED.' : '\nAll bars and ceilings met.')
+  console.log(
+    anyBreach
+      ? '\nAT LEAST ONE BAR OR CEILING BREACHED.'
+      : '\nAll bars and ceilings met.',
+  )
   if (statesAfter !== statesBefore) {
-    console.log(`NOTE: guest_states moved ${statesBefore} -> ${statesAfter} (a recognition band changed).`)
+    console.log(
+      `NOTE: guest_states moved ${statesBefore} -> ${statesAfter} (a recognition band changed).`,
+    )
   }
 }
 

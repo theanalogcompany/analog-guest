@@ -246,7 +246,10 @@ export interface RuntimeContext {
    * buildAiRuntime; see the AI-side field for why both axes are carried rather
    * than one derived from the other.
    */
-  scanArrival: { hadPriorConversation: boolean; hasRecordedVisit: boolean } | null
+  scanArrival: {
+    hadPriorConversation: boolean
+    hasRecordedVisit: boolean
+  } | null
   // TAC-495: the conversation's channel. Set once by build-runtime-context.ts
   // via resolveConversationChannel, from the guest's identifiers, the inbound
   // message's channel and (TAC-469) the guest's last inbound channel. It picks
@@ -327,7 +330,12 @@ export type AgentResult =
   // (enumeration order); primaryTrigger is the priority-selected one that
   // also lands on messages.review_reason and shows up first in the
   // operator queue UI.
-  | { status: 'queued'; outboundMessageId: string; triggers: string[]; primaryTrigger: string }
+  | {
+      status: 'queued'
+      outboundMessageId: string
+      triggers: string[]
+      primaryTrigger: string
+    }
   | { status: 'refused'; reason: string; attemptScores?: number[] }
   | { status: 'skipped_duplicate' }
   // A card in this draft's pending slot won, so the draft was discarded:

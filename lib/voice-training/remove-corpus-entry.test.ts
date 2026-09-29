@@ -51,7 +51,9 @@ describe('removeCorpusEntry', () => {
   it('returns ok with corpusId on successful delete', async () => {
     const state = newState()
     vi.mocked(createAdminClient).mockReturnValue(
-      makeSupabaseMock(state) as unknown as ReturnType<typeof createAdminClient>,
+      makeSupabaseMock(state) as unknown as ReturnType<
+        typeof createAdminClient
+      >,
     )
 
     const result = await removeCorpusEntry(CORPUS_ID)
@@ -63,7 +65,9 @@ describe('removeCorpusEntry', () => {
   it('returns not_found when no row matched', async () => {
     const state = newState({ deletedRow: null })
     vi.mocked(createAdminClient).mockReturnValue(
-      makeSupabaseMock(state) as unknown as ReturnType<typeof createAdminClient>,
+      makeSupabaseMock(state) as unknown as ReturnType<
+        typeof createAdminClient
+      >,
     )
 
     const result = await removeCorpusEntry(CORPUS_ID)
@@ -75,7 +79,9 @@ describe('removeCorpusEntry', () => {
   it('returns db_error on supabase failure', async () => {
     const state = newState({ deleteError: { message: 'connection lost' } })
     vi.mocked(createAdminClient).mockReturnValue(
-      makeSupabaseMock(state) as unknown as ReturnType<typeof createAdminClient>,
+      makeSupabaseMock(state) as unknown as ReturnType<
+        typeof createAdminClient
+      >,
     )
 
     const result = await removeCorpusEntry(CORPUS_ID)

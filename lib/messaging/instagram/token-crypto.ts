@@ -62,10 +62,16 @@ function getKey(env: NodeJS.ProcessEnv = process.env): Buffer {
  */
 export function checkInstagramTokenEncKey(
   env: NodeJS.ProcessEnv = process.env,
-): { ok: true } | { ok: false; problem: 'missing' | 'wrong_length'; detail: string } {
+):
+  | { ok: true }
+  | { ok: false; problem: 'missing' | 'wrong_length'; detail: string } {
   const raw = env[INSTAGRAM_TOKEN_ENC_KEY_VAR]
   if (!raw || raw.trim() === '') {
-    return { ok: false, problem: 'missing', detail: `${INSTAGRAM_TOKEN_ENC_KEY_VAR} is not set` }
+    return {
+      ok: false,
+      problem: 'missing',
+      detail: `${INSTAGRAM_TOKEN_ENC_KEY_VAR} is not set`,
+    }
   }
   const length = Buffer.from(raw, 'base64').length
   if (length !== KEY_BYTES) {
@@ -78,19 +84,32 @@ export function checkInstagramTokenEncKey(
   return { ok: true }
 }
 
-export function encryptInstagramToken(plaintext: string, env?: NodeJS.ProcessEnv): string {
+export function encryptInstagramToken(
+  plaintext: string,
+  env?: NodeJS.ProcessEnv,
+): string {
   const iv = randomBytes(IV_BYTES)
   const cipher = createCipheriv(ALGO, getKey(env), iv)
-  const ciphertext = Buffer.concat([cipher.update(plaintext, 'utf8'), cipher.final()])
+  const ciphertext = Buffer.concat([
+    cipher.update(plaintext, 'utf8'),
+    cipher.final(),
+  ])
   const tag = cipher.getAuthTag()
   return `${iv.toString('base64')}.${tag.toString('base64')}.${ciphertext.toString('base64')}`
 }
 
-export function decryptInstagramToken(encoded: string, env?: NodeJS.ProcessEnv): string {
+export function decryptInstagramToken(
+  encoded: string,
+  env?: NodeJS.ProcessEnv,
+): string {
   const parts = encoded.split('.')
   if (parts.length !== 3) throw new Error('malformed encrypted Instagram token')
   const [ivB64, tagB64, ctB64] = parts
-  const decipher = createDecipheriv(ALGO, getKey(env), Buffer.from(ivB64, 'base64'))
+  const decipher = createDecipheriv(
+    ALGO,
+    getKey(env),
+    Buffer.from(ivB64, 'base64'),
+  )
   decipher.setAuthTag(Buffer.from(tagB64, 'base64'))
   return Buffer.concat([
     decipher.update(Buffer.from(ctB64, 'base64')),

@@ -15,9 +15,9 @@ export default function AdminLandingPage() {
       </div>
 
       <div className="text-sm text-ink-soft max-w-prose leading-relaxed">
-        Surfaces will land here as they ship: conversation viewer, guest
-        detail, venue config, operator onboarding. For now: check Health to
-        confirm the underlying systems are reachable.
+        Surfaces will land here as they ship: conversation viewer, guest detail,
+        venue config, operator onboarding. For now: check Health to confirm the
+        underlying systems are reachable.
       </div>
     </div>
   )

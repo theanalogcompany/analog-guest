@@ -190,7 +190,12 @@ export type InstagramEventOutcome =
       messageId: string | null
     }
   /** A read receipt. `messageId` is the row that was read, or null if we don't have it. */
-  | { status: 'read'; venueId: string; guestId: string; messageId: string | null }
+  | {
+      status: 'read'
+      venueId: string
+      guestId: string
+      messageId: string | null
+    }
   | {
       status: 'skipped'
       kind: InstagramHandledEvent['kind']
@@ -213,14 +218,25 @@ export type InstagramEventOutcome =
       venueId: string | null
     }
 
-type Failure = { stage: InstagramFailureStage; error: string; code: string | null }
+type Failure = {
+  stage: InstagramFailureStage
+  error: string
+  code: string | null
+}
 type Step<T> = { ok: true; value: T } | { ok: false; failure: Failure }
 
 // Only the error's `message` and `code` are kept, and they are what a failed
 // save logs. Never add PostgREST's `details` or `hint`: `details` carries the
 // failing row's values ("Failing row contains (...)"), message text included.
-function fail(stage: InstagramFailureStage, error: { message: string; code?: string } | null): Failure {
-  return { stage, error: error?.message ?? 'no row returned', code: error?.code ?? null }
+function fail(
+  stage: InstagramFailureStage,
+  error: { message: string; code?: string } | null,
+): Failure {
+  return {
+    stage,
+    error: error?.message ?? 'no row returned',
+    code: error?.code ?? null,
+  }
 }
 
 function failedOutcome(
@@ -272,7 +288,9 @@ async function findGuest(
  * (TAC-492; see the header). Meta's source value is compared exactly: anything
  * else, a missing referral included, is an ordinary first contact.
  */
-function createdViaForReferral(referral: InstagramReferral | null): InstagramGuestCreatedVia {
+function createdViaForReferral(
+  referral: InstagramReferral | null,
+): InstagramGuestCreatedVia {
   return isScanReferral(referral?.source) ? 'qr_scan' : 'inbound_message'
 }
 
@@ -285,7 +303,10 @@ async function findOrCreateGuest(
   const existing = await findGuest(supabase, venueId, igsid)
   if (!existing.ok) return existing
   if (existing.value !== null) {
-    return { ok: true, value: { guestId: existing.value, created: false, createdVia: null } }
+    return {
+      ok: true,
+      value: { guestId: existing.value, created: false, createdVia: null },
+    }
   }
 
   const nowIso = new Date().toISOString()
@@ -299,8 +320,13 @@ async function findOrCreateGuest(
     last_inbound_at: nowIso,
     last_interaction_at: nowIso,
   }
-  const { data, error } = await supabase.from('guests').insert(guest).select('id').single()
-  if (!error && data) return { ok: true, value: { guestId: data.id, created: true, createdVia } }
+  const { data, error } = await supabase
+    .from('guests')
+    .insert(guest)
+    .select('id')
+    .single()
+  if (!error && data)
+    return { ok: true, value: { guestId: data.id, created: true, createdVia } }
 
   if (error?.code === UNIQUE_VIOLATION) {
     // Another delivery created this guest between our read and our insert.
@@ -308,13 +334,19 @@ async function findOrCreateGuest(
     const winner = await findGuest(supabase, venueId, igsid)
     if (!winner.ok) return winner
     if (winner.value !== null) {
-      return { ok: true, value: { guestId: winner.value, created: false, createdVia: null } }
+      return {
+        ok: true,
+        value: { guestId: winner.value, created: false, createdVia: null },
+      }
     }
   }
   return { ok: false, failure: fail('guest_insert', error) }
 }
 
-async function findMessageId(supabase: AdminSupabaseClient, mid: string): Promise<Step<string | null>> {
+async function findMessageId(
+  supabase: AdminSupabaseClient,
+  mid: string,
+): Promise<Step<string | null>> {
   const { data, error } = await supabase
     .from('messages')
     .select('id')
@@ -347,7 +379,11 @@ function inboundInsert(
   }
 }
 
-function echoInsert(event: InstagramEchoEvent, venueId: string, guestId: string): MessageInsert {
+function echoInsert(
+  event: InstagramEchoEvent,
+  venueId: string,
+  guestId: string,
+): MessageInsert {
   return {
     venue_id: venueId,
     guest_id: guestId,
@@ -377,19 +413,29 @@ async function insertMessage(
   const existing = await findMessageId(supabase, event.mid)
   if (!existing.ok) return failedOutcome(event.kind, existing.failure, venueId)
   if (existing.value !== null) {
-    return { status: 'duplicate', kind: event.kind, venueId, messageId: existing.value }
+    return {
+      status: 'duplicate',
+      kind: event.kind,
+      venueId,
+      messageId: existing.value,
+    }
   }
 
   const row =
     event.kind === 'echo'
       ? echoInsert(event, venueId, guest.guestId)
       : inboundInsert(event, venueId, guest.guestId)
-  const { data, error } = await supabase.from('messages').insert(row).select('id').single()
+  const { data, error } = await supabase
+    .from('messages')
+    .insert(row)
+    .select('id')
+    .single()
   if (error?.code === UNIQUE_VIOLATION) {
     // Meta delivered the same event twice at once; the other copy saved it.
     return { status: 'duplicate', kind: event.kind, venueId, messageId: null }
   }
-  if (error || !data) return failedOutcome(event.kind, fail('message_insert', error), venueId)
+  if (error || !data)
+    return failedOutcome(event.kind, fail('message_insert', error), venueId)
 
   return {
     status: 'persisted',
@@ -399,9 +445,11 @@ async function insertMessage(
     messageId: data.id,
     guestCreated: guest.created,
     hasReferral: event.kind !== 'echo' && event.referral !== null,
-    referralSource: event.kind === 'echo' ? null : (event.referral?.source ?? null),
+    referralSource:
+      event.kind === 'echo' ? null : (event.referral?.source ?? null),
     hasProviderSentAt: event.providerSentAt !== null,
-    titlelessPostback: event.kind === 'postback' && (event.title ?? '').trim() === '',
+    titlelessPostback:
+      event.kind === 'postback' && (event.title ?? '').trim() === '',
     guestCreatedVia: guest.createdVia,
     // `referral` only; insertReferralMessage is the one writer.
     hadPriorConversation: null,
@@ -476,9 +524,15 @@ async function insertReferralMessage(
       .eq('provider_sent_at', event.providerSentAt)
       .limit(1)
       .maybeSingle()
-    if (error) return failedOutcome('referral', fail('message_lookup', error), venueId)
+    if (error)
+      return failedOutcome('referral', fail('message_lookup', error), venueId)
     if (data !== null) {
-      return { status: 'duplicate', kind: 'referral', venueId, messageId: data.id }
+      return {
+        status: 'duplicate',
+        kind: 'referral',
+        venueId,
+        messageId: data.id,
+      }
     }
   }
 
@@ -499,8 +553,13 @@ async function insertReferralMessage(
     referral_ref: event.referral.ref,
     referral_source: event.referral.source,
   }
-  const { data, error } = await supabase.from('messages').insert(row).select('id').single()
-  if (error || !data) return failedOutcome('referral', fail('message_insert', error), venueId)
+  const { data, error } = await supabase
+    .from('messages')
+    .insert(row)
+    .select('id')
+    .single()
+  if (error || !data)
+    return failedOutcome('referral', fail('message_insert', error), venueId)
 
   return {
     status: 'persisted',
@@ -543,7 +602,12 @@ async function handleEvent(
   const venue = await findVenue(supabase, event.accountId, venueCache)
   if (!venue.ok) return failedOutcome(event.kind, venue.failure, null)
   if (venue.value === null)
-    return { status: 'skipped', kind: event.kind, reason: 'venue_not_found', venueId: null }
+    return {
+      status: 'skipped',
+      kind: event.kind,
+      reason: 'venue_not_found',
+      venueId: null,
+    }
   const venueId = venue.value
 
   // Only a guest's own action creates a guest. TAC-536 added the third: a
@@ -565,7 +629,12 @@ async function handleEvent(
   }
   if (event.kind === 'message' || event.kind === 'postback') {
     const createdVia = createdViaForReferral(event.referral)
-    const guest = await findOrCreateGuest(supabase, venueId, event.guestIgsid, createdVia)
+    const guest = await findOrCreateGuest(
+      supabase,
+      venueId,
+      event.guestIgsid,
+      createdVia,
+    )
     if (!guest.ok) return failedOutcome(event.kind, guest.failure, venueId)
     return insertMessage(supabase, event, venueId, guest.value)
   }
@@ -573,10 +642,19 @@ async function handleEvent(
   const guest = await findGuest(supabase, venueId, event.guestIgsid)
   if (!guest.ok) return failedOutcome(event.kind, guest.failure, venueId)
   if (guest.value === null)
-    return { status: 'skipped', kind: event.kind, reason: 'unknown_guest', venueId }
+    return {
+      status: 'skipped',
+      kind: event.kind,
+      reason: 'unknown_guest',
+      venueId,
+    }
 
   if (event.kind === 'echo') {
-    return insertMessage(supabase, event, venueId, { guestId: guest.value, created: false, createdVia: null })
+    return insertMessage(supabase, event, venueId, {
+      guestId: guest.value,
+      created: false,
+      createdVia: null,
+    })
   }
   return matchRead(supabase, event, venueId, guest.value)
 }
@@ -595,7 +673,11 @@ export async function processInstagramDelivery(
 
   for (const event of parseInstagramDelivery(parsed)) {
     if (event.kind === 'unhandled') {
-      outcomes.push({ status: 'unhandled', reason: event.reason, fields: event.fields })
+      outcomes.push({
+        status: 'unhandled',
+        reason: event.reason,
+        fields: event.fields,
+      })
       continue
     }
     try {
@@ -653,7 +735,9 @@ export function scanUnattributedReason(
   if (outcome.referralSource === null) {
     return outcome.kind === 'postback' ? 'postback_without_referral' : null
   }
-  return isScanReferral(outcome.referralSource) ? null : 'unrecognized_referral_source'
+  return isScanReferral(outcome.referralSource)
+    ? null
+    : 'unrecognized_referral_source'
 }
 
 export function logInstagramOutcome(outcome: InstagramEventOutcome): void {

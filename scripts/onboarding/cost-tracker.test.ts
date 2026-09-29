@@ -26,14 +26,22 @@ describe('cost-tracker', () => {
 
   it('accumulates measured cost per grade, using haiku pricing by default', () => {
     let state = newCostTracker()
-    state = addGrade(state, { inputTokens: 1_000_000, outputTokens: 1_000_000, model: 'claude-haiku-4-5-20251001' })
+    state = addGrade(state, {
+      inputTokens: 1_000_000,
+      outputTokens: 1_000_000,
+      model: 'claude-haiku-4-5-20251001',
+    })
     // 1M in @ $0.80 + 1M out @ $4.00 = $4.80
     expect(totalCostUsd(state)).toBeCloseTo(4.8, 5)
     expect(state.scenariosGraded).toBe(1)
   })
 
   it('uses sonnet pricing when the model name contains sonnet', () => {
-    const cost = measuredGradeCostUsd({ inputTokens: 1_000_000, outputTokens: 1_000_000, model: 'claude-sonnet-4-6' })
+    const cost = measuredGradeCostUsd({
+      inputTokens: 1_000_000,
+      outputTokens: 1_000_000,
+      model: 'claude-sonnet-4-6',
+    })
     // 1M in @ $3 + 1M out @ $15 = $18
     expect(cost).toBeCloseTo(18, 5)
   })

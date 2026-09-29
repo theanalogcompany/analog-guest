@@ -1,0 +1,3 @@
+# Default owners for the whole repo. GitHub requests review from the owner
+# automatically on every PR; branch rules can additionally require it.
+* @claudechen95

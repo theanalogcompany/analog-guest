@@ -125,7 +125,9 @@ function parseQuantity(raw: string | undefined): number {
  * Line items are NOT on the payment — they live on the Order and are hydrated
  * separately via fetchOrder. Returns null if the object doesn't parse.
  */
-export function mapSquarePaymentToTransaction(payment: unknown): TransactionEvent | null {
+export function mapSquarePaymentToTransaction(
+  payment: unknown,
+): TransactionEvent | null {
   const parsed = SquarePaymentSchema.safeParse(payment)
   if (!parsed.success) return null
   const p = parsed.data

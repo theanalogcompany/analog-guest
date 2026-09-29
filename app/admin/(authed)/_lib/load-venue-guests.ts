@@ -68,7 +68,9 @@ export async function loadVenueGuestsByActivity(
   const [guestsResult, activityResult] = await Promise.all([
     supabase
       .from('guests')
-      .select('id, first_name, last_name, phone_number, instagram_username, first_contacted_at')
+      .select(
+        'id, first_name, last_name, phone_number, instagram_username, first_contacted_at',
+      )
       .eq('venue_id', venueId)
       .order('first_contacted_at', { ascending: false, nullsFirst: false })
       .limit(FETCH_CEILING),
@@ -83,12 +85,16 @@ export async function loadVenueGuestsByActivity(
     return { rows: [], activityDegraded: false }
   }
 
-  const activityDegraded = activityResult.error !== null || activityResult.data === null
+  const activityDegraded =
+    activityResult.error !== null || activityResult.data === null
   if (activityDegraded) {
-    console.warn('[admin] conversations: guest activity load failed; list is ordered by enrollment', {
-      venueId,
-      error: activityResult.error?.message ?? 'no rows returned',
-    })
+    console.warn(
+      '[admin] conversations: guest activity load failed; list is ordered by enrollment',
+      {
+        venueId,
+        error: activityResult.error?.message ?? 'no rows returned',
+      },
+    )
   }
 
   return {

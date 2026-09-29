@@ -67,7 +67,10 @@ export type ConversationChannelResolution = {
     | 'guest_has_no_identifier'
 }
 
-function guestHasIdentifierFor(channel: MessageChannel, input: ConversationChannelInput): boolean {
+function guestHasIdentifierFor(
+  channel: MessageChannel,
+  input: ConversationChannelInput,
+): boolean {
   switch (channel) {
     case 'text':
       return input.hasPhone
@@ -76,13 +79,18 @@ function guestHasIdentifierFor(channel: MessageChannel, input: ConversationChann
   }
 }
 
-export function resolveConversationChannel(input: ConversationChannelInput): ConversationChannelResolution {
+export function resolveConversationChannel(
+  input: ConversationChannelInput,
+): ConversationChannelResolution {
   if (input.inboundChannel !== undefined) {
     if (input.inboundChannel === null) {
       return { channel: null, unresolvedReason: 'inbound_channel_unparseable' }
     }
     if (!guestHasIdentifierFor(input.inboundChannel, input)) {
-      return { channel: null, unresolvedReason: 'inbound_channel_without_identifier' }
+      return {
+        channel: null,
+        unresolvedReason: 'inbound_channel_without_identifier',
+      }
     }
     return { channel: input.inboundChannel }
   }
@@ -106,6 +114,8 @@ export function resolveConversationChannel(input: ConversationChannelInput): Con
  * still need it. This decides only buildRuntimeContext's precondition; every
  * send path looks the number up itself (lib/messaging/venue-lookup.ts).
  */
-export function venueMessagingNumberRequired(channel: MessageChannel | null): boolean {
+export function venueMessagingNumberRequired(
+  channel: MessageChannel | null,
+): boolean {
   return channel !== 'instagram'
 }

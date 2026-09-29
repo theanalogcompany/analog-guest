@@ -7,12 +7,17 @@ import { formatPromptedAt, resolveDefinition } from '../_lib/definition-display'
 // asked this". Since TAC-380 that is once, ever, for first-contact intentions;
 // an event-armed row shows only its latest prompt, and a newer event can re-arm it.
 
-export function RecordedPromptsList({ rows }: { rows: readonly IntentionPromptRow[] }) {
+export function RecordedPromptsList({
+  rows,
+}: {
+  rows: readonly IntentionPromptRow[]
+}) {
   if (rows.length === 0) {
     return (
       <p className="text-sm text-ink-faint italic max-w-2xl">
-        No intention prompts recorded yet. A row appears here only after a sent message actually
-        raises an open intention, which the conditions above make rare.
+        No intention prompts recorded yet. A row appears here only after a sent
+        message actually raises an open intention, which the conditions above
+        make rare.
       </p>
     )
   }
@@ -30,7 +35,9 @@ export function RecordedPromptsList({ rows }: { rows: readonly IntentionPromptRo
             <div className="flex flex-col gap-1 min-w-0">
               <span className="text-sm text-ink">{row.guestLabel}</span>
               <span className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
-                <code className="text-xs text-ink-soft">{row.intentionKey}</code>
+                <code className="text-xs text-ink-soft">
+                  {row.intentionKey}
+                </code>
                 {/* An intention_key with no live definition still renders.
                     The column has no FK, so a renamed or removed definition
                     leaves history behind — hiding it would hide the cap that

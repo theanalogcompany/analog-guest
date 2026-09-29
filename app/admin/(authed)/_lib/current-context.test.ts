@@ -23,7 +23,12 @@ const OTHER_ENTRY_ID = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc'
 const NEW_KNOWLEDGE_ID = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd'
 
 const baseVenueInfo = (overrides: Record<string, unknown> = {}) => ({
-  address: { line1: '1 Main St', city: 'Someville', region: 'CA', postalCode: '00000' },
+  address: {
+    line1: '1 Main St',
+    city: 'Someville',
+    region: 'CA',
+    postalCode: '00000',
+  },
   contact: {},
   hours: {},
   menu: { highlights: [], items: [] },
@@ -94,7 +99,8 @@ function makeSupabaseMock(state: MockState) {
           select: (_cols: string) => ({
             single: async () => {
               state.insertCalls.push(row)
-              if (state.insertError) return { data: null, error: state.insertError }
+              if (state.insertError)
+                return { data: null, error: state.insertError }
               return { data: state.insertedRow, error: null }
             },
           }),
@@ -121,7 +127,9 @@ describe('addCurrentContextEntry', () => {
   it('appends a new entry and preserves the existing one', async () => {
     const state = newState()
     vi.mocked(createAdminClient).mockReturnValue(
-      makeSupabaseMock(state) as unknown as ReturnType<typeof createAdminClient>,
+      makeSupabaseMock(state) as unknown as ReturnType<
+        typeof createAdminClient
+      >,
     )
 
     const result = await addCurrentContextEntry({
@@ -136,7 +144,9 @@ describe('addCurrentContextEntry', () => {
       expect(result.entry.source).toBe('manual_entry')
       expect(typeof result.entry.id).toBe('string')
     }
-    const written = state.updateCalls[0].venue_info as { currentContext: Array<{ id: string }> }
+    const written = state.updateCalls[0].venue_info as {
+      currentContext: Array<{ id: string }>
+    }
     expect(written.currentContext).toHaveLength(2)
     expect(written.currentContext[0].id).toBe(ENTRY_ID)
   })
@@ -144,10 +154,15 @@ describe('addCurrentContextEntry', () => {
   it('returns db_error when venue_info fails to parse, without writing', async () => {
     const state = newState({ venueInfo: { staff: 'not an array' } })
     vi.mocked(createAdminClient).mockReturnValue(
-      makeSupabaseMock(state) as unknown as ReturnType<typeof createAdminClient>,
+      makeSupabaseMock(state) as unknown as ReturnType<
+        typeof createAdminClient
+      >,
     )
 
-    const result = await addCurrentContextEntry({ venueId: VENUE_ID, content: 'x' })
+    const result = await addCurrentContextEntry({
+      venueId: VENUE_ID,
+      content: 'x',
+    })
     expect(result.ok).toBe(false)
     if (!result.ok) expect(result.errorCode).toBe('db_error')
     expect(state.updateCalls).toEqual([])
@@ -160,28 +175,56 @@ describe('dropCurrentContextEntry', () => {
       venueInfo: baseVenueInfo({
         currentContext: [
           ...baseVenueInfo().currentContext,
-          { id: OTHER_ENTRY_ID, content: 'Permanent note', source: 'text', addedAt: '2026-01-01T00:00:00.000Z' },
+          {
+            id: OTHER_ENTRY_ID,
+            content: 'Permanent note',
+            source: 'text',
+            addedAt: '2026-01-01T00:00:00.000Z',
+          },
         ],
       }),
     })
     vi.mocked(createAdminClient).mockReturnValue(
-      makeSupabaseMock(state) as unknown as ReturnType<typeof createAdminClient>,
+      makeSupabaseMock(state) as unknown as ReturnType<
+        typeof createAdminClient
+      >,
     )
 
-    const result = await dropCurrentContextEntry({ venueId: VENUE_ID, entryId: ENTRY_ID })
+    const result = await dropCurrentContextEntry({
+      venueId: VENUE_ID,
+      entryId: ENTRY_ID,
+    })
     expect(result).toEqual({ ok: true })
-    const written = state.updateCalls[0].venue_info as { currentContext: Array<{ id: string }> }
-    expect(written.currentContext).toEqual([{ id: OTHER_ENTRY_ID, content: 'Permanent note', source: 'text', addedAt: '2026-01-01T00:00:00.000Z' }])
+    const written = state.updateCalls[0].venue_info as {
+      currentContext: Array<{ id: string }>
+    }
+    expect(written.currentContext).toEqual([
+      {
+        id: OTHER_ENTRY_ID,
+        content: 'Permanent note',
+        source: 'text',
+        addedAt: '2026-01-01T00:00:00.000Z',
+      },
+    ])
   })
 
   it('returns not_found when the entry does not exist, without writing', async () => {
     const state = newState()
     vi.mocked(createAdminClient).mockReturnValue(
-      makeSupabaseMock(state) as unknown as ReturnType<typeof createAdminClient>,
+      makeSupabaseMock(state) as unknown as ReturnType<
+        typeof createAdminClient
+      >,
     )
 
-    const result = await dropCurrentContextEntry({ venueId: VENUE_ID, entryId: 'nope' })
-    expect(result).toEqual({ ok: false, error: 'entry not found: nope', errorCode: 'not_found' })
+    const result = await dropCurrentContextEntry({
+      venueId: VENUE_ID,
+      entryId: 'nope',
+    })
+    expect(result).toEqual({
+      ok: false,
+      error: 'entry not found: nope',
+      errorCode: 'not_found',
+    })
     expect(state.updateCalls).toEqual([])
   })
 })
@@ -190,7 +233,9 @@ describe('promoteCurrentContextEntry — ordering', () => {
   it('happy path: inserts + embeds the knowledge row, THEN removes the currentContext entry', async () => {
     const state = newState()
     vi.mocked(createAdminClient).mockReturnValue(
-      makeSupabaseMock(state) as unknown as ReturnType<typeof createAdminClient>,
+      makeSupabaseMock(state) as unknown as ReturnType<
+        typeof createAdminClient
+      >,
     )
     vi.mocked(ingestKnowledgeCorpusEntry).mockResolvedValue({
       ok: true,
@@ -212,7 +257,9 @@ describe('promoteCurrentContextEntry — ordering', () => {
       metadata: { promotedFromCurrentContext: ENTRY_ID },
     })
     expect(ingestKnowledgeCorpusEntry).toHaveBeenCalledWith(NEW_KNOWLEDGE_ID)
-    const written = state.updateCalls[0].venue_info as { currentContext: unknown[] }
+    const written = state.updateCalls[0].venue_info as {
+      currentContext: unknown[]
+    }
     expect(written.currentContext).toEqual([])
     expect(state.deleteCalls).toEqual([])
   })
@@ -220,7 +267,9 @@ describe('promoteCurrentContextEntry — ordering', () => {
   it('a failed embed leaves the currentContext entry untouched and cleans up the knowledge row', async () => {
     const state = newState()
     vi.mocked(createAdminClient).mockReturnValue(
-      makeSupabaseMock(state) as unknown as ReturnType<typeof createAdminClient>,
+      makeSupabaseMock(state) as unknown as ReturnType<
+        typeof createAdminClient
+      >,
     )
     vi.mocked(ingestKnowledgeCorpusEntry).mockResolvedValue({
       ok: false,
@@ -246,7 +295,9 @@ describe('promoteCurrentContextEntry — ordering', () => {
   it('returns not_found without touching knowledge_corpus when the entry is gone', async () => {
     const state = newState()
     vi.mocked(createAdminClient).mockReturnValue(
-      makeSupabaseMock(state) as unknown as ReturnType<typeof createAdminClient>,
+      makeSupabaseMock(state) as unknown as ReturnType<
+        typeof createAdminClient
+      >,
     )
 
     const result = await promoteCurrentContextEntry({
@@ -256,14 +307,20 @@ describe('promoteCurrentContextEntry — ordering', () => {
       secondaryTags: [],
     })
 
-    expect(result).toEqual({ ok: false, error: 'entry not found: nope', errorCode: 'not_found' })
+    expect(result).toEqual({
+      ok: false,
+      error: 'entry not found: nope',
+      errorCode: 'not_found',
+    })
     expect(state.insertCalls).toEqual([])
   })
 
   it('re-reads venue_info fresh before the final write, not the pre-embed snapshot (TOCTOU)', async () => {
     const state = newState()
     vi.mocked(createAdminClient).mockReturnValue(
-      makeSupabaseMock(state) as unknown as ReturnType<typeof createAdminClient>,
+      makeSupabaseMock(state) as unknown as ReturnType<
+        typeof createAdminClient
+      >,
     )
     // The Voyage embed call is a slow network round trip. Simulate a
     // concurrent admin edit landing on venue_info while it's in flight.
@@ -290,7 +347,9 @@ describe('promoteCurrentContextEntry — ordering', () => {
     })
 
     expect(result).toEqual({ ok: true, knowledgeCorpusId: NEW_KNOWLEDGE_ID })
-    const written = state.updateCalls[0].venue_info as { currentContext: Array<{ id: string }> }
+    const written = state.updateCalls[0].venue_info as {
+      currentContext: Array<{ id: string }>
+    }
     // The promoted entry is gone, but the concurrently-added entry survives —
     // proving the write is based on a fresh read, not the stale pre-embed
     // snapshot (which would have silently dropped it).
@@ -307,13 +366,17 @@ describe('promoteCurrentContextEntry — ordering', () => {
   it('returns db_error without deleting the knowledge row when the post-embed venue_info write fails', async () => {
     const state = newState({ updateError: { message: 'connection reset' } })
     vi.mocked(createAdminClient).mockReturnValue(
-      makeSupabaseMock(state) as unknown as ReturnType<typeof createAdminClient>,
+      makeSupabaseMock(state) as unknown as ReturnType<
+        typeof createAdminClient
+      >,
     )
     vi.mocked(ingestKnowledgeCorpusEntry).mockResolvedValue({
       ok: true,
       data: { embeddedChunkCount: 1 },
     })
-    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const consoleErrorSpy = vi
+      .spyOn(console, 'error')
+      .mockImplementation(() => {})
 
     const result = await promoteCurrentContextEntry({
       venueId: VENUE_ID,

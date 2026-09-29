@@ -32,9 +32,11 @@ import type {
 const MAX_HISTORY_BODY_CHARS = 200
 
 const FORMALITY_GUIDANCE: Record<BrandPersona['formality'], string> = {
-  casual: 'Use contractions; lowercase starts are fine; write the way you would text a friend.',
+  casual:
+    'Use contractions; lowercase starts are fine; write the way you would text a friend.',
   warm: 'Conversational and friendly. Contractions are fine. Avoid stiffness, but stay clear and complete.',
-  formal: 'Complete sentences and proper capitalization. No slang. Polite but never stiff.',
+  formal:
+    'Complete sentences and proper capitalization. No slang. Polite but never stiff.',
 }
 
 // TAC-495: the casual line's Instagram variant says "message a friend", not
@@ -48,7 +50,12 @@ const FORMALITY_GUIDANCE: Record<BrandPersona['formality'], string> = {
 // channel and are identical on both.
 const CASUAL_FORMALITY_CHANNEL_SUBSTITUTIONS = {
   text: [],
-  instagram: [{ from: 'write the way you would text a friend.', to: 'write the way you would message a friend.' }],
+  instagram: [
+    {
+      from: 'write the way you would text a friend.',
+      to: 'write the way you would message a friend.',
+    },
+  ],
 } as const satisfies Record<MessageChannel, readonly ChannelSubstitution[]>
 
 const CASUAL_FORMALITY_BY_CHANNEL: Record<MessageChannel, string> = {
@@ -64,13 +71,19 @@ const CASUAL_FORMALITY_BY_CHANNEL: Record<MessageChannel, string> = {
   ),
 }
 
-function formalityGuidanceFor(formality: BrandPersona['formality'], channel: MessageChannel | null): string {
-  return formality === 'casual' ? CASUAL_FORMALITY_BY_CHANNEL[copyVariantFor(channel)] : FORMALITY_GUIDANCE[formality]
+function formalityGuidanceFor(
+  formality: BrandPersona['formality'],
+  channel: MessageChannel | null,
+): string {
+  return formality === 'casual'
+    ? CASUAL_FORMALITY_BY_CHANNEL[copyVariantFor(channel)]
+    : FORMALITY_GUIDANCE[formality]
 }
 
 const EMOJI_GUIDANCE: Record<BrandPersona['emojiPolicy'], string> = {
   never: 'Do not use emoji.',
-  sparingly: 'You may use one emoji occasionally — only when it genuinely fits the tone. Default to none.',
+  sparingly:
+    'You may use one emoji occasionally — only when it genuinely fits the tone. Default to none.',
   // TAC-362: `never` and `sparingly` are UNCHANGED and deliberately so —
   // both measure 0 emoji across 240 responses, and rewording a proven path
   // is how you find out it was load-bearing. Only `frequent` moves, because
@@ -110,7 +123,12 @@ const NAMED_PERSON_LINE =
 
 const NAMED_PERSON_LINE_CHANNEL_SUBSTITUTIONS = {
   text: [],
-  instagram: [{ from: 'staff at the venue, texting as yourself.', to: 'staff at the venue, messaging as yourself.' }],
+  instagram: [
+    {
+      from: 'staff at the venue, texting as yourself.',
+      to: 'staff at the venue, messaging as yourself.',
+    },
+  ],
 } as const satisfies Record<MessageChannel, readonly ChannelSubstitution[]>
 
 const NAMED_PERSON_LINE_BY_CHANNEL: Record<MessageChannel, string> = {
@@ -126,7 +144,10 @@ const NAMED_PERSON_LINE_BY_CHANNEL: Record<MessageChannel, string> = {
   ),
 }
 
-function speakerFramingProse(persona: BrandPersona, channel: MessageChannel | null): string {
+function speakerFramingProse(
+  persona: BrandPersona,
+  channel: MessageChannel | null,
+): string {
   switch (persona.speakerFraming) {
     case 'venue':
       return 'Speak as the venue itself ("we"). Do not sign messages with a personal name.'
@@ -172,7 +193,10 @@ function speakerFramingProse(persona: BrandPersona, channel: MessageChannel | nu
  */
 function personaBullet(text: string): string {
   const [first = '', ...rest] = text.split('\n')
-  return [`- ${first}`, ...rest.map((line) => (line.trim() === '' ? '' : `  ${line}`))].join('\n')
+  return [
+    `- ${first}`,
+    ...rest.map((line) => (line.trim() === '' ? '' : `  ${line}`)),
+  ].join('\n')
 }
 
 /**
@@ -182,14 +206,23 @@ function personaBullet(text: string): string {
  * passes 'text', because its prompt is not guest-facing and TAC-495 leaves it
  * exactly as it was.
  */
-export function personaToProse(persona: BrandPersona, channel: MessageChannel | null): string {
+export function personaToProse(
+  persona: BrandPersona,
+  channel: MessageChannel | null,
+): string {
   const sections: string[] = []
 
   sections.push(`## Voice and Tone\n${persona.tone}`)
-  sections.push(`## How to address the guest\n${speakerFramingProse(persona, channel)}`)
-  sections.push(`## Formality\n${persona.formality} — ${formalityGuidanceFor(persona.formality, channel)}`)
+  sections.push(
+    `## How to address the guest\n${speakerFramingProse(persona, channel)}`,
+  )
+  sections.push(
+    `## Formality\n${persona.formality} — ${formalityGuidanceFor(persona.formality, channel)}`,
+  )
   sections.push(`## Length\n${persona.lengthGuide}`)
-  sections.push(`## Emojis\n${persona.emojiPolicy} — ${EMOJI_GUIDANCE[persona.emojiPolicy]}`)
+  sections.push(
+    `## Emojis\n${persona.emojiPolicy} — ${EMOJI_GUIDANCE[persona.emojiPolicy]}`,
+  )
 
   if (persona.signaturePhrases.length > 0) {
     sections.push(
@@ -216,18 +249,29 @@ export function personaToProse(persona: BrandPersona, channel: MessageChannel | 
 }
 
 function formatAddress(addr: VenueInfo['address']): string {
-  const parts = [addr.line1, addr.line2, `${addr.city}, ${addr.region} ${addr.postalCode}`].filter(
-    (p): p is string => Boolean(p),
-  )
+  const parts = [
+    addr.line1,
+    addr.line2,
+    `${addr.city}, ${addr.region} ${addr.postalCode}`,
+  ].filter((p): p is string => Boolean(p))
   return parts.join(', ')
 }
 
 function formatHours(hours: VenueInfo['hours']): string | null {
-  const days = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'] as const
+  const days = [
+    'monday',
+    'tuesday',
+    'wednesday',
+    'thursday',
+    'friday',
+    'saturday',
+    'sunday',
+  ] as const
   const lines: string[] = []
   for (const day of days) {
     const value = hours[day]
-    if (value) lines.push(`  - ${day[0].toUpperCase() + day.slice(1)}: ${value}`)
+    if (value)
+      lines.push(`  - ${day[0].toUpperCase() + day.slice(1)}: ${value}`)
   }
   if (hours.notes) {
     // Notes can be multi-line (operator may write several `- **<key>:** <val>`
@@ -273,24 +317,36 @@ function compareItems(a: MenuItem, b: MenuItem): number {
 function formatMenuItems(items: readonly MenuItem[]): string | null {
   if (items.length === 0) return null
 
-  const onMenu = items.filter((i) => !i.isOffMenu).slice().sort(compareItems)
-  const offMenu = items.filter((i) => i.isOffMenu).slice().sort(compareItems)
+  const onMenu = items
+    .filter((i) => !i.isOffMenu)
+    .slice()
+    .sort(compareItems)
+  const offMenu = items
+    .filter((i) => i.isOffMenu)
+    .slice()
+    .sort(compareItems)
 
   const sections: string[] = []
   if (onMenu.length > 0) {
     sections.push(`On-menu:\n${onMenu.map(formatMenuItemLine).join('\n')}`)
   }
   if (offMenu.length > 0) {
-    sections.push(`Off-menu (by request):\n${offMenu.map(formatMenuItemLine).join('\n')}`)
+    sections.push(
+      `Off-menu (by request):\n${offMenu.map(formatMenuItemLine).join('\n')}`,
+    )
   }
 
   return `## Menu (structured)\n${sections.join('\n\n')}`
 }
 
-function formatAmenities(amenities: NonNullable<VenueInfo['amenities']>): string | null {
+function formatAmenities(
+  amenities: NonNullable<VenueInfo['amenities']>,
+): string | null {
   const lines: string[] = []
-  if (amenities.wifi !== undefined) lines.push(`  - WiFi: ${amenities.wifi ? 'yes' : 'no'}`)
-  if (amenities.petFriendly !== undefined) lines.push(`  - Pet-friendly: ${amenities.petFriendly ? 'yes' : 'no'}`)
+  if (amenities.wifi !== undefined)
+    lines.push(`  - WiFi: ${amenities.wifi ? 'yes' : 'no'}`)
+  if (amenities.petFriendly !== undefined)
+    lines.push(`  - Pet-friendly: ${amenities.petFriendly ? 'yes' : 'no'}`)
   if (amenities.parking) lines.push(`  - Parking: ${amenities.parking}`)
   if (amenities.seating) lines.push(`  - Seating: ${amenities.seating}`)
   if (amenities.notes) lines.push(`  - Notes: ${amenities.notes}`)
@@ -343,7 +399,9 @@ function formatVenueServices(services: VenueServices): string | null {
   const offered: string[] = []
   const notOffered: string[] = []
 
-  for (const key of Object.keys(SERVICE_LABELS) as Array<keyof typeof SERVICE_LABELS>) {
+  for (const key of Object.keys(SERVICE_LABELS) as Array<
+    keyof typeof SERVICE_LABELS
+  >) {
     const value = services[key]
     // Strict boolean checks: `undefined` means nobody said, and must fall
     // through to NEITHER list.
@@ -481,7 +539,10 @@ export function ragChunksToProse(chunks: VoiceCorpusChunk[]): string {
   if (chunks.length === 0) return ''
 
   const blocks = chunks.map((c) => {
-    const quoted = c.text.split('\n').map((l) => `> ${l}`).join('\n')
+    const quoted = c.text
+      .split('\n')
+      .map((l) => `> ${l}`)
+      .join('\n')
     return `[${c.sourceType}]\n${quoted}`
   })
 
@@ -529,10 +590,17 @@ export function knowledgeChunksToProse(chunks: KnowledgeCorpusChunk[]): string {
 
   const blocks = chunks.map((c) => {
     const primaryLine =
-      c.primaryTags.length > 0 ? `[primary: ${c.primaryTags.join(', ')}]` : `[primary: ${c.sourceType}]`
+      c.primaryTags.length > 0
+        ? `[primary: ${c.primaryTags.join(', ')}]`
+        : `[primary: ${c.sourceType}]`
     const secondaryLine =
-      c.secondaryTags.length > 0 ? `\n[secondary: ${c.secondaryTags.join(', ')}]` : ''
-    const quoted = c.text.split('\n').map((l) => `> ${l}`).join('\n')
+      c.secondaryTags.length > 0
+        ? `\n[secondary: ${c.secondaryTags.join(', ')}]`
+        : ''
+    const quoted = c.text
+      .split('\n')
+      .map((l) => `> ${l}`)
+      .join('\n')
     return `${primaryLine}${secondaryLine}\n${quoted}`
   })
 
@@ -553,7 +621,9 @@ export function knowledgeChunksToProse(chunks: KnowledgeCorpusChunk[]): string {
  * block byte-identical to its pre-TAC-301 shape. That silence is deliberate:
  * see the governing rule in lib/schemas/venue-hours.ts.
  */
-function formatOpenStatus(openState: NonNullable<RuntimeContext['today']>['openState']): string | null {
+function formatOpenStatus(
+  openState: NonNullable<RuntimeContext['today']>['openState'],
+): string | null {
   if (!openState) return null
 
   if (openState.state === 'open') {
@@ -600,7 +670,9 @@ function formatOpenStatus(openState: NonNullable<RuntimeContext['today']>['openS
  * Every line is Jaipal's wording. No em dash: R3 bans them in output and the
  * prompt should not model one.
  */
-function formatScanArrival(scanArrival: NonNullable<RuntimeContext['scanArrival']>): string {
+function formatScanArrival(
+  scanArrival: NonNullable<RuntimeContext['scanArrival']>,
+): string {
   return [
     '## Guest just arrived',
     scanArrival.hadPriorConversation
@@ -663,7 +735,9 @@ function normalizeHistoryBody(body: string): string {
 // draft the venue decided against and a send that failed both went unread, but
 // only the first was a decision, and "never sent" with no reason can nudge the
 // model to raise what an operator rejected (2026-09-14 ruling).
-export function historyDeliveryMarker(delivery: MessageDelivery): string | null {
+export function historyDeliveryMarker(
+  delivery: MessageDelivery,
+): string | null {
   switch (delivery) {
     case 'delivered':
       return null
@@ -683,14 +757,19 @@ export function historyDeliveryMarker(delivery: MessageDelivery): string | null 
 export const UNSENT_HISTORY_NOTE =
   'Lines marked NOT SENT or NEVER SENT never reached the guest. They have not read them.'
 
-function formatRecentConversation(messages: readonly RecentMessage[], now: Date): string | null {
+function formatRecentConversation(
+  messages: readonly RecentMessage[],
+  now: Date,
+): string | null {
   if (messages.length === 0) return null
   const lines = messages.map((m) => {
     const speaker = m.direction === 'inbound' ? 'guest' : 'venue'
     const delta = formatTimeDelta(m.createdAt, now)
     const body = normalizeHistoryBody(m.body)
     const marker = historyDeliveryMarker(m.delivery)
-    return marker === null ? `[${speaker}, ${delta}] ${body}` : `[${speaker}, ${delta}, ${marker}] ${body}`
+    return marker === null
+      ? `[${speaker}, ${delta}] ${body}`
+      : `[${speaker}, ${delta}, ${marker}] ${body}`
   })
   const block = `## Recent conversation\n${lines.join('\n')}`
   // A history with nothing unsent renders exactly as it did before TAC-394:
@@ -836,7 +915,7 @@ function formatCritiqueToIncorporate(critique: string): string {
     '## Critique to incorporate',
     'A previous attempt at this message was flagged. The operator wrote:',
     critique,
-    'Take this critique seriously. Generate a new message that addresses it directly while still speaking in the venue\'s voice.',
+    "Take this critique seriously. Generate a new message that addresses it directly while still speaking in the venue's voice.",
   ].join('\n')
 }
 
@@ -851,7 +930,7 @@ function formatOperatorInstruction(instruction: string): string {
   return [
     '## Operator instruction',
     `The operator wants you to follow up with this guest about: ${instruction}`,
-    'Draft a message that addresses this directly, in the venue\'s voice.',
+    "Draft a message that addresses this directly, in the venue's voice.",
   ].join('\n')
 }
 
@@ -872,7 +951,8 @@ function formatGuestDetailsLines(
   if (details.first_name) lines.push(`- First name: ${details.first_name}`)
   if (details.last_name) lines.push(`- Last name: ${details.last_name}`)
   if (details.pronouns) lines.push(`- Pronouns: ${details.pronouns}`)
-  if (details.date_of_birth) lines.push(`- Date of birth: ${details.date_of_birth}`)
+  if (details.date_of_birth)
+    lines.push(`- Date of birth: ${details.date_of_birth}`)
   // TAC-300: home_base / workplace are bare strings post-normalize. Legacy
   // nested-object reads are flattened in toParsedGuestContext, so the
   // serializer only ever sees a string here.
@@ -930,10 +1010,15 @@ function formatGuestContext(context: ParsedGuestContext): string | null {
   if (rendered.length <= GUEST_CONTEXT_CHAR_BUDGET) return rendered
 
   // First fallback: trim observations to the floor.
-  if (context.observations && context.observations.length > GUEST_CONTEXT_OBSERVATIONS_FLOOR) {
+  if (
+    context.observations &&
+    context.observations.length > GUEST_CONTEXT_OBSERVATIONS_FLOOR
+  ) {
     const trimmed: ParsedGuestContext = {
       ...context,
-      observations: context.observations.slice(-GUEST_CONTEXT_OBSERVATIONS_FLOOR),
+      observations: context.observations.slice(
+        -GUEST_CONTEXT_OBSERVATIONS_FLOOR,
+      ),
     }
     rendered = renderGuestContextBody(trimmed)
     if (rendered.length <= GUEST_CONTEXT_CHAR_BUDGET) return rendered
@@ -947,7 +1032,8 @@ function formatGuestContext(context: ParsedGuestContext): string | null {
     while (keepCount >= 0) {
       const trimmed: ParsedGuestContext = {
         ...context,
-        life_context: keepCount === 0 ? undefined : context.life_context.slice(-keepCount),
+        life_context:
+          keepCount === 0 ? undefined : context.life_context.slice(-keepCount),
       }
       rendered = renderGuestContextBody(trimmed)
       if (rendered.length <= GUEST_CONTEXT_CHAR_BUDGET) return rendered
@@ -1151,7 +1237,7 @@ function formatMechanicEligibility(
     return `- ${m.name}${reward}${qual}${approval}`
   })
   const reviewedRider = willBeReviewed
-    ? "\nSomeone at the venue approves this message before the guest sees it, so if putting things right calls for something beyond the list, propose it and let them decide."
+    ? '\nSomeone at the venue approves this message before the guest sees it, so if putting things right calls for something beyond the list, propose it and let them decide.'
     : ''
   return `${header}\n${intro}\n${bullets.join('\n')}${reviewedRider}`
 }
@@ -1344,7 +1430,10 @@ const FIRST_TOUCH_OPENER =
 const FIRST_TOUCH_OPENER_CHANNEL_SUBSTITUTIONS = {
   text: [],
   instagram: [
-    { from: "This is the guest's first message on this number,", to: "This is the guest's first message," },
+    {
+      from: "This is the guest's first message on this number,",
+      to: "This is the guest's first message,",
+    },
   ],
 } as const satisfies Record<MessageChannel, readonly ChannelSubstitution[]>
 
@@ -1423,7 +1512,9 @@ function formatOpenIntentions(
     '',
     'If nothing fits, let it wait. There will be other conversations.',
   ].join('\n')
-  const opener = firstTouchAfterQrScan ? `${firstTouchOpenerFor(channel)}\n\n` : ''
+  const opener = firstTouchAfterQrScan
+    ? `${firstTouchOpenerFor(channel)}\n\n`
+    : ''
   return `${header}\n${opener}${lines.join('\n')}\n\n${paragraph}`
 }
 
@@ -1559,7 +1650,12 @@ export function runtimeToProse(
     blocks.push(formatOperatorInstruction(runtime.operatorInstruction))
   }
   if (runtime.mechanics !== undefined) {
-    blocks.push(formatMechanicEligibility(runtime.mechanics, runtime.willBeReviewed === true))
+    blocks.push(
+      formatMechanicEligibility(
+        runtime.mechanics,
+        runtime.willBeReviewed === true,
+      ),
+    )
   }
   // TAC-244: ## Follow-up context sits immediately BEFORE ## Visit history.
   // Intent-then-evidence — this block states *why* we're reaching out;
@@ -1644,7 +1740,11 @@ export function runtimeToProse(
   // NOT after the emoji directive, which keeps its own last-block position:
   // that one is measured (TAC-362) and demoting a measured mechanism to promote
   // this one is not a trade this ticket makes.
-  if (shouldRenderOpenIntentions(category) && runtime.openIntentions && runtime.openIntentions.length > 0) {
+  if (
+    shouldRenderOpenIntentions(category) &&
+    runtime.openIntentions &&
+    runtime.openIntentions.length > 0
+  ) {
     const block = formatOpenIntentions(
       runtime.openIntentions,
       runtime.firstTouchAfterQrScan === true,
@@ -1691,7 +1791,9 @@ export function runtimeToProse(
   if (runtime.perkBeingUnlocked) {
     lines.push(`Perk: ${runtime.perkBeingUnlocked.name}`)
     lines.push(`Why they qualified: ${runtime.perkBeingUnlocked.qualification}`)
-    lines.push(`What they're being offered: ${runtime.perkBeingUnlocked.rewardDescription}`)
+    lines.push(
+      `What they're being offered: ${runtime.perkBeingUnlocked.rewardDescription}`,
+    )
   }
   if (runtime.eventBeingInvited) {
     lines.push(`Event: ${runtime.eventBeingInvited.name}`)
@@ -1703,7 +1805,10 @@ export function runtimeToProse(
     lines.push(`Additional context: ${runtime.additionalContext}`)
   }
 
-  const tail = lines.length === 0 ? `Generate a ${category} message now.` : `${lines.join('\n')}\n\nGenerate the message now.`
+  const tail =
+    lines.length === 0
+      ? `Generate a ${category} message now.`
+      : `${lines.join('\n')}\n\nGenerate the message now.`
 
   if (blocks.length === 0) return tail
   return `${blocks.join('\n\n')}\n\n${tail}`

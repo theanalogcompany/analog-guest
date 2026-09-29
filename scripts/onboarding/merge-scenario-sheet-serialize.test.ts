@@ -56,7 +56,11 @@ describe('scenarioRowToValues / valuesToScenarioRow round-trip', () => {
 
   it('round-trips an owner-edited row with exclude=true and notes set', () => {
     const [base] = stampFreshRows([baseScenario()])
-    const edited: ScenarioSheetRow = { ...base, exclude: true, notes: 'keeping this, seems fine' }
+    const edited: ScenarioSheetRow = {
+      ...base,
+      exclude: true,
+      notes: 'keeping this, seems fine',
+    }
     const values = scenarioRowToValues(edited)
     const parsed = valuesToScenarioRow(HEADER, values)
     expect(parsed).toEqual(edited)
@@ -69,7 +73,9 @@ describe('scenarioRowToValues / valuesToScenarioRow round-trip', () => {
   })
 
   it('preserves a non-null expected_failure', () => {
-    const [row] = stampFreshRows([baseScenario({ expected_failure: 'known gap: no hours listed' })])
+    const [row] = stampFreshRows([
+      baseScenario({ expected_failure: 'known gap: no hours listed' }),
+    ])
     const parsed = valuesToScenarioRow(HEADER, scenarioRowToValues(row))
     expect(parsed?.expected_failure).toBe('known gap: no hours listed')
   })
@@ -101,10 +107,18 @@ describe('buildMergedMetaEntries', () => {
   it('overwrites an existing meta entry when the same id is written again', () => {
     const existing = [{ id: 'a', topic: 'old-topic', message: 'old message' }]
     const [freshRow] = stampFreshRows([
-      baseScenario({ sample_id: 'a', topic: 'new-topic', inbound_message: 'new message' }),
+      baseScenario({
+        sample_id: 'a',
+        topic: 'new-topic',
+        inbound_message: 'new message',
+      }),
     ])
     const merged = buildMergedMetaEntries(existing, [freshRow])
     expect(merged).toHaveLength(1)
-    expect(merged[0]).toEqual({ id: 'a', topic: 'new-topic', message: 'new message' })
+    expect(merged[0]).toEqual({
+      id: 'a',
+      topic: 'new-topic',
+      message: 'new message',
+    })
   })
 })

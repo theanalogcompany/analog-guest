@@ -3,7 +3,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
-import { APPROVAL_TRIGGERS, GENERATION_FAILED_REVIEW_REASON } from '@/lib/agent/stages'
+import {
+  APPROVAL_TRIGGERS,
+  GENERATION_FAILED_REVIEW_REASON,
+} from '@/lib/agent/stages'
 
 // send.ts now imports APPROVAL_TRIGGERS from @/lib/agent/stages (so the label
 // map is keyed on the source of truth rather than re-listed literals), which
@@ -23,17 +26,16 @@ import type { MessageCategory } from '@/lib/ai/types'
 
 import type { ApnsClientResult, ApnsRequestPayload } from './apns/client'
 
-const sendApnsRequestMock = vi.fn<
-  (payload: ApnsRequestPayload) => Promise<ApnsClientResult>
->()
+const sendApnsRequestMock =
+  vi.fn<(payload: ApnsRequestPayload) => Promise<ApnsClientResult>>()
 vi.mock('./apns/client', () => ({
-  sendApnsRequest: (payload: ApnsRequestPayload) => sendApnsRequestMock(payload),
+  sendApnsRequest: (payload: ApnsRequestPayload) =>
+    sendApnsRequestMock(payload),
 }))
 
 const capturePushSentMock = vi.fn<(props: PushSentProps) => Promise<void>>()
-const capturePushTokenInvalidMock = vi.fn<
-  (props: PushTokenInvalidProps) => Promise<void>
->()
+const capturePushTokenInvalidMock =
+  vi.fn<(props: PushTokenInvalidProps) => Promise<void>>()
 vi.mock('@/lib/analytics/posthog', () => ({
   capturePushSent: (props: PushSentProps) => capturePushSentMock(props),
   capturePushTokenInvalid: (props: PushTokenInvalidProps) =>
@@ -128,7 +130,9 @@ describe('shouldSendDraftFlaggedPush', () => {
   it('returns true for model_flagged, comp_regex_backstop, fidelity_below_auto_send_floor', () => {
     expect(shouldSendDraftFlaggedPush('model_flagged')).toBe(true)
     expect(shouldSendDraftFlaggedPush('comp_regex_backstop')).toBe(true)
-    expect(shouldSendDraftFlaggedPush('fidelity_below_auto_send_floor')).toBe(true)
+    expect(shouldSendDraftFlaggedPush('fidelity_below_auto_send_floor')).toBe(
+      true,
+    )
   })
 
   it('returns false for previous_pending_held (regen of already-pushed draft)', () => {
@@ -166,9 +170,13 @@ describe('buildPushTitle / buildPushBody (TAC-532)', () => {
     expect(buildPushTitle('Alex', 'knowledge_gap', 'new_question')).toBe(
       'Alex: needs an answer',
     )
-    expect(buildPushBody('do you have oat milk for the latte?', 'new_question', false)).toBe(
-      '"do you have oat milk for the latte?"',
-    )
+    expect(
+      buildPushBody(
+        'do you have oat milk for the latte?',
+        'new_question',
+        false,
+      ),
+    ).toBe('"do you have oat milk for the latte?"')
   })
 
   // THE REGRESSION THIS TICKET IS. Three cards were waiting for one guest on
@@ -189,7 +197,9 @@ describe('buildPushTitle / buildPushBody (TAC-532)', () => {
     // The titles are IDENTICAL and that is correct: the title carries the
     // reason, which genuinely is the same for all three. The body is what
     // distinguishes them, which is the whole point of the split.
-    const titles = questions.map(() => buildPushTitle('Alex', 'knowledge_gap', 'new_question'))
+    const titles = questions.map(() =>
+      buildPushTitle('Alex', 'knowledge_gap', 'new_question'),
+    )
     expect(new Set(titles).size).toBe(1)
   })
 
@@ -198,9 +208,13 @@ describe('buildPushTitle / buildPushBody (TAC-532)', () => {
       expect(buildPushTitle('Alex', 'knowledge_gap', 'comp_complaint')).toBe(
         'Alex: something went wrong',
       )
-      expect(buildPushBody('my cortado was cold and the guy was rude', 'comp_complaint', false)).toBe(
-        'Complaint waiting for review',
-      )
+      expect(
+        buildPushBody(
+          'my cortado was cold and the guy was rude',
+          'comp_complaint',
+          false,
+        ),
+      ).toBe('Complaint waiting for review')
     })
 
     // The load-bearing case. comp_complaint routes to a comp-forward draft, so
@@ -211,9 +225,9 @@ describe('buildPushTitle / buildPushBody (TAC-532)', () => {
     it('suppresses on the category even when the trigger is not a complaint trigger', () => {
       const body = buildPushBody('my cortado was cold', 'comp_complaint', false)
       expect(body).not.toContain('cortado')
-      expect(buildPushTitle('Alex', 'commitment_type_gated', 'comp_complaint')).toBe(
-        'Alex: something went wrong',
-      )
+      expect(
+        buildPushTitle('Alex', 'commitment_type_gated', 'comp_complaint'),
+      ).toBe('Alex: something went wrong')
     })
 
     it('still quotes the guest when the same trigger fires on a non-complaint', () => {
@@ -228,19 +242,27 @@ describe('buildPushTitle / buildPushBody (TAC-532)', () => {
   // suppress. The crash-card call site reaches exactly this state.
   it('suppresses the quote when the category is unresolved', () => {
     expect(shouldQuoteGuest(null, false)).toBe(false)
-    expect(buildPushBody('my cortado was cold', null, false)).toBe('Draft ready to review')
-    expect(buildPushBody('my cortado was cold', null, false)).not.toContain('cortado')
+    expect(buildPushBody('my cortado was cold', null, false)).toBe(
+      'Draft ready to review',
+    )
+    expect(buildPushBody('my cortado was cold', null, false)).not.toContain(
+      'cortado',
+    )
   })
 
   it('falls back when there is no guest message (followups)', () => {
-    expect(buildPushBody(null, 'follow_up', false)).toBe('Draft ready to review')
-    expect(buildPushBody('   ', 'follow_up', false)).toBe('Draft ready to review')
+    expect(buildPushBody(null, 'follow_up', false)).toBe(
+      'Draft ready to review',
+    )
+    expect(buildPushBody('   ', 'follow_up', false)).toBe(
+      'Draft ready to review',
+    )
   })
 
   it('collapses whitespace so a multi-line inbound renders as one run', () => {
-    expect(buildPushBody('do you have\n\noat   milk?', 'new_question', false)).toBe(
-      '"do you have oat milk?"',
-    )
+    expect(
+      buildPushBody('do you have\n\noat   milk?', 'new_question', false),
+    ).toBe('"do you have oat milk?"')
   })
 
   it('falls back to "A guest" when the first name is missing', () => {
@@ -277,7 +299,11 @@ describe('buildPushTitle / buildPushBody (TAC-532)', () => {
     })
 
     it('trims the NAME and keeps the reason whole when the title is over budget', () => {
-      const title = buildPushTitle('Christopherbartholomew-Fitzwilliam', 'knowledge_gap', 'new_question')
+      const title = buildPushTitle(
+        'Christopherbartholomew-Fitzwilliam',
+        'knowledge_gap',
+        'new_question',
+      )
       expect(title.length).toBeLessThanOrEqual(40)
       expect(title.endsWith(': needs an answer')).toBe(true)
     })
@@ -292,16 +318,24 @@ describe('buildPushTitle / buildPushBody (TAC-532)', () => {
       for (const trigger of Object.values(APPROVAL_TRIGGERS)) {
         expect(Object.keys(REASON_BY_REVIEW_REASON)).toContain(trigger)
       }
-      expect(Object.keys(REASON_BY_REVIEW_REASON)).toContain(GENERATION_FAILED_REVIEW_REASON)
-      expect(Object.keys(REASON_BY_REVIEW_REASON)).toContain('instagram_send_failed')
+      expect(Object.keys(REASON_BY_REVIEW_REASON)).toContain(
+        GENERATION_FAILED_REVIEW_REASON,
+      )
+      expect(Object.keys(REASON_BY_REVIEW_REASON)).toContain(
+        'instagram_send_failed',
+      )
     })
 
     it('carries no em dash or en dash in any phrase, title or fallback body', () => {
       for (const [key, phrase] of reasons) {
         expect(phrase, key).not.toMatch(/[–—]/)
-        expect(buildPushTitle('Alex', key, 'new_question'), key).not.toMatch(/[–—]/)
+        expect(buildPushTitle('Alex', key, 'new_question'), key).not.toMatch(
+          /[–—]/,
+        )
       }
-      expect(buildPushTitle('Alex', 'knowledge_gap', 'comp_complaint')).not.toMatch(/[–—]/)
+      expect(
+        buildPushTitle('Alex', 'knowledge_gap', 'comp_complaint'),
+      ).not.toMatch(/[–—]/)
       for (const body of [
         buildPushBody(null, 'follow_up', false),
         buildPushBody('x', 'comp_complaint', false),
@@ -312,7 +346,11 @@ describe('buildPushTitle / buildPushBody (TAC-532)', () => {
 
     it('fits the title budget for every phrase, with a long name', () => {
       for (const [key] of reasons) {
-        const title = buildPushTitle('Christopherbartholomew', key, 'new_question')
+        const title = buildPushTitle(
+          'Christopherbartholomew',
+          key,
+          'new_question',
+        )
         expect(title.length, `${key}: ${title}`).toBeLessThanOrEqual(40)
       }
     })
@@ -335,12 +373,15 @@ describe('buildPushTitle / buildPushBody (TAC-532)', () => {
   // because the question put to him did not raise it. Suppressing is the safe
   // direction and strictly narrower than what was approved.
   describe('a crisis message is never quoted (TAC-532 code review)', () => {
-    const CRISIS = "i don't want to be here anymore, i've been thinking about ending it"
+    const CRISIS =
+      "i don't want to be here anymore, i've been thinking about ending it"
 
     it('suppresses the quote whatever the category says', () => {
       expect(shouldQuoteGuest('unknown', true)).toBe(false)
       expect(shouldQuoteGuest('new_question', true)).toBe(false)
-      expect(buildPushBody(CRISIS, 'unknown', true)).toBe('Draft ready to review')
+      expect(buildPushBody(CRISIS, 'unknown', true)).toBe(
+        'Draft ready to review',
+      )
       expect(buildPushBody(CRISIS, 'unknown', true)).not.toContain('ending it')
     })
 
@@ -354,7 +395,9 @@ describe('buildPushTitle / buildPushBody (TAC-532)', () => {
     it('takes the neutral body, not the complaint one', () => {
       // A crisis turn is not a complaint, so BODY_COMPLAINT would be a false
       // statement about the card.
-      expect(buildPushBody(CRISIS, 'comp_complaint', true)).toBe('Draft ready to review')
+      expect(buildPushBody(CRISIS, 'comp_complaint', true)).toBe(
+        'Draft ready to review',
+      )
     })
   })
 
@@ -363,8 +406,16 @@ describe('buildPushTitle / buildPushBody (TAC-532)', () => {
   // characters would blow the title budget unseen.
   it('fits the title budget for the two reasons outside the map', () => {
     for (const title of [
-      buildPushTitle('Christopherbartholomew', 'knowledge_gap', 'comp_complaint'),
-      buildPushTitle('Christopherbartholomew', 'a_reason_nobody_mapped', 'new_question'),
+      buildPushTitle(
+        'Christopherbartholomew',
+        'knowledge_gap',
+        'comp_complaint',
+      ),
+      buildPushTitle(
+        'Christopherbartholomew',
+        'a_reason_nobody_mapped',
+        'new_question',
+      ),
     ]) {
       expect(title.length, title).toBeLessThanOrEqual(40)
     }
@@ -380,9 +431,13 @@ describe('buildPushTitle / buildPushBody (TAC-532)', () => {
       join(__dirname, '..', 'agent', 'dispatch-instagram-reply.ts'),
       'utf8',
     )
-    expect(owner).toContain("INSTAGRAM_SEND_FAILED_REVIEW_REASON = 'instagram_send_failed'")
+    expect(owner).toContain(
+      "INSTAGRAM_SEND_FAILED_REVIEW_REASON =\n  'instagram_send_failed' as const",
+    )
     const mine = readFileSync(join(__dirname, 'send.ts'), 'utf8')
-    expect(mine).toContain("const INSTAGRAM_SEND_FAILED_REASON = 'instagram_send_failed'")
+    expect(mine).toContain(
+      "const INSTAGRAM_SEND_FAILED_REASON = 'instagram_send_failed'",
+    )
   })
 })
 
@@ -398,7 +453,10 @@ function firstCallProps<T>(mock: { mock: { calls: T[][] } }): T {
 
 describe('sendDraftFlaggedPush', () => {
   it('skips entirely when primaryTrigger is filtered out', async () => {
-    await sendDraftFlaggedPush({ ...baseInput, primaryTrigger: 'previous_pending_held' })
+    await sendDraftFlaggedPush({
+      ...baseInput,
+      primaryTrigger: 'previous_pending_held',
+    })
     expect(fromMock).not.toHaveBeenCalled()
     expect(sendApnsRequestMock).not.toHaveBeenCalled()
     expect(capturePushSentMock).not.toHaveBeenCalled()
@@ -423,14 +481,23 @@ describe('sendDraftFlaggedPush', () => {
     queue('messages', { count: 3, error: null })
     sendApnsRequestMock.mockResolvedValueOnce({
       ok: true,
-      response: { status: 200, reason: null, apnsId: 'A1B2C3D4-0000-1111-2222-333344445555' },
+      response: {
+        status: 200,
+        reason: null,
+        apnsId: 'A1B2C3D4-0000-1111-2222-333344445555',
+      },
     })
 
     const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {})
     try {
       await sendDraftFlaggedPush(baseInput)
-      const responseLine = logSpy.mock.calls.find((c) => c[0] === '[apns] apns response')
-      expect(responseLine, 'expected an [apns] apns response log on the 200 path').toBeDefined()
+      const responseLine = logSpy.mock.calls.find(
+        (c) => c[0] === '[apns] apns response',
+      )
+      expect(
+        responseLine,
+        'expected an [apns] apns response log on the 200 path',
+      ).toBeDefined()
       expect(responseLine?.[1]).toMatchObject({
         status: 200,
         reason: null,
@@ -502,7 +569,10 @@ describe('sendDraftFlaggedPush', () => {
         data: [{ operator: { id: 'op-1', apns_device_token: 'tok-1' } }],
         error: null,
       })
-      queue('operator_venues', { data: [{ venue_id: 'venue-1' }], error: null })
+      queue('operator_venues', {
+        data: [{ venue_id: 'venue-1' }],
+        error: null,
+      })
       queue('messages', { count: 1, error: null })
       sendApnsRequestMock.mockResolvedValueOnce({
         ok: true,
@@ -510,7 +580,9 @@ describe('sendDraftFlaggedPush', () => {
       })
     }
 
-    function sentPayload(): { aps: { alert: { title: string; body: string } } } {
+    function sentPayload(): {
+      aps: { alert: { title: string; body: string } }
+    } {
       const arg = sendApnsRequestMock.mock.calls[0]?.[0]
       if (arg === undefined) throw new Error('no push was sent')
       return arg.body as { aps: { alert: { title: string; body: string } } }
@@ -557,8 +629,15 @@ describe('sendDraftFlaggedPush', () => {
       await sendDraftFlaggedPush(baseInput)
       const payload = sentPayload()
       const serialized = JSON.stringify(payload)
-      for (const key of ['inboundBody', 'generatedBody', 'message', 'draftBody']) {
-        expect(serialized.toLowerCase()).not.toContain(`"${key.toLowerCase()}":`)
+      for (const key of [
+        'inboundBody',
+        'generatedBody',
+        'message',
+        'draftBody',
+      ]) {
+        expect(serialized.toLowerCase()).not.toContain(
+          `"${key.toLowerCase()}":`,
+        )
       }
       expect(payload.aps.alert.title.length).toBeLessThanOrEqual(40)
       expect(payload.aps.alert.body.length).toBeLessThanOrEqual(110)
@@ -596,7 +675,7 @@ describe('sendDraftFlaggedPush', () => {
     expect(sentProps).toMatchObject({ ok: false, status: 410 })
   })
 
-  it("on 400 BadDeviceToken also nulls the token (Apple's second way of saying \"token dead\")", async () => {
+  it('on 400 BadDeviceToken also nulls the token (Apple\'s second way of saying "token dead")', async () => {
     queue('operator_venues', {
       data: [{ operator: { id: 'op-1', apns_device_token: 'tok-bad' } }],
       error: null,
@@ -635,7 +714,10 @@ describe('sendDraftFlaggedPush', () => {
 
     expect(capturePushTokenInvalidMock).not.toHaveBeenCalled()
     expect(capturePushSentMock).toHaveBeenCalledTimes(1)
-    expect(firstCallProps(capturePushSentMock)).toMatchObject({ ok: false, status: 400 })
+    expect(firstCallProps(capturePushSentMock)).toMatchObject({
+      ok: false,
+      status: 400,
+    })
   })
 
   it('on transport failure fires push.sent ok=false with status=null', async () => {
@@ -679,8 +761,14 @@ describe('sendDraftFlaggedPush', () => {
     queue('messages', { count: 1, error: null })
 
     sendApnsRequestMock
-      .mockResolvedValueOnce({ ok: true, response: { status: 200, reason: null, apnsId: null } })
-      .mockResolvedValueOnce({ ok: true, response: { status: 200, reason: null, apnsId: null } })
+      .mockResolvedValueOnce({
+        ok: true,
+        response: { status: 200, reason: null, apnsId: null },
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        response: { status: 200, reason: null, apnsId: null },
+      })
 
     await sendDraftFlaggedPush(baseInput)
 
@@ -700,8 +788,12 @@ describe('sendDraftFlaggedPush — generation_failed context (TAC-364)', () => {
   // Until TAC-364 it borrowed knowledge_gap's 'needs an answer' by borrowing
   // its review_reason; splitting the reason without adding a label here would
   // have made the push quietly less informative than before.
-  it("labels the push rather than degrading to a bare name", () => {
-    const title = buildPushTitle('Sam', GENERATION_FAILED_REVIEW_REASON, 'new_question')
+  it('labels the push rather than degrading to a bare name', () => {
+    const title = buildPushTitle(
+      'Sam',
+      GENERATION_FAILED_REVIEW_REASON,
+      'new_question',
+    )
     expect(title).toContain("couldn't write it")
     expect(title).not.toBe('Sam')
   })
@@ -710,7 +802,11 @@ describe('sendDraftFlaggedPush — generation_failed context (TAC-364)', () => {
   // question, which is the point of the ticket, so the guarantee moved from
   // "the whole push is categorical" to "the title is, and the body is gated".
   it('keeps the title categorical, with no guest text and no draft body', () => {
-    const title = buildPushTitle('Sam', GENERATION_FAILED_REVIEW_REASON, 'new_question')
+    const title = buildPushTitle(
+      'Sam',
+      GENERATION_FAILED_REVIEW_REASON,
+      'new_question',
+    )
     expect(title).toBe("Sam: couldn't write it")
   })
 })

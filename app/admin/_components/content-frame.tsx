@@ -28,7 +28,9 @@ export function ContentFrame({ children }: ContentFrameProps) {
     (route) => pathname === route || pathname.startsWith(`${route}/`),
   )
   return (
-    <div className={`flex-1 overflow-auto px-8 py-10 w-full ${fullWidth ? '' : 'max-w-5xl'}`}>
+    <div
+      className={`flex-1 overflow-auto px-8 py-10 w-full ${fullWidth ? '' : 'max-w-5xl'}`}
+    >
       {children}
     </div>
   )

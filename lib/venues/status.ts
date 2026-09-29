@@ -44,7 +44,12 @@
  * exactly these four. This list moves with it, and `status.test.ts` reads the
  * migration to hold the two equal, because SQL cannot import a constant.
  */
-export const VENUE_STATUSES = ['pending', 'active', 'paused', 'archived'] as const
+export const VENUE_STATUSES = [
+  'pending',
+  'active',
+  'paused',
+  'archived',
+] as const
 
 export type VenueStatus = (typeof VENUE_STATUSES)[number]
 
@@ -90,10 +95,14 @@ export function isVenueStatus(value: unknown): value is VenueStatus {
  * own. Null is not a guess at a status; `isVenueProcessingHalted` decides what
  * an unreadable one means.
  */
-export function parseVenueStatus(value: string | null | undefined): VenueStatus | null {
+export function parseVenueStatus(
+  value: string | null | undefined,
+): VenueStatus | null {
   if (isVenueStatus(value)) return value
   if (value !== null && value !== undefined) {
-    console.warn(`[venue-status] unrecognized venues.status "${value}", treating as unknown`)
+    console.warn(
+      `[venue-status] unrecognized venues.status "${value}", treating as unknown`,
+    )
   }
   return null
 }
@@ -115,7 +124,9 @@ export function parseVenueStatus(value: string | null | undefined): VenueStatus 
  * else, known or not, carries on. It warns, so the misconfiguration is not
  * silent.
  */
-export function isVenueProcessingHalted(value: string | null | undefined): boolean {
+export function isVenueProcessingHalted(
+  value: string | null | undefined,
+): boolean {
   const status = parseVenueStatus(value)
   if (status === null) return false
   return VENUE_PROCESSING[status] === 'halted'

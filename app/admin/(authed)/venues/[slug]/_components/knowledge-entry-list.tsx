@@ -126,13 +126,16 @@ export function KnowledgeEntryList({
   // this instance a fresh `entries` prop but doesn't touch its useState.
   // Filtering selectedIds down to ids still present in `entries` on every
   // render means a stale id can never ride along into a submitted merge.
-  const validSelectedIds = new Set([...selectedIds].filter((id) => entries.some((e) => e.id === id)))
+  const validSelectedIds = new Set(
+    [...selectedIds].filter((id) => entries.some((e) => e.id === id)),
+  )
   const [merging, setMerging] = useState(false)
   /** Frozen at startMerge() — see the comment in submitMerge for why this
    *  must not be re-derived from live selection at submit time. */
   const [mergeIds, setMergeIds] = useState<string[]>([])
   const [mergeContent, setMergeContent] = useState('')
-  const [mergePrimaryTag, setMergePrimaryTag] = useState<string>(defaultPrimaryTag)
+  const [mergePrimaryTag, setMergePrimaryTag] =
+    useState<string>(defaultPrimaryTag)
   const [mergeSecondaryTags, setMergeSecondaryTags] = useState('')
 
   function onMutate() {
@@ -214,11 +217,14 @@ export function KnowledgeEntryList({
   }
 
   async function removeEntry(entryId: string) {
-    if (!window.confirm('Delete this knowledge entry? This cannot be undone.')) return
+    if (!window.confirm('Delete this knowledge entry? This cannot be undone.'))
+      return
     setBusy(true)
     setError(null)
     try {
-      const res = await fetch(`/admin/venues/api/knowledge/${entryId}`, { method: 'DELETE' })
+      const res = await fetch(`/admin/venues/api/knowledge/${entryId}`, {
+        method: 'DELETE',
+      })
       if (!res.ok) {
         const j = await res.json().catch(() => ({}))
         setError((j.detail as string) || (j.error as string) || 'Delete failed')
@@ -304,7 +310,9 @@ export function KnowledgeEntryList({
     setMergeIds(ids)
     setMergeContent(selected.map((e) => e.content).join('\n\n'))
     setMergePrimaryTag(selected[0]?.primaryTags[0] ?? defaultPrimaryTag)
-    setMergeSecondaryTags([...new Set(selected.flatMap((e) => e.secondaryTags))].join(', '))
+    setMergeSecondaryTags(
+      [...new Set(selected.flatMap((e) => e.secondaryTags))].join(', '),
+    )
     setMerging(true)
   }
 
@@ -380,7 +388,11 @@ export function KnowledgeEntryList({
 
       {adding && (
         <div className="flex flex-col gap-2 border-b border-stone-light/40 pb-3">
-          <PrimaryTagSelect value={addPrimaryTag} onChange={setAddPrimaryTag} disabled={busy} />
+          <PrimaryTagSelect
+            value={addPrimaryTag}
+            onChange={setAddPrimaryTag}
+            disabled={busy}
+          />
           <Textarea
             value={addContent}
             onChange={(e) => setAddContent(e.target.value)}
@@ -421,7 +433,11 @@ export function KnowledgeEntryList({
           <p className="text-xs uppercase tracking-wide text-ink-faint">
             Merging {validSelectedIds.size} entries into one
           </p>
-          <PrimaryTagSelect value={mergePrimaryTag} onChange={setMergePrimaryTag} disabled={busy} />
+          <PrimaryTagSelect
+            value={mergePrimaryTag}
+            onChange={setMergePrimaryTag}
+            disabled={busy}
+          />
           <Textarea
             value={mergeContent}
             onChange={(e) => setMergeContent(e.target.value)}
@@ -485,7 +501,9 @@ export function KnowledgeEntryList({
                       />
                     )}
                     {!isEditing && !isSplitting && (
-                      <p className="text-sm text-ink leading-snug">{entry.content}</p>
+                      <p className="text-sm text-ink leading-snug">
+                        {entry.content}
+                      </p>
                     )}
                   </div>
                   <div className="flex shrink-0 items-center gap-3 text-[10.5px]">
@@ -527,7 +545,8 @@ export function KnowledgeEntryList({
                   </div>
                 </div>
 
-                {(entry.primaryTags.length > 0 || entry.secondaryTags.length > 0) &&
+                {(entry.primaryTags.length > 0 ||
+                  entry.secondaryTags.length > 0) &&
                   !isEditing &&
                   !isSplitting && (
                     <div className="flex flex-wrap gap-1.5 pl-6">
@@ -582,7 +601,11 @@ export function KnowledgeEntryList({
                       >
                         Cancel
                       </Button>
-                      <Button onClick={() => submitEdit(entry.id)} disabled={busy} size="sm">
+                      <Button
+                        onClick={() => submitEdit(entry.id)}
+                        disabled={busy}
+                        size="sm"
+                      >
                         {busy ? 'Saving…' : 'Save'}
                       </Button>
                     </div>
@@ -592,7 +615,10 @@ export function KnowledgeEntryList({
                 {isSplitting && (
                   <div className="flex flex-col gap-3">
                     {splitPieces.map((piece, i) => (
-                      <div key={i} className="flex flex-col gap-2 border-l-2 border-stone-light/60 pl-3">
+                      <div
+                        key={i}
+                        className="flex flex-col gap-2 border-l-2 border-stone-light/60 pl-3"
+                      >
                         <div className="flex items-center justify-between">
                           <span className="text-[10px] uppercase tracking-wide text-ink-faint">
                             Piece {i + 1}
@@ -612,7 +638,9 @@ export function KnowledgeEntryList({
                           value={piece.primaryTag}
                           onChange={(v) =>
                             setSplitPieces((pieces) =>
-                              pieces.map((p, idx) => (idx === i ? { ...p, primaryTag: v } : p)),
+                              pieces.map((p, idx) =>
+                                idx === i ? { ...p, primaryTag: v } : p,
+                              ),
                             )
                           }
                           disabled={busy}
@@ -622,7 +650,9 @@ export function KnowledgeEntryList({
                           onChange={(e) =>
                             setSplitPieces((pieces) =>
                               pieces.map((p, idx) =>
-                                idx === i ? { ...p, content: e.target.value } : p,
+                                idx === i
+                                  ? { ...p, content: e.target.value }
+                                  : p,
                               ),
                             )
                           }
@@ -633,7 +663,9 @@ export function KnowledgeEntryList({
                           onChange={(e) =>
                             setSplitPieces((pieces) =>
                               pieces.map((p, idx) =>
-                                idx === i ? { ...p, secondaryTags: e.target.value } : p,
+                                idx === i
+                                  ? { ...p, secondaryTags: e.target.value }
+                                  : p,
                               ),
                             )
                           }
@@ -665,8 +697,14 @@ export function KnowledgeEntryList({
                         >
                           Cancel
                         </Button>
-                        <Button onClick={() => submitSplit(entry.id)} disabled={busy} size="sm">
-                          {busy ? 'Splitting…' : `Split into ${splitPieces.filter((p) => p.content.trim()).length}`}
+                        <Button
+                          onClick={() => submitSplit(entry.id)}
+                          disabled={busy}
+                          size="sm"
+                        >
+                          {busy
+                            ? 'Splitting…'
+                            : `Split into ${splitPieces.filter((p) => p.content.trim()).length}`}
                         </Button>
                       </div>
                     </div>

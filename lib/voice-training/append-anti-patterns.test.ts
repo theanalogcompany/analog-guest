@@ -22,15 +22,21 @@ import {
 
 describe('normalizeAntiPattern', () => {
   it('lowercases, collapses internal whitespace, trims edges', () => {
-    expect(normalizeAntiPattern('  Rule:   Avoid  EM-Dashes  ')).toBe('rule: avoid em-dashes')
+    expect(normalizeAntiPattern('  Rule:   Avoid  EM-Dashes  ')).toBe(
+      'rule: avoid em-dashes',
+    )
   })
 
   it('treats whitespace-different rules as equivalent', () => {
-    expect(normalizeAntiPattern('rule: be   terse')).toBe(normalizeAntiPattern('rule: be terse'))
+    expect(normalizeAntiPattern('rule: be   terse')).toBe(
+      normalizeAntiPattern('rule: be terse'),
+    )
   })
 
   it('treats case-different rules as equivalent', () => {
-    expect(normalizeAntiPattern('Rule: be Terse')).toBe(normalizeAntiPattern('rule: be terse'))
+    expect(normalizeAntiPattern('Rule: be Terse')).toBe(
+      normalizeAntiPattern('rule: be terse'),
+    )
   })
 
   it('returns empty string for whitespace-only input', () => {
@@ -117,7 +123,9 @@ describe('dedupeAndAppendAntiPatterns — write shape', () => {
     expect(entry.authorOperatorId).toBe(OPERATOR_ID)
     expect(typeof entry.addedAt).toBe('string')
     // ISO-8601 sanity check — the helper stamps `new Date().toISOString()`.
-    expect(entry.addedAt as string).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/)
+    expect(entry.addedAt as string).toMatch(
+      /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/,
+    )
   })
 
   it('omits authorOperatorId when not provided (CLI/script path)', async () => {
@@ -162,7 +170,11 @@ describe('dedupeAndAppendAntiPatterns — mixed input migration', () => {
     })
 
     const written = state.updateCalls[0].payload.brand_persona as {
-      voiceAntiPatterns: Array<{ text: string; source: string; addedAt?: string }>
+      voiceAntiPatterns: Array<{
+        text: string
+        source: string
+        addedAt?: string
+      }>
     }
     expect(written.voiceAntiPatterns).toHaveLength(3)
     // Legacy entries: text preserved, source defaulted to 'manual', no addedAt
@@ -275,7 +287,11 @@ describe('dedupeAndAppendAntiPatterns — dedup behavior', () => {
     const state: MockState = {
       persona: makePersonaWithAntiPatterns([
         'legacy a',
-        { text: 'struct b', source: 'auto', addedAt: '2026-04-01T00:00:00.000Z' },
+        {
+          text: 'struct b',
+          source: 'auto',
+          addedAt: '2026-04-01T00:00:00.000Z',
+        },
       ]),
       updateCalls: [],
     }

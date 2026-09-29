@@ -46,13 +46,9 @@ export async function GET(request: NextRequest) {
   const linked = await linkOperatorByAuthUser(exchanged.user.id)
   if (!linked.ok) {
     if (linked.error === 'no_matching_operator') {
-      return NextResponse.redirect(
-        `${adminBase}/admin/sign-in?error=no_access`,
-      )
+      return NextResponse.redirect(`${adminBase}/admin/sign-in?error=no_access`)
     }
-    return NextResponse.redirect(
-      `${adminBase}/admin/sign-in?error=link_failed`,
-    )
+    return NextResponse.redirect(`${adminBase}/admin/sign-in?error=link_failed`)
   }
 
   return NextResponse.redirect(`${adminBase}/admin`)

@@ -73,13 +73,22 @@ export type InstagramWindowState =
     }
 
 /** Pure. Open until INSTAGRAM_WINDOW_MARGIN_MS before Meta's window closes. */
-export function instagramWindowState(lastGuestActionAt: Date | null, now: Date): InstagramWindowState {
+export function instagramWindowState(
+  lastGuestActionAt: Date | null,
+  now: Date,
+): InstagramWindowState {
   if (lastGuestActionAt === null) {
-    return { open: false, reason: 'no_guest_action', closesAt: null, remainingMs: null }
+    return {
+      open: false,
+      reason: 'no_guest_action',
+      closesAt: null,
+      remainingMs: null,
+    }
   }
   const closesAt = new Date(lastGuestActionAt.getTime() + INSTAGRAM_WINDOW_MS)
   const remainingMs = closesAt.getTime() - now.getTime()
-  if (remainingMs > INSTAGRAM_WINDOW_MARGIN_MS) return { open: true, closesAt, remainingMs }
+  if (remainingMs > INSTAGRAM_WINDOW_MARGIN_MS)
+    return { open: true, closesAt, remainingMs }
   return { open: false, reason: 'closed', closesAt, remainingMs }
 }
 
@@ -105,7 +114,10 @@ export async function loadLastGuestActionAt(
     .limit(1)
     .maybeSingle()
   if (error) return { ok: false, error: error.message }
-  if (!data || typeof data.provider_sent_at !== 'string') return { ok: true, value: null }
+  if (!data || typeof data.provider_sent_at !== 'string')
+    return { ok: true, value: null }
   const at = new Date(data.provider_sent_at)
-  return Number.isNaN(at.getTime()) ? { ok: true, value: null } : { ok: true, value: at }
+  return Number.isNaN(at.getTime())
+    ? { ok: true, value: null }
+    : { ok: true, value: at }
 }

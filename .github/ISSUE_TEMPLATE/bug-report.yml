@@ -1,0 +1,31 @@
+name: Bug report
+description: Something in analog-guest behaves wrong
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Internal work is tracked in Linear; issues filed here are triaged into it.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you saw, with exact messages or output where possible.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: The end-to-end path a user would take to hit this, not just the code path.
+  - type: textarea
+    id: context
+    attributes:
+      label: Environment / context
+      description: Production or preview, branch, venue slug, channel (iMessage/SMS/Instagram) if relevant.

@@ -126,7 +126,12 @@ async function judge(row: Row, arm: Arm): Promise<Verdict> {
     guestInboundBody: arm === 'with_inbound' ? row.guestInbound : null,
   })
   if (!r.ok) {
-    return { flagged: false, commitmentType: null, commitmentDescription: null, failed: true }
+    return {
+      flagged: false,
+      commitmentType: null,
+      commitmentDescription: null,
+      failed: true,
+    }
   }
   return {
     flagged: r.data.promisesSomething,
@@ -136,7 +141,11 @@ async function judge(row: Row, arm: Arm): Promise<Verdict> {
   }
 }
 
-async function pooled<T, R>(items: T[], size: number, work: (t: T) => Promise<R>): Promise<R[]> {
+async function pooled<T, R>(
+  items: T[],
+  size: number,
+  work: (t: T) => Promise<R>,
+): Promise<R[]> {
   const out: R[] = new Array(items.length)
   let next = 0
   await Promise.all(
@@ -161,7 +170,10 @@ function verdictOnCell(cell: Cell): { ok: boolean; why: string } {
   }
   switch (EXPECTATION[cell.row.label][cell.arm]) {
     case 'flag':
-      return { ok: cell.flagged === REPEATS, why: `expected ${REPEATS}/${REPEATS} flagged` }
+      return {
+        ok: cell.flagged === REPEATS,
+        why: `expected ${REPEATS}/${REPEATS} flagged`,
+      }
     case 'clean':
       return { ok: cell.flagged === 0, why: `expected 0/${REPEATS} flagged` }
     case 'mostly_clean': {
@@ -213,7 +225,9 @@ async function main(): Promise<void> {
     process.exit(1)
   }
 
-  const cellsToRun = fixture.rows.flatMap((row) => ARMS.map((arm) => ({ row, arm })))
+  const cellsToRun = fixture.rows.flatMap((row) =>
+    ARMS.map((arm) => ({ row, arm })),
+  )
   console.log(
     `[elliptical] ${fixture.rows.length} rows x ${ARMS.length} arms x ${REPEATS} repeats = ${cellsToRun.length * REPEATS} calls`,
   )
@@ -244,7 +258,8 @@ async function main(): Promise<void> {
       verdicts,
     })
     done += 1
-    if (done % 6 === 0) console.log(`[elliptical] ${done}/${cellsToRun.length} cells`)
+    if (done % 6 === 0)
+      console.log(`[elliptical] ${done}/${cellsToRun.length} cells`)
     return cell
   })
 
@@ -273,9 +288,13 @@ async function main(): Promise<void> {
       )
       console.log(`     guest: ${row.guestInbound}`)
       console.log(`     reply: ${row.body}`)
-      const named = withI.verdicts.find((v) => v.flagged && v.commitmentType !== null)
+      const named = withI.verdicts.find(
+        (v) => v.flagged && v.commitmentType !== null,
+      )
       if (named !== undefined) {
-        console.log(`     names: ${named.commitmentType} / "${named.commitmentDescription}"`)
+        console.log(
+          `     names: ${named.commitmentType} / "${named.commitmentDescription}"`,
+        )
       }
     }
   }

@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import { buildRunRows, formatRetrievedChunks, RUN_ROW_HEADER, type RunRow } from './run-sheet'
+import {
+  buildRunRows,
+  formatRetrievedChunks,
+  RUN_ROW_HEADER,
+  type RunRow,
+} from './run-sheet'
 
 /**
  * Every field carries a value equal to its own header name, so a
@@ -42,7 +47,10 @@ describe('buildRunRows', () => {
   })
 
   it('emits one row per scenario', () => {
-    const rows = buildRunRows([makeRow({ sampleId: 'a' }), makeRow({ sampleId: 'b' })])
+    const rows = buildRunRows([
+      makeRow({ sampleId: 'a' }),
+      makeRow({ sampleId: 'b' }),
+    ])
     expect(rows).toHaveLength(3)
     expect(rows[1][0]).toBe('a')
     expect(rows[2][0]).toBe('b')
@@ -62,7 +70,10 @@ describe('buildRunRows', () => {
   it('places the TAC-358 retrieval columns last, so prior column positions are unchanged', () => {
     // Appending rather than inserting keeps every pre-existing column at the
     // index a saved filter or a historical tab already expects.
-    expect(RUN_ROW_HEADER.slice(-2)).toEqual(['retrieved_chunk_ids', 'retrieved_chunk_scores'])
+    expect(RUN_ROW_HEADER.slice(-2)).toEqual([
+      'retrieved_chunk_ids',
+      'retrieved_chunk_scores',
+    ])
   })
 })
 
@@ -72,7 +83,9 @@ describe('formatRetrievedChunks', () => {
   })
 
   it('renders a single corpus id and its score', () => {
-    expect(formatRetrievedChunks([{ corpusId: '1f9dc70a', similarity: 0.6123 }])).toEqual({
+    expect(
+      formatRetrievedChunks([{ corpusId: '1f9dc70a', similarity: 0.6123 }]),
+    ).toEqual({
       ids: '1f9dc70a',
       scores: '0.6123',
     })
@@ -106,7 +119,9 @@ describe('formatRetrievedChunks', () => {
     // can ever contain is a post-floor survivor — retrieveKnowledgeStage
     // returns filterByRelevance(...), so a sub-floor score is not a value the
     // pipeline can produce and must not be used here as though it were.
-    expect(formatRetrievedChunks([{ corpusId: 'x', similarity: 0.50123 }]).scores).toBe('0.5012')
+    expect(
+      formatRetrievedChunks([{ corpusId: 'x', similarity: 0.50123 }]).scores,
+    ).toBe('0.5012')
   })
 
   it('returns both columns from one call, so they cannot be built from different arrays', () => {

@@ -43,13 +43,15 @@ function mockClient(results: { prompted: MockResult; eligible: MockResult }) {
     // behavioural tests honest about which query produced which rows.
     builder.then = (resolve: (v: unknown) => unknown) => {
       const isPromptedQuery = calls.some((c) => c.method === 'not')
-      return Promise.resolve(isPromptedQuery ? results.prompted : results.eligible).then(resolve)
+      return Promise.resolve(
+        isPromptedQuery ? results.prompted : results.eligible,
+      ).then(resolve)
     }
     return builder
   })
-  vi.mocked(createAdminClient).mockReturnValue({ from } as unknown as ReturnType<
-    typeof createAdminClient
-  >)
+  vi.mocked(createAdminClient).mockReturnValue({
+    from,
+  } as unknown as ReturnType<typeof createAdminClient>)
   return { queries, from }
 }
 
@@ -67,7 +69,10 @@ describe('loadIntentionRows', () => {
 
     expect(queries).toHaveLength(2)
     for (const q of queries) {
-      expect(q[0]).toEqual({ method: 'from', args: ['guest_intention_prompts'] })
+      expect(q[0]).toEqual({
+        method: 'from',
+        args: ['guest_intention_prompts'],
+      })
       expect(q.filter((c) => c.method === 'eq')).toEqual([
         { method: 'eq', args: ['venue_id', 'v1'] },
         { method: 'eq', args: ['guest_id', 'g1'] },
@@ -75,7 +80,10 @@ describe('loadIntentionRows', () => {
     }
 
     const prompted = queries.find((q) =>
-      q.some((c) => c.method === 'select' && String(c.args[0]).includes('prompt_source')),
+      q.some(
+        (c) =>
+          c.method === 'select' && String(c.args[0]).includes('prompt_source'),
+      ),
     )
     const eligible = queries.find((q) => q !== prompted)
     expect(prompted?.filter((c) => c.method === 'not')).toEqual([
@@ -103,7 +111,12 @@ describe('loadIntentionRows', () => {
         error: null,
       },
       eligible: {
-        data: [{ intention_key: 'learn_name', eligible_at: '2026-09-13T11:00:00.000Z' }],
+        data: [
+          {
+            intention_key: 'learn_name',
+            eligible_at: '2026-09-13T11:00:00.000Z',
+          },
+        ],
         error: null,
       },
     })
@@ -120,7 +133,12 @@ describe('loadIntentionRows', () => {
           messageId: 'm1',
         },
       ],
-      eligible: [{ intentionKey: 'learn_name', eligibleAt: new Date('2026-09-13T11:00:00.000Z') }],
+      eligible: [
+        {
+          intentionKey: 'learn_name',
+          eligibleAt: new Date('2026-09-13T11:00:00.000Z'),
+        },
+      ],
     })
   })
 
@@ -156,7 +174,10 @@ describe('loadIntentionRows', () => {
 
   it('returns empty lists for a guest with no rows', async () => {
     mockClient({ prompted: EMPTY, eligible: EMPTY })
-    await expect(loadIntentionRows('v1', 'g1')).resolves.toEqual({ prompted: [], eligible: [] })
+    await expect(loadIntentionRows('v1', 'g1')).resolves.toEqual({
+      prompted: [],
+      eligible: [],
+    })
   })
 
   // Fail CLOSED on every failure. A null result is what tells the derivation
@@ -164,14 +185,20 @@ describe('loadIntentionRows', () => {
   // guest something they were already asked.
   it('fails closed (null) when the prompted read errors', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
-    mockClient({ prompted: { data: null, error: { message: 'connection reset' } }, eligible: EMPTY })
+    mockClient({
+      prompted: { data: null, error: { message: 'connection reset' } },
+      eligible: EMPTY,
+    })
     await expect(loadIntentionRows('v1', 'g1')).resolves.toBeNull()
     warn.mockRestore()
   })
 
   it('fails closed (null) when the eligibility read errors', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
-    mockClient({ prompted: EMPTY, eligible: { data: null, error: { message: 'connection reset' } } })
+    mockClient({
+      prompted: EMPTY,
+      eligible: { data: null, error: { message: 'connection reset' } },
+    })
     await expect(loadIntentionRows('v1', 'g1')).resolves.toBeNull()
     warn.mockRestore()
   })

@@ -17,6 +17,7 @@
 // header so the operator can exercise the path locally.
 
 import { processDueCommitments } from '@/lib/guests/commitments-due'
+import { logger } from '@/lib/observability/logger'
 
 // TAC-428: two accepted bearers, not one. cron-job.org is the PRIMARY trigger
 // for this route now (the GitHub Actions workflow stays as a redundant net, see
@@ -34,7 +35,10 @@ function isAuthorized(request: Request): boolean {
   if (process.env.NODE_ENV !== 'production') return true
   const presented = request.headers.get('authorization')
   if (!presented) return false
-  for (const expected of [process.env.CRON_SECRET, process.env.EXTERNAL_CRON_SECRET]) {
+  for (const expected of [
+    process.env.CRON_SECRET,
+    process.env.EXTERNAL_CRON_SECRET,
+  ]) {
     if (expected && presented === `Bearer ${expected}`) return true
   }
   return false
@@ -46,7 +50,7 @@ export async function GET(request: Request): Promise<Response> {
   }
 
   const summary = await processDueCommitments(new Date())
-  console.log('[cron commitments-due] tick complete', summary)
+  logger.info('[cron commitments-due] tick complete', { summary })
 
   return Response.json({ ok: true, ...summary })
 }

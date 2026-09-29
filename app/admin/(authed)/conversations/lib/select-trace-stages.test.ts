@@ -20,7 +20,10 @@ function obs(id: string, name: string, parentId: string | null = null): Obs {
   } as unknown as Obs
 }
 
-function makeTrace(name: string | null, observations: Obs[]): ApiTraceWithFullDetails {
+function makeTrace(
+  name: string | null,
+  observations: Obs[],
+): ApiTraceWithFullDetails {
   return {
     id: 'tr_test',
     timestamp: '2026-04-30T00:00:00Z',

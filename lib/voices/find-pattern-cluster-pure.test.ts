@@ -13,7 +13,11 @@ const ID_B = '22222222-2222-4222-8222-222222222222'
 const ID_C = '33333333-3333-4333-8333-333333333333'
 const MSG_NEW = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
 
-function match(id: string, text: string, similarity = 0.9): SimilarCritiqueMatch {
+function match(
+  id: string,
+  text: string,
+  similarity = 0.9,
+): SimilarCritiqueMatch {
   return { id, messageId: id, critiqueText: text, similarity }
 }
 
@@ -26,7 +30,11 @@ describe('hasEnoughCandidates', () => {
   it('returns true on 2+ prior matches (third-member gate)', () => {
     expect(hasEnoughCandidates([match(ID_A, 'x'), match(ID_B, 'y')])).toBe(true)
     expect(
-      hasEnoughCandidates([match(ID_A, 'x'), match(ID_B, 'y'), match(ID_C, 'z')]),
+      hasEnoughCandidates([
+        match(ID_A, 'x'),
+        match(ID_B, 'y'),
+        match(ID_C, 'z'),
+      ]),
     ).toBe(true)
   })
 })

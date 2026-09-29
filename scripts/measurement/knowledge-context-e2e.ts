@@ -49,7 +49,8 @@ export async function runBhadraE2E({ reps }: { reps: number }) {
     .select('id, slug')
     .eq('slug', VENUE_SLUG)
     .maybeSingle()
-  if (error || !venue) throw new Error(`venue lookup failed: ${error?.message ?? 'not found'}`)
+  if (error || !venue)
+    throw new Error(`venue lookup failed: ${error?.message ?? 'not found'}`)
 
   const statesBefore = await countGuestStates(db, venue.id)
 
@@ -86,16 +87,35 @@ export async function runBhadraE2E({ reps }: { reps: number }) {
   // The two prior turns, replacing whatever real history this guest carries,
   // so both arms see exactly the device exchange and nothing else.
   const history: RecentMessage[] = [
-    { direction: 'inbound', body: PREV_GUEST, delivery: 'delivered', createdAt: new Date(Date.now() - 6 * 60_000) },
-    { direction: 'outbound', body: AGENT_REPLY, delivery: 'delivered', createdAt: new Date(Date.now() - 5 * 60_000) },
+    {
+      direction: 'inbound',
+      body: PREV_GUEST,
+      delivery: 'delivered',
+      createdAt: new Date(Date.now() - 6 * 60_000),
+    },
+    {
+      direction: 'outbound',
+      body: AGENT_REPLY,
+      delivery: 'delivered',
+      createdAt: new Date(Date.now() - 5 * 60_000),
+    },
   ]
 
   const log = createRunLog({
     name: 'tac547-bhadra-e2e',
-    meta: { arm: 'control+change', venue: venue.slug, guestId: GUEST_ID, reps, followUp: FOLLOW_UP },
+    meta: {
+      arm: 'control+change',
+      venue: venue.slug,
+      guestId: GUEST_ID,
+      reps,
+      followUp: FOLLOW_UP,
+    },
   })
 
-  const summary: Record<string, { met: number; ran: number; failed: number; held: number }> = {}
+  const summary: Record<
+    string,
+    { met: number; ran: number; failed: number; held: number }
+  > = {}
 
   for (const arm of ['control', 'change'] as const) {
     summary[arm] = { met: 0, ran: 0, failed: 0, held: 0 }
@@ -106,8 +126,16 @@ export async function runBhadraE2E({ reps }: { reps: number }) {
         ctx.corpus = await retrieveCorpusStage(ctx)
         ctx.knowledgeCorpus =
           arm === 'control'
-            ? await retrieveKnowledgeStage(ctx, ctx.classification.category, FOLLOW_UP)
-            : await retrieveKnowledgeWithContextStage(ctx, ctx.classification.category, FOLLOW_UP)
+            ? await retrieveKnowledgeStage(
+                ctx,
+                ctx.classification.category,
+                FOLLOW_UP,
+              )
+            : await retrieveKnowledgeWithContextStage(
+                ctx,
+                ctx.classification.category,
+                FOLLOW_UP,
+              )
 
         const gen = await generateStage(ctx, ctx.classification.category)
         if (gen.status !== 'success') {
@@ -130,7 +158,8 @@ export async function runBhadraE2E({ reps }: { reps: number }) {
           met,
           verdict,
           grounding: grounding.status,
-          ungroundedClaims: grounding.status === 'flagged' ? grounding.claims : null,
+          ungroundedClaims:
+            grounding.status === 'flagged' ? grounding.claims : null,
           retrievedEntries: ctx.knowledgeCorpus.map((c) => ({
             id: c.knowledgeCorpusId,
             similarity: Number(c.similarity.toFixed(4)),
@@ -140,7 +169,11 @@ export async function runBhadraE2E({ reps }: { reps: number }) {
         process.stdout.write(met ? '+' : '-')
       } catch (e) {
         summary[arm].failed += 1
-        log.appendUnit({ arm, rep, error: e instanceof Error ? e.message : String(e) })
+        log.appendUnit({
+          arm,
+          rep,
+          error: e instanceof Error ? e.message : String(e),
+        })
         process.stdout.write('!')
       }
     }

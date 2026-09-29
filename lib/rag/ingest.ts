@@ -1,4 +1,5 @@
 import { createAdminClient } from '@/lib/db/admin'
+import { logger } from '@/lib/observability/logger'
 import { chunkText } from './chunk'
 import { EMBEDDING_MODEL } from './client'
 import { embedText } from './embed'
@@ -48,13 +49,23 @@ async function ingestCorpusInternal(
     if (fetchError.code === 'PGRST116') {
       return { ok: false, error: 'corpus_entry_not_found' }
     }
-    return { ok: false, error: fetchError.message, errorCode: 'db_lookup_failed' }
+    return {
+      ok: false,
+      error: fetchError.message,
+      errorCode: 'db_lookup_failed',
+    }
   }
 
   const deleteResult =
     kind === 'voice'
-      ? await supabase.from('voice_embeddings').delete().eq('corpus_id', corpusId)
-      : await supabase.from('knowledge_embeddings').delete().eq('corpus_id', corpusId)
+      ? await supabase
+          .from('voice_embeddings')
+          .delete()
+          .eq('corpus_id', corpusId)
+      : await supabase
+          .from('knowledge_embeddings')
+          .delete()
+          .eq('corpus_id', corpusId)
 
   if (deleteResult.error) {
     return {
@@ -66,7 +77,11 @@ async function ingestCorpusInternal(
 
   const chunks = chunkText(corpusEntry.content)
   if (chunks.length === 0) {
-    return { ok: false, error: 'corpus_entry_empty', errorCode: 'invalid_input' }
+    return {
+      ok: false,
+      error: 'corpus_entry_empty',
+      errorCode: 'invalid_input',
+    }
   }
 
   const rows: Array<{
@@ -82,7 +97,7 @@ async function ingestCorpusInternal(
     const chunk = chunks[i]
     const result = await embedText(chunk, 'document')
     if (!result.ok) {
-      console.error('rag ingest: chunk embed failed', {
+      logger.error('rag ingest: chunk embed failed', {
         kind,
         corpusId,
         venueId: corpusEntry.venue_id,
@@ -103,7 +118,11 @@ async function ingestCorpusInternal(
   }
 
   if (rows.length === 0) {
-    return { ok: false, error: 'all_chunks_failed_to_embed', errorCode: 'voyage_api_error' }
+    return {
+      ok: false,
+      error: 'all_chunks_failed_to_embed',
+      errorCode: 'voyage_api_error',
+    }
   }
 
   const insertResult =
@@ -120,20 +139,32 @@ async function ingestCorpusInternal(
   }
 
   // TODO: monitor for orphaned ingest where embeddings succeeded but is_processed flag failed
-  const flagPayload = { is_processed: true, processed_at: new Date().toISOString() }
+  const flagPayload = {
+    is_processed: true,
+    processed_at: new Date().toISOString(),
+  }
   const updateResult =
     kind === 'voice'
-      ? await supabase.from('voice_corpus').update(flagPayload).eq('id', corpusId)
-      : await supabase.from('knowledge_corpus').update(flagPayload).eq('id', corpusId)
+      ? await supabase
+          .from('voice_corpus')
+          .update(flagPayload)
+          .eq('id', corpusId)
+      : await supabase
+          .from('knowledge_corpus')
+          .update(flagPayload)
+          .eq('id', corpusId)
 
   if (updateResult.error) {
-    console.error('rag ingest: is_processed flag update failed after embeddings insert', {
-      kind,
-      corpusId,
-      venueId: corpusEntry.venue_id,
-      embeddedChunkCount: rows.length,
-      error: updateResult.error.message,
-    })
+    logger.error(
+      'rag ingest: is_processed flag update failed after embeddings insert',
+      {
+        kind,
+        corpusId,
+        venueId: corpusEntry.venue_id,
+        embeddedChunkCount: rows.length,
+        error: updateResult.error.message,
+      },
+    )
   }
 
   return { ok: true, data: { embeddedChunkCount: rows.length } }

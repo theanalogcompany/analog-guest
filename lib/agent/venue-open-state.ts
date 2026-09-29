@@ -52,7 +52,10 @@ export interface VenueOpenStateInput {
  * understood. Callers must treat `unknown` as "do not act", never as closed:
  * see the module header.
  */
-export function resolveVenueOpenState(venue: VenueOpenStateInput, now: Date): OpenState {
+export function resolveVenueOpenState(
+  venue: VenueOpenStateInput,
+  now: Date,
+): OpenState {
   return resolveOpenState(venue.venueInfo.hours, venue.timezone, now)
 }
 

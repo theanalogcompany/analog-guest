@@ -63,8 +63,14 @@ export function TransactionsList({
   // transaction in the window is unpriced there's no known amount at all —
   // render that explicitly rather than a fabricated "$0.00 total · avg
   // $0.00" (mirrors page.tsx's avgPerVisitCents === null treatment).
-  const pricedCount = transactions.reduce((acc, t) => (t.amountCents !== null ? acc + 1 : acc), 0)
-  const totalCents = transactions.reduce((acc, t) => acc + (t.amountCents ?? 0), 0)
+  const pricedCount = transactions.reduce(
+    (acc, t) => (t.amountCents !== null ? acc + 1 : acc),
+    0,
+  )
+  const totalCents = transactions.reduce(
+    (acc, t) => acc + (t.amountCents ?? 0),
+    0,
+  )
   const totalsLabel =
     pricedCount > 0
       ? `$${formatDollars(totalCents)} total · avg $${formatDollars(Math.round(totalCents / pricedCount))}`
@@ -74,7 +80,9 @@ export function TransactionsList({
     <Card className="rounded-md border-stone-light/60 bg-parchment shadow-none p-3 flex flex-col gap-3">
       <header className="flex items-baseline justify-between gap-3">
         <Eyebrow>{`Transactions · ${transactions.length} in last ${windowDays} days`}</Eyebrow>
-        <span className="text-xs text-ink-soft tabular-nums">{totalsLabel}</span>
+        <span className="text-xs text-ink-soft tabular-nums">
+          {totalsLabel}
+        </span>
       </header>
       <div className="flex flex-col">
         {transactions.map((tx) => (

@@ -24,7 +24,10 @@ function isAuthorized(request: Request): boolean {
   if (process.env.NODE_ENV !== 'production') return true
   const presented = request.headers.get('authorization')
   if (!presented) return false
-  for (const expected of [process.env.CRON_SECRET, process.env.EXTERNAL_CRON_SECRET]) {
+  for (const expected of [
+    process.env.CRON_SECRET,
+    process.env.EXTERNAL_CRON_SECRET,
+  ]) {
     if (expected && presented === `Bearer ${expected}`) return true
   }
   return false

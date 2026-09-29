@@ -1,6 +1,12 @@
 import type { UnclaimedField } from '../../_lib/unclaimed-fields'
-import { KnowledgeEntryList, type KnowledgeEntryListRow } from './knowledge-entry-list'
-import { EmptySectionNote, SectionShell } from '@/app/admin/_components/section-shell'
+import {
+  KnowledgeEntryList,
+  type KnowledgeEntryListRow,
+} from './knowledge-entry-list'
+import {
+  EmptySectionNote,
+  SectionShell,
+} from '@/app/admin/_components/section-shell'
 
 // Structural complement of every named section above (TAC-343 plan review,
 // "render from the data, not from my list"). Nothing here was placed by
@@ -37,9 +43,13 @@ export function CatchAllSection({
               <ul className="flex flex-col gap-1.5">
                 {unclaimedVenueInfoFields.map((f) => (
                   <li key={f.key} className="text-sm">
-                    <span className="font-mono text-xs text-ink-faint">{f.key}</span>{' '}
+                    <span className="font-mono text-xs text-ink-faint">
+                      {f.key}
+                    </span>{' '}
                     <span className="text-ink">
-                      {typeof f.value === 'string' ? f.value : JSON.stringify(f.value)}
+                      {typeof f.value === 'string'
+                        ? f.value
+                        : JSON.stringify(f.value)}
                     </span>
                   </li>
                 ))}

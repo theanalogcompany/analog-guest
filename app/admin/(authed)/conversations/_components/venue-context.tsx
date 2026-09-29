@@ -29,10 +29,18 @@ interface VenueContextProps {
     redemptionPolicy: string
     redemptionWindowDays: number | null
   }>
-  todayLocalIso: string  // venue-local YYYY-MM-DD computed server-side
+  todayLocalIso: string // venue-local YYYY-MM-DD computed server-side
 }
 
-const DAY_KEYS = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'] as const
+const DAY_KEYS = [
+  'sunday',
+  'monday',
+  'tuesday',
+  'wednesday',
+  'thursday',
+  'friday',
+  'saturday',
+] as const
 // Short three-letter day labels for the "Hours · Fri" header line. Matches
 // the mockup's compact form.
 const DAY_SHORT = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'] as const
@@ -58,7 +66,9 @@ export function VenueContext({
   const tone = firstSentenceOrPhrase(persona.tone)
 
   const activeMechanicCount = mechanics.length
-  const gatedMechanicCount = mechanics.filter((m) => m.minState !== 'new').length
+  const gatedMechanicCount = mechanics.filter(
+    (m) => m.minState !== 'new',
+  ).length
   const mechanicsLabel =
     activeMechanicCount === 0
       ? 'none active'
@@ -73,7 +83,9 @@ export function VenueContext({
       <header className="flex items-baseline justify-between gap-3">
         <Eyebrow>Venue</Eyebrow>
         {phoneTail ? (
-          <span className="text-xs text-ink-soft tabular-nums">···{phoneTail}</span>
+          <span className="text-xs text-ink-soft tabular-nums">
+            ···{phoneTail}
+          </span>
         ) : null}
       </header>
 
@@ -128,7 +140,9 @@ function Label({ children }: { children: React.ReactNode }) {
 }
 
 function Value({ children }: { children: React.ReactNode }) {
-  return <dd className="text-ink min-w-0 break-words tabular-nums">{children}</dd>
+  return (
+    <dd className="text-ink min-w-0 break-words tabular-nums">{children}</dd>
+  )
 }
 
 // Trim a free-form persona tone string to its first sentence (or first ~80

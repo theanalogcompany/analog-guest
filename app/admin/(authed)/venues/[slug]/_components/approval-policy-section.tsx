@@ -93,7 +93,8 @@ export function ApprovalPolicySection({
   const initial = useMemo(() => {
     const held = new Set<MessageCategory>()
     for (const category of categories) {
-      if (resolveCategoryPolicy(policy, category) === 'operator_approval') held.add(category)
+      if (resolveCategoryPolicy(policy, category) === 'operator_approval')
+        held.add(category)
     }
     return held
   }, [policy, categories])
@@ -128,20 +129,26 @@ export function ApprovalPolicySection({
         // hand-written row may hold (the route refuses those, and the resolver
         // ignores them anyway).
         for (const [key, value] of Object.entries(policy.perCategory)) {
-          if (!isPolicyExemptCategory(key as MessageCategory)) perCategory[key] = value
+          if (!isPolicyExemptCategory(key as MessageCategory))
+            perCategory[key] = value
         }
         for (const category of touched) {
-          perCategory[category] = held.has(category) ? 'operator_approval' : 'auto_send'
+          perCategory[category] = held.has(category)
+            ? 'operator_approval'
+            : 'auto_send'
         }
       }
-      const res = await fetch(`/admin/venues/api/venues/${venueId}/approval-policy`, {
-        method: 'PATCH',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          default: holdAll ? 'operator_approval' : 'auto_send',
-          perCategory,
-        }),
-      })
+      const res = await fetch(
+        `/admin/venues/api/venues/${venueId}/approval-policy`,
+        {
+          method: 'PATCH',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            default: holdAll ? 'operator_approval' : 'auto_send',
+            perCategory,
+          }),
+        },
+      )
       if (!res.ok) {
         const j = await res.json().catch(() => ({}))
         setError((j.detail as string) || (j.error as string) || 'Save failed')
@@ -171,7 +178,9 @@ export function ApprovalPolicySection({
           disabled={holdAll || busy}
           onCheckedChange={() => toggle(category)}
         />
-        <span className={holdAll ? 'text-ink-faint' : undefined}>{category}</span>
+        <span className={holdAll ? 'text-ink-faint' : undefined}>
+          {category}
+        </span>
       </label>
     )
   }
@@ -183,7 +192,10 @@ export function ApprovalPolicySection({
     >
       <div className="flex flex-col gap-5">
         <div className="border-b border-stone-light/60 pb-4">
-          <label className="flex items-center gap-2.5 text-sm text-ink" htmlFor="policy-hold-all">
+          <label
+            className="flex items-center gap-2.5 text-sm text-ink"
+            htmlFor="policy-hold-all"
+          >
             <Checkbox
               id="policy-hold-all"
               checked={holdAll}
@@ -196,8 +208,8 @@ export function ApprovalPolicySection({
             <span className="font-medium">Hold everything</span>
           </label>
           <p className="mt-1.5 text-xs text-ink-faint">
-            Every message waits for review. No per-category exception applies while this is
-            on, and nothing auto-sends past it.
+            Every message waits for review. No per-category exception applies
+            while this is on, and nothing auto-sends past it.
           </p>
         </div>
 
@@ -211,14 +223,16 @@ export function ApprovalPolicySection({
             </p>
           )}
           <div className="grid gap-x-8 sm:grid-cols-2">
-            <div>{categories.filter((c) => !isOutboundOnly(c)).map(renderRow)}</div>
+            <div>
+              {categories.filter((c) => !isOutboundOnly(c)).map(renderRow)}
+            </div>
             <div>{categories.filter(isOutboundOnly).map(renderRow)}</div>
           </div>
         </div>
 
         <p className="text-xs text-ink-faint">
-          <code>{EXEMPT_LABEL}</code> is not listed: an opt-out confirmation has to reach the
-          guest immediately, so it can never be held.
+          <code>{EXEMPT_LABEL}</code> is not listed: an opt-out confirmation has
+          to reach the guest immediately, so it can never be held.
         </p>
 
         {error && <p className="text-sm text-[#DC2626]">{error}</p>}
@@ -227,7 +241,11 @@ export function ApprovalPolicySection({
           <Button size="sm" onClick={save} disabled={busy}>
             {busy ? 'Saving…' : 'Save policy'}
           </Button>
-          {saved && <span className="text-xs text-ink-faint">Saved. Takes effect immediately.</span>}
+          {saved && (
+            <span className="text-xs text-ink-faint">
+              Saved. Takes effect immediately.
+            </span>
+          )}
         </div>
       </div>
     </SectionShell>

@@ -11,13 +11,22 @@ import {
   writeMarkdownFile,
 } from './onboarding/drive'
 import { extractVenueSpec } from './onboarding/extract'
-import { parseArgs, shouldRefuseOverwrite } from './onboarding/extract-venue-spec-args'
-import { countVoiceCorpusEntries, formatNeedsConfirmationSection, runVerification } from './onboarding/verify'
+import {
+  parseArgs,
+  shouldRefuseOverwrite,
+} from './onboarding/extract-venue-spec-args'
+import {
+  countVoiceCorpusEntries,
+  formatNeedsConfirmationSection,
+  runVerification,
+} from './onboarding/verify'
 
 async function main(): Promise<void> {
   const parsed = parseArgs(process.argv)
   if (!parsed) {
-    console.error('Usage: npm run extract-venue-spec -- <slug> [--dry-run] [--force] [--interview-date YYYY-MM-DD]')
+    console.error(
+      'Usage: npm run extract-venue-spec -- <slug> [--dry-run] [--force] [--interview-date YYYY-MM-DD]',
+    )
     process.exit(1)
   }
   const { slug, dryRun, force, interviewDate } = parsed
@@ -46,14 +55,18 @@ async function main(): Promise<void> {
     console.error(
       `[extract] ${existing06.name} already exists in the venue folder — refusing to overwrite an operator's reviewed spec.`,
     )
-    console.error('[extract] pass --force to overwrite anyway, or back up/resolve the existing file first.')
+    console.error(
+      '[extract] pass --force to overwrite anyway, or back up/resolve the existing file first.',
+    )
     process.exit(1)
   }
 
   // 05- = transcript (md)
   const transcriptFile = findByPrefix(files, '05-')
   if (!transcriptFile) {
-    console.error(`[extract] no file with prefix "05-" found in folder; need a transcript`)
+    console.error(
+      `[extract] no file with prefix "05-" found in folder; need a transcript`,
+    )
     process.exit(1)
   }
   console.log(`[extract] reading transcript: ${transcriptFile.name}`)
@@ -66,14 +79,19 @@ async function main(): Promise<void> {
     console.log(`[extract] reading menu: ${menuFile.name}`)
     menuCsv = await readDriveFileAsText(drive, menuFile)
   } else {
-    console.warn(`[extract] no file with prefix "04-" found; menu will be omitted`)
+    console.warn(
+      `[extract] no file with prefix "04-" found; menu will be omitted`,
+    )
   }
 
   console.log(`[extract] fetching Airtable record for "${slug}"...`)
   const airtableRecord = await getAirtableRecord(slug)
   console.log(`[extract] airtable record id: ${airtableRecord.id}`)
 
-  const fixturePath = resolve(__dirname, 'onboarding/fixtures/venue-spec-example.md')
+  const fixturePath = resolve(
+    __dirname,
+    'onboarding/fixtures/venue-spec-example.md',
+  )
   const fixtureMarkdown = await readFile(fixturePath, 'utf-8')
 
   console.log(`[extract] calling Claude (model: claude-sonnet-4-6)...`)
@@ -106,7 +124,9 @@ async function main(): Promise<void> {
     console.error(
       `[extract] verification pass FAILED after retry: ${e instanceof Error ? e.message : String(e)}`,
     )
-    console.error('[extract] refusing to write — nothing was written to Drive or disk.')
+    console.error(
+      '[extract] refusing to write — nothing was written to Drive or disk.',
+    )
     process.exit(1)
   }
   console.log(
@@ -116,7 +136,10 @@ async function main(): Promise<void> {
   )
 
   const voiceCorpusCount = countVoiceCorpusEntries(draftMarkdown)
-  const needsConfirmationSection = formatNeedsConfirmationSection(verifyResult, voiceCorpusCount)
+  const needsConfirmationSection = formatNeedsConfirmationSection(
+    verifyResult,
+    voiceCorpusCount,
+  )
   const finalMarkdown = `${draftMarkdown}\n\n---\n\n${needsConfirmationSection}\n`
 
   const outName = `06-${slug}-venue-spec-draft.md`
@@ -130,11 +153,18 @@ async function main(): Promise<void> {
   }
 
   console.log(`[extract] writing ${outName} to Drive...`)
-  const writeResult = await writeMarkdownFile(drive, folder.id, outName, finalMarkdown)
-  console.log(`[extract] ✓ ${writeResult.created ? 'created' : 'updated'} ${outName} (id=${writeResult.id})`)
+  const writeResult = await writeMarkdownFile(
+    drive,
+    folder.id,
+    outName,
+    finalMarkdown,
+  )
+  console.log(
+    `[extract] ✓ ${writeResult.created ? 'created' : 'updated'} ${outName} (id=${writeResult.id})`,
+  )
 }
 
 main().catch((e: unknown) => {
-  console.error(e instanceof Error ? e.stack ?? e.message : String(e))
+  console.error(e instanceof Error ? (e.stack ?? e.message) : String(e))
   process.exit(1)
 })

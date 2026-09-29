@@ -56,9 +56,18 @@ export async function POST(
     pieces: body.pieces,
   })
   if (!result.ok) {
-    const status = result.errorCode === 'embed_failed' ? 502 : result.errorCode === 'invalid_input' ? 400 : 500
+    const status =
+      result.errorCode === 'embed_failed'
+        ? 502
+        : result.errorCode === 'invalid_input'
+          ? 400
+          : 500
     return NextResponse.json(
-      { error: 'knowledge split failed', detail: result.error, errorCode: result.errorCode },
+      {
+        error: 'knowledge split failed',
+        detail: result.error,
+        errorCode: result.errorCode,
+      },
       { status },
     )
   }

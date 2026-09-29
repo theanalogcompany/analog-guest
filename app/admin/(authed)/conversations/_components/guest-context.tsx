@@ -54,9 +54,15 @@ export function GuestContext({
   responseRatePct,
   venueTimezone,
 }: GuestContextProps) {
-  const fullName = [guest.firstName, guest.lastName].filter(Boolean).join(' ') || '(unnamed)'
-  const formattedPhone = formatGuestPhone(guest.phoneNumber, guest.instagramUsername)
-  const sinceLabel = sinceAt ? formatInTimeZone(sinceAt, venueTimezone, 'MMM d') : null
+  const fullName =
+    [guest.firstName, guest.lastName].filter(Boolean).join(' ') || '(unnamed)'
+  const formattedPhone = formatGuestPhone(
+    guest.phoneNumber,
+    guest.instagramUsername,
+  )
+  const sinceLabel = sinceAt
+    ? formatInTimeZone(sinceAt, venueTimezone, 'MMM d')
+    : null
 
   const lastVisitLabel = lastVisitAt
     ? formatRelativeVisit(lastVisitAt, venueTimezone, new Date())
@@ -122,7 +128,9 @@ function Label({ children }: { children: React.ReactNode }) {
 }
 
 function Value({ children }: { children: React.ReactNode }) {
-  return <dd className="text-ink min-w-0 break-words tabular-nums">{children}</dd>
+  return (
+    <dd className="text-ink min-w-0 break-words tabular-nums">{children}</dd>
+  )
 }
 
 function Empty() {
@@ -143,7 +151,10 @@ function formatRelativeVisit(date: Date, tz: string, now: Date): string {
   // tz, then compute the day delta from those wall-clock days.
   const dateLocal = formatInTimeZone(date, tz, 'yyyy-MM-dd')
   const nowLocal = formatInTimeZone(now, tz, 'yyyy-MM-dd')
-  const days = differenceInCalendarDays(new Date(`${nowLocal}T00:00:00Z`), new Date(`${dateLocal}T00:00:00Z`))
+  const days = differenceInCalendarDays(
+    new Date(`${nowLocal}T00:00:00Z`),
+    new Date(`${dateLocal}T00:00:00Z`),
+  )
   if (days === 0) return `today · ${time}`
   if (days === 1) return `yesterday · ${time}`
   if (days >= 2 && days <= 6) {

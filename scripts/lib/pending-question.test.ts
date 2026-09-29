@@ -1,11 +1,26 @@
 import { describe, expect, it } from 'vitest'
-import { EXIT, LABEL_FOR_MARKER, USAGE, newestTurn, pendingQuestionLabel, reconcile, run } from './pending-question.mjs'
+import {
+  EXIT,
+  LABEL_FOR_MARKER,
+  USAGE,
+  newestTurn,
+  pendingQuestionLabel,
+  reconcile,
+  run,
+} from './pending-question.mjs'
 
-const bot = (marker: string, body = '', createdAt = '2026-01-01T00:00:00Z') => ({
+const bot = (
+  marker: string,
+  body = '',
+  createdAt = '2026-01-01T00:00:00Z',
+) => ({
   body: `**[FROM CLAUDE CODE]**\n\n[${marker}] TAC-1${body ? `\n\n${body}` : ''}`,
   createdAt,
 })
-const human = (body: string, createdAt = '2026-01-01T00:00:00Z') => ({ body, createdAt })
+const human = (body: string, createdAt = '2026-01-01T00:00:00Z') => ({
+  body,
+  createdAt,
+})
 const chatRuling = (body: string, createdAt = '2026-01-01T00:00:00Z') => ({
   body: `**[FROM CLAUDE CHAT — RULING]**\n\n${body}`,
   createdAt,
@@ -29,7 +44,10 @@ describe('newestTurn', () => {
 
   it('skips a plain CHAT comment, which is context and answers nothing', () => {
     const plan = bot('PLAN', '', '2026-01-01T00:00:00Z')
-    const chat = chatPlain('Just some context, not a decision.', '2026-01-02T00:00:00Z')
+    const chat = chatPlain(
+      'Just some context, not a decision.',
+      '2026-01-02T00:00:00Z',
+    )
     expect(newestTurn([plan, chat])).toBe(plan)
   })
 
@@ -66,12 +84,18 @@ describe('pendingQuestionLabel', () => {
   })
 
   it('returns Needs Decision for an AUDIT with a real numbered question', () => {
-    const audit = bot('AUDIT', '**3. QUESTIONS**\n\n1. A real question.\n\n**4. FINDINGS**\n\nNone.')
+    const audit = bot(
+      'AUDIT',
+      '**3. QUESTIONS**\n\n1. A real question.\n\n**4. FINDINGS**\n\nNone.',
+    )
     expect(pendingQuestionLabel([audit])).toBe('Needs Decision')
   })
 
   it('returns null for a clean AUDIT ("None.")', () => {
-    const audit = bot('AUDIT', '**3. QUESTIONS**\n\nNone.\n\n**4. FINDINGS**\n\nNone.')
+    const audit = bot(
+      'AUDIT',
+      '**3. QUESTIONS**\n\nNone.\n\n**4. FINDINGS**\n\nNone.',
+    )
     expect(pendingQuestionLabel([audit])).toBeNull()
   })
 
@@ -96,7 +120,14 @@ describe('pendingQuestionLabel', () => {
     expect(pendingQuestionLabel([bot('HUMAN-REVIEW-REQUIRED')])).toBeNull()
   })
 
-  it.each(['BUILD-SKIPPED', 'AUDIT-SKIPPED', 'SILENT-RUN', 'TURN-LIMIT', 'FINDING', 'CANCELLED'])(
+  it.each([
+    'BUILD-SKIPPED',
+    'AUDIT-SKIPPED',
+    'SILENT-RUN',
+    'TURN-LIMIT',
+    'FINDING',
+    'CANCELLED',
+  ])(
     'does not flag %s: it resolves by an edit or a fixed cause, never by a reply',
     (marker) => {
       expect(pendingQuestionLabel([bot(marker)])).toBeNull()
@@ -143,9 +174,21 @@ describe('pendingQuestionLabel', () => {
 
 describe('reconcile', () => {
   it('includes only the candidates with a pending label, in order', () => {
-    const pending = { id: 'uuid-1', identifier: 'TAC-1', comments: [bot('PLAN')] }
-    const clean = { id: 'uuid-2', identifier: 'TAC-2', comments: [human('Go ahead.')] }
-    const alsoPending = { id: 'uuid-3', identifier: 'TAC-3', comments: [bot('NEEDS-ACTION')] }
+    const pending = {
+      id: 'uuid-1',
+      identifier: 'TAC-1',
+      comments: [bot('PLAN')],
+    }
+    const clean = {
+      id: 'uuid-2',
+      identifier: 'TAC-2',
+      comments: [human('Go ahead.')],
+    }
+    const alsoPending = {
+      id: 'uuid-3',
+      identifier: 'TAC-3',
+      comments: [bot('NEEDS-ACTION')],
+    }
     expect(reconcile([pending, clean, alsoPending])).toEqual([
       { id: 'uuid-1', identifier: 'TAC-1', label: 'Needs Decision' },
       { id: 'uuid-3', identifier: 'TAC-3', label: 'Needs Action' },
@@ -153,7 +196,11 @@ describe('reconcile', () => {
   })
 
   it('returns an empty array, not nothing, when nothing is pending', () => {
-    expect(reconcile([{ id: 'uuid-1', identifier: 'TAC-1', comments: [human('Go ahead.')] }])).toEqual([])
+    expect(
+      reconcile([
+        { id: 'uuid-1', identifier: 'TAC-1', comments: [human('Go ahead.')] },
+      ]),
+    ).toEqual([])
     expect(reconcile([])).toEqual([])
     expect(reconcile(undefined)).toEqual([])
   })
@@ -163,20 +210,30 @@ describe('run', () => {
   function invoke(stdin: string) {
     const out: string[] = []
     const err: string[] = []
-    const code = run({ stdin, stdout: (s: string) => out.push(s), stderr: (s: string) => err.push(s) })
+    const code = run({
+      stdin,
+      stdout: (s: string) => out.push(s),
+      stderr: (s: string) => err.push(s),
+    })
     return { code, out: out.join(''), err: err.join('') }
   }
 
   it('prints the pending candidates as JSON', () => {
-    const candidates = [{ id: 'uuid-1', identifier: 'TAC-1', comments: [bot('PLAN')] }]
+    const candidates = [
+      { id: 'uuid-1', identifier: 'TAC-1', comments: [bot('PLAN')] },
+    ]
     const r = invoke(JSON.stringify(candidates))
     expect(r.code).toBe(EXIT.OK)
-    expect(JSON.parse(r.out)).toEqual([{ id: 'uuid-1', identifier: 'TAC-1', label: 'Needs Decision' }])
+    expect(JSON.parse(r.out)).toEqual([
+      { id: 'uuid-1', identifier: 'TAC-1', label: 'Needs Decision' },
+    ])
     expect(r.err).toBe('')
   })
 
   it('prints an empty array, not nothing, when nothing is pending', () => {
-    const r = invoke(JSON.stringify([{ id: 'uuid-1', identifier: 'TAC-1', comments: [] }]))
+    const r = invoke(
+      JSON.stringify([{ id: 'uuid-1', identifier: 'TAC-1', comments: [] }]),
+    )
     expect(JSON.parse(r.out)).toEqual([])
   })
 

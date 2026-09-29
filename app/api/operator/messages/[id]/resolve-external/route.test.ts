@@ -16,7 +16,8 @@ vi.mock('@/lib/auth/verify-jwt', () => ({
 
 const captureMock = vi.fn()
 vi.mock('@/lib/analytics/posthog', () => ({
-  captureOperatorMessageResolvedExternally: (...args: unknown[]) => captureMock(...args),
+  captureOperatorMessageResolvedExternally: (...args: unknown[]) =>
+    captureMock(...args),
 }))
 
 interface DbScript {
@@ -51,7 +52,8 @@ vi.mock('@/lib/db/admin', () => ({
             },
             async select() {
               updateFilters.push(filters)
-              if (script.claimError) return { data: null, error: { message: script.claimError } }
+              if (script.claimError)
+                return { data: null, error: { message: script.claimError } }
               return { data: script.claimed ?? [], error: null }
             },
           }
@@ -74,7 +76,8 @@ vi.mock('@/lib/db/admin', () => ({
             },
             async maybeSingle() {
               lookupFilters.push({ ...filters })
-              if (script.lookupError) return { data: null, error: { message: script.lookupError } }
+              if (script.lookupError)
+                return { data: null, error: { message: script.lookupError } }
               return { data: script.current ?? null, error: null }
             },
           }
@@ -106,13 +109,19 @@ async function resolveExternal(
   headers: Record<string, string> = { authorization: 'Bearer fake-jwt' },
 ): Promise<{ status: number; body: Record<string, unknown> }> {
   const res = await POST(
-    new Request(`https://example.test/api/operator/messages/${id}/resolve-external`, {
-      method: 'POST',
-      headers,
-    }),
+    new Request(
+      `https://example.test/api/operator/messages/${id}/resolve-external`,
+      {
+        method: 'POST',
+        headers,
+      },
+    ),
     { params: Promise.resolve({ id }) },
   )
-  return { status: res.status, body: (await res.json()) as Record<string, unknown> }
+  return {
+    status: res.status,
+    body: (await res.json()) as Record<string, unknown>,
+  }
 }
 
 beforeEach(() => {
@@ -121,7 +130,10 @@ beforeEach(() => {
   lookupFilters.length = 0
   updatePatch = {}
   script = {}
-  verifyMock.mockResolvedValue({ operatorId: 'op-1', venueScope: grantedVenues([VENUE_A]) })
+  verifyMock.mockResolvedValue({
+    operatorId: 'op-1',
+    venueScope: grantedVenues([VENUE_A]),
+  })
 })
 
 describe('POST /api/operator/messages/[id]/resolve-external', () => {
@@ -168,22 +180,46 @@ describe('POST /api/operator/messages/[id]/resolve-external', () => {
   it('is idempotent: a second call answers 200 with alreadyResolved', async () => {
     // The operator may double-tap, and the echo may land between their tap and
     // this request. Either way the card is resolved; an error would be wrong.
-    script = { claimed: [], current: { id: VALID_UUID, review_state: 'resolved_externally', direction: 'outbound' } }
+    script = {
+      claimed: [],
+      current: {
+        id: VALID_UUID,
+        review_state: 'resolved_externally',
+        direction: 'outbound',
+      },
+    }
     expect(await resolveExternal()).toEqual({
       status: 200,
-      body: { ok: true, reviewState: 'resolved_externally', alreadyResolved: true },
+      body: {
+        ok: true,
+        reviewState: 'resolved_externally',
+        alreadyResolved: true,
+      },
     })
   })
 
   it('reports a card an operator already approved as alreadyResolved, without touching it', async () => {
-    script = { claimed: [], current: { id: VALID_UUID, review_state: 'approved', direction: 'outbound' } }
+    script = {
+      claimed: [],
+      current: {
+        id: VALID_UUID,
+        review_state: 'approved',
+        direction: 'outbound',
+      },
+    }
     const res = await resolveExternal()
     expect(res.status).toBe(200)
-    expect(res.body).toEqual({ ok: true, reviewState: 'approved', alreadyResolved: true })
+    expect(res.body).toEqual({
+      ok: true,
+      reviewState: 'approved',
+      alreadyResolved: true,
+    })
   })
 
   it('answers 401 with the Contract body when the bearer is missing or invalid', async () => {
-    verifyMock.mockRejectedValueOnce(new AuthError(401, 'missing Authorization header'))
+    verifyMock.mockRejectedValueOnce(
+      new AuthError(401, 'missing Authorization header'),
+    )
     const res = await resolveExternal(VALID_UUID, {})
     expect(res).toEqual({ status: 401, body: { error: 'unauthorized' } })
     // The HOF would have forwarded err.message here; the Contract says it must not.
@@ -192,20 +228,32 @@ describe('POST /api/operator/messages/[id]/resolve-external', () => {
 
   it('answers 404 for a message that does not exist', async () => {
     script = { claimed: [], current: null }
-    expect(await resolveExternal()).toEqual({ status: 404, body: { error: 'not_found' } })
+    expect(await resolveExternal()).toEqual({
+      status: 404,
+      body: { error: 'not_found' },
+    })
   })
 
   it('answers 404, not 400, for an id that is not a UUID', async () => {
-    expect(await resolveExternal('not-a-uuid')).toEqual({ status: 404, body: { error: 'not_found' } })
+    expect(await resolveExternal('not-a-uuid')).toEqual({
+      status: 404,
+      body: { error: 'not_found' },
+    })
   })
 
   it('answers 404 for a card outside the venue allowlist, leaking no existence', async () => {
     // The allowlist is applied to the lookup too, so an out-of-allowlist card
     // comes back as absent and is indistinguishable from one that never existed.
-    verifyMock.mockResolvedValue({ operatorId: 'op-1', venueScope: grantedVenues(['other-venue']) })
+    verifyMock.mockResolvedValue({
+      operatorId: 'op-1',
+      venueScope: grantedVenues(['other-venue']),
+    })
     script = { claimed: [], current: null }
     const outOfScope = await resolveExternal()
-    verifyMock.mockResolvedValue({ operatorId: 'op-1', venueScope: grantedVenues([VENUE_A]) })
+    verifyMock.mockResolvedValue({
+      operatorId: 'op-1',
+      venueScope: grantedVenues([VENUE_A]),
+    })
     script = { claimed: [], current: null }
     const absent = await resolveExternal()
     expect(outOfScope).toEqual(absent)
@@ -217,9 +265,15 @@ describe('POST /api/operator/messages/[id]/resolve-external', () => {
   // the `if (length > 0)` idiom from the COOKIE path, where empty means
   // analog-admin scope. Same field name, opposite meaning.
   it('answers 404 and touches nothing when the operator is allowlisted for no venue', async () => {
-    verifyMock.mockResolvedValue({ operatorId: 'op-1', venueScope: grantedVenues([]) })
+    verifyMock.mockResolvedValue({
+      operatorId: 'op-1',
+      venueScope: grantedVenues([]),
+    })
     script = { claimed: [PENDING_CARD] }
-    expect(await resolveExternal()).toEqual({ status: 404, body: { error: 'not_found' } })
+    expect(await resolveExternal()).toEqual({
+      status: 404,
+      body: { error: 'not_found' },
+    })
     expect(updateFilters).toHaveLength(0)
     expect(lookupFilters).toHaveLength(0)
     expect(captureMock).not.toHaveBeenCalled()
@@ -234,30 +288,50 @@ describe('POST /api/operator/messages/[id]/resolve-external', () => {
   })
 
   it('answers 404 for an inbound row', async () => {
-    script = { claimed: [], current: { id: VALID_UUID, review_state: null, direction: 'inbound' } }
-    expect(await resolveExternal()).toEqual({ status: 404, body: { error: 'not_found' } })
+    script = {
+      claimed: [],
+      current: { id: VALID_UUID, review_state: null, direction: 'inbound' },
+    }
+    expect(await resolveExternal()).toEqual({
+      status: 404,
+      body: { error: 'not_found' },
+    })
   })
 
   it.each([
     ['the update', { claimError: 'boom' }],
     ['the lookup', { claimed: [], lookupError: 'boom' }],
-  ] as const)('answers 500 with the Contract body when %s fails, leaking no detail', async (_n, s) => {
-    script = s as DbScript
-    const res = await resolveExternal()
-    expect(res).toEqual({ status: 500, body: { error: 'internal_error' } })
-    expect(JSON.stringify(res.body)).not.toContain('boom')
-  })
+  ] as const)(
+    'answers 500 with the Contract body when %s fails, leaking no detail',
+    async (_n, s) => {
+      script = s as DbScript
+      const res = await resolveExternal()
+      expect(res).toEqual({ status: 500, body: { error: 'internal_error' } })
+      expect(JSON.stringify(res.body)).not.toContain('boom')
+    },
+  )
 
   it('records the action, with the channel, only when it actually resolved one', async () => {
     script = { claimed: [PENDING_CARD] }
     await resolveExternal()
     expect(captureMock).toHaveBeenCalledTimes(1)
     expect(captureMock).toHaveBeenCalledWith(
-      expect.objectContaining({ messageId: VALID_UUID, operatorId: 'op-1', channel: 'instagram' }),
+      expect.objectContaining({
+        messageId: VALID_UUID,
+        operatorId: 'op-1',
+        channel: 'instagram',
+      }),
     )
 
     captureMock.mockClear()
-    script = { claimed: [], current: { id: VALID_UUID, review_state: 'approved', direction: 'outbound' } }
+    script = {
+      claimed: [],
+      current: {
+        id: VALID_UUID,
+        review_state: 'approved',
+        direction: 'outbound',
+      },
+    }
     await resolveExternal()
     expect(captureMock).not.toHaveBeenCalled()
   })

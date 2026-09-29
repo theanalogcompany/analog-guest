@@ -67,7 +67,12 @@ type FakeError = { code?: string; message: string }
  */
 function violatesOneGreetingPerDay(
   rows: ScanArrivalRow[],
-  candidate: { id: string; venue_id: string; guest_id: string; venue_local_date: string | null },
+  candidate: {
+    id: string
+    venue_id: string
+    guest_id: string
+    venue_local_date: string | null
+  },
 ): boolean {
   // A NULL in the key is never in the index, exactly as in Postgres.
   if (candidate.venue_local_date === null) return false
@@ -82,12 +87,18 @@ function violatesOneGreetingPerDay(
 }
 
 export function createScanArrivalsFake(seed: ScanArrivalsSeed = {}) {
-  const arrivals: ScanArrivalRow[] = (seed.arrivals ?? []).map((r) => ({ ...r }))
+  const arrivals: ScanArrivalRow[] = (seed.arrivals ?? []).map((r) => ({
+    ...r,
+  }))
   const venues = seed.venues ?? []
   const guests = seed.guests ?? []
   const messages = seed.messages ?? []
   const venueInfo = seed.venueInfo === undefined ? {} : seed.venueInfo
-  const queuedErrors: Array<{ table: string; op: 'select' | 'update'; error: FakeError }> = []
+  const queuedErrors: Array<{
+    table: string
+    op: 'select' | 'update'
+    error: FakeError
+  }> = []
 
   function takeError(table: string, op: 'select' | 'update'): FakeError | null {
     const i = queuedErrors.findIndex((q) => q.table === table && q.op === op)
@@ -114,7 +125,10 @@ export function createScanArrivalsFake(seed: ScanArrivalsSeed = {}) {
         if (error) return Promise.resolve({ data: null, error })
         const matched = arrivals
           .filter((row) =>
-            filters.every(([c, , v]) => (row as unknown as Record<string, unknown>)[c] === v),
+            filters.every(
+              ([c, , v]) =>
+                (row as unknown as Record<string, unknown>)[c] === v,
+            ),
           )
           .sort((a, b) => a.scanned_at.localeCompare(b.scanned_at))
           .slice(0, n)
@@ -132,7 +146,9 @@ export function createScanArrivalsFake(seed: ScanArrivalsSeed = {}) {
       const error = takeError('instagram_scan_arrivals', 'update')
       if (error) return { data: null, error }
       const matched = arrivals.filter((row) =>
-        filters.every(([c, , v]) => (row as unknown as Record<string, unknown>)[c] === v),
+        filters.every(
+          ([c, , v]) => (row as unknown as Record<string, unknown>)[c] === v,
+        ),
       )
       for (const row of matched) {
         const candidate = {
@@ -145,11 +161,16 @@ export function createScanArrivalsFake(seed: ScanArrivalsSeed = {}) {
               : row.venue_local_date,
         }
         const wouldBeClaimed =
-          'claimed_at' in patch ? patch.claimed_at !== null : row.claimed_at !== null
+          'claimed_at' in patch
+            ? patch.claimed_at !== null
+            : row.claimed_at !== null
         if (wouldBeClaimed && violatesOneGreetingPerDay(arrivals, candidate)) {
           return {
             data: null,
-            error: { code: '23505', message: 'duplicate key value violates unique constraint' },
+            error: {
+              code: '23505',
+              message: 'duplicate key value violates unique constraint',
+            },
           }
         }
         Object.assign(row, patch)
@@ -168,7 +189,9 @@ export function createScanArrivalsFake(seed: ScanArrivalsSeed = {}) {
       select() {
         return Promise.resolve(apply())
       },
-      then<R>(onFulfilled: (v: { data: unknown; error: FakeError | null }) => R): Promise<R> {
+      then<R>(
+        onFulfilled: (v: { data: unknown; error: FakeError | null }) => R,
+      ): Promise<R> {
         return Promise.resolve(onFulfilled(apply()))
       },
     }
@@ -207,13 +230,19 @@ export function createScanArrivalsFake(seed: ScanArrivalsSeed = {}) {
           if (gteAt !== null && row.created_at < gteAt) return false
           return true
         })
-        return Promise.resolve({ data: match ? { id: match.id } : null, error: null })
+        return Promise.resolve({
+          data: match ? { id: match.id } : null,
+          error: null,
+        })
       },
     }
     return builder
   }
 
-  function rowSelect(table: 'venues' | 'guests' | 'venue_configs', columns: string) {
+  function rowSelect(
+    table: 'venues' | 'guests' | 'venue_configs',
+    columns: string,
+  ) {
     const eqs: Array<[string, unknown]> = []
     const builder = {
       eq(column: string, value: unknown) {
@@ -224,7 +253,10 @@ export function createScanArrivalsFake(seed: ScanArrivalsSeed = {}) {
         const error = takeError(table, 'select')
         if (error) return Promise.resolve({ data: null, error })
         if (table === 'venue_configs') {
-          return Promise.resolve({ data: { venue_info: venueInfo }, error: null })
+          return Promise.resolve({
+            data: { venue_info: venueInfo },
+            error: null,
+          })
         }
         const source: Array<Record<string, unknown>> =
           table === 'venues'
@@ -251,7 +283,11 @@ export function createScanArrivalsFake(seed: ScanArrivalsSeed = {}) {
         }
       }
       if (table === 'messages') return { select: () => messagesSelect() }
-      if (table === 'venues' || table === 'guests' || table === 'venue_configs') {
+      if (
+        table === 'venues' ||
+        table === 'guests' ||
+        table === 'venue_configs'
+      ) {
         return { select: (columns: string) => rowSelect(table, columns) }
       }
       throw new Error(`scan-arrivals fake: unexpected table ${table}`)

@@ -15,8 +15,14 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 
 import type { Database } from '@/db/types'
 
-export type RecordedQuery = { table: string; calls: Array<[string, ...unknown[]]> }
-export type ScriptedAnswer = { data: unknown; error: { message: string; code?: string } | null }
+export type RecordedQuery = {
+  table: string
+  calls: Array<[string, ...unknown[]]>
+}
+export type ScriptedAnswer = {
+  data: unknown
+  error: { message: string; code?: string } | null
+}
 
 export function queryRecorder(script: Record<string, ScriptedAnswer[]>): {
   client: SupabaseClient<Database>
@@ -29,15 +35,36 @@ export function queryRecorder(script: Record<string, ScriptedAnswer[]>): {
 
   function from(table: string) {
     const answer = remaining[table]?.shift()
-    if (answer === undefined) throw new Error(`query-recorder: no scripted answer left for ${table}`)
+    if (answer === undefined)
+      throw new Error(`query-recorder: no scripted answer left for ${table}`)
     const query: RecordedQuery = { table, calls: [] }
     queries.push(query)
     const builder: Record<string, unknown> = {}
-    const chain = (name: string) => (...args: unknown[]) => {
-      query.calls.push([name, ...args])
-      return builder
-    }
-    for (const name of ['select', 'eq', 'neq', 'not', 'is', 'in', 'or', 'lte', 'gte', 'gt', 'lt', 'order', 'limit', 'update', 'insert', 'upsert', 'delete']) {
+    const chain =
+      (name: string) =>
+      (...args: unknown[]) => {
+        query.calls.push([name, ...args])
+        return builder
+      }
+    for (const name of [
+      'select',
+      'eq',
+      'neq',
+      'not',
+      'is',
+      'in',
+      'or',
+      'lte',
+      'gte',
+      'gt',
+      'lt',
+      'order',
+      'limit',
+      'update',
+      'insert',
+      'upsert',
+      'delete',
+    ]) {
       builder[name] = chain(name)
     }
     builder.maybeSingle = () => {
@@ -48,8 +75,10 @@ export function queryRecorder(script: Record<string, ScriptedAnswer[]>): {
       query.calls.push(['single'])
       return Promise.resolve(answer)
     }
-    builder.then = (resolve: (v: ScriptedAnswer) => unknown, reject?: (e: unknown) => unknown) =>
-      Promise.resolve(answer).then(resolve, reject)
+    builder.then = (
+      resolve: (v: ScriptedAnswer) => unknown,
+      reject?: (e: unknown) => unknown,
+    ) => Promise.resolve(answer).then(resolve, reject)
     return builder
   }
 

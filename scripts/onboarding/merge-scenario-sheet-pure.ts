@@ -58,7 +58,9 @@ export function computeRowHash(row: HashableRow): string {
 }
 
 /** Stamp fresh generator output into persistable sheet rows. */
-export function stampFreshRows(scenarios: readonly Scenario[]): ScenarioSheetRow[] {
+export function stampFreshRows(
+  scenarios: readonly Scenario[],
+): ScenarioSheetRow[] {
   return scenarios.map((s) => {
     const base: HashableRow & Scenario = { ...s, exclude: false, notes: '' }
     return {
@@ -112,9 +114,10 @@ export interface MergeResult {
  * merge design exists to protect, and that invariant doesn't bend for a
  * collision-cleanup pass.
  */
-export function dedupeRowsBySampleId(
-  rows: readonly ScenarioSheetRow[],
-): { rows: ScenarioSheetRow[]; droppedSampleIds: string[] } {
+export function dedupeRowsBySampleId(rows: readonly ScenarioSheetRow[]): {
+  rows: ScenarioSheetRow[]
+  droppedSampleIds: string[]
+} {
   const byId = new Map<string, ScenarioSheetRow[]>()
   for (const row of rows) {
     const list = byId.get(row.sample_id) ?? []
@@ -234,9 +237,15 @@ export function groupTombstonesByTopic(
 export function filterTombstoneDuplicates(
   freshScenarios: readonly Scenario[],
   tombstonesByTopic: ReadonlyMap<string, MetaEntry[]>,
-  similarityLookup: (candidateMessage: string, tombstoneMessage: string) => number,
+  similarityLookup: (
+    candidateMessage: string,
+    tombstoneMessage: string,
+  ) => number,
   threshold: number,
-): { kept: Scenario[]; dropped: Array<{ scenario: Scenario; matchedTombstone: MetaEntry }> } {
+): {
+  kept: Scenario[]
+  dropped: Array<{ scenario: Scenario; matchedTombstone: MetaEntry }>
+} {
   const kept: Scenario[] = []
   const dropped: Array<{ scenario: Scenario; matchedTombstone: MetaEntry }> = []
 
@@ -259,7 +268,10 @@ export function filterTombstoneDuplicates(
   return { kept, dropped }
 }
 
-export function cosineSimilarity(a: readonly number[], b: readonly number[]): number {
+export function cosineSimilarity(
+  a: readonly number[],
+  b: readonly number[],
+): number {
   if (a.length !== b.length || a.length === 0) return 0
   let dot = 0
   let normA = 0
@@ -278,6 +290,8 @@ export function cosineSimilarity(a: readonly number[], b: readonly number[]): nu
 // required test ("excluded rows are kept but not run by the runner").
 // ---------------------------------------------------------------------------
 
-export function filterRunnableScenarios(rows: readonly ScenarioSheetRow[]): ScenarioSheetRow[] {
+export function filterRunnableScenarios(
+  rows: readonly ScenarioSheetRow[],
+): ScenarioSheetRow[] {
   return rows.filter((r) => !r.exclude)
 }

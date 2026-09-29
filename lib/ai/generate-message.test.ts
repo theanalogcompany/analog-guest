@@ -1,7 +1,16 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 // Relative imports — vitest doesn't pick up Next's `@/*` alias under our setup.
-import { BrandPersonaSchema, VenueInfoSchema, type BrandPersona, type VenueInfo } from '../schemas'
-import { generateMessage, replaceDashes, VOICE_FIDELITY_INSTRUCTION } from './generate-message'
+import {
+  BrandPersonaSchema,
+  VenueInfoSchema,
+  type BrandPersona,
+  type VenueInfo,
+} from '../schemas'
+import {
+  generateMessage,
+  replaceDashes,
+  VOICE_FIDELITY_INSTRUCTION,
+} from './generate-message'
 import type { GenerateMessageInput } from './types'
 
 // Mock the AI SDK + the model client so no real Anthropic call goes out.
@@ -30,7 +39,9 @@ function userPromptOnCall(n: number): string {
   }
   const last = messages[messages.length - 1]
   if (last.role !== 'user') {
-    throw new Error(`call ${n}: expected a trailing user message, got ${last.role}`)
+    throw new Error(
+      `call ${n}: expected a trailing user message, got ${last.role}`,
+    )
   }
   return last.content
 }
@@ -65,7 +76,12 @@ function makePersona(overrides: Partial<BrandPersona> = {}): BrandPersona {
 
 function makeVenueInfo(overrides: Partial<VenueInfo> = {}): VenueInfo {
   return VenueInfoSchema.parse({
-    address: { line1: '1 Test St', city: 'Test', region: 'CA', postalCode: '94000' },
+    address: {
+      line1: '1 Test St',
+      city: 'Test',
+      region: 'CA',
+      postalCode: '94000',
+    },
     ...overrides,
   })
 }
@@ -76,7 +92,11 @@ function makeInput(): GenerateMessageInput {
     persona: makePersona(),
     venueInfo: makeVenueInfo(),
     ragChunks: [
-      { id: 'c1', text: 'sample voice corpus chunk', sourceType: 'sample_text' },
+      {
+        id: 'c1',
+        text: 'sample voice corpus chunk',
+        sourceType: 'sample_text',
+      },
     ],
     channel: 'text',
     runtime: {
@@ -176,7 +196,7 @@ describe('generateMessage — dash regex check (THE-225)', () => {
 
   it('substitutes an en dash in place, spending no extra attempt', async () => {
     queueResponses({
-      body: 'iced isn\'t on the menu – only hot',
+      body: "iced isn't on the menu – only hot",
       voiceFidelity: 0.9,
       reasoning: 'first try',
     })
@@ -185,7 +205,7 @@ describe('generateMessage — dash regex check (THE-225)', () => {
     expect(r.ok).toBe(true)
     if (!r.ok) return
     expect(r.data.attempts).toBe(1)
-    expect(r.data.body).toBe('iced isn\'t on the menu, only hot')
+    expect(r.data.body).toBe("iced isn't on the menu, only hot")
     expect(r.data.dashViolationPersisted).toBe(false)
   })
 
@@ -305,7 +325,11 @@ describe('generateMessage — dash regex check (THE-225)', () => {
     expect(r.data.body).toBe('e, f')
     expect(r.data.dashViolationPersisted).toBe(false)
     // Every recorded attempt is substituted, not just the shipped one.
-    expect(r.data.attemptHistory.map((a) => a.body)).toEqual(['a, b', 'c, d', 'e, f'])
+    expect(r.data.attemptHistory.map((a) => a.body)).toEqual([
+      'a, b',
+      'c, d',
+      'e, f',
+    ])
   })
 
   it('never puts a dash constraint in a regen prompt', async () => {
@@ -346,8 +370,9 @@ describe('generateMessage — dash regex check (THE-225)', () => {
     )
     await generateMessage(makeInput())
     for (const call of generateObjectMock.mock.calls) {
-      const prompt = (call[0] as { messages: { role: string; content: string }[] })
-        .messages.at(-1)!.content
+      const prompt = (
+        call[0] as { messages: { role: string; content: string }[] }
+      ).messages.at(-1)!.content
       expect(prompt).not.toContain('Your previous attempt')
       expect(prompt).not.toContain('previous attempt contained')
       expect(prompt).not.toContain('Rewrite')
@@ -383,7 +408,7 @@ describe('generateMessage — self-talk check (TAC-355)', () => {
     // The literal TAC-355 failing reply shape (le-mils-coffee-010).
     queueResponses(
       {
-        body: "made with chicory and dandelion root — actually wait, no dashes. chicory and dandelion root extract.",
+        body: 'made with chicory and dandelion root — actually wait, no dashes. chicory and dandelion root extract.',
         voiceFidelity: 0.9,
         reasoning: 'first try',
       },
@@ -403,9 +428,7 @@ describe('generateMessage — self-talk check (TAC-355)', () => {
     expect(r.data.selfTalkViolationPersisted).toBe(false)
 
     const secondCallPrompt = userPromptOnCall(1)
-    expect(secondCallPrompt).toContain(
-      'any reference to your own instructions',
-    )
+    expect(secondCallPrompt).toContain('any reference to your own instructions')
   })
 
   it('does NOT include self-talk feedback when fidelity-only retry happens', async () => {
@@ -420,7 +443,9 @@ describe('generateMessage — self-talk check (TAC-355)', () => {
 
     expect(r.data.selfTalkViolationPersisted).toBe(false)
     const secondCallPrompt = userPromptOnCall(1)
-    expect(secondCallPrompt).not.toContain('any reference to your own instructions')
+    expect(secondCallPrompt).not.toContain(
+      'any reference to your own instructions',
+    )
   })
 
   it('MUST NOT ship silently — persists selfTalkViolationPersisted=true when MAX_ATTEMPTS exhausted', async () => {
@@ -469,7 +494,9 @@ describe('generateMessage — self-talk check (TAC-355)', () => {
     expect(r.data.dashViolationPersisted).toBe(false)
     expect(r.data.selfTalkViolationPersisted).toBe(false)
     // Attempt 1's dash was substituted before the self-talk check read it.
-    expect(r.data.attemptHistory[0].body).toBe('chicory, actually wait, no dashes')
+    expect(r.data.attemptHistory[0].body).toBe(
+      'chicory, actually wait, no dashes',
+    )
 
     const secondCallPrompt = userPromptOnCall(1)
     expect(secondCallPrompt).not.toContain('dash character')
@@ -495,7 +522,10 @@ describe('generateMessage — basic shape', () => {
   // channel is unknown) and generates normally.
   it('returns invalid_input when channel is missing or not a channel, before calling the model', async () => {
     for (const channel of [undefined, 'sms', 'Instagram']) {
-      const r = await generateMessage({ ...makeInput(), channel } as unknown as GenerateMessageInput)
+      const r = await generateMessage({
+        ...makeInput(),
+        channel,
+      } as unknown as GenerateMessageInput)
       expect(r.ok).toBe(false)
       if (r.ok) continue
       expect(r.error).toBe('invalid_input')
@@ -579,7 +609,9 @@ describe('generateMessage — operator-approval self-flag (TAC-212)', () => {
     expect(r.data.attemptHistory[0].requiresOperatorApproval).toBe(false)
     expect(r.data.attemptHistory[0].approvalReason).toBe('')
     expect(r.data.attemptHistory[1].requiresOperatorApproval).toBe(true)
-    expect(r.data.attemptHistory[1].approvalReason).toBe('drafted a complimentary refill')
+    expect(r.data.attemptHistory[1].approvalReason).toBe(
+      'drafted a complimentary refill',
+    )
   })
 })
 
@@ -616,7 +648,11 @@ describe('generateMessage — emojiDirectiveViolated (TAC-362)', () => {
   })
 
   it("does not flag a clean body on a 'none' turn", async () => {
-    queueResponses({ body: 'we close at 3', voiceFidelity: 0.85, reasoning: 'clean' })
+    queueResponses({
+      body: 'we close at 3',
+      voiceFidelity: 0.85,
+      reasoning: 'clean',
+    })
     const r = await generateMessage(inputWithDirective('none'))
     expect(r.ok).toBe(true)
     if (!r.ok) return
@@ -627,7 +663,11 @@ describe('generateMessage — emojiDirectiveViolated (TAC-362)', () => {
   // not violated. A flag that fired on both branches would make the PostHog
   // event meaningless.
   it("never flags on an 'allowed' turn, emoji or not", async () => {
-    queueResponses({ body: 'we close at 3 😊', voiceFidelity: 0.85, reasoning: 'clean' })
+    queueResponses({
+      body: 'we close at 3 😊',
+      voiceFidelity: 0.85,
+      reasoning: 'clean',
+    })
     const withEmoji = await generateMessage(inputWithDirective('allowed'))
     expect(withEmoji.ok).toBe(true)
     if (!withEmoji.ok) return
@@ -635,7 +675,11 @@ describe('generateMessage — emojiDirectiveViolated (TAC-362)', () => {
   })
 
   it('never flags when no directive was issued', async () => {
-    queueResponses({ body: 'we close at 3 😊', voiceFidelity: 0.85, reasoning: 'clean' })
+    queueResponses({
+      body: 'we close at 3 😊',
+      voiceFidelity: 0.85,
+      reasoning: 'clean',
+    })
     const r = await generateMessage(inputWithDirective(undefined))
     expect(r.ok).toBe(true)
     if (!r.ok) return
@@ -650,8 +694,16 @@ describe('generateMessage — emojiDirectiveViolated (TAC-362)', () => {
     // dash, which no longer costs an attempt — the directive this test is
     // about is unaffected either way, it just needs the loop to run twice.
     queueResponses(
-      { body: 'we close at 11, come by 😊', voiceFidelity: 0.4, reasoning: 'too generic' },
-      { body: 'we close at 11. come by 😊', voiceFidelity: 0.88, reasoning: 'better' },
+      {
+        body: 'we close at 11, come by 😊',
+        voiceFidelity: 0.4,
+        reasoning: 'too generic',
+      },
+      {
+        body: 'we close at 11. come by 😊',
+        voiceFidelity: 0.88,
+        reasoning: 'better',
+      },
     )
     const r = await generateMessage(inputWithDirective('none'))
     expect(r.ok).toBe(true)
@@ -674,11 +726,18 @@ describe('generateMessage — unverified URL check (TAC-509)', () => {
   const LISTED = 'https://lemils.com/products/le-mils-budan-bold'
 
   function inputWithLinks(links: unknown): GenerateMessageInput {
-    return { ...makeInput(), venueInfo: makeVenueInfo({ links } as Partial<VenueInfo>) }
+    return {
+      ...makeInput(),
+      venueInfo: makeVenueInfo({ links } as Partial<VenueInfo>),
+    }
   }
 
   it('sends a listed link unchanged, in one attempt', async () => {
-    queueResponses({ body: `Grab it at ${LISTED}`, voiceFidelity: 0.9, reasoning: 'r' })
+    queueResponses({
+      body: `Grab it at ${LISTED}`,
+      voiceFidelity: 0.9,
+      reasoning: 'r',
+    })
     const r = await generateMessage(
       inputWithLinks([{ label: 'Budan beans', url: LISTED }]),
     )
@@ -708,9 +767,15 @@ describe('generateMessage — unverified URL check (TAC-509)', () => {
     const off = 'https://lemils.com/products/nope'
     queueResponses(
       { body: `Try ${off}`, voiceFidelity: 0.9, reasoning: 'r' },
-      { body: 'Come by and ask at the counter.', voiceFidelity: 0.9, reasoning: 'r' },
+      {
+        body: 'Come by and ask at the counter.',
+        voiceFidelity: 0.9,
+        reasoning: 'r',
+      },
     )
-    await generateMessage(inputWithLinks([{ label: 'Budan beans', url: LISTED }]))
+    await generateMessage(
+      inputWithLinks([{ label: 'Budan beans', url: LISTED }]),
+    )
     const secondPrompt = userPromptOnCall(1)
     expect(secondPrompt).toContain(off)
     expect(secondPrompt).toContain('## Links')
@@ -804,7 +869,9 @@ describe('generateMessage — unverified URL check (TAC-509)', () => {
       { body: `Try ${off}, it is great.`, voiceFidelity: 0.9, reasoning: '2' },
       { body: `Try ${off}, it is great.`, voiceFidelity: 0.9, reasoning: '3' },
     )
-    const r = await generateMessage(inputWithLinks([{ label: 'Budan beans', url: LISTED }]))
+    const r = await generateMessage(
+      inputWithLinks([{ label: 'Budan beans', url: LISTED }]),
+    )
     expect(r.ok).toBe(true)
     if (!r.ok) return
     expect(r.data.attempts).toBe(3)
@@ -831,7 +898,9 @@ describe('generateMessage — unverified URL check (TAC-509)', () => {
       { body: `Try ${second}`, voiceFidelity: 0.9, reasoning: '2' },
       { body: `Try ${second}`, voiceFidelity: 0.9, reasoning: '3' },
     )
-    await generateMessage(inputWithLinks([{ label: 'Budan beans', url: LISTED }]))
+    await generateMessage(
+      inputWithLinks([{ label: 'Budan beans', url: LISTED }]),
+    )
     const thirdPrompt = userPromptOnCall(2)
     expect(thirdPrompt).toContain(first)
     expect(thirdPrompt).toContain(second)
@@ -840,10 +909,20 @@ describe('generateMessage — unverified URL check (TAC-509)', () => {
   it('composes URL feedback alongside self-talk on one attempt, with the dash substituted', async () => {
     const off = 'https://lemils.com/products/nope'
     queueResponses(
-      { body: `Try ${off} — actually wait, no dashes.`, voiceFidelity: 0.9, reasoning: 'r' },
-      { body: 'Come by and ask at the counter.', voiceFidelity: 0.9, reasoning: 'r' },
+      {
+        body: `Try ${off} — actually wait, no dashes.`,
+        voiceFidelity: 0.9,
+        reasoning: 'r',
+      },
+      {
+        body: 'Come by and ask at the counter.',
+        voiceFidelity: 0.9,
+        reasoning: 'r',
+      },
     )
-    await generateMessage(inputWithLinks([{ label: 'Budan beans', url: LISTED }]))
+    await generateMessage(
+      inputWithLinks([{ label: 'Budan beans', url: LISTED }]),
+    )
     const secondPrompt = userPromptOnCall(1)
     // The two regeneration-driven checks still compose.
     expect(secondPrompt).toContain('self-correction')
@@ -853,7 +932,11 @@ describe('generateMessage — unverified URL check (TAC-509)', () => {
   })
 
   it('reconciles a single trailing slash against the stored list', async () => {
-    queueResponses({ body: 'see https://lemils.com', voiceFidelity: 0.9, reasoning: 'r' })
+    queueResponses({
+      body: 'see https://lemils.com',
+      voiceFidelity: 0.9,
+      reasoning: 'r',
+    })
     const r = await generateMessage(
       inputWithLinks([{ label: 'Homepage', url: 'https://lemils.com/' }]),
     )
@@ -891,7 +974,8 @@ describe('generateMessage — the regen loop has no groundedness check (TAC-501)
   // none of them can see a fact the first attempt never made, because none
   // of them look at the first attempt's body at all once a new one exists.
   it('accepts a regen that introduces a fact absent from the first attempt, when nothing else flags it', async () => {
-    const firstAttempt = "I don't always catch calls right away, what's on your mind?"
+    const firstAttempt =
+      "I don't always catch calls right away, what's on your mind?"
     const secondAttempt =
       "yeah, here's the number: 415-735-5428. though I'll be honest, I don't always catch calls right away. what's on your mind?"
     queueResponses(
@@ -924,7 +1008,9 @@ describe('generateMessage — the regen loop has no groundedness check (TAC-501)
     // attempt said, let alone asked to stay consistent with it.
     const secondCallPrompt = userPromptOnCall(1)
     expect(secondCallPrompt).not.toContain('do not use a dash character')
-    expect(secondCallPrompt).not.toContain('any reference to your own instructions')
+    expect(secondCallPrompt).not.toContain(
+      'any reference to your own instructions',
+    )
     expect(secondCallPrompt).not.toContain('is not a link')
     expect(secondCallPrompt).not.toContain('are not links')
     expect(r.data.attemptHistory[1].userPromptOverride).toBeUndefined()
@@ -944,18 +1030,28 @@ describe('generateMessage — prompt cache breakpoint', () => {
     // r.data.systemPrompt is what the Langfuse trace records and what every
     // measurement script replays. If the blocks actually sent ever diverge
     // from it, the traces stop describing the request that was made.
-    queueResponses({ body: 'we close at 11', voiceFidelity: 0.9, reasoning: 'r' })
+    queueResponses({
+      body: 'we close at 11',
+      voiceFidelity: 0.9,
+      reasoning: 'r',
+    })
     return generateMessage(makeInput()).then((r) => {
       expect(r.ok).toBe(true)
       if (!r.ok) return
       const blocks = systemBlocksOnCall(0)
       expect(blocks).toHaveLength(2)
-      expect(blocks.map((b) => b.content).join('\n\n')).toBe(r.data.systemPrompt)
+      expect(blocks.map((b) => b.content).join('\n\n')).toBe(
+        r.data.systemPrompt,
+      )
     })
   })
 
   it('marks the first system block ephemeral and leaves the second unmarked', async () => {
-    queueResponses({ body: 'we close at 11', voiceFidelity: 0.9, reasoning: 'r' })
+    queueResponses({
+      body: 'we close at 11',
+      voiceFidelity: 0.9,
+      reasoning: 'r',
+    })
     await generateMessage(makeInput())
 
     const [stable, volatile] = systemBlocksOnCall(0)
@@ -975,7 +1071,11 @@ describe('generateMessage — prompt cache breakpoint', () => {
     // Anthropic allows at most 4 cache_control breakpoints per request.
     // Nothing here needs more than one, and a second added carelessly is how
     // that budget gets silently consumed.
-    queueResponses({ body: 'we close at 11', voiceFidelity: 0.9, reasoning: 'r' })
+    queueResponses({
+      body: 'we close at 11',
+      voiceFidelity: 0.9,
+      reasoning: 'r',
+    })
     await generateMessage(makeInput())
 
     const { messages } = generateObjectMock.mock.calls[0][0] as {
@@ -994,7 +1094,11 @@ describe('generateMessage — prompt cache breakpoint', () => {
     // change: a fidelity-only retry appends no feedback and re-sends a
     // byte-identical request (see regenFeedback staying null in the loop).
     queueResponses(
-      { body: 'sure thing, as an AI I should say', voiceFidelity: 0.9, reasoning: 'self-talk' },
+      {
+        body: 'sure thing, as an AI I should say',
+        voiceFidelity: 0.9,
+        reasoning: 'self-talk',
+      },
       { body: 'yeah, of course', voiceFidelity: 0.9, reasoning: 'better' },
     )
     const r = await generateMessage(makeInput())
@@ -1002,7 +1106,9 @@ describe('generateMessage — prompt cache breakpoint', () => {
     if (!r.ok) return
     expect(r.data.attempts).toBe(2)
 
-    expect(systemBlocksOnCall(1)[0].content).toBe(systemBlocksOnCall(0)[0].content)
+    expect(systemBlocksOnCall(1)[0].content).toBe(
+      systemBlocksOnCall(0)[0].content,
+    )
     expect(systemBlocksOnCall(1)[0].providerOptions).toEqual(
       systemBlocksOnCall(0)[0].providerOptions,
     )
@@ -1014,7 +1120,11 @@ describe('generateMessage — prompt cache breakpoint', () => {
     // THE-160's instruction is appended after the category block. Moving it
     // into the cached prefix would be a silent prompt change, so its position
     // is pinned rather than left to the reader of the composition code.
-    queueResponses({ body: 'we close at 11', voiceFidelity: 0.9, reasoning: 'r' })
+    queueResponses({
+      body: 'we close at 11',
+      voiceFidelity: 0.9,
+      reasoning: 'r',
+    })
     const r = await generateMessage(makeInput())
     expect(r.ok).toBe(true)
     if (!r.ok) return

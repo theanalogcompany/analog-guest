@@ -3,7 +3,11 @@ import { join } from 'node:path'
 
 import { describe, expect, it } from 'vitest'
 
-import { type HistoryRow, deriveDelivery, groupIntoResponses } from './group-responses'
+import {
+  type HistoryRow,
+  deriveDelivery,
+  groupIntoResponses,
+} from './group-responses'
 
 // Rows arrive from the query ordered created_at DESC, so fixtures are written
 // newest-first to match what the projection actually receives.
@@ -18,7 +22,9 @@ function row(
     id,
     direction,
     body,
-    created_at: new Date(Date.UTC(2026, 7, 8, 12, 0, 0) - minutesAgo * 60_000).toISOString(),
+    created_at: new Date(
+      Date.UTC(2026, 7, 8, 12, 0, 0) - minutesAgo * 60_000,
+    ).toISOString(),
     generation_id: generationId,
     // TAC-394: a sent message by default, so every case below that predates
     // delivery reads as it always did.
@@ -27,7 +33,8 @@ function row(
   }
 }
 
-const group = (rows: readonly HistoryRow[], max: number) => groupIntoResponses(rows, max)
+const group = (rows: readonly HistoryRow[], max: number) =>
+  groupIntoResponses(rows, max)
 
 const bodies = (rows: ReturnType<typeof groupIntoResponses>): string[] =>
   rows.map((r) => r.body)
@@ -35,7 +42,11 @@ const bodies = (rows: ReturnType<typeof groupIntoResponses>): string[] =>
 describe('groupIntoResponses', () => {
   it('returns chronological order (oldest first) for the prompt', () => {
     const out = group(
-      [row('c', 'outbound', 'third', 1), row('b', 'inbound', 'second', 2), row('a', 'outbound', 'first', 3)],
+      [
+        row('c', 'outbound', 'third', 1),
+        row('b', 'inbound', 'second', 2),
+        row('a', 'outbound', 'first', 3),
+      ],
       30,
     )
     expect(bodies(out)).toEqual(['first', 'second', 'third'])
@@ -79,7 +90,10 @@ describe('groupIntoResponses', () => {
 
   it('carries the direction of the grouped rows', () => {
     const out = group(
-      [row('b2', 'outbound', 'b', 1, 'gen-1'), row('b1', 'outbound', 'a', 2, 'gen-1')],
+      [
+        row('b2', 'outbound', 'b', 1, 'gen-1'),
+        row('b1', 'outbound', 'a', 2, 'gen-1'),
+      ],
       30,
     )
     expect(out[0]!.direction).toBe('outbound')
@@ -109,7 +123,11 @@ describe('groupIntoResponses', () => {
   it('treats null generation_id rows as their own responses', () => {
     // This is what makes migration 032 need no backfill.
     const out = group(
-      [row('c', 'outbound', 'c', 1), row('b', 'outbound', 'b', 2), row('a', 'outbound', 'a', 3)],
+      [
+        row('c', 'outbound', 'c', 1),
+        row('b', 'outbound', 'b', 2),
+        row('a', 'outbound', 'a', 3),
+      ],
       30,
     )
     expect(out).toHaveLength(3)
@@ -149,7 +167,13 @@ describe('groupIntoResponses', () => {
     for (let g = 3; g >= 1; g -= 1) {
       for (let b = 3; b >= 1; b -= 1) {
         rows.push(
-          row(`g${g}b${b}`, 'outbound', `g${g}b${b}`, (4 - g) * 10 + (4 - b), `gen-${g}`),
+          row(
+            `g${g}b${b}`,
+            'outbound',
+            `g${g}b${b}`,
+            (4 - g) * 10 + (4 - b),
+            `gen-${g}`,
+          ),
         )
       }
     }
@@ -176,7 +200,11 @@ describe('groupIntoResponses', () => {
 
   it('keeps the MOST RECENT responses when over the cap', () => {
     const out = group(
-      [row('c', 'outbound', 'newest', 1), row('b', 'outbound', 'middle', 2), row('a', 'outbound', 'oldest', 3)],
+      [
+        row('c', 'outbound', 'newest', 1),
+        row('b', 'outbound', 'middle', 2),
+        row('a', 'outbound', 'oldest', 3),
+      ],
       2,
     )
     expect(bodies(out)).toEqual(['middle', 'newest'])
@@ -188,7 +216,10 @@ describe('groupIntoResponses', () => {
 
   it('skips empty bodies when joining', () => {
     const out = group(
-      [row('b2', 'outbound', 'real text', 1, 'gen-1'), row('b1', 'outbound', '', 2, 'gen-1')],
+      [
+        row('b2', 'outbound', 'real text', 1, 'gen-1'),
+        row('b1', 'outbound', '', 2, 'gen-1'),
+      ],
       30,
     )
     expect(bodies(out)).toEqual(['real text'])
@@ -203,10 +234,15 @@ describe('groupIntoResponses', () => {
 // append-only, so a future one that widens the constraint must repoint this at
 // itself, or its new status goes untested.
 const MESSAGE_STATUSES: string[] = (() => {
-  const sql = readFileSync(join(__dirname, '../../db/migrations/001_initial_schema.sql'), 'utf-8')
+  const sql = readFileSync(
+    join(__dirname, '../../db/migrations/001_initial_schema.sql'),
+    'utf-8',
+  )
   const table = sql.slice(sql.indexOf('create table messages'))
   const check = table.slice(table.indexOf('check (status in ('))
-  return [...check.slice(0, check.indexOf('))')).matchAll(/'([a-z_]+)'/g)].map((m) => m[1]!)
+  return [...check.slice(0, check.indexOf('))')).matchAll(/'([a-z_]+)'/g)].map(
+    (m) => m[1]!,
+  )
 })()
 
 type DeliveryRow = Parameters<typeof deriveDelivery>[0]
@@ -236,25 +272,41 @@ describe('deriveDelivery (TAC-394)', () => {
 
   it('has a decision for every status migration 001 permits', () => {
     expect(MESSAGE_STATUSES.length).toBeGreaterThan(0)
-    expect(Object.keys(OUTBOUND_BY_STATUS).sort()).toEqual([...MESSAGE_STATUSES].sort())
+    expect(Object.keys(OUTBOUND_BY_STATUS).sort()).toEqual(
+      [...MESSAGE_STATUSES].sort(),
+    )
   })
 
-  it.each(Object.entries(OUTBOUND_BY_STATUS))('an outbound row at status %s reads %s', (status, expected) => {
-    expect(deriveDelivery(outbound(status, 'auto_sent'))).toBe(expected)
-  })
+  it.each(Object.entries(OUTBOUND_BY_STATUS))(
+    'an outbound row at status %s reads %s',
+    (status, expected) => {
+      expect(deriveDelivery(outbound(status, 'auto_sent'))).toBe(expected)
+    },
+  )
 
   // The incident: a pending draft rendered as sent. review_state is checked
   // before status, so no status value can make a pending row read delivered.
-  it.each(MESSAGE_STATUSES)('a pending draft at status %s reads awaiting_review', (status) => {
-    expect(deriveDelivery(outbound(status, 'pending'))).toBe('awaiting_review')
-  })
+  it.each(MESSAGE_STATUSES)(
+    'a pending draft at status %s reads awaiting_review',
+    (status) => {
+      expect(deriveDelivery(outbound(status, 'pending'))).toBe(
+        'awaiting_review',
+      )
+    },
+  )
 
   // A skip says why the line never arrived, which a failed send must not. A
   // delivered status still wins, because then the guest read it.
-  it.each(MESSAGE_STATUSES)('a skipped draft at status %s reads skipped_by_operator unless delivered', (status) => {
-    const expected = OUTBOUND_BY_STATUS[status] === 'delivered' ? 'delivered' : 'skipped_by_operator'
-    expect(deriveDelivery(outbound(status, 'skipped'))).toBe(expected)
-  })
+  it.each(MESSAGE_STATUSES)(
+    'a skipped draft at status %s reads skipped_by_operator unless delivered',
+    (status) => {
+      const expected =
+        OUTBOUND_BY_STATUS[status] === 'delivered'
+          ? 'delivered'
+          : 'skipped_by_operator'
+      expect(deriveDelivery(outbound(status, 'skipped'))).toBe(expected)
+    },
+  )
 
   // TAC-473. A card answered from the Instagram app keeps `pending_review`, so
   // it reaches the catch-all unless named. Before this it read NEVER SENT, and
@@ -264,36 +316,62 @@ describe('deriveDelivery (TAC-394)', () => {
     'an externally resolved card at status %s reads answered_outside_app unless delivered',
     (status) => {
       const expected =
-        OUTBOUND_BY_STATUS[status] === 'delivered' ? 'delivered' : 'answered_outside_app'
-      expect(deriveDelivery(outbound(status, 'resolved_externally'))).toBe(expected)
+        OUTBOUND_BY_STATUS[status] === 'delivered'
+          ? 'delivered'
+          : 'answered_outside_app'
+      expect(deriveDelivery(outbound(status, 'resolved_externally'))).toBe(
+        expected,
+      )
     },
   )
 
   it('does NOT read an externally resolved card as never_sent', () => {
     // The whole point: nothing failed. Pinned separately so a fallthrough to
     // the catch-all fails here even if the it.each above were ever relaxed.
-    expect(deriveDelivery(outbound('pending_review', 'resolved_externally'))).not.toBe('never_sent')
+    expect(
+      deriveDelivery(outbound('pending_review', 'resolved_externally')),
+    ).not.toBe('never_sent')
   })
 
   it('stranded and failed outbound rows read never_sent, not skipped', () => {
     // The v1 dispatch gap: approved or edited, Sendblue threw, row stranded.
-    expect(deriveDelivery(outbound('pending_review', 'approved'))).toBe('never_sent')
-    expect(deriveDelivery(outbound('pending_review', 'edited'))).toBe('never_sent')
+    expect(deriveDelivery(outbound('pending_review', 'approved'))).toBe(
+      'never_sent',
+    )
+    expect(deriveDelivery(outbound('pending_review', 'edited'))).toBe(
+      'never_sent',
+    )
     expect(deriveDelivery(outbound('failed', 'auto_sent'))).toBe('never_sent')
   })
 
   it('a status nobody mapped reads never_sent, never delivered', () => {
-    expect(deriveDelivery(outbound('some_future_status', null))).toBe('never_sent')
+    expect(deriveDelivery(outbound('some_future_status', null))).toBe(
+      'never_sent',
+    )
   })
 
   it('an inbound row is delivered whatever its other columns say', () => {
-    expect(deriveDelivery({ ...outbound('failed', 'pending'), direction: 'inbound' })).toBe('delivered')
-    expect(deriveDelivery({ ...outbound('failed', 'skipped'), direction: 'inbound' })).toBe('delivered')
+    expect(
+      deriveDelivery({
+        ...outbound('failed', 'pending'),
+        direction: 'inbound',
+      }),
+    ).toBe('delivered')
+    expect(
+      deriveDelivery({
+        ...outbound('failed', 'skipped'),
+        direction: 'inbound',
+      }),
+    ).toBe('delivered')
   })
 })
 
 describe('groupIntoResponses delivery (TAC-394)', () => {
-  const at = (r: HistoryRow, status: string, reviewState: string | null): HistoryRow => ({
+  const at = (
+    r: HistoryRow,
+    status: string,
+    reviewState: string | null,
+  ): HistoryRow => ({
     ...r,
     status,
     review_state: reviewState,
@@ -302,9 +380,22 @@ describe('groupIntoResponses delivery (TAC-394)', () => {
   it('carries each response its delivery, unsent drafts included rather than dropped', () => {
     const out = groupIntoResponses(
       [
-        at(row('draft', 'outbound', "the next one's on us", 1), 'pending_review', 'pending'),
-        at(row('skip', 'outbound', 'an earlier draft', 2), 'pending_review', 'skipped'),
-        row('in', 'inbound', 'the cortado i got this morning was cold and bad', 3),
+        at(
+          row('draft', 'outbound', "the next one's on us", 1),
+          'pending_review',
+          'pending',
+        ),
+        at(
+          row('skip', 'outbound', 'an earlier draft', 2),
+          'pending_review',
+          'skipped',
+        ),
+        row(
+          'in',
+          'inbound',
+          'the cortado i got this morning was cold and bad',
+          3,
+        ),
       ],
       30,
     )
@@ -320,7 +411,11 @@ describe('groupIntoResponses delivery (TAC-394)', () => {
   it('a split response is delivered if any bubble was', () => {
     const out = groupIntoResponses(
       [
-        at(row('b2', 'outbound', 'second', 1, 'gen-1'), 'delivered', 'auto_sent'),
+        at(
+          row('b2', 'outbound', 'second', 1, 'gen-1'),
+          'delivered',
+          'auto_sent',
+        ),
         at(row('b1', 'outbound', 'first', 2, 'gen-1'), 'failed', 'auto_sent'),
       ],
       30,

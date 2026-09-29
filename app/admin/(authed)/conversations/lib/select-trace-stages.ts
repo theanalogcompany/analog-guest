@@ -20,15 +20,15 @@ import type { ApiTraceWithFullDetails } from '@/lib/observability'
 export type TraceObservation = ApiTraceWithFullDetails['observations'][number]
 
 export interface TraceStage {
-  name: string                     // 'context_build' | 'classify' | 'retrieve' | 'retrieve_knowledge' | 'generate' | 'send' | <unknown>
+  name: string // 'context_build' | 'classify' | 'retrieve' | 'retrieve_knowledge' | 'generate' | 'send' | <unknown>
   observation: TraceObservation
-  attempts?: TraceObservation[]    // generate.attempt_N children, ordered by name suffix
+  attempts?: TraceObservation[] // generate.attempt_N children, ordered by name suffix
 }
 
 export interface SelectedTraceStages {
-  rootName: string                 // 'agent.inbound' | 'agent.followup' | other
+  rootName: string // 'agent.inbound' | 'agent.followup' | other
   stages: TraceStage[]
-  other: TraceObservation[]        // top-level observations that don't match any known stage
+  other: TraceObservation[] // top-level observations that don't match any known stage
 }
 
 // retrieve_knowledge sits between retrieve (voice) and generate per the agent
@@ -47,7 +47,9 @@ const KNOWN_STAGE_ORDER = [
 
 const ATTEMPT_PREFIX = 'generate.attempt_'
 
-export function selectTraceStages(trace: ApiTraceWithFullDetails): SelectedTraceStages {
+export function selectTraceStages(
+  trace: ApiTraceWithFullDetails,
+): SelectedTraceStages {
   const observations = trace.observations ?? []
   const byId = new Map<string, TraceObservation>()
   for (const obs of observations) byId.set(obs.id, obs)
@@ -73,8 +75,14 @@ export function selectTraceStages(trace: ApiTraceWithFullDetails): SelectedTrace
       // Sort by numeric suffix so attempt_2 appears after attempt_1 even if
       // observations arrive out of order.
       const attempts = observations
-        .filter((o) => o.parentObservationId === match.id && o.name?.startsWith(ATTEMPT_PREFIX))
-        .sort((a, b) => extractAttemptIndex(a.name) - extractAttemptIndex(b.name))
+        .filter(
+          (o) =>
+            o.parentObservationId === match.id &&
+            o.name?.startsWith(ATTEMPT_PREFIX),
+        )
+        .sort(
+          (a, b) => extractAttemptIndex(a.name) - extractAttemptIndex(b.name),
+        )
       if (attempts.length > 0) stage.attempts = attempts
     }
     stages.push(stage)

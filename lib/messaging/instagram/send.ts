@@ -86,18 +86,27 @@ export type InstagramSendResult =
  * error carrying a 5xx counts too: Meta's own side failed, and it may have
  * accepted the message before it did.
  */
-export function sendOutcomeUnknown(kind: InstagramSendFailureKind, httpStatus: number | null = null): boolean {
-  if (kind === 'timeout' || kind === 'network' || kind === 'malformed_response') return true
+export function sendOutcomeUnknown(
+  kind: InstagramSendFailureKind,
+  httpStatus: number | null = null,
+): boolean {
+  if (kind === 'timeout' || kind === 'network' || kind === 'malformed_response')
+    return true
   return kind === 'graph_error' && httpStatus !== null && httpStatus >= 500
 }
 
 /** The same question, asked of a whole failure result. */
-export function sendResultOutcomeUnknown(result: Extract<InstagramSendResult, { ok: false }>): boolean {
-  const status = result.failure?.reason === 'graph_error' ? result.failure.httpStatus : null
+export function sendResultOutcomeUnknown(
+  result: Extract<InstagramSendResult, { ok: false }>,
+): boolean {
+  const status =
+    result.failure?.reason === 'graph_error' ? result.failure.httpStatus : null
   return sendOutcomeUnknown(result.kind, status)
 }
 
-export function classifySendFailure(failure: GraphFailure): InstagramSendFailureKind {
+export function classifySendFailure(
+  failure: GraphFailure,
+): InstagramSendFailureKind {
   switch (failure.reason) {
     case 'timeout':
       return 'timeout'
@@ -106,12 +115,17 @@ export function classifySendFailure(failure: GraphFailure): InstagramSendFailure
     case 'malformed_response':
       return 'malformed_response'
     case 'graph_error':
-      if (failure.code === GRAPH_CODE_WINDOW_CLOSED && failure.subcode === GRAPH_SUBCODE_WINDOW_CLOSED) {
+      if (
+        failure.code === GRAPH_CODE_WINDOW_CLOSED &&
+        failure.subcode === GRAPH_SUBCODE_WINDOW_CLOSED
+      ) {
         return 'window_closed'
       }
       if (failure.code === GRAPH_CODE_TOKEN_REJECTED) return 'token_rejected'
-      if (failure.code !== null && GRAPH_RATE_LIMIT_CODES.has(failure.code)) return 'rate_limited'
-      if (failure.code === GRAPH_CODE_RECIPIENT_UNAVAILABLE) return 'recipient_unavailable'
+      if (failure.code !== null && GRAPH_RATE_LIMIT_CODES.has(failure.code))
+        return 'rate_limited'
+      if (failure.code === GRAPH_CODE_RECIPIENT_UNAVAILABLE)
+        return 'recipient_unavailable'
       return 'graph_error'
   }
 }
@@ -125,8 +139,10 @@ export async function sendInstagramText(input: {
   token: string
   fetchImpl: FetchLike
 }): Promise<InstagramSendResult> {
-  if (input.text.trim() === '') return { ok: false, kind: 'empty_text', failure: null }
-  if (!fitsInstagramTextCap(input.text)) return { ok: false, kind: 'over_byte_cap', failure: null }
+  if (input.text.trim() === '')
+    return { ok: false, kind: 'empty_text', failure: null }
+  if (!fitsInstagramTextCap(input.text))
+    return { ok: false, kind: 'over_byte_cap', failure: null }
 
   const result = await graphRequest(
     'POST',
@@ -134,18 +150,32 @@ export async function sendInstagramText(input: {
     input.token,
     input.fetchImpl,
     {
-      body: { recipient: { id: input.recipientId }, message: { text: input.text } },
+      body: {
+        recipient: { id: input.recipientId },
+        message: { text: input.text },
+      },
       timeoutMs: INSTAGRAM_SEND_TIMEOUT_MS,
     },
   )
-  if (!result.ok) return { ok: false, kind: classifySendFailure(result.failure), failure: result.failure }
+  if (!result.ok)
+    return {
+      ok: false,
+      kind: classifySendFailure(result.failure),
+      failure: result.failure,
+    }
 
   // The mid is what the echo carries and what messages.provider_message_id
   // holds. A 200 without one cannot be matched to anything, so it is treated
   // as a failure even though Meta may have sent the message.
-  const mid = isRecord(result.value) ? stringOrNull(result.value.message_id) : null
+  const mid = isRecord(result.value)
+    ? stringOrNull(result.value.message_id)
+    : null
   if (mid === null) {
-    return { ok: false, kind: 'malformed_response', failure: { reason: 'malformed_response', httpStatus: 200 } }
+    return {
+      ok: false,
+      kind: 'malformed_response',
+      failure: { reason: 'malformed_response', httpStatus: 200 },
+    }
   }
   return { ok: true, mid }
 }

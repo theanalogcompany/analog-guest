@@ -2,7 +2,12 @@ import { z } from 'zod'
 
 // Order is meaningful: state-bands ranking compares by index ('new' < 'returning'
 // < 'regular' < 'raving_fan'). See lib/recognition/state-bands.ts.
-export const GUEST_STATES = ['new', 'returning', 'regular', 'raving_fan'] as const
+export const GUEST_STATES = [
+  'new',
+  'returning',
+  'regular',
+  'raving_fan',
+] as const
 export type GuestState = (typeof GUEST_STATES)[number]
 
 export type EngagementEventWeights = {
@@ -82,7 +87,9 @@ export const RelationshipStrengthFormulaSchema = z.object({
   multiplierStackingCap: z.number(),
 })
 
-export type RelationshipStrengthFormula = z.infer<typeof RelationshipStrengthFormulaSchema>
+export type RelationshipStrengthFormula = z.infer<
+  typeof RelationshipStrengthFormulaSchema
+>
 
 export const StateThresholdsSchema = z.object({
   schemaVersion: z.literal(1),
@@ -101,12 +108,12 @@ export const DEFAULT_FORMULA: RelationshipStrengthFormula = {
   schemaVersion: 1,
   weights: {
     recency: 0.25,
-    visitFrequency: 0.20,
+    visitFrequency: 0.2,
     engagementEvents: 0.15,
-    moneySpent: 0.10,
-    responseRate: 0.10,
-    percentMenuExplored: 0.10,
-    referrals: 0.10,
+    moneySpent: 0.1,
+    responseRate: 0.1,
+    percentMenuExplored: 0.1,
+    referrals: 0.1,
   },
   multipliers: {
     distance: {
@@ -186,5 +193,4 @@ export type RawSignals = {
 }
 
 export type RecognitionResult<T> =
-  | { ok: true; data: T }
-  | { ok: false; error: string; errorCode?: string }
+  { ok: true; data: T } | { ok: false; error: string; errorCode?: string }

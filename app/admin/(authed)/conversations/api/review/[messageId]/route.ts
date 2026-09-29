@@ -8,7 +8,10 @@ import {
   MESSAGE_REVIEW_SCHEMA_VERSION,
   type MessageReview,
 } from '@/lib/schemas'
-import { dedupeAndAppendAntiPatterns, upsertCorpusEdit } from '@/lib/voice-training'
+import {
+  dedupeAndAppendAntiPatterns,
+  upsertCorpusEdit,
+} from '@/lib/voice-training'
 import { allowsVenue, type VenueScope } from '@/lib/auth/venue-scope'
 
 // PUT /admin/conversations/api/review/[messageId] — capture a per-message
@@ -47,7 +50,8 @@ const PutBodySchema = z.object({
   expectedFailure: z.string().optional(),
 })
 
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
 export const dynamic = 'force-dynamic'
 
@@ -134,7 +138,11 @@ export async function PUT(
 
   // ---- 1. corpus replace (when editedMessage present) ----
   const editedMessage = body.editedMessage?.trim()
-  if (!ingestSuppressed && editedMessage !== undefined && editedMessage.length > 0) {
+  if (
+    !ingestSuppressed &&
+    editedMessage !== undefined &&
+    editedMessage.length > 0
+  ) {
     const sourceRef = `cc-review:${messageId}`
     const result = await upsertCorpusEdit(
       {
@@ -190,10 +198,14 @@ export async function PUT(
     reviewedVia: 'cc_review',
     reviewedAt: new Date().toISOString(),
     ...(body.category !== undefined ? { category: body.category } : {}),
-    ...(body.editedMessage !== undefined ? { editedMessage: body.editedMessage } : {}),
+    ...(body.editedMessage !== undefined
+      ? { editedMessage: body.editedMessage }
+      : {}),
     ...(body.comment !== undefined ? { comment: body.comment } : {}),
     ...(body.rule !== undefined ? { rule: body.rule } : {}),
-    ...(body.expectedFailure !== undefined ? { expectedFailure: body.expectedFailure } : {}),
+    ...(body.expectedFailure !== undefined
+      ? { expectedFailure: body.expectedFailure }
+      : {}),
   }
   const reviewJson = JSON.parse(JSON.stringify(review)) as Json
   const { error: stampErr } = await supabase

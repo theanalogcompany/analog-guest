@@ -19,8 +19,8 @@
  * because the audit workflow runs it without installing dependencies.
  */
 
-import { readFile } from 'node:fs/promises';
-import { run } from './lib/linear-cli.mjs';
+import { readFile } from 'node:fs/promises'
+import { run } from './lib/linear-cli.mjs'
 
 process.exitCode = await run({
   argv: process.argv.slice(2),
@@ -29,4 +29,4 @@ process.exitCode = await run({
   readFile: (path) => readFile(path, 'utf8'),
   stdout: (text) => process.stdout.write(text),
   stderr: (text) => process.stderr.write(text),
-});
+})

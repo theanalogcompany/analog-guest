@@ -87,9 +87,14 @@ function malformed(httpStatus: number): { ok: false; failure: GraphFailure } {
 
 function networkFailure(e: unknown): GraphFailure {
   const name = e instanceof Error ? e.name : typeof e
-  if (name === 'TimeoutError' || name === 'AbortError') return { reason: 'timeout' }
+  if (name === 'TimeoutError' || name === 'AbortError')
+    return { reason: 'timeout' }
   const cause = e instanceof Error && isRecord(e.cause) ? e.cause : null
-  return { reason: 'network', errorName: name, causeCode: cause ? stringOrNull(cause.code) : null }
+  return {
+    reason: 'network',
+    errorName: name,
+    causeCode: cause ? stringOrNull(cause.code) : null,
+  }
 }
 
 /**
@@ -99,7 +104,12 @@ function networkFailure(e: unknown): GraphFailure {
  * app secret is ever in a URL. Meta's documented shape for this one.
  */
 export async function exchangeInstagramCode(
-  input: { code: string; redirectUri: string; appId: string; appSecret: string },
+  input: {
+    code: string
+    redirectUri: string
+    appId: string
+    appSecret: string
+  },
   fetchImpl: FetchLike,
 ): Promise<GraphResult<ShortLivedToken>> {
   const body = new URLSearchParams({
@@ -112,12 +122,15 @@ export async function exchangeInstagramCode(
 
   let response: Response
   try {
-    response = await fetchImpl(`${INSTAGRAM_OAUTH_BASE_URL}/oauth/access_token`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/x-www-form-urlencoded' },
-      body: body.toString(),
-      signal: AbortSignal.timeout(INSTAGRAM_GRAPH_TIMEOUT_MS),
-    })
+    response = await fetchImpl(
+      `${INSTAGRAM_OAUTH_BASE_URL}/oauth/access_token`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/x-www-form-urlencoded' },
+        body: body.toString(),
+        signal: AbortSignal.timeout(INSTAGRAM_GRAPH_TIMEOUT_MS),
+      },
+    )
   } catch (e) {
     return { ok: false, failure: networkFailure(e) }
   }
@@ -138,7 +151,8 @@ export async function exchangeInstagramCode(
         reason: 'graph_error',
         httpStatus: response.status,
         code: typeof error.code === 'number' ? error.code : null,
-        subcode: typeof error.error_subcode === 'number' ? error.error_subcode : null,
+        subcode:
+          typeof error.error_subcode === 'number' ? error.error_subcode : null,
         type: stringOrNull(error.type),
         fbtraceId: stringOrNull(error.fbtrace_id),
       },
@@ -173,11 +187,14 @@ export async function exchangeForLongLivedToken(
 
   let response: Response
   try {
-    response = await fetchImpl(`${INSTAGRAM_GRAPH_ROOT_URL}/access_token?${query.toString()}`, {
-      method: 'GET',
-      headers: { authorization: `Bearer ${input.shortLivedToken}` },
-      signal: AbortSignal.timeout(INSTAGRAM_GRAPH_TIMEOUT_MS),
-    })
+    response = await fetchImpl(
+      `${INSTAGRAM_GRAPH_ROOT_URL}/access_token?${query.toString()}`,
+      {
+        method: 'GET',
+        headers: { authorization: `Bearer ${input.shortLivedToken}` },
+        signal: AbortSignal.timeout(INSTAGRAM_GRAPH_TIMEOUT_MS),
+      },
+    )
   } catch (e) {
     return { ok: false, failure: networkFailure(e) }
   }
@@ -196,7 +213,8 @@ export async function exchangeForLongLivedToken(
         reason: 'graph_error',
         httpStatus: response.status,
         code: typeof error.code === 'number' ? error.code : null,
-        subcode: typeof error.error_subcode === 'number' ? error.error_subcode : null,
+        subcode:
+          typeof error.error_subcode === 'number' ? error.error_subcode : null,
         type: stringOrNull(error.type),
         fbtraceId: stringOrNull(error.fbtrace_id),
       },
@@ -208,9 +226,13 @@ export async function exchangeForLongLivedToken(
   // A missing or nonsensical expires_in must never produce an expiry in the
   // past: that would make a brand new credential look unrecoverable on the
   // refresh job's very first pass.
-  const seconds = typeof parsed.expires_in === 'number' && parsed.expires_in > 0 ? parsed.expires_in : null
+  const seconds =
+    typeof parsed.expires_in === 'number' && parsed.expires_in > 0
+      ? parsed.expires_in
+      : null
   const expiresAt = new Date(
-    input.now.getTime() + (seconds === null ? DEFAULT_LONG_LIVED_MS : seconds * 1000),
+    input.now.getTime() +
+      (seconds === null ? DEFAULT_LONG_LIVED_MS : seconds * 1000),
   )
   return { ok: true, value: { token, expiresAt } }
 }
@@ -236,11 +258,14 @@ export async function refreshInstagramLongLivedToken(
 
   let response: Response
   try {
-    response = await fetchImpl(`${INSTAGRAM_GRAPH_ROOT_URL}/refresh_access_token?${query.toString()}`, {
-      method: 'GET',
-      headers: { authorization: `Bearer ${token}` },
-      signal: AbortSignal.timeout(INSTAGRAM_GRAPH_TIMEOUT_MS),
-    })
+    response = await fetchImpl(
+      `${INSTAGRAM_GRAPH_ROOT_URL}/refresh_access_token?${query.toString()}`,
+      {
+        method: 'GET',
+        headers: { authorization: `Bearer ${token}` },
+        signal: AbortSignal.timeout(INSTAGRAM_GRAPH_TIMEOUT_MS),
+      },
+    )
   } catch (e) {
     return { ok: false, failure: networkFailure(e) }
   }
@@ -259,7 +284,8 @@ export async function refreshInstagramLongLivedToken(
         reason: 'graph_error',
         httpStatus: response.status,
         code: typeof error.code === 'number' ? error.code : null,
-        subcode: typeof error.error_subcode === 'number' ? error.error_subcode : null,
+        subcode:
+          typeof error.error_subcode === 'number' ? error.error_subcode : null,
         type: stringOrNull(error.type),
         fbtraceId: stringOrNull(error.fbtrace_id),
       },
@@ -268,12 +294,18 @@ export async function refreshInstagramLongLivedToken(
 
   const refreshed = stringOrNull(parsed.access_token)
   if (refreshed === null) return malformed(response.status)
-  const seconds = typeof parsed.expires_in === 'number' && parsed.expires_in > 0 ? parsed.expires_in : null
+  const seconds =
+    typeof parsed.expires_in === 'number' && parsed.expires_in > 0
+      ? parsed.expires_in
+      : null
   return {
     ok: true,
     value: {
       token: refreshed,
-      expiresAt: new Date(now.getTime() + (seconds === null ? DEFAULT_LONG_LIVED_MS : seconds * 1000)),
+      expiresAt: new Date(
+        now.getTime() +
+          (seconds === null ? DEFAULT_LONG_LIVED_MS : seconds * 1000),
+      ),
     },
   }
 }
@@ -289,7 +321,12 @@ export async function fetchConnectedAccount(
   token: string,
   fetchImpl: FetchLike,
 ): Promise<GraphResult<ConnectedAccount>> {
-  const result = await graphRequest('GET', '/me?fields=user_id,username', token, fetchImpl)
+  const result = await graphRequest(
+    'GET',
+    '/me?fields=user_id,username',
+    token,
+    fetchImpl,
+  )
   if (!result.ok) return result
   if (!isRecord(result.value)) return malformed(200)
 
@@ -298,7 +335,10 @@ export async function fetchConnectedAccount(
   if (userId === null) return malformed(200)
   // A missing username costs the handle, not the connection: the operator app
   // shows it, nothing routes on it.
-  return { ok: true, value: { userId, username: stringOrNull(result.value.username) } }
+  return {
+    ok: true,
+    value: { userId, username: stringOrNull(result.value.username) },
+  }
 }
 
 /**
@@ -322,8 +362,13 @@ export async function subscribeInstagramWebhooks(
   )
   if (!result.ok) return result
   // Meta answers {"success": true}. Anything else is not a subscription.
-  if (!isRecord(result.value) || result.value.success !== true) return malformed(200)
+  if (!isRecord(result.value) || result.value.success !== true)
+    return malformed(200)
   return { ok: true, value: true }
 }
 
-export { INSTAGRAM_GRAPH_BASE_URL, INSTAGRAM_OAUTH_BASE_URL, INSTAGRAM_GRAPH_ROOT_URL }
+export {
+  INSTAGRAM_GRAPH_BASE_URL,
+  INSTAGRAM_OAUTH_BASE_URL,
+  INSTAGRAM_GRAPH_ROOT_URL,
+}

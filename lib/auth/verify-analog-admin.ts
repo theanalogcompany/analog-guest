@@ -102,10 +102,7 @@ export async function verifyAnalogAdminAccess(
       .eq('id', operatorId)
       .single()
     if (linkedErr) {
-      throw new AuthError(
-        401,
-        `admin flag lookup failed: ${linkedErr.message}`,
-      )
+      throw new AuthError(401, `admin flag lookup failed: ${linkedErr.message}`)
     }
     isAnalogAdmin = linkedRow.is_analog_admin
   }

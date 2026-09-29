@@ -54,10 +54,7 @@
 // apparent omission.
 
 export type DateLanguageKind =
-  | 'year_stated'
-  | 'numeric_date'
-  | 'month_named'
-  | 'person_shaped'
+  'year_stated' | 'numeric_date' | 'month_named' | 'person_shaped'
 
 export interface DateLanguageMatch {
   kind: DateLanguageKind
@@ -89,8 +86,7 @@ const MONTH_ABBR = 'jan|feb|mar|apr|jun|jul|aug|sept|sep|oct|nov|dec'
 // `person_shaped`, which is the POSITIVE counter. A false positive there makes
 // the after arm look better than it is, which is the one failure a measurement
 // must not be able to produce quietly. A missed "fri" only undercounts a win.
-const WEEKDAYS =
-  'monday|tuesday|wednesday|thursday|friday|saturday|sunday'
+const WEEKDAYS = 'monday|tuesday|wednesday|thursday|friday|saturday|sunday'
 
 const PATTERNS: readonly Pattern[] = [
   // --- year_stated ---------------------------------------------------------
@@ -119,7 +115,10 @@ const PATTERNS: readonly Pattern[] = [
   // "24/7" is excluded outright: it is ordinary café copy about opening hours
   // and it is not a date. A fraction ("1/2 off") can still match; that is rare
   // enough to leave, and the context string makes it obvious on reading.
-  { kind: 'numeric_date', re: /\b(?!24\/7\b)\d{1,2}\/\d{1,2}(?:\/\d{2,4})?\b/g },
+  {
+    kind: 'numeric_date',
+    re: /\b(?!24\/7\b)\d{1,2}\/\d{1,2}(?:\/\d{2,4})?\b/g,
+  },
   // An ordinal day attached to a month, which is the written-out form of the
   // same thing: "September 26th". MONTH-THEN-DAY ONLY — "the 26th of
   // September" reports `month_named` but not `numeric_date`. Left as is

@@ -37,7 +37,12 @@ export type IssueOAuthStateResult = { ok: true } | { ok: false; error: string }
 
 export async function issueInstagramOAuthState(
   supabase: AdminSupabaseClient,
-  input: { nonce: string; venueId: string; operatorId: string; expiresAt: Date },
+  input: {
+    nonce: string
+    venueId: string
+    operatorId: string
+    expiresAt: Date
+  },
 ): Promise<IssueOAuthStateResult> {
   const { error } = await supabase.from('instagram_oauth_states').insert({
     state_nonce: input.nonce,
@@ -82,8 +87,15 @@ export async function claimInstagramOAuthState(
     .select('venue_id, operator_id')
 
   if (error) return { ok: false, reason: 'error', error: error.message }
-  const rows = (data ?? []) as unknown as Array<{ venue_id: string; operator_id: string }>
+  const rows = (data ?? []) as unknown as Array<{
+    venue_id: string
+    operator_id: string
+  }>
   // Zero rows is the replay, the expiry and the unknown nonce all at once.
   if (rows.length !== 1) return { ok: false, reason: 'unclaimable' }
-  return { ok: true, venueId: rows[0].venue_id, operatorId: rows[0].operator_id }
+  return {
+    ok: true,
+    venueId: rows[0].venue_id,
+    operatorId: rows[0].operator_id,
+  }
 }

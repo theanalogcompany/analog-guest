@@ -3,6 +3,7 @@ import {
   captureCommitmentExpired,
   type CommitmentEscalationReason,
 } from '@/lib/analytics/posthog'
+import { logger } from '@/lib/observability/logger'
 import type { GuestCommitmentRow } from '@/lib/schemas/guest-commitment'
 import { escalationDueAt } from './commitment-expiry'
 import { findOpenObligations, markEscalated, markExpired } from './commitments'
@@ -54,7 +55,7 @@ export async function processCommitmentLifecycle(
 
   const scan = await findOpenObligations()
   if (!scan.ok) {
-    console.error(`[cron commitment-lifecycle] scan failed: ${scan.error}`)
+    logger.error(`[cron commitment-lifecycle] scan failed: ${scan.error}`)
     summary.errored += 1
     return summary
   }
@@ -65,7 +66,7 @@ export async function processCommitmentLifecycle(
       await processRow(row, now, summary)
     } catch (e) {
       summary.errored += 1
-      console.error(
+      logger.error(
         `[cron commitment-lifecycle] unexpected failure on commitment=${row.id}: ${e instanceof Error ? e.message : String(e)}`,
       )
     }
@@ -86,7 +87,7 @@ async function processRow(
   const expiresAt = new Date(row.expires_at)
   if (Number.isNaN(expiresAt.getTime())) {
     summary.errored += 1
-    console.error(
+    logger.error(
       `[cron commitment-lifecycle] unparseable expires_at "${row.expires_at}" on commitment=${row.id}; leaving it open`,
     )
     return
@@ -111,7 +112,8 @@ async function processRow(
   // (a GH Actions outage, a deploy gap), the row would arrive here already
   // elapsed and never-surfaced. Without the clause it would expire in
   // silence, which is the exact failure the ticket is named after.
-  const needsEscalation = row.escalated_at === null && (windowPassed || isElapsed)
+  const needsEscalation =
+    row.escalated_at === null && (windowPassed || isElapsed)
 
   let escalatedThisTick = false
 
@@ -119,7 +121,7 @@ async function processRow(
     const result = await markEscalated({ commitmentId: row.id, now })
     if (!result.ok) {
       summary.errored += 1
-      console.error(
+      logger.error(
         `[cron commitment-lifecycle] escalate failed for commitment=${row.id}: ${result.error}`,
       )
       // RETURN, do not fall through to expiry. Expiring a row whose
@@ -172,7 +174,7 @@ async function processRow(
   const expiry = await markExpired({ commitmentId: row.id, now })
   if (!expiry.ok) {
     summary.errored += 1
-    console.error(
+    logger.error(
       `[cron commitment-lifecycle] expire failed for commitment=${row.id}: ${expiry.error}`,
     )
     return

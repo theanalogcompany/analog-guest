@@ -23,7 +23,8 @@ const adminMock = vi.fn(() => ({
     if (table !== 'messages') throw new Error(`unexpected table: ${table}`)
     return {
       select: (columns: string) => ({
-        in: (column: string, ids: string[]) => carrierSelectMock({ columns, column, ids }),
+        in: (column: string, ids: string[]) =>
+          carrierSelectMock({ columns, column, ids }),
       }),
     }
   },
@@ -82,7 +83,10 @@ describe('listPendingQueue', () => {
       ],
       error: null,
     })
-    const result = await listPendingQueue(grantedVenues(['v1']), Date.parse('2026-05-12T21:00:00.000Z'))
+    const result = await listPendingQueue(
+      grantedVenues(['v1']),
+      Date.parse('2026-05-12T21:00:00.000Z'),
+    )
     expect(result.ok).toBe(true)
     if (result.ok) {
       expect(result.drafts).toHaveLength(1)
@@ -254,7 +258,8 @@ describe('listPendingQueue', () => {
     expect(result.drafts).toHaveLength(2)
     expect(result.drafts[0]!.guestPhoneFallback).toBe('')
     expect(result.drafts[1]!.guestPhoneFallback).toBe('+15555550009')
-    for (const d of result.drafts) expect(typeof d.guestPhoneFallback).toBe('string')
+    for (const d of result.drafts)
+      expect(typeof d.guestPhoneFallback).toBe('string')
   })
 
   // -------------------------------------------------------------------------
@@ -296,7 +301,10 @@ describe('listPendingQueue', () => {
     // The acceptance criterion, stated as the Contract states it: always
     // present, null on every draft a correction did not regenerate.
     it('is null on a draft with no replaced text, never undefined', async () => {
-      const draft = await draftFor({ replaced_draft_body: null, replaced_draft_at: null })
+      const draft = await draftFor({
+        replaced_draft_body: null,
+        replaced_draft_at: null,
+      })
       expect(draft.replacedDraft).toBeNull()
       expect('replacedDraft' in draft).toBe(true)
     })
@@ -322,9 +330,24 @@ describe('listPendingQueue', () => {
     // null }`: the Contract promises a string. The persist layer writes both
     // or neither, but that guarantee lives in another file.
     it.each([
-      ['no timestamp', { replaced_draft_body: 'prior text', replaced_draft_at: null }],
-      ['no body', { replaced_draft_body: null, replaced_draft_at: '2026-09-21T16:10:29.000Z' }],
-      ['empty body', { replaced_draft_body: '', replaced_draft_at: '2026-09-21T16:10:29.000Z' }],
+      [
+        'no timestamp',
+        { replaced_draft_body: 'prior text', replaced_draft_at: null },
+      ],
+      [
+        'no body',
+        {
+          replaced_draft_body: null,
+          replaced_draft_at: '2026-09-21T16:10:29.000Z',
+        },
+      ],
+      [
+        'empty body',
+        {
+          replaced_draft_body: '',
+          replaced_draft_at: '2026-09-21T16:10:29.000Z',
+        },
+      ],
     ])('is null when the pair is incomplete (%s)', async (_label, over) => {
       const draft = await draftFor(over)
       expect(draft.replacedDraft).toBeNull()
@@ -424,14 +447,20 @@ describe('listPendingQueue', () => {
       // TAC-401: transcribed from the approved plan on the ticket ([PLAN],
       // section 5) and the ruling comment that confirmed it, never read back
       // out of REVIEW_REASON_LABELS.
-      ['prose_promise_backstop', 'This sounds like a promise to the guest. Your call.'],
+      [
+        'prose_promise_backstop',
+        'This sounds like a promise to the guest. Your call.',
+      ],
       // TAC-513: transcribed from the ruling comment on the ticket
       // (2026-09-21), which approved the stronger of the two options put to
       // Jaipal for prose_cancellation_backstop and the other two as proposed.
       // Never read back out of REVIEW_REASON_LABELS: a table written by
       // reading the map can only confirm the map equals itself, which is how
       // TAC-310 certified a live defect on every green run.
-      ['commitment_cancellation_gated', 'This cancels something already promised. Your call.'],
+      [
+        'commitment_cancellation_gated',
+        'This cancels something already promised. Your call.',
+      ],
       [
         'prose_cancellation_backstop',
         "This tells the guest a promise is cancelled. Nothing here cancels it, so don't send it as written.",
@@ -445,7 +474,10 @@ describe('listPendingQueue', () => {
       ],
       // --- Something outside the draft needs you ---
       ['knowledge_gap', "A guest asked something I don't have an answer for."],
-      ['knowledge_gap_backstop', "I wasn't sure this was true, so I didn't send it."],
+      [
+        'knowledge_gap_backstop',
+        "I wasn't sure this was true, so I didn't send it.",
+      ],
       ['grounding_check_failed', "I couldn't finish checking this one."],
       // TAC-424, transcribed from the 2026-09-21 ruling comment on the ticket,
       // not read back out of REVIEW_REASON_LABELS.
@@ -455,21 +487,36 @@ describe('listPendingQueue', () => {
       ],
       // TAC-401: the sibling of the line above, and deliberately a separate
       // sentence from prose_promise_backstop's — nothing was caught here.
-      ['prose_promise_check_failed', "I couldn't check this one for a promise."],
+      [
+        'prose_promise_check_failed',
+        "I couldn't check this one for a promise.",
+      ],
       // TAC-513: the sibling of the line above, and a separate sentence for
       // the same reason — nothing was caught here, the check did not complete.
-      ['prose_cancellation_check_failed', "I couldn't check this one for a cancellation."],
+      [
+        'prose_cancellation_check_failed',
+        "I couldn't check this one for a cancellation.",
+      ],
       ['hold_all_outbound', "You're holding everything here right now."],
       // The TAC-361 defect. Previously 'Complaint needs your call' — an
       // explicit entry, not a fallthrough — which reached the operator on a
       // welcome reply to "Hi Himanshu!" with no complaint anywhere in it.
       // TAC-397: transcribed from the same 2026-09-22 ruling. Same discipline
       // as the row above.
-      ['category_requires_approval', 'Replies like this one always come to you.'],
+      [
+        'category_requires_approval',
+        'Replies like this one always come to you.',
+      ],
       // --- The draft came out wrong ---
       ['model_flagged', 'Something felt off about this one.'],
-      ['self_talk_detected', 'I was talking about myself instead of to the guest.'],
-      ['unverified_url', "Has a link we couldn't verify. Check it before sending."],
+      [
+        'self_talk_detected',
+        'I was talking about myself instead of to the guest.',
+      ],
+      [
+        'unverified_url',
+        "Has a link we couldn't verify. Check it before sending.",
+      ],
       // TAC-363, copy approved verbatim (2026-09-22) with two edits from the
       // version put to Jaipal: "coming over" became "coming in", and the
       // backstop quotes 'come on over' so the phrase reads as the thing the
@@ -499,7 +546,10 @@ describe('listPendingQueue', () => {
       // fails here instead of shipping a card that falls back to
       // 'Needs review' and loses the only line telling the operator the send
       // may have gone through.
-      [INSTAGRAM_SEND_FAILED_REVIEW_REASON, "This reply didn't send on Instagram. Check the thread before sending it again."],
+      [
+        INSTAGRAM_SEND_FAILED_REVIEW_REASON,
+        "This reply didn't send on Instagram. Check the thread before sending it again.",
+      ],
       // --- You're mid-thread with this guest ---
       // TAC-397: transcribed from the 2026-09-22 ruling comment on the
       // ticket, which approved this wording verbatim. Never read back out of
@@ -524,17 +574,20 @@ describe('listPendingQueue', () => {
       ['gibberish_unknown_code', 'Needs review'],
     ]
 
-    it.each(COPY_TABLE)('maps review_reason %s to %s', async (raw, expected) => {
-      rpcMock.mockResolvedValue({
-        data: [{ ...baseRow, review_reason: raw }],
-        error: null,
-      })
-      const result = await listPendingQueue(grantedVenues(['v1']))
-      expect(result.ok).toBe(true)
-      if (result.ok) {
-        expect(result.drafts[0]!.reviewReason).toBe(expected)
-      }
-    })
+    it.each(COPY_TABLE)(
+      'maps review_reason %s to %s',
+      async (raw, expected) => {
+        rpcMock.mockResolvedValue({
+          data: [{ ...baseRow, review_reason: raw }],
+          error: null,
+        })
+        const result = await listPendingQueue(grantedVenues(['v1']))
+        expect(result.ok).toBe(true)
+        if (result.ok) {
+          expect(result.drafts[0]!.reviewReason).toBe(expected)
+        }
+      },
+    )
 
     // TAC-364. The `it.each` above claims completeness, and until this guard
     // nothing enforced it: `tsc` forces copy to EXIST for a new trigger (the
@@ -580,7 +633,9 @@ describe('listPendingQueue', () => {
 
     it('covers every key in REVIEW_REASON_LABELS — no copy ships unchecked', () => {
       const covered = new Set(COPY_TABLE.map(([code]) => code))
-      const missing = _REVIEW_REASON_KEYS_FOR_TESTS.filter((k) => !covered.has(k))
+      const missing = _REVIEW_REASON_KEYS_FOR_TESTS.filter(
+        (k) => !covered.has(k),
+      )
       expect(missing).toEqual([])
     })
 
@@ -648,7 +703,12 @@ describe('listPendingQueue', () => {
     it("reviewReasonCode is '' — never null — when review_reason is null", async () => {
       rpcMock.mockResolvedValue({
         data: [
-          { ...baseRow, review_reason: null, review_triggers: null, ungrounded_claims: null },
+          {
+            ...baseRow,
+            review_reason: null,
+            review_triggers: null,
+            ungrounded_claims: null,
+          },
         ],
         error: null,
       })
@@ -724,9 +784,17 @@ describe('listPendingQueue', () => {
         // a re-sort of either array fails. A `forEach` comparing
         // `reviewTriggerLabels[i]` to itself would be a tautology, and a bare
         // length check passes any permutation.
-        expect(d.reviewTriggers.map((code, i) => [code, d.reviewTriggerLabels[i]])).toEqual([
-          ['fidelity_below_auto_send_floor', "This doesn't sound enough like you."],
-          ['commitment_type_gated', 'This commits you to something. Your call.'],
+        expect(
+          d.reviewTriggers.map((code, i) => [code, d.reviewTriggerLabels[i]]),
+        ).toEqual([
+          [
+            'fidelity_below_auto_send_floor',
+            "This doesn't sound enough like you.",
+          ],
+          [
+            'commitment_type_gated',
+            'This commits you to something. Your call.',
+          ],
           ['gibberish_unknown_code', 'Needs review'],
         ])
       }
@@ -742,7 +810,10 @@ describe('listPendingQueue', () => {
           {
             ...baseRow,
             review_reason: 'commitment_type_gated',
-            review_triggers: ['fidelity_below_auto_send_floor', 'commitment_type_gated'],
+            review_triggers: [
+              'fidelity_below_auto_send_floor',
+              'commitment_type_gated',
+            ],
             ungrounded_claims: null,
           },
         ],
@@ -754,9 +825,9 @@ describe('listPendingQueue', () => {
         const d = result.drafts[0]!
         expect(d.reviewTriggers).toContain(d.reviewReasonCode)
         // And the subtraction the client is expected to perform works.
-        expect(d.reviewTriggers.filter((t) => t !== d.reviewReasonCode)).toEqual([
-          'fidelity_below_auto_send_floor',
-        ])
+        expect(
+          d.reviewTriggers.filter((t) => t !== d.reviewReasonCode),
+        ).toEqual(['fidelity_below_auto_send_floor'])
       }
     })
 
@@ -777,7 +848,9 @@ describe('listPendingQueue', () => {
       if (result.ok) {
         expect(result.drafts[0]!.reviewTriggers).toEqual([])
         expect(result.drafts[0]!.reviewTriggerLabels).toEqual([])
-        expect(result.drafts[0]!.reviewReason).toBe('Something felt off about this one.')
+        expect(result.drafts[0]!.reviewReason).toBe(
+          'Something felt off about this one.',
+        )
       }
     })
 
@@ -895,7 +968,7 @@ describe('listPendingQueue', () => {
 
     // Transcribed from the Contract's example: one guest, a comp card and a
     // conversation card, each reporting 1.
-    it('carries the count on both of a guest\'s cards', async () => {
+    it("carries the count on both of a guest's cards", async () => {
       rpcMock.mockResolvedValue({
         data: [
           {
@@ -916,14 +989,19 @@ describe('listPendingQueue', () => {
       const result = await listPendingQueue(grantedVenues(['v1']))
       expect(result.ok).toBe(true)
       if (!result.ok) return
-      expect(result.drafts.map((d) => [d.messageId, d.otherPendingDraftsForGuest])).toEqual([
+      expect(
+        result.drafts.map((d) => [d.messageId, d.otherPendingDraftsForGuest]),
+      ).toEqual([
         ['11111111-1111-4111-8111-111111111111', 1],
         ['22222222-2222-4222-8222-222222222222', 1],
       ])
     })
 
     it('is 0 when the guest has no other card', async () => {
-      rpcMock.mockResolvedValue({ data: [{ ...baseRow, other_pending_for_guest: 0 }], error: null })
+      rpcMock.mockResolvedValue({
+        data: [{ ...baseRow, other_pending_for_guest: 0 }],
+        error: null,
+      })
       const result = await listPendingQueue(grantedVenues(['v1']))
       expect(result.ok && result.drafts[0]!.otherPendingDraftsForGuest).toBe(0)
     })
@@ -979,7 +1057,10 @@ describe('listPendingQueue', () => {
 
     async function draftFor(over: Record<string, unknown> = {}) {
       rpcMock.mockResolvedValue({ data: [{ ...igRow, ...over }], error: null })
-      const result = await listPendingQueue(grantedVenues(['v1']), Date.parse('2026-09-23T12:00:00.000Z'))
+      const result = await listPendingQueue(
+        grantedVenues(['v1']),
+        Date.parse('2026-09-23T12:00:00.000Z'),
+      )
       expect(result.ok).toBe(true)
       if (!result.ok) throw new Error('unreachable')
       return result.drafts[0]!
@@ -1025,7 +1106,10 @@ describe('listPendingQueue', () => {
     // The guest here HAS a phone number, so a guest-derived channel would say
     // 'text' and this fixture is the only shape that separates the two.
     it('reads the DRAFT ROW channel, not one derived from the guest', async () => {
-      const draft = await draftFor({ guest_channel: 'instagram', guest_phone: '+15551110001' })
+      const draft = await draftFor({
+        guest_channel: 'instagram',
+        guest_phone: '+15551110001',
+      })
       expect(draft.guestChannel).toBe('instagram')
     })
 
@@ -1042,7 +1126,9 @@ describe('listPendingQueue', () => {
     })
 
     it('computes the deadline from Meta clock plus 24 hours, with no margin subtracted', async () => {
-      const draft = await draftFor({ last_guest_action_at: '2026-09-23T09:12:03.000Z' })
+      const draft = await draftFor({
+        last_guest_action_at: '2026-09-23T09:12:03.000Z',
+      })
       expect(draft.replyWindowExpiresAt).toBe('2026-09-24T09:12:03.000Z')
     })
 
@@ -1053,7 +1139,9 @@ describe('listPendingQueue', () => {
     })
 
     it('does not clamp a window that has already closed', async () => {
-      const draft = await draftFor({ last_guest_action_at: '2026-09-20T09:12:03.000Z' })
+      const draft = await draftFor({
+        last_guest_action_at: '2026-09-20T09:12:03.000Z',
+      })
       expect(draft.replyWindowExpiresAt).toBe('2026-09-21T09:12:03.000Z')
     })
 
@@ -1131,9 +1219,18 @@ describe('listPendingQueue: what approving creates (TAC-527)', () => {
     vi.restoreAllMocks()
   })
 
-  function withCarrier(carrier: unknown, reviewReason = 'prose_promise_backstop') {
+  function withCarrier(
+    carrier: unknown,
+    reviewReason = 'prose_promise_backstop',
+  ) {
     rpcMock.mockResolvedValue({
-      data: [{ ...baseRow, review_reason: reviewReason, review_triggers: [reviewReason] }],
+      data: [
+        {
+          ...baseRow,
+          review_reason: reviewReason,
+          review_triggers: [reviewReason],
+        },
+      ],
       error: null,
     })
     carrierSelectMock.mockResolvedValue({
@@ -1144,30 +1241,43 @@ describe('listPendingQueue: what approving creates (TAC-527)', () => {
 
   const APPROVED = [
     ['comp', 'Approving this comps a replacement gulab jamun. Your call.'],
-    ['hold', 'Approving this sets aside a replacement gulab jamun for them. Your call.'],
+    [
+      'hold',
+      'Approving this sets aside a replacement gulab jamun for them. Your call.',
+    ],
     [
       'discount',
       'Approving this promises a discount on a replacement gulab jamun. Your call.',
     ],
   ] as const
 
-  it.each(APPROVED)('names what a %s carrier will create', async (type, expected) => {
-    withCarrier({ type, description: 'a replacement gulab jamun', code: 'G1H2', expiresAt: null })
-    const result = await listPendingQueue(grantedVenues(['v1']))
-    expect(result.ok).toBe(true)
-    if (!result.ok) return
-    expect(result.drafts[0]!.reviewReason).toBe(expected)
-    // Index-aligned with the codes, so the secondary chip says the same thing
-    // the primary label does rather than contradicting it.
-    expect(result.drafts[0]!.reviewTriggerLabels).toEqual([expected])
-  })
+  it.each(APPROVED)(
+    'names what a %s carrier will create',
+    async (type, expected) => {
+      withCarrier({
+        type,
+        description: 'a replacement gulab jamun',
+        code: 'G1H2',
+        expiresAt: null,
+      })
+      const result = await listPendingQueue(grantedVenues(['v1']))
+      expect(result.ok).toBe(true)
+      if (!result.ok) return
+      expect(result.drafts[0]!.reviewReason).toBe(expected)
+      // Index-aligned with the codes, so the secondary chip says the same thing
+      // the primary label does rather than contradicting it.
+      expect(result.drafts[0]!.reviewTriggerLabels).toEqual([expected])
+    },
+  )
 
   it('keeps the TAC-401 wording when the check flagged a promise it could not name', async () => {
     withCarrier(null)
     const result = await listPendingQueue(grantedVenues(['v1']))
     expect(result.ok).toBe(true)
     if (!result.ok) return
-    expect(result.drafts[0]!.reviewReason).toBe('This sounds like a promise to the guest. Your call.')
+    expect(result.drafts[0]!.reviewReason).toBe(
+      'This sounds like a promise to the guest. Your call.',
+    )
   })
 
   // The residual, both ways round. With no carrier the operator is told
@@ -1184,7 +1294,12 @@ describe('listPendingQueue: what approving creates (TAC-527)', () => {
 
   it('drops the creates-nothing suffix when the regex hold DOES carry something', async () => {
     withCarrier(
-      { type: 'comp', description: 'a replacement gulab jamun', code: 'G1H2', expiresAt: null },
+      {
+        type: 'comp',
+        description: 'a replacement gulab jamun',
+        code: 'G1H2',
+        expiresAt: null,
+      },
       'comp_regex_backstop',
     )
     const result = await listPendingQueue(grantedVenues(['v1']))
@@ -1193,7 +1308,9 @@ describe('listPendingQueue: what approving creates (TAC-527)', () => {
     expect(result.drafts[0]!.reviewReason).toBe(
       "This sounds like it's offering something on the house.",
     )
-    expect(result.drafts[0]!.reviewReason).not.toContain("won't create anything")
+    expect(result.drafts[0]!.reviewReason).not.toContain(
+      "won't create anything",
+    )
   })
 
   // THE INTERPOLATION GUARD. The no-em-dash invariant above runs the STATIC
@@ -1246,24 +1363,38 @@ describe('listPendingQueue: what approving creates (TAC-527)', () => {
   // prose.
   it('leaves commitment_type_gated alone even when a carrier resolved', async () => {
     withCarrier(
-      { type: 'comp', description: 'a replacement gulab jamun', code: 'G1H2', expiresAt: null },
+      {
+        type: 'comp',
+        description: 'a replacement gulab jamun',
+        code: 'G1H2',
+        expiresAt: null,
+      },
       'commitment_type_gated',
     )
     const result = await listPendingQueue(grantedVenues(['v1']))
     expect(result.ok).toBe(true)
     if (!result.ok) return
-    expect(result.drafts[0]!.reviewReason).toBe('This commits you to something. Your call.')
+    expect(result.drafts[0]!.reviewReason).toBe(
+      'This commits you to something. Your call.',
+    )
     expect(result.drafts[0]!.reviewReason).not.toContain('Approving this')
   })
 
   // A recommendation costs the venue nothing and has no sentence here, so the
   // card falls back rather than inventing one.
   it('falls back to static copy for a recommendation carrier', async () => {
-    withCarrier({ type: 'recommendation', description: 'the cortado', code: null, expiresAt: null })
+    withCarrier({
+      type: 'recommendation',
+      description: 'the cortado',
+      code: null,
+      expiresAt: null,
+    })
     const result = await listPendingQueue(grantedVenues(['v1']))
     expect(result.ok).toBe(true)
     if (!result.ok) return
-    expect(result.drafts[0]!.reviewReason).toBe('This sounds like a promise to the guest. Your call.')
+    expect(result.drafts[0]!.reviewReason).toBe(
+      'This sounds like a promise to the guest. Your call.',
+    )
   })
 
   // Found in code review. The test above uses prose_promise_backstop, where the
@@ -1274,7 +1405,12 @@ describe('listPendingQueue: what approving creates (TAC-527)', () => {
   // leaves `open`, so the card was false about a row that does create something.
   it('does NOT claim nothing will be created when the row carries a recommendation', async () => {
     withCarrier(
-      { type: 'recommendation', description: 'the cortado', code: null, expiresAt: null },
+      {
+        type: 'recommendation',
+        description: 'the cortado',
+        code: null,
+        expiresAt: null,
+      },
       'comp_regex_backstop',
     )
     const result = await listPendingQueue(grantedVenues(['v1']))
@@ -1283,7 +1419,9 @@ describe('listPendingQueue: what approving creates (TAC-527)', () => {
     expect(result.drafts[0]!.reviewReason).toBe(
       "This sounds like it's offering something on the house.",
     )
-    expect(result.drafts[0]!.reviewReason).not.toContain("won't create anything")
+    expect(result.drafts[0]!.reviewReason).not.toContain(
+      "won't create anything",
+    )
   })
 
   // Same reasoning one step further in: an OBLIGATION carrier whose description
@@ -1310,7 +1448,12 @@ describe('listPendingQueue: what approving creates (TAC-527)', () => {
   // fires on.
   it('falls back to static copy when a prose-promise description sanitizes to nothing', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
-    withCarrier({ type: 'comp', description: '\u2014 \u2013', code: 'G1H2', expiresAt: null })
+    withCarrier({
+      type: 'comp',
+      description: '\u2014 \u2013',
+      code: 'G1H2',
+      expiresAt: null,
+    })
     const result = await listPendingQueue(grantedVenues(['v1']))
     expect(result.ok).toBe(true)
     if (!result.ok) return
@@ -1361,14 +1504,19 @@ describe('listPendingQueue: what approving creates (TAC-527)', () => {
       ],
       error: null,
     })
-    carrierSelectMock.mockResolvedValue({ data: null, error: { message: 'connection reset' } })
+    carrierSelectMock.mockResolvedValue({
+      data: null,
+      error: { message: 'connection reset' },
+    })
 
     const result = await listPendingQueue(grantedVenues(['v1']))
 
     expect(result.ok).toBe(true)
     if (!result.ok) return
     expect(result.drafts).toHaveLength(1)
-    expect(result.drafts[0]!.reviewReason).toBe('This sounds like a promise to the guest. Your call.')
+    expect(result.drafts[0]!.reviewReason).toBe(
+      'This sounds like a promise to the guest. Your call.',
+    )
     warn.mockRestore()
   })
 
@@ -1378,7 +1526,9 @@ describe('listPendingQueue: what approving creates (TAC-527)', () => {
     const result = await listPendingQueue(grantedVenues(['v1']))
     expect(result.ok).toBe(true)
     if (!result.ok) return
-    expect(result.drafts[0]!.reviewReason).toBe('This sounds like a promise to the guest. Your call.')
+    expect(result.drafts[0]!.reviewReason).toBe(
+      'This sounds like a promise to the guest. Your call.',
+    )
     warn.mockRestore()
   })
 
@@ -1402,7 +1552,6 @@ describe('listPendingQueue: what approving creates (TAC-527)', () => {
     })
   })
 })
-
 
 // TAC-534: the guest message each draft is answering, projected onto the card.
 //
@@ -1447,7 +1596,10 @@ describe('listPendingQueue: the replied-to message (TAC-534)', () => {
 
   async function draftFor(over: Record<string, unknown> = {}) {
     rpcMock.mockResolvedValue({ data: [{ ...baseRow, ...over }], error: null })
-    const result = await listPendingQueue(grantedVenues(['v1']), Date.parse('2026-09-23T18:12:00.000Z'))
+    const result = await listPendingQueue(
+      grantedVenues(['v1']),
+      Date.parse('2026-09-23T18:12:00.000Z'),
+    )
     expect(result.ok).toBe(true)
     if (!result.ok) throw new Error('unreachable')
     return result.drafts[0]!
@@ -1479,9 +1631,24 @@ describe('listPendingQueue: the replied-to message (TAC-534)', () => {
   it('carries the body when the replied-to message is OUTSIDE recentContext', async () => {
     const draft = await draftFor({
       recent_context: [
-        { id: 'm-3', direction: 'inbound', body: 'do you have a loyalty program?', createdAt: '2026-09-23T18:09:00.000Z' },
-        { id: 'm-2', direction: 'inbound', body: 'do you have any events coming up in november?', createdAt: '2026-09-23T18:08:00.000Z' },
-        { id: 'm-1', direction: 'outbound', body: '3pm on Sundays', createdAt: '2026-09-23T18:07:00.000Z' },
+        {
+          id: 'm-3',
+          direction: 'inbound',
+          body: 'do you have a loyalty program?',
+          createdAt: '2026-09-23T18:09:00.000Z',
+        },
+        {
+          id: 'm-2',
+          direction: 'inbound',
+          body: 'do you have any events coming up in november?',
+          createdAt: '2026-09-23T18:08:00.000Z',
+        },
+        {
+          id: 'm-1',
+          direction: 'outbound',
+          body: '3pm on Sundays',
+          createdAt: '2026-09-23T18:07:00.000Z',
+        },
       ],
     })
     expect(draft.recentContext.map((e) => e.id)).toEqual(['m-3', 'm-2', 'm-1'])
@@ -1539,10 +1706,13 @@ describe('listPendingQueue: the replied-to message (TAC-534)', () => {
     ['an empty timestamp', { replying_to_created_at: '' }],
     ['no id but a body', { reply_to_message_id: null }],
     ['an empty id', { reply_to_message_id: '' }],
-  ])('degrades to null rather than emitting a half-object: %s', async (_label, over) => {
-    const draft = await draftFor(over)
-    expect(draft.replyingTo).toBeNull()
-  })
+  ])(
+    'degrades to null rather than emitting a half-object: %s',
+    async (_label, over) => {
+      const draft = await draftFor(over)
+      expect(draft.replyingTo).toBeNull()
+    },
+  )
 
   // The symptom on the card is `replyingTo: null`, which is exactly what a
   // proactive card looks like, so the degrade has to say something or a
@@ -1557,7 +1727,12 @@ describe('listPendingQueue: the replied-to message (TAC-534)', () => {
     await draftFor({ replying_to_created_at: null })
     expect(spy).toHaveBeenCalledTimes(1)
     const rendered = spy.mock.calls
-      .map((args) => formatWithOptions({ depth: null, maxStringLength: null, maxArrayLength: null }, ...args))
+      .map((args) =>
+        formatWithOptions(
+          { depth: null, maxStringLength: null, maxArrayLength: null },
+          ...args,
+        ),
+      )
       .join('\n')
     expect(rendered).toContain('d-1')
     expect(rendered).toContain('hasBody')
@@ -1568,7 +1743,11 @@ describe('listPendingQueue: the replied-to message (TAC-534)', () => {
 
   it('does not log when there is simply nothing to reply to', async () => {
     const spy = vi.spyOn(console, 'error').mockImplementation(() => {})
-    await draftFor({ reply_to_message_id: null, replying_to_body: null, replying_to_created_at: null })
+    await draftFor({
+      reply_to_message_id: null,
+      replying_to_body: null,
+      replying_to_created_at: null,
+    })
     expect(spy).not.toHaveBeenCalled()
     spy.mockRestore()
   })
@@ -1587,10 +1766,15 @@ describe('listPendingQueue: the replied-to message (TAC-534)', () => {
       ],
       error: null,
     })
-    const result = await listPendingQueue(grantedVenues(['v1']), Date.parse('2026-09-23T18:12:00.000Z'))
+    const result = await listPendingQueue(
+      grantedVenues(['v1']),
+      Date.parse('2026-09-23T18:12:00.000Z'),
+    )
     expect(result.ok).toBe(true)
     if (!result.ok) throw new Error('unreachable')
-    expect(result.drafts.map((d) => [d.messageId, d.replyingTo?.body ?? null])).toEqual([
+    expect(
+      result.drafts.map((d) => [d.messageId, d.replyingTo?.body ?? null]),
+    ).toEqual([
       ['d-1', 'do you have oat milk for any drink?'],
       ['d-2', null],
     ])

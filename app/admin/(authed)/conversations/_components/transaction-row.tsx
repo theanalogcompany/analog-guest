@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import { differenceInCalendarDays } from 'date-fns'
 import { formatInTimeZone } from 'date-fns-tz'
+import { logger } from '@/lib/observability/logger'
 import {
   buildItemsPreview,
   formatPosProvider,
@@ -46,7 +47,12 @@ interface TransactionRowProps {
   onDeleted?: () => void
 }
 
-export function TransactionRow({ tx, venueTimezone, now, onDeleted }: TransactionRowProps) {
+export function TransactionRow({
+  tx,
+  venueTimezone,
+  now,
+  onDeleted,
+}: TransactionRowProps) {
   const ticket = parseTicket(tx.rawData)
   const dateLabel = formatTransactionDate(tx.occurredAt, venueTimezone, now)
   const deletable = tx.source === 'guest_reported'
@@ -55,7 +61,9 @@ export function TransactionRow({ tx, venueTimezone, now, onDeleted }: Transactio
     // Non-clickable; null raw_data has nothing meaningful to expand into.
     return (
       <div className="flex items-baseline gap-3 px-1 py-1.5 text-sm">
-        <span className="text-ink-soft tabular-nums shrink-0 w-[124px]">{dateLabel}</span>
+        <span className="text-ink-soft tabular-nums shrink-0 w-[124px]">
+          {dateLabel}
+        </span>
         <span className="flex-1 truncate text-ink-faint italic">—</span>
         <span className="text-ink-soft tabular-nums shrink-0 w-[64px] text-right">
           {formatItemCount(tx.itemCount)}
@@ -65,7 +73,9 @@ export function TransactionRow({ tx, venueTimezone, now, onDeleted }: Transactio
         </span>
         {/* No chevron column — preserve column alignment with a spacer. */}
         <span className="w-3 shrink-0" aria-hidden />
-        {deletable ? <DeleteButton transactionId={tx.id} onDeleted={onDeleted} /> : null}
+        {deletable ? (
+          <DeleteButton transactionId={tx.id} onDeleted={onDeleted} />
+        ) : null}
       </div>
     )
   }
@@ -89,7 +99,13 @@ interface ExpandableProps {
   onDeleted?: () => void
 }
 
-function TransactionRowExpandable({ tx, ticket, dateLabel, deletable, onDeleted }: ExpandableProps) {
+function TransactionRowExpandable({
+  tx,
+  ticket,
+  dateLabel,
+  deletable,
+  onDeleted,
+}: ExpandableProps) {
   const [open, setOpen] = useState(false)
   const itemsPreview = buildItemsPreview(ticket.lineItems)
 
@@ -102,7 +118,9 @@ function TransactionRowExpandable({ tx, ticket, dateLabel, deletable, onDeleted 
           className="flex flex-1 items-baseline gap-3 text-left cursor-pointer hover:bg-white/30 rounded transition-colors -mx-1 px-1"
           aria-expanded={open}
         >
-          <span className="text-ink-soft tabular-nums shrink-0 w-[124px]">{dateLabel}</span>
+          <span className="text-ink-soft tabular-nums shrink-0 w-[124px]">
+            {dateLabel}
+          </span>
           <span className="flex-1 truncate text-ink-soft">{itemsPreview}</span>
           <span className="text-ink-soft tabular-nums shrink-0 w-[64px] text-right">
             {formatItemCount(tx.itemCount ?? ticket.lineItems.length)}
@@ -118,7 +136,9 @@ function TransactionRowExpandable({ tx, ticket, dateLabel, deletable, onDeleted 
             {open ? '▾' : '▸'}
           </span>
         </button>
-        {deletable ? <DeleteButton transactionId={tx.id} onDeleted={onDeleted} /> : null}
+        {deletable ? (
+          <DeleteButton transactionId={tx.id} onDeleted={onDeleted} />
+        ) : null}
       </div>
 
       {open ? <TicketDetail ticket={ticket} /> : null}
@@ -142,14 +162,25 @@ function DeleteButton({
   const [deleting, setDeleting] = useState(false)
 
   async function handleDelete() {
-    if (!window.confirm('Delete this guest-reported order? This cannot be undone.')) return
+    if (
+      !window.confirm(
+        'Delete this guest-reported order? This cannot be undone.',
+      )
+    )
+      return
     setDeleting(true)
     try {
-      const res = await fetch(`/admin/conversations/api/transactions/${transactionId}`, {
-        method: 'DELETE',
-      })
+      const res = await fetch(
+        `/admin/conversations/api/transactions/${transactionId}`,
+        {
+          method: 'DELETE',
+        },
+      )
       if (!res.ok) {
-        console.error('[transaction-row] delete failed', { transactionId, status: res.status })
+        logger.error('[transaction-row] delete failed', {
+          transactionId,
+          status: res.status,
+        })
         window.alert('Delete failed — see console for details.')
         return
       }
@@ -174,8 +205,11 @@ function DeleteButton({
 
 function TicketDetail({ ticket }: { ticket: ParsedTicket }) {
   const subtotalLabel =
-    ticket.subtotalCents !== null ? `subtotal $${formatDollars(ticket.subtotalCents)}` : null
-  const tipLabel = ticket.tipCents !== null ? `tip $${formatDollars(ticket.tipCents)}` : null
+    ticket.subtotalCents !== null
+      ? `subtotal $${formatDollars(ticket.subtotalCents)}`
+      : null
+  const tipLabel =
+    ticket.tipCents !== null ? `tip $${formatDollars(ticket.tipCents)}` : null
   const footerLeft = [subtotalLabel, tipLabel].filter(Boolean).join(' · ')
 
   // Card last four: `card ···{1234}`. Include payment_method label only when
@@ -196,13 +230,17 @@ function TicketDetail({ ticket }: { ticket: ParsedTicket }) {
         >
           Ticket {ticket.ticketId ?? '—'}
         </span>
-        <span className="text-xs text-ink-soft">{formatPosProvider(ticket.posProvider)}</span>
+        <span className="text-xs text-ink-soft">
+          {formatPosProvider(ticket.posProvider)}
+        </span>
       </div>
 
       <div className="flex flex-col gap-1 text-sm">
         {ticket.lineItems.map((item, i) => (
           <div key={`${i}-${item.name}`} className="flex items-baseline gap-3">
-            <span className="text-ink-faint tabular-nums shrink-0 w-7">{item.quantity}×</span>
+            <span className="text-ink-faint tabular-nums shrink-0 w-7">
+              {item.quantity}×
+            </span>
             <span className="flex-1 text-ink">{item.name}</span>
             <span className="text-ink tabular-nums shrink-0">
               {item.unitPriceCents !== null
@@ -218,7 +256,9 @@ function TicketDetail({ ticket }: { ticket: ParsedTicket }) {
           <HairlineDivider />
           <div className="flex items-baseline justify-between gap-3 text-xs text-ink-soft">
             <span className="tabular-nums">{footerLeft}</span>
-            {paymentLabel ? <span className="tabular-nums">{paymentLabel}</span> : null}
+            {paymentLabel ? (
+              <span className="tabular-nums">{paymentLabel}</span>
+            ) : null}
           </div>
         </>
       ) : null}

@@ -46,8 +46,14 @@ describe('PATCH /admin/venues/api/mechanics/[mechanicId]', () => {
   })
 
   it('200 on a valid partial patch', async () => {
-    vi.mocked(editMechanic).mockResolvedValue({ ok: true, mechanicId: MECHANIC_ID })
-    const res = await PATCH(buildRequest({ minState: 'raving_fan' }), buildParams())
+    vi.mocked(editMechanic).mockResolvedValue({
+      ok: true,
+      mechanicId: MECHANIC_ID,
+    })
+    const res = await PATCH(
+      buildRequest({ minState: 'raving_fan' }),
+      buildParams(),
+    )
     expect(res.status).toBe(200)
     expect(editMechanic).toHaveBeenCalledWith({
       mechanicId: MECHANIC_ID,
@@ -67,7 +73,10 @@ describe('PATCH /admin/venues/api/mechanics/[mechanicId]', () => {
       error: 'redemptionWindowDays must be set when renewable',
       errorCode: 'invalid_after_merge',
     })
-    const res = await PATCH(buildRequest({ redemptionPolicy: 'renewable' }), buildParams())
+    const res = await PATCH(
+      buildRequest({ redemptionPolicy: 'renewable' }),
+      buildParams(),
+    )
     expect(res.status).toBe(400)
   })
 
@@ -84,7 +93,10 @@ describe('PATCH /admin/venues/api/mechanics/[mechanicId]', () => {
   it('passes through 404 from auth helper', async () => {
     vi.mocked(requireMechanicAdmin).mockResolvedValue({
       ok: false,
-      response: NextResponse.json({ error: 'mechanic not found' }, { status: 404 }),
+      response: NextResponse.json(
+        { error: 'mechanic not found' },
+        { status: 404 },
+      ),
     })
     const res = await PATCH(buildRequest({ name: 'New name' }), buildParams())
     expect(res.status).toBe(404)
@@ -103,7 +115,10 @@ describe('DELETE /admin/venues/api/mechanics/[mechanicId]', () => {
   })
 
   it('200 on successful deactivate', async () => {
-    vi.mocked(deactivateMechanic).mockResolvedValue({ ok: true, mechanicId: MECHANIC_ID })
+    vi.mocked(deactivateMechanic).mockResolvedValue({
+      ok: true,
+      mechanicId: MECHANIC_ID,
+    })
     const res = await DELETE(buildRequest(), buildParams())
     expect(res.status).toBe(200)
     const json = await res.json()
@@ -124,7 +139,10 @@ describe('DELETE /admin/venues/api/mechanics/[mechanicId]', () => {
   it('passes through 403 from auth helper', async () => {
     vi.mocked(requireMechanicAdmin).mockResolvedValue({
       ok: false,
-      response: NextResponse.json({ error: 'venue not allowed' }, { status: 403 }),
+      response: NextResponse.json(
+        { error: 'venue not allowed' },
+        { status: 403 },
+      ),
     })
     const res = await DELETE(buildRequest(), buildParams())
     expect(res.status).toBe(403)

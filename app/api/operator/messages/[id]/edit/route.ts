@@ -39,7 +39,8 @@ import { SOURCE_REF_PREFIXES } from '@/lib/voice-training/channels'
 import { upsertCorpusEdit } from '@/lib/voice-training'
 import type { Json } from '@/db/types'
 
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
 const ParamsSchema = z.object({ id: z.string().regex(UUID_RE) })
 const BodySchema = z.object({
@@ -86,7 +87,10 @@ export const POST = withOperatorAuth<{ id: string }>(
         case 'message_not_found':
           return NextResponse.json({ error: 'not found' }, { status: 404 })
         case 'opted_out':
-          return NextResponse.json({ error: 'guest opted out' }, { status: 422 })
+          return NextResponse.json(
+            { error: 'guest opted out' },
+            { status: 422 },
+          )
         // TAC-309: nothing to send. Either a knowledge-gap card the operator
         // hasn't written yet, or a blank edit. 422 rather than the default
         // 500, because this is a user-actionable refusal and the Contract
@@ -147,7 +151,10 @@ export const POST = withOperatorAuth<{ id: string }>(
         venueId: result.venueId,
         sourceRef,
         editedMessage: editedBody,
-        tags: ['operator_approve', ...(result.category ? [result.category] : [])],
+        tags: [
+          'operator_approve',
+          ...(result.category ? [result.category] : []),
+        ],
       },
       'replace',
     )
@@ -191,14 +198,18 @@ export const POST = withOperatorAuth<{ id: string }>(
 
     const before = result.originalBody.length
     const after = editedBody.length
-    const deltaPct = before === 0 ? 0 : Math.round(((after - before) / before) * 100)
+    const deltaPct =
+      before === 0 ? 0 : Math.round(((after - before) / before) * 100)
 
     await captureOperatorMessageEdited({
       venueId: result.venueId,
       guestId: result.guestId,
       messageId: result.messageId,
       operatorId: operator.operatorId,
-      timeToActionMs: Math.max(0, Date.now() - new Date(result.createdAt).getTime()),
+      timeToActionMs: Math.max(
+        0,
+        Date.now() - new Date(result.createdAt).getTime(),
+      ),
       voiceFidelity: result.voiceFidelity,
       category: result.category,
       recognitionState: null,

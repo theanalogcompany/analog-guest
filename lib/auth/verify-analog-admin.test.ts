@@ -64,10 +64,11 @@ function makeSupabaseMock(opts: {
         // Both code paths read from operators. Bearer uses adminFlagResult
         // (reads only is_analog_admin); session uses operatorsResult (reads
         // id + is_analog_admin). Tests pass whichever is relevant.
-        const result = opts.operatorsResult ?? opts.adminFlagResult ?? {
-          data: null,
-          error: null,
-        }
+        const result = opts.operatorsResult ??
+          opts.adminFlagResult ?? {
+            data: null,
+            error: null,
+          }
         return makeBuilder(result)
       }
       if (table === 'operator_venues') {
@@ -114,7 +115,9 @@ describe('verifyAnalogAdminRequest (bearer)', () => {
     vi.mocked(verifyOperatorRequest).mockRejectedValue(
       new AuthError(401, 'invalid or expired token'),
     )
-    await expect(verifyAnalogAdminRequest(emptyRequest())).rejects.toMatchObject({
+    await expect(
+      verifyAnalogAdminRequest(emptyRequest()),
+    ).rejects.toMatchObject({
       status: 401,
       message: 'invalid or expired token',
     })
@@ -130,7 +133,9 @@ describe('verifyAnalogAdminRequest (bearer)', () => {
     })
     vi.mocked(createAdminClient).mockReturnValue(mock as never)
 
-    await expect(verifyAnalogAdminRequest(emptyRequest())).rejects.toMatchObject({
+    await expect(
+      verifyAnalogAdminRequest(emptyRequest()),
+    ).rejects.toMatchObject({
       status: 403,
       message: 'not an analog admin',
     })
@@ -146,7 +151,9 @@ describe('verifyAnalogAdminRequest (bearer)', () => {
     })
     vi.mocked(createAdminClient).mockReturnValue(mock as never)
 
-    await expect(verifyAnalogAdminRequest(emptyRequest())).rejects.toMatchObject({
+    await expect(
+      verifyAnalogAdminRequest(emptyRequest()),
+    ).rejects.toMatchObject({
       status: 401,
       message: expect.stringContaining('admin flag lookup failed'),
     })

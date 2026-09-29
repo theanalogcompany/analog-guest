@@ -11,7 +11,9 @@ const mocks = vi.hoisted(() => ({
   createAdminClient: vi.fn(),
   captureWebhookSilence: vi.fn(),
 }))
-vi.mock('@/lib/db/admin', () => ({ createAdminClient: mocks.createAdminClient }))
+vi.mock('@/lib/db/admin', () => ({
+  createAdminClient: mocks.createAdminClient,
+}))
 vi.mock('@/lib/analytics/posthog', () => ({
   captureWebhookSilence: mocks.captureWebhookSilence,
   WEBHOOK_SILENCE_THRESHOLD_HOURS: 24,
@@ -25,12 +27,18 @@ type Filter = [method: string, column: string, value: unknown]
  * query, and returns `newestInbound` only if the filters would really select
  * it, so a query that drops the channel filter reads the Instagram row.
  */
-function fakeDb(rows: Array<{ created_at: string; channel: string; direction: string }>) {
+function fakeDb(
+  rows: Array<{ created_at: string; channel: string; direction: string }>,
+) {
   const messageFilters: Filter[] = []
   const client = {
     from(table: string) {
       if (table === 'venues') {
-        return { select: () => ({ eq: async () => ({ data: [{ id: 'venue-1' }], error: null }) }) }
+        return {
+          select: () => ({
+            eq: async () => ({ data: [{ id: 'venue-1' }], error: null }),
+          }),
+        }
       }
       const chain = {
         select: () => chain,
@@ -47,9 +55,17 @@ function fakeDb(rows: Array<{ created_at: string; channel: string; direction: st
         maybeSingle: async () => {
           const eqs = messageFilters.filter(([m]) => m === 'eq')
           const match = rows
-            .filter((row) => eqs.every(([, column, value]) => (row as Record<string, unknown>)[column] === value))
+            .filter((row) =>
+              eqs.every(
+                ([, column, value]) =>
+                  (row as Record<string, unknown>)[column] === value,
+              ),
+            )
             .sort((a, b) => b.created_at.localeCompare(a.created_at))[0]
-          return { data: match ? { created_at: match.created_at } : null, error: null }
+          return {
+            data: match ? { created_at: match.created_at } : null,
+            error: null,
+          }
         },
       }
       return chain
@@ -59,7 +75,8 @@ function fakeDb(rows: Array<{ created_at: string; channel: string; direction: st
 }
 
 const NOW = new Date('2026-09-18T12:00:00.000Z')
-const hoursAgo = (h: number): string => new Date(NOW.getTime() - h * 3_600_000).toISOString()
+const hoursAgo = (h: number): string =>
+  new Date(NOW.getTime() - h * 3_600_000).toISOString()
 
 beforeEach(() => {
   vi.useFakeTimers({ toFake: ['Date'] })
@@ -80,9 +97,14 @@ describe('GET /api/cron/webhook-silence', () => {
     ])
     mocks.createAdminClient.mockReturnValue(db.client)
 
-    const res = await GET(new Request('http://localhost/api/cron/webhook-silence'))
+    const res = await GET(
+      new Request('http://localhost/api/cron/webhook-silence'),
+    )
 
-    expect(await res.json()).toMatchObject({ ok: true, hoursWithoutWebhook: 30 })
+    expect(await res.json()).toMatchObject({
+      ok: true,
+      hoursWithoutWebhook: 30,
+    })
     expect(mocks.captureWebhookSilence).toHaveBeenCalledWith({
       hoursWithoutWebhook: 30,
       lastWebhookAt: hoursAgo(30),
@@ -91,7 +113,9 @@ describe('GET /api/cron/webhook-silence', () => {
   })
 
   it('stays quiet while text messages keep arriving', async () => {
-    const db = fakeDb([{ created_at: hoursAgo(2), channel: 'text', direction: 'inbound' }])
+    const db = fakeDb([
+      { created_at: hoursAgo(2), channel: 'text', direction: 'inbound' },
+    ])
     mocks.createAdminClient.mockReturnValue(db.client)
 
     await GET(new Request('http://localhost/api/cron/webhook-silence'))

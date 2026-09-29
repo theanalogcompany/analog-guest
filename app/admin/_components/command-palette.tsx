@@ -39,7 +39,9 @@ const CommandPaletteContext = createContext<CommandPaletteApi | null>(null)
 export function useCommandPalette(): CommandPaletteApi {
   const ctx = useContext(CommandPaletteContext)
   if (!ctx) {
-    throw new Error('useCommandPalette must be used within CommandPaletteProvider')
+    throw new Error(
+      'useCommandPalette must be used within CommandPaletteProvider',
+    )
   }
   return ctx
 }
@@ -64,7 +66,10 @@ export function CommandPaletteProvider({ children }: { children: ReactNode }) {
     router.push(href)
   }
 
-  const api = useMemo<CommandPaletteApi>(() => ({ open: () => setOpen(true) }), [])
+  const api = useMemo<CommandPaletteApi>(
+    () => ({ open: () => setOpen(true) }),
+    [],
+  )
 
   return (
     <CommandPaletteContext.Provider value={api}>

@@ -20,7 +20,9 @@ vi.mock('@/lib/analytics/posthog', () => ({
 }))
 // TAC-540 code review. The transport is mocked so ONE test can exercise the
 // default wiring; every other test injects `sendAction` and never reaches it.
-vi.mock('./sender-actions', () => ({ sendInstagramSenderAction: vi.fn(async () => ({ ok: true })) }))
+vi.mock('./sender-actions', () => ({
+  sendInstagramSenderAction: vi.fn(async () => ({ ok: true })),
+}))
 
 import { captureInstagramSenderActionFailed } from '@/lib/analytics/posthog'
 import { sendInstagramSenderAction } from './sender-actions'
@@ -42,14 +44,23 @@ function venueRow(status: string | null): FakeRow {
 function stubDeps(over: Partial<MarkSeenDeps> = {}) {
   const loadTarget = vi.fn(async () => ({
     ok: true as const,
-    target: { accountId: ACCOUNT_ID, recipientId: IGSID, token: TOKEN, tokenSource: 'env' as const },
+    target: {
+      accountId: ACCOUNT_ID,
+      recipientId: IGSID,
+      token: TOKEN,
+      tokenSource: 'env' as const,
+    },
   }))
   const sendAction = vi.fn(async () => ({ ok: true as const }))
   return { deps: { loadTarget, sendAction, ...over }, loadTarget, sendAction }
 }
 
 function dbWith(venue: FakeRow) {
-  const fake = createInstagramDbFake({ venues: [venue], guests: [], messages: [] })
+  const fake = createInstagramDbFake({
+    venues: [venue],
+    guests: [],
+    messages: [],
+  })
   return { supabase: fake.client, fake }
 }
 
@@ -60,11 +71,16 @@ describe('a live venue', () => {
       const { supabase } = dbWith(venueRow(status))
       const { deps, loadTarget, sendAction } = stubDeps()
 
-      expect(await markInboundSeen(supabase, TARGET, deps)).toEqual({ status: 'sent' })
+      expect(await markInboundSeen(supabase, TARGET, deps)).toEqual({
+        status: 'sent',
+      })
       // WHICH venue and guest, not merely that something was asked. A stub
       // that ignored its arguments would let the call site pass the wrong id
       // and still pass this test — the mutant token-stub.ts documents.
-      expect(loadTarget).toHaveBeenCalledWith({ venueId: VENUE_ID, guestId: GUEST_ID })
+      expect(loadTarget).toHaveBeenCalledWith({
+        venueId: VENUE_ID,
+        guestId: GUEST_ID,
+      })
       expect(sendAction).toHaveBeenCalledWith({
         accountId: ACCOUNT_ID,
         recipientId: IGSID,
@@ -132,23 +148,33 @@ describe('the failure directions', () => {
     ['token_missing'],
     ['token_unreadable'],
     ['lookup_failed'],
-  ])('does not send when the send target is unresolvable (%s)', async (problem) => {
-    const { supabase } = dbWith(venueRow('active'))
-    const { deps, sendAction } = stubDeps({
-      loadTarget: vi.fn(async () => ({ ok: false as const, problem: problem as never })),
-    })
+  ])(
+    'does not send when the send target is unresolvable (%s)',
+    async (problem) => {
+      const { supabase } = dbWith(venueRow('active'))
+      const { deps, sendAction } = stubDeps({
+        loadTarget: vi.fn(async () => ({
+          ok: false as const,
+          problem: problem as never,
+        })),
+      })
 
-    expect(await markInboundSeen(supabase, TARGET, deps)).toEqual({
-      status: 'no_send_target',
-      problem,
-    })
-    expect(sendAction).not.toHaveBeenCalled()
-  })
+      expect(await markInboundSeen(supabase, TARGET, deps)).toEqual({
+        status: 'no_send_target',
+        problem,
+      })
+      expect(sendAction).not.toHaveBeenCalled()
+    },
+  )
 
   it('captures a failed send, and returns rather than throwing', async () => {
     const { supabase } = dbWith(venueRow('active'))
     const { deps } = stubDeps({
-      sendAction: vi.fn(async () => ({ ok: false as const, kind: 'token_rejected' as const, failure: null as never })),
+      sendAction: vi.fn(async () => ({
+        ok: false as const,
+        kind: 'token_rejected' as const,
+        failure: null as never,
+      })),
     })
 
     expect(await markInboundSeen(supabase, TARGET, deps)).toEqual({
@@ -199,7 +225,11 @@ describe('what reaches a log line', () => {
     try {
       const { supabase } = dbWith(venueRow('active'))
       const { deps } = stubDeps({
-        sendAction: vi.fn(async () => ({ ok: false as const, kind: 'rate_limited' as const, failure: null as never })),
+        sendAction: vi.fn(async () => ({
+          ok: false as const,
+          kind: 'rate_limited' as const,
+          failure: null as never,
+        })),
       })
       await markInboundSeen(supabase, TARGET, deps)
 
@@ -238,7 +268,9 @@ describe('the default wiring', () => {
     const { deps } = stubDeps()
 
     // Only loadTarget is injected: sendAction comes from defaultDeps.
-    expect(await markInboundSeen(supabase, TARGET, { loadTarget: deps.loadTarget })).toEqual({
+    expect(
+      await markInboundSeen(supabase, TARGET, { loadTarget: deps.loadTarget }),
+    ).toEqual({
       status: 'sent',
     })
     expect(sendInstagramSenderAction).toHaveBeenCalledWith({

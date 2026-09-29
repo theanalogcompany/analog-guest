@@ -14,10 +14,15 @@
 
 const TIMESTAMP_RE = /^(\d{4}-\d{2}-\d{2})T(\d{2}):(\d{2})/
 
-export function buildTimestampedTabName(prefix: string, runDateIso: string): string {
+export function buildTimestampedTabName(
+  prefix: string,
+  runDateIso: string,
+): string {
   const m = TIMESTAMP_RE.exec(runDateIso)
   if (!m) {
-    throw new Error(`buildTimestampedTabName: runDateIso "${runDateIso}" is not a recognizable ISO timestamp`)
+    throw new Error(
+      `buildTimestampedTabName: runDateIso "${runDateIso}" is not a recognizable ISO timestamp`,
+    )
   }
   return `${prefix} ${m[1]} ${m[2]}-${m[3]}`
 }
@@ -35,8 +40,14 @@ function escapeRegExp(s: string): string {
  * in chronological order (fixed-width, zero-padded) with no Date parsing
  * needed; the oldest excess tabs (beyond `keep`, from the front) are returned.
  */
-export function selectTabsToDelete(existingTitles: readonly string[], prefix: string, keep: number): string[] {
-  const re = new RegExp(`^${escapeRegExp(prefix)} \\d{4}-\\d{2}-\\d{2} \\d{2}-\\d{2}$`)
+export function selectTabsToDelete(
+  existingTitles: readonly string[],
+  prefix: string,
+  keep: number,
+): string[] {
+  const re = new RegExp(
+    `^${escapeRegExp(prefix)} \\d{4}-\\d{2}-\\d{2} \\d{2}-\\d{2}$`,
+  )
   const matching = [...existingTitles].filter((t) => re.test(t)).sort()
   if (matching.length <= keep) return []
   return matching.slice(0, matching.length - keep)

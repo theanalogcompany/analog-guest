@@ -29,7 +29,10 @@ import {
   KNOWLEDGE_RETRIEVE_LIMIT,
   retrieveKnowledgeStage,
 } from '@/lib/agent/stages'
-import { mergeKnowledgeMatches, type MergeRule } from '@/lib/agent/retrieval-context'
+import {
+  mergeKnowledgeMatches,
+  type MergeRule,
+} from '@/lib/agent/retrieval-context'
 import { retrieveContext } from '@/lib/rag'
 import type { MessageCategory } from '@/lib/ai/types'
 import type { KnowledgeMatch, RuntimeContext } from '@/lib/agent/types'
@@ -79,7 +82,11 @@ async function runArm(
   arm: string,
 ): Promise<{ result: ArmResult; rows: KnowledgeMatch[] }> {
   try {
-    const rows = await retrieveKnowledgeStage(minimalCtx(venueId), f.category, queryForArm(f, arm))
+    const rows = await retrieveKnowledgeStage(
+      minimalCtx(venueId),
+      f.category,
+      queryForArm(f, arm),
+    )
     return {
       rows,
       result: {
@@ -88,7 +95,10 @@ async function runArm(
       },
     }
   } catch (e) {
-    return { rows: [], result: { failed: e instanceof Error ? e.message : String(e) } }
+    return {
+      rows: [],
+      result: { failed: e instanceof Error ? e.message : String(e) },
+    }
   }
 }
 
@@ -96,7 +106,10 @@ async function voiceProbe(venueId: string, query: string) {
   const r = await retrieveContext({ venueId, query, limit: VOICE_PROBE_LIMIT })
   if (!r.ok) return { failed: r.error }
   return {
-    top: r.data.length > 0 ? Number(Math.max(...r.data.map((m) => m.similarity)).toFixed(4)) : 0,
+    top:
+      r.data.length > 0
+        ? Number(Math.max(...r.data.map((m) => m.similarity)).toFixed(4))
+        : 0,
     strong: r.data.filter((m) => m.similarity >= 0.3).length,
   }
 }
@@ -104,7 +117,9 @@ async function voiceProbe(venueId: string, query: string) {
 async function main() {
   const args = process.argv.slice(2)
   const mode = readFlag(args, '--mode') ?? 'retrieval'
-  const arms = (readFlag(args, '--arms') ?? 'control').split(',').map((a) => a.trim())
+  const arms = (readFlag(args, '--arms') ?? 'control')
+    .split(',')
+    .map((a) => a.trim())
 
   if (mode === 'e2e') {
     await runBhadraE2E({ reps: Number(readFlag(args, '--reps') ?? '10') })
@@ -118,10 +133,14 @@ async function main() {
     .select('id, slug')
     .eq('slug', VENUE_SLUG)
     .maybeSingle()
-  if (venueErr || !venue) throw new Error(`venue lookup failed: ${venueErr?.message ?? 'not found'}`)
+  if (venueErr || !venue)
+    throw new Error(`venue lookup failed: ${venueErr?.message ?? 'not found'}`)
 
   const raw = JSON.parse(
-    readFileSync(resolve(__dirname, 'fixtures/knowledge-context-retrieval.json'), 'utf8'),
+    readFileSync(
+      resolve(__dirname, 'fixtures/knowledge-context-retrieval.json'),
+      'utf8',
+    ),
   ) as { followUps: Fixture[]; standalone: Fixture[] }
 
   const log = createRunLog({
@@ -131,11 +150,15 @@ async function main() {
       venue: venue.slug,
       venueId: venue.id,
       knowledgeRetrieveLimit: KNOWLEDGE_RETRIEVE_LIMIT,
-      fixtureCounts: { followUps: raw.followUps.length, standalone: raw.standalone.length },
+      fixtureCounts: {
+        followUps: raw.followUps.length,
+        standalone: raw.standalone.length,
+      },
     },
   })
 
-  const tally: Record<string, { hit: number; total: number; failed: number }> = {}
+  const tally: Record<string, { hit: number; total: number; failed: number }> =
+    {}
   const bump = (key: string, hit: boolean, failed: boolean) => {
     tally[key] ??= { hit: 0, total: 0, failed: 0 }
     if (failed) tally[key].failed += 1
@@ -157,30 +180,45 @@ async function main() {
         perArm[arm] = result
         rowsByArm[arm] = rows
         const failed = 'failed' in result
-        bump(`${population}:${arm}`, !failed && result.ids.includes(f.target), failed)
+        bump(
+          `${population}:${arm}`,
+          !failed && result.ids.includes(f.target),
+          failed,
+        )
       }
 
       // Merge every context arm against control, under both rules. A unit
       // whose control or context arm failed is disqualified rather than
       // merged from a half-empty input.
-      const merged: Record<string, { ids: string[]; lostVsControl: string[] }> = {}
-      const controlOk = perArm.control !== undefined && !('failed' in perArm.control)
+      const merged: Record<string, { ids: string[]; lostVsControl: string[] }> =
+        {}
+      const controlOk =
+        perArm.control !== undefined && !('failed' in perArm.control)
       for (const arm of arms.filter((a) => a !== 'control')) {
         const armOk = perArm[arm] !== undefined && !('failed' in perArm[arm])
-        for (const rule of ['best-score', 'interleave'] as const satisfies readonly MergeRule[]) {
+        for (const rule of [
+          'best-score',
+          'interleave',
+        ] as const satisfies readonly MergeRule[]) {
           const key = `${arm}:${rule}`
           if (!controlOk || !armOk) {
             bump(`${population}:${key}`, false, true)
             continue
           }
-          const out = mergeKnowledgeMatches([rowsByArm.control, rowsByArm[arm]], {
-            rule,
-            limit: KNOWLEDGE_RETRIEVE_LIMIT,
-            floor: KNOWLEDGE_RELEVANCE_FLOOR,
-          })
+          const out = mergeKnowledgeMatches(
+            [rowsByArm.control, rowsByArm[arm]],
+            {
+              rule,
+              limit: KNOWLEDGE_RETRIEVE_LIMIT,
+              floor: KNOWLEDGE_RELEVANCE_FLOOR,
+            },
+          )
           const ids = out.map((r) => r.knowledgeCorpusId)
           const controlIds = (perArm.control as { ids: string[] }).ids
-          merged[key] = { ids, lostVsControl: controlIds.filter((c) => !ids.includes(c)) }
+          merged[key] = {
+            ids,
+            lostVsControl: controlIds.filter((c) => !ids.includes(c)),
+          }
           bump(`${population}:${key}`, ids.includes(f.target), false)
         }
       }
@@ -215,7 +253,9 @@ async function main() {
 
   process.stdout.write('\n\n')
   for (const [key, t] of Object.entries(tally)) {
-    console.log(`${key.padEnd(24)} hit ${t.hit}/${t.total}${t.failed > 0 ? `  DISQUALIFIED ${t.failed}` : ''}`)
+    console.log(
+      `${key.padEnd(24)} hit ${t.hit}/${t.total}${t.failed > 0 ? `  DISQUALIFIED ${t.failed}` : ''}`,
+    )
   }
   console.log(`\nrun log: ${log.path}`)
 }

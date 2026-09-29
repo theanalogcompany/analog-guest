@@ -21,22 +21,29 @@ export type InstagramCallbackFailure =
   | 'not_configured'
   | 'storage_failed'
 
-const FAILURE_COPY: Record<InstagramCallbackFailure, { title: string; detail: string }> = {
+const FAILURE_COPY: Record<
+  InstagramCallbackFailure,
+  { title: string; detail: string }
+> = {
   missing_parameters: {
     title: 'That link was incomplete',
-    detail: 'Instagram did not send everything we needed. Start the connection again from the app.',
+    detail:
+      'Instagram did not send everything we needed. Start the connection again from the app.',
   },
   state_invalid: {
     title: 'We could not verify that link',
-    detail: 'It did not come from us, or it was altered on the way. Start the connection again from the app.',
+    detail:
+      'It did not come from us, or it was altered on the way. Start the connection again from the app.',
   },
   state_expired: {
     title: 'That link expired',
-    detail: 'Connection links are good for a few minutes. Start the connection again from the app.',
+    detail:
+      'Connection links are good for a few minutes. Start the connection again from the app.',
   },
   state_already_used: {
     title: 'That link was already used',
-    detail: 'Each connection link works once. Start the connection again from the app.',
+    detail:
+      'Each connection link works once. Start the connection again from the app.',
   },
   account_already_connected: {
     title: 'That Instagram account is already connected',
@@ -45,15 +52,18 @@ const FAILURE_COPY: Record<InstagramCallbackFailure, { title: string; detail: st
   },
   exchange_failed: {
     title: 'Instagram did not complete the connection',
-    detail: 'Nothing was changed. Try again from the app, and if it keeps happening let us know.',
+    detail:
+      'Nothing was changed. Try again from the app, and if it keeps happening let us know.',
   },
   not_configured: {
     title: 'This is not set up yet',
-    detail: 'Connecting Instagram is not configured on our side. Let us know and we will sort it out.',
+    detail:
+      'Connecting Instagram is not configured on our side. Let us know and we will sort it out.',
   },
   storage_failed: {
     title: 'We could not save that connection',
-    detail: 'Nothing was changed. Try again from the app, and if it keeps happening let us know.',
+    detail:
+      'Nothing was changed. Try again from the app, and if it keeps happening let us know.',
   },
 }
 
@@ -88,19 +98,27 @@ export function instagramCallbackSuccessPage(username: string | null): string {
   // The handle is the one value here that comes from Meta. It is rendered
   // only when it matches Instagram's own character set, so nothing arbitrary
   // reaches the markup even though Meta is not an attacker.
-  const safeHandle = username !== null && /^[A-Za-z0-9._]{1,30}$/.test(username) ? username : null
+  const safeHandle =
+    username !== null && /^[A-Za-z0-9._]{1,30}$/.test(username)
+      ? username
+      : null
   const body = safeHandle
     ? `You are connected as @${safeHandle}. You can close this and go back to the app.`
     : 'You are connected. You can close this and go back to the app.'
   return page('Instagram connected', 'Instagram connected', body)
 }
 
-export function instagramCallbackFailurePage(reason: InstagramCallbackFailure): string {
+export function instagramCallbackFailurePage(
+  reason: InstagramCallbackFailure,
+): string {
   const copy = FAILURE_COPY[reason]
   return page('Instagram not connected', copy.title, copy.detail)
 }
 
-export const INSTAGRAM_CALLBACK_FAILURE_STATUS: Record<InstagramCallbackFailure, number> = {
+export const INSTAGRAM_CALLBACK_FAILURE_STATUS: Record<
+  InstagramCallbackFailure,
+  number
+> = {
   missing_parameters: 400,
   state_invalid: 401,
   state_expired: 401,

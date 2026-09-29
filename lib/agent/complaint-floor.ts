@@ -65,9 +65,8 @@ import type { MessageCategory } from '@/lib/ai/types'
  * the regression case that matters most. Adding a category here is a real
  * decision; it widens what gets held from the guest.
  */
-export const FLOOR_CATEGORIES: ReadonlySet<MessageCategory> = new Set<MessageCategory>([
-  'comp_complaint',
-])
+export const FLOOR_CATEGORIES: ReadonlySet<MessageCategory> =
+  new Set<MessageCategory>(['comp_complaint'])
 
 /**
  * First-person forward-commitment grammar.
@@ -109,8 +108,7 @@ export const FORWARD_COMMITMENT_PATTERNS: readonly RegExp[] = [
 ]
 
 export type ForwardCommitmentMatch =
-  | { matched: true; pattern: string }
-  | { matched: false }
+  { matched: true; pattern: string } | { matched: false }
 
 /**
  * Scan a drafted body for first-person forward-commitment grammar. Returns
@@ -134,6 +132,8 @@ export function matchForwardCommitment(body: string): ForwardCommitmentMatch {
  * than an inline Set lookup so the category scope is greppable from the
  * gate and testable independently of the grammar.
  */
-export function isFloorCategory(category: MessageCategory | undefined): boolean {
+export function isFloorCategory(
+  category: MessageCategory | undefined,
+): boolean {
   return category !== undefined && FLOOR_CATEGORIES.has(category)
 }

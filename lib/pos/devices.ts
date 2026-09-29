@@ -25,7 +25,10 @@ export function hashDeviceToken(token: string): string {
 }
 
 /** Constant-time compare of a presented token against the stored hash. */
-export function verifyDeviceToken(presentedToken: string, storedHash: string): boolean {
+export function verifyDeviceToken(
+  presentedToken: string,
+  storedHash: string,
+): boolean {
   const a = Buffer.from(hashDeviceToken(presentedToken))
   const b = Buffer.from(storedHash)
   if (a.length !== b.length) return false
@@ -39,7 +42,9 @@ export function verifyDeviceToken(presentedToken: string, storedHash: string): b
  * payload safely on every poll.
  */
 export function deriveTapToken(transactionId: string, secret: string): string {
-  const sig = createHmac('sha256', secret).update(transactionId).digest('base64url')
+  const sig = createHmac('sha256', secret)
+    .update(transactionId)
+    .digest('base64url')
   return `tt_${sig.slice(0, 32)}`
 }
 

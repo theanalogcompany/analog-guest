@@ -68,13 +68,18 @@ export function extractRecognition(
   // State is metadata on the span output (output.recognitionState) — the
   // span sets it as a top-level scalar, not under content.
   const state =
-    typeof output.recognitionState === 'string' ? output.recognitionState : 'unknown'
+    typeof output.recognitionState === 'string'
+      ? output.recognitionState
+      : 'unknown'
 
   // Score: prefer the explicit field on the span output. Fall back to summing
   // contributions when missing — equivalent by construction (score is the
   // pre-rounding sum of contributions; see lib/recognition/compute-strength.ts).
   let score: number
-  if (typeof output.recognitionScore === 'number' && Number.isFinite(output.recognitionScore)) {
+  if (
+    typeof output.recognitionScore === 'number' &&
+    Number.isFinite(output.recognitionScore)
+  ) {
     score = Math.round(output.recognitionScore)
   } else {
     const sum = signals.reduce((acc, s) => acc + s.contribution, 0)

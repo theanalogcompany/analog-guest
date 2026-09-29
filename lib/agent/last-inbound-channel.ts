@@ -11,7 +11,11 @@
 // read is warned, never thrown: it decides a fallback, not a send.
 
 import { createAdminClient } from '@/lib/db/admin'
-import { parseMessageChannel, type MessageChannel } from '@/lib/schemas/message-channel'
+import { logger } from '@/lib/observability/logger'
+import {
+  parseMessageChannel,
+  type MessageChannel,
+} from '@/lib/schemas/message-channel'
 
 export async function loadLastInboundChannel(
   venueId: string,
@@ -28,11 +32,14 @@ export async function loadLastInboundChannel(
     .limit(1)
     .maybeSingle()
   if (error) {
-    console.warn('[agent] last inbound channel unreadable; falling back to the phone number', {
-      venueId,
-      guestId,
-      error: error.message,
-    })
+    logger.warn(
+      '[agent] last inbound channel unreadable; falling back to the phone number',
+      {
+        venueId,
+        guestId,
+        error: error.message,
+      },
+    )
     return null
   }
   return data ? parseMessageChannel(data.channel) : null

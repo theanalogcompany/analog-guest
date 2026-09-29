@@ -38,6 +38,7 @@
 // commitments under-counts what is actually waiting.
 
 import { createAdminClient } from '@/lib/db/admin'
+import { logger } from '@/lib/observability/logger'
 
 export interface OperatorRecipient {
   id: string
@@ -62,7 +63,7 @@ export async function loadPushRecipients(
     .eq('venue_id', venueId)
     .not('operator.apns_device_token', 'is', null)
   if (error || !data) {
-    console.error(`${options.logPrefix} query failed`, {
+    logger.error(`${options.logPrefix} query failed`, {
       venueId,
       error: error?.message,
     })
@@ -84,7 +85,7 @@ export async function loadPushRecipients(
     // dropped them all (or row.operator was unexpectedly null/array-shaped).
     // recipientCount === 0 with rawRowCount === 0 means no operator is
     // allowlisted for this venue.
-    console.log(options.logPrefix, {
+    logger.info(options.logPrefix, {
       venueId,
       rawRowCount: data.length,
       recipientCount: out.length,
@@ -117,7 +118,9 @@ async function allowedVenueIds(operatorId: string): Promise<string[]> {
  * DRAFTS ONLY — see the header. `countOperatorBadge` is the one that also
  * counts commitments, and the two genuinely disagree.
  */
-export async function countPendingDraftsForOperator(operatorId: string): Promise<number> {
+export async function countPendingDraftsForOperator(
+  operatorId: string,
+): Promise<number> {
   const supabase = createAdminClient()
   const venueIds = await allowedVenueIds(operatorId)
   if (venueIds.length === 0) return 0
@@ -127,7 +130,7 @@ export async function countPendingDraftsForOperator(operatorId: string): Promise
     .eq('review_state', 'pending')
     .in('venue_id', venueIds)
   if (error) {
-    console.error('apns: countPendingForOperator failed', {
+    logger.error('apns: countPendingForOperator failed', {
       operatorId,
       error: error.message,
     })
@@ -160,13 +163,13 @@ export async function countOperatorBadge(operatorId: string): Promise<number> {
       .in('venue_id', venueIds),
   ])
   if (draftsResult.error) {
-    console.error('[apns] commitment countBadgeForOperator drafts failed', {
+    logger.error('[apns] commitment countBadgeForOperator drafts failed', {
       operatorId,
       error: draftsResult.error.message,
     })
   }
   if (commitmentsResult.error) {
-    console.error('[apns] commitment countBadgeForOperator commitments failed', {
+    logger.error('[apns] commitment countBadgeForOperator commitments failed', {
       operatorId,
       error: commitmentsResult.error.message,
     })
@@ -189,7 +192,7 @@ export async function clearOperatorPushToken(
     .update({ apns_device_token: null, apns_token_updated_at: null })
     .eq('id', operatorId)
   if (error) {
-    console.error(options.logPrefix, {
+    logger.error(options.logPrefix, {
       operatorId,
       error: error.message,
     })

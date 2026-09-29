@@ -21,6 +21,7 @@ import {
   WEBHOOK_SILENCE_THRESHOLD_HOURS,
 } from '@/lib/analytics/posthog'
 import { createAdminClient } from '@/lib/db/admin'
+import { logger } from '@/lib/observability/logger'
 
 const HOUR_MS = 60 * 60 * 1000
 
@@ -43,7 +44,7 @@ export async function GET(request: Request): Promise<Response> {
     .select('id')
     .eq('is_test', false)
   if (venuesError) {
-    console.error('cron webhook-silence: venues lookup failed', {
+    logger.error('cron webhook-silence: venues lookup failed', {
       error: venuesError.message,
     })
     return new Response('Internal error', { status: 500 })
@@ -70,7 +71,7 @@ export async function GET(request: Request): Promise<Response> {
     .limit(1)
     .maybeSingle()
   if (msgError) {
-    console.error('cron webhook-silence: messages lookup failed', {
+    logger.error('cron webhook-silence: messages lookup failed', {
       error: msgError.message,
     })
     return new Response('Internal error', { status: 500 })

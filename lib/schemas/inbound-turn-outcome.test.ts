@@ -28,7 +28,14 @@ import {
  */
 
 const MIGRATION = readFileSync(
-  join(__dirname, '..', '..', 'db', 'migrations', '055_inbound_turn_outcomes.sql'),
+  join(
+    __dirname,
+    '..',
+    '..',
+    'db',
+    'migrations',
+    '055_inbound_turn_outcomes.sql',
+  ),
   'utf8',
 )
 
@@ -46,7 +53,14 @@ const MIGRATION = readFileSync(
  * fails loudly on that, which is why it is worth keeping by name.
  */
 const REASON_MIGRATION = readFileSync(
-  join(__dirname, '..', '..', 'db', 'migrations', '064_instagram_scan_arrivals.sql'),
+  join(
+    __dirname,
+    '..',
+    '..',
+    'db',
+    'migrations',
+    '064_instagram_scan_arrivals.sql',
+  ),
   'utf8',
 )
 
@@ -79,7 +93,8 @@ function checkListIn(sql: string, column: string): string[] {
   if (start === -1) throw new Error(`no CHECK list found for column ${column}`)
   const body = sql.slice(start + opener.length)
   const end = body.indexOf('))')
-  if (end === -1) throw new Error(`unterminated CHECK list for column ${column}`)
+  if (end === -1)
+    throw new Error(`unterminated CHECK list for column ${column}`)
   return [...body.slice(0, end).matchAll(/'([^']*)'/g)].map((m) => m[1])
 }
 

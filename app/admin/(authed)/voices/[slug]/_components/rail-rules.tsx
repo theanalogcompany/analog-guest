@@ -4,7 +4,10 @@ import { useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import type { BrandPersona } from '@/lib/schemas'
-import { UNIVERSAL_RULES_DISPLAY, UNIVERSAL_RULES_UNDISPLAYED } from '../_lib/universal-rules'
+import {
+  UNIVERSAL_RULES_DISPLAY,
+  UNIVERSAL_RULES_UNDISPLAYED,
+} from '../_lib/universal-rules'
 import { PatternsBanner } from './patterns-banner'
 import { SourcePill } from './source-pill'
 
@@ -14,7 +17,10 @@ interface RailRulesProps {
   onMutate: () => void
 }
 
-function formatAddedAt(iso: string | undefined, now: Date = new Date()): string {
+function formatAddedAt(
+  iso: string | undefined,
+  now: Date = new Date(),
+): string {
   if (!iso) return '—'
   const t = new Date(iso)
   if (Number.isNaN(t.getTime())) return '—'
@@ -192,7 +198,9 @@ export function RailRules({ venueId, persona, onMutate }: RailRulesProps) {
         <header className="pb-1.5 mb-2 border-b border-stone-light/60">
           <h3 className="text-[10.5px] uppercase font-semibold tracking-eyebrow text-ink">
             Universal · {UNIVERSAL_RULES_DISPLAY.length} shown of{' '}
-            {UNIVERSAL_RULES_DISPLAY.length + UNIVERSAL_RULES_UNDISPLAYED.length} (locked)
+            {UNIVERSAL_RULES_DISPLAY.length +
+              UNIVERSAL_RULES_UNDISPLAYED.length}{' '}
+            (locked)
           </h3>
         </header>
         {UNIVERSAL_RULES_DISPLAY.map((r) => (

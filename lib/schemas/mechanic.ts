@@ -1,5 +1,9 @@
 import { z } from 'zod'
-import { GUEST_STATES, type MechanicType, type RedemptionPolicy } from '@/lib/recognition'
+import {
+  GUEST_STATES,
+  type MechanicType,
+  type RedemptionPolicy,
+} from '@/lib/recognition'
 
 // TAC-343 Stage C: the admin edit-boundary schema for `mechanics` rows.
 // Deliberately separate from parse-venue-spec.ts's onboarding-time
@@ -33,7 +37,10 @@ export const MECHANIC_TYPES = [
   'merch',
 ] as const satisfies readonly MechanicType[]
 
-export const MECHANIC_TRIGGER_TYPES = ['guest_initiated_request', 'manual_invite'] as const
+export const MECHANIC_TRIGGER_TYPES = [
+  'guest_initiated_request',
+  'manual_invite',
+] as const
 export type MechanicTriggerType = (typeof MECHANIC_TRIGGER_TYPES)[number]
 
 export const MECHANIC_REDEMPTION_POLICIES = [
@@ -75,7 +82,8 @@ export type MechanicPatch = z.infer<typeof MechanicPatchSchema>
  * before it ever reaches Postgres.
  */
 export const MechanicFullSchema = MechanicFieldsSchema.refine(
-  (m) => (m.redemptionPolicy === 'renewable') === (m.redemptionWindowDays !== null),
+  (m) =>
+    (m.redemptionPolicy === 'renewable') === (m.redemptionWindowDays !== null),
   {
     message:
       'redemptionWindowDays must be set when redemptionPolicy is renewable, and omitted when one_time',

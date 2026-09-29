@@ -125,7 +125,9 @@ describe('findPendingQuestion — the card filter (TAC-364)', () => {
     }
     // Exactly one leg per reason, plus the pending_until leg — catches a
     // duplicated or stray leg that `toContain` alone would wave through.
-    expect(filter.split(',')).toHaveLength(KNOWLEDGE_GAP_CARD_REVIEW_REASONS.length + 1)
+    expect(filter.split(',')).toHaveLength(
+      KNOWLEDGE_GAP_CARD_REVIEW_REASONS.length + 1,
+    )
   })
 
   it('keeps the clock leg first, so a card with a co-fired label still matches', async () => {
@@ -134,15 +136,20 @@ describe('findPendingQuestion — the card filter (TAC-364)', () => {
     // same turn). Losing it would make the filter label-only, which is the
     // narrower of the two conditions isKnowledgeGapCard ORs together.
     await findPendingQuestion(VENUE, GUEST)
-    expect((orMock.mock.calls[0][0] as string).startsWith('pending_until.not.is.null,')).toBe(
-      true,
-    )
+    expect(
+      (orMock.mock.calls[0][0] as string).startsWith(
+        'pending_until.not.is.null,',
+      ),
+    ).toBe(true)
   })
 })
 
 describe('findPendingQuestion — fail-open (TAC-308)', () => {
   it('returns null rather than throwing when the card lookup errors', async () => {
-    cardMaybeSingle.mockResolvedValue({ data: null, error: { message: 'boom' } })
+    cardMaybeSingle.mockResolvedValue({
+      data: null,
+      error: { message: 'boom' },
+    })
     await expect(findPendingQuestion(VENUE, GUEST)).resolves.toBeNull()
   })
 

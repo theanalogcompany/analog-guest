@@ -44,14 +44,22 @@ export interface TurnClaimsFake extends TurnClaimStore {
   /** Seed a claim directly, bypassing the insert path. */
   seed(row: TurnClaimRow): void
   /** Make the next N operations of `kind` fail, for the fail-open tests. */
-  failNext(kind: 'insert' | 'read' | 'takeOver' | 'delete', times?: number): void
+  failNext(
+    kind: 'insert' | 'read' | 'takeOver' | 'delete',
+    times?: number,
+  ): void
   /** How many times each operation ran. */
   calls: { insert: number; read: number; takeOver: number; delete: number }
 }
 
 export function createTurnClaimsFake(): TurnClaimsFake {
   const table = new Map<string, TurnClaimRow>()
-  const failures: Record<string, number> = { insert: 0, read: 0, takeOver: 0, delete: 0 }
+  const failures: Record<string, number> = {
+    insert: 0,
+    read: 0,
+    takeOver: 0,
+    delete: 0,
+  }
   const calls = { insert: 0, read: 0, takeOver: 0, delete: 0 }
 
   // The yield. Awaiting a resolved promise hands control back to the
@@ -79,7 +87,8 @@ export function createTurnClaimsFake(): TurnClaimsFake {
     async insertClaim(row): Promise<InsertClaimResult> {
       calls.insert += 1
       await yieldToPeers()
-      if (shouldFail('insert')) return { ok: false, error: 'insertClaim: fake failure' }
+      if (shouldFail('insert'))
+        return { ok: false, error: 'insertClaim: fake failure' }
       const key = primaryKeyOf(row)
       // The primary key. A conflicting insert writes NOTHING and reports the
       // violation, exactly as Postgres does.
@@ -91,32 +100,44 @@ export function createTurnClaimsFake(): TurnClaimsFake {
     async readClaim(venueId, guestId): Promise<ReadClaimResult> {
       calls.read += 1
       await yieldToPeers()
-      if (shouldFail('read')) return { ok: false, error: 'readClaim: fake failure' }
+      if (shouldFail('read'))
+        return { ok: false, error: 'readClaim: fake failure' }
       const held = table.get(primaryKeyOf({ venueId, guestId }))
       return { ok: true, claim: held ? { ...held } : null }
     },
 
-    async takeOverClaim({ row, expectedAgentRunId }): Promise<TakeOverClaimResult> {
+    async takeOverClaim({
+      row,
+      expectedAgentRunId,
+    }): Promise<TakeOverClaimResult> {
       calls.takeOver += 1
       await yieldToPeers()
-      if (shouldFail('takeOver')) return { ok: false, error: 'takeOverClaim: fake failure' }
+      if (shouldFail('takeOver'))
+        return { ok: false, error: 'takeOverClaim: fake failure' }
       const key = primaryKeyOf(row)
       const held = table.get(key)
       // The CAS. A holder that changed since the caller read it means another
       // run took over first, and this one must not.
-      if (!held || held.agentRunId !== expectedAgentRunId) return { ok: true, tookOver: false }
+      if (!held || held.agentRunId !== expectedAgentRunId)
+        return { ok: true, tookOver: false }
       table.set(key, { ...row })
       return { ok: true, tookOver: true }
     },
 
-    async deleteClaim({ venueId, guestId, agentRunId }): Promise<DeleteClaimResult> {
+    async deleteClaim({
+      venueId,
+      guestId,
+      agentRunId,
+    }): Promise<DeleteClaimResult> {
       calls.delete += 1
       await yieldToPeers()
-      if (shouldFail('delete')) return { ok: false, error: 'deleteClaim: fake failure' }
+      if (shouldFail('delete'))
+        return { ok: false, error: 'deleteClaim: fake failure' }
       const key = primaryKeyOf({ venueId, guestId })
       const held = table.get(key)
       // Scoped to the holder, as the real DELETE is.
-      if (!held || held.agentRunId !== agentRunId) return { ok: true, deleted: false }
+      if (!held || held.agentRunId !== agentRunId)
+        return { ok: true, deleted: false }
       table.delete(key)
       return { ok: true, deleted: true }
     },

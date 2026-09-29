@@ -2,7 +2,10 @@ import { NextResponse } from 'next/server'
 import { z } from 'zod'
 import { requireKnowledgeEntryAdmin } from '@/lib/auth'
 import { PrimaryTagSchema } from '@/lib/schemas'
-import { editKnowledgeEntry, removeKnowledgeEntry } from '../../../../_lib/knowledge-corpus'
+import {
+  editKnowledgeEntry,
+  removeKnowledgeEntry,
+} from '../../../../_lib/knowledge-corpus'
 
 // PATCH/DELETE /admin/venues/api/knowledge/[entryId] — edit or remove an
 // existing knowledge_corpus row. Mirrors /admin/voices/api/corpus/[entryId].
@@ -16,7 +19,10 @@ const PatchBodySchema = z
     secondaryTags: z.array(z.string()).optional(),
   })
   .refine(
-    (b) => b.content !== undefined || b.primaryTags !== undefined || b.secondaryTags !== undefined,
+    (b) =>
+      b.content !== undefined ||
+      b.primaryTags !== undefined ||
+      b.secondaryTags !== undefined,
     { message: 'pass at least one of content, primaryTags, or secondaryTags' },
   )
 
@@ -58,7 +64,11 @@ export async function PATCH(
   if (!result.ok) {
     const status = result.errorCode === 'embed_failed' ? 502 : 500
     return NextResponse.json(
-      { error: 'knowledge edit failed', detail: result.error, errorCode: result.errorCode },
+      {
+        error: 'knowledge edit failed',
+        detail: result.error,
+        errorCode: result.errorCode,
+      },
       { status },
     )
   }
@@ -81,7 +91,11 @@ export async function DELETE(
   if (!result.ok) {
     const status = result.errorCode === 'not_found' ? 404 : 500
     return NextResponse.json(
-      { error: 'knowledge delete failed', detail: result.error, errorCode: result.errorCode },
+      {
+        error: 'knowledge delete failed',
+        detail: result.error,
+        errorCode: result.errorCode,
+      },
       { status },
     )
   }

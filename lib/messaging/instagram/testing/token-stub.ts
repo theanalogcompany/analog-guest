@@ -7,7 +7,10 @@
 
 import { vi } from 'vitest'
 
-import type { ResolveInstagramTokenResult, InstagramTokenSource } from '../credentials-store'
+import type {
+  ResolveInstagramTokenResult,
+  InstagramTokenSource,
+} from '../credentials-store'
 import type { ResolveInstagramTokenFn } from '../send-target'
 
 /**
@@ -21,7 +24,8 @@ import type { ResolveInstagramTokenFn } from '../send-target'
  * So a test that exercises a call site must assert WHICH venue was asked
  * about, not merely that a token came back.
  */
-export type RecordingResolveToken = ReturnType<typeof vi.fn> & ResolveInstagramTokenFn
+export type RecordingResolveToken = ReturnType<typeof vi.fn> &
+  ResolveInstagramTokenFn
 
 /**
  * Resolves to `token`, or to nothing when it is null (the venue has no
@@ -35,15 +39,16 @@ export function stubResolveToken(
   token: string | null,
   source: InstagramTokenSource = 'env',
 ): RecordingResolveToken {
-  return vi.fn(
-    async (): Promise<ResolveInstagramTokenResult> => ({
-      ok: true,
-      resolved: token === null ? null : { token, source, expiresAt: null },
-    }),
-  ) as RecordingResolveToken
+  return vi.fn(async (): Promise<ResolveInstagramTokenResult> => ({
+    ok: true,
+    resolved: token === null ? null : { token, source, expiresAt: null },
+  })) as RecordingResolveToken
 }
 
 /** The credential read failed, or its ciphertext could not be decrypted. */
 export function failResolveToken(error: string): RecordingResolveToken {
-  return vi.fn(async (): Promise<ResolveInstagramTokenResult> => ({ ok: false, error })) as RecordingResolveToken
+  return vi.fn(async (): Promise<ResolveInstagramTokenResult> => ({
+    ok: false,
+    error,
+  })) as RecordingResolveToken
 }

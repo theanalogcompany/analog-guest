@@ -55,9 +55,7 @@ export default async function VoicePage({ params, searchParams }: PageProps) {
   const data = await loadVoicePage({ slug, selectedGuestId: guest ?? null })
   if (!data) notFound()
 
-  if (
-    !allowsVenue(venueScope, data.venue.id)
-  ) {
+  if (!allowsVenue(venueScope, data.venue.id)) {
     notFound()
   }
 

@@ -4,8 +4,14 @@ import { useRouter } from 'next/navigation'
 import { useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { KnowledgeEntryList, type KnowledgeEntryListRow } from './knowledge-entry-list'
-import { EmptySectionNote, SectionShell } from '@/app/admin/_components/section-shell'
+import {
+  KnowledgeEntryList,
+  type KnowledgeEntryListRow,
+} from './knowledge-entry-list'
+import {
+  EmptySectionNote,
+  SectionShell,
+} from '@/app/admin/_components/section-shell'
 
 // Staff depth lives in chunks, not venue_info (§2: "do not widen
 // venue_info.staff to carry notes"). This section renders the thin roster
@@ -39,11 +45,14 @@ export function TeamSection({
     setBusy(true)
     setError(null)
     try {
-      const res = await fetch(`/admin/venues/api/venues/${venueId}/venue-info`, {
-        method: 'PATCH',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ staff: cleaned }),
-      })
+      const res = await fetch(
+        `/admin/venues/api/venues/${venueId}/venue-info`,
+        {
+          method: 'PATCH',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ staff: cleaned }),
+        },
+      )
       if (!res.ok) {
         const j = await res.json().catch(() => ({}))
         setError((j.detail as string) || (j.error as string) || 'Save failed')
@@ -64,7 +73,12 @@ export function TeamSection({
       subtitle="staff roster, staff_[name] chunks"
       headerAction={
         !editing && (
-          <Button variant="link" size="sm" onClick={startEdit} className="h-auto p-0 text-[11px] text-clay font-medium hover:text-clay-deep">
+          <Button
+            variant="link"
+            size="sm"
+            onClick={startEdit}
+            className="h-auto p-0 text-[11px] text-clay font-medium hover:text-clay-deep"
+          >
             Edit roster
           </Button>
         )
@@ -78,7 +92,9 @@ export function TeamSection({
                 <Input
                   value={name}
                   onChange={(e) =>
-                    setFormStaff((names) => names.map((n, idx) => (idx === i ? e.target.value : n)))
+                    setFormStaff((names) =>
+                      names.map((n, idx) => (idx === i ? e.target.value : n)),
+                    )
                   }
                   placeholder="Staff name"
                   className="h-auto bg-highlight py-1.5 text-sm"
@@ -86,7 +102,9 @@ export function TeamSection({
                 <Button
                   variant="link"
                   size="sm"
-                  onClick={() => setFormStaff((names) => names.filter((_, idx) => idx !== i))}
+                  onClick={() =>
+                    setFormStaff((names) => names.filter((_, idx) => idx !== i))
+                  }
                   className="h-auto p-0 text-[10.5px] text-ink-faint hover:text-clay"
                 >
                   remove
@@ -101,9 +119,18 @@ export function TeamSection({
             >
               + Add staff
             </Button>
-            {error && <p className="border-l-2 border-clay bg-clay/5 px-2 py-1 text-xs text-clay-deep">{error}</p>}
+            {error && (
+              <p className="border-l-2 border-clay bg-clay/5 px-2 py-1 text-xs text-clay-deep">
+                {error}
+              </p>
+            )}
             <div className="flex justify-end gap-3 text-[11px]">
-              <Button variant="ghost" size="sm" onClick={() => setEditing(false)} disabled={busy}>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setEditing(false)}
+                disabled={busy}
+              >
                 Cancel
               </Button>
               <Button onClick={submit} disabled={busy} size="sm">

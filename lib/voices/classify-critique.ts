@@ -14,8 +14,7 @@ export type {
 } from './classify-critique-pure'
 
 export type ClassifyCritiqueResult =
-  | { ok: true; data: ClassifyCritiqueOutput }
-  | { ok: false; error: string }
+  { ok: true; data: ClassifyCritiqueOutput } | { ok: false; error: string }
 
 /**
  * Decide whether the operator's critique is a one-shot fix (edit_only) or

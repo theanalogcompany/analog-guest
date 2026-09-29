@@ -21,10 +21,17 @@
 // first name, the time left, and ids. Same invariant as the other two surfaces
 // and asserted in the tests.
 
-import { capturePushSent, capturePushTokenInvalid } from '@/lib/analytics/posthog'
+import {
+  capturePushSent,
+  capturePushTokenInvalid,
+} from '@/lib/analytics/posthog'
 
 import { sendApnsRequest } from './apns/client'
-import { clearOperatorPushToken, countOperatorBadge, loadPushRecipients } from './recipients'
+import {
+  clearOperatorPushToken,
+  countOperatorBadge,
+  loadPushRecipients,
+} from './recipients'
 
 const APNS_TOKEN_INVALID_STATUS = 410
 const APNS_BAD_DEVICE_TOKEN_STATUS = 400
@@ -91,7 +98,10 @@ export async function sendInstagramWindowWarningPush(
     })
     if (recipients.length === 0) return
 
-    const body = buildInstagramWindowPushBody(input.guestFirstName, input.remainingMs)
+    const body = buildInstagramWindowPushBody(
+      input.guestFirstName,
+      input.remainingMs,
+    )
 
     for (const recipient of recipients) {
       const badge = await countOperatorBadge(recipient.id)

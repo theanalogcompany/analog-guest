@@ -30,7 +30,8 @@ export type PendingIndexMode = '020' | '041' | '054' | 'none'
 // Migration 054's sentinel, written out here rather than imported for the same
 // reason the slot condition is: a fake that reused the code under test would
 // agree with it by construction.
-const NULL_REPLY_SENTINEL_FROM_MIGRATION_054 = '00000000-0000-0000-0000-000000000000'
+const NULL_REPLY_SENTINEL_FROM_MIGRATION_054 =
+  '00000000-0000-0000-0000-000000000000'
 
 export interface FakeMessageRow {
   id: string
@@ -61,7 +62,8 @@ function slotOfRow(row: FakeMessageRow): 'obligation' | 'conversation' {
     carrier !== null && typeof carrier === 'object' && !Array.isArray(carrier)
       ? (carrier as Record<string, unknown>).type
       : undefined
-  return typeof type === 'string' && OBLIGATION_TYPES_FROM_MIGRATION_041.includes(type)
+  return typeof type === 'string' &&
+    OBLIGATION_TYPES_FROM_MIGRATION_041.includes(type)
     ? 'obligation'
     : 'conversation'
 }
@@ -80,7 +82,8 @@ export function createPendingRowsFake(mode: PendingIndexMode) {
     if (mode === '041' || slot === 'obligation') return `${base}|${slot}`
     // '054', conversation slot: one card per inbound.
     const reply =
-      typeof row.reply_to_message_id === 'string' && row.reply_to_message_id.length > 0
+      typeof row.reply_to_message_id === 'string' &&
+      row.reply_to_message_id.length > 0
         ? row.reply_to_message_id
         : NULL_REPLY_SENTINEL_FROM_MIGRATION_054
     return `${base}|${slot}|${reply}`
@@ -107,8 +110,10 @@ export function createPendingRowsFake(mode: PendingIndexMode) {
   function matchesOrLeg(row: FakeMessageRow, leg: string): boolean {
     const [column, ...rest] = leg.split('.')
     const op = rest.join('.')
-    if (op === 'not.is.null') return row[column] !== null && row[column] !== undefined
-    if (op === 'is.null') return row[column] === null || row[column] === undefined
+    if (op === 'not.is.null')
+      return row[column] !== null && row[column] !== undefined
+    if (op === 'is.null')
+      return row[column] === null || row[column] === undefined
     if (op.startsWith('eq.')) return row[column] === op.slice('eq.'.length)
     throw new Error(`pending-rows-fake: unsupported or() leg "${leg}"`)
   }
@@ -121,12 +126,17 @@ export function createPendingRowsFake(mode: PendingIndexMode) {
     )
   }
 
-  function project(row: FakeMessageRow, columns: string): Record<string, unknown> {
+  function project(
+    row: FakeMessageRow,
+    columns: string,
+  ): Record<string, unknown> {
     const out: Record<string, unknown> = {}
     for (const raw of columns.split(',')) {
       const column = raw.trim()
       if (!(column in row)) {
-        throw new Error(`pending-rows-fake: selected unknown column "${column}"`)
+        throw new Error(
+          `pending-rows-fake: selected unknown column "${column}"`,
+        )
       }
       out[column] = row[column]
     }
@@ -216,17 +226,26 @@ export function createPendingRowsFake(mode: PendingIndexMode) {
           maybeSingle() {
             const targets = rows.filter((r) => matches(r, filters))
             if (targets.length > 1) {
-              throw new Error('pending-rows-fake: UPDATE matched more than one row')
+              throw new Error(
+                'pending-rows-fake: UPDATE matched more than one row',
+              )
             }
             const target = targets[0]
-            if (target === undefined) return Promise.resolve({ data: null, error: null })
-            const updated = { ...target, ...structuredClone(payload) } as FakeMessageRow
+            if (target === undefined)
+              return Promise.resolve({ data: null, error: null })
+            const updated = {
+              ...target,
+              ...structuredClone(payload),
+            } as FakeMessageRow
             const candidate = rows.map((r) => (r === target ? updated : r))
             if (violates(candidate)) {
               return Promise.resolve({ data: null, error: uniqueViolation })
             }
             rows[rows.indexOf(target)] = updated
-            return Promise.resolve({ data: project(updated, columns), error: null })
+            return Promise.resolve({
+              data: project(updated, columns),
+              error: null,
+            })
           },
         }
       },
@@ -237,7 +256,9 @@ export function createPendingRowsFake(mode: PendingIndexMode) {
   const client = {
     from(table: string) {
       if (table !== 'messages') {
-        throw new Error(`pending-rows-fake: only the messages table is modelled, got "${table}"`)
+        throw new Error(
+          `pending-rows-fake: only the messages table is modelled, got "${table}"`,
+        )
       }
       return {
         select: (columns: string) => selectBuilder(columns),
@@ -250,7 +271,10 @@ export function createPendingRowsFake(mode: PendingIndexMode) {
                 return Promise.resolve({ data: null, error: uniqueViolation })
               }
               rows.push(row)
-              return Promise.resolve({ data: project(row, columns), error: null })
+              return Promise.resolve({
+                data: project(row, columns),
+                error: null,
+              })
             },
           }),
         }),
@@ -266,10 +290,18 @@ export function createPendingRowsFake(mode: PendingIndexMode) {
      * Insert a row directly, as the database already holds it. Enforces the
      * index mode too, so a test cannot seed a state the migration forbids.
      */
-    seed(row: Partial<FakeMessageRow> & { id: string; venue_id: string; guest_id: string }) {
+    seed(
+      row: Partial<FakeMessageRow> & {
+        id: string
+        venue_id: string
+        guest_id: string
+      },
+    ) {
       const built = buildRow(row)
       if (violates([...rows, built])) {
-        throw new Error(`pending-rows-fake: seeding ${row.id} violates the ${mode} index`)
+        throw new Error(
+          `pending-rows-fake: seeding ${row.id} violates the ${mode} index`,
+        )
       }
       rows.push(built)
       return built

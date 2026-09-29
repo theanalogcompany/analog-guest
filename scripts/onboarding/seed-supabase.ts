@@ -60,7 +60,9 @@ export interface SeedVenueResult {
  *
  * Server-only. Uses the admin DB client.
  */
-export async function seedVenue(options: SeedVenueOptions): Promise<SeedVenueResult> {
+export async function seedVenue(
+  options: SeedVenueOptions,
+): Promise<SeedVenueResult> {
   const { parsed, messagingPhoneNumber, menuItems, force = false } = options
   const supabase = createAdminClient()
 
@@ -87,7 +89,9 @@ export async function seedVenue(options: SeedVenueOptions): Promise<SeedVenueRes
     .eq('slug', parsed.slug)
     .maybeSingle()
   if (checkError) {
-    throw new Error(`seed: failed to check for existing venue: ${checkError.message}`)
+    throw new Error(
+      `seed: failed to check for existing venue: ${checkError.message}`,
+    )
   }
   if (existing && !force) {
     throw new Error(
@@ -140,15 +144,26 @@ export async function seedVenue(options: SeedVenueOptions): Promise<SeedVenueRes
     // neither yet.
     const [guestsCheck, messagesCheck] = await Promise.all([
       supabase.from('guests').select('id').eq('venue_id', existing.id).limit(1),
-      supabase.from('messages').select('id').eq('venue_id', existing.id).limit(1),
+      supabase
+        .from('messages')
+        .select('id')
+        .eq('venue_id', existing.id)
+        .limit(1),
     ])
     if (guestsCheck.error) {
-      throw new Error(`seed: --force guest-history check failed: ${guestsCheck.error.message}`)
+      throw new Error(
+        `seed: --force guest-history check failed: ${guestsCheck.error.message}`,
+      )
     }
     if (messagesCheck.error) {
-      throw new Error(`seed: --force guest-history check failed: ${messagesCheck.error.message}`)
+      throw new Error(
+        `seed: --force guest-history check failed: ${messagesCheck.error.message}`,
+      )
     }
-    if ((guestsCheck.data ?? []).length > 0 || (messagesCheck.data ?? []).length > 0) {
+    if (
+      (guestsCheck.data ?? []).length > 0 ||
+      (messagesCheck.data ?? []).length > 0
+    ) {
       throw new Error(
         [
           `seed: --force refused for venue "${parsed.slug}" (id=${existing.id}).`,
@@ -173,10 +188,20 @@ export async function seedVenue(options: SeedVenueOptions): Promise<SeedVenueRes
         `[seed] guest_states) are left untouched.`,
       ].join('\n'),
     )
-    for (const table of ['venue_configs', 'mechanics', 'voice_corpus', 'knowledge_corpus'] as const) {
-      const { error: deleteError } = await supabase.from(table).delete().eq('venue_id', existing.id)
+    for (const table of [
+      'venue_configs',
+      'mechanics',
+      'voice_corpus',
+      'knowledge_corpus',
+    ] as const) {
+      const { error: deleteError } = await supabase
+        .from(table)
+        .delete()
+        .eq('venue_id', existing.id)
       if (deleteError) {
-        throw new Error(`seed: --force delete of ${table} failed: ${deleteError.message}`)
+        throw new Error(
+          `seed: --force delete of ${table} failed: ${deleteError.message}`,
+        )
       }
     }
     venueId = existing.id
@@ -195,7 +220,9 @@ export async function seedVenue(options: SeedVenueOptions): Promise<SeedVenueRes
       .select('id')
       .single()
     if (venueError || !venue) {
-      throw new Error(`seed: venues insert failed: ${venueError?.message ?? 'no row returned'}`)
+      throw new Error(
+        `seed: venues insert failed: ${venueError?.message ?? 'no row returned'}`,
+      )
     }
     venueId = venue.id
   }
@@ -231,7 +258,9 @@ export async function seedVenue(options: SeedVenueOptions): Promise<SeedVenueRes
       // THE-170: pass through eligibility + redemption-policy fields. Spec
       // defaults at the DB layer ('new' / 'one_time' / null) when omitted.
       ...(m.min_state !== undefined ? { min_state: m.min_state } : {}),
-      ...(m.redemption_policy !== undefined ? { redemption_policy: m.redemption_policy } : {}),
+      ...(m.redemption_policy !== undefined
+        ? { redemption_policy: m.redemption_policy }
+        : {}),
       ...(m.redemption_window_days !== undefined
         ? { redemption_window_days: m.redemption_window_days }
         : {}),
@@ -242,7 +271,9 @@ export async function seedVenue(options: SeedVenueOptions): Promise<SeedVenueRes
         ? { requires_operator_approval: m.requires_operator_approval }
         : {}),
     }))
-    const { error: mechanicError } = await supabase.from('mechanics').insert(mechanicRows)
+    const { error: mechanicError } = await supabase
+      .from('mechanics')
+      .insert(mechanicRows)
     if (mechanicError) {
       throw new Error(`seed: mechanics insert failed: ${mechanicError.message}`)
     }
@@ -301,9 +332,13 @@ export async function seedVenue(options: SeedVenueOptions): Promise<SeedVenueRes
       .insert(knowledgeRows)
       .select('id')
     if (knowledgeError) {
-      throw new Error(`seed: knowledge_corpus insert failed: ${knowledgeError.message}`)
+      throw new Error(
+        `seed: knowledge_corpus insert failed: ${knowledgeError.message}`,
+      )
     }
-    insertedKnowledgeCorpusIds.push(...(knowledgeInserted ?? []).map((r) => r.id))
+    insertedKnowledgeCorpusIds.push(
+      ...(knowledgeInserted ?? []).map((r) => r.id),
+    )
 
     for (const id of insertedKnowledgeCorpusIds) {
       const result = await ingestKnowledgeCorpusEntry(id)

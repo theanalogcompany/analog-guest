@@ -1,5 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { FETCH_CEILING, loadVenueGuestsByActivity, type VenueGuestRow } from './load-venue-guests'
+import {
+  FETCH_CEILING,
+  loadVenueGuestsByActivity,
+  type VenueGuestRow,
+} from './load-venue-guests'
 
 const VENUE = '11111111-1111-1111-1111-111111111111'
 
@@ -80,13 +84,24 @@ describe('loadVenueGuestsByActivity', () => {
   it('orders by derived activity, not by enrollment', async () => {
     const result = await loadVenueGuestsByActivity(
       makeClient({
-        guests: [guest('newest-enrolled', '2026-09-19T00:00:00Z'), guest('oldest-enrolled', '2026-01-01T00:00:00Z')],
-        activity: [{ guest_id: 'oldest-enrolled', last_interaction_at: '2026-09-20T00:00:00Z' }],
+        guests: [
+          guest('newest-enrolled', '2026-09-19T00:00:00Z'),
+          guest('oldest-enrolled', '2026-01-01T00:00:00Z'),
+        ],
+        activity: [
+          {
+            guest_id: 'oldest-enrolled',
+            last_interaction_at: '2026-09-20T00:00:00Z',
+          },
+        ],
       }),
       VENUE,
       50,
     )
-    expect(result.rows.map((g) => g.id)).toEqual(['oldest-enrolled', 'newest-enrolled'])
+    expect(result.rows.map((g) => g.id)).toEqual([
+      'oldest-enrolled',
+      'newest-enrolled',
+    ])
     expect(result.activityDegraded).toBe(false)
   })
 
@@ -94,7 +109,9 @@ describe('loadVenueGuestsByActivity', () => {
   // rows whatever venue is asked for.
   it('asks venue_guest_activity for the venue it is loading', async () => {
     await loadVenueGuestsByActivity(makeClient({}), VENUE, 50)
-    expect(capturedRpcCalls).toEqual([{ fn: 'venue_guest_activity', args: { p_venue_id: VENUE } }])
+    expect(capturedRpcCalls).toEqual([
+      { fn: 'venue_guest_activity', args: { p_venue_id: VENUE } },
+    ])
   })
 
   it('scopes the guest query to the venue and selects what the dropdown renders', async () => {
@@ -126,15 +143,23 @@ describe('loadVenueGuestsByActivity', () => {
     expect(FETCH_CEILING).toBeGreaterThan(50)
     expect(FETCH_CEILING).toBeLessThanOrEqual(10_000)
     expect(capturedGuestOrder).toEqual([
-      { column: 'first_contacted_at', opts: { ascending: false, nullsFirst: false } },
+      {
+        column: 'first_contacted_at',
+        opts: { ascending: false, nullsFirst: false },
+      },
     ])
   })
 
   it('applies the caller limit after sorting by activity', async () => {
     const result = await loadVenueGuestsByActivity(
       makeClient({
-        guests: [guest('a', '2026-01-01T00:00:00Z'), guest('b', '2026-01-02T00:00:00Z')],
-        activity: [{ guest_id: 'a', last_interaction_at: '2026-09-20T00:00:00Z' }],
+        guests: [
+          guest('a', '2026-01-01T00:00:00Z'),
+          guest('b', '2026-01-02T00:00:00Z'),
+        ],
+        activity: [
+          { guest_id: 'a', last_interaction_at: '2026-09-20T00:00:00Z' },
+        ],
       }),
       VENUE,
       1,
@@ -148,7 +173,10 @@ describe('loadVenueGuestsByActivity', () => {
   it('flags a failed activity read and still returns the guests', async () => {
     const result = await loadVenueGuestsByActivity(
       makeClient({
-        guests: [guest('older', '2026-01-01T00:00:00Z'), guest('newer', '2026-09-01T00:00:00Z')],
+        guests: [
+          guest('older', '2026-01-01T00:00:00Z'),
+          guest('newer', '2026-09-01T00:00:00Z'),
+        ],
         activityError: 'PGRST202',
       }),
       VENUE,
@@ -161,7 +189,11 @@ describe('loadVenueGuestsByActivity', () => {
   })
 
   it('returns no rows and does not claim degradation when the guest query fails', async () => {
-    const result = await loadVenueGuestsByActivity(makeClient({ guestsError: 'boom' }), VENUE, 50)
+    const result = await loadVenueGuestsByActivity(
+      makeClient({ guestsError: 'boom' }),
+      VENUE,
+      50,
+    )
     expect(result.rows).toEqual([])
     expect(result.activityDegraded).toBe(false)
   })
@@ -169,8 +201,13 @@ describe('loadVenueGuestsByActivity', () => {
   it('keeps a guest with no activity row', async () => {
     const result = await loadVenueGuestsByActivity(
       makeClient({
-        guests: [guest('silent', '2026-01-01T00:00:00Z'), guest('active', '2026-01-02T00:00:00Z')],
-        activity: [{ guest_id: 'active', last_interaction_at: '2026-09-20T00:00:00Z' }],
+        guests: [
+          guest('silent', '2026-01-01T00:00:00Z'),
+          guest('active', '2026-01-02T00:00:00Z'),
+        ],
+        activity: [
+          { guest_id: 'active', last_interaction_at: '2026-09-20T00:00:00Z' },
+        ],
       }),
       VENUE,
       50,

@@ -125,7 +125,10 @@ describe('POST /admin/voices/api/patterns/[venueId]/promote', () => {
   it('passes through auth helper response', async () => {
     vi.mocked(requireVenueAdmin).mockResolvedValue({
       ok: false,
-      response: NextResponse.json({ error: 'venue not allowed' }, { status: 403 }),
+      response: NextResponse.json(
+        { error: 'venue not allowed' },
+        { status: 403 },
+      ),
     })
 
     const res = await POST(

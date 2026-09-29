@@ -112,7 +112,8 @@ const SIGN_OFF = (names: string) =>
 // case-sensitive regex: "I'm" would then never match its own lowercase
 // alternation. The frame folds case, the captured word is checked for a
 // capital in code. Apostrophes are folded first so a curly one still matches.
-const UNKNOWN_NAME_INTRO = /\b(?:i'm|i am|this is|you've reached|you've got)\s+(\w{3,})\b/i
+const UNKNOWN_NAME_INTRO =
+  /\b(?:i'm|i am|this is|you've reached|you've got)\s+(\w{3,})\b/i
 
 function foldApostrophes(s: string): string {
   return s.replace(/[\u2018\u2019]/g, "'")
@@ -225,7 +226,9 @@ export function classifySpeakerIdentity(
   }
 
   const nameAskSentence =
-    sentences.find((s) => NAME_ASK_PATTERNS.some((re) => re.test(normalize(s)))) ?? null
+    sentences.find((s) =>
+      NAME_ASK_PATTERNS.some((re) => re.test(normalize(s))),
+    ) ?? null
   const asksName = nameAskSentence !== null
 
   // Bareness is judged on the WHOLE reply, not the sentence alone: "oh and" or
@@ -259,6 +262,7 @@ export function classifySpeakerIdentity(
     overPromisesRecognition: overPromisesRecognitionMatch !== null,
     overPromisesRecognitionMatch,
     questionCount: sentences.filter((s) => s.includes('?')).length,
-    namesVenue: venuePattern.length > 0 && new RegExp(venuePattern, 'i').test(normalized),
+    namesVenue:
+      venuePattern.length > 0 && new RegExp(venuePattern, 'i').test(normalized),
   }
 }

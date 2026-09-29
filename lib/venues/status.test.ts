@@ -96,11 +96,15 @@ describe('VENUE_PROCESSING', () => {
   // is a compile-time one. This says the same thing at runtime so the totality
   // is visible to a reader who is not running tsc.
   it('decides every status, with no extras', () => {
-    expect(Object.keys(VENUE_PROCESSING).sort()).toEqual([...VENUE_STATUSES].sort())
+    expect(Object.keys(VENUE_PROCESSING).sort()).toEqual(
+      [...VENUE_STATUSES].sort(),
+    )
   })
 
   it('halts exactly two of the four', () => {
-    const halted = VENUE_STATUSES.filter((s) => VENUE_PROCESSING[s] === 'halted')
+    const halted = VENUE_STATUSES.filter(
+      (s) => VENUE_PROCESSING[s] === 'halted',
+    )
     expect([...halted].sort()).toEqual(['archived', 'paused'])
   })
 })
@@ -116,7 +120,10 @@ describe('VENUE_STATUSES matches the venues.status CHECK', () => {
   // list. A regex that matched the wrong block could pass while comparing
   // against a different table's vocabulary.
   function venuesTableBlock(): string {
-    const sql = readFileSync(join(__dirname, '../../db/migrations/001_initial_schema.sql'), 'utf8')
+    const sql = readFileSync(
+      join(__dirname, '../../db/migrations/001_initial_schema.sql'),
+      'utf8',
+    )
     const block = sql.match(/create table venues \(([\s\S]*?)\n\);/)
     expect(block).not.toBeNull()
     return block?.[1] ?? ''
@@ -133,7 +140,9 @@ describe('VENUE_STATUSES matches the venues.status CHECK', () => {
   it('lists exactly the values the CHECK permits', () => {
     const check = venuesTableBlock().match(/check \(status in \(([^)]*)\)\)/)
     expect(check).not.toBeNull()
-    const values = (check?.[1] ?? '').split(',').map((v) => v.trim().replace(/^'|'$/g, ''))
+    const values = (check?.[1] ?? '')
+      .split(',')
+      .map((v) => v.trim().replace(/^'|'$/g, ''))
     expect([...values].sort()).toEqual([...VENUE_STATUSES].sort())
   })
 })

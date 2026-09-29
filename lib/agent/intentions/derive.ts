@@ -49,7 +49,11 @@ export interface IntentionStateEntry {
   promptedAt: Date | null
 }
 
-function isExpired(def: IntentionDefinition, eligibleAt: Date, now: Date): boolean {
+function isExpired(
+  def: IntentionDefinition,
+  eligibleAt: Date,
+  now: Date,
+): boolean {
   return now.getTime() - eligibleAt.getTime() > def.expiresAfterMs
 }
 
@@ -61,8 +65,15 @@ function isExpired(def: IntentionDefinition, eligibleAt: Date, now: Date): boole
  * prompt older than the anchor belongs to an earlier arming. First-contact
  * intentions never re-arm, so they never reopen.
  */
-function isReopened(def: IntentionDefinition, eligibleAt: Date, promptedAt: Date): boolean {
-  return rearmsOnNewerEvent(def.armsOn) && promptedAt.getTime() < eligibleAt.getTime()
+function isReopened(
+  def: IntentionDefinition,
+  eligibleAt: Date,
+  promptedAt: Date,
+): boolean {
+  return (
+    rearmsOnNewerEvent(def.armsOn) &&
+    promptedAt.getTime() < eligibleAt.getTime()
+  )
 }
 
 /**
@@ -82,10 +93,18 @@ export function deriveIntentionState(input: {
     const entry = input.entries.get(def.key)
     if (!entry || entry.eligibleAt === null) continue // never became eligible
     // Prompted -> closed, unless a newer event has re-armed it since.
-    if (entry.promptedAt !== null && !isReopened(def, entry.eligibleAt, entry.promptedAt)) continue
+    if (
+      entry.promptedAt !== null &&
+      !isReopened(def, entry.eligibleAt, entry.promptedAt)
+    )
+      continue
     if (isExpired(def, entry.eligibleAt, input.now)) continue // window run from eligibility
     if (def.isSatisfied(input.facts)) continue // an observable proxy closed it
-    open.push({ key: def.key, promptLine: def.promptLine, eligibleAt: entry.eligibleAt })
+    open.push({
+      key: def.key,
+      promptLine: def.promptLine,
+      eligibleAt: entry.eligibleAt,
+    })
   }
   return open
 }
@@ -103,7 +122,8 @@ export function buildSatisfactionFacts(input: {
   return {
     hasQualifyingTransaction: input.hasQualifyingTransaction,
     hasFirstName: input.firstName !== null && input.firstName.trim().length > 0,
-    hasHomeBase: input.homeBase !== undefined && input.homeBase.trim().length > 0,
+    hasHomeBase:
+      input.homeBase !== undefined && input.homeBase.trim().length > 0,
   }
 }
 
@@ -152,17 +172,22 @@ export function isIntentionBrakeEngaged(input: {
   for (const row of input.prompted) {
     if (row.promptSource === 'pessimistic') continue
     if (row.promptedAt.getTime() < input.inboundHistoryFrom.getTime()) continue
-    const messageKey = row.messageId ?? `prompted-at:${row.promptedAt.toISOString()}`
+    const messageKey =
+      row.messageId ?? `prompted-at:${row.promptedAt.toISOString()}`
     const t = row.promptedAt.getTime()
     const existing = promptTimeByMessage.get(messageKey)
-    if (existing === undefined || t < existing) promptTimeByMessage.set(messageKey, t)
+    if (existing === undefined || t < existing)
+      promptTimeByMessage.set(messageKey, t)
   }
 
-  const latest = [...promptTimeByMessage.values()].sort((a, b) => b - a).slice(0, input.streak)
+  const latest = [...promptTimeByMessage.values()]
+    .sort((a, b) => b - a)
+    .slice(0, input.streak)
   if (latest.length < input.streak) return false
 
   return latest.every(
-    (promptedAt) => !wasAnswered(promptedAt, input.inboundTimes, input.conversationWindowMs),
+    (promptedAt) =>
+      !wasAnswered(promptedAt, input.inboundTimes, input.conversationWindowMs),
   )
 }
 
@@ -203,9 +228,12 @@ export function resolveInboundHistoryFrom(input: {
   historyCutoff: Date
 }): Date {
   const capped =
-    input.recentMessages.length >= input.responseCap || input.rowsFetched >= input.rowCap
+    input.recentMessages.length >= input.responseCap ||
+    input.rowsFetched >= input.rowCap
   if (!capped || input.recentMessages.length === 0) return input.historyCutoff
-  const oldest = Math.min(...input.recentMessages.map((m) => m.createdAt.getTime()))
+  const oldest = Math.min(
+    ...input.recentMessages.map((m) => m.createdAt.getTime()),
+  )
   return new Date(Math.max(oldest, input.historyCutoff.getTime()))
 }
 
@@ -320,8 +348,12 @@ function newestEventArming(
   }
   if (newest === null) return null
   if (newest + conversationWindowMs > now) return HELD // still the conversation it happened in
-  if (touchedTimes.some((t) => t.getTime() + conversationWindowMs > now)) return HELD // re-suggested in this conversation
-  return { eventAt: new Date(newest), eligibleAt: new Date(newest + conversationWindowMs) }
+  if (touchedTimes.some((t) => t.getTime() + conversationWindowMs > now))
+    return HELD // re-suggested in this conversation
+  return {
+    eventAt: new Date(newest),
+    eligibleAt: new Date(newest + conversationWindowMs),
+  }
 }
 
 /**
@@ -356,7 +388,10 @@ function armingFor(
     case 'visit_confirmed':
       return input.visitConfirmedAt === null
         ? null
-        : { eligibleAt: input.visitConfirmedAt, eventAt: input.visitConfirmedAt }
+        : {
+            eligibleAt: input.visitConfirmedAt,
+            eventAt: input.visitConfirmedAt,
+          }
     case 'first_contact':
       return { eligibleAt: input.now, eventAt: input.now }
     case 'open_recommendation':
@@ -371,7 +406,11 @@ function armingFor(
         input.openRecommendationTouchedTimes,
       )
     case 'recorded_order':
-      return newestEventArming(input.recordedOrderTimes, input.conversationWindowMs, now)
+      return newestEventArming(
+        input.recordedOrderTimes,
+        input.conversationWindowMs,
+        now,
+      )
   }
 }
 
@@ -390,10 +429,15 @@ function lastPromptWentUnanswered(
   prompt: PromptedIntentionRow | undefined,
   input: DeriveOpenIntentionsInput,
 ): boolean {
-  if (prompt === undefined || prompt.promptSource === 'pessimistic') return false
+  if (prompt === undefined || prompt.promptSource === 'pessimistic')
+    return false
   const promptedAt = prompt.promptedAt.getTime()
   if (promptedAt < input.inboundHistoryFrom.getTime()) return false
-  return !wasAnswered(promptedAt, input.inboundTimes, input.conversationWindowMs)
+  return !wasAnswered(
+    promptedAt,
+    input.inboundTimes,
+    input.conversationWindowMs,
+  )
 }
 
 /**
@@ -425,7 +469,10 @@ export function isFirstEverInboundTurn(repliedMessageCount: number): boolean {
  * Its first-message count is stated per intention and is NOT venue-overridable:
  * `min_replies` tunes the ongoing stagger, not the opening exchange.
  */
-function gateOpen(def: IntentionDefinition, input: DeriveOpenIntentionsInput): boolean {
+function gateOpen(
+  def: IntentionDefinition,
+  input: DeriveOpenIntentionsInput,
+): boolean {
   switch (def.gate.kind) {
     case 'none':
       return true
@@ -436,7 +483,8 @@ function gateOpen(def: IntentionDefinition, input: DeriveOpenIntentionsInput): b
       return input.repliedMessageCount >= minReplies
     }
     case 'conversational': {
-      const minReplies = input.rules.min_replies[def.key] ?? def.gate.defaultMinReplies
+      const minReplies =
+        input.rules.min_replies[def.key] ?? def.gate.defaultMinReplies
       return (
         input.responseRate >= input.rules.response_rate_floor &&
         input.repliedMessageCount >= minReplies
@@ -476,8 +524,11 @@ function gateOpen(def: IntentionDefinition, input: DeriveOpenIntentionsInput): b
  * recommendations couldn't be read, got_the_recommendation is held the same way:
  * that read fails closed, as the read at build-runtime-context.ts:203 does.
  */
-export function deriveOpenIntentions(input: DeriveOpenIntentionsInput): DeriveOpenIntentionsResult {
-  if (input.rows === null) return { open: [], newlyEligible: [], brakeEngaged: false }
+export function deriveOpenIntentions(
+  input: DeriveOpenIntentionsInput,
+): DeriveOpenIntentionsResult {
+  if (input.rows === null)
+    return { open: [], newlyEligible: [], brakeEngaged: false }
 
   const entries = new Map<IntentionKey, IntentionStateEntry>()
   const keysWithRows = new Set<IntentionKey>()
@@ -513,7 +564,12 @@ export function deriveOpenIntentions(input: DeriveOpenIntentionsInput): DeriveOp
     // A re-armable row with no anchor could never be stamped closed, because its
     // stamp is guarded on eligible_at, so it would be asked every turn. Nothing
     // writes one; leave it alone rather than render it.
-    if (existing === undefined && keysWithRows.has(def.key) && rearmsOnNewerEvent(def.armsOn)) continue
+    if (
+      existing === undefined &&
+      keysWithRows.has(def.key) &&
+      rearmsOnNewerEvent(def.armsOn)
+    )
+      continue
 
     const armed = armingFor(def, input)
     if (armed === HELD) {
@@ -524,18 +580,30 @@ export function deriveOpenIntentions(input: DeriveOpenIntentionsInput): DeriveOp
     if (existing !== undefined) {
       if (existing.eligibleAt === null) continue
       if (armed.eventAt.getTime() <= existing.eligibleAt.getTime()) continue // not strictly newer
-      if (lastPromptWentUnanswered(lastPromptByKey.get(def.key), input)) continue
+      if (lastPromptWentUnanswered(lastPromptByKey.get(def.key), input))
+        continue
     }
 
     if (!gateOpen(def, input)) continue
     if (def.isSatisfied(input.facts)) continue // no point recording a closed intention
     if (isExpired(def, armed.eligibleAt, input.now)) continue
     // A re-armed row keeps its last prompt; isReopened reads it as open again.
-    entries.set(def.key, { eligibleAt: armed.eligibleAt, promptedAt: existing?.promptedAt ?? null })
+    entries.set(def.key, {
+      eligibleAt: armed.eligibleAt,
+      promptedAt: existing?.promptedAt ?? null,
+    })
     if (existing !== undefined) {
-      newlyEligible.push({ key: def.key, eligibleAt: armed.eligibleAt, rearm: true })
+      newlyEligible.push({
+        key: def.key,
+        eligibleAt: armed.eligibleAt,
+        rearm: true,
+      })
     } else if (!keysWithRows.has(def.key)) {
-      newlyEligible.push({ key: def.key, eligibleAt: armed.eligibleAt, rearm: false })
+      newlyEligible.push({
+        key: def.key,
+        eligibleAt: armed.eligibleAt,
+        rearm: false,
+      })
     }
   }
 
@@ -550,9 +618,11 @@ export function deriveOpenIntentions(input: DeriveOpenIntentionsInput): DeriveOp
   return {
     open: brakeEngaged
       ? []
-      : deriveIntentionState({ entries, facts: input.facts, now: input.now }).filter(
-          (o) => !held.has(o.key),
-        ),
+      : deriveIntentionState({
+          entries,
+          facts: input.facts,
+          now: input.now,
+        }).filter((o) => !held.has(o.key)),
     newlyEligible,
     brakeEngaged,
   }
@@ -616,6 +686,11 @@ export function renderableIntentions(
   category: MessageCategory | null,
   hasPendingQuestion: boolean,
 ): OpenIntention[] {
-  if (category === 'opt_out' || category === 'comp_complaint' || hasPendingQuestion) return []
+  if (
+    category === 'opt_out' ||
+    category === 'comp_complaint' ||
+    hasPendingQuestion
+  )
+    return []
   return [...open]
 }

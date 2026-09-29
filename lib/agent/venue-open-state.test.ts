@@ -39,11 +39,15 @@ const ONE_AM_PACIFIC = new Date('2026-09-22T08:00:00Z')
 
 describe('resolveVenueOpenState', () => {
   it('reads open during service hours on the venue clock', () => {
-    expect(resolveVenueOpenState(venue(LE_MILS_HOURS), DURING_SERVICE).state).toBe('open')
+    expect(
+      resolveVenueOpenState(venue(LE_MILS_HOURS), DURING_SERVICE).state,
+    ).toBe('open')
   })
 
   it('reads closed at 1am, the hour the incident landed in', () => {
-    expect(resolveVenueOpenState(venue(LE_MILS_HOURS), ONE_AM_PACIFIC).state).toBe('closed')
+    expect(
+      resolveVenueOpenState(venue(LE_MILS_HOURS), ONE_AM_PACIFIC).state,
+    ).toBe('closed')
   })
 
   it('resolves the verdict against the VENUE timezone, not the host clock', () => {
@@ -51,27 +55,36 @@ describe('resolveVenueOpenState', () => {
     // long past it in London. A helper that read the process timezone, or that
     // ignored the field, cannot produce two different answers here.
     const instant = DURING_SERVICE
-    expect(resolveVenueOpenState(venue(LE_MILS_HOURS, 'America/Los_Angeles'), instant).state).toBe(
-      'open',
-    )
-    expect(resolveVenueOpenState(venue(LE_MILS_HOURS, 'Europe/London'), instant).state).toBe(
-      'closed',
-    )
+    expect(
+      resolveVenueOpenState(
+        venue(LE_MILS_HOURS, 'America/Los_Angeles'),
+        instant,
+      ).state,
+    ).toBe('open')
+    expect(
+      resolveVenueOpenState(venue(LE_MILS_HOURS, 'Europe/London'), instant)
+        .state,
+    ).toBe('closed')
   })
 
   it('reads unknown when the timezone is not a real zone', () => {
     // `America/Los_Angles` is the plausible Studio typo TAC-341 documents.
     // It must not silently resolve against UTC.
-    expect(resolveVenueOpenState(venue(LE_MILS_HOURS, 'America/Los_Angles'), ONE_AM_PACIFIC)).toEqual(
-      { state: 'unknown' },
-    )
+    expect(
+      resolveVenueOpenState(
+        venue(LE_MILS_HOURS, 'America/Los_Angles'),
+        ONE_AM_PACIFIC,
+      ),
+    ).toEqual({ state: 'unknown' })
   })
 
   it('reads unknown when the day has no hours recorded', () => {
     // Absence is not a closure: parse-venue-spec drops rows whose label it does
     // not recognise ("Sat & Sun", "Weekends"), so a missing key means nobody
     // said at least as often as it means shut.
-    expect(resolveVenueOpenState(venue({}), DURING_SERVICE)).toEqual({ state: 'unknown' })
+    expect(resolveVenueOpenState(venue({}), DURING_SERVICE)).toEqual({
+      state: 'unknown',
+    })
   })
 
   it('reads unknown on an ambiguous descending range rather than guessing overnight', () => {
@@ -79,9 +92,10 @@ describe('resolveVenueOpenState', () => {
     // overnight range reports OPEN at 7:57pm, which is the exact minute of the
     // TAC-301 incident.
     const shorthand = { ...LE_MILS_HOURS, tuesday: '7-3' }
-    expect(resolveVenueOpenState(venue(shorthand), new Date('2026-09-23T02:57:00Z')).state).toBe(
-      'unknown',
-    )
+    expect(
+      resolveVenueOpenState(venue(shorthand), new Date('2026-09-23T02:57:00Z'))
+        .state,
+    ).toBe('unknown')
   })
 })
 
@@ -96,7 +110,9 @@ describe('isVenueClosed', () => {
     // which reads as a harmless tidy and inverts the ruling at every venue
     // whose hours nobody has filled in.
     expect(isVenueClosed(venue({}), ONE_AM_PACIFIC)).toBe(false)
-    expect(isVenueClosed(venue(LE_MILS_HOURS, 'America/Los_Angles'), ONE_AM_PACIFIC)).toBe(false)
+    expect(
+      isVenueClosed(venue(LE_MILS_HOURS, 'America/Los_Angles'), ONE_AM_PACIFIC),
+    ).toBe(false)
   })
 
   it('is false during service', () => {
@@ -129,10 +145,18 @@ describe('equivalence with the expression it replaced', () => {
   function oldExpression(hours: VenueInfo['hours'], tz: string, now: Date) {
     const substituted = !isValidTimezone(tz)
     const effective = substituted ? 'America/Los_Angeles' : tz
-    return substituted ? { state: 'unknown' } : resolveOpenState(hours, effective, now)
+    return substituted
+      ? { state: 'unknown' }
+      : resolveOpenState(hours, effective, now)
   }
 
-  const zones = ['America/Los_Angeles', 'Europe/London', 'Pacific/Auckland', 'America/Los_Angles', '']
+  const zones = [
+    'America/Los_Angeles',
+    'Europe/London',
+    'Pacific/Auckland',
+    'America/Los_Angles',
+    '',
+  ]
   const hourSets: Array<VenueInfo['hours']> = [
     LE_MILS_HOURS,
     {},
@@ -140,7 +164,11 @@ describe('equivalence with the expression it replaced', () => {
     { ...LE_MILS_HOURS, tuesday: '5:00 PM – 2:00 AM' },
     { ...LE_MILS_HOURS, tuesday: '7-3' },
   ]
-  const instants = [DURING_SERVICE, ONE_AM_PACIFIC, new Date('2026-09-23T02:57:00Z')]
+  const instants = [
+    DURING_SERVICE,
+    ONE_AM_PACIFIC,
+    new Date('2026-09-23T02:57:00Z'),
+  ]
 
   it('matches buildAiRuntime’s own expression across zones, hour shapes and instants', () => {
     for (const tz of zones) {

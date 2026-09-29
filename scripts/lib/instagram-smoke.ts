@@ -58,21 +58,27 @@ const CAP_VERDICT_BLOCKERS = {
   window_closed: 'the 24-hour reply window was shut',
   token_rejected: 'Meta rejected the token',
   rate_limited: 'Meta throttled the send',
-  recipient_unavailable: 'Meta says the recipient is unavailable (blocked the account, or gone)',
+  recipient_unavailable:
+    'Meta says the recipient is unavailable (blocked the account, or gone)',
   timeout: 'the send timed out',
   network: 'the network failed',
   malformed_response: 'the response could not be read',
   empty_text: 'our own guard refused an empty message before the network',
-  over_byte_cap: 'our own guard refused it before the network, so Meta never saw it',
+  over_byte_cap:
+    'our own guard refused it before the network, so Meta never saw it',
   graph_error: null,
 } as const satisfies Record<InstagramSendFailureKind, string | null>
 
-export function capVerdictBlocker(kind: InstagramSendFailureKind): string | null {
+export function capVerdictBlocker(
+  kind: InstagramSendFailureKind,
+): string | null {
   return CAP_VERDICT_BLOCKERS[kind]
 }
 
 /** The failure kinds this module knows about, for a test that the map is total. */
-export const CAP_VERDICT_BLOCKER_KINDS = Object.keys(CAP_VERDICT_BLOCKERS) as InstagramSendFailureKind[]
+export const CAP_VERDICT_BLOCKER_KINDS = Object.keys(
+  CAP_VERDICT_BLOCKERS,
+) as InstagramSendFailureKind[]
 
 /**
  * A message of EXACTLY `bytes` UTF-8 bytes, opening with `label` so a person
@@ -84,11 +90,14 @@ export const CAP_VERDICT_BLOCKER_KINDS = Object.keys(CAP_VERDICT_BLOCKERS) as In
 export function textOfBytes(bytes: number, label: string): string {
   const prefix = `${label} `
   if (Buffer.byteLength(prefix, 'utf8') > bytes) {
-    throw new Error(`textOfBytes: the label alone is longer than ${bytes} bytes`)
+    throw new Error(
+      `textOfBytes: the label alone is longer than ${bytes} bytes`,
+    )
   }
   const text = prefix + 'a'.repeat(bytes - Buffer.byteLength(prefix, 'utf8'))
   const actual = Buffer.byteLength(text, 'utf8')
-  if (actual !== bytes) throw new Error(`textOfBytes: wanted ${bytes}, built ${actual}`)
+  if (actual !== bytes)
+    throw new Error(`textOfBytes: wanted ${bytes}, built ${actual}`)
   return text
 }
 

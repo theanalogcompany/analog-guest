@@ -20,18 +20,25 @@ export type SquareEnv = 'sandbox' | 'production'
 export function resolveSquareEnv(raw: string | undefined): SquareEnv {
   if (raw === undefined || raw === '' || raw === 'sandbox') return 'sandbox'
   if (raw === 'production') return 'production'
-  throw new Error(`Invalid SQUARE_ENV: "${raw}" (expected 'sandbox' | 'production')`)
+  throw new Error(
+    `Invalid SQUARE_ENV: "${raw}" (expected 'sandbox' | 'production')`,
+  )
 }
 
 function toSquareEnvironment(env: SquareEnv): SquareEnvironment {
-  return env === 'production' ? SquareEnvironment.Production : SquareEnvironment.Sandbox
+  return env === 'production'
+    ? SquareEnvironment.Production
+    : SquareEnvironment.Sandbox
 }
 
 /**
  * Build a Square client for a specific access token + environment. Used with
  * per-merchant tokens once pos_credentials is wired (migration 030).
  */
-export function createSquareClient(token: string, env: SquareEnv): SquareClient {
+export function createSquareClient(
+  token: string,
+  env: SquareEnv,
+): SquareClient {
   return new SquareClient({ token, environment: toSquareEnvironment(env) })
 }
 
@@ -49,13 +56,18 @@ export function createSquareClient(token: string, env: SquareEnv): SquareClient 
 export function squareAccessTokenFromEnv(): { token: string; env: SquareEnv } {
   const env = resolveSquareEnv(process.env.SQUARE_ENV)
   const tokenVar =
-    env === 'production' ? 'SQUARE_PRODUCTION_ACCESS_TOKEN' : 'SQUARE_SANDBOX_ACCESS_TOKEN'
+    env === 'production'
+      ? 'SQUARE_PRODUCTION_ACCESS_TOKEN'
+      : 'SQUARE_SANDBOX_ACCESS_TOKEN'
   const token = process.env[tokenVar]
   if (!token) throw new Error(`Missing env var: ${tokenVar}`)
   return { token, env }
 }
 
-export function squareClientFromEnv(): { client: SquareClient; env: SquareEnv } {
+export function squareClientFromEnv(): {
+  client: SquareClient
+  env: SquareEnv
+} {
   const { token, env } = squareAccessTokenFromEnv()
   return { client: createSquareClient(token, env), env }
 }

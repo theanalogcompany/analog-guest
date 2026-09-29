@@ -36,7 +36,9 @@ export interface MechanicFieldsInput {
  * — migration 009's CHECK constraint pairs one_time+null / renewable+non-null,
  * so a one_time mechanic with a null window is correct, not a gap.
  */
-export function findMissingMechanicFields(mechanic: MechanicFieldsInput): string[] {
+export function findMissingMechanicFields(
+  mechanic: MechanicFieldsInput,
+): string[] {
   const missing: string[] = []
   if (!mechanic.description || mechanic.description.trim().length === 0) {
     missing.push('description')
@@ -44,10 +46,16 @@ export function findMissingMechanicFields(mechanic: MechanicFieldsInput): string
   if (!mechanic.qualification || mechanic.qualification.trim().length === 0) {
     missing.push('qualification')
   }
-  if (!mechanic.rewardDescription || mechanic.rewardDescription.trim().length === 0) {
+  if (
+    !mechanic.rewardDescription ||
+    mechanic.rewardDescription.trim().length === 0
+  ) {
     missing.push('reward_description')
   }
-  if (mechanic.redemptionPolicy === 'renewable' && mechanic.redemptionWindowDays === null) {
+  if (
+    mechanic.redemptionPolicy === 'renewable' &&
+    mechanic.redemptionWindowDays === null
+  ) {
     missing.push('redemption_window_days')
   }
   return missing

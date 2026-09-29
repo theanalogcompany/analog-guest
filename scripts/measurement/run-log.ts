@@ -40,7 +40,13 @@
  */
 
 import { execFileSync } from 'node:child_process'
-import { existsSync, mkdirSync, appendFileSync, readFileSync, writeFileSync } from 'node:fs'
+import {
+  existsSync,
+  mkdirSync,
+  appendFileSync,
+  readFileSync,
+  writeFileSync,
+} from 'node:fs'
 import { dirname, join } from 'node:path'
 
 export interface RunLogMeta {
@@ -108,7 +114,9 @@ export const RUN_LOG_DIR = 'measurement-runs'
 
 function defaultGitSha(): string | null {
   try {
-    return execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim()
+    return execFileSync('git', ['rev-parse', 'HEAD'], {
+      encoding: 'utf8',
+    }).trim()
   } catch {
     // Not a git checkout, or git unavailable. A run log outside a repo is
     // still valid — the header just can't pin a code state.
@@ -210,6 +218,8 @@ export function readRunLog(path: string): RunLogContents {
     throw new Error(`run-log: "${path}" has no header line`)
   }
   const header = JSON.parse(lines[0]) as RunLogHeader
-  const units = lines.slice(1).map((line) => JSON.parse(line) as Record<string, unknown>)
+  const units = lines
+    .slice(1)
+    .map((line) => JSON.parse(line) as Record<string, unknown>)
   return { header, units }
 }

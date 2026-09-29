@@ -102,7 +102,9 @@ export const ArrivalCaptureEmissionSchema = z.object({
   expectedArrival: z.string().optional(),
   referencesCommitmentId: z.string().optional(),
 })
-export type ArrivalCaptureEmission = z.infer<typeof ArrivalCaptureEmissionSchema>
+export type ArrivalCaptureEmission = z.infer<
+  typeof ArrivalCaptureEmissionSchema
+>
 
 /**
  * True when the agent emitted no actionable commitment this turn. Used by
@@ -128,7 +130,9 @@ export function isEmptyCommitmentEmission(
  * without a referenced commitment can't transition anything; a referenced
  * commitment without a signal carries no new info.
  */
-export function isEmptyArrivalCapture(emission: ArrivalCaptureEmission): boolean {
+export function isEmptyArrivalCapture(
+  emission: ArrivalCaptureEmission,
+): boolean {
   if (emission.signal === undefined) return true
   if (emission.referencesCommitmentId === undefined) return true
   if (emission.referencesCommitmentId.trim().length === 0) return true
@@ -165,7 +169,9 @@ export function pendingFromEmission(
   const type = emission.type!
   const description = emission.description!.trim()
   const requiresCode = type === 'comp' || type === 'hold' || type === 'discount'
-  const code = requiresCode ? (emission.code?.trim() || generateCommitmentCode()) : null
+  const code = requiresCode
+    ? emission.code?.trim() || generateCommitmentCode()
+    : null
   const expiresAt = emission.expiresAt?.trim() || null
   return { type, description, code, expiresAt }
 }
@@ -268,7 +274,11 @@ export type PendingCancellation = z.infer<typeof PendingCancellationSchema>
  */
 export type CancellationResolution =
   | { status: 'none' }
-  | { status: 'resolved'; cancellation: PendingCancellation; commitment: ActiveCommitment }
+  | {
+      status: 'resolved'
+      cancellation: PendingCancellation
+      commitment: ActiveCommitment
+    }
   | { status: 'unresolved'; claimedId: string }
 
 /**
@@ -298,7 +308,11 @@ export function resolveCancellation(
   if (claimedId.length === 0) return { status: 'none' }
   const commitment = activeCommitments.find((c) => c.id === claimedId)
   if (commitment === undefined) return { status: 'unresolved', claimedId }
-  return { status: 'resolved', cancellation: { commitmentId: commitment.id }, commitment }
+  return {
+    status: 'resolved',
+    cancellation: { commitmentId: commitment.id },
+    commitment,
+  }
 }
 
 // ===== Operator-API payload shape =====

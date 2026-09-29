@@ -11,7 +11,9 @@ import { classifyFirstTouchReply } from './first-touch-question-detector'
 
 const path = process.argv[2]
 if (!path) {
-  console.error('usage: tsx scripts/measurement/first-touch-question-score.ts <run-log.jsonl>')
+  console.error(
+    'usage: tsx scripts/measurement/first-touch-question-score.ts <run-log.jsonl>',
+  )
   process.exit(2)
 }
 
@@ -31,10 +33,27 @@ const rows: Row[] = readFileSync(path, 'utf8')
 const meta = rows.find((r) => r.__meta__)
 const units = rows.filter((r) => !r.__meta__)
 
-const tally = new Map<string, { n: number; q: number; o: number; implied: number; invalid: number; noBody: number }>()
+const tally = new Map<
+  string,
+  {
+    n: number
+    q: number
+    o: number
+    implied: number
+    invalid: number
+    noBody: number
+  }
+>()
 const key = (r: Row) => `${r.scenarioId}|${r.arm}`
 for (const r of units) {
-  const t = tally.get(key(r)) ?? { n: 0, q: 0, o: 0, implied: 0, invalid: 0, noBody: 0 }
+  const t = tally.get(key(r)) ?? {
+    n: 0,
+    q: 0,
+    o: 0,
+    implied: 0,
+    invalid: 0,
+    noBody: 0,
+  }
   if (r.invalid) t.invalid += 1
   else if (!r.body) t.noBody += 1
   else {
@@ -48,9 +67,12 @@ for (const r of units) {
 }
 
 console.log(`run: ${path}`)
-console.log(`prompt version at generation: ${String(meta?.['promptVersion' as keyof Row] ?? '?')}`)
+console.log(
+  `prompt version at generation: ${String(meta?.['promptVersion' as keyof Row] ?? '?')}`,
+)
 console.log(`units: ${units.length}\n`)
-const pct = (x: number, n: number) => (n ? `${x}/${n} (${Math.round((100 * x) / n)}%)` : '0/0')
+const pct = (x: number, n: number) =>
+  n ? `${x}/${n} (${Math.round((100 * x) / n)}%)` : '0/0'
 for (const [k, t] of [...tally.entries()].sort()) {
   const [scenario, arm] = k.split('|')
   console.log(

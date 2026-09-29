@@ -1,0 +1,46 @@
+{
+  "repoUrl": "https://github.com/theanalogcompany/analog-guest",
+  "createdAt": 1790712356484,
+  "achievedLevel": 4,
+  "overallPassPercent": 66.67,
+  "checksNeededForNextLevel": 11,
+  "levelBreakdowns": [
+    {
+      "level": 1,
+      "checksPassed": 600,
+      "checksTotal": 700,
+      "percentComplete": 85.71428571428571,
+      "isUnlocked": true
+    },
+    {
+      "level": 2,
+      "checksPassed": 1500,
+      "checksTotal": 2300,
+      "percentComplete": 65.21739130434783,
+      "isUnlocked": true
+    },
+    {
+      "level": 3,
+      "checksPassed": 1700,
+      "checksTotal": 2400,
+      "percentComplete": 70.83333333333334,
+      "isUnlocked": true
+    },
+    {
+      "level": 4,
+      "checksPassed": 1200,
+      "checksTotal": 1900,
+      "percentComplete": 63.1578947368421,
+      "isUnlocked": true
+    },
+    {
+      "level": 5,
+      "checksPassed": 0,
+      "checksTotal": 200,
+      "percentComplete": 0,
+      "isUnlocked": true
+    }
+  ],
+  "commitHash": "6eca6a3785d2305961970ae2260f8cf4b1e74ea4",
+  "branch": "worktree-agent-readiness"
+}

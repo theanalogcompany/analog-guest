@@ -166,7 +166,8 @@ function makeSupabaseMock(opts: {
     mechanics: {
       select: () => ({
         eq: (_c: string, _v: unknown) => ({
-          eq: (_c2: string, _v2: unknown) => Promise.resolve({ data: [], error: null }),
+          eq: (_c2: string, _v2: unknown) =>
+            Promise.resolve({ data: [], error: null }),
         }),
       }),
     },
@@ -186,7 +187,10 @@ function makeSupabaseMock(opts: {
     rpc: (fn: string, args: unknown) => {
       capturedRpcCalls.push({ fn, args })
       if (opts.activityError !== undefined) {
-        return Promise.resolve({ data: null, error: { message: opts.activityError } })
+        return Promise.resolve({
+          data: null,
+          error: { message: opts.activityError },
+        })
       }
       return Promise.resolve({ data: opts.activity, error: null })
     },
@@ -223,7 +227,12 @@ beforeEach(() => {
             instagram_account_id: null,
             venue_configs: {
               followup_rules: null, // → FOLLOWUP_RULES_DEFAULT
-              messaging_cadence: { day_1: false, day_3: false, day_7: true, day_14: true },
+              messaging_cadence: {
+                day_1: false,
+                day_3: false,
+                day_7: true,
+                day_14: true,
+              },
             },
           },
         ],
@@ -232,7 +241,9 @@ beforeEach(() => {
             id: GUEST_ID,
             opted_out_at: null,
             // 7 days ago → post_visit_day_7 detector fires.
-            last_visit_at: new Date(NOW.getTime() - 7 * 24 * 60 * 60 * 1000).toISOString(),
+            last_visit_at: new Date(
+              NOW.getTime() - 7 * 24 * 60 * 60 * 1000,
+            ).toISOString(),
             phone_number: '+15551230000',
             instagram_scoped_id: null,
           },
@@ -311,7 +322,12 @@ describe('processDueFollowups — visit-time precision gate (TAC-377)', () => {
         instagram_account_id: null,
         venue_configs: {
           followup_rules: null,
-          messaging_cadence: { day_1: false, day_3: false, day_7: true, day_14: true },
+          messaging_cadence: {
+            day_1: false,
+            day_3: false,
+            day_7: true,
+            day_14: true,
+          },
         },
       },
     ],
@@ -321,7 +337,9 @@ describe('processDueFollowups — visit-time precision gate (TAC-377)', () => {
         opted_out_at: null,
         // 7 days ago — post_visit_day_7 is due on elapsed time alone, so
         // precision is the only thing that can stop it.
-        last_visit_at: new Date(NOW.getTime() - 7 * 24 * 60 * 60 * 1000).toISOString(),
+        last_visit_at: new Date(
+          NOW.getTime() - 7 * 24 * 60 * 60 * 1000,
+        ).toISOString(),
         last_visit_precision: precision,
         phone_number: '+15551230000',
         instagram_scoped_id: null,
@@ -352,7 +370,9 @@ describe('processDueFollowups — visit-time precision gate (TAC-377)', () => {
     )
     const result = await processDueFollowups(NOW)
     expect(handleFollowup).toHaveBeenCalledOnce()
-    expect(vi.mocked(handleFollowup).mock.calls[0]?.[0]?.trigger.reason).toBe('day_7')
+    expect(vi.mocked(handleFollowup).mock.calls[0]?.[0]?.trigger.reason).toBe(
+      'day_7',
+    )
     expect(result.guestsDispatched).toBe(1)
   })
 
@@ -390,7 +410,12 @@ describe('processDueFollowups — visit-time precision gate (TAC-377)', () => {
           // → FOLLOWUP_RULES_DEFAULT, recent_conversation_hours = 48. Typed
           // `unknown` rather than inferred, so a test can override it.
           followup_rules: null as unknown,
-          messaging_cadence: { day_1: false, day_3: false, day_7: true, day_14: true },
+          messaging_cadence: {
+            day_1: false,
+            day_3: false,
+            day_7: true,
+            day_14: true,
+          },
         },
       },
     ] as VenueLoadShape[],
@@ -398,7 +423,9 @@ describe('processDueFollowups — visit-time precision gate (TAC-377)', () => {
       {
         id: GUEST_ID,
         opted_out_at: null,
-        last_visit_at: new Date(NOW.getTime() - 7 * 24 * 60 * 60 * 1000).toISOString(),
+        last_visit_at: new Date(
+          NOW.getTime() - 7 * 24 * 60 * 60 * 1000,
+        ).toISOString(),
         phone_number: '+15551230000',
         instagram_scoped_id: null,
       },
@@ -409,7 +436,10 @@ describe('processDueFollowups — visit-time precision gate (TAC-377)', () => {
 
   const useActivity = (...args: Parameters<typeof withActivity>) => {
     vi.mocked(createAdminClient).mockImplementation(
-      () => makeSupabaseMock(withActivity(...args)) as unknown as ReturnType<typeof createAdminClient>,
+      () =>
+        makeSupabaseMock(withActivity(...args)) as unknown as ReturnType<
+          typeof createAdminClient
+        >,
     )
   }
 
@@ -418,7 +448,9 @@ describe('processDueFollowups — visit-time precision gate (TAC-377)', () => {
   // ago. Production dispatched to exactly this shape three times (1.7h, 4.5h
   // and 6.4h after the guest's real previous inbound).
   it('holds back a guest enrolled long ago who texted inside the window', async () => {
-    const twoHoursAgo = new Date(NOW.getTime() - 2 * 60 * 60 * 1000).toISOString()
+    const twoHoursAgo = new Date(
+      NOW.getTime() - 2 * 60 * 60 * 1000,
+    ).toISOString()
     useActivity([
       {
         guest_id: GUEST_ID,
@@ -459,7 +491,9 @@ describe('processDueFollowups — visit-time precision gate (TAC-377)', () => {
   })
 
   it('dispatches when the last inbound is outside the window', async () => {
-    const fiveDaysAgo = new Date(NOW.getTime() - 5 * 24 * 60 * 60 * 1000).toISOString()
+    const fiveDaysAgo = new Date(
+      NOW.getTime() - 5 * 24 * 60 * 60 * 1000,
+    ).toISOString()
     useActivity([
       {
         guest_id: GUEST_ID,
@@ -500,7 +534,10 @@ describe('processDueFollowups — visit-time precision gate (TAC-377)', () => {
       recent_conversation_hours: 1_000_000,
     }
     vi.mocked(createAdminClient).mockImplementation(
-      () => makeSupabaseMock(fixture) as unknown as ReturnType<typeof createAdminClient>,
+      () =>
+        makeSupabaseMock(fixture) as unknown as ReturnType<
+          typeof createAdminClient
+        >,
     )
     const result = await processDueFollowups(NOW)
     expect(handleFollowup).toHaveBeenCalledOnce()
@@ -582,7 +619,10 @@ describe('processDueFollowups — happy path (queued)', () => {
       primaryTrigger: 'fidelity_below_auto_send_floor',
     })
     const result = await processDueFollowups(NOW)
-    expect(finalizeFollowupLogClaim).toHaveBeenCalledWith(['log-1'], 'msg-queued-1')
+    expect(finalizeFollowupLogClaim).toHaveBeenCalledWith(
+      ['log-1'],
+      'msg-queued-1',
+    )
     expect(releaseFollowupLogClaim).not.toHaveBeenCalled()
     expect(result.guestsDispatched).toBe(1)
   })
@@ -605,7 +645,12 @@ describe('processDueFollowups — multi-reason claim sharing one message_id', ()
               instagram_account_id: null,
               venue_configs: {
                 followup_rules: null,
-                messaging_cadence: { day_1: false, day_3: false, day_7: true, day_14: true },
+                messaging_cadence: {
+                  day_1: false,
+                  day_3: false,
+                  day_7: true,
+                  day_14: true,
+                },
               },
             },
           ],
@@ -613,7 +658,9 @@ describe('processDueFollowups — multi-reason claim sharing one message_id', ()
             {
               id: GUEST_ID,
               opted_out_at: null,
-              last_visit_at: new Date(NOW.getTime() - 7 * 24 * 60 * 60 * 1000).toISOString(),
+              last_visit_at: new Date(
+                NOW.getTime() - 7 * 24 * 60 * 60 * 1000,
+              ).toISOString(),
               phone_number: '+15551230000',
               instagram_scoped_id: null,
             },
@@ -638,13 +685,19 @@ describe('processDueFollowups — multi-reason claim sharing one message_id', ()
       outboundMessageId: 'msg-shared-1',
     })
     await processDueFollowups(NOW)
-    expect(finalizeFollowupLogClaim).toHaveBeenCalledWith(['log-1', 'log-2'], 'msg-shared-1')
+    expect(finalizeFollowupLogClaim).toHaveBeenCalledWith(
+      ['log-1', 'log-2'],
+      'msg-shared-1',
+    )
   })
 })
 
 describe('processDueFollowups — claim conflict (concurrent run)', () => {
   it('skips dispatch and counts the conflict', async () => {
-    vi.mocked(claimFollowupLogRows).mockResolvedValue({ ok: true, conflict: true })
+    vi.mocked(claimFollowupLogRows).mockResolvedValue({
+      ok: true,
+      conflict: true,
+    })
     const result = await processDueFollowups(NOW)
     expect(handleFollowup).not.toHaveBeenCalled()
     expect(finalizeFollowupLogClaim).not.toHaveBeenCalled()
@@ -743,7 +796,9 @@ describe('processDueFollowups — gate suppression', () => {
             {
               id: GUEST_ID,
               opted_out_at: '2026-01-01T00:00:00Z',
-              last_visit_at: new Date(NOW.getTime() - 7 * 24 * 60 * 60 * 1000).toISOString(),
+              last_visit_at: new Date(
+                NOW.getTime() - 7 * 24 * 60 * 60 * 1000,
+              ).toISOString(),
               phone_number: '+15551230000',
               instagram_scoped_id: null,
             },
@@ -799,7 +854,11 @@ describe('processDueFollowups — venue local-hour filter', () => {
       data: new Map([
         [
           GUEST_ID,
-          { weeklyCount: 1, lastByReason: {}, announcedMechanicIds: new Set<string>() },
+          {
+            weeklyCount: 1,
+            lastByReason: {},
+            announcedMechanicIds: new Set<string>(),
+          },
         ],
       ]),
     } as unknown as Awaited<ReturnType<typeof loadFollowupSnapshotsForVenue>>)
@@ -823,7 +882,6 @@ describe('processDueFollowups — venue local-hour filter', () => {
   })
 })
 
-
 // TAC-469 PR B. Instagram has a 24-hour reply window that only the guest can
 // reopen, so a SCHEDULED follow-up there is never a send: it is recorded as a
 // task for a human. Rule 2 — outbound splits by ORIGIN, not by window state —
@@ -840,7 +898,12 @@ describe('Instagram follow-ups are recorded, never sent (TAC-469 PR B)', () => {
         instagram_account_id: null,
         venue_configs: {
           followup_rules: null,
-          messaging_cadence: { day_1: false, day_3: false, day_7: true, day_14: true },
+          messaging_cadence: {
+            day_1: false,
+            day_3: false,
+            day_7: true,
+            day_14: true,
+          },
         },
       },
     ],
@@ -848,7 +911,9 @@ describe('Instagram follow-ups are recorded, never sent (TAC-469 PR B)', () => {
       {
         id: GUEST_ID,
         opted_out_at: null,
-        last_visit_at: new Date(NOW.getTime() - 7 * 24 * 60 * 60 * 1000).toISOString(),
+        last_visit_at: new Date(
+          NOW.getTime() - 7 * 24 * 60 * 60 * 1000,
+        ).toISOString(),
         phone_number: null,
         instagram_scoped_id: '17841400000000001',
         ...overrides,
@@ -859,7 +924,10 @@ describe('Instagram follow-ups are recorded, never sent (TAC-469 PR B)', () => {
 
   const useGuest = (shape: ReturnType<typeof instagramGuest>) => {
     vi.mocked(createAdminClient).mockImplementation(
-      () => makeSupabaseMock(shape) as unknown as ReturnType<typeof createAdminClient>,
+      () =>
+        makeSupabaseMock(shape) as unknown as ReturnType<
+          typeof createAdminClient
+        >,
     )
   }
 
@@ -976,7 +1044,12 @@ describe('processDueFollowups — venue status and channel gates (TAC-529)', () 
               instagram_account_id: null,
               venue_configs: {
                 followup_rules: null,
-                messaging_cadence: { day_1: false, day_3: false, day_7: true, day_14: true },
+                messaging_cadence: {
+                  day_1: false,
+                  day_3: false,
+                  day_7: true,
+                  day_14: true,
+                },
               },
               ...overrides,
             },
@@ -985,7 +1058,9 @@ describe('processDueFollowups — venue status and channel gates (TAC-529)', () 
             {
               id: GUEST_ID,
               opted_out_at: null,
-              last_visit_at: new Date(NOW.getTime() - 7 * 24 * 60 * 60 * 1000).toISOString(),
+              last_visit_at: new Date(
+                NOW.getTime() - 7 * 24 * 60 * 60 * 1000,
+              ).toISOString(),
               phone_number: '+15551230000',
               instagram_scoped_id: null,
             },
@@ -995,17 +1070,20 @@ describe('processDueFollowups — venue status and channel gates (TAC-529)', () 
     )
   }
 
-  it.each(['paused', 'archived'])('does not process a %s venue at all', async (status) => {
-    useVenue({ status })
-    const result = await processDueFollowups(NOW)
-    expect(result.venuesHalted).toBe(1)
-    expect(result.venuesDispatching).toBe(0)
-    expect(result.guestsDispatched).toBe(0)
-    expect(handleFollowup).not.toHaveBeenCalled()
-    expect(claimFollowupLogRows).not.toHaveBeenCalled()
-    // Never reached the guest load, so never reached context build.
-    expect(capturedGuestSelect).toBeNull()
-  })
+  it.each(['paused', 'archived'])(
+    'does not process a %s venue at all',
+    async (status) => {
+      useVenue({ status })
+      const result = await processDueFollowups(NOW)
+      expect(result.venuesHalted).toBe(1)
+      expect(result.venuesDispatching).toBe(0)
+      expect(result.guestsDispatched).toBe(0)
+      expect(handleFollowup).not.toHaveBeenCalled()
+      expect(claimFollowupLogRows).not.toHaveBeenCalled()
+      // Never reached the guest load, so never reached context build.
+      expect(capturedGuestSelect).toBeNull()
+    },
+  )
 
   // THE LIVE-DATA TEST, and the reason this is a deny-list. Le Mil's, the only
   // real venue, is 'pending' in production while both mock venues are
@@ -1062,7 +1140,10 @@ describe('processDueFollowups — venue status and channel gates (TAC-529)', () 
   })
 
   it('still processes a venue that has only an Instagram account', async () => {
-    useVenue({ messaging_phone_number: null, instagram_account_id: 'ig-acct-1' })
+    useVenue({
+      messaging_phone_number: null,
+      instagram_account_id: 'ig-acct-1',
+    })
     const result = await processDueFollowups(NOW)
     expect(result.venuesNoChannel).toBe(0)
     expect(result.venuesDispatching).toBe(1)
@@ -1119,7 +1200,10 @@ describe('processDueFollowups — venue status and channel gates (TAC-529)', () 
   // number is deleted and it goes Instagram-only, so without this the fix
   // expires at the live venue.
   it('skips a phone guest at a venue that has Instagram but no number', async () => {
-    useVenue({ messaging_phone_number: null, instagram_account_id: 'ig-acct-1' })
+    useVenue({
+      messaging_phone_number: null,
+      instagram_account_id: 'ig-acct-1',
+    })
     const result = await processDueFollowups(NOW)
     expect(result.guestsUnservable).toBe(1)
     expect(result.guestsDispatched).toBe(0)
@@ -1145,7 +1229,12 @@ describe('processDueFollowups — venue status and channel gates (TAC-529)', () 
               instagram_account_id: 'ig-acct-1',
               venue_configs: {
                 followup_rules: null,
-                messaging_cadence: { day_1: false, day_3: false, day_7: true, day_14: true },
+                messaging_cadence: {
+                  day_1: false,
+                  day_3: false,
+                  day_7: true,
+                  day_14: true,
+                },
               },
             },
           ],
@@ -1153,7 +1242,9 @@ describe('processDueFollowups — venue status and channel gates (TAC-529)', () 
             {
               id: GUEST_ID,
               opted_out_at: null,
-              last_visit_at: new Date(NOW.getTime() - 7 * 24 * 60 * 60 * 1000).toISOString(),
+              last_visit_at: new Date(
+                NOW.getTime() - 7 * 24 * 60 * 60 * 1000,
+              ).toISOString(),
               phone_number: null,
               instagram_scoped_id: 'igsid-1',
             },

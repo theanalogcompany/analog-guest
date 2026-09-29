@@ -161,7 +161,9 @@ describe('captureDemoBypassedApprovalGate — conditional Slack relay (TAC-284)'
       properties: { wouldHaveQueuedTriggers: string[] }
     }
     expect(args.event).toBe('demo_bypassed_approval_gate')
-    expect(args.properties.wouldHaveQueuedTriggers).toEqual(['fidelity_below_auto_send_floor'])
+    expect(args.properties.wouldHaveQueuedTriggers).toEqual([
+      'fidelity_below_auto_send_floor',
+    ])
   })
 })
 
@@ -179,7 +181,11 @@ describe('captureDraftDropped: names both offers and the guest (TAC-394)', () =>
       description: 'a free cortado on your next visit',
       code: '7K2P',
     },
-    droppedCommitment: { type: 'comp', description: 'a free croissant', code: null },
+    droppedCommitment: {
+      type: 'comp',
+      description: 'a free croissant',
+      code: null,
+    },
     triggers: ['commitment_type_gated'],
     kind: 'inbound' as const,
     category: 'comp_complaint',
@@ -190,12 +196,16 @@ describe('captureDraftDropped: names both offers and the guest (TAC-394)', () =>
   // which offer was kept, which was dropped, and which guest, without a lookup.
   it('names both commitments, their codes, and the guest by first name and last four digits', () => {
     const text = formatDraftDropped(PROPS)
-    expect(text).toContain('*Draft dropped: this guest already has a different offer waiting* (inbound)')
+    expect(text).toContain(
+      '*Draft dropped: this guest already has a different offer waiting* (inbound)',
+    )
     expect(text).toContain('guest: Sam, phone ending 0123 (`g-1`)')
     expect(text).toContain(
       'kept, pending card `card-a`: comp "a free cortado on your next visit" (code 7K2P)',
     )
-    expect(text).toContain('dropped, never saved: comp "a free croissant" (no code)')
+    expect(text).toContain(
+      'dropped, never saved: comp "a free croissant" (no code)',
+    )
   })
 
   it('never puts the full phone number in Slack or PostHog', async () => {
@@ -215,12 +225,18 @@ describe('captureDraftDropped: names both offers and the guest (TAC-394)', () =>
     expect(args.event).toBe('draft_dropped')
     expect(args.properties).not.toHaveProperty('guestPhone')
     expect(args.properties.guestPhoneLast4).toBe('0123')
-    expect(args.properties.protectedCommitment).toEqual(PROPS.protectedCommitment)
+    expect(args.properties.protectedCommitment).toEqual(
+      PROPS.protectedCommitment,
+    )
     expect(args.properties.droppedCommitment).toEqual(PROPS.droppedCommitment)
   })
 
   it('still identifies a guest with no name and no number', () => {
-    const text = formatDraftDropped({ ...PROPS, guestFirstName: null, guestPhone: null })
+    const text = formatDraftDropped({
+      ...PROPS,
+      guestFirstName: null,
+      guestPhone: null,
+    })
     expect(text).toContain('guest: unnamed guest (`g-1`)')
   })
 
@@ -254,7 +270,10 @@ describe('capturePendingSlotInvariantBroken: the indexes-are-gone signal (TAC-39
       extraIds: ['card-b'],
     })
 
-    const args = captureMock.mock.calls[0][0] as { event: string; properties: Record<string, unknown> }
+    const args = captureMock.mock.calls[0][0] as {
+      event: string
+      properties: Record<string, unknown>
+    }
     expect(args.event).toBe('pending_slot_invariant_broken')
     expect(args.properties.extraIds).toEqual(['card-b'])
     expect(postToSlackMock).toHaveBeenCalledTimes(1)
@@ -282,7 +301,10 @@ describe('captureConversationChannelUnresolved: a reply that cannot be routed (T
       expect.objectContaining({
         event: 'conversation_channel_unresolved',
         distinctId: 'guest-1',
-        properties: expect.objectContaining({ reason: 'inbound_channel_without_identifier', inboundChannel: 'text' }),
+        properties: expect.objectContaining({
+          reason: 'inbound_channel_without_identifier',
+          inboundChannel: 'text',
+        }),
       }),
     )
     expect(postToSlackMock).toHaveBeenCalledTimes(1)
@@ -292,10 +314,19 @@ describe('captureConversationChannelUnresolved: a reply that cannot be routed (T
   })
 
   it('names a run with no inbound message and an unparseable channel apart', async () => {
-    await captureConversationChannelUnresolved({ ...base, inboundMessageId: null, inboundChannel: undefined })
-    await captureConversationChannelUnresolved({ ...base, inboundChannel: null })
+    await captureConversationChannelUnresolved({
+      ...base,
+      inboundMessageId: null,
+      inboundChannel: undefined,
+    })
+    await captureConversationChannelUnresolved({
+      ...base,
+      inboundChannel: null,
+    })
     const channels = captureMock.mock.calls.map(
-      (c) => (c[0] as { properties: { inboundChannel: string } }).properties.inboundChannel,
+      (c) =>
+        (c[0] as { properties: { inboundChannel: string } }).properties
+          .inboundChannel,
     )
     expect(channels).toEqual(['none', 'unparseable'])
   })

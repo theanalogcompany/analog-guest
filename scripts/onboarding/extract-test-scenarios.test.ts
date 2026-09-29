@@ -18,7 +18,9 @@ const baseScenario = (overrides: Partial<RawScenario> = {}): RawScenario => ({
 
 describe('normalizeName', () => {
   it('maps mixed-case multi-word to snake_case', () => {
-    expect(normalizeName('Couch Hold for Regulars')).toBe('couch_hold_for_regulars')
+    expect(normalizeName('Couch Hold for Regulars')).toBe(
+      'couch_hold_for_regulars',
+    )
   })
 
   it('passes already-lowercase snake_case through unchanged', () => {
@@ -27,7 +29,9 @@ describe('normalizeName', () => {
 
   it('collapses runs of spaces and punctuation into a single underscore', () => {
     expect(normalizeName('busy   /  wait times')).toBe('busy_wait_times')
-    expect(normalizeName('event / mechanic-specific')).toBe('event_mechanic_specific')
+    expect(normalizeName('event / mechanic-specific')).toBe(
+      'event_mechanic_specific',
+    )
   })
 
   it('trims leading and trailing non-alphanumerics', () => {
@@ -81,7 +85,10 @@ describe('validateUniversalCategories', () => {
   it('passes when every scenario uses a known category', () => {
     expect(() =>
       validateUniversalCategories({
-        scenarios: [baseScenario({ category: 'greeting' }), baseScenario({ category: 'hours' })],
+        scenarios: [
+          baseScenario({ category: 'greeting' }),
+          baseScenario({ category: 'hours' }),
+        ],
         validCategories: valid,
       }),
     ).not.toThrow()
@@ -109,15 +116,26 @@ describe('assignSampleIds', () => {
 
   it('produces zero-padded {slug}-NNN ids in sorted order', () => {
     const scenarios = [
-      baseScenario({ category: 'menu_fact', inbound_message: 'do you have iced tea?' }),
+      baseScenario({
+        category: 'menu_fact',
+        inbound_message: 'do you have iced tea?',
+      }),
       baseScenario({ category: 'greeting', inbound_message: 'hi' }),
       baseScenario({ category: 'hours', inbound_message: 'are you open?' }),
     ]
     const out = assignSampleIds(scenarios, 'mock-cp', order)
-    expect(out.map((s) => s.sample_id)).toEqual(['mock-cp-001', 'mock-cp-002', 'mock-cp-003'])
+    expect(out.map((s) => s.sample_id)).toEqual([
+      'mock-cp-001',
+      'mock-cp-002',
+      'mock-cp-003',
+    ])
     // Sorted by fixture-category index. category is prefixed behavior_ per
     // the unified Scenario shape (scenario-schema.ts).
-    expect(out.map((s) => s.category)).toEqual(['behavior_greeting', 'behavior_hours', 'behavior_menu_fact'])
+    expect(out.map((s) => s.category)).toEqual([
+      'behavior_greeting',
+      'behavior_hours',
+      'behavior_menu_fact',
+    ])
   })
 
   it('is idempotent — the same input twice produces the same output mapping', () => {
@@ -155,11 +173,27 @@ describe('assignSampleIds', () => {
 
   it('orders states within a category by GUEST_STATES order, not alphabetical', () => {
     const scenarios = [
-      baseScenario({ category: 'greeting', guest_state: 'regular', inbound_message: 'a' }),
-      baseScenario({ category: 'greeting', guest_state: 'new', inbound_message: 'a' }),
-      baseScenario({ category: 'greeting', guest_state: 'returning', inbound_message: 'a' }),
+      baseScenario({
+        category: 'greeting',
+        guest_state: 'regular',
+        inbound_message: 'a',
+      }),
+      baseScenario({
+        category: 'greeting',
+        guest_state: 'new',
+        inbound_message: 'a',
+      }),
+      baseScenario({
+        category: 'greeting',
+        guest_state: 'returning',
+        inbound_message: 'a',
+      }),
     ]
     const out = assignSampleIds(scenarios, 'foo', order)
-    expect(out.map((s) => s.guest_state)).toEqual(['new', 'returning', 'regular'])
+    expect(out.map((s) => s.guest_state)).toEqual([
+      'new',
+      'returning',
+      'regular',
+    ])
   })
 })

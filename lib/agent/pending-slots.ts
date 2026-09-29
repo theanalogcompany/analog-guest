@@ -35,7 +35,10 @@
 import type { MessageCategory } from '@/lib/ai/types'
 import { capturePendingSlotInvariantBroken } from '@/lib/analytics/posthog'
 import { createAdminClient } from '@/lib/db/admin'
-import { isObligationType, OBLIGATION_TYPES } from '@/lib/guests/commitment-expiry'
+import {
+  isObligationType,
+  OBLIGATION_TYPES,
+} from '@/lib/guests/commitment-expiry'
 import { commitmentDedupKey } from '@/lib/guests/commitments'
 import {
   type CommitmentEmission,
@@ -61,7 +64,9 @@ export type PendingSlot = 'obligation' | 'conversation'
  * keeping the two in step. A new obligation type therefore needs a new
  * migration, and the failing test is what says so.
  */
-export const OBLIGATION_SLOT_TYPES: readonly string[] = [...OBLIGATION_TYPES].sort()
+export const OBLIGATION_SLOT_TYPES: readonly string[] = [
+  ...OBLIGATION_TYPES,
+].sort()
 
 /**
  * Which slot a pending row's carrier puts it in. Mirrors migration 041:
@@ -116,7 +121,8 @@ export function commitmentIdentityOf(raw: unknown): CommitmentIdentity | null {
   if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) return null
   const r = raw as Record<string, unknown>
   if (typeof r.type !== 'string') return null
-  if (typeof r.description !== 'string' || r.description.trim().length === 0) return null
+  if (typeof r.description !== 'string' || r.description.trim().length === 0)
+    return null
   return {
     type: r.type,
     description: r.description,
@@ -253,7 +259,8 @@ export function isSameCommitment(
 ): boolean {
   if (a === null || b === null) return false
   return (
-    a.type === b.type && commitmentDedupKey(a.description) === commitmentDedupKey(b.description)
+    a.type === b.type &&
+    commitmentDedupKey(a.description) === commitmentDedupKey(b.description)
   )
 }
 
@@ -433,11 +440,14 @@ export async function loadPendingRowsBySlot(
   // channel as the invariant break below, because the consequence is the
   // same — the gate is deciding against an incomplete picture.
   if (data.length >= PENDING_ROWS_READ_LIMIT) {
-    console.error('[agent] pending-slot read hit its limit; older cards were not read', {
-      venueId,
-      guestId,
-      limit: PENDING_ROWS_READ_LIMIT,
-    })
+    console.error(
+      '[agent] pending-slot read hit its limit; older cards were not read',
+      {
+        venueId,
+        guestId,
+        limit: PENDING_ROWS_READ_LIMIT,
+      },
+    )
   }
 
   const { rows, extra } = partitionPendingRows(data)
@@ -452,7 +462,8 @@ export async function loadPendingRowsBySlot(
         venueId,
         guestId,
         keptObligationId: rows.obligation?.id ?? null,
-        keptConversationId: mostRecentlyOpenedConversationCard(rows)?.id ?? null,
+        keptConversationId:
+          mostRecentlyOpenedConversationCard(rows)?.id ?? null,
         extraIds: extra.map((r) => r.id),
       },
     )
@@ -461,7 +472,8 @@ export async function loadPendingRowsBySlot(
         venueId,
         guestId,
         keptObligationId: rows.obligation?.id ?? null,
-        keptConversationId: mostRecentlyOpenedConversationCard(rows)?.id ?? null,
+        keptConversationId:
+          mostRecentlyOpenedConversationCard(rows)?.id ?? null,
         extraIds: extra.map((r) => r.id),
       })
     } catch {
@@ -486,7 +498,8 @@ export async function loadPendingRowsBySlot(
  *   never_regen          manual followups (TAC-307): a Follow Up click never
  *                        overwrites a card an operator is about to act on
  */
-export type SlotCallerPolicy = 'regen' | 'regen_always' | 'regen_gap_card_only' | 'never_regen'
+export type SlotCallerPolicy =
+  'regen' | 'regen_always' | 'regen_gap_card_only' | 'never_regen'
 
 /**
  * TAC-397: what a guest's new message does to the conversation card they
@@ -611,9 +624,7 @@ export function silencesConversationTurn(input: {
 }
 
 export type SlotDropReason =
-  | 'obligation_slot_taken'
-  | 'knowledge_gap_card_protected'
-  | 'slot_occupied'
+  'obligation_slot_taken' | 'knowledge_gap_card_protected' | 'slot_occupied'
 
 export type SlotDecision =
   | { action: 'insert'; slot: PendingSlot }
@@ -636,7 +647,12 @@ export type SlotDecision =
   // `drop`, which means a draft competed for a slot and lost — here nothing
   // competed, and there was never a reply worth keeping.
   | { action: 'silence'; slot: 'conversation' }
-  | { action: 'drop'; slot: PendingSlot; reason: SlotDropReason; protectedDraftId: string }
+  | {
+      action: 'drop'
+      slot: PendingSlot
+      reason: SlotDropReason
+      protectedDraftId: string
+    }
 
 export interface SlotDecisionInput {
   rows: PendingRowsBySlot
@@ -694,7 +710,9 @@ export interface SlotDecisionInput {
 export function decideSlotAction(input: SlotDecisionInput): SlotDecision {
   const slot = pendingSlotOf(input.draftCommitment)
   const occupant =
-    slot === 'obligation' ? input.rows.obligation : mostRecentlyOpenedConversationCard(input.rows)
+    slot === 'obligation'
+      ? input.rows.obligation
+      : mostRecentlyOpenedConversationCard(input.rows)
 
   // TAC-397: on the conversation slot the `regen` policy decides from the
   // DISPOSITION first, because "this message deserves its own card" is true
@@ -766,7 +784,10 @@ export function decideSlotAction(input: SlotDecisionInput): SlotDecision {
 
   if (
     slot === 'obligation' &&
-    !isSameCommitment(commitmentIdentityOf(occupant.pending_commitment), input.draftCommitment)
+    !isSameCommitment(
+      commitmentIdentityOf(occupant.pending_commitment),
+      input.draftCommitment,
+    )
   ) {
     return drop('obligation_slot_taken')
   }
@@ -778,18 +799,37 @@ export function decideSlotAction(input: SlotDecisionInput): SlotDecision {
     case 'never_regen':
       return drop('slot_occupied')
     case 'regen_always':
-      return { action: 'regen', slot, draftId: occupant.id, captureReplacedDraft: false }
+      return {
+        action: 'regen',
+        slot,
+        draftId: occupant.id,
+        captureReplacedDraft: false,
+      }
     case 'regen_gap_card_only':
       return isKnowledgeGapCard(occupant)
-        ? { action: 'regen', slot, draftId: occupant.id, captureReplacedDraft: false }
+        ? {
+            action: 'regen',
+            slot,
+            draftId: occupant.id,
+            captureReplacedDraft: false,
+          }
         : drop('slot_occupied')
     case 'regen':
       // Only reachable for the OBLIGATION slot: the conversation branch
       // returned above. TAC-308's protection and TAC-367's exemption unchanged.
-      if (isKnowledgeGapCard(occupant) && !input.isGapTurn && !input.checkDidNotComplete) {
+      if (
+        isKnowledgeGapCard(occupant) &&
+        !input.isGapTurn &&
+        !input.checkDidNotComplete
+      ) {
         return drop('knowledge_gap_card_protected')
       }
-      return { action: 'regen', slot, draftId: occupant.id, captureReplacedDraft: false }
+      return {
+        action: 'regen',
+        slot,
+        draftId: occupant.id,
+        captureReplacedDraft: false,
+      }
   }
 }
 
@@ -819,8 +859,13 @@ export function anyKnowledgeGapCard(rows: PendingRowsBySlot): boolean {
  * same one decideSlotAction and a correction both target. Used by the two drop
  * reports, which need the protected card's carrier.
  */
-export function occupantOfSlot(rows: PendingRowsBySlot, slot: PendingSlot): PendingSlotRow | null {
-  return slot === 'obligation' ? rows.obligation : mostRecentlyOpenedConversationCard(rows)
+export function occupantOfSlot(
+  rows: PendingRowsBySlot,
+  slot: PendingSlot,
+): PendingSlotRow | null {
+  return slot === 'obligation'
+    ? rows.obligation
+    : mostRecentlyOpenedConversationCard(rows)
 }
 
 /**
@@ -834,7 +879,9 @@ export function otherSlotOccupied(
   draftCommitment: CommitmentIdentity | null,
 ): boolean {
   const other = otherSlot(pendingSlotOf(draftCommitment))
-  return other === 'obligation' ? rows.obligation !== null : rows.conversation.length > 0
+  return other === 'obligation'
+    ? rows.obligation !== null
+    : rows.conversation.length > 0
 }
 
 /**
@@ -854,7 +901,8 @@ export function gapFlagsFromTriggers(triggers: readonly string[] | undefined): {
 } {
   const set = triggers ?? []
   return {
-    isGapTurn: set.includes('knowledge_gap') || set.includes('knowledge_gap_backstop'),
+    isGapTurn:
+      set.includes('knowledge_gap') || set.includes('knowledge_gap_backstop'),
     // Both absence-of-information triggers, and they must stay in step with
     // the gate's own computation in stages.ts — this is what 23505 race
     // recovery decides with, so a divergence means the gate spares a draft and
@@ -967,6 +1015,8 @@ export function isKnowledgeGapCard(row: {
   return (
     typeof row.pending_until === 'string' ||
     (typeof row.review_reason === 'string' &&
-      (KNOWLEDGE_GAP_CARD_REVIEW_REASONS as readonly string[]).includes(row.review_reason))
+      (KNOWLEDGE_GAP_CARD_REVIEW_REASONS as readonly string[]).includes(
+        row.review_reason,
+      ))
   )
 }

@@ -5,10 +5,7 @@
 import { z } from 'zod'
 
 import type { NormalizedEvent, PosResult } from '../types'
-import {
-  mapSquareInventoryCounts,
-  mapSquarePaymentToTransaction,
-} from './map'
+import { mapSquareInventoryCounts, mapSquarePaymentToTransaction } from './map'
 
 // Permissive envelope — we only require the fields we branch on. Unknown event
 // types are surfaced as { kind: 'unknown' } rather than rejected, so a new
@@ -33,7 +30,9 @@ const EnvelopeSchema = z.object({
  * to 400). A recognized envelope whose inner payload doesn't map yields an
  * 'unknown' event rather than an error — the delivery is still acknowledged.
  */
-export function parseSquareWebhook(rawBody: string): PosResult<NormalizedEvent[]> {
+export function parseSquareWebhook(
+  rawBody: string,
+): PosResult<NormalizedEvent[]> {
   let json: unknown
   try {
     json = JSON.parse(rawBody)
@@ -43,7 +42,11 @@ export function parseSquareWebhook(rawBody: string): PosResult<NormalizedEvent[]
 
   const parsed = EnvelopeSchema.safeParse(json)
   if (!parsed.success) {
-    return { ok: false, error: 'envelope missing type/event_id', errorCode: 'invalid_envelope' }
+    return {
+      ok: false,
+      error: 'envelope missing type/event_id',
+      errorCode: 'invalid_envelope',
+    }
   }
 
   const env = parsed.data
@@ -56,7 +59,11 @@ export function parseSquareWebhook(rawBody: string): PosResult<NormalizedEvent[]
       // Square nests the payment under data.object.payment.
       const payment = (object as Record<string, unknown> | undefined)?.payment
       const txn = mapSquarePaymentToTransaction(payment)
-      if (!txn) return { ok: true, data: [{ kind: 'unknown', eventId, type: env.type }] }
+      if (!txn)
+        return {
+          ok: true,
+          data: [{ kind: 'unknown', eventId, type: env.type }],
+        }
       // The merchant id lives on the envelope, not the payment object.
       txn.merchantExternalId = env.merchant_id ?? null
       return { ok: true, data: [{ kind: 'transaction', eventId, data: txn }] }
@@ -65,14 +72,27 @@ export function parseSquareWebhook(rawBody: string): PosResult<NormalizedEvent[]
     case 'catalog.version.updated':
       return {
         ok: true,
-        data: [{ kind: 'catalog_updated', eventId, merchantExternalId: env.merchant_id ?? null }],
+        data: [
+          {
+            kind: 'catalog_updated',
+            eventId,
+            merchantExternalId: env.merchant_id ?? null,
+          },
+        ],
       }
 
     case 'inventory.count.updated': {
-      const counts = (object as Record<string, unknown> | undefined)?.inventory_counts
+      const counts = (object as Record<string, unknown> | undefined)
+        ?.inventory_counts
       return {
         ok: true,
-        data: [{ kind: 'inventory_updated', eventId, counts: mapSquareInventoryCounts(counts) }],
+        data: [
+          {
+            kind: 'inventory_updated',
+            eventId,
+            counts: mapSquareInventoryCounts(counts),
+          },
+        ],
       }
     }
 

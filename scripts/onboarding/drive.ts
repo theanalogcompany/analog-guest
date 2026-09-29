@@ -56,7 +56,8 @@ export async function createMultiTabSheet(
     },
   })
   const spreadsheetId = created.data.spreadsheetId
-  if (!spreadsheetId) throw new Error(`drive: spreadsheet create returned no id for "${name}"`)
+  if (!spreadsheetId)
+    throw new Error(`drive: spreadsheet create returned no id for "${name}"`)
   await drive.files.update({
     fileId: spreadsheetId,
     addParents: folderId,
@@ -117,7 +118,9 @@ export async function readTabValues(
     range: tabTitle,
     valueRenderOption: 'UNFORMATTED_VALUE',
   })
-  return (res.data.values ?? []).map((row) => row.map((cell) => String(cell ?? '')))
+  return (res.data.values ?? []).map((row) =>
+    row.map((cell) => String(cell ?? '')),
+  )
 }
 
 /**
@@ -131,12 +134,19 @@ export async function ensureTabExists(
   spreadsheetId: string,
   tabTitle: string,
 ): Promise<void> {
-  const meta = await sheets.spreadsheets.get({ spreadsheetId, fields: 'sheets.properties.title' })
-  const existingTitles = new Set((meta.data.sheets ?? []).map((s) => s.properties?.title))
+  const meta = await sheets.spreadsheets.get({
+    spreadsheetId,
+    fields: 'sheets.properties.title',
+  })
+  const existingTitles = new Set(
+    (meta.data.sheets ?? []).map((s) => s.properties?.title),
+  )
   if (existingTitles.has(tabTitle)) return
   await sheets.spreadsheets.batchUpdate({
     spreadsheetId,
-    requestBody: { requests: [{ addSheet: { properties: { title: tabTitle } } }] },
+    requestBody: {
+      requests: [{ addSheet: { properties: { title: tabTitle } } }],
+    },
   })
 }
 
@@ -146,21 +156,39 @@ export interface SheetTabMeta {
 }
 
 /** Every tab on a spreadsheet with its numeric sheetId (deleteSheet needs the id, not the title). */
-export async function listTabs(sheets: sheets_v4.Sheets, spreadsheetId: string): Promise<SheetTabMeta[]> {
-  const meta = await sheets.spreadsheets.get({ spreadsheetId, fields: 'sheets.properties(sheetId,title)' })
+export async function listTabs(
+  sheets: sheets_v4.Sheets,
+  spreadsheetId: string,
+): Promise<SheetTabMeta[]> {
+  const meta = await sheets.spreadsheets.get({
+    spreadsheetId,
+    fields: 'sheets.properties(sheetId,title)',
+  })
   return (meta.data.sheets ?? []).flatMap((s) => {
     const sheetId = s.properties?.sheetId
     const title = s.properties?.title
-    if (sheetId === undefined || sheetId === null || title === undefined || title === null) return []
+    if (
+      sheetId === undefined ||
+      sheetId === null ||
+      title === undefined ||
+      title === null
+    )
+      return []
     return [{ sheetId, title }]
   })
 }
 
-export async function deleteTabs(sheets: sheets_v4.Sheets, spreadsheetId: string, sheetIds: readonly number[]): Promise<void> {
+export async function deleteTabs(
+  sheets: sheets_v4.Sheets,
+  spreadsheetId: string,
+  sheetIds: readonly number[],
+): Promise<void> {
   if (sheetIds.length === 0) return
   await sheets.spreadsheets.batchUpdate({
     spreadsheetId,
-    requestBody: { requests: sheetIds.map((sheetId) => ({ deleteSheet: { sheetId } })) },
+    requestBody: {
+      requests: sheetIds.map((sheetId) => ({ deleteSheet: { sheetId } })),
+    },
   })
 }
 
@@ -183,7 +211,9 @@ export async function pruneTabsByPrefix(
   )
   if (toDelete.length === 0) return { deletedTitles: [] }
   const deleteSet = new Set(toDelete)
-  const idsToDelete = tabs.filter((t) => deleteSet.has(t.title)).map((t) => t.sheetId)
+  const idsToDelete = tabs
+    .filter((t) => deleteSet.has(t.title))
+    .map((t) => t.sheetId)
   await deleteTabs(sheets, spreadsheetId, idsToDelete)
   return { deletedTitles: toDelete }
 }
@@ -206,7 +236,9 @@ export async function findVenueFolder(
   })
   const files = res.data.files ?? []
   if (files.length === 0) {
-    throw new Error(`drive: venue folder not found for slug="${slug}" under parent ${parentFolderId}`)
+    throw new Error(
+      `drive: venue folder not found for slug="${slug}" under parent ${parentFolderId}`,
+    )
   }
   if (files.length > 1) {
     throw new Error(`drive: multiple folders match slug="${slug}" — ambiguous`)
@@ -282,7 +314,9 @@ export async function writeMarkdownFile(
   })
   const matches = existing.data.files ?? []
   if (matches.length > 1) {
-    throw new Error(`drive: multiple files match name="${name}" in folder — ambiguous`)
+    throw new Error(
+      `drive: multiple files match name="${name}" in folder — ambiguous`,
+    )
   }
   if (matches.length === 1 && matches[0].id) {
     await drive.files.update({
@@ -319,7 +353,9 @@ export async function writeJsonFile(
   })
   const matches = existing.data.files ?? []
   if (matches.length > 1) {
-    throw new Error(`drive: multiple files match name="${name}" in folder — ambiguous`)
+    throw new Error(
+      `drive: multiple files match name="${name}" in folder — ambiguous`,
+    )
   }
   if (matches.length === 1 && matches[0].id) {
     await drive.files.update({
@@ -357,7 +393,9 @@ export async function writeSheetFile(
   })
   const matches = existing.data.files ?? []
   if (matches.length > 1) {
-    throw new Error(`drive: multiple files match name="${name}" in folder — ambiguous`)
+    throw new Error(
+      `drive: multiple files match name="${name}" in folder — ambiguous`,
+    )
   }
   if (matches.length === 1 && matches[0].id) {
     await drive.files.update({

@@ -205,7 +205,11 @@ const PUSH_POLICY = {
  * module, or a review_reason written by a non-policy path — pushes.
  */
 export function shouldSendDraftFlaggedPush(primaryTrigger: string): boolean {
-  return (PUSH_POLICY as Record<string, PushDecision | undefined>)[primaryTrigger] !== 'skip'
+  return (
+    (PUSH_POLICY as Record<string, PushDecision | undefined>)[
+      primaryTrigger
+    ] !== 'skip'
+  )
 }
 
 /** Test-only accessor. Not for runtime branching — use the function above. */

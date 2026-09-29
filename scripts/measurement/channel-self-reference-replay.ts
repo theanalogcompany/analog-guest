@@ -56,7 +56,10 @@
 // Run: npm run measure-channel-self-reference
 //      REPEATS=5 npm run measure-channel-self-reference
 
-import { verifyGrounding, VERIFY_GROUNDING_PROMPT_VERSION } from '@/lib/ai/verify-grounding'
+import {
+  verifyGrounding,
+  VERIFY_GROUNDING_PROMPT_VERSION,
+} from '@/lib/ai/verify-grounding'
 import type { MessageChannel } from '@/lib/schemas/message-channel'
 import { VenueInfoSchema, type VenueInfo } from '@/lib/schemas'
 import { createRunLog } from './run-log'
@@ -113,9 +116,24 @@ function leMilsShaped(overrides: Record<string, unknown> = {}): VenueInfo {
     menu: {
       highlights: [],
       items: [
-        { name: 'Pink Panther', category: 'drinks', price: 7, isOffMenu: false },
-        { name: 'Blossom Tonic', category: 'drinks', price: 7, isOffMenu: false },
-        { name: 'Olive Oil Cake', category: 'pastry', price: 6, isOffMenu: false },
+        {
+          name: 'Pink Panther',
+          category: 'drinks',
+          price: 7,
+          isOffMenu: false,
+        },
+        {
+          name: 'Blossom Tonic',
+          category: 'drinks',
+          price: 7,
+          isOffMenu: false,
+        },
+        {
+          name: 'Olive Oil Cake',
+          category: 'pastry',
+          price: 6,
+          isOffMenu: false,
+        },
       ],
     },
     staff: [],
@@ -218,7 +236,8 @@ const FIXTURES: readonly Fixture[] = [
     id: 'other_number_on_text',
     expect: 'flag',
     channel: 'text',
-    inboundBody: 'my friend wants to order for pickup, whats the best number for them to call?',
+    inboundBody:
+      'my friend wants to order for pickup, whats the best number for them to call?',
     body: "give them a ring on (415) 555-0142 and they'll sort the pickup out.",
     venueInfo: leMilsShaped(),
     runtimeContext: runtimeContext([NO_PERKS]),
@@ -268,7 +287,7 @@ const FIXTURES: readonly Fixture[] = [
       NO_PERKS,
     ]),
     claimMustMatch: /pink panther|two days/i,
-    why: "AC5 catch #1, a genuine production flag. The reply says the guest had the Pink Panther two days running; the visit history the live prompt carried held one blossom tonic and no Pink Panther at all. It must still flag, and nothing about the channel bears on it.",
+    why: 'AC5 catch #1, a genuine production flag. The reply says the guest had the Pink Panther two days running; the visit history the live prompt carried held one blossom tonic and no Pink Panther at all. It must still flag, and nothing about the channel bears on it.',
   },
   {
     id: 'hold_promise_no_holds',
@@ -348,7 +367,11 @@ interface CellResult {
 }
 
 /** Run `work` over `items` with a fixed number of workers. */
-async function pooled<T, R>(items: T[], size: number, work: (t: T) => Promise<R>): Promise<R[]> {
+async function pooled<T, R>(
+  items: T[],
+  size: number,
+  work: (t: T) => Promise<R>,
+): Promise<R[]> {
   const out: R[] = new Array(items.length)
   let next = 0
   await Promise.all(
@@ -386,7 +409,11 @@ function hasVerdicts(cell: CellResult): boolean {
  * all" case TAC-409 found in eight drafts that had been reasoned about as
  * eight behaviours.
  */
-function channelArmMeets(fixture: Fixture, cell: CellResult, reps: number): boolean {
+function channelArmMeets(
+  fixture: Fixture,
+  cell: CellResult,
+  reps: number,
+): boolean {
   if (!hasVerdicts(cell)) return false
   if (fixture.expect !== 'flag') return cell.flaggedCount === 0
   return cell.flaggedCount === reps && namedTheRightClaim(fixture, cell)
@@ -408,7 +435,9 @@ function channelArmMeets(fixture: Fixture, cell: CellResult, reps: number): bool
 function namedTheRightClaim(fixture: Fixture, cell: CellResult): boolean {
   const pattern = fixture.claimMustMatch
   if (pattern === undefined) return true
-  return cell.verdicts.every((v) => !v.flagged || v.claims.some((c) => pattern.test(c)))
+  return cell.verdicts.every(
+    (v) => !v.flagged || v.claims.some((c) => pattern.test(c)),
+  )
 }
 
 /**
@@ -443,7 +472,9 @@ function nullArmMeets(
 ): boolean {
   if (!hasVerdicts(nullCell)) return false
   if (fixture.expect === 'flag') {
-    return nullCell.flaggedCount === reps && namedTheRightClaim(fixture, nullCell)
+    return (
+      nullCell.flaggedCount === reps && namedTheRightClaim(fixture, nullCell)
+    )
   }
   return (
     nullCell.flaggedCount >= controlFloor(reps) &&
@@ -459,19 +490,24 @@ function nullArmExpectation(fixture: Fixture): string {
 
 async function main(): Promise<void> {
   if (!Number.isInteger(REPEATS) || REPEATS < 1) {
-    console.error(`REPEATS must be a positive integer, got ${process.env.REPEATS}`)
+    console.error(
+      `REPEATS must be a positive integer, got ${process.env.REPEATS}`,
+    )
     process.exit(2)
   }
   // Same guard, because the asymmetry was arbitrary: CONCURRENCY=0 makes
   // `pooled` spawn no workers, leaves every cell undefined, and the run dies
   // with an opaque TypeError after making zero model calls.
   if (!Number.isInteger(CONCURRENCY) || CONCURRENCY < 1) {
-    console.error(`CONCURRENCY must be a positive integer, got ${process.env.CONCURRENCY}`)
+    console.error(
+      `CONCURRENCY must be a positive integer, got ${process.env.CONCURRENCY}`,
+    )
     process.exit(2)
   }
 
   const cells: { fixture: Fixture; arm: Arm }[] = []
-  for (const fixture of FIXTURES) for (const arm of ARMS) cells.push({ fixture, arm })
+  for (const fixture of FIXTURES)
+    for (const arm of ARMS) cells.push({ fixture, arm })
 
   const log = createRunLog({
     name: 'tac502-channel-self-reference',
@@ -482,7 +518,7 @@ async function main(): Promise<void> {
       repeats: REPEATS,
       concurrency: CONCURRENCY,
       fixtureCount: FIXTURES.length,
-      note: "the `null` arm reproduces pre-TAC-502 SOURCE MATERIAL against the v1.6.0 system prompt; it is not a measurement of v1.5.0",
+      note: 'the `null` arm reproduces pre-TAC-502 SOURCE MATERIAL against the v1.6.0 system prompt; it is not a measurement of v1.5.0',
     },
   })
 
@@ -495,7 +531,8 @@ async function main(): Promise<void> {
   let done = 0
   const results = await pooled(cells, CONCURRENCY, async ({ fixture, arm }) => {
     const verdicts: Verdict[] = []
-    for (let i = 0; i < REPEATS; i++) verdicts.push(await judgeOnce(fixture, arm))
+    for (let i = 0; i < REPEATS; i++)
+      verdicts.push(await judgeOnce(fixture, arm))
     const result: CellResult = {
       fixture,
       arm,
@@ -534,20 +571,28 @@ async function main(): Promise<void> {
     const nullArm = cellFor(fixture.id, 'null')
     const channelOk = channelArmMeets(fixture, channelArm, REPEATS)
     const nullOk = nullArmMeets(fixture, nullArm, channelArm, REPEATS)
-    if (!channelOk) misses.push(`${fixture.id} (channel arm: expected ${fixture.expect})`)
-    if (!nullOk) misses.push(`${fixture.id} (null arm: expected to ${nullArmExpectation(fixture)})`)
+    if (!channelOk)
+      misses.push(`${fixture.id} (channel arm: expected ${fixture.expect})`)
+    if (!nullOk)
+      misses.push(
+        `${fixture.id} (null arm: expected to ${nullArmExpectation(fixture)})`,
+      )
 
     console.log(`\n  ${fixture.id}  [${fixture.channel}]`)
     console.log(`     body: ${fixture.body}`)
     const failNote = (c: CellResult) =>
-      c.failedCount > 0 ? `  [${c.failedCount}/${REPEATS} CALLS FAILED — not a verdict]` : ''
+      c.failedCount > 0
+        ? `  [${c.failedCount}/${REPEATS} CALLS FAILED — not a verdict]`
+        : ''
     console.log(
       `     channel arm: flagged ${channelArm.flaggedCount}/${REPEATS}  expected ${fixture.expect}  ${channelOk ? 'as expected' : 'MISS'}${failNote(channelArm)}`,
     )
     console.log(
       `     null arm:    flagged ${nullArm.flaggedCount}/${REPEATS}  expected to ${nullArmExpectation(fixture)}  ${nullOk ? 'as expected' : 'MISS'}${failNote(nullArm)}`,
     )
-    const claim = [...channelArm.verdicts, ...nullArm.verdicts].find((v) => v.flagged)
+    const claim = [...channelArm.verdicts, ...nullArm.verdicts].find(
+      (v) => v.flagged,
+    )
     if (claim !== undefined && claim.claims.length > 0) {
       console.log(`     a claim it named: ${claim.claims[0]}`)
     }
@@ -568,7 +613,9 @@ async function main(): Promise<void> {
   )
 
   const failed = results.reduce((a, r) => a + r.failedCount, 0)
-  console.log(`\n=== Check health ===\n  failed calls: ${failed}/${cells.length * REPEATS}`)
+  console.log(
+    `\n=== Check health ===\n  failed calls: ${failed}/${cells.length * REPEATS}`,
+  )
   if (failed > 0) {
     const example = results.flatMap((r) => r.verdicts).find((v) => v.failed)
     console.log(`  first error: ${example?.error}`)

@@ -60,7 +60,9 @@ function parseActivityTime(iso: string): number {
 /**
  * Build the guest -> last-activity lookup the sort reads.
  */
-export function activityIndex(rows: readonly GuestActivityRow[]): Map<string, number> {
+export function activityIndex(
+  rows: readonly GuestActivityRow[],
+): Map<string, number> {
   const index = new Map<string, number>()
   for (const row of rows) {
     index.set(row.guest_id, parseActivityTime(row.last_interaction_at))
@@ -89,10 +91,12 @@ export function orderGuestsByActivity<T extends GuestLike>(
   return [...guests]
     .sort((a, b) => {
       const byActivity =
-        (activity.get(b.id) ?? NO_ACTIVITY) - (activity.get(a.id) ?? NO_ACTIVITY)
+        (activity.get(b.id) ?? NO_ACTIVITY) -
+        (activity.get(a.id) ?? NO_ACTIVITY)
       if (byActivity !== 0) return byActivity
       const byEnrollment =
-        parseActivityTime(b.first_contacted_at ?? '') - parseActivityTime(a.first_contacted_at ?? '')
+        parseActivityTime(b.first_contacted_at ?? '') -
+        parseActivityTime(a.first_contacted_at ?? '')
       if (byEnrollment !== 0) return byEnrollment
       return a.id.localeCompare(b.id)
     })

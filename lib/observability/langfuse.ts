@@ -181,7 +181,11 @@ interface SdkTraceLike {
 // (when provided) is folded into the input object under a `content` key so it
 // renders next to the metadata input in the Langfuse UI. When off, content is
 // dropped.
-function buildSpanInput(input: unknown, content: unknown, captureContent: boolean): unknown {
+function buildSpanInput(
+  input: unknown,
+  content: unknown,
+  captureContent: boolean,
+): unknown {
   if (!captureContent || content === undefined) return input
   if (input === undefined) return { content }
   if (typeof input === 'object' && input !== null && !Array.isArray(input)) {
@@ -220,18 +224,27 @@ function wrapSpan(span: SdkSpanLike, captureContent: boolean): AgentSpan {
     span(name, input, content) {
       try {
         return wrapSpan(
-          span.span({ name, input: buildSpanInput(input, content, captureContent) }),
+          span.span({
+            name,
+            input: buildSpanInput(input, content, captureContent),
+          }),
           captureContent,
         )
       } catch (e) {
-        console.warn('[observability] span.span failed', e instanceof Error ? e.message : e)
+        console.warn(
+          '[observability] span.span failed',
+          e instanceof Error ? e.message : e,
+        )
         return NOOP_SPAN
       }
     },
     generation(name, input, content) {
       try {
         return wrapSpan(
-          span.generation({ name, input: buildSpanInput(input, content, captureContent) }),
+          span.generation({
+            name,
+            input: buildSpanInput(input, content, captureContent),
+          }),
           captureContent,
         )
       } catch (e) {
@@ -246,14 +259,20 @@ function wrapSpan(span: SdkSpanLike, captureContent: boolean): AgentSpan {
       try {
         span.update(buildUpdateBody(body, captureContent))
       } catch (e) {
-        console.warn('[observability] span.update failed', e instanceof Error ? e.message : e)
+        console.warn(
+          '[observability] span.update failed',
+          e instanceof Error ? e.message : e,
+        )
       }
     },
     end(body) {
       try {
         span.end(buildUpdateBody(body, captureContent))
       } catch (e) {
-        console.warn('[observability] span.end failed', e instanceof Error ? e.message : e)
+        console.warn(
+          '[observability] span.end failed',
+          e instanceof Error ? e.message : e,
+        )
       }
     },
   }
@@ -275,7 +294,9 @@ export type { ApiTraceWithFullDetails } from 'langfuse'
  * "trace unavailable" UI on null. No retry — the API route handler issues
  * fresh fetches per click, so transient failures self-heal on user retry.
  */
-export async function fetchTrace(traceId: string): Promise<ApiTraceWithFullDetails | null> {
+export async function fetchTrace(
+  traceId: string,
+): Promise<ApiTraceWithFullDetails | null> {
   const trimmed = traceId.trim()
   if (!trimmed) return null
   const client = getClient()
@@ -322,11 +343,17 @@ export function startAgentTrace(opts: StartAgentTraceOptions): AgentTrace {
     span(name, input, content) {
       try {
         return wrapSpan(
-          trace.span({ name, input: buildSpanInput(input, content, captureContent) }),
+          trace.span({
+            name,
+            input: buildSpanInput(input, content, captureContent),
+          }),
           captureContent,
         )
       } catch (e) {
-        console.warn('[observability] trace.span failed', e instanceof Error ? e.message : e)
+        console.warn(
+          '[observability] trace.span failed',
+          e instanceof Error ? e.message : e,
+        )
         return NOOP_SPAN
       }
     },
@@ -334,14 +361,20 @@ export function startAgentTrace(opts: StartAgentTraceOptions): AgentTrace {
       try {
         trace.update(buildUpdateBody(body, captureContent))
       } catch (e) {
-        console.warn('[observability] trace.update failed', e instanceof Error ? e.message : e)
+        console.warn(
+          '[observability] trace.update failed',
+          e instanceof Error ? e.message : e,
+        )
       }
     },
     async flushAsync() {
       try {
         await client.flushAsync()
       } catch (e) {
-        console.warn('[observability] flushAsync failed', e instanceof Error ? e.message : e)
+        console.warn(
+          '[observability] flushAsync failed',
+          e instanceof Error ? e.message : e,
+        )
       }
     },
   }

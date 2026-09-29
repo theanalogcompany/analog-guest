@@ -16,7 +16,8 @@ import { withOperatorAuth } from '@/lib/auth'
 import { captureOperatorMessageApproved } from '@/lib/analytics/posthog'
 import { dispatchOperatorOutbound } from '@/lib/operator'
 
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
 const ParamsSchema = z.object({ id: z.string().regex(UUID_RE) })
 
@@ -42,7 +43,10 @@ export const POST = withOperatorAuth<{ id: string }>(
         case 'message_not_found':
           return NextResponse.json({ error: 'not found' }, { status: 404 })
         case 'opted_out':
-          return NextResponse.json({ error: 'guest opted out' }, { status: 422 })
+          return NextResponse.json(
+            { error: 'guest opted out' },
+            { status: 422 },
+          )
         // TAC-309: nothing to send. Either a knowledge-gap card the operator
         // hasn't written yet, or a blank edit. 422 rather than the default
         // 500, because this is a user-actionable refusal and the Contract
@@ -100,7 +104,10 @@ export const POST = withOperatorAuth<{ id: string }>(
       guestId: result.guestId,
       messageId: result.messageId,
       operatorId: operator.operatorId,
-      timeToActionMs: Math.max(0, Date.now() - new Date(result.createdAt).getTime()),
+      timeToActionMs: Math.max(
+        0,
+        Date.now() - new Date(result.createdAt).getTime(),
+      ),
       voiceFidelity: result.voiceFidelity,
       category: result.category,
       recognitionState: null,

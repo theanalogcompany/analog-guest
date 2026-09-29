@@ -3,7 +3,9 @@ import {
   classifyContextEntry,
   filterActiveContext,
   type VenueContextNote,
-  VenueInfoSchema, parseVenueLinks} from './venue-info'
+  VenueInfoSchema,
+  parseVenueLinks,
+} from './venue-info'
 
 const NOW = new Date('2026-04-29T12:00:00Z')
 
@@ -56,7 +58,10 @@ describe('filterActiveContext', () => {
     const malformed = note({ id: 'malformed', expiresAt: 'garbage' })
     vi.spyOn(console, 'warn').mockImplementation(() => {})
 
-    const out = filterActiveContext([expired, active, permanent, malformed], NOW)
+    const out = filterActiveContext(
+      [expired, active, permanent, malformed],
+      NOW,
+    )
     expect(out.map((e) => e.id)).toEqual(['active', 'permanent'])
   })
 
@@ -101,7 +106,12 @@ describe('classifyContextEntry', () => {
 // TAC-301 part 2.
 describe('VenueInfoSchema — services', () => {
   const minimal = {
-    address: { line1: '1 Test St', city: 'SF', region: 'CA', postalCode: '94109' },
+    address: {
+      line1: '1 Test St',
+      city: 'SF',
+      region: 'CA',
+      postalCode: '94109',
+    },
   }
 
   it('parses a venue with no services key at all (every venue predating this)', () => {
@@ -125,7 +135,10 @@ describe('VenueInfoSchema — services', () => {
   })
 
   it('defaults the free-form arrays so callers never handle undefined', () => {
-    const r = VenueInfoSchema.safeParse({ ...minimal, services: { holds: false } })
+    const r = VenueInfoSchema.safeParse({
+      ...minimal,
+      services: { holds: false },
+    })
     expect(r.success).toBe(true)
     if (r.success) {
       expect(r.data.services?.alsoOffers).toEqual([])
@@ -139,7 +152,10 @@ describe('VenueInfoSchema — services', () => {
   // venue over a typo. Degrading to "nobody said" renders nothing, which is
   // the same safe state as unconfigured.
   it('degrades a malformed services object to undefined instead of failing the venue', () => {
-    const r = VenueInfoSchema.safeParse({ ...minimal, services: { holds: 'no' } })
+    const r = VenueInfoSchema.safeParse({
+      ...minimal,
+      services: { holds: 'no' },
+    })
     expect(r.success).toBe(true)
     if (r.success) expect(r.data.services).toBeUndefined()
   })
@@ -161,7 +177,12 @@ describe('VenueInfoSchema — services', () => {
 describe('VenueInfoSchema — links (TAC-509)', () => {
   function base(): Record<string, unknown> {
     return {
-      address: { line1: '1 Main St', city: 'Someville', region: 'CA', postalCode: '00000' },
+      address: {
+        line1: '1 Main St',
+        city: 'Someville',
+        region: 'CA',
+        postalCode: '00000',
+      },
     }
   }
 
@@ -172,7 +193,9 @@ describe('VenueInfoSchema — links (TAC-509)', () => {
   })
 
   it('stores entries untouched, so the admin write path round-trips them', () => {
-    const stored = [{ label: 'Budan beans', url: 'https://lemils.com/products/budan' }]
+    const stored = [
+      { label: 'Budan beans', url: 'https://lemils.com/products/budan' },
+    ]
     const r = VenueInfoSchema.safeParse({ ...base(), links: stored })
     expect(r.success).toBe(true)
     if (r.success) expect(r.data.links).toEqual(stored)
@@ -208,8 +231,12 @@ describe('parseVenueLinks (TAC-509)', () => {
 
   it('keeps a well-formed entry', () => {
     expect(
-      parseVenueLinks([{ label: 'Budan beans', url: 'https://lemils.com/products/budan' }]),
-    ).toEqual([{ label: 'Budan beans', url: 'https://lemils.com/products/budan' }])
+      parseVenueLinks([
+        { label: 'Budan beans', url: 'https://lemils.com/products/budan' },
+      ]),
+    ).toEqual([
+      { label: 'Budan beans', url: 'https://lemils.com/products/budan' },
+    ])
   })
 
   it('drops a bad entry and KEEPS its siblings', () => {
@@ -233,11 +260,13 @@ describe('parseVenueLinks (TAC-509)', () => {
 
   it('trims whitespace around a stored url but normalizes nothing else', () => {
     expect(
-      parseVenueLinks([{ label: 'X', url: '  https://lemils.com/Products/Budan?v=1  ' }]),
+      parseVenueLinks([
+        { label: 'X', url: '  https://lemils.com/Products/Budan?v=1  ' },
+      ]),
     ).toEqual([{ label: 'X', url: 'https://lemils.com/Products/Budan?v=1' }])
   })
 
-  it('does not mutate the caller\'s stored array', () => {
+  it("does not mutate the caller's stored array", () => {
     const stored = [{ label: 'X', url: '  https://lemils.com/a  ' }]
     parseVenueLinks(stored)
     expect(stored[0].url).toBe('  https://lemils.com/a  ')

@@ -55,7 +55,10 @@ describe('getCategoryInstructions — round-trip', () => {
 
   it('every constant is non-empty', () => {
     for (const [cat, text] of ROUND_TRIP_TABLE) {
-      expect(text.length, `${cat} instructions must be non-empty`).toBeGreaterThan(0)
+      expect(
+        text.length,
+        `${cat} instructions must be non-empty`,
+      ).toBeGreaterThan(0)
     }
   })
 })
@@ -74,7 +77,9 @@ describe('comp-complaint instructions (v1.24.0 register)', () => {
   // the brake. Deleting an assertion here should require deleting the reason.
 
   it('opens on understanding, not on a rule', () => {
-    expect(COMP_COMPLAINT_INSTRUCTIONS).toContain('First, understand what actually happened')
+    expect(COMP_COMPLAINT_INSTRUCTIONS).toContain(
+      'First, understand what actually happened',
+    )
   })
 
   it('authorizes exactly one genuine apology', () => {
@@ -82,12 +87,18 @@ describe('comp-complaint instructions (v1.24.0 register)', () => {
     // deleted "Do not perform sympathy or pile on apologies" rule. It is
     // deliberately NOT restated as a separate prohibition — that is how this
     // file drifts back into a list of things not to do.
-    expect(COMP_COMPLAINT_INSTRUCTIONS).toContain('say sorry for it, once, and mean it')
+    expect(COMP_COMPLAINT_INSTRUCTIONS).toContain(
+      'say sorry for it, once, and mean it',
+    )
   })
 
   it('makes the comp the default remedy, framed as an invitation', () => {
-    expect(COMP_COMPLAINT_INSTRUCTIONS).toContain('come back and have another one on us')
-    expect(COMP_COMPLAINT_INSTRUCTIONS).toContain('invitation rather than a payout')
+    expect(COMP_COMPLAINT_INSTRUCTIONS).toContain(
+      'come back and have another one on us',
+    )
+    expect(COMP_COMPLAINT_INSTRUCTIONS).toContain(
+      'invitation rather than a payout',
+    )
   })
 
   it('names the goal as winning the guest back', () => {
@@ -98,32 +109,42 @@ describe('comp-complaint instructions (v1.24.0 register)', () => {
   it('forbids the diagnostic register that produced the cold turn', () => {
     // "Sour matcha's usually a sign something was off with the prep" was
     // exactly this: explaining the prep instead of addressing the person.
-    expect(COMP_COMPLAINT_INSTRUCTIONS).toContain('not explaining what went wrong in the prep')
+    expect(COMP_COMPLAINT_INSTRUCTIONS).toContain(
+      'not explaining what went wrong in the prep',
+    )
   })
 
   it('mirrors the gate: a question alone is a complete turn', () => {
     // The shape understand -> apologize -> make it up maps onto
     // complaintIntent clarifying -> resolving, which is what decides
     // auto-send vs queue. Prompt and routing must tell the same story.
-    expect(COMP_COMPLAINT_INSTRUCTIONS).toContain('ask one real question and send only that')
+    expect(COMP_COMPLAINT_INSTRUCTIONS).toContain(
+      'ask one real question and send only that',
+    )
   })
 
   it('defers to the eligibility block rather than hardcoding what is offerable', () => {
     // That block is conditioned on willBeReviewed, so this pointer is what
     // keeps the instruction correct on BOTH the reviewed and unreviewed paths.
-    expect(COMP_COMPLAINT_INSTRUCTIONS).toContain('"What this guest can access" block')
+    expect(COMP_COMPLAINT_INSTRUCTIONS).toContain(
+      '"What this guest can access" block',
+    )
   })
 
   it('carries none of the deleted prohibitions', () => {
     // Regression guard in the cold direction. Each of these strings produced
     // or reinforced the 2026-08-07 03:40 "Noted." reply.
     expect(COMP_COMPLAINT_INSTRUCTIONS).not.toContain('Do not perform sympathy')
-    expect(COMP_COMPLAINT_INSTRUCTIONS).not.toContain('No remedy of any kind is yours to offer')
+    expect(COMP_COMPLAINT_INSTRUCTIONS).not.toContain(
+      'No remedy of any kind is yours to offer',
+    )
     expect(COMP_COMPLAINT_INSTRUCTIONS).not.toContain('IS a complete response')
   })
 
   it('still names the specific thing raised (length directive removed, TAC-314)', () => {
-    expect(COMP_COMPLAINT_INSTRUCTIONS).toContain('Name the specific thing they raised')
+    expect(COMP_COMPLAINT_INSTRUCTIONS).toContain(
+      'Name the specific thing they raised',
+    )
     expect(COMP_COMPLAINT_INSTRUCTIONS).not.toContain('Keep it short')
   })
 
@@ -140,17 +161,23 @@ describe('mechanic-request instructions (THE-228)', () => {
   })
 
   it('grants the agent authority for eligible mechanics', () => {
-    expect(MECHANIC_REQUEST_INSTRUCTIONS).toContain('you have authority for what\'s listed')
+    expect(MECHANIC_REQUEST_INSTRUCTIONS).toContain(
+      "you have authority for what's listed",
+    )
   })
 
   it('forbids naming or revealing gating for ineligible mechanics', () => {
-    expect(MECHANIC_REQUEST_INSTRUCTIONS).toContain('without naming the mechanic')
-    expect(MECHANIC_REQUEST_INSTRUCTIONS).toContain('without revealing the gating rule')
+    expect(MECHANIC_REQUEST_INSTRUCTIONS).toContain(
+      'without naming the mechanic',
+    )
+    expect(MECHANIC_REQUEST_INSTRUCTIONS).toContain(
+      'without revealing the gating rule',
+    )
   })
 
-  it('forbids inventing perks that don\'t exist', () => {
+  it("forbids inventing perks that don't exist", () => {
     expect(MECHANIC_REQUEST_INSTRUCTIONS).toContain(
-      'without inventing a perk that doesn\'t exist',
+      "without inventing a perk that doesn't exist",
     )
   })
 
@@ -209,7 +236,7 @@ describe('recommendation-request references known order history (TAC-417)', () =
     // also covering the guest's own history — collapsing the fix into the
     // very line it has to coexist with.
     expect(RECOMMENDATION_REQUEST_INSTRUCTIONS).toContain(
-      "not the \"regulars' habits\" framing above, which is about other people",
+      'not the "regulars\' habits" framing above, which is about other people',
     )
   })
 
@@ -221,7 +248,7 @@ describe('recommendation-request references known order history (TAC-417)', () =
     // not a hedge about uncertain history — there is no "uncertain" state:
     // the block is either rendered from real transactions or absent.
     expect(RECOMMENDATION_REQUEST_INSTRUCTIONS).toContain(
-      'recommend as you would to someone you\'re meeting for the first time',
+      "recommend as you would to someone you're meeting for the first time",
     )
   })
 })
@@ -241,13 +268,13 @@ describe('casual-chatter instructions (THE-228)', () => {
   // now lives exclusively in lib/agent/intentions/, correctly conditional.
   it('no longer forbids pivoting to perks/events/service offers (TAC-327: PURSUIT belongs to intentions)', () => {
     expect(CASUAL_CHATTER_INSTRUCTIONS).not.toContain(
-      'don\'t pivot to perks, events, or a service offer',
+      "don't pivot to perks, events, or a service offer",
     )
   })
 
   it('no longer forbids reading service intent into chatter (TAC-327: PURSUIT belongs to intentions)', () => {
     expect(CASUAL_CHATTER_INSTRUCTIONS).not.toContain(
-      'Don\'t try to read a service intent into a friendly remark',
+      "Don't try to read a service intent into a friendly remark",
     )
   })
 
@@ -277,7 +304,9 @@ describe('manual instructions — Operator instruction reinforcement (THE-232)',
   })
 
   it('no longer references the stale "additional context" framing', () => {
-    expect(MANUAL_INSTRUCTIONS).not.toContain('The intent is in the additional context')
+    expect(MANUAL_INSTRUCTIONS).not.toContain(
+      'The intent is in the additional context',
+    )
   })
 })
 
@@ -295,7 +324,9 @@ describe('follow-up instructions — Operator instruction reinforcement (THE-232
 
 describe('personal-history-question instructions (THE-233)', () => {
   it('points the agent at the ## Visit history block (TAC-234 rename)', () => {
-    expect(PERSONAL_HISTORY_QUESTION_INSTRUCTIONS).toContain('"## Visit history" block')
+    expect(PERSONAL_HISTORY_QUESTION_INSTRUCTIONS).toContain(
+      '"## Visit history" block',
+    )
   })
 
   it('forbids reciting the data back', () => {
@@ -311,7 +342,9 @@ describe('personal-history-question instructions (THE-233)', () => {
   })
 
   it('provides admit-no-record fallbacks in the venue voice', () => {
-    expect(PERSONAL_HISTORY_QUESTION_INSTRUCTIONS).toContain('haven\'t seen you in here yet')
+    expect(PERSONAL_HISTORY_QUESTION_INSTRUCTIONS).toContain(
+      "haven't seen you in here yet",
+    )
     expect(PERSONAL_HISTORY_QUESTION_INSTRUCTIONS).toContain(
       'no record of you in the system, when were you in?',
     )
@@ -371,7 +404,9 @@ describe('acknowledgment instructions — guest sign-off semantics (v1.10.0)', (
   })
 
   it('frames the turn as a close, without word-count prescriptions (TAC-314)', () => {
-    expect(ACKNOWLEDGMENT_INSTRUCTIONS).toContain('This is a close, not an opening')
+    expect(ACKNOWLEDGMENT_INSTRUCTIONS).toContain(
+      'This is a close, not an opening',
+    )
     expect(ACKNOWLEDGMENT_INSTRUCTIONS).not.toContain('one to three words')
   })
 
@@ -387,7 +422,9 @@ describe('acknowledgment instructions — guest sign-off semantics (v1.10.0)', (
     expect(ACKNOWLEDGMENT_INSTRUCTIONS).not.toContain('on your own initiative')
     // Canary against a revert to the pre-TAC-330 absolute phrasing, which had
     // no carve-out at all and silently vetoed goal state.
-    expect(ACKNOWLEDGMENT_INSTRUCTIONS).not.toContain('do not start a new thread')
+    expect(ACKNOWLEDGMENT_INSTRUCTIONS).not.toContain(
+      'do not start a new thread',
+    )
   })
 
   it('no longer carries the goal-state jurisdictional carve-out locally (promoted to universal R22, TAC-314)', () => {
@@ -420,7 +457,9 @@ describe('acknowledgment instructions — guest sign-off semantics (v1.10.0)', (
 
 describe('unknown instructions — inbound catch-all (v1.10.0)', () => {
   it('frames the case as classifier failure or operator-attention needed', () => {
-    expect(UNKNOWN_INSTRUCTIONS).toContain('classifier could not confidently categorize')
+    expect(UNKNOWN_INSTRUCTIONS).toContain(
+      'classifier could not confidently categorize',
+    )
   })
 
   it('directs the agent to send a warm holding response (no length directive, TAC-314)', () => {
@@ -483,8 +522,12 @@ describe('event-question instructions (v1.10.0)', () => {
     // The category-local "say so plainly rather than inventing one" was
     // disclosure policy — R8 + # Knowledge gaps own that on every category.
     // The no-sales-pressure pivot is topic/behavior and stays.
-    expect(EVENT_QUESTION_INSTRUCTIONS).not.toContain('rather than inventing one')
-    expect(EVENT_QUESTION_INSTRUCTIONS).toContain('Do not pivot to suggesting they come anyway')
+    expect(EVENT_QUESTION_INSTRUCTIONS).not.toContain(
+      'rather than inventing one',
+    )
+    expect(EVENT_QUESTION_INSTRUCTIONS).toContain(
+      'Do not pivot to suggesting they come anyway',
+    )
   })
 
   it('contains no em or en dashes', () => {
@@ -503,8 +546,12 @@ describe('NEW_QUESTION_INSTRUCTIONS — after the TAC-314 promotion', () => {
     // price that leaked in UAT was on a `reply` turn. R17 in SYSTEM_TEMPLATE
     // owns this now, on every category — compose-prompt.test.ts asserts the
     // assembled prompt carries it for reply and recommendation_request too.
-    expect(NEW_QUESTION_INSTRUCTIONS).not.toContain('price is not part of the answer')
-    expect(NEW_QUESTION_INSTRUCTIONS).not.toContain('lists a price on every menu item')
+    expect(NEW_QUESTION_INSTRUCTIONS).not.toContain(
+      'price is not part of the answer',
+    )
+    expect(NEW_QUESTION_INSTRUCTIONS).not.toContain(
+      'lists a price on every menu item',
+    )
   })
 
   it('still forbids guessing prices that are not listed (kept: anti-invention, not disclosure)', () => {
@@ -514,7 +561,9 @@ describe('NEW_QUESTION_INSTRUCTIONS — after the TAC-314 promotion', () => {
   })
 
   it('routes an unanswerable question to # Knowledge gaps, not a promise', () => {
-    expect(NEW_QUESTION_INSTRUCTIONS).toContain('handle it per the # Knowledge gaps block')
+    expect(NEW_QUESTION_INSTRUCTIONS).toContain(
+      'handle it per the # Knowledge gaps block',
+    )
   })
 
   it('no longer offers to ask someone or get back to the guest', () => {
@@ -545,9 +594,12 @@ describe('category blocks carry no form authority (TAC-314)', () => {
   const FORBIDDEN_FORM =
     /keep it short|keep the answer direct and short|short sentences? total|one short (line|message)|at or below the length|stay short|one to three words|one or two short (lines|sentences)|match their energy and length|match the energy and length/i
 
-  it.each(ROUND_TRIP_TABLE)('%s has no length or sentence-count directive', (_cat, text) => {
-    expect(text).not.toMatch(FORBIDDEN_FORM)
-  })
+  it.each(ROUND_TRIP_TABLE)(
+    '%s has no length or sentence-count directive',
+    (_cat, text) => {
+      expect(text).not.toMatch(FORBIDDEN_FORM)
+    },
+  )
 
   it('reply and unknown carry no TAC-308 survivor phrasing', () => {
     for (const block of [REPLY_INSTRUCTIONS, UNKNOWN_INSTRUCTIONS]) {
@@ -555,7 +607,9 @@ describe('category blocks carry no form authority (TAC-314)', () => {
       expect(block).not.toContain('offer to find out')
     }
     // reply gets the same routing new_question got in #111.
-    expect(REPLY_INSTRUCTIONS).toContain('handle it per the # Knowledge gaps block')
+    expect(REPLY_INSTRUCTIONS).toContain(
+      'handle it per the # Knowledge gaps block',
+    )
   })
 
   it('recommendation_request prescribes topic, not shape or hedging', () => {
@@ -612,18 +666,26 @@ describe('category blocks carry no form authority (TAC-314)', () => {
 // next audit is still what catches a reworded leak, same as TAC-314's
 // FORBIDDEN_FORM sweep above it.
 describe('category blocks carry no pursuit authority (TAC-327)', () => {
-  const FORBIDDEN_PURSUIT = /pivot to perks,?\s*events,?\s*or a service offer|service intent into a friendly remark/i
+  const FORBIDDEN_PURSUIT =
+    /pivot to perks,?\s*events,?\s*or a service offer|service intent into a friendly remark/i
 
-  it.each(ROUND_TRIP_TABLE)('%s has no pursuit-of-intentions restraint language', (_cat, text) => {
-    expect(text).not.toMatch(FORBIDDEN_PURSUIT)
-  })
+  it.each(ROUND_TRIP_TABLE)(
+    '%s has no pursuit-of-intentions restraint language',
+    (_cat, text) => {
+      expect(text).not.toMatch(FORBIDDEN_PURSUIT)
+    },
+  )
 
   it('deliberate keeps are unaffected: event_question and follow_up still restrain generic return-visit nudging', () => {
     // Not a duplicate of anything intentions currently models (no
     // plant_next_visit-style intention exists) — deleting these would leave
     // a real gap, not remove a leak. See CLAUDE.md for the full rationale.
-    expect(EVENT_QUESTION_INSTRUCTIONS).toContain('Do not pivot to suggesting they come anyway')
-    expect(FOLLOW_UP_INSTRUCTIONS).toContain('Do not push a return visit explicitly')
+    expect(EVENT_QUESTION_INSTRUCTIONS).toContain(
+      'Do not pivot to suggesting they come anyway',
+    )
+    expect(FOLLOW_UP_INSTRUCTIONS).toContain(
+      'Do not push a return visit explicitly',
+    )
   })
 
   it('acknowledgment still bans an invented pivot, and no longer vetoes goal state via a promoted universal rule (TAC-330, TAC-314)', () => {
@@ -635,7 +697,9 @@ describe('category blocks carry no pursuit authority (TAC-327)', () => {
     // compose-prompt.test.ts for the assertion that it now protects EVERY
     // category, not just this one.
     expect(ACKNOWLEDGMENT_INSTRUCTIONS).toContain('Do not pivot to a new topic')
-    expect(ACKNOWLEDGMENT_INSTRUCTIONS).toContain('do not push for a return visit')
+    expect(ACKNOWLEDGMENT_INSTRUCTIONS).toContain(
+      'do not push for a return visit',
+    )
     expect(ACKNOWLEDGMENT_INSTRUCTIONS).not.toContain(
       "not authority over whether you act on a goal you're already carrying",
     )
@@ -652,7 +716,9 @@ describe('categoryInstructionsFor — channel variants (TAC-495)', () => {
 
   it('the SMS copy is getCategoryInstructions itself, for every category', () => {
     for (const category of categories) {
-      expect(categoryInstructionsFor(category, 'text')).toBe(getCategoryInstructions(category))
+      expect(categoryInstructionsFor(category, 'text')).toBe(
+        getCategoryInstructions(category),
+      )
     }
   })
 
@@ -660,10 +726,15 @@ describe('categoryInstructionsFor — channel variants (TAC-495)', () => {
     for (const category of categories) {
       const ig = categoryInstructionsFor(category, 'instagram')
       if (category === 'unknown') {
-        expect(ig).toContain('It should sound like a real busy person messaging back in their own natural voice.')
-        expect(ig.replace('a real busy person messaging back', 'a real busy person texting back')).toBe(
-          getCategoryInstructions('unknown'),
+        expect(ig).toContain(
+          'It should sound like a real busy person messaging back in their own natural voice.',
         )
+        expect(
+          ig.replace(
+            'a real busy person messaging back',
+            'a real busy person texting back',
+          ),
+        ).toBe(getCategoryInstructions('unknown'))
       } else {
         expect(ig).toBe(getCategoryInstructions(category))
       }
@@ -672,7 +743,9 @@ describe('categoryInstructionsFor — channel variants (TAC-495)', () => {
 
   it('an unknown channel gets the Instagram copy', () => {
     for (const category of categories) {
-      expect(categoryInstructionsFor(category, null)).toBe(categoryInstructionsFor(category, 'instagram'))
+      expect(categoryInstructionsFor(category, null)).toBe(
+        categoryInstructionsFor(category, 'instagram'),
+      )
     }
   })
 })
@@ -734,7 +807,9 @@ describe('the scan-greeting instruction (TAC-536)', () => {
   it.each([true, false])(
     'never licenses a name against the voice setting, hadPriorConversation=%s (TAC-541)',
     (hadPriorConversation) => {
-      const text = categoryInstructionsFor('guest_arrived', 'instagram', { hadPriorConversation })
+      const text = categoryInstructionsFor('guest_arrived', 'instagram', {
+        hadPriorConversation,
+      })
       expect(text).not.toMatch(/hold your name back/i)
       expect(text).not.toMatch(/even where your (voice|persona|venue)/i)
     },
@@ -743,24 +818,31 @@ describe('the scan-greeting instruction (TAC-536)', () => {
   // A wiring bug, not a reachable state. It falls to the variant that
   // introduces itself, because an introduction nobody needed is odd and
   // telling a stranger "you have talked before" is false.
-  it.each([null, undefined])('falls back to the new-guest variant on %s', (missing) => {
-    expect(categoryInstructionsFor('guest_arrived', 'instagram', missing ?? null)).toContain(
-      'say who they have reached',
-    )
-  })
+  it.each([null, undefined])(
+    'falls back to the new-guest variant on %s',
+    (missing) => {
+      expect(
+        categoryInstructionsFor('guest_arrived', 'instagram', missing ?? null),
+      ).toContain('say who they have reached')
+    },
+  )
 
   // Inverting the branch is the mutant that matters, and these two together
   // are what kill it: each asserts the OTHER variant's distinctive clause is
   // absent, which a single positive assertion would not.
   it('never tells a returning guest to introduce itself', () => {
     expect(
-      categoryInstructionsFor('guest_arrived', 'instagram', { hadPriorConversation: true }),
+      categoryInstructionsFor('guest_arrived', 'instagram', {
+        hadPriorConversation: true,
+      }),
     ).not.toContain('say who they have reached')
   })
 
   it('never tells a new guest it has talked to them before', () => {
     expect(
-      categoryInstructionsFor('guest_arrived', 'instagram', { hadPriorConversation: false }),
+      categoryInstructionsFor('guest_arrived', 'instagram', {
+        hadPriorConversation: false,
+      }),
     ).not.toContain('You have talked before')
   })
 
@@ -769,8 +851,14 @@ describe('the scan-greeting instruction (TAC-536)', () => {
   // ever introduced into it.
   it('reads identically on both channels', () => {
     for (const had of [true, false]) {
-      expect(categoryInstructionsFor('guest_arrived', 'text', { hadPriorConversation: had })).toBe(
-        categoryInstructionsFor('guest_arrived', 'instagram', { hadPriorConversation: had }),
+      expect(
+        categoryInstructionsFor('guest_arrived', 'text', {
+          hadPriorConversation: had,
+        }),
+      ).toBe(
+        categoryInstructionsFor('guest_arrived', 'instagram', {
+          hadPriorConversation: had,
+        }),
       )
     }
   })
@@ -780,7 +868,9 @@ describe('the scan-greeting instruction (TAC-536)', () => {
   it('carries no em dash', () => {
     for (const had of [true, false]) {
       expect(
-        categoryInstructionsFor('guest_arrived', 'instagram', { hadPriorConversation: had }),
+        categoryInstructionsFor('guest_arrived', 'instagram', {
+          hadPriorConversation: had,
+        }),
       ).not.toMatch(/[—–]/)
     }
   })

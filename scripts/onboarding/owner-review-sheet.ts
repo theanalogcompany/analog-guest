@@ -12,7 +12,10 @@ import type { GradedScenario } from './scorecard'
  * the INPUT to the owner's Phase 5 review, not a completed one.
  */
 
-export function buildOwnerReviewRows(selected: readonly GradedScenario[], runDateIso: string): string[][] {
+export function buildOwnerReviewRows(
+  selected: readonly GradedScenario[],
+  runDateIso: string,
+): string[][] {
   const rows: string[][] = [[...SHEET_HEADERS]]
   for (const g of selected) {
     rows.push([
@@ -33,7 +36,12 @@ export function buildOwnerReviewRows(selected: readonly GradedScenario[], runDat
 }
 
 function needsCsvQuoting(field: string): boolean {
-  return field.includes(',') || field.includes('"') || field.includes('\n') || field.includes('\r')
+  return (
+    field.includes(',') ||
+    field.includes('"') ||
+    field.includes('\n') ||
+    field.includes('\r')
+  )
 }
 
 function toCsvField(field: string): string {

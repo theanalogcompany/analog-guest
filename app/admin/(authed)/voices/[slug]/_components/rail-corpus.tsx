@@ -42,7 +42,8 @@ export function RailCorpus({ venueId, corpus, onMutate }: RailCorpusProps) {
 
   // Add modal state
   const [addContent, setAddContent] = useState('')
-  const [addSource, setAddSource] = useState<AddCorpusSourceType>('manual_entry')
+  const [addSource, setAddSource] =
+    useState<AddCorpusSourceType>('manual_entry')
   const [addTags, setAddTags] = useState('')
 
   // Edit-in-place state
@@ -303,7 +304,9 @@ export function RailCorpus({ venueId, corpus, onMutate }: RailCorpusProps) {
                 </div>
               </div>
             ) : (
-              <p className="text-[12.5px] text-ink leading-snug">{row.content}</p>
+              <p className="text-[12.5px] text-ink leading-snug">
+                {row.content}
+              </p>
             )}
           </div>
         )

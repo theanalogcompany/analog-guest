@@ -47,7 +47,9 @@ export type ConflationScore = {
  * caller can print exactly which claim(s) tripped it alongside the raw list.
  * An empty input (no claim flagged at all) scores false, not an error.
  */
-export function scoreConflationClaims(claims: readonly string[]): ConflationScore {
+export function scoreConflationClaims(
+  claims: readonly string[],
+): ConflationScore {
   const matchedClaims = claims.filter(isConflationShapedClaim)
   return { isConflationShaped: matchedClaims.length > 0, matchedClaims }
 }

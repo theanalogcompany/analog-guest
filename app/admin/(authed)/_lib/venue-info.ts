@@ -19,11 +19,17 @@ export async function loadVenueInfo(
     .eq('venue_id', venueId)
     .single()
   if (readErr || !row) {
-    return { ok: false, error: `venue_configs lookup failed: ${readErr?.message ?? 'no row'}` }
+    return {
+      ok: false,
+      error: `venue_configs lookup failed: ${readErr?.message ?? 'no row'}`,
+    }
   }
   const parsed = VenueInfoSchema.safeParse(row.venue_info)
   if (!parsed.success) {
-    return { ok: false, error: `venue_info parse failed: ${parsed.error.message}` }
+    return {
+      ok: false,
+      error: `venue_info parse failed: ${parsed.error.message}`,
+    }
   }
   return { ok: true, venueInfo: parsed.data }
 }

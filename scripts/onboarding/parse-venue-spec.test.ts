@@ -76,7 +76,8 @@ describe('parseVenueSpec — knowledge_corpus (TAC-242)', () => {
       '```json',
       JSON.stringify({
         source_type: 'voicenote_transcript',
-        content: 'Our flagship blend is two Ethiopian coffees roasted by a friend.',
+        content:
+          'Our flagship blend is two Ethiopian coffees roasted by a friend.',
         primary_tags: ['sourcing'],
         secondary_tags: ['ethiopia', 'roaster'],
         confidence_score: 0.9,
@@ -103,7 +104,9 @@ describe('parseVenueSpec — knowledge_corpus (TAC-242)', () => {
       secondary_tags: ['ethiopia', 'roaster'],
       confidence_score: 0.9,
     })
-    expect(parsed.knowledgeCorpus[1].primary_tags).toEqual(['mechanic_the_joey'])
+    expect(parsed.knowledgeCorpus[1].primary_tags).toEqual([
+      'mechanic_the_joey',
+    ])
     expect(parsed.knowledgeCorpus[1].secondary_tags).toEqual(['explanation'])
   })
 
@@ -114,7 +117,8 @@ describe('parseVenueSpec — knowledge_corpus (TAC-242)', () => {
       '```json',
       JSON.stringify({
         source_type: 'voicenote_transcript',
-        content: "Phoebe's seasonal matcha experiments draw the morning regulars.",
+        content:
+          "Phoebe's seasonal matcha experiments draw the morning regulars.",
         primary_tags: ['menu', 'staff_phoebe'],
         secondary_tags: ['seasonal', 'matcha'],
         confidence_score: 0.9,
@@ -123,7 +127,10 @@ describe('parseVenueSpec — knowledge_corpus (TAC-242)', () => {
     ].join('\n')
 
     const parsed = parseVenueSpec(buildSpec(section7))
-    expect(parsed.knowledgeCorpus[0].primary_tags).toEqual(['menu', 'staff_phoebe'])
+    expect(parsed.knowledgeCorpus[0].primary_tags).toEqual([
+      'menu',
+      'staff_phoebe',
+    ])
   })
 
   it('defaults primary_tags + secondary_tags to [] when omitted', () => {
@@ -174,7 +181,10 @@ describe('parseVenueSpec — knowledge_corpus (TAC-242)', () => {
       '## 7. knowledge_corpus',
       '',
       '```json',
-      JSON.stringify({ source_type: 'manual_entry', primary_tags: ['sourcing'] }),
+      JSON.stringify({
+        source_type: 'manual_entry',
+        primary_tags: ['sourcing'],
+      }),
       '```',
     ].join('\n')
 
@@ -224,7 +234,9 @@ describe('parseVenueSpec — staff[].notes routing (TAC-343 Phase 0)', () => {
 
     expect(parsed.venueInfo.staff).toEqual(['Sam — Owner'])
     expect(
-      parsed.knowledgeCorpus.filter((c) => c.primary_tags.some((t) => t.startsWith('staff_'))),
+      parsed.knowledgeCorpus.filter((c) =>
+        c.primary_tags.some((t) => t.startsWith('staff_')),
+      ),
     ).toHaveLength(0)
   })
 
@@ -234,7 +246,11 @@ describe('parseVenueSpec — staff[].notes routing (TAC-343 Phase 0)', () => {
       '',
       '```json',
       JSON.stringify([
-        { name: 'Phoebe', role: 'Bar lead', notes: 'Seasonal matcha experiments.' },
+        {
+          name: 'Phoebe',
+          role: 'Bar lead',
+          notes: 'Seasonal matcha experiments.',
+        },
         { name: 'Sam', role: 'Owner', notes: '' },
       ]),
       '```',
@@ -246,7 +262,8 @@ describe('parseVenueSpec — staff[].notes routing (TAC-343 Phase 0)', () => {
       '```json',
       JSON.stringify({
         source_type: 'voicenote_transcript',
-        content: 'Our flagship blend is two Ethiopian coffees roasted by a friend.',
+        content:
+          'Our flagship blend is two Ethiopian coffees roasted by a friend.',
         primary_tags: ['sourcing'],
         secondary_tags: ['ethiopia'],
         confidence_score: 0.9,
@@ -257,8 +274,14 @@ describe('parseVenueSpec — staff[].notes routing (TAC-343 Phase 0)', () => {
     const parsed = parseVenueSpec(buildSpec(section7, section4Extra))
 
     expect(parsed.knowledgeCorpus).toHaveLength(2)
-    expect(parsed.knowledgeCorpus.some((c) => c.primary_tags.includes('sourcing'))).toBe(true)
-    expect(parsed.knowledgeCorpus.some((c) => c.primary_tags.includes('staff_phoebe'))).toBe(true)
+    expect(
+      parsed.knowledgeCorpus.some((c) => c.primary_tags.includes('sourcing')),
+    ).toBe(true)
+    expect(
+      parsed.knowledgeCorpus.some((c) =>
+        c.primary_tags.includes('staff_phoebe'),
+      ),
+    ).toBe(true)
   })
 })
 
@@ -293,13 +316,19 @@ describe('parseVenueSpec — Needs confirmation section (TAC-346)', () => {
     '',
     '### Unsupported claims',
     '```json',
-    JSON.stringify({ section: '4. venue_info', claim: 'a claim', reason: 'not_in_source' }),
+    JSON.stringify({
+      section: '4. venue_info',
+      claim: 'a claim',
+      reason: 'not_in_source',
+    }),
     '```',
   ].join('\n')
 
   it('ignores a trailing Needs confirmation section entirely, including one containing a stray json block', () => {
     const withoutSection = parseVenueSpec(buildSpec(section7))
-    const withSection = parseVenueSpec(buildSpec(section7 + needsConfirmationSection))
+    const withSection = parseVenueSpec(
+      buildSpec(section7 + needsConfirmationSection),
+    )
     expect(withSection).toEqual(withoutSection)
     expect(withSection.knowledgeCorpus).toHaveLength(1)
   })

@@ -1,14 +1,20 @@
 import { generateObject } from 'ai'
 import { z } from 'zod'
 import { getClassificationModel } from './client'
-import type { AIResult, ClassifyIntentionPromptsInput, ClassifyIntentionPromptsResult } from './types'
+import type {
+  AIResult,
+  ClassifyIntentionPromptsInput,
+  ClassifyIntentionPromptsResult,
+} from './types'
 
 // TAC-324. Deliberately its OWN version, not SYSTEM_TEMPLATE's PROMPT_VERSION
 // — this classifier never touches the classify/generate contract, mirroring
 // EXTRACT_REPORTED_ORDER_PROMPT_VERSION's precedent (lib/ai/extract-reported-order.ts).
 export const CLASSIFY_INTENTION_PROMPTS_PROMPT_VERSION = 'v1.0.0'
 
-function buildSystemPrompt(openIntentions: readonly { key: string; description: string }[]): string {
+function buildSystemPrompt(
+  openIntentions: readonly { key: string; description: string }[],
+): string {
   const lines = openIntentions.map((o) => `- ${o.key}: ${o.description}`)
   return `You read a text message a cafe, bakery, or restaurant sent to a guest, and decide which of a small set of conversational goals that message actually raised.
 
@@ -49,14 +55,22 @@ export async function classifyIntentionPrompts(
   if (input.openIntentions.length === 0) {
     return {
       ok: true,
-      data: { raisedKeys: [], promptVersion: CLASSIFY_INTENTION_PROMPTS_PROMPT_VERSION },
+      data: {
+        raisedKeys: [],
+        promptVersion: CLASSIFY_INTENTION_PROMPTS_PROMPT_VERSION,
+      },
     }
   }
 
   // Dedup by key (a caller shouldn't send duplicates, but z.enum requires a
   // set of distinct values and repeating one is otherwise harmless-but-wasteful).
-  const dedupedByKey = [...new Map(input.openIntentions.map((o) => [o.key, o])).values()]
-  const openIntentionKeys = dedupedByKey.map((o) => o.key) as [string, ...string[]]
+  const dedupedByKey = [
+    ...new Map(input.openIntentions.map((o) => [o.key, o])).values(),
+  ]
+  const openIntentionKeys = dedupedByKey.map((o) => o.key) as [
+    string,
+    ...string[],
+  ]
   const schema = z.object({
     raisedKeys: z.array(z.enum(openIntentionKeys)),
   })
@@ -81,6 +95,10 @@ export async function classifyIntentionPrompts(
     }
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e)
-    return { ok: false, error: message, errorCode: 'ai_classify_intention_prompts_failed' }
+    return {
+      ok: false,
+      error: message,
+      errorCode: 'ai_classify_intention_prompts_failed',
+    }
   }
 }

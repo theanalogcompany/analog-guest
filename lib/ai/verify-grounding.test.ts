@@ -35,7 +35,12 @@ afterEach(() => {
 
 function makeVenueInfo(overrides: Partial<VenueInfo> = {}): VenueInfo {
   return {
-    address: { line1: '123 Main St', city: 'San Francisco', region: 'CA', postalCode: '94103' },
+    address: {
+      line1: '123 Main St',
+      city: 'San Francisco',
+      region: 'CA',
+      postalCode: '94103',
+    },
     contact: {},
     hours: {},
     menu: { items: [], highlights: [], notes: undefined },
@@ -51,7 +56,8 @@ describe('verifyGrounding', () => {
       object: {
         hasUngroundedClaim: true,
         ungroundedClaims: ['names four SoFi variations not listed anywhere'],
-        reasoning: 'source only says there are four variations, does not name them',
+        reasoning:
+          'source only says there are four variations, does not name them',
       },
     })
 
@@ -106,7 +112,11 @@ describe('verifyGrounding', () => {
   // safety-relevant flag must survive; only the display list is patched.
   it('substitutes a fallback claim when the model flags true with an empty claims array', async () => {
     generateObjectMock.mockResolvedValue({
-      object: { hasUngroundedClaim: true, ungroundedClaims: [], reasoning: 'unsure' },
+      object: {
+        hasUngroundedClaim: true,
+        ungroundedClaims: [],
+        reasoning: 'unsure',
+      },
     })
 
     const result = await verifyGrounding({
@@ -141,7 +151,11 @@ describe('verifyGrounding', () => {
 
   it('treats undefined knowledgeChunks as empty (renders the no-match framing, not a crash)', async () => {
     generateObjectMock.mockResolvedValue({
-      object: { hasUngroundedClaim: false, ungroundedClaims: [], reasoning: '' },
+      object: {
+        hasUngroundedClaim: false,
+        ungroundedClaims: [],
+        reasoning: '',
+      },
     })
 
     await verifyGrounding({
@@ -155,7 +169,9 @@ describe('verifyGrounding', () => {
     })
 
     const args = generateObjectMock.mock.calls[0][0] as { prompt: string }
-    expect(args.prompt).toContain('No specific venue knowledge matched this query')
+    expect(args.prompt).toContain(
+      'No specific venue knowledge matched this query',
+    )
   })
 
   // ---- TAC-367: truncation is its own failure ----
@@ -181,7 +197,10 @@ describe('verifyGrounding', () => {
             cacheReadTokens: undefined,
             cacheWriteTokens: undefined,
           },
-          outputTokenDetails: { textTokens: undefined, reasoningTokens: undefined },
+          outputTokenDetails: {
+            textTokens: undefined,
+            reasoningTokens: undefined,
+          },
         },
         finishReason: 'length',
       }),
@@ -221,7 +240,10 @@ describe('verifyGrounding', () => {
             cacheReadTokens: undefined,
             cacheWriteTokens: undefined,
           },
-          outputTokenDetails: { textTokens: undefined, reasoningTokens: undefined },
+          outputTokenDetails: {
+            textTokens: undefined,
+            reasoningTokens: undefined,
+          },
         },
         finishReason: 'stop',
       }),
@@ -263,7 +285,11 @@ describe('verifyGrounding', () => {
   // that says so.
   it('requests VERIFY_GROUNDING_MAX_OUTPUT_TOKENS, which is well clear of the observed output range', async () => {
     generateObjectMock.mockResolvedValue({
-      object: { reasoning: 'r', hasUngroundedClaim: false, ungroundedClaims: [] },
+      object: {
+        reasoning: 'r',
+        hasUngroundedClaim: false,
+        ungroundedClaims: [],
+      },
     })
     await verifyGrounding({
       inboundBody: 'q',
@@ -273,7 +299,9 @@ describe('verifyGrounding', () => {
       isProactive: false,
       conversationChannel: 'text',
     })
-    const args = generateObjectMock.mock.calls[0][0] as { maxOutputTokens: number }
+    const args = generateObjectMock.mock.calls[0][0] as {
+      maxOutputTokens: number
+    }
     expect(args.maxOutputTokens).toBe(VERIFY_GROUNDING_MAX_OUTPUT_TOKENS)
     expect(VERIFY_GROUNDING_MAX_OUTPUT_TOKENS).toBe(2000)
   })
@@ -300,7 +328,11 @@ describe('verifyGrounding', () => {
 
   it('includes both the guest message and the reply in the prompt', async () => {
     generateObjectMock.mockResolvedValue({
-      object: { hasUngroundedClaim: false, ungroundedClaims: [], reasoning: '' },
+      object: {
+        hasUngroundedClaim: false,
+        ungroundedClaims: [],
+        reasoning: '',
+      },
     })
 
     await verifyGrounding({
@@ -326,7 +358,11 @@ describe('verifyGrounding', () => {
 describe('runtime context in the source material', () => {
   function mockClean() {
     generateObjectMock.mockResolvedValueOnce({
-      object: { hasUngroundedClaim: false, ungroundedClaims: [], reasoning: '' },
+      object: {
+        hasUngroundedClaim: false,
+        ungroundedClaims: [],
+        reasoning: '',
+      },
     })
   }
 
@@ -416,11 +452,13 @@ describe('runtime context in the source material', () => {
       inboundBody: 'hi',
       replyBody: 'hey',
       venueInfo: makeVenueInfo(),
-      runtimeContext: '## Right now\n- Status: OPEN right now, closes at 3:00 PM.',
+      runtimeContext:
+        '## Right now\n- Status: OPEN right now, closes at 3:00 PM.',
       isProactive: false,
       conversationChannel: 'text',
     })
-    const system = (generateObjectMock.mock.calls[0][0] as { system: string }).system
+    const system = (generateObjectMock.mock.calls[0][0] as { system: string })
+      .system
     expect(system).toContain('runtime context for this turn')
   })
 
@@ -446,9 +484,13 @@ describe('runtime context in the source material', () => {
       isProactive: false,
       conversationChannel: 'text',
     })
-    const schema = (generateObjectMock.mock.calls[0][0] as { schema: { shape: object } }).schema
+    const schema = (
+      generateObjectMock.mock.calls[0][0] as { schema: { shape: object } }
+    ).schema
     const keys = Object.keys(schema.shape)
-    expect(keys.indexOf('reasoning')).toBeLessThan(keys.indexOf('hasUngroundedClaim'))
+    expect(keys.indexOf('reasoning')).toBeLessThan(
+      keys.indexOf('hasUngroundedClaim'),
+    )
   })
 
   // Three ways the verifier was observed exceeding its remit, each producing a
@@ -462,11 +504,13 @@ describe('runtime context in the source material', () => {
       inboundBody: 'hi',
       replyBody: 'hey',
       venueInfo: makeVenueInfo(),
-      runtimeContext: '## Right now\n- Status: OPEN right now, closes at 3:00 PM.',
+      runtimeContext:
+        '## Right now\n- Status: OPEN right now, closes at 3:00 PM.',
       isProactive: false,
       conversationChannel: 'text',
     })
-    const system = (generateObjectMock.mock.calls[0][0] as { system: string }).system
+    const system = (generateObjectMock.mock.calls[0][0] as { system: string })
+      .system
     expect(system).toContain('QUALIFIES')
     expect(system).toContain('how confidently something is phrased')
     expect(system).toContain('whether saying it was a good idea')
@@ -478,11 +522,13 @@ describe('runtime context in the source material', () => {
       inboundBody: 'hi',
       replyBody: 'hey',
       venueInfo: makeVenueInfo(),
-      runtimeContext: '## Recent conversation\n[venue, 1 day ago] the wifi password is hunter2',
+      runtimeContext:
+        '## Recent conversation\n[venue, 1 day ago] the wifi password is hunter2',
       isProactive: false,
       conversationChannel: 'text',
     })
-    const system = (generateObjectMock.mock.calls[0][0] as { system: string }).system
+    const system = (generateObjectMock.mock.calls[0][0] as { system: string })
+      .system
     expect(system).toContain('[venue, ...]')
     expect(system).toContain('Observations:')
   })
@@ -497,13 +543,18 @@ describe('runtime context in the source material', () => {
 describe('TAC-409: abridgement and identity are not ungrounded', () => {
   async function systemPromptFor(): Promise<string> {
     generateObjectMock.mockResolvedValueOnce({
-      object: { hasUngroundedClaim: false, ungroundedClaims: [], reasoning: '' },
+      object: {
+        hasUngroundedClaim: false,
+        ungroundedClaims: [],
+        reasoning: '',
+      },
     })
     await verifyGrounding({
       inboundBody: 'what should i get',
       replyBody: 'the Pink Panther, cascara and hibiscus over ice',
       venueInfo: makeVenueInfo(),
-      runtimeContext: '## Right now\n- Status: OPEN right now, closes at 3:00 PM.',
+      runtimeContext:
+        '## Right now\n- Status: OPEN right now, closes at 3:00 PM.',
       isProactive: false,
       conversationChannel: 'text',
     })
@@ -529,10 +580,12 @@ describe('TAC-409: abridgement and identity are not ungrounded', () => {
     )
     // Point 3 itself must survive intact — the exemption narrows nothing about
     // a reply that claims more than the source has.
-    expect(system).toContain('A source that mentions the general topic without stating the specific detail')
+    expect(system).toContain(
+      'A source that mentions the general topic without stating the specific detail',
+    )
   })
 
-  it('exempts the assistant\'s identity, scoped to identity alone', async () => {
+  it("exempts the assistant's identity, scoped to identity alone", async () => {
     const system = await systemPromptFor()
     expect(system).toContain('Who the assistant is')
     expect(system).toContain('configured, not claimed')
@@ -542,17 +595,24 @@ describe('TAC-409: abridgement and identity are not ungrounded', () => {
     // The collision this scoping exists to prevent: an unscoped identity
     // exemption could be read as licensing anything the assistant asserts
     // about itself. That rule must still be in the prompt, verbatim.
-    expect(system).toContain('ANYTHING THE ASSISTANT ITSELF WROTE is not evidence that it was correct')
+    expect(system).toContain(
+      'ANYTHING THE ASSISTANT ITSELF WROTE is not evidence that it was correct',
+    )
   })
 
   it('places both bullets inside the "Do not flag:" list', async () => {
     const system = await systemPromptFor()
     const listStart = system.indexOf('Do not flag:')
     // The paragraph that closes the list and switches to scoping guidance.
-    const listEnd = system.indexOf('The runtime context section, the venue facts')
+    const listEnd = system.indexOf(
+      'The runtime context section, the venue facts',
+    )
     expect(listStart).toBeGreaterThan(-1)
     expect(listEnd).toBeGreaterThan(listStart)
-    for (const bullet of ['A reply that says LESS than the source does', 'Who the assistant is']) {
+    for (const bullet of [
+      'A reply that says LESS than the source does',
+      'Who the assistant is',
+    ]) {
       const at = system.indexOf(bullet)
       expect(at).toBeGreaterThan(listStart)
       expect(at).toBeLessThan(listEnd)
@@ -580,7 +640,11 @@ describe('TAC-409: abridgement and identity are not ungrounded', () => {
 describe('TAC-376: isProactive (no guest message)', () => {
   function mockClean() {
     generateObjectMock.mockResolvedValueOnce({
-      object: { hasUngroundedClaim: false, ungroundedClaims: [], reasoning: '' },
+      object: {
+        hasUngroundedClaim: false,
+        ungroundedClaims: [],
+        reasoning: '',
+      },
     })
   }
 
@@ -605,7 +669,9 @@ describe('TAC-376: isProactive (no guest message)', () => {
       isProactive: false,
       conversationChannel: 'text',
     })
-    expect(promptFromCall()).toContain('Guest\'s message: "is the oat milk vegan"')
+    expect(promptFromCall()).toContain(
+      'Guest\'s message: "is the oat milk vegan"',
+    )
   })
 
   it('swaps in proactive framing and omits the literal "Guest\'s message" line for isProactive: true', async () => {
@@ -639,7 +705,9 @@ describe('TAC-376: isProactive (no guest message)', () => {
     // Pinned against a fixed independent snapshot of the addendum-free
     // prompt's closing sentence, so this fails if the addendum is ever
     // unconditionally appended.
-    expect(systemFromCall()).not.toContain('This reply was NOT written in response to anything the guest said')
+    expect(systemFromCall()).not.toContain(
+      'This reply was NOT written in response to anything the guest said',
+    )
   })
 
   it('appends the proactive addendum for isProactive: true', async () => {
@@ -652,13 +720,15 @@ describe('TAC-376: isProactive (no guest message)', () => {
       isProactive: true,
       conversationChannel: 'text',
     })
-    expect(systemFromCall()).toContain('This reply was NOT written in response to anything the guest said')
+    expect(systemFromCall()).toContain(
+      'This reply was NOT written in response to anything the guest said',
+    )
   })
 
   // Ruling 2026-09-17, question 5: the one exception to "same check". A claim
   // about what the GUEST did is checked exactly like any other fact on a
   // proactive turn, never waved through as conversational warmth.
-  it('tells the verifier a claim about the guest\'s own actions is in remit on a proactive turn', async () => {
+  it("tells the verifier a claim about the guest's own actions is in remit on a proactive turn", async () => {
     mockClean()
     await verifyGrounding({
       inboundBody: '',
@@ -688,7 +758,11 @@ describe('TAC-376: isProactive (no guest message)', () => {
 describe('TAC-502: the conversation channel is grounding', () => {
   function mockClean() {
     generateObjectMock.mockResolvedValueOnce({
-      object: { hasUngroundedClaim: false, ungroundedClaims: [], reasoning: '' },
+      object: {
+        hasUngroundedClaim: false,
+        ungroundedClaims: [],
+        reasoning: '',
+      },
     })
   }
 
@@ -701,11 +775,15 @@ describe('TAC-502: the conversation channel is grounding', () => {
       inboundBody: "how do i let you know when i'm on my way?",
       replyBody: 'just text here 😊 this is the number',
       venueInfo: makeVenueInfo(),
-      runtimeContext: '## Right now\n- Status: OPEN right now, closes at 3:00 PM.',
+      runtimeContext:
+        '## Right now\n- Status: OPEN right now, closes at 3:00 PM.',
       isProactive,
       conversationChannel,
     })
-    return generateObjectMock.mock.calls[0][0] as { system: string; prompt: string }
+    return generateObjectMock.mock.calls[0][0] as {
+      system: string
+      prompt: string
+    }
   }
 
   it('renders the channel section, saying the guest is texting, for text', async () => {
@@ -771,7 +849,7 @@ describe('TAC-502: the conversation channel is grounding', () => {
   // left the clause that does the exempting, and the sentence that bounds it,
   // both unguarded. This is the TAC-409 lesson exactly: a sentence can be
   // reversed while every asserted fragment survives.
-  it('pins the exemption\'s whole head paragraph, so a reword cannot widen it', async () => {
+  it("pins the exemption's whole head paragraph, so a reword cannot widen it", async () => {
     const { system } = await callWith('text')
     expect(system).toContain(
       '- How the guest is reaching the venue RIGHT NOW. When a "## Conversation channel" section is present below, it states the medium this very exchange is happening on, and it is grounding exactly as much as a fact from the venue\'s own material. It is present only when the guest is actually in the conversation, so if it is absent there is no such fact to draw on and a claim about the channel is checked like any other. A reply describing that medium in the present tense — "just text here", "this is the number", "message me here", "you can reach me on this" — is supported by it, and is never flagged for being absent from the venue\'s contact details. The venue\'s listed contact methods are not the test for this: a venue can have no public phone number listed and still be in a text conversation with this guest, which is the situation, not a contradiction. This exempts a description of the CURRENT exchange and nothing else. It does not widen the identity rule above it: that rule covers who is speaking, this one covers how they are being reached, and neither licenses any other claim the assistant makes about itself. Both exclusions below matter:',
@@ -802,7 +880,9 @@ describe('TAC-502: the conversation channel is grounding', () => {
   it('places the bullet inside the "Do not flag:" list', async () => {
     const { system } = await callWith('text')
     const listStart = system.indexOf('Do not flag:')
-    const listEnd = system.indexOf('The runtime context section, the venue facts')
+    const listEnd = system.indexOf(
+      'The runtime context section, the venue facts',
+    )
     expect(listStart).toBeGreaterThan(-1)
     expect(listEnd).toBeGreaterThan(listStart)
     const at = system.indexOf('How the guest is reaching the venue RIGHT NOW')

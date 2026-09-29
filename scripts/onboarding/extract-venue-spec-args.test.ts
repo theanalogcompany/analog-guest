@@ -27,7 +27,9 @@ describe('parseArgs', () => {
   })
 
   it('parses --interview-date with a valid YYYY-MM-DD value', () => {
-    expect(parseArgs(argv('mock-sextant', '--interview-date', '2026-08-30'))).toEqual({
+    expect(
+      parseArgs(argv('mock-sextant', '--interview-date', '2026-08-30')),
+    ).toEqual({
       slug: 'mock-sextant',
       dryRun: false,
       force: false,
@@ -36,7 +38,9 @@ describe('parseArgs', () => {
   })
 
   it('rejects --interview-date with a malformed value', () => {
-    expect(parseArgs(argv('mock-sextant', '--interview-date', 'next-tuesday'))).toBeNull()
+    expect(
+      parseArgs(argv('mock-sextant', '--interview-date', 'next-tuesday')),
+    ).toBeNull()
   })
 
   it('rejects --interview-date with no value at all', () => {
@@ -44,7 +48,9 @@ describe('parseArgs', () => {
   })
 
   it('rejects --interview-date immediately followed by another flag', () => {
-    expect(parseArgs(argv('mock-sextant', '--interview-date', '--dry-run'))).toBeNull()
+    expect(
+      parseArgs(argv('mock-sextant', '--interview-date', '--dry-run')),
+    ).toBeNull()
   })
 
   it('rejects an unknown flag', () => {

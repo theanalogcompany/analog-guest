@@ -17,8 +17,7 @@ const BY_KEY: ReadonlyMap<string, IntentionDefinition> = new Map(
 )
 
 export type ResolvedDefinition =
-  | { known: true; definition: IntentionDefinition }
-  | { known: false }
+  { known: true; definition: IntentionDefinition } | { known: false }
 
 /**
  * Resolve a raw `guest_intention_prompts.intention_key` against the live

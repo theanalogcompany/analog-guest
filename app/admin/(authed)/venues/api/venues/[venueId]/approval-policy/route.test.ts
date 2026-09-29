@@ -25,7 +25,9 @@ interface AdminMockState {
   count: number
 }
 
-function newAdminState(overrides: Partial<AdminMockState> = {}): AdminMockState {
+function newAdminState(
+  overrides: Partial<AdminMockState> = {},
+): AdminMockState {
   return { updateCalls: [], updateError: null, count: 1, ...overrides }
 }
 
@@ -70,16 +72,24 @@ describe('PATCH approval-policy (TAC-307)', () => {
   it('refuses when the caller is not an analog admin for this venue', async () => {
     vi.mocked(requireVenueAdmin).mockResolvedValue({
       ok: false,
-      response: NextResponse.json({ error: 'venue not allowed' }, { status: 403 }),
+      response: NextResponse.json(
+        { error: 'venue not allowed' },
+        { status: 403 },
+      ),
     })
-    const res = await PATCH(req({ default: 'auto_send', perCategory: {} }), { params })
+    const res = await PATCH(req({ default: 'auto_send', perCategory: {} }), {
+      params,
+    })
     expect(res.status).toBe(403)
     expect(state.updateCalls).toHaveLength(0)
   })
 
   it('writes the whole policy object', async () => {
     const res = await PATCH(
-      req({ default: 'auto_send', perCategory: { comp_complaint: 'operator_approval' } }),
+      req({
+        default: 'auto_send',
+        perCategory: { comp_complaint: 'operator_approval' },
+      }),
       { params },
     )
     expect(res.status).toBe(200)
@@ -91,7 +101,10 @@ describe('PATCH approval-policy (TAC-307)', () => {
   })
 
   it('writes the master switch as default=operator_approval with an empty perCategory', async () => {
-    const res = await PATCH(req({ default: 'operator_approval', perCategory: {} }), { params })
+    const res = await PATCH(
+      req({ default: 'operator_approval', perCategory: {} }),
+      { params },
+    )
     expect(res.status).toBe(200)
     expect(state.updateCalls[0].approval_policy).toEqual({
       default: 'operator_approval',
@@ -100,7 +113,10 @@ describe('PATCH approval-policy (TAC-307)', () => {
   })
 
   it('rejects an unknown disposition', async () => {
-    const res = await PATCH(req({ default: 'manual_review', perCategory: {} }), { params })
+    const res = await PATCH(
+      req({ default: 'manual_review', perCategory: {} }),
+      { params },
+    )
     expect(res.status).toBe(400)
     expect(state.updateCalls).toHaveLength(0)
   })
@@ -111,7 +127,10 @@ describe('PATCH approval-policy (TAC-307)', () => {
     // boundary, where the same typo should fail loudly instead of being
     // persisted and silently never matching anything.
     const res = await PATCH(
-      req({ default: 'auto_send', perCategory: { comp_complaints: 'operator_approval' } }),
+      req({
+        default: 'auto_send',
+        perCategory: { comp_complaints: 'operator_approval' },
+      }),
       { params },
     )
     expect(res.status).toBe(400)
@@ -120,7 +139,10 @@ describe('PATCH approval-policy (TAC-307)', () => {
 
   it('refuses to hold an exempt category rather than silently dropping it', async () => {
     const res = await PATCH(
-      req({ default: 'auto_send', perCategory: { opt_out: 'operator_approval' } }),
+      req({
+        default: 'auto_send',
+        perCategory: { opt_out: 'operator_approval' },
+      }),
       { params },
     )
     expect(res.status).toBe(400)
@@ -147,13 +169,17 @@ describe('PATCH approval-policy (TAC-307)', () => {
 
   it('404s when no venue_configs row matched', async () => {
     state.count = 0
-    const res = await PATCH(req({ default: 'auto_send', perCategory: {} }), { params })
+    const res = await PATCH(req({ default: 'auto_send', perCategory: {} }), {
+      params,
+    })
     expect(res.status).toBe(404)
   })
 
   it('500s on a database error', async () => {
     state.updateError = { message: 'boom' }
-    const res = await PATCH(req({ default: 'auto_send', perCategory: {} }), { params })
+    const res = await PATCH(req({ default: 'auto_send', perCategory: {} }), {
+      params,
+    })
     expect(res.status).toBe(500)
   })
 })

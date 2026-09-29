@@ -100,7 +100,10 @@ function buildUserPrompt(input: VerifyClosedVenueArrivalInput): string {
 export async function verifyClosedVenueArrival(
   input: VerifyClosedVenueArrivalInput,
 ): Promise<AIResult<VerifyClosedVenueArrivalResult>> {
-  if (typeof input.replyBody !== 'string' || input.replyBody.trim().length === 0) {
+  if (
+    typeof input.replyBody !== 'string' ||
+    input.replyBody.trim().length === 0
+  ) {
     return { ok: false, error: 'invalid_input' }
   }
 
@@ -145,6 +148,10 @@ export async function verifyClosedVenueArrival(
         errorCode: VERIFY_CLOSED_VENUE_ARRIVAL_TRUNCATED_ERROR_CODE,
       }
     }
-    return { ok: false, error: message, errorCode: 'ai_verify_closed_venue_arrival_failed' }
+    return {
+      ok: false,
+      error: message,
+      errorCode: 'ai_verify_closed_venue_arrival_failed',
+    }
   }
 }

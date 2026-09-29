@@ -15,7 +15,9 @@ const retrieveCorpusStageMock = vi.fn()
 // Resolves NON-EMPTY deliberately: with [] it would return exactly the value
 // an "expect empty" assertion checks, and could not tell "skipped retrieval"
 // from "retrieved nothing". Never called by the fixed implementation.
-const retrieveKnowledgeStageMock = vi.fn<(...a: unknown[]) => Promise<unknown[]>>(async () => [
+const retrieveKnowledgeStageMock = vi.fn<
+  (...a: unknown[]) => Promise<unknown[]>
+>(async () => [
   {
     id: 'k1',
     knowledgeCorpusId: 'kc1',
@@ -35,7 +37,9 @@ const verifyClosedVenueArrivalStageMock = vi.fn()
 // TAC-513: default CLEAN, not undefined. The './stages' factory below is an
 // explicit allow-list, so a stage missing from it arrives `undefined` and
 // throws inside the allSettled argument list before the gate is reached.
-const verifyCancellationClaimStageMock = vi.fn().mockResolvedValue({ resolution: { status: 'none' }, claim: 'clean' })
+const verifyCancellationClaimStageMock = vi
+  .fn()
+  .mockResolvedValue({ resolution: { status: 'none' }, claim: 'clean' })
 const verifyMechanicOfferStageMock = vi.fn()
 const persistOrRegenQueuedDraftMock = vi.fn()
 const captureDraftDroppedMock = vi.fn()
@@ -72,7 +76,8 @@ vi.mock('./stages', async () => {
     // shared extractor buildAiRuntime uses. Same posture as APPROVAL_TRIGGERS.
     operatorInstructionQuery: actual.operatorInstructionQuery,
     retrieveCorpusStage: (...a: unknown[]) => retrieveCorpusStageMock(...a),
-    retrieveKnowledgeStage: (...a: unknown[]) => retrieveKnowledgeStageMock(...a),
+    retrieveKnowledgeStage: (...a: unknown[]) =>
+      retrieveKnowledgeStageMock(...a),
     // TAC-367: TRUE, matching production for the `event` and `manual` triggers
     // these tests actually exercise. It was `() => false` — the opposite — so
     // retrieveKnowledgeStage was unreachable in every test here and the live
@@ -81,21 +86,26 @@ vi.mock('./stages', async () => {
     // was the first); see CLAUDE.md's rule on mocked behaviour flags.
     shouldRetrieveKnowledge: () => true,
     generateStage: (...a: unknown[]) => generateStageMock(...a),
-    applyApprovalPolicyStage: (...a: unknown[]) => applyApprovalPolicyStageMock(...a),
+    applyApprovalPolicyStage: (...a: unknown[]) =>
+      applyApprovalPolicyStageMock(...a),
     verifyGroundingStage: (...a: unknown[]) => verifyGroundingStageMock(...a),
     // TAC-401: this factory is an explicit ALLOW-LIST. A stage missing here
     // arrives `undefined` at the call site, which in an allSettled array is a
     // TypeError swallowed into a rejected settlement — the check would read as
     // permanently degraded and every test here would stay green.
-    verifyProsePromiseStage: (...a: unknown[]) => verifyProsePromiseStageMock(...a),
+    verifyProsePromiseStage: (...a: unknown[]) =>
+      verifyProsePromiseStageMock(...a),
     verifyClosedVenueArrivalStage: (...a: unknown[]) =>
       verifyClosedVenueArrivalStageMock(...a),
-    verifyCancellationClaimStage: (...a: unknown[]) => verifyCancellationClaimStageMock(...a),
-    verifyMechanicOfferStage: (...a: unknown[]) => verifyMechanicOfferStageMock(...a),
+    verifyCancellationClaimStage: (...a: unknown[]) =>
+      verifyCancellationClaimStageMock(...a),
+    verifyMechanicOfferStage: (...a: unknown[]) =>
+      verifyMechanicOfferStageMock(...a),
   }
 })
 vi.mock('./schedule-and-send', () => ({
-  persistOrRegenQueuedDraft: (...a: unknown[]) => persistOrRegenQueuedDraftMock(...a),
+  persistOrRegenQueuedDraft: (...a: unknown[]) =>
+    persistOrRegenQueuedDraftMock(...a),
   scheduleAndSend: (...a: unknown[]) => scheduleAndSendMock(...a),
 }))
 vi.mock('./alerts', () => ({
@@ -133,7 +143,11 @@ vi.mock('@/lib/observability', () => ({
   startAgentTrace: () => ({
     id: '',
     captureContent: false,
-    span: () => ({ span: () => ({ end: () => undefined }), end: () => undefined, update: () => undefined }),
+    span: () => ({
+      span: () => ({ end: () => undefined }),
+      end: () => undefined,
+      update: () => undefined,
+    }),
     update: () => undefined,
     flushAsync: async () => undefined,
   }),
@@ -153,11 +167,17 @@ import type { FollowupTrigger, RuntimeContext } from './types'
 const VENUE_ID = '11111111-1111-4111-8111-111111111111'
 const GUEST_ID = '22222222-2222-4222-8222-222222222222'
 
-function makeCtx(followupTrigger: RuntimeContext['followupTrigger']): RuntimeContext {
+function makeCtx(
+  followupTrigger: RuntimeContext['followupTrigger'],
+): RuntimeContext {
   return {
     agentRunId: 'run-1',
     venue: { id: VENUE_ID, holdAllOutbound: false } as RuntimeContext['venue'],
-    guest: { id: GUEST_ID, firstName: 'Sam', isDemo: false } as RuntimeContext['guest'],
+    guest: {
+      id: GUEST_ID,
+      firstName: 'Sam',
+      isDemo: false,
+    } as RuntimeContext['guest'],
     currentMessage: null,
     // handleFollowup's own context_build step throws (inbound-XOR-outbound
     // invariant) unless followupTrigger is non-null here — buildRuntimeContext
@@ -168,7 +188,11 @@ function makeCtx(followupTrigger: RuntimeContext['followupTrigger']): RuntimeCon
     pendingQuestion: null,
     recentMessages: [],
     conversationWindowMs: 48 * 60 * 60 * 1000,
-    recognition: { state: 'regular', score: 0, computedAt: new Date() } as RuntimeContext['recognition'],
+    recognition: {
+      state: 'regular',
+      score: 0,
+      computedAt: new Date(),
+    } as RuntimeContext['recognition'],
     mechanics: [],
     recentVisits: [],
     activeCommitments: [],
@@ -240,7 +264,10 @@ beforeEach(() => {
       makeCtx(args.followupTrigger),
   )
   retrieveCorpusStageMock.mockResolvedValue([])
-  generateStageMock.mockResolvedValue({ status: 'success', result: successResult() })
+  generateStageMock.mockResolvedValue({
+    status: 'success',
+    result: successResult(),
+  })
   // TAC-376: default to 'skipped', matching production's most common case
   // (a followup with no gap-shaped finding). Tests that need a real verdict
   // override with mockResolvedValueOnce.
@@ -250,7 +277,10 @@ beforeEach(() => {
   verifyProsePromiseStageMock.mockResolvedValue({ status: 'skipped' })
   // TAC-363: 'skipped' is what the real stage returns at an open venue.
   verifyClosedVenueArrivalStageMock.mockResolvedValue({ status: 'skipped' })
-  verifyCancellationClaimStageMock.mockResolvedValue({ resolution: { status: 'none' }, claim: 'clean' })
+  verifyCancellationClaimStageMock.mockResolvedValue({
+    resolution: { status: 'none' },
+    claim: 'clean',
+  })
   scheduleAndSendMock.mockResolvedValue({
     outboundMessageId: 'sent-1',
     providerMessageId: 'p1',
@@ -282,7 +312,11 @@ describe('handleFollowup — mechanic-offer backstop wiring (TAC-355)', () => {
     await handleFollowup({
       venueId: VENUE_ID,
       guestId: GUEST_ID,
-      trigger: { reason: 'manual', triggeredAt: new Date(), metadata: { hint: 'checking in' } },
+      trigger: {
+        reason: 'manual',
+        triggeredAt: new Date(),
+        metadata: { hint: 'checking in' },
+      },
     })
 
     expect(verifyMechanicOfferStageMock).toHaveBeenCalled()
@@ -293,7 +327,10 @@ describe('handleFollowup — mechanic-offer backstop wiring (TAC-355)', () => {
   })
 
   it('invokes verifyMechanicOfferStage for a cron-triggered (day_7) followup and threads a "flagged" result into applyApprovalPolicyStage as the fourth argument', async () => {
-    verifyMechanicOfferStageMock.mockResolvedValueOnce({ status: 'flagged', mechanicId: 'mech-1' })
+    verifyMechanicOfferStageMock.mockResolvedValueOnce({
+      status: 'flagged',
+      mechanicId: 'mech-1',
+    })
     applyApprovalPolicyStageMock.mockResolvedValue({
       action: 'queue',
       triggers: ['mechanic_offer_backstop'],
@@ -323,12 +360,16 @@ describe('handleFollowup — mechanic-offer backstop wiring (TAC-355)', () => {
 
     expect(verifyMechanicOfferStageMock).toHaveBeenCalledTimes(1)
     expect(applyApprovalPolicyStageMock).toHaveBeenCalledTimes(1)
-    const [, , groundingArg, mechanicOfferArg] = applyApprovalPolicyStageMock.mock.calls[0]
+    const [, , groundingArg, mechanicOfferArg] =
+      applyApprovalPolicyStageMock.mock.calls[0]
     // TAC-376: followups now run verifyGroundingStage — the default fixture
     // resolves 'skipped' (this test's own finding is on the mechanic-offer
     // side), so the gate receives the real skipped result, not null.
     expect(groundingArg).toEqual({ status: 'skipped' })
-    expect(mechanicOfferArg).toEqual({ status: 'flagged', mechanicId: 'mech-1' })
+    expect(mechanicOfferArg).toEqual({
+      status: 'flagged',
+      mechanicId: 'mech-1',
+    })
 
     // TAC-364: the followup path threads the gate's trigger set and claims to
     // the persist layer exactly as inbound does.
@@ -355,7 +396,9 @@ describe('handleFollowup — mechanic-offer backstop wiring (TAC-355)', () => {
       triggers: ['knowledge_gap_backstop'],
       primaryTrigger: 'knowledge_gap_backstop',
       compMatchedPattern: null,
-      ungroundedClaims: ['thanks the guest for a referral with no referral on record'],
+      ungroundedClaims: [
+        'thanks the guest for a referral with no referral on record',
+      ],
       existingPendingDraftId: null,
       blankBody: false,
       slot: 'conversation',
@@ -490,7 +533,10 @@ describe('handleFollowup — mechanic-offer backstop wiring (TAC-355)', () => {
   // uses Promise.allSettled rather than Promise.all, mirroring handle-inbound.
   it('degrades to skipped, not a rejection, when verifyGroundingStage throws (allSettled)', async () => {
     verifyGroundingStageMock.mockRejectedValueOnce(new Error('boom'))
-    verifyMechanicOfferStageMock.mockResolvedValueOnce({ status: 'flagged', mechanicId: 'mech-2' })
+    verifyMechanicOfferStageMock.mockResolvedValueOnce({
+      status: 'flagged',
+      mechanicId: 'mech-2',
+    })
     applyApprovalPolicyStageMock.mockResolvedValue({
       action: 'queue',
       triggers: ['mechanic_offer_backstop'],
@@ -514,9 +560,13 @@ describe('handleFollowup — mechanic-offer backstop wiring (TAC-355)', () => {
       trigger: { reason: 'day_3', triggeredAt: new Date() },
     })
 
-    const [, , groundingArg, mechanicOfferArg] = applyApprovalPolicyStageMock.mock.calls[0]
+    const [, , groundingArg, mechanicOfferArg] =
+      applyApprovalPolicyStageMock.mock.calls[0]
     expect(groundingArg).toEqual({ status: 'skipped' })
-    expect(mechanicOfferArg).toEqual({ status: 'flagged', mechanicId: 'mech-2' })
+    expect(mechanicOfferArg).toEqual({
+      status: 'flagged',
+      mechanicId: 'mech-2',
+    })
   })
 
   // TAC-367 PR 3 (option B). The original defect was retrieving against
@@ -546,12 +596,20 @@ describe('handleFollowup — mechanic-offer backstop wiring (TAC-355)', () => {
   // structured (visit history, guest context, the perk's reward_description)
   // and already in the prompt; a hintless manual followup has nothing at all.
   it.each([
-    ['manual with no note', { reason: 'manual' as const, triggeredAt: new Date() }],
-    ['a cron day_7 followup', { reason: 'day_7' as const, triggeredAt: new Date() }],
+    [
+      'manual with no note',
+      { reason: 'manual' as const, triggeredAt: new Date() },
+    ],
+    [
+      'a cron day_7 followup',
+      { reason: 'day_7' as const, triggeredAt: new Date() },
+    ],
   ])('does not retrieve knowledge for %s', async (_label, trigger) => {
     await handleFollowup({ venueId: VENUE_ID, guestId: GUEST_ID, trigger })
     expect(retrieveKnowledgeStageMock).not.toHaveBeenCalled()
-    const ctx = generateStageMock.mock.calls[0][0] as { knowledgeCorpus: unknown }
+    const ctx = generateStageMock.mock.calls[0][0] as {
+      knowledgeCorpus: unknown
+    }
     expect(ctx.knowledgeCorpus).toEqual([])
   })
 
@@ -562,13 +620,19 @@ describe('handleFollowup — mechanic-offer backstop wiring (TAC-355)', () => {
     await handleFollowup({
       venueId: VENUE_ID,
       guestId: GUEST_ID,
-      trigger: { reason: 'manual', triggeredAt: new Date(), metadata: { hint: '   ' } },
+      trigger: {
+        reason: 'manual',
+        triggeredAt: new Date(),
+        metadata: { hint: '   ' },
+      },
     })
     expect(retrieveKnowledgeStageMock).not.toHaveBeenCalled()
   })
 
   it('FAILS CLOSED — a "check_failed" result still queues rather than sending', async () => {
-    verifyMechanicOfferStageMock.mockResolvedValueOnce({ status: 'check_failed' })
+    verifyMechanicOfferStageMock.mockResolvedValueOnce({
+      status: 'check_failed',
+    })
     applyApprovalPolicyStageMock.mockResolvedValue({
       action: 'queue',
       triggers: ['mechanic_offer_backstop'],
@@ -646,23 +710,26 @@ describe('handleFollowup: a draft with nowhere to go (TAC-394)', () => {
   it.each([
     ['manual', 'never_regen'],
     ['day_7', 'regen'],
-  ] as const)('a %s followup persists with callerPolicy %s', async (reason, policy) => {
-    applyApprovalPolicyStageMock.mockResolvedValue(QUEUE)
-    persistOrRegenQueuedDraftMock.mockResolvedValue({
-      outboundMessageId: 'queued-1',
-      action: 'inserted',
-      priorReviewReason: null,
-    })
+  ] as const)(
+    'a %s followup persists with callerPolicy %s',
+    async (reason, policy) => {
+      applyApprovalPolicyStageMock.mockResolvedValue(QUEUE)
+      persistOrRegenQueuedDraftMock.mockResolvedValue({
+        outboundMessageId: 'queued-1',
+        action: 'inserted',
+        priorReviewReason: null,
+      })
 
-    await handleFollowup({
-      venueId: VENUE_ID,
-      guestId: GUEST_ID,
-      trigger: { reason, triggeredAt: new Date() },
-    })
+      await handleFollowup({
+        venueId: VENUE_ID,
+        guestId: GUEST_ID,
+        trigger: { reason, triggeredAt: new Date() },
+      })
 
-    const [, , , , opts] = persistOrRegenQueuedDraftMock.mock.calls[0]
-    expect(opts.callerPolicy).toBe(policy)
-  })
+      const [, , , , opts] = persistOrRegenQueuedDraftMock.mock.calls[0]
+      expect(opts.callerPolicy).toBe(policy)
+    },
+  )
 
   // Refused, never skipped silently: logged, recorded as its own event, and the
   // route tells the operator who clicked. No dropped-draft Slack alert, which
@@ -735,8 +802,16 @@ describe('handleFollowup: a draft with nowhere to go (TAC-394)', () => {
   })
 
   it('any other drop goes to the dropped-draft alert, naming both commitments', async () => {
-    const kept = { type: 'comp', description: 'a free cortado on your next visit', code: '7K2P' }
-    const dropped = { type: 'comp', description: 'a free croissant', code: null }
+    const kept = {
+      type: 'comp',
+      description: 'a free cortado on your next visit',
+      code: '7K2P',
+    }
+    const dropped = {
+      type: 'comp',
+      description: 'a free croissant',
+      code: null,
+    }
     applyApprovalPolicyStageMock.mockResolvedValue({
       action: 'drop',
       reason: 'obligation_slot_taken',
@@ -771,7 +846,9 @@ describe('handleFollowup: a draft with nowhere to go (TAC-394)', () => {
 // generating, so no caller (the engine, the Command Center button, a perk
 // unlock, a demo guest) can reach an Instagram send by this path.
 describe('handleFollowup: never on Instagram (TAC-469)', () => {
-  const trigger = (reason: 'day_3' | 'manual' | 'perk_unlock' | 'cold_lapsed') => ({
+  const trigger = (
+    reason: 'day_3' | 'manual' | 'perk_unlock' | 'cold_lapsed',
+  ) => ({
     reason,
     triggeredAt: new Date(),
   })
@@ -779,12 +856,23 @@ describe('handleFollowup: never on Instagram (TAC-469)', () => {
   it.each(['day_3', 'manual', 'perk_unlock', 'cold_lapsed'] as const)(
     'refuses a %s follow-up for an Instagram conversation before generating',
     async (reason) => {
-      buildRuntimeContextMock.mockImplementation(async (args: { followupTrigger: RuntimeContext['followupTrigger'] }) => ({
-        ...makeCtx(args.followupTrigger),
-        conversationChannel: 'instagram',
-      }))
-      const result = await handleFollowup({ venueId: VENUE_ID, guestId: GUEST_ID, trigger: trigger(reason) })
-      expect(result).toEqual({ status: 'refused', reason: 'instagram_followups_are_manual' })
+      buildRuntimeContextMock.mockImplementation(
+        async (args: {
+          followupTrigger: RuntimeContext['followupTrigger']
+        }) => ({
+          ...makeCtx(args.followupTrigger),
+          conversationChannel: 'instagram',
+        }),
+      )
+      const result = await handleFollowup({
+        venueId: VENUE_ID,
+        guestId: GUEST_ID,
+        trigger: trigger(reason),
+      })
+      expect(result).toEqual({
+        status: 'refused',
+        reason: 'instagram_followups_are_manual',
+      })
       expect(generateStageMock).not.toHaveBeenCalled()
       expect(scheduleAndSendMock).not.toHaveBeenCalled()
       expect(persistOrRegenQueuedDraftMock).not.toHaveBeenCalled()
@@ -792,27 +880,50 @@ describe('handleFollowup: never on Instagram (TAC-469)', () => {
   )
 
   it('refuses a demo guest on Instagram too: the demo bypass is about approval, not channel', async () => {
-    buildRuntimeContextMock.mockImplementation(async (args: { followupTrigger: RuntimeContext['followupTrigger'] }) => {
-      const ctx = makeCtx(args.followupTrigger)
-      return { ...ctx, conversationChannel: 'instagram', guest: { ...ctx.guest, isDemo: true } }
+    buildRuntimeContextMock.mockImplementation(
+      async (args: { followupTrigger: RuntimeContext['followupTrigger'] }) => {
+        const ctx = makeCtx(args.followupTrigger)
+        return {
+          ...ctx,
+          conversationChannel: 'instagram',
+          guest: { ...ctx.guest, isDemo: true },
+        }
+      },
+    )
+    const result = await handleFollowup({
+      venueId: VENUE_ID,
+      guestId: GUEST_ID,
+      trigger: trigger('day_3'),
     })
-    const result = await handleFollowup({ venueId: VENUE_ID, guestId: GUEST_ID, trigger: trigger('day_3') })
-    expect(result).toEqual({ status: 'refused', reason: 'instagram_followups_are_manual' })
+    expect(result).toEqual({
+      status: 'refused',
+      reason: 'instagram_followups_are_manual',
+    })
     expect(scheduleAndSendMock).not.toHaveBeenCalled()
   })
 
   it('refuses an unresolved channel: nothing routes on null', async () => {
-    buildRuntimeContextMock.mockImplementation(async (args: { followupTrigger: RuntimeContext['followupTrigger'] }) => ({
-      ...makeCtx(args.followupTrigger),
-      conversationChannel: null,
-    }))
-    const result = await handleFollowup({ venueId: VENUE_ID, guestId: GUEST_ID, trigger: trigger('day_3') })
+    buildRuntimeContextMock.mockImplementation(
+      async (args: { followupTrigger: RuntimeContext['followupTrigger'] }) => ({
+        ...makeCtx(args.followupTrigger),
+        conversationChannel: null,
+      }),
+    )
+    const result = await handleFollowup({
+      venueId: VENUE_ID,
+      guestId: GUEST_ID,
+      trigger: trigger('day_3'),
+    })
     expect(result).toEqual({ status: 'refused', reason: 'channel_unresolved' })
     expect(generateStageMock).not.toHaveBeenCalled()
   })
 
   it('still sends a text follow-up, unchanged', async () => {
-    const result = await handleFollowup({ venueId: VENUE_ID, guestId: GUEST_ID, trigger: trigger('day_3') })
+    const result = await handleFollowup({
+      venueId: VENUE_ID,
+      guestId: GUEST_ID,
+      trigger: trigger('day_3'),
+    })
     expect(generateStageMock).toHaveBeenCalledTimes(1)
     expect(result.status).not.toBe('refused')
   })
@@ -824,14 +935,21 @@ describe('handleFollowup: never on Instagram (TAC-469)', () => {
     const scanTrigger = (): FollowupTrigger => ({
       reason: 'instagram_scan_arrival',
       triggeredAt: new Date(),
-      instagramScanArrival: { scanMessageId: 'scan-msg-1', hadPriorConversation: true },
+      instagramScanArrival: {
+        scanMessageId: 'scan-msg-1',
+        hadPriorConversation: true,
+      },
     })
 
     beforeEach(() => {
-      buildRuntimeContextMock.mockImplementation(async (args: { followupTrigger: RuntimeContext['followupTrigger'] }) => ({
-        ...makeCtx(args.followupTrigger),
-        conversationChannel: 'instagram',
-      }))
+      buildRuntimeContextMock.mockImplementation(
+        async (args: {
+          followupTrigger: RuntimeContext['followupTrigger']
+        }) => ({
+          ...makeCtx(args.followupTrigger),
+          conversationChannel: 'instagram',
+        }),
+      )
       // These two are RESET by the file's own beforeEach and never given a
       // default, because every pre-existing Instagram test refuses before
       // generating and never reaches them. This block is the first that does,
@@ -854,7 +972,11 @@ describe('handleFollowup: never on Instagram (TAC-469)', () => {
     // Only dispatchReply reaches the Instagram transport. Routing this through
     // scheduleAndSend would try to send an Instagram greeting over Sendblue.
     it('sends through dispatchReply, never scheduleAndSend', async () => {
-      await handleFollowup({ venueId: VENUE_ID, guestId: GUEST_ID, trigger: scanTrigger() })
+      await handleFollowup({
+        venueId: VENUE_ID,
+        guestId: GUEST_ID,
+        trigger: scanTrigger(),
+      })
       expect(dispatchReplyMock).toHaveBeenCalledTimes(1)
       expect(scheduleAndSendMock).not.toHaveBeenCalled()
     })
@@ -864,7 +986,11 @@ describe('handleFollowup: never on Instagram (TAC-469)', () => {
     // silence the agent's own reply to whatever the guest says next. Dropping
     // this is the mutant that matters most on this path.
     it('names the scan row it answers', async () => {
-      await handleFollowup({ venueId: VENUE_ID, guestId: GUEST_ID, trigger: scanTrigger() })
+      await handleFollowup({
+        venueId: VENUE_ID,
+        guestId: GUEST_ID,
+        trigger: scanTrigger(),
+      })
       expect(dispatchReplyMock.mock.calls[0]?.[2]).toMatchObject({
         answersInboundId: 'scan-msg-1',
         replyCheck: { inboundMessageId: 'scan-msg-1' },
@@ -881,7 +1007,10 @@ describe('handleFollowup: never on Instagram (TAC-469)', () => {
         trigger: {
           reason: 'instagram_scan_arrival',
           triggeredAt: new Date(),
-          instagramScanArrival: { scanMessageId: null, hadPriorConversation: false },
+          instagramScanArrival: {
+            scanMessageId: null,
+            hadPriorConversation: false,
+          },
         },
       })
       expect(dispatchReplyMock.mock.calls[0]?.[2]).toMatchObject({
@@ -891,14 +1020,21 @@ describe('handleFollowup: never on Instagram (TAC-469)', () => {
     })
 
     it('records it as guest_arrived, not follow_up', async () => {
-      await handleFollowup({ venueId: VENUE_ID, guestId: GUEST_ID, trigger: scanTrigger() })
+      await handleFollowup({
+        venueId: VENUE_ID,
+        guestId: GUEST_ID,
+        trigger: scanTrigger(),
+      })
       expect(generateStageMock.mock.calls[0]?.[1]).toBe('guest_arrived')
     })
 
     // The Instagram arm can decline. The text arm throws instead, so these are
     // reachable only here, and they must not read as a clean send.
     it('reports a reply staff already sent as superseded, not sent', async () => {
-      dispatchReplyMock.mockResolvedValue({ kind: 'superseded', byMessageId: 'staff-1' })
+      dispatchReplyMock.mockResolvedValue({
+        kind: 'superseded',
+        byMessageId: 'staff-1',
+      })
       const result = await handleFollowup({
         venueId: VENUE_ID,
         guestId: GUEST_ID,
@@ -908,13 +1044,20 @@ describe('handleFollowup: never on Instagram (TAC-469)', () => {
     })
 
     it('reports a carded greeting as queued', async () => {
-      dispatchReplyMock.mockResolvedValue({ kind: 'carded', reason: 'window_closed', cardId: 'card-9' })
+      dispatchReplyMock.mockResolvedValue({
+        kind: 'carded',
+        reason: 'window_closed',
+        cardId: 'card-9',
+      })
       const result = await handleFollowup({
         venueId: VENUE_ID,
         guestId: GUEST_ID,
         trigger: scanTrigger(),
       })
-      expect(result).toMatchObject({ status: 'queued', outboundMessageId: 'card-9' })
+      expect(result).toMatchObject({
+        status: 'queued',
+        outboundMessageId: 'card-9',
+      })
     })
 
     // The caller's run id has to reach the trace, or the ledger row it writes
@@ -954,7 +1097,10 @@ describe('handleFollowup — prose-promise backstop (TAC-401)', () => {
   }
 
   it('threads the prose-promise verdict through to applyApprovalPolicyStage', async () => {
-    verifyProsePromiseStageMock.mockResolvedValueOnce({ status: 'flagged', commitment })
+    verifyProsePromiseStageMock.mockResolvedValueOnce({
+      status: 'flagged',
+      commitment,
+    })
     applyApprovalPolicyStageMock.mockResolvedValue({ action: 'send' })
 
     await handleFollowup({
@@ -969,7 +1115,10 @@ describe('handleFollowup — prose-promise backstop (TAC-401)', () => {
   })
 
   it('passes the named commitment into the persist options', async () => {
-    verifyProsePromiseStageMock.mockResolvedValueOnce({ status: 'flagged', commitment })
+    verifyProsePromiseStageMock.mockResolvedValueOnce({
+      status: 'flagged',
+      commitment,
+    })
     applyApprovalPolicyStageMock.mockResolvedValue({
       action: 'queue',
       triggers: ['prose_promise_backstop'],
@@ -1045,7 +1194,11 @@ describe('handleFollowup — cancellation carrier (TAC-513)', () => {
       result: { ...successResult(), cancelsCommitmentId: TONIC.id },
     })
     verifyCancellationClaimStageMock.mockResolvedValueOnce({
-      resolution: { status: 'resolved', cancellation: pendingCancellation, commitment: TONIC },
+      resolution: {
+        status: 'resolved',
+        cancellation: pendingCancellation,
+        commitment: TONIC,
+      },
       claim: 'skipped',
     })
     applyApprovalPolicyStageMock.mockResolvedValue({
@@ -1088,7 +1241,9 @@ describe('handleFollowup — cancellation carrier (TAC-513)', () => {
       status: 'success',
       result: { ...successResult(), cancelsCommitmentId: TONIC.id },
     })
-    verifyCancellationClaimStageMock.mockRejectedValueOnce(new Error('unexpected throw'))
+    verifyCancellationClaimStageMock.mockRejectedValueOnce(
+      new Error('unexpected throw'),
+    )
     applyApprovalPolicyStageMock.mockResolvedValue({
       action: 'queue',
       triggers: ['prose_cancellation_check_failed'],
@@ -1110,9 +1265,14 @@ describe('handleFollowup — cancellation carrier (TAC-513)', () => {
       trigger: { reason: 'day_7', triggeredAt: new Date() },
     })
 
-    const [, , , , , cancellationArg] = applyApprovalPolicyStageMock.mock.calls[0]
+    const [, , , , , cancellationArg] =
+      applyApprovalPolicyStageMock.mock.calls[0]
     expect(cancellationArg).toEqual({
-      resolution: { status: 'resolved', cancellation: { commitmentId: TONIC.id }, commitment: TONIC },
+      resolution: {
+        status: 'resolved',
+        cancellation: { commitmentId: TONIC.id },
+        commitment: TONIC,
+      },
       claim: 'check_failed',
     })
   })

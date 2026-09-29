@@ -17,10 +17,7 @@ export {
   listPendingQueue,
 } from './queue'
 
-export {
-  type ListHeadsUpQueueResult,
-  listHeadsUpQueue,
-} from './heads-up-queue'
+export { type ListHeadsUpQueueResult, listHeadsUpQueue } from './heads-up-queue'
 
 export {
   type LoadGuestThreadErrorCode,

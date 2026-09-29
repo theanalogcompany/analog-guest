@@ -1,4 +1,7 @@
-import { loadPendingRowsBySlot, type PendingSlot } from '@/lib/agent/pending-slots'
+import {
+  loadPendingRowsBySlot,
+  type PendingSlot,
+} from '@/lib/agent/pending-slots'
 import { createAdminClient } from '@/lib/db/admin'
 import { findActiveCommitmentsForGuest } from '@/lib/guests/commitments'
 import { diffGuardrailState, type GuardrailCounts } from './preflight-pure'
@@ -64,14 +67,29 @@ export function clearMessagingCredentials(): void {
 }
 
 /** Row counts for the four tables any accidental write could touch, scoped to one venue. */
-export async function countGuardrailState(venueId: string): Promise<GuardrailCounts> {
+export async function countGuardrailState(
+  venueId: string,
+): Promise<GuardrailCounts> {
   const supabase = createAdminClient()
-  const [messages, guestCommitments, guestStates, engagementEvents] = await Promise.all([
-    supabase.from('messages').select('id', { count: 'exact', head: true }).eq('venue_id', venueId),
-    supabase.from('guest_commitments').select('id', { count: 'exact', head: true }).eq('venue_id', venueId),
-    supabase.from('guest_states').select('id', { count: 'exact', head: true }).eq('venue_id', venueId),
-    supabase.from('engagement_events').select('id', { count: 'exact', head: true }).eq('venue_id', venueId),
-  ])
+  const [messages, guestCommitments, guestStates, engagementEvents] =
+    await Promise.all([
+      supabase
+        .from('messages')
+        .select('id', { count: 'exact', head: true })
+        .eq('venue_id', venueId),
+      supabase
+        .from('guest_commitments')
+        .select('id', { count: 'exact', head: true })
+        .eq('venue_id', venueId),
+      supabase
+        .from('guest_states')
+        .select('id', { count: 'exact', head: true })
+        .eq('venue_id', venueId),
+      supabase
+        .from('engagement_events')
+        .select('id', { count: 'exact', head: true })
+        .eq('venue_id', venueId),
+    ])
   const labeled = [
     ['messages', messages],
     ['guest_commitments', guestCommitments],
@@ -79,7 +97,10 @@ export async function countGuardrailState(venueId: string): Promise<GuardrailCou
     ['engagement_events', engagementEvents],
   ] as const
   for (const [label, res] of labeled) {
-    if (res.error) throw new Error(`countGuardrailState: ${label} count failed: ${res.error.message}`)
+    if (res.error)
+      throw new Error(
+        `countGuardrailState: ${label} count failed: ${res.error.message}`,
+      )
   }
   return {
     messages: messages.count ?? 0,
@@ -127,14 +148,16 @@ export async function checkCleanState(
         phone: phonesByState[state] ?? 'unknown',
         guestId,
         kind: 'pending_draft',
-        detail: 'could not read pending drafts; check this guest by hand before running',
+        detail:
+          'could not read pending drafts; check this guest by hand before running',
       })
     } else {
       for (const slot of PENDING_SLOTS) {
         // TAC-397: the conversation slot is many-valued now, so report EVERY
         // card. Showing one of three would read as "this guest is nearly
         // clean", which is worse than showing none.
-        const rows = slot === 'obligation' ? [pending.obligation] : pending.conversation
+        const rows =
+          slot === 'obligation' ? [pending.obligation] : pending.conversation
         for (const row of rows) {
           if (row === null) continue
           hits.push({
@@ -147,7 +170,10 @@ export async function checkCleanState(
         }
       }
     }
-    const commitments = await findActiveCommitmentsForGuest({ venueId, guestId })
+    const commitments = await findActiveCommitmentsForGuest({
+      venueId,
+      guestId,
+    })
     if (commitments.ok && commitments.data.length > 0) {
       hits.push({
         state,

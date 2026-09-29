@@ -58,12 +58,13 @@ function surfaceFiles(dir: string): string[] {
 }
 
 /** Every file across every surface root, tagged with a readable location. */
-const FILES: ReadonlyArray<{ label: string; path: string }> = SURFACE_ROOTS.flatMap((root) =>
-  surfaceFiles(root.dir).map((path) => ({
-    label: `${root.label}/${path.slice(root.dir.length + 1)}`,
-    path,
-  })),
-)
+const FILES: ReadonlyArray<{ label: string; path: string }> =
+  SURFACE_ROOTS.flatMap((root) =>
+    surfaceFiles(root.dir).map((path) => ({
+      label: `${root.label}/${path.slice(root.dir.length + 1)}`,
+      path,
+    })),
+  )
 
 /** Quote entities only. `&amp;` is deliberately absent — decoding it would
  *  create an ordering trap (`&amp;rsquo;` -> `&rsquo;` -> `'`) for no gain,
@@ -86,7 +87,8 @@ const QUOTE_ENTITIES: ReadonlyArray<readonly [string, string]> = [
  */
 function normalizeForCopyCheck(text: string): string {
   let out = text
-  for (const [entity, char] of QUOTE_ENTITIES) out = out.split(entity).join(char)
+  for (const [entity, char] of QUOTE_ENTITIES)
+    out = out.split(entity).join(char)
   return out
     .replace(/[\u2018\u2019]/g, "'")
     .replace(/[\u201C\u201D]/g, '"')
@@ -102,7 +104,9 @@ describe('intentions surface renders definitions from the constant', () => {
     // exactly the failure that adding the second root exists to prevent.
     const labels = FILES.map((f) => f.label)
     expect(labels).toContain('intentions/page.tsx')
-    expect(labels).toContain(`intentions/${join('_components', 'definitions-list.tsx')}`)
+    expect(labels).toContain(
+      `intentions/${join('_components', 'definitions-list.tsx')}`,
+    )
     expect(labels).toContain('venue-page/intentions-section.tsx')
     for (const root of SURFACE_ROOTS) {
       expect(
@@ -114,7 +118,10 @@ describe('intentions surface renders definitions from the constant', () => {
   })
 
   it('the definitions list imports INTENTION_DEFINITIONS', () => {
-    const src = readFileSync(join(SURFACE_DIR, '_components', 'definitions-list.tsx'), 'utf-8')
+    const src = readFileSync(
+      join(SURFACE_DIR, '_components', 'definitions-list.tsx'),
+      'utf-8',
+    )
     expect(src).toContain("from '@/lib/agent/intentions/definitions'")
     expect(src).toContain('INTENTION_DEFINITIONS')
   })
@@ -127,12 +134,14 @@ describe('intentions surface renders definitions from the constant', () => {
         expect(src, `${where} copies ${def.key}.promptLine`).not.toContain(
           normalizeForCopyCheck(def.promptLine),
         )
-        expect(src, `${where} copies ${def.key}.classifierDescription`).not.toContain(
-          normalizeForCopyCheck(def.classifierDescription),
-        )
-        expect(src, `${where} copies ${def.key}.satisfactionLabel`).not.toContain(
-          normalizeForCopyCheck(def.satisfactionLabel),
-        )
+        expect(
+          src,
+          `${where} copies ${def.key}.classifierDescription`,
+        ).not.toContain(normalizeForCopyCheck(def.classifierDescription))
+        expect(
+          src,
+          `${where} copies ${def.key}.satisfactionLabel`,
+        ).not.toContain(normalizeForCopyCheck(def.satisfactionLabel))
       }
     }
   })
@@ -142,7 +151,10 @@ describe('intentions surface renders definitions from the constant', () => {
   // so the gating copy names it deliberately. Pinned so that reference is a
   // decision rather than an accident, and so a stale key name fails here.
   it('names understand_order in the gating copy, since the rule is key-specific', () => {
-    const src = readFileSync(join(SURFACE_DIR, '_components', 'gating-conditions.tsx'), 'utf-8')
+    const src = readFileSync(
+      join(SURFACE_DIR, '_components', 'gating-conditions.tsx'),
+      'utf-8',
+    )
     expect(src).toContain('understand_order')
     expect(src).not.toContain('learn_first_order')
   })

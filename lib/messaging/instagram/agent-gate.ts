@@ -195,7 +195,8 @@ const HANDOFF_RESOLVERS: HandoffResolvers = {
     // TAC-469: an icebreaker tap with no title is an empty inbound. There is
     // nothing to reply to, so the agent isn't run; the row still opens the
     // window.
-    if (outcome.titlelessPostback) return { kind: 'record', reason: 'titleless_postback' }
+    if (outcome.titlelessPostback)
+      return { kind: 'record', reason: 'titleless_postback' }
     return {
       kind: 'run',
       messageId: outcome.messageId,
@@ -237,15 +238,15 @@ const HANDOFF_RESOLVERS: HandoffResolvers = {
  * referral, an entry key we don't read) or one the guest withdrew
  * (`message_deleted`), which needs no reply by the time we see it.
  */
-const GUEST_CONTENT_UNHANDLED_REASONS: ReadonlySet<InstagramUnhandledReason> = new Set([
-  'message_unsupported',
-  'message_no_content',
-])
+const GUEST_CONTENT_UNHANDLED_REASONS: ReadonlySet<InstagramUnhandledReason> =
+  new Set(['message_unsupported', 'message_no_content'])
 
 // TAC-536 added 'referral': a scan is a guest action, so a scan we could not
 // file is a lost turn in the same way a lost message is. An echo and a read
 // stay out, for the reasons the file header gives.
-function isGuestTurnKind(kind: 'message' | 'echo' | 'postback' | 'read' | 'referral'): boolean {
+function isGuestTurnKind(
+  kind: 'message' | 'echo' | 'postback' | 'read' | 'referral',
+): boolean {
   return kind === 'message' || kind === 'postback' || kind === 'referral'
 }
 
@@ -256,7 +257,10 @@ export function resolveAgentHandoff(
   // HANDOFF_RESOLVERS is total over the union by its TYPE; TypeScript cannot
   // carry the per-key narrowing through an index access, so the call is cast.
   const resolve = HANDOFF_RESOLVERS[outcome.status] as
-    | ((outcome: InstagramEventOutcome, enabled: boolean) => InstagramAgentHandoff)
+    | ((
+        outcome: InstagramEventOutcome,
+        enabled: boolean,
+      ) => InstagramAgentHandoff)
     | undefined
   // The map is tsc-total, so `undefined` needs an `as` cast or a runtime/type
   // divergence to happen at all. Guarded anyway because the cost is not local:

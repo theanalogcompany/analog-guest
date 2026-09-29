@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import type { BrandPersona, VenueContextNote } from '@/lib/schemas'
-import { computeReadiness, READINESS_THRESHOLDS, type ReadinessInput } from './readiness'
+import {
+  computeReadiness,
+  READINESS_THRESHOLDS,
+  type ReadinessInput,
+} from './readiness'
 
 const NOW = new Date('2026-04-29T12:00:00Z')
 
@@ -25,7 +29,11 @@ const dated = (id: string, expiresAt: string): VenueContextNote => ({
   expiresAt,
 })
 
-const fullMechanic = (overrides: Partial<Parameters<typeof computeReadiness>[0]['mechanics'][number]> = {}) => ({
+const fullMechanic = (
+  overrides: Partial<
+    Parameters<typeof computeReadiness>[0]['mechanics'][number]
+  > = {},
+) => ({
   id: 'm1',
   name: 'The Joey',
   isActive: true,
@@ -43,11 +51,14 @@ function baseInput(overrides: Partial<ReadinessInput> = {}): ReadinessInput {
   return {
     now: NOW,
     voiceCorpusCount: READINESS_THRESHOLDS.MIN_VOICE_CORPUS,
-    knowledgeEntries: Array.from({ length: READINESS_THRESHOLDS.MIN_KNOWLEDGE_CHUNKS }, (_, i) => ({
-      id: `k${i}`,
-      primaryTags: ['history'],
-      isProcessed: true,
-    })),
+    knowledgeEntries: Array.from(
+      { length: READINESS_THRESHOLDS.MIN_KNOWLEDGE_CHUNKS },
+      (_, i) => ({
+        id: `k${i}`,
+        primaryTags: ['history'],
+        isProcessed: true,
+      }),
+    ),
     mechanics: [fullMechanic()],
     currentContext: [
       dated('c1', '2026-05-01T00:00:00Z'),
@@ -78,7 +89,9 @@ describe('computeReadiness', () => {
   it('fails the knowledge threshold when processed count is below 15', () => {
     const report = computeReadiness(
       baseInput({
-        knowledgeEntries: [{ id: 'k1', primaryTags: ['history'], isProcessed: true }],
+        knowledgeEntries: [
+          { id: 'k1', primaryTags: ['history'], isProcessed: true },
+        ],
       }),
     )
     expect(report.knowledge.met).toBe(false)
@@ -116,7 +129,9 @@ describe('computeReadiness', () => {
   })
 
   it('fails the currentContext threshold when fewer than 2 entries carry a valid date', () => {
-    const report = computeReadiness(baseInput({ currentContext: [dated('c1', '2026-05-01T00:00:00Z')] }))
+    const report = computeReadiness(
+      baseInput({ currentContext: [dated('c1', '2026-05-01T00:00:00Z')] }),
+    )
     expect(report.currentContext.met).toBe(false)
     expect(report.currentContext.datedCount).toBe(1)
   })
@@ -129,24 +144,38 @@ describe('computeReadiness', () => {
       addedAt: new Date('2026-01-01T00:00:00Z'),
     }
     const report = computeReadiness(
-      baseInput({ currentContext: [dated('c1', '2026-05-01T00:00:00Z'), permanent] }),
+      baseInput({
+        currentContext: [dated('c1', '2026-05-01T00:00:00Z'), permanent],
+      }),
     )
     expect(report.currentContext.datedCount).toBe(1)
   })
 
   it('flags a mechanic with missing fields', () => {
     const report = computeReadiness(
-      baseInput({ mechanics: [fullMechanic({ description: null, qualification: null })] }),
+      baseInput({
+        mechanics: [fullMechanic({ description: null, qualification: null })],
+      }),
     )
     expect(report.mechanics.issues).toEqual([
-      { id: 'm1', name: 'The Joey', missingFields: ['description', 'qualification'] },
+      {
+        id: 'm1',
+        name: 'The Joey',
+        missingFields: ['description', 'qualification'],
+      },
     ])
   })
 
   it('excludes a deactivated mechanic from missing-field issues', () => {
     const report = computeReadiness(
       baseInput({
-        mechanics: [fullMechanic({ isActive: false, description: null, qualification: null })],
+        mechanics: [
+          fullMechanic({
+            isActive: false,
+            description: null,
+            qualification: null,
+          }),
+        ],
       }),
     )
     expect(report.mechanics.issues).toEqual([])
@@ -158,18 +187,26 @@ describe('computeReadiness', () => {
     const report = computeReadiness(
       baseInput({
         mechanics: [
-          fullMechanic({ trigger: { type: 'manual_invite' }, requiresOperatorApproval: false }),
+          fullMechanic({
+            trigger: { type: 'manual_invite' },
+            requiresOperatorApproval: false,
+          }),
         ],
       }),
     )
-    expect(report.mechanics.manualInviteWithoutApproval).toEqual([{ id: 'm1', name: 'The Joey' }])
+    expect(report.mechanics.manualInviteWithoutApproval).toEqual([
+      { id: 'm1', name: 'The Joey' },
+    ])
   })
 
   it('does not flag a manual_invite mechanic that does require approval', () => {
     const report = computeReadiness(
       baseInput({
         mechanics: [
-          fullMechanic({ trigger: { type: 'manual_invite' }, requiresOperatorApproval: true }),
+          fullMechanic({
+            trigger: { type: 'manual_invite' },
+            requiresOperatorApproval: true,
+          }),
         ],
       }),
     )
@@ -193,12 +230,16 @@ describe('computeReadiness', () => {
 
   it('marks every brand_persona field unpopulated when persona is null', () => {
     const report = computeReadiness(baseInput({ brandPersona: null }))
-    expect(report.brandPersona.fields.every((f) => f.populated === false)).toBe(true)
+    expect(report.brandPersona.fields.every((f) => f.populated === false)).toBe(
+      true,
+    )
   })
 
   it('marks required-enum fields populated on any successfully-parsed persona', () => {
     const report = computeReadiness(baseInput({ brandPersona: fullPersona }))
-    const byField = Object.fromEntries(report.brandPersona.fields.map((f) => [f.field, f.populated]))
+    const byField = Object.fromEntries(
+      report.brandPersona.fields.map((f) => [f.field, f.populated]),
+    )
     expect(byField.formality).toBe(true)
     expect(byField.speakerFraming).toBe(true)
     expect(byField.emojiPolicy).toBe(true)
@@ -208,23 +249,34 @@ describe('computeReadiness', () => {
     const report = computeReadiness(
       baseInput({ brandPersona: { ...fullPersona, signaturePhrases: [] } }),
     )
-    const byField = Object.fromEntries(report.brandPersona.fields.map((f) => [f.field, f.populated]))
+    const byField = Object.fromEntries(
+      report.brandPersona.fields.map((f) => [f.field, f.populated]),
+    )
     expect(byField.signaturePhrases).toBe(false)
   })
 
   it('falls back to the code default approval policy when the stored value is null', () => {
     const report = computeReadiness(baseInput({ rawApprovalPolicy: null }))
     expect(report.approvalPolicy.default).toBe('auto_send')
-    expect(report.approvalPolicy.perCategory.comp_complaint).toBe('operator_approval')
+    expect(report.approvalPolicy.perCategory.comp_complaint).toBe(
+      'operator_approval',
+    )
   })
 
   it('layers a stored perCategory override on top of the code default, not replacing it', () => {
     const report = computeReadiness(
       baseInput({
-        rawApprovalPolicy: { default: 'auto_send', perCategory: { mechanic_request: 'operator_approval' } },
+        rawApprovalPolicy: {
+          default: 'auto_send',
+          perCategory: { mechanic_request: 'operator_approval' },
+        },
       }),
     )
-    expect(report.approvalPolicy.perCategory.comp_complaint).toBe('operator_approval')
-    expect(report.approvalPolicy.perCategory.mechanic_request).toBe('operator_approval')
+    expect(report.approvalPolicy.perCategory.comp_complaint).toBe(
+      'operator_approval',
+    )
+    expect(report.approvalPolicy.perCategory.mechanic_request).toBe(
+      'operator_approval',
+    )
   })
 })

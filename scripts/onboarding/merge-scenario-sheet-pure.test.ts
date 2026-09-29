@@ -79,17 +79,37 @@ describe('stampFreshRows', () => {
 describe('mergeScenarioRows', () => {
   it('replaces an untouched generated row (hash still matches)', () => {
     const untouched = stampRow({ sample_id: 'a' })
-    const fresh = stampFreshRows([baseScenario({ sample_id: 'b', inbound_message: 'fresh regen' })])
-    const { finalRows, stats } = mergeScenarioRows({ currentRows: [untouched], freshStampedRows: fresh })
+    const fresh = stampFreshRows([
+      baseScenario({ sample_id: 'b', inbound_message: 'fresh regen' }),
+    ])
+    const { finalRows, stats } = mergeScenarioRows({
+      currentRows: [untouched],
+      freshStampedRows: fresh,
+    })
     expect(finalRows.map((r) => r.sample_id)).toEqual(['b'])
-    expect(stats).toEqual({ keptOwner: 0, keptEdited: 0, replaced: 1, inserted: 1, dedupedSampleIds: [] })
+    expect(stats).toEqual({
+      keptOwner: 0,
+      keptEdited: 0,
+      replaced: 1,
+      inserted: 1,
+      dedupedSampleIds: [],
+    })
   })
 
   it('preserves an edited generated row (hash no longer matches) untouched', () => {
-    const original = stampRow({ sample_id: 'a', inbound_message: 'original message' })
-    const edited: ScenarioSheetRow = { ...original, inbound_message: 'owner rewrote this' }
+    const original = stampRow({
+      sample_id: 'a',
+      inbound_message: 'original message',
+    })
+    const edited: ScenarioSheetRow = {
+      ...original,
+      inbound_message: 'owner rewrote this',
+    }
     const fresh = stampFreshRows([baseScenario({ sample_id: 'b' })])
-    const { finalRows, stats } = mergeScenarioRows({ currentRows: [edited], freshStampedRows: fresh })
+    const { finalRows, stats } = mergeScenarioRows({
+      currentRows: [edited],
+      freshStampedRows: fresh,
+    })
     const keptEdited = finalRows.find((r) => r.sample_id === 'a')
     expect(keptEdited?.inbound_message).toBe('owner rewrote this')
     expect(stats.keptEdited).toBe(1)
@@ -98,12 +118,18 @@ describe('mergeScenarioRows', () => {
 
   it('preserves an owner-added row regardless of content or hash', () => {
     const ownerRow: ScenarioSheetRow = {
-      ...stampRow({ sample_id: 'owner-1', inbound_message: 'owner typed this from scratch' }),
+      ...stampRow({
+        sample_id: 'owner-1',
+        inbound_message: 'owner typed this from scratch',
+      }),
       origin: 'owner',
       generated_hash: 'irrelevant-does-not-matter',
     }
     const fresh = stampFreshRows([baseScenario({ sample_id: 'b' })])
-    const { finalRows, stats } = mergeScenarioRows({ currentRows: [ownerRow], freshStampedRows: fresh })
+    const { finalRows, stats } = mergeScenarioRows({
+      currentRows: [ownerRow],
+      freshStampedRows: fresh,
+    })
     expect(finalRows.some((r) => r.sample_id === 'owner-1')).toBe(true)
     expect(stats.keptOwner).toBe(1)
   })
@@ -112,7 +138,10 @@ describe('mergeScenarioRows', () => {
     const base = stampRow({ sample_id: 'a' })
     const excluded: ScenarioSheetRow = { ...base, exclude: true } // hash still reflects pre-exclude content
     const fresh = stampFreshRows([baseScenario({ sample_id: 'b' })])
-    const { finalRows, stats } = mergeScenarioRows({ currentRows: [excluded], freshStampedRows: fresh })
+    const { finalRows, stats } = mergeScenarioRows({
+      currentRows: [excluded],
+      freshStampedRows: fresh,
+    })
     const kept = finalRows.find((r) => r.sample_id === 'a')
     expect(kept?.exclude).toBe(true)
     expect(stats.keptEdited).toBe(1)
@@ -122,13 +151,27 @@ describe('mergeScenarioRows', () => {
   // than an owner edit — the false "kept as edited" bug) that shares an id
   // with a brand-new fresh row must not produce two physical rows.
   it('when a kept-edited row collides with a fresh row sharing its id, the fresh row wins', () => {
-    const original = stampRow({ sample_id: 'venue_topic:menu_food:17', inbound_message: 'stale content' })
-    const staleKept: ScenarioSheetRow = { ...original, inbound_message: 'unexplainably different now' }
+    const original = stampRow({
+      sample_id: 'venue_topic:menu_food:17',
+      inbound_message: 'stale content',
+    })
+    const staleKept: ScenarioSheetRow = {
+      ...original,
+      inbound_message: 'unexplainably different now',
+    }
     const fresh = stampFreshRows([
-      baseScenario({ sample_id: 'venue_topic:menu_food:17', inbound_message: 'brand new generation' }),
+      baseScenario({
+        sample_id: 'venue_topic:menu_food:17',
+        inbound_message: 'brand new generation',
+      }),
     ])
-    const { finalRows, stats } = mergeScenarioRows({ currentRows: [staleKept], freshStampedRows: fresh })
-    const matches = finalRows.filter((r) => r.sample_id === 'venue_topic:menu_food:17')
+    const { finalRows, stats } = mergeScenarioRows({
+      currentRows: [staleKept],
+      freshStampedRows: fresh,
+    })
+    const matches = finalRows.filter(
+      (r) => r.sample_id === 'venue_topic:menu_food:17',
+    )
     expect(matches).toHaveLength(1)
     expect(matches[0].inbound_message).toBe('brand new generation')
     expect(stats.dedupedSampleIds).toEqual(['venue_topic:menu_food:17'])
@@ -136,15 +179,26 @@ describe('mergeScenarioRows', () => {
 
   it('an owner row always wins a same-id collision, even against a fresh row', () => {
     const ownerRow: ScenarioSheetRow = {
-      ...stampRow({ sample_id: 'venue_topic:menu_food:17', inbound_message: 'owner wrote this' }),
+      ...stampRow({
+        sample_id: 'venue_topic:menu_food:17',
+        inbound_message: 'owner wrote this',
+      }),
       origin: 'owner',
       generated_hash: 'irrelevant',
     }
     const fresh = stampFreshRows([
-      baseScenario({ sample_id: 'venue_topic:menu_food:17', inbound_message: 'fresh generation' }),
+      baseScenario({
+        sample_id: 'venue_topic:menu_food:17',
+        inbound_message: 'fresh generation',
+      }),
     ])
-    const { finalRows, stats } = mergeScenarioRows({ currentRows: [ownerRow], freshStampedRows: fresh })
-    const matches = finalRows.filter((r) => r.sample_id === 'venue_topic:menu_food:17')
+    const { finalRows, stats } = mergeScenarioRows({
+      currentRows: [ownerRow],
+      freshStampedRows: fresh,
+    })
+    const matches = finalRows.filter(
+      (r) => r.sample_id === 'venue_topic:menu_food:17',
+    )
     expect(matches).toHaveLength(1)
     expect(matches[0].inbound_message).toBe('owner wrote this')
     expect(matches[0].origin).toBe('owner')
@@ -163,14 +217,20 @@ describe('dedupeRowsBySampleId', () => {
   it('keeps the LAST generated row among duplicates (most-recently-appended heuristic)', () => {
     const first = stampRow({ sample_id: 'x', inbound_message: 'older' })
     const second = stampRow({ sample_id: 'x', inbound_message: 'newer' })
-    const { rows: result, droppedSampleIds } = dedupeRowsBySampleId([first, second])
+    const { rows: result, droppedSampleIds } = dedupeRowsBySampleId([
+      first,
+      second,
+    ])
     expect(result).toHaveLength(1)
     expect(result[0].inbound_message).toBe('newer')
     expect(droppedSampleIds).toEqual(['x'])
   })
 
   it('never drops an owner row, regardless of position', () => {
-    const generated = stampRow({ sample_id: 'x', inbound_message: 'generated' })
+    const generated = stampRow({
+      sample_id: 'x',
+      inbound_message: 'generated',
+    })
     const owner: ScenarioSheetRow = {
       ...stampRow({ sample_id: 'x', inbound_message: 'owner' }),
       origin: 'owner',
@@ -185,7 +245,11 @@ describe('dedupeRowsBySampleId', () => {
 describe('deleted rows never resurrected (tombstones + similarity filter)', () => {
   it('drops a fresh candidate that duplicates a tombstoned row in the same topic', () => {
     const metaEntries: MetaEntry[] = [
-      { id: 'venue_topic:story:1', topic: 'story_and_sourcing', message: 'where do your beans come from' },
+      {
+        id: 'venue_topic:story:1',
+        topic: 'story_and_sourcing',
+        message: 'where do your beans come from',
+      },
     ]
     // The row is gone from the current sheet — owner deleted it.
     const currentRows: ScenarioSheetRow[] = []
@@ -211,14 +275,23 @@ describe('deleted rows never resurrected (tombstones + similarity filter)', () =
 
   it('keeps a fresh candidate for the same topic that is not similar to any tombstone', () => {
     const metaEntries: MetaEntry[] = [
-      { id: 'venue_topic:story:1', topic: 'story_and_sourcing', message: 'where do your beans come from' },
+      {
+        id: 'venue_topic:story:1',
+        topic: 'story_and_sourcing',
+        message: 'where do your beans come from',
+      },
     ]
     const byTopic = groupTombstonesByTopic(detectTombstones(metaEntries, []))
     const freshCandidate = baseScenario({
       sample_id: 'venue_topic:story:2',
       inbound_message: 'do you ever do latte art',
     })
-    const { kept, dropped } = filterTombstoneDuplicates([freshCandidate], byTopic, () => 0.1, 0.9)
+    const { kept, dropped } = filterTombstoneDuplicates(
+      [freshCandidate],
+      byTopic,
+      () => 0.1,
+      0.9,
+    )
     expect(kept).toHaveLength(1)
     expect(dropped).toHaveLength(0)
   })
@@ -230,10 +303,20 @@ describe('deleted rows never resurrected (tombstones + similarity filter)', () =
   })
 
   it('does not cross-match tombstones from a different topic', () => {
-    const metaEntries: MetaEntry[] = [{ id: 'a', topic: 'wholesale', message: 'do you sell wholesale' }]
+    const metaEntries: MetaEntry[] = [
+      { id: 'a', topic: 'wholesale', message: 'do you sell wholesale' },
+    ]
     const byTopic = groupTombstonesByTopic(detectTombstones(metaEntries, []))
-    const freshCandidate = baseScenario({ topic: 'story_and_sourcing', inbound_message: 'do you sell wholesale' })
-    const { kept, dropped } = filterTombstoneDuplicates([freshCandidate], byTopic, () => 0.99, 0.9)
+    const freshCandidate = baseScenario({
+      topic: 'story_and_sourcing',
+      inbound_message: 'do you sell wholesale',
+    })
+    const { kept, dropped } = filterTombstoneDuplicates(
+      [freshCandidate],
+      byTopic,
+      () => 0.99,
+      0.9,
+    )
     expect(kept).toHaveLength(1)
     expect(dropped).toHaveLength(0)
   })
@@ -242,7 +325,10 @@ describe('deleted rows never resurrected (tombstones + similarity filter)', () =
 describe('filterRunnableScenarios (excluded rows skipped by the runner)', () => {
   it('drops rows with exclude=true and keeps everything else', () => {
     const a = stampRow({ sample_id: 'a' })
-    const b: ScenarioSheetRow = { ...stampRow({ sample_id: 'b' }), exclude: true }
+    const b: ScenarioSheetRow = {
+      ...stampRow({ sample_id: 'b' }),
+      exclude: true,
+    }
     const c = stampRow({ sample_id: 'c' })
     const runnable = filterRunnableScenarios([a, b, c])
     expect(runnable.map((r) => r.sample_id)).toEqual(['a', 'c'])

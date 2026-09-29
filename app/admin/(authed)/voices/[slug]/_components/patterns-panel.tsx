@@ -34,9 +34,9 @@ export function PatternsPanel({
 }: PatternsPanelProps) {
   const [busyClusterIdx, setBusyClusterIdx] = useState<number | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const [editedRuleByIdx, setEditedRuleByIdx] = useState<Record<number, string>>(
-    {},
-  )
+  const [editedRuleByIdx, setEditedRuleByIdx] = useState<
+    Record<number, string>
+  >({})
 
   function ruleTextFor(idx: number, original: string): string {
     return editedRuleByIdx[idx] ?? original
@@ -46,20 +46,19 @@ export function PatternsPanel({
     setError(null)
     setBusyClusterIdx(idx)
     try {
-      const res = await fetch(
-        `/admin/voices/api/patterns/${venueId}/promote`,
-        {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({
-            critiqueIds: cluster.critiqueIds,
-            ruleText: ruleTextFor(idx, cluster.proposedRuleText).trim(),
-          }),
-        },
-      )
+      const res = await fetch(`/admin/voices/api/patterns/${venueId}/promote`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          critiqueIds: cluster.critiqueIds,
+          ruleText: ruleTextFor(idx, cluster.proposedRuleText).trim(),
+        }),
+      })
       if (!res.ok) {
         const j = await res.json().catch(() => ({}))
-        setError((j.detail as string) ?? (j.error as string) ?? 'promote failed')
+        setError(
+          (j.detail as string) ?? (j.error as string) ?? 'promote failed',
+        )
         return
       }
       onResolved()
@@ -74,17 +73,16 @@ export function PatternsPanel({
     setError(null)
     setBusyClusterIdx(idx)
     try {
-      const res = await fetch(
-        `/admin/voices/api/patterns/${venueId}/dismiss`,
-        {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ critiqueIds: cluster.critiqueIds }),
-        },
-      )
+      const res = await fetch(`/admin/voices/api/patterns/${venueId}/dismiss`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ critiqueIds: cluster.critiqueIds }),
+      })
       if (!res.ok) {
         const j = await res.json().catch(() => ({}))
-        setError((j.detail as string) ?? (j.error as string) ?? 'dismiss failed')
+        setError(
+          (j.detail as string) ?? (j.error as string) ?? 'dismiss failed',
+        )
         return
       }
       onResolved()
@@ -120,7 +118,10 @@ export function PatternsPanel({
             <Textarea
               value={ruleTextFor(idx, cluster.proposedRuleText)}
               onChange={(e) =>
-                setEditedRuleByIdx((prev) => ({ ...prev, [idx]: e.target.value }))
+                setEditedRuleByIdx((prev) => ({
+                  ...prev,
+                  [idx]: e.target.value,
+                }))
               }
               className="bg-paper border-0 border-l-2 border-clay rounded-r-[3px] rounded-l-none px-2.5 py-1.5 text-[12.5px] leading-snug italic font-fraunces font-fraunces-text text-ink resize-vertical min-h-[44px]"
             />

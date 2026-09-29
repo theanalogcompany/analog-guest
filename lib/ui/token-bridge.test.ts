@@ -81,7 +81,10 @@ const themeVars = declaredVars(themeInline)
 // Source custom properties live on :root plus the admin surface override.
 const rootVars = declaredVars(extractBlock(CSS, ':root'))
 const adminVars = declaredVars(extractBlock(CSS, '\\[data-surface="admin"\\]'))
-const sourceVarNames = new Set<string>([...rootVars.keys(), ...adminVars.keys()])
+const sourceVarNames = new Set<string>([
+  ...rootVars.keys(),
+  ...adminVars.keys(),
+])
 
 describe('shadcn token bridge', () => {
   it.each(REQUIRED_SHADCN_TOKENS)(

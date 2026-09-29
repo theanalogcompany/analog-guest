@@ -51,7 +51,11 @@ export function buildCoverableRows(ctx: {
 
   for (const k of ctx.knowledgeRows) {
     if (!k.isProcessed) continue
-    rows.push({ id: `knowledge:${k.id}`, label: k.primaryTags[0] ?? 'other', content: k.content })
+    rows.push({
+      id: `knowledge:${k.id}`,
+      label: k.primaryTags[0] ?? 'other',
+      content: k.content,
+    })
   }
 
   const hoursEntries = Object.entries(ctx.venueInfo.hours).filter(([, v]) => v)
@@ -62,37 +66,66 @@ export function buildCoverableRows(ctx: {
       content: hoursEntries.map(([d, v]) => `${d}: ${v}`).join('; '),
     })
   }
-  rows.push({ id: 'fact:address', label: 'address', content: formatAddress(ctx.venueInfo.address) })
+  rows.push({
+    id: 'fact:address',
+    label: 'address',
+    content: formatAddress(ctx.venueInfo.address),
+  })
   const contactParts: string[] = []
-  if (ctx.venueInfo.contact.publicPhone) contactParts.push(`phone: ${ctx.venueInfo.contact.publicPhone}`)
-  if (ctx.venueInfo.contact.publicEmail) contactParts.push(`email: ${ctx.venueInfo.contact.publicEmail}`)
-  if (ctx.venueInfo.contact.website) contactParts.push(`website: ${ctx.venueInfo.contact.website}`)
+  if (ctx.venueInfo.contact.publicPhone)
+    contactParts.push(`phone: ${ctx.venueInfo.contact.publicPhone}`)
+  if (ctx.venueInfo.contact.publicEmail)
+    contactParts.push(`email: ${ctx.venueInfo.contact.publicEmail}`)
+  if (ctx.venueInfo.contact.website)
+    contactParts.push(`website: ${ctx.venueInfo.contact.website}`)
   if (contactParts.length > 0) {
-    rows.push({ id: 'fact:contact', label: 'contact', content: contactParts.join('; ') })
+    rows.push({
+      id: 'fact:contact',
+      label: 'contact',
+      content: contactParts.join('; '),
+    })
   }
   if (ctx.venueInfo.amenities) {
     const a = ctx.venueInfo.amenities
     const parts: string[] = []
     if (a.wifi !== undefined) parts.push(`wifi: ${a.wifi ? 'yes' : 'no'}`)
-    if (a.petFriendly !== undefined) parts.push(`pet friendly: ${a.petFriendly ? 'yes' : 'no'}`)
+    if (a.petFriendly !== undefined)
+      parts.push(`pet friendly: ${a.petFriendly ? 'yes' : 'no'}`)
     if (a.parking) parts.push(`parking: ${a.parking}`)
     if (a.seating) parts.push(`seating: ${a.seating}`)
     if (a.notes) parts.push(a.notes)
-    if (parts.length > 0) rows.push({ id: 'fact:amenities', label: 'amenities', content: parts.join('; ') })
+    if (parts.length > 0)
+      rows.push({
+        id: 'fact:amenities',
+        label: 'amenities',
+        content: parts.join('; '),
+      })
   }
   if (ctx.venueInfo.staff.length > 0) {
-    rows.push({ id: 'fact:staff', label: 'staff', content: `Staff: ${ctx.venueInfo.staff.join(', ')}` })
+    rows.push({
+      id: 'fact:staff',
+      label: 'staff',
+      content: `Staff: ${ctx.venueInfo.staff.join(', ')}`,
+    })
   }
-  for (const entry of filterActiveContext(ctx.venueInfo.currentContext, new Date())) {
-    rows.push({ id: `fact:current_context:${entry.id}`, label: 'current context', content: entry.content })
+  for (const entry of filterActiveContext(
+    ctx.venueInfo.currentContext,
+    new Date(),
+  )) {
+    rows.push({
+      id: `fact:current_context:${entry.id}`,
+      label: 'current context',
+      content: entry.content,
+    })
   }
 
   const usedSlugs = new Set<string>()
   ctx.venueInfo.menu.items.forEach((item, i) => {
-    const base = item.name
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, '_')
-      .replace(/^_+|_+$/g, '') || `item_${i}`
+    const base =
+      item.name
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '_')
+        .replace(/^_+|_+$/g, '') || `item_${i}`
     let slug = base
     let n = 2
     while (usedSlugs.has(slug)) {
@@ -100,13 +133,22 @@ export function buildCoverableRows(ctx: {
       n += 1
     }
     usedSlugs.add(slug)
-    const price = item.price !== undefined ? `$${item.price.toFixed(2)}` : (item.priceNote ?? 'price on request')
+    const price =
+      item.price !== undefined
+        ? `$${item.price.toFixed(2)}`
+        : (item.priceNote ?? 'price on request')
     const parts = [`price: ${price}`]
-    if (item.dietary.length > 0) parts.push(`dietary: ${item.dietary.join(', ')}`)
-    if (item.modifiers.length > 0) parts.push(`modifiers: ${item.modifiers.join(', ')}`)
+    if (item.dietary.length > 0)
+      parts.push(`dietary: ${item.dietary.join(', ')}`)
+    if (item.modifiers.length > 0)
+      parts.push(`modifiers: ${item.modifiers.join(', ')}`)
     if (item.isOffMenu) parts.push('off-menu')
     if (item.description) parts.push(item.description)
-    rows.push({ id: `menu:${slug}`, label: `menu: ${item.name}`, content: parts.join('; ') })
+    rows.push({
+      id: `menu:${slug}`,
+      label: `menu: ${item.name}`,
+      content: parts.join('; '),
+    })
   })
 
   for (const m of ctx.mechanics) {
@@ -115,7 +157,11 @@ export function buildCoverableRows(ctx: {
     if (m.rewardDescription) parts.push(m.rewardDescription)
     else if (m.description) parts.push(m.description)
     if (m.requiresOperatorApproval) parts.push('requires operator approval')
-    rows.push({ id: `mechanic:${m.id}`, label: `mechanic: ${m.name}`, content: parts.join('; ') })
+    rows.push({
+      id: `mechanic:${m.id}`,
+      label: `mechanic: ${m.name}`,
+      content: parts.join('; '),
+    })
   }
 
   return rows
@@ -185,7 +231,9 @@ export function computeUncoveredRowIds(
   coverableRows: readonly CoverableRow[],
   sourceRowIdsUsed: ReadonlySet<string>,
 ): string[] {
-  return coverableRows.filter((r) => !sourceRowIdsUsed.has(r.id)).map((r) => r.id)
+  return coverableRows
+    .filter((r) => !sourceRowIdsUsed.has(r.id))
+    .map((r) => r.id)
 }
 
 /**
@@ -203,7 +251,9 @@ export function parseMissingInformationItems(specMarkdown: string): string[] {
 
   const subsectionIdx = section.indexOf('### Missing information')
   if (subsectionIdx === -1) return []
-  const afterHeader = section.slice(subsectionIdx + '### Missing information'.length)
+  const afterHeader = section.slice(
+    subsectionIdx + '### Missing information'.length,
+  )
 
   const nextH3Idx = afterHeader.search(/\n###\s/)
   const body = nextH3Idx === -1 ? afterHeader : afterHeader.slice(0, nextH3Idx)

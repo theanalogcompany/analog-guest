@@ -1,7 +1,10 @@
 import { randomUUID } from 'node:crypto'
 import type { Database } from '@/db/types'
 import { buildRuntimeContext } from '@/lib/agent/build-runtime-context'
-import { buildCrisisSafetyResult, CRISIS_SAFETY_REVIEW_REASON } from '@/lib/agent/crisis-safety'
+import {
+  buildCrisisSafetyResult,
+  CRISIS_SAFETY_REVIEW_REASON,
+} from '@/lib/agent/crisis-safety'
 import {
   classifyStage,
   generateStage,
@@ -19,7 +22,8 @@ import type { ScenarioSheetRow } from './scenario-schema'
 
 type TransactionInsert = Database['public']['Tables']['transactions']['Insert']
 type MessageInsert = Database['public']['Tables']['messages']['Insert']
-type EngagementEventInsert = Database['public']['Tables']['engagement_events']['Insert']
+type EngagementEventInsert =
+  Database['public']['Tables']['engagement_events']['Insert']
 
 // Locked deterministic phone numbers, reused across venues. The corresponding
 // guest rows are per-venue (schema requires guests.venue_id NOT NULL), so
@@ -67,9 +71,10 @@ interface SeedOutcome {
  * covers only the concurrent portion — no state transition can race a
  * concurrent buildRuntimeContext call into a duplicate row.
  */
-export async function seedSyntheticGuests(
-  venueId: string,
-): Promise<{ guestIdsByState: Record<GuestState, string>; outcomes: SeedOutcome[] }> {
+export async function seedSyntheticGuests(venueId: string): Promise<{
+  guestIdsByState: Record<GuestState, string>
+  outcomes: SeedOutcome[]
+}> {
   const states: GuestState[] = ['new', 'returning', 'regular', 'raving_fan']
   const guestIdsByState = {} as Record<GuestState, string>
   const outcomes: SeedOutcome[] = []
@@ -125,7 +130,9 @@ async function ensureSyntheticGuest(
     .maybeSingle()
 
   if (lookupError) {
-    throw new Error(`ensureSyntheticGuest: lookup failed for ${phone}: ${lookupError.message}`)
+    throw new Error(
+      `ensureSyntheticGuest: lookup failed for ${phone}: ${lookupError.message}`,
+    )
   }
   if (existing) {
     if (!existing.is_test_synthetic) {
@@ -161,7 +168,10 @@ interface SignalCounts {
   engagementEvents: number
 }
 
-async function countExistingSignals(venueId: string, guestId: string): Promise<SignalCounts> {
+async function countExistingSignals(
+  venueId: string,
+  guestId: string,
+): Promise<SignalCounts> {
   const supabase = createAdminClient()
   const [t, m, e] = await Promise.all([
     supabase
@@ -180,9 +190,14 @@ async function countExistingSignals(venueId: string, guestId: string): Promise<S
       .eq('venue_id', venueId)
       .eq('guest_id', guestId),
   ])
-  if (t.error) throw new Error(`countExistingSignals: transactions: ${t.error.message}`)
-  if (m.error) throw new Error(`countExistingSignals: messages: ${m.error.message}`)
-  if (e.error) throw new Error(`countExistingSignals: engagement_events: ${e.error.message}`)
+  if (t.error)
+    throw new Error(`countExistingSignals: transactions: ${t.error.message}`)
+  if (m.error)
+    throw new Error(`countExistingSignals: messages: ${m.error.message}`)
+  if (e.error)
+    throw new Error(
+      `countExistingSignals: engagement_events: ${e.error.message}`,
+    )
   return {
     transactions: t.count ?? 0,
     messages: m.count ?? 0,
@@ -205,7 +220,10 @@ async function seedSignalsForState(
     const txRows = buildTransactionsForState(state, venueId, guestId, now)
     if (txRows.length > 0) {
       const { error } = await supabase.from('transactions').insert(txRows)
-      if (error) throw new Error(`seedSignalsForState: transactions insert: ${error.message}`)
+      if (error)
+        throw new Error(
+          `seedSignalsForState: transactions insert: ${error.message}`,
+        )
     }
   }
 
@@ -215,7 +233,10 @@ async function seedSignalsForState(
     const msgRows = buildMessagesForState(state, venueId, guestId, now)
     if (msgRows.length > 0) {
       const { error } = await supabase.from('messages').insert(msgRows)
-      if (error) throw new Error(`seedSignalsForState: messages insert: ${error.message}`)
+      if (error)
+        throw new Error(
+          `seedSignalsForState: messages insert: ${error.message}`,
+        )
     }
   }
 
@@ -223,9 +244,13 @@ async function seedSignalsForState(
   if (counts.engagementEvents === 0) {
     const eventRows = buildEngagementEventsForState(state, venueId, guestId)
     if (eventRows.length > 0) {
-      const { error } = await supabase.from('engagement_events').insert(eventRows)
+      const { error } = await supabase
+        .from('engagement_events')
+        .insert(eventRows)
       if (error) {
-        throw new Error(`seedSignalsForState: engagement_events insert: ${error.message}`)
+        throw new Error(
+          `seedSignalsForState: engagement_events insert: ${error.message}`,
+        )
       }
     }
   }
@@ -270,11 +295,12 @@ function buildMessagesForState(
 ): MessageInsert[] {
   // Outbound + inbound counts per state. Returning has 0 (responseRate
   // contributes 0 with sample < 3 anyway, so don't bother).
-  const counts = state === 'returning'
-    ? { outbound: 0, inbound: 0 }
-    : state === 'regular'
-      ? { outbound: 5, inbound: 5 }
-      : { outbound: 10, inbound: 10 }
+  const counts =
+    state === 'returning'
+      ? { outbound: 0, inbound: 0 }
+      : state === 'regular'
+        ? { outbound: 5, inbound: 5 }
+        : { outbound: 10, inbound: 10 }
   const dated = new Date(now - SEED_MESSAGE_AGE_DAYS * MS_PER_DAY).toISOString()
   const rows: MessageInsert[] = []
   for (let i = 0; i < counts.outbound; i++) {
@@ -327,7 +353,11 @@ function buildEngagementEventsForState(
   const rows: EngagementEventInsert[] = []
   for (const entry of mix) {
     for (let i = 0; i < entry.count; i++) {
-      rows.push({ venue_id: venueId, guest_id: guestId, event_type: entry.type })
+      rows.push({
+        venue_id: venueId,
+        guest_id: guestId,
+        event_type: entry.type,
+      })
     }
   }
   return rows
@@ -347,7 +377,8 @@ function buildEngagementEventsForState(
  * fidelity below the floor) is recorded as its own outcome and graded, not
  * treated as a runner error."
  */
-export type ScenarioOutcome = 'sent' | 'queued' | 'dropped' | 'refused' | 'failed'
+export type ScenarioOutcome =
+  'sent' | 'queued' | 'dropped' | 'refused' | 'failed'
 
 export interface RetrievedKnowledgeChunk {
   text: string
@@ -420,7 +451,9 @@ export interface RunScenarioInput {
  * voice-fidelity refusal) is captured as its own ScenarioResult.outcome so
  * the caller can iterate without a try/catch of its own.
  */
-export async function runScenario(input: RunScenarioInput): Promise<ScenarioResult> {
+export async function runScenario(
+  input: RunScenarioInput,
+): Promise<ScenarioResult> {
   const { scenario, venueId, guestId } = input
   const start = Date.now()
   const base = {
@@ -514,7 +547,15 @@ export async function runScenario(input: RunScenarioInput): Promise<ScenarioResu
     const elapsedMs = Date.now() - start
 
     if (outcome.status === 'failed') {
-      return { ...base, ...empty, outcome: 'failed', errorMessage: outcome.error, elapsedMs, retrievedVoiceExamples, retrievedKnowledge }
+      return {
+        ...base,
+        ...empty,
+        outcome: 'failed',
+        errorMessage: outcome.error,
+        elapsedMs,
+        retrievedVoiceExamples,
+        retrievedKnowledge,
+      }
     }
     if (outcome.status === 'refused') {
       return {
@@ -545,17 +586,20 @@ export async function runScenario(input: RunScenarioInput): Promise<ScenarioResu
     // which protects a guest-facing decision. This is a grading harness with
     // no guest and no send, and a scenario that throws should fail loudly and
     // be re-run rather than be graded on half its evidence.
-    const [groundingBackstop, prosePromiseBackstop, closedVenueArrivalBackstop] =
-      await Promise.all([
-        verifyGroundingStage(ctx, outcome.result),
-        verifyProsePromiseStage(ctx, outcome.result),
-        // TAC-363. Note this makes a run's routing grades depend on the venue
-        // clock in a second way: CLAUDE.md already says to run the harness
-        // during the venue's open hours because `## Right now` renders a
-        // status line, and now an arrival scenario run after close also
-        // queues where the same scenario would send at 10am.
-        verifyClosedVenueArrivalStage(ctx, outcome.result),
-      ])
+    const [
+      groundingBackstop,
+      prosePromiseBackstop,
+      closedVenueArrivalBackstop,
+    ] = await Promise.all([
+      verifyGroundingStage(ctx, outcome.result),
+      verifyProsePromiseStage(ctx, outcome.result),
+      // TAC-363. Note this makes a run's routing grades depend on the venue
+      // clock in a second way: CLAUDE.md already says to run the harness
+      // during the venue's open hours because `## Right now` renders a
+      // status line, and now an arrival scenario run after close also
+      // queues where the same scenario would send at 10am.
+      verifyClosedVenueArrivalStage(ctx, outcome.result),
+    ])
 
     // status === 'success' — evaluate the approval decision. Decision only:
     // this never persists a draft, dispatches to Sendblue, or fires a push.
@@ -644,6 +688,14 @@ export async function runScenario(input: RunScenarioInput): Promise<ScenarioResu
   } catch (e) {
     const elapsedMs = Date.now() - start
     const message = e instanceof Error ? e.message : String(e)
-    return { ...base, ...empty, outcome: 'failed', errorMessage: message, elapsedMs, retrievedVoiceExamples, retrievedKnowledge }
+    return {
+      ...base,
+      ...empty,
+      outcome: 'failed',
+      errorMessage: message,
+      elapsedMs,
+      retrievedVoiceExamples,
+      retrievedKnowledge,
+    }
   }
 }

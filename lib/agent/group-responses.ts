@@ -103,7 +103,8 @@ export function deriveDelivery(
   if (row.review_state === 'pending') return 'awaiting_review'
   if (DELIVERED_OUTBOUND_STATUSES.has(row.status)) return 'delivered'
   if (row.review_state === 'skipped') return 'skipped_by_operator'
-  if (row.review_state === RESOLVED_EXTERNALLY_REVIEW_STATE) return 'answered_outside_app'
+  if (row.review_state === RESOLVED_EXTERNALLY_REVIEW_STATE)
+    return 'answered_outside_app'
   return 'never_sent'
 }
 
@@ -172,7 +173,9 @@ export function groupIntoResponses(
         // The moment the venue STARTED replying. The time delta the prompt
         // renders should describe the response, not its last fragment.
         createdAt: new Date(first.created_at),
-        delivery: deliveries.includes('delivered') ? 'delivered' : deliveries[0]!,
+        delivery: deliveries.includes('delivered')
+          ? 'delivered'
+          : deliveries[0]!,
       }
     })
     .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime())

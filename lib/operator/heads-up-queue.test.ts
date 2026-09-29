@@ -167,8 +167,16 @@ describe('listHeadsUpQueue', () => {
       commitmentRows: [makeCommitmentRow()],
       stateRows: [
         // Ordered DESC by entered_at — first row per guest_id is the latest.
-        { guest_id: GUEST_1, state: 'regular', entered_at: '2026-05-28T10:00:00Z' },
-        { guest_id: GUEST_1, state: 'returning', entered_at: '2026-05-15T10:00:00Z' },
+        {
+          guest_id: GUEST_1,
+          state: 'regular',
+          entered_at: '2026-05-28T10:00:00Z',
+        },
+        {
+          guest_id: GUEST_1,
+          state: 'returning',
+          entered_at: '2026-05-15T10:00:00Z',
+        },
       ],
     })
     vi.mocked(createAdminClient).mockReturnValue(
@@ -196,7 +204,11 @@ describe('listHeadsUpQueue', () => {
     const state = newState({
       commitmentRows: [makeCommitmentRow()],
       stateRows: [
-        { guest_id: GUEST_1, state: 'mystery_state', entered_at: '2026-05-28T10:00:00Z' },
+        {
+          guest_id: GUEST_1,
+          state: 'mystery_state',
+          entered_at: '2026-05-28T10:00:00Z',
+        },
       ],
     })
     vi.mocked(createAdminClient).mockReturnValue(
@@ -216,7 +228,11 @@ describe('listHeadsUpQueue', () => {
         makeCommitmentRow({ id: 'eee', guest_id: GUEST_1 }),
       ],
       stateRows: [
-        { guest_id: GUEST_1, state: 'regular', entered_at: '2026-05-28T10:00:00Z' },
+        {
+          guest_id: GUEST_1,
+          state: 'regular',
+          entered_at: '2026-05-28T10:00:00Z',
+        },
         { guest_id: GUEST_2, state: 'new', entered_at: '2026-05-28T10:00:00Z' },
       ],
     })
@@ -232,13 +248,17 @@ describe('listHeadsUpQueue', () => {
       expect(byId.get('eee')).toBe('regular')
     }
     // Deduped: GUEST_1 + GUEST_2, not three entries.
-    const guestIdCall = state.stateSelectInCalls.find((c) => c.field === 'guest_id')
+    const guestIdCall = state.stateSelectInCalls.find(
+      (c) => c.field === 'guest_id',
+    )
     expect(guestIdCall).toBeDefined()
     expect(new Set(guestIdCall?.values as string[])).toEqual(
       new Set([GUEST_1, GUEST_2]),
     )
     // venue_id filter encoded on the query surface (composite index hit).
-    const venueIdCall = state.stateSelectInCalls.find((c) => c.field === 'venue_id')
+    const venueIdCall = state.stateSelectInCalls.find(
+      (c) => c.field === 'venue_id',
+    )
     expect(venueIdCall).toBeDefined()
     expect(venueIdCall?.values).toEqual([VENUE_A])
   })
@@ -281,7 +301,10 @@ describe('listHeadsUpQueue', () => {
 // ---------------------------------------------------------------------------
 describe('listHeadsUpQueue — venueId / guestId (TAC-364)', () => {
   it('projects both onto the Contract payload', async () => {
-    const state = newState({ commitmentRows: [makeCommitmentRow()], stateRows: [] })
+    const state = newState({
+      commitmentRows: [makeCommitmentRow()],
+      stateRows: [],
+    })
     vi.mocked(createAdminClient).mockReturnValue(
       makeSupabase(state) as unknown as ReturnType<typeof createAdminClient>,
     )
@@ -304,7 +327,11 @@ describe('listHeadsUpQueue — venueId / guestId (TAC-364)', () => {
     const state = newState({
       commitmentRows: [
         makeCommitmentRow(),
-        makeCommitmentRow({ id: COMMITMENT_2, venue_id: VENUE_B, guest_id: GUEST_2 }),
+        makeCommitmentRow({
+          id: COMMITMENT_2,
+          venue_id: VENUE_B,
+          guest_id: GUEST_2,
+        }),
       ],
       stateRows: [],
     })
@@ -315,9 +342,11 @@ describe('listHeadsUpQueue — venueId / guestId (TAC-364)', () => {
     expect(r.ok).toBe(true)
     if (r.ok) {
       expect(r.commitments.map((c) => c.venueId)).toEqual([VENUE_A, VENUE_B])
-      expect(r.commitments.every((c) => typeof c.venueId === 'string' && c.venueId !== '')).toBe(
-        true,
-      )
+      expect(
+        r.commitments.every(
+          (c) => typeof c.venueId === 'string' && c.venueId !== '',
+        ),
+      ).toBe(true)
     }
   })
 
@@ -327,7 +356,10 @@ describe('listHeadsUpQueue — venueId / guestId (TAC-364)', () => {
     // asserted directly. Same technique as handle-operator-decline's
     // import-set check: a non-behavioural assertion for something no
     // behavioural one can reach.
-    const state = newState({ commitmentRows: [makeCommitmentRow()], stateRows: [] })
+    const state = newState({
+      commitmentRows: [makeCommitmentRow()],
+      stateRows: [],
+    })
     vi.mocked(createAdminClient).mockReturnValue(
       makeSupabase(state) as unknown as ReturnType<typeof createAdminClient>,
     )

@@ -12,6 +12,7 @@
 // embedded corpus entries behind.
 
 import { createAdminClient } from '@/lib/db/admin'
+import { logger } from '@/lib/observability/logger'
 import { ingestCorpusEntry } from '@/lib/rag'
 
 // Subset of voice_corpus.source_type that the rail UI exposes. Not the
@@ -82,7 +83,7 @@ export async function addCorpusEntry(
       .delete()
       .eq('id', inserted.id)
     if (cleanupErr) {
-      console.error(
+      logger.error(
         '[voice-training] add-corpus-entry: cleanup-after-embed-failure failed; voice_corpus row stranded',
         {
           corpusId: inserted.id,

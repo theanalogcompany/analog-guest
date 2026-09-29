@@ -52,7 +52,9 @@ export const FollowupRulesSchema = z.object({
   // cold_lapsed: only fires when the guest is currently in one of these
   // recognition states. Drops new/returning out of scope — we don't try to
   // re-engage guests who never engaged in the first place.
-  lapsed_eligible_states: z.array(z.enum(GUEST_STATES)).default(['regular', 'raving_fan']),
+  lapsed_eligible_states: z
+    .array(z.enum(GUEST_STATES))
+    .default(['regular', 'raving_fan']),
   // cold_lapsed: secondary dedup — even if absence_window_days passes, don't
   // fire again within this many days of the last cold_lapsed dispatch. Keyed
   // off followup_log.created_at for reason='cold_lapsed'.

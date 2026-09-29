@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest'
 
-import { decideAccountClaim, describeGraphFailure, parseInsertArgs } from './insert-instagram-credential'
+import {
+  decideAccountClaim,
+  describeGraphFailure,
+  parseInsertArgs,
+} from './insert-instagram-credential'
 
 const TARGET = 'venue-1'
 const OTHER = 'venue-2'
@@ -8,11 +12,20 @@ const ACCOUNT = '17841479626987104'
 
 describe('parseInsertArgs', () => {
   it('requires a venue', () => {
-    expect(parseInsertArgs([])).toEqual({ ok: false, error: '--venue is required' })
+    expect(parseInsertArgs([])).toEqual({
+      ok: false,
+      error: '--venue is required',
+    })
   })
 
   it('reads the flags it supports', () => {
-    const result = parseInsertArgs(['--venue', 'le-mils-coffee', '--confirm', '--operator', 'op-1'])
+    const result = parseInsertArgs([
+      '--venue',
+      'le-mils-coffee',
+      '--confirm',
+      '--operator',
+      'op-1',
+    ])
     expect(result).toEqual({
       ok: true,
       args: {
@@ -36,13 +49,28 @@ describe('parseInsertArgs', () => {
   })
 
   it('refuses an unreadable --expires-at instead of storing an Invalid Date', () => {
-    const result = parseInsertArgs(['--venue', 'v', '--expires-at', 'next tuesday'])
-    expect(result).toEqual({ ok: false, error: '--expires-at is not a date I can read: next tuesday' })
+    const result = parseInsertArgs([
+      '--venue',
+      'v',
+      '--expires-at',
+      'next tuesday',
+    ])
+    expect(result).toEqual({
+      ok: false,
+      error: '--expires-at is not a date I can read: next tuesday',
+    })
   })
 
   it('parses a real --expires-at', () => {
-    const result = parseInsertArgs(['--venue', 'v', '--expires-at', '2026-11-21T00:00:00.000Z'])
-    expect(result.ok && result.args.expiresAtOverride?.toISOString()).toBe('2026-11-21T00:00:00.000Z')
+    const result = parseInsertArgs([
+      '--venue',
+      'v',
+      '--expires-at',
+      '2026-11-21T00:00:00.000Z',
+    ])
+    expect(result.ok && result.args.expiresAtOverride?.toISOString()).toBe(
+      '2026-11-21T00:00:00.000Z',
+    )
   })
 
   it('refuses an argument it does not recognise rather than ignoring it', () => {
@@ -102,7 +130,9 @@ describe('decideAccountClaim', () => {
       tokenAccountId: ACCOUNT,
     })
     expect(decision.action).toBe('refuse')
-    expect(decision.action === 'refuse' && decision.reason).toContain('receiving on one account')
+    expect(decision.action === 'refuse' && decision.reason).toContain(
+      'receiving on one account',
+    )
   })
 
   // Both conflicts at once still refuses, and on the cross-venue reason: that
@@ -114,7 +144,9 @@ describe('decideAccountClaim', () => {
       holderVenueId: OTHER,
       tokenAccountId: ACCOUNT,
     })
-    expect(decision.action === 'refuse' && decision.reason).toContain('already connected to a different venue')
+    expect(decision.action === 'refuse' && decision.reason).toContain(
+      'already connected to a different venue',
+    )
   })
 })
 
@@ -123,10 +155,18 @@ describe('describeGraphFailure', () => {
   // httpStatus, and a template over it prints "HTTP undefined" on a timeout —
   // a message that reads like a real status and is not one.
   it('never invents an HTTP status for a failure that has none', () => {
-    expect(describeGraphFailure({ reason: 'timeout' })).toBe('the request to Meta timed out')
-    expect(describeGraphFailure({ reason: 'timeout' })).not.toContain('undefined')
+    expect(describeGraphFailure({ reason: 'timeout' })).toBe(
+      'the request to Meta timed out',
+    )
+    expect(describeGraphFailure({ reason: 'timeout' })).not.toContain(
+      'undefined',
+    )
     expect(
-      describeGraphFailure({ reason: 'network', errorName: 'TypeError', causeCode: 'ECONNRESET' }),
+      describeGraphFailure({
+        reason: 'network',
+        errorName: 'TypeError',
+        causeCode: 'ECONNRESET',
+      }),
     ).not.toContain('undefined')
   })
 
@@ -160,8 +200,8 @@ describe('describeGraphFailure', () => {
   })
 
   it('reports a malformed response as a shape problem, not a refusal', () => {
-    expect(describeGraphFailure({ reason: 'malformed_response', httpStatus: 200 })).toContain(
-      'could not read',
-    )
+    expect(
+      describeGraphFailure({ reason: 'malformed_response', httpStatus: 200 }),
+    ).toContain('could not read')
   })
 })

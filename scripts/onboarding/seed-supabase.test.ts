@@ -19,7 +19,12 @@ import { seedVenue } from './seed-supabase'
 const EXISTING_VENUE_ID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
 const NEW_VENUE_ID = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'
 
-const CONFIG_STORE_TABLES = ['venue_configs', 'mechanics', 'voice_corpus', 'knowledge_corpus'] as const
+const CONFIG_STORE_TABLES = [
+  'venue_configs',
+  'mechanics',
+  'voice_corpus',
+  'knowledge_corpus',
+] as const
 
 const brandPersona: BrandPersona = {
   tone: 'warm',
@@ -34,7 +39,12 @@ const brandPersona: BrandPersona = {
 }
 
 const venueInfo: VenueInfo = {
-  address: { line1: '123 Main St', city: 'Testville', region: 'CA', postalCode: '90210' },
+  address: {
+    line1: '123 Main St',
+    city: 'Testville',
+    region: 'CA',
+    postalCode: '90210',
+  },
   contact: {},
   hours: {},
   menu: { highlights: [], items: [] },
@@ -95,7 +105,8 @@ function makeSupabaseMock(state: MockState) {
           select: (_cols: string) => ({
             eq: (_f: string, _v: string) => ({
               maybeSingle: async () => {
-                if (state.checkError) return { data: null, error: state.checkError }
+                if (state.checkError)
+                  return { data: null, error: state.checkError }
                 return { data: state.existingVenue, error: null }
               },
             }),
@@ -117,8 +128,12 @@ function makeSupabaseMock(state: MockState) {
           select: (_cols: string) => ({
             eq: (_f: string, _v: string) => ({
               limit: async (_n: number) => {
-                if (state.guestsCheckError) return { data: null, error: state.guestsCheckError }
-                return { data: state.hasGuests ? [{ id: 'guest-1' }] : [], error: null }
+                if (state.guestsCheckError)
+                  return { data: null, error: state.guestsCheckError }
+                return {
+                  data: state.hasGuests ? [{ id: 'guest-1' }] : [],
+                  error: null,
+                }
               },
             }),
           }),
@@ -129,8 +144,12 @@ function makeSupabaseMock(state: MockState) {
           select: (_cols: string) => ({
             eq: (_f: string, _v: string) => ({
               limit: async (_n: number) => {
-                if (state.messagesCheckError) return { data: null, error: state.messagesCheckError }
-                return { data: state.hasMessages ? [{ id: 'message-1' }] : [], error: null }
+                if (state.messagesCheckError)
+                  return { data: null, error: state.messagesCheckError }
+                return {
+                  data: state.hasMessages ? [{ id: 'message-1' }] : [],
+                  error: null,
+                }
               },
             }),
           }),
@@ -149,13 +168,17 @@ function makeSupabaseMock(state: MockState) {
           return {
             then: resolved.then.bind(resolved),
             catch: resolved.catch.bind(resolved),
-            select: (_cols: string) => Promise.resolve({ data: [], error: null }),
+            select: (_cols: string) =>
+              Promise.resolve({ data: [], error: null }),
           }
         },
         delete: () => ({
           eq: async (_f: string, v: unknown) => {
             state.configDeleteCalls.push({ table, venueId: String(v) })
-            if (state.configDeleteError && state.configDeleteError.table === table) {
+            if (
+              state.configDeleteError &&
+              state.configDeleteError.table === table
+            ) {
               return { error: { message: state.configDeleteError.message } }
             }
             return { error: null }
@@ -174,31 +197,49 @@ beforeEach(() => {
 
 describe('seedVenue — already-seeded guard (TAC-343 Phase 0b)', () => {
   it('refuses when a venue with the slug already exists and force is not passed', async () => {
-    const state = newState({ existingVenue: { id: EXISTING_VENUE_ID, slug: 'test-venue' } })
+    const state = newState({
+      existingVenue: { id: EXISTING_VENUE_ID, slug: 'test-venue' },
+    })
     vi.mocked(createAdminClient).mockReturnValue(
-      makeSupabaseMock(state) as unknown as ReturnType<typeof createAdminClient>,
+      makeSupabaseMock(state) as unknown as ReturnType<
+        typeof createAdminClient
+      >,
     )
 
     await expect(
-      seedVenue({ parsed: baseParsed(), messagingPhoneNumber: null, menuItems: [] }),
+      seedVenue({
+        parsed: baseParsed(),
+        messagingPhoneNumber: null,
+        menuItems: [],
+      }),
     ).rejects.toThrow(/already exists/)
 
     expect(state.configDeleteCalls).toEqual([])
   })
 
   it('refusal message points at --force rather than a manual Studio delete', async () => {
-    const state = newState({ existingVenue: { id: EXISTING_VENUE_ID, slug: 'test-venue' } })
+    const state = newState({
+      existingVenue: { id: EXISTING_VENUE_ID, slug: 'test-venue' },
+    })
     vi.mocked(createAdminClient).mockReturnValue(
-      makeSupabaseMock(state) as unknown as ReturnType<typeof createAdminClient>,
+      makeSupabaseMock(state) as unknown as ReturnType<
+        typeof createAdminClient
+      >,
     )
 
     await expect(
-      seedVenue({ parsed: baseParsed(), messagingPhoneNumber: null, menuItems: [] }),
+      seedVenue({
+        parsed: baseParsed(),
+        messagingPhoneNumber: null,
+        menuItems: [],
+      }),
     ).rejects.toThrow(/--force/)
   })
 
   it('refusal covers every store, not only menu.items — nothing is written before the guard', async () => {
-    const state = newState({ existingVenue: { id: EXISTING_VENUE_ID, slug: 'test-venue' } })
+    const state = newState({
+      existingVenue: { id: EXISTING_VENUE_ID, slug: 'test-venue' },
+    })
     const mock = makeSupabaseMock(state)
     const fromSpy = vi.fn(mock.from)
     vi.mocked(createAdminClient).mockReturnValue({
@@ -207,7 +248,9 @@ describe('seedVenue — already-seeded guard (TAC-343 Phase 0b)', () => {
 
     await expect(
       seedVenue({
-        parsed: baseParsed({ mechanics: [{ type: 'perk', name: 'Perk', trigger: {} }] }),
+        parsed: baseParsed({
+          mechanics: [{ type: 'perk', name: 'Perk', trigger: {} }],
+        }),
         messagingPhoneNumber: null,
         menuItems: [],
       }),
@@ -224,7 +267,9 @@ describe('seedVenue — already-seeded guard (TAC-343 Phase 0b)', () => {
   it('does not refuse and does not delete when no venue with the slug exists', async () => {
     const state = newState({ existingVenue: null })
     vi.mocked(createAdminClient).mockReturnValue(
-      makeSupabaseMock(state) as unknown as ReturnType<typeof createAdminClient>,
+      makeSupabaseMock(state) as unknown as ReturnType<
+        typeof createAdminClient
+      >,
     )
 
     const result = await seedVenue({
@@ -240,9 +285,13 @@ describe('seedVenue — already-seeded guard (TAC-343 Phase 0b)', () => {
 
 describe('seedVenue — narrowed --force (TAC-343 plan review)', () => {
   it('deletes and rewrites config stores only, reuses the existing venue id, and never touches the venues row', async () => {
-    const state = newState({ existingVenue: { id: EXISTING_VENUE_ID, slug: 'test-venue' } })
+    const state = newState({
+      existingVenue: { id: EXISTING_VENUE_ID, slug: 'test-venue' },
+    })
     vi.mocked(createAdminClient).mockReturnValue(
-      makeSupabaseMock(state) as unknown as ReturnType<typeof createAdminClient>,
+      makeSupabaseMock(state) as unknown as ReturnType<
+        typeof createAdminClient
+      >,
     )
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
 
@@ -260,7 +309,10 @@ describe('seedVenue — narrowed --force (TAC-343 plan review)', () => {
     // existing venue id. No delete call for 'venues' (or any other table)
     // appears here at all — only these four tables ever call `.delete()`.
     expect(state.configDeleteCalls).toEqual(
-      CONFIG_STORE_TABLES.map((table) => ({ table, venueId: EXISTING_VENUE_ID })),
+      CONFIG_STORE_TABLES.map((table) => ({
+        table,
+        venueId: EXISTING_VENUE_ID,
+      })),
     )
 
     expect(warnSpy).toHaveBeenCalled()
@@ -278,7 +330,9 @@ describe('seedVenue — narrowed --force (TAC-343 plan review)', () => {
       hasGuests: true,
     })
     vi.mocked(createAdminClient).mockReturnValue(
-      makeSupabaseMock(state) as unknown as ReturnType<typeof createAdminClient>,
+      makeSupabaseMock(state) as unknown as ReturnType<
+        typeof createAdminClient
+      >,
     )
     vi.spyOn(console, 'warn').mockImplementation(() => {})
 
@@ -300,7 +354,9 @@ describe('seedVenue — narrowed --force (TAC-343 plan review)', () => {
       hasMessages: true,
     })
     vi.mocked(createAdminClient).mockReturnValue(
-      makeSupabaseMock(state) as unknown as ReturnType<typeof createAdminClient>,
+      makeSupabaseMock(state) as unknown as ReturnType<
+        typeof createAdminClient
+      >,
     )
     vi.spyOn(console, 'warn').mockImplementation(() => {})
 
@@ -322,7 +378,9 @@ describe('seedVenue — narrowed --force (TAC-343 plan review)', () => {
       configDeleteError: { table: 'mechanics', message: 'fk violation' },
     })
     vi.mocked(createAdminClient).mockReturnValue(
-      makeSupabaseMock(state) as unknown as ReturnType<typeof createAdminClient>,
+      makeSupabaseMock(state) as unknown as ReturnType<
+        typeof createAdminClient
+      >,
     )
     vi.spyOn(console, 'warn').mockImplementation(() => {})
 
@@ -342,7 +400,9 @@ describe('seedVenue — narrowed --force (TAC-343 plan review)', () => {
       guestsCheckError: { message: 'connection lost' },
     })
     vi.mocked(createAdminClient).mockReturnValue(
-      makeSupabaseMock(state) as unknown as ReturnType<typeof createAdminClient>,
+      makeSupabaseMock(state) as unknown as ReturnType<
+        typeof createAdminClient
+      >,
     )
     vi.spyOn(console, 'warn').mockImplementation(() => {})
 

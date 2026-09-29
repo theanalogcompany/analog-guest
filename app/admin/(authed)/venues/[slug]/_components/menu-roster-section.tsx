@@ -8,7 +8,10 @@ import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import type { MenuItem, VenueInfo } from '@/lib/schemas'
 import { HairlineRow } from '@/lib/ui'
-import { EmptySectionNote, SectionShell } from '@/app/admin/_components/section-shell'
+import {
+  EmptySectionNote,
+  SectionShell,
+} from '@/app/admin/_components/section-shell'
 
 function formatPrice(item: MenuItem): string {
   if (item.price !== undefined) return `$${item.price.toFixed(2)}`
@@ -52,9 +55,13 @@ export function MenuRosterSection({
   const { items, notes, highlights } = venueInfo.menu
 
   const [editing, setEditing] = useState(false)
-  const [formItems, setFormItems] = useState<MenuItem[]>(() => items.map((i) => ({ ...i })))
+  const [formItems, setFormItems] = useState<MenuItem[]>(() =>
+    items.map((i) => ({ ...i })),
+  )
   const [formNotes, setFormNotes] = useState(notes ?? '')
-  const [formHighlights, setFormHighlights] = useState<string[]>(() => [...highlights])
+  const [formHighlights, setFormHighlights] = useState<string[]>(() => [
+    ...highlights,
+  ])
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -67,13 +74,22 @@ export function MenuRosterSection({
   }
 
   function updateItem(index: number, patch: Partial<MenuItem>) {
-    setFormItems((rows) => rows.map((row, i) => (i === index ? { ...row, ...patch } : row)))
+    setFormItems((rows) =>
+      rows.map((row, i) => (i === index ? { ...row, ...patch } : row)),
+    )
   }
 
   function addItem() {
     setFormItems((rows) => [
       ...rows,
-      { name: '', category: '', modifiers: [], dietary: [], isOffMenu: false, price: 0 },
+      {
+        name: '',
+        category: '',
+        modifiers: [],
+        dietary: [],
+        isOffMenu: false,
+        price: 0,
+      },
     ])
   }
 
@@ -86,26 +102,32 @@ export function MenuRosterSection({
       (item) =>
         item.name.trim().length === 0 ||
         item.category.trim().length === 0 ||
-        (item.price === undefined && (!item.priceNote || item.priceNote.trim().length === 0)),
+        (item.price === undefined &&
+          (!item.priceNote || item.priceNote.trim().length === 0)),
     )
     if (invalid) {
-      setError('Every item needs a name, category, and either a price or a price note')
+      setError(
+        'Every item needs a name, category, and either a price or a price note',
+      )
       return
     }
     setBusy(true)
     setError(null)
     try {
-      const res = await fetch(`/admin/venues/api/venues/${venueId}/venue-info`, {
-        method: 'PATCH',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          menu: {
-            items: formItems,
-            notes: formNotes || undefined,
-            highlights: formHighlights.filter((h) => h.trim().length > 0),
-          },
-        }),
-      })
+      const res = await fetch(
+        `/admin/venues/api/venues/${venueId}/venue-info`,
+        {
+          method: 'PATCH',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            menu: {
+              items: formItems,
+              notes: formNotes || undefined,
+              highlights: formHighlights.filter((h) => h.trim().length > 0),
+            },
+          }),
+        },
+      )
       if (!res.ok) {
         const j = await res.json().catch(() => ({}))
         setError((j.detail as string) || (j.error as string) || 'Save failed')
@@ -126,7 +148,10 @@ export function MenuRosterSection({
         <div className="flex flex-col gap-4">
           <div className="flex flex-col gap-3">
             {formItems.map((item, i) => (
-              <div key={i} className="flex flex-col gap-2 border-b border-stone-light/40 pb-3">
+              <div
+                key={i}
+                className="flex flex-col gap-2 border-b border-stone-light/40 pb-3"
+              >
                 <div className="grid grid-cols-2 gap-2">
                   <Input
                     value={item.name}
@@ -136,13 +161,17 @@ export function MenuRosterSection({
                   />
                   <Input
                     value={item.size ?? ''}
-                    onChange={(e) => updateItem(i, { size: e.target.value || undefined })}
+                    onChange={(e) =>
+                      updateItem(i, { size: e.target.value || undefined })
+                    }
                     placeholder="Size (optional)"
                     className="h-auto bg-highlight py-1.5 text-sm"
                   />
                   <Input
                     value={item.category}
-                    onChange={(e) => updateItem(i, { category: e.target.value })}
+                    onChange={(e) =>
+                      updateItem(i, { category: e.target.value })
+                    }
                     placeholder="Category"
                     className="h-auto bg-highlight py-1.5 text-sm"
                   />
@@ -162,13 +191,19 @@ export function MenuRosterSection({
                   />
                   <Input
                     value={item.priceNote ?? ''}
-                    onChange={(e) => updateItem(i, { priceNote: e.target.value || undefined })}
+                    onChange={(e) =>
+                      updateItem(i, { priceNote: e.target.value || undefined })
+                    }
                     placeholder="Price note (e.g. by request)"
                     className="h-auto bg-highlight py-1.5 text-sm"
                   />
                   <Input
                     value={item.description ?? ''}
-                    onChange={(e) => updateItem(i, { description: e.target.value || undefined })}
+                    onChange={(e) =>
+                      updateItem(i, {
+                        description: e.target.value || undefined,
+                      })
+                    }
                     placeholder="Notes"
                     className="h-auto bg-highlight py-1.5 text-sm"
                   />
@@ -177,7 +212,9 @@ export function MenuRosterSection({
                   <label className="flex items-center gap-2 text-xs text-ink">
                     <Checkbox
                       checked={item.isOffMenu}
-                      onCheckedChange={(checked) => updateItem(i, { isOffMenu: checked === true })}
+                      onCheckedChange={(checked) =>
+                        updateItem(i, { isOffMenu: checked === true })
+                      }
                     />
                     Off-menu
                   </label>
@@ -210,7 +247,9 @@ export function MenuRosterSection({
           />
 
           <div className="border-t border-stone-light/60 pt-4">
-            <p className="mb-1 text-xs uppercase tracking-wide text-ink-faint">Highlights</p>
+            <p className="mb-1 text-xs uppercase tracking-wide text-ink-faint">
+              Highlights
+            </p>
             <HighlightsCaption />
             <div className="flex flex-col gap-2">
               {formHighlights.map((highlight, i) => (
@@ -218,14 +257,20 @@ export function MenuRosterSection({
                   <Input
                     value={highlight}
                     onChange={(e) =>
-                      setFormHighlights((hs) => hs.map((h, idx) => (idx === i ? e.target.value : h)))
+                      setFormHighlights((hs) =>
+                        hs.map((h, idx) => (idx === i ? e.target.value : h)),
+                      )
                     }
                     className="h-auto bg-highlight py-1.5 text-sm"
                   />
                   <Button
                     variant="link"
                     size="sm"
-                    onClick={() => setFormHighlights((hs) => hs.filter((_, idx) => idx !== i))}
+                    onClick={() =>
+                      setFormHighlights((hs) =>
+                        hs.filter((_, idx) => idx !== i),
+                      )
+                    }
                     className="h-auto p-0 text-[10.5px] text-ink-faint hover:text-clay"
                   >
                     remove
@@ -243,9 +288,18 @@ export function MenuRosterSection({
             </div>
           </div>
 
-          {error && <p className="border-l-2 border-clay bg-clay/5 px-2 py-1 text-xs text-clay-deep">{error}</p>}
+          {error && (
+            <p className="border-l-2 border-clay bg-clay/5 px-2 py-1 text-xs text-clay-deep">
+              {error}
+            </p>
+          )}
           <div className="flex justify-end gap-3 text-[11px]">
-            <Button variant="ghost" size="sm" onClick={() => setEditing(false)} disabled={busy}>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setEditing(false)}
+              disabled={busy}
+            >
               Cancel
             </Button>
             <Button onClick={submit} disabled={busy} size="sm">
@@ -262,7 +316,12 @@ export function MenuRosterSection({
       title="The menu"
       subtitle="roster"
       headerAction={
-        <Button variant="link" size="sm" onClick={startEdit} className="h-auto p-0 text-[11px] text-clay font-medium hover:text-clay-deep">
+        <Button
+          variant="link"
+          size="sm"
+          onClick={startEdit}
+          className="h-auto p-0 text-[11px] text-clay font-medium hover:text-clay-deep"
+        >
           Edit
         </Button>
       }
@@ -276,7 +335,9 @@ export function MenuRosterSection({
               <tr className="border-b border-stone-light/60 text-left text-xs uppercase tracking-wide text-ink-faint">
                 <th className="py-2 pr-3 font-normal">Item</th>
                 <th className="py-2 pr-3 font-normal">Category</th>
-                <th className="py-2 pr-3 font-normal text-right tabular-nums">Price</th>
+                <th className="py-2 pr-3 font-normal text-right tabular-nums">
+                  Price
+                </th>
                 <th className="py-2 font-normal">Notes</th>
               </tr>
             </thead>
@@ -299,7 +360,9 @@ export function MenuRosterSection({
                   <td className="py-2 pr-3 text-right tabular-nums text-ink">
                     {formatPrice(item)}
                   </td>
-                  <td className="py-2 text-ink-faint">{item.description ?? ''}</td>
+                  <td className="py-2 text-ink-faint">
+                    {item.description ?? ''}
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -309,14 +372,19 @@ export function MenuRosterSection({
       {notes && <p className="mt-4 text-sm text-ink-soft">{notes}</p>}
 
       <div className="mt-6 border-t border-stone-light/60 pt-4">
-        <p className="mb-1 text-xs uppercase tracking-wide text-ink-faint">Highlights</p>
+        <p className="mb-1 text-xs uppercase tracking-wide text-ink-faint">
+          Highlights
+        </p>
         <HighlightsCaption />
         {highlights.length === 0 ? (
           <EmptySectionNote>No highlights on file yet.</EmptySectionNote>
         ) : (
           <ul className="flex flex-col">
             {highlights.map((highlight, i) => (
-              <HairlineRow key={`${highlight}-${i}`} last={i === highlights.length - 1}>
+              <HairlineRow
+                key={`${highlight}-${i}`}
+                last={i === highlights.length - 1}
+              >
                 <span className="text-sm text-ink">{highlight}</span>
               </HairlineRow>
             ))}

@@ -1,0 +1,29 @@
+name: Weekly release notes
+
+# Monday 09:00 UTC: cut a lightweight tag and a GitHub release whose notes
+# GitHub generates from the PRs merged since the previous release. Commits
+# here are ticket-prefixed rather than conventional-commit, so PR-based
+# note generation is the format that stays accurate without changing the
+# commit convention.
+on:
+  schedule:
+    - cron: "0 9 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release-notes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - run: |
+          tag="weekly-$(date -u +%Y%m%d)"
+          gh release create "$tag" \
+            --repo "$GITHUB_REPOSITORY" \
+            --target main \
+            --title "Week of $(date -u +%Y-%m-%d)" \
+            --generate-notes
+        env:
+          GH_TOKEN: ${{ github.token }}

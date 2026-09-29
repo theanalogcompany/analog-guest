@@ -36,7 +36,9 @@ export function computeMessageStats(
   const windowMs = windowHours * MS_PER_HOUR
   // Sort once so the inbound-after-outbound check can stop as soon as a
   // candidate inbound is found. Sort by createdAt ascending.
-  const sorted = [...messages].sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime())
+  const sorted = [...messages].sort(
+    (a, b) => a.createdAt.getTime() - b.createdAt.getTime(),
+  )
   let outboundCount = 0
   let inboundCount = 0
   let repliedCount = 0
