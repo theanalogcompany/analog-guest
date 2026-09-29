@@ -107,9 +107,9 @@ export async function seedVenue(options: SeedVenueOptions): Promise<SeedVenueRes
         ``,
         `  • Mechanics, menu, hours, brand persona, venue_info config:`,
         `      Supabase Studio → SQL editor.`,
-        `      SQL templates are documented under "Common gotchas" in`,
-        `      CLAUDE.md (in-place mechanic edits, redemption events,`,
-        `      etc.). Run them directly against the live row.`,
+        `      Edit the live row directly (in-place mechanic edits,`,
+        `      redemption events). db/migrations/CLAUDE.md, "Patterns this schema uses",`,
+        `      covers what this schema expects of a write.`,
         ``,
         `───────────────────────────────────────────────────────────────────`,
         `If you are certain you want to wipe and reseed this venue's config`,
@@ -236,8 +236,8 @@ export async function seedVenue(options: SeedVenueOptions): Promise<SeedVenueRes
         ? { redemption_window_days: m.redemption_window_days }
         : {}),
       // TAC-212: pass through operator-approval flag. DB default (false) when
-      // the spec omits it. Per-venue overrides land via the Supabase Studio
-      // UPDATE template documented in CLAUDE.md Common gotchas.
+      // the spec omits it. Per-venue overrides land via a hand-written UPDATE
+      // in Supabase Studio against the live row.
       ...(m.requires_operator_approval !== undefined
         ? { requires_operator_approval: m.requires_operator_approval }
         : {}),

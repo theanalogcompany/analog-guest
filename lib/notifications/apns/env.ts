@@ -1,11 +1,13 @@
 // APNs environment validation (TAC-207 follow-up).
 //
-// CLAUDE.md → "Environment variables → Boot-time validation" prescribes a
-// startup validator that crashes loudly for every required env var, written
-// after the 2026-05-27 incident where APNS_AUTH_KEY was pasted without its
-// `-----END PRIVATE KEY-----` footer, signed nothing, and failed silently at
-// the first push attempt nine hours after deploy. That validator was never
-// implemented — getApnsJwt still parsed the key lazily on first send.
+// CLAUDE.md, "Environment variables", requires a validator to ship with every
+// new credential var. The rule was originally written as a boot-time validator
+// that crashes loudly, after the 2026-05-27 incident where APNS_AUTH_KEY was
+// pasted without its `-----END PRIVATE KEY-----` footer, signed nothing, and
+// failed silently at the first push attempt nine hours after deploy. That
+// boot-time validator was never implemented — getApnsJwt still parsed the key
+// lazily on first send — and the rule has since been rewritten to require
+// first-call enforcement instead, for the reason below.
 //
 // WHY THIS IS FIRST-CALL, NOT MODULE-LOAD:
 //

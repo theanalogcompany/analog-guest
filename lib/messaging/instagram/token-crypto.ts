@@ -7,14 +7,14 @@
 // format, different env var and different domain. Extracting a shared module
 // would mean refactoring Square's working credential path from inside a
 // hard-stop auth-and-credentials ticket, and a new lib/crypto/ module
-// directory needs asking first (CLAUDE.md, "File path conventions"). Both
+// directory needs asking first (CLAUDE.md, "Conventions"). Both
 // files carry a pointer at the other, which is this repo's convention for
 // duplication that is real rather than accidental — cf. markCancelled and
 // cancelCommitmentForGuest. Revisit if a third consumer ever appears.
 //
 // THE KEY IS READ LAZILY, per call, never at module load. CI defines none of
 // the Meta vars, so a module-load throw would crash tsc, vitest and next build
-// on every future PR — CLAUDE.md, "Module-load vs first-call", which
+// on every future PR — CLAUDE.md, "Environment variables", which
 // explicitly supersedes the older parse-at-boot guidance for this repo. It is
 // parsed and length-checked on every use instead, so a malformed key fails
 // loudly at the call site naming the specific defect, rather than silently

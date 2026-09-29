@@ -4,7 +4,8 @@
 // WHY THIS EXISTS: the APNs push path is fire-and-forget through waitUntil and
 // errors-as-values, so a broken configuration produces NO user-visible signal —
 // the agent runs normally, drafts queue normally, and the push simply never
-// arrives. CLAUDE.md → "Common gotchas → APNs env vars fail SILENTLY" documents
+// arrives. lib/notifications/CLAUDE.md, "Env vars fail SILENTLY, so the
+// validation is three-part", documents
 // the diagnostic chain that follows, which today starts with reading PostHog
 // minutes after the fact. This row makes the same information ambient.
 //

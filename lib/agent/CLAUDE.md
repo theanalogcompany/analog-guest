@@ -232,3 +232,8 @@ source-level guard matching both the snake_case column and the camelCase field.
   so the orchestrator reads `undefined.status`. Default every check mock explicitly.
 - `dispatch-reply.ts` is the one place a reply picks its transport. Nothing routes on a
   null channel.
+
+---
+
+Root `CLAUDE.md` is the index for the whole repo, `docs/decisions/README.md` holds the
+cross-cutting decisions, and `README.md` is the navigable map of both.

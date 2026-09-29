@@ -119,3 +119,8 @@ No emoji, no checkmarks. Status uses `<StatusDot>`, where `bad` means actually w
 
 Put new section chrome in `app/admin/_components/section-shell.tsx`. A local
 re-declaration is how the last one drifted on padding.
+
+---
+
+Root `CLAUDE.md` is the index for the whole repo, `docs/decisions/README.md` holds the
+cross-cutting decisions, and `README.md` is the navigable map of both.

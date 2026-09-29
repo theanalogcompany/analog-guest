@@ -111,3 +111,8 @@ block-order test is the only thing that catches a move past it.
   at a venue whose prompt said "not in every text".
 - **`sparingly` is empirically identical to `never`** (0 of 188 measured). Recorded, not
   fixed.
+
+---
+
+Root `CLAUDE.md` is the index for the whole repo, `docs/decisions/README.md` holds the
+cross-cutting decisions, and `README.md` is the navigable map of both.

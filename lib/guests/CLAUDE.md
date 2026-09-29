@@ -114,3 +114,8 @@ ladder: the timestamp advances past a stale precision and nothing rewrites it.
 `null` precision is **permissive** - it means nobody recorded one, which is every row
 predating the column. Do not tidy the gate from `=== 'approximate'` to `!== 'pinned'`; that
 silently switches off every legacy row. There is a mutation-verified negative test.
+
+---
+
+Root `CLAUDE.md` is the index for the whole repo, `docs/decisions/README.md` holds the
+cross-cutting decisions, and `README.md` is the navigable map of both.

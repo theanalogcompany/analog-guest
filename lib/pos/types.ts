@@ -2,8 +2,8 @@
 // (Square now; Toast / Clover later) implements. Consumers (the webhook route,
 // the reconciler, the catalog/inventory sync) depend on these normalized
 // models and the PosProvider interface, never on a vendor SDK directly — per
-// CLAUDE.md §"Tech stack": "Code should depend on internal interfaces, not on
-// vendor names."
+// CLAUDE.md, "Stack": "Depend on internal interfaces (`lib/messaging/send.ts`),
+// never on vendor names."
 //
 // Only Square is implemented this cycle; the abstraction exists so adding a
 // provider later is a new class under lib/pos/<provider>/ plus a registry
