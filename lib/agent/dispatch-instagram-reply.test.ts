@@ -104,6 +104,8 @@ function generation(body: string, overrides: Partial<GenerateMessageResult> = {}
     commitment: {},
     arrivalCapture: {},
     cancelsCommitmentId: '',
+    intentionQuestion: '',
+    intentionQuestionDuplicateStripped: false,
     attempts: 1,
     attemptScores: [0.8],
     attemptHistory: [],
@@ -370,12 +372,12 @@ describe('dispatchInstagramReply: the 1000-byte cap', () => {
     const emoji = '\u{1F600}'
     // 600 of .length, 1200 bytes, one sentence.
     expect(emoji.repeat(300).length).toBe(600)
-    expect(fitBubblesToInstagramCap([emoji.repeat(300)], emoji.repeat(300))).toEqual({ ok: false, reason: 'sentence_over_cap' })
-    expect(fitBubblesToInstagramCap([emoji.repeat(250)], emoji.repeat(250))).toEqual({ ok: true, bubbles: [emoji.repeat(250)] })
+    expect(fitBubblesToInstagramCap([emoji.repeat(300)], emoji.repeat(300), '')).toEqual({ ok: false, reason: 'sentence_over_cap' })
+    expect(fitBubblesToInstagramCap([emoji.repeat(250)], emoji.repeat(250), '')).toEqual({ ok: true, bubbles: [emoji.repeat(250)] })
   })
 
   it('leaves messages already under the cap exactly as they were', () => {
-    expect(fitBubblesToInstagramCap(['Open until 3', 'Oat milk too'], 'Open until 3. Oat milk too.')).toEqual({
+    expect(fitBubblesToInstagramCap(['Open until 3', 'Oat milk too'], 'Open until 3. Oat milk too.', '')).toEqual({
       ok: true,
       bubbles: ['Open until 3', 'Oat milk too'],
     })
@@ -785,5 +787,104 @@ describe('dispatchInstagramReply — cancellation (TAC-513)', () => {
     await dispatchInstagramReply(makeCtx(), gen, INBOUND_REPLY, d)
 
     expect(d.applyCancellation).not.toHaveBeenCalled()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// TAC-554: the question is its own message on Instagram too, and the cap
+// repack does not merge it back.
+// ---------------------------------------------------------------------------
+
+describe('fitBubblesToInstagramCap — the question survives a repack (TAC-554)', () => {
+  const tail = "by the way, what's your name?"
+
+  // THE REGRESSION THIS EXISTS FOR. The repack only runs when a bubble is over
+  // 1000 bytes, so before this the question got merged back into the message in
+  // front of it on exactly the long replies and nowhere else — a conditional
+  // regression nothing would have noticed.
+  // The sentence fixtures start with a CAPITAL deliberately. splitIntoSentences
+  // requires a capital, digit or emoji after the boundary (TAC-319 ruling #2,
+  // matching what production sends actually look like), so a lowercase opener
+  // makes the whole thing one giant sentence and the fitter reports
+  // sentence_over_cap instead of packing. Written the wrong way first.
+  it('keeps the question out of the greedy packing', () => {
+    const long = `X${'x'.repeat(899)}`
+    const second = `Y${'y'.repeat(899)}`
+    const reply = `${long}. ${second}. ${tail}`
+    const fit = fitBubblesToInstagramCap([reply], reply, tail)
+    expect(fit.ok).toBe(true)
+    if (!fit.ok) return
+    expect(fit.bubbles[fit.bubbles.length - 1]).toBe(tail)
+    expect(fit.bubbles.slice(0, -1).join(' ')).not.toContain(tail)
+  })
+
+  it('leaves messages already under the cap alone, question and all', () => {
+    expect(fitBubblesToInstagramCap(['Open until 3', tail], `Open until 3. ${tail}`, tail)).toEqual({
+      ok: true,
+      bubbles: ['Open until 3', tail],
+    })
+  })
+
+  // The question counts toward the cap, so an answer needing all three slots
+  // still cards rather than sending four messages.
+  it('refuses rather than exceeding the cap once the question is counted', () => {
+    const reply = `A${'a'.repeat(899)}. B${'b'.repeat(899)}. C${'c'.repeat(899)}. ${tail}`
+    expect(fitBubblesToInstagramCap([reply], reply, tail)).toEqual({
+      ok: false,
+      reason: 'too_many_messages',
+    })
+  })
+
+  it('falls back to packing the whole reply when the tail is not a suffix', () => {
+    const long = `X${'x'.repeat(899)}`
+    const second = `Y${'y'.repeat(899)}`
+    const reply = `${long}. ${second}.`
+    const fit = fitBubblesToInstagramCap([reply], reply, 'a question that is not in the reply?')
+    expect(fit.ok).toBe(true)
+    if (!fit.ok) return
+    expect(fit.bubbles).toEqual([`${long}.`, `${second}.`])
+  })
+})
+
+describe('dispatchInstagramReply — the intention question is its own message (TAC-554)', () => {
+  const tail = "by the way, what's your name?"
+
+  // THE WIRING. Dropping the third argument at the split call, or dropping the
+  // gate, leaves sentence-split.test.ts entirely green.
+  it('sends the question as its own last message', async () => {
+    const d = deps()
+    const result = await dispatchInstagramReply(
+      makeCtx(),
+      generation(`Open until 3 today. ${tail}`, { intentionQuestion: tail }),
+      { ...INBOUND_REPLY, renderedIntentions: RENDERED, rng: ONE_BLOCK },
+      d,
+    )
+
+    expect(result).toMatchObject({ kind: 'sent', bubbleCount: 2 })
+    expect(sentTexts(d)).toEqual(['Open until 3 today', tail])
+  })
+
+  it('folds the question in when no intention rendered', async () => {
+    const d = deps()
+    const result = await dispatchInstagramReply(
+      makeCtx(),
+      generation(`Open until 3 today. ${tail}`, { intentionQuestion: tail }),
+      { ...INBOUND_REPLY, rng: ONE_BLOCK },
+      d,
+    )
+
+    expect(result).toMatchObject({ kind: 'sent', bubbleCount: 1 })
+    expect(sentTexts(d)).toEqual([`Open until 3 today. ${tail}`])
+  })
+
+  it('is unchanged when the model asked nothing', async () => {
+    const d = deps()
+    await dispatchInstagramReply(
+      makeCtx(),
+      generation('Open until 3 today.'),
+      { ...INBOUND_REPLY, renderedIntentions: RENDERED, rng: ONE_BLOCK },
+      d,
+    )
+    expect(sentTexts(d)).toEqual(['Open until 3 today.'])
   })
 })

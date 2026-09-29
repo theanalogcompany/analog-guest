@@ -1394,8 +1394,8 @@ function formatMechanicEligibility(
 // The two CLAUSES that used to sit after the question are still gone, and they
 // are a separate thing from the question itself. The paragraph rendered
 // directly beneath says both: "take the one listed first, and only that one",
-// and "Asking never changes what the reply is about ... the question goes at
-// the end, in one short line, or not at all." The second of them was also the
+// and "Asking never changes what the reply is about ... the question is one
+// short line on its own, or not at all." The second of them was also the
 // deadlock sentence TAC-436 deleted from that paragraph, surviving here in
 // different words and so invisible to the canary guarding it. Consequence,
 // ruled rather than inherited: a guest who scans AND asks something gets their
@@ -1498,9 +1498,15 @@ function formatOpenIntentions(
     'Not an opening: a message carrying an apology, bad news, or something',
     "they're unhappy about. Leave those alone entirely.",
     '',
+    // TAC-554 dropped "goes at the end" from the next line. The question no
+    // longer has a POSITION in this text at all: it is emitted in its own
+    // field and dispatch sends it as its own message after the reply, so a
+    // claim about where it sits in the body would be false. "One short line
+    // on its own" is what survives, and it is still true — it is now true
+    // structurally rather than by the model's cooperation.
     'Asking never changes what the reply is about. Whatever they raised is',
-    'still the job, and the question goes at the end, in one short line, or',
-    'not at all. Never steer the conversation toward one of these, and never',
+    'still the job, and the question is one short line on its own, or not at',
+    'all. Never steer the conversation toward one of these, and never',
     'raise one twice.',
     '',
     'If nothing fits, let it wait. There will be other conversations.',

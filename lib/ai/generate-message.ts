@@ -280,7 +280,122 @@ export const GeneratedMessageSchema = z.object({
   // through v1.17.0 the id was missing from the block, the model reached for
   // the code instead, and every arrival capture no-op'd.
   cancelsCommitmentId: z.string(),
+  // TAC-554: the getting-to-know-you question this reply is asking, alone, and
+  // NOT in `body`. Empty string on every turn that is not asking one, which is
+  // most turns.
+  //
+  // WHY A SEPARATE FIELD AT ALL. Jaipal ruled that a question raised from the
+  // `## What you're hoping to get to` block always goes out as its own message
+  // bubble, after the answer. A persona rule saying exactly that failed twice
+  // on device on 2026-09-29, and dispatch is why: resolveDispatchBubbles splits
+  // on sentence boundaries it can detect, so one of those replies rode a fair
+  // coin and lost, and the other had no detectable boundary before its question
+  // and could not have split at any probability. Bubble structure is not
+  // something prompt wording can reach.
+  //
+  // WHAT THIS FIELD IS NOT: it is not the text we send as a second message
+  // directly from here. composeReplyWithIntention CONCATENATES it back onto the
+  // body immediately below, so `GenerateMessageResult.body` stays the complete
+  // reply exactly as it always has, and every check that reads the body — the
+  // dash substitution, self-talk, unverified links, the grounding verifier, the
+  // prose-promise and cancellation checks, the comp regex — still sees the
+  // question. The field rides alongside as the exact TAIL of the body, true by
+  // construction because we did the joining. Dispatch peels it off.
+  //
+  // A BARE REQUIRED STRING, the cancelsCommitmentId reasoning verbatim:
+  // Anthropic counts only optionals against the 24-property cap, this schema
+  // sits at 20 against a repo budget of 22 (lib/ai/schema-budget.test.ts), and
+  // a required string costs zero.
+  intentionQuestion: z.string(),
 })
+
+/**
+ * A one-line-regex duplicate of hasRenderableContent in
+ * lib/agent/sentence-split.ts, deliberately, with a pointer in each file.
+ *
+ * lib/agent imports lib/ai and never the reverse, so sharing it would mean
+ * either a cycle or a new shared module for one predicate. The two also do
+ * different jobs: here it NORMALIZES a contentless question to '' so nothing
+ * downstream ever sees one, and there it DEFENDS against a caller that didn't.
+ * Both are one line, and the duplication is bounded and stated rather than
+ * discovered.
+ */
+function hasRenderableContent(piece: string): boolean {
+  return /[\p{L}\p{N}]/u.test(piece)
+}
+
+/** Letters and digits only, case-folded. */
+function normalizeForDuplicate(text: string): string {
+  return text.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '')
+}
+
+/**
+ * If the answer already ends with the question, cut it off.
+ *
+ * THE ONE FAILURE A STRUCTURAL MECHANISM CANNOT PREVENT is the model putting
+ * the question in BOTH fields, which would compose to "...what's your name?
+ * what's your name?" — a duplicated question in the guest's thread. Approved
+ * 2026-09-29 on the condition that its firing rate is reported rather than
+ * silent, which is what `intentionQuestionDuplicateStripped` on the result is
+ * for: a guard nobody can count is how comp_regex_backstop became an illusion.
+ *
+ * It only ever REMOVES a trailing duplicate, never adds or reorders, so the
+ * worst case is a slightly shorter answer rather than wrong text.
+ *
+ * Comparison is on letters and digits alone, case-folded, so the model
+ * re-punctuating or re-casing its own sentence still matches. The scan walks
+ * back from the end and stops as soon as the candidate suffix is longer than
+ * the question, which is sound because prepending characters can only keep or
+ * grow a normalized length.
+ */
+export function stripTrailingDuplicate(answer: string, question: string): string {
+  const q = normalizeForDuplicate(question)
+  if (q === '') return answer
+  for (let i = answer.length - 1; i >= 0; i -= 1) {
+    const candidate = normalizeForDuplicate(answer.slice(i))
+    if (candidate.length > q.length) break
+    if (candidate === q) return answer.slice(0, i).trim()
+  }
+  return answer
+}
+
+/**
+ * Join the model's two halves into the one complete reply, and hand back the
+ * tail dispatch will peel off again.
+ *
+ * Called at the replaceDashes seam, which is the single normalization point
+ * every downstream read already flows through. THE ORDER MATTERS: replaceDashes
+ * runs on each part BEFORE they are joined, so `body` ends with
+ * `intentionQuestion` character for character. Substituting on the joined
+ * string instead would let a dash inside the question change it after the fact
+ * and break the identity dispatch relies on.
+ */
+export function composeReplyWithIntention(
+  rawBody: string,
+  rawQuestion: string,
+): { body: string; intentionQuestion: string; duplicateStripped: boolean } {
+  const answerIn = replaceDashes(rawBody)
+  const question = replaceDashes(rawQuestion)
+
+  // Normalize a question that is absent, whitespace, or has nothing a guest
+  // would read (see hasRenderableContent) to '' here, once, so no downstream
+  // reader has to think about it. This is also where replaceDashes' refusal
+  // case lands: a field containing only an em dash comes back as "—".
+  if (question.trim() === '' || !hasRenderableContent(question)) {
+    return { body: answerIn, intentionQuestion: '', duplicateStripped: false }
+  }
+
+  const answer = stripTrailingDuplicate(answerIn, question)
+  const duplicateStripped = answer !== answerIn
+
+  // The model put the whole reply in the field, or the answer was nothing but
+  // a repeat of the question. One message, which is the question.
+  if (answer.trim() === '') {
+    return { body: question, intentionQuestion: question, duplicateStripped }
+  }
+
+  return { body: `${answer} ${question}`, intentionQuestion: question, duplicateStripped }
+}
 
 /**
  * Generate an outbound message in the venue's voice with a self-assessed
@@ -355,6 +470,7 @@ export async function generateMessage(
       commitment: z.infer<typeof CommitmentEmissionSchema>
       arrivalCapture: z.infer<typeof ArrivalCaptureEmissionSchema>
       cancelsCommitmentId: string
+      intentionQuestion: string
     } | null = null
     const attemptScores: number[] = []
     const attemptHistory: GenerateMessageAttempt[] = []
@@ -390,6 +506,10 @@ export async function generateMessage(
     // same prefix shows up as two reads rather than being averaged away.
     let cacheReadTokens = 0
     let cacheWriteTokens = 0
+    // TAC-554: whether the duplicate guard fired on the attempt that shipped.
+    // Assigned per attempt alongside lastResult, so it describes the same
+    // attempt the body came from rather than any earlier one.
+    let duplicateStripped = false
     // Order-preserving and deduped, so a link flagged on attempt 1 is still
     // named on attempt 3 alongside anything new attempt 2 invented.
     const unverifiedUrlsSeen: string[] = []
@@ -463,8 +583,22 @@ export async function generateMessage(
       // return so every downstream read — the break condition below, the
       // attempt history, the shipped body — sees one body, and so a dash can
       // never be the reason another generation call is spent.
-      const object = { ...rawObject, body: replaceDashes(rawObject.body) }
+      // TAC-554: compose the two halves into one complete reply here, at the
+      // seam replaceDashes already owned, so every read below — the break
+      // condition, the attempt history, the shipped body, and every backstop
+      // downstream — sees ONE body carrying the question, exactly as it did
+      // before this field existed.
+      const composed = composeReplyWithIntention(rawObject.body, rawObject.intentionQuestion)
+      if (composed.duplicateStripped) {
+        console.warn('[ai] generateMessage: stripped a duplicated intention question from the answer')
+      }
+      const object = {
+        ...rawObject,
+        body: composed.body,
+        intentionQuestion: composed.intentionQuestion,
+      }
       lastResult = object
+      duplicateStripped = composed.duplicateStripped
       attemptScores.push(object.voiceFidelity)
       attemptHistory.push({
         body: object.body,
@@ -478,6 +612,7 @@ export async function generateMessage(
         commitment: object.commitment,
         arrivalCapture: object.arrivalCapture,
         cancelsCommitmentId: object.cancelsCommitmentId,
+        intentionQuestion: object.intentionQuestion,
         userPromptOverride:
           userPromptForAttempt !== userPrompt ? userPromptForAttempt : undefined,
       })
@@ -541,6 +676,14 @@ export async function generateMessage(
         // SAID back (TAC-296 precedent).
         arrivalCapture: lastResult.arrivalCapture,
         cancelsCommitmentId: lastResult.cancelsCommitmentId,
+        // TAC-554: the exact tail of `body`. Dispatch splits there so the
+        // question goes out as its own last message. '' means this turn asked
+        // nothing, and dispatch then behaves exactly as it did before.
+        intentionQuestion: lastResult.intentionQuestion,
+        // Whether the duplicate guard fired on the shipped attempt. Carried so
+        // the guard is countable — it edits guest-facing text, and that was
+        // approved on the condition it is reported rather than silent.
+        intentionQuestionDuplicateStripped: duplicateStripped,
         attempts,
         attemptScores,
         attemptHistory,
