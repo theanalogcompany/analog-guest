@@ -5,8 +5,21 @@ paths:
   - "lib/ai/classify-message.ts"
   - "lib/agent/**"
   - "lib/voices/**"
-  - "**/*.test.ts"
 ---
+
+<!--
+Scoped to the directories that own the composed prompt, NOT to `**/*.test.ts`.
+That glob matched all 304 test files in the repo to reach the 52 in these
+directories, so this file loaded on five reads out of six that had nothing to do
+with the prompt. The cost is not tokens: a rule that shows up on every unrelated
+read is a rule that gets skimmed, and injected mid-session text competes for
+authority with the actual task (root CLAUDE.md, "later beats earlier").
+
+The sweep this file describes is still repo-wide - the tests it warns about are
+fixtures scattered anywhere. That is what the grep is for. The rule does not have
+to be resident in every session to be followed once you are bumping the constant,
+and every path that gets you there is covered above.
+-->
 
 # Bumping PROMPT_VERSION is a repo-wide sweep
 
