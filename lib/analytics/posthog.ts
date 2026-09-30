@@ -2969,7 +2969,9 @@ export interface WarmCloseSentProps {
   markerOutcome?: 'marked' | 'already_marked' | 'write_failed'
 }
 
-export async function captureWarmCloseSent(props: WarmCloseSentProps): Promise<void> {
+export async function captureWarmCloseSent(
+  props: WarmCloseSentProps,
+): Promise<void> {
   await capturePostHogEvent('warm_close_sent', props.guestId, { ...props })
   await postToSlack(
     [
@@ -2992,6 +2994,8 @@ export interface WarmCloseSkippedProps {
   agentStatus?: string
 }
 
-export async function captureWarmCloseSkipped(props: WarmCloseSkippedProps): Promise<void> {
+export async function captureWarmCloseSkipped(
+  props: WarmCloseSkippedProps,
+): Promise<void> {
   await capturePostHogEvent('warm_close_skipped', props.guestId, { ...props })
 }

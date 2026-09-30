@@ -15,20 +15,24 @@ vi.mock('@/lib/analytics/posthog', () => ({
 
 // vi.hoisted, because vi.mock factories are hoisted above every const in this
 // file and would otherwise read these before initialization.
-const { handleFollowupMock, loadPendingRowsBySlotMock, store } = vi.hoisted(() => ({
-  handleFollowupMock: vi.fn(),
-  loadPendingRowsBySlotMock: vi.fn(),
-  store: {
-    loadWarmCloseVenues: vi.fn(),
-    loadWarmCloseCandidates: vi.fn(),
-    loadWarmCloseGuestFacts: vi.fn(),
-    loadLastInboundCategory: vi.fn(),
-    claimWarmClose: vi.fn(),
-    releaseWarmCloseClaim: vi.fn(),
-  },
-}))
+const { handleFollowupMock, loadPendingRowsBySlotMock, store } = vi.hoisted(
+  () => ({
+    handleFollowupMock: vi.fn(),
+    loadPendingRowsBySlotMock: vi.fn(),
+    store: {
+      loadWarmCloseVenues: vi.fn(),
+      loadWarmCloseCandidates: vi.fn(),
+      loadWarmCloseGuestFacts: vi.fn(),
+      loadLastInboundCategory: vi.fn(),
+      claimWarmClose: vi.fn(),
+      releaseWarmCloseClaim: vi.fn(),
+    },
+  }),
+)
 vi.mock('./handle-followup', () => ({ handleFollowup: handleFollowupMock }))
-vi.mock('./pending-slots', () => ({ loadPendingRowsBySlot: loadPendingRowsBySlotMock }))
+vi.mock('./pending-slots', () => ({
+  loadPendingRowsBySlot: loadPendingRowsBySlotMock,
+}))
 vi.mock('./warm-close-store', () => store)
 
 import { processDueWarmCloses } from './warm-close-timeout'
@@ -80,25 +84,40 @@ function facts(over: Record<string, unknown> = {}) {
 beforeEach(() => {
   vi.clearAllMocks()
   store.loadWarmCloseVenues.mockResolvedValue({ ok: true, data: [venue()] })
-  store.loadWarmCloseCandidates.mockResolvedValue({ ok: true, data: [candidate()] })
+  store.loadWarmCloseCandidates.mockResolvedValue({
+    ok: true,
+    data: [candidate()],
+  })
   store.loadWarmCloseGuestFacts.mockResolvedValue({ ok: true, data: facts() })
   store.loadLastInboundCategory.mockResolvedValue('reply')
   store.claimWarmClose.mockResolvedValue({ status: 'claimed' })
   store.releaseWarmCloseClaim.mockResolvedValue(undefined)
-  loadPendingRowsBySlotMock.mockResolvedValue({ obligation: null, conversation: [] })
-  handleFollowupMock.mockResolvedValue({ status: 'sent', outboundMessageId: 'm-close' })
+  loadPendingRowsBySlotMock.mockResolvedValue({
+    obligation: null,
+    conversation: [],
+  })
+  handleFollowupMock.mockResolvedValue({
+    status: 'sent',
+    outboundMessageId: 'm-close',
+  })
 })
 
 describe('processDueWarmCloses: the happy path (TAC-560)', () => {
   it('claims, then closes, in that order', async () => {
     const r = await processDueWarmCloses(NOW)
     expect(r.closed).toBe(1)
-    expect(store.claimWarmClose).toHaveBeenCalledWith(expect.anything(), GUEST, NOW)
+    expect(store.claimWarmClose).toHaveBeenCalledWith(
+      expect.anything(),
+      GUEST,
+      NOW,
+    )
     expect(handleFollowupMock).toHaveBeenCalledTimes(1)
     // CLAIM BEFORE THE SIDE EFFECT. A process dying between the two loses one
     // close rather than sending two.
     const claimOrder = store.claimWarmClose.mock.invocationCallOrder[0]
-    expect(claimOrder).toBeLessThan(handleFollowupMock.mock.invocationCallOrder[0])
+    expect(claimOrder).toBeLessThan(
+      handleFollowupMock.mock.invocationCallOrder[0],
+    )
   })
 
   it('hands the trigger the outbound row the guest went quiet after', async () => {
@@ -123,7 +142,10 @@ describe('processDueWarmCloses: every skip and defer (TAC-560)', () => {
   async function expectSkip(reason: string) {
     const r = await processDueWarmCloses(NOW)
     expect(r.closed).toBe(0)
-    expect(r.skipped[reason], `expected skip ${reason}, got ${JSON.stringify(r.skipped)}`).toBe(1)
+    expect(
+      r.skipped[reason],
+      `expected skip ${reason}, got ${JSON.stringify(r.skipped)}`,
+    ).toBe(1)
     expect(store.claimWarmClose).not.toHaveBeenCalled()
     expect(handleFollowupMock).not.toHaveBeenCalled()
   }
@@ -157,9 +179,17 @@ describe('processDueWarmCloses: every skip and defer (TAC-560)', () => {
     store.loadWarmCloseGuestFacts.mockResolvedValue({ ok: true, data: facts() })
     store.loadLastInboundCategory.mockResolvedValue('reply')
     store.claimWarmClose.mockResolvedValue({ status: 'claimed' })
-    loadPendingRowsBySlotMock.mockResolvedValue({ obligation: null, conversation: [] })
-    handleFollowupMock.mockResolvedValue({ status: 'sent', outboundMessageId: 'm-close' })
-    const fired = await processDueWarmCloses(new Date(SENT_AT.getTime() + 21 * 60 * 1000))
+    loadPendingRowsBySlotMock.mockResolvedValue({
+      obligation: null,
+      conversation: [],
+    })
+    handleFollowupMock.mockResolvedValue({
+      status: 'sent',
+      outboundMessageId: 'm-close',
+    })
+    const fired = await processDueWarmCloses(
+      new Date(SENT_AT.getTime() + 21 * 60 * 1000),
+    )
     expect(fired.closed).toBe(1)
   })
 
@@ -168,7 +198,9 @@ describe('processDueWarmCloses: every skip and defer (TAC-560)', () => {
     // signal and the body may read as a plain statement.
     store.loadWarmCloseCandidates.mockResolvedValue({
       ok: true,
-      data: [candidate({ body: 'nice, glad it landed', renderedIntentionCount: 1 })],
+      data: [
+        candidate({ body: 'nice, glad it landed', renderedIntentionCount: 1 }),
+      ],
     })
     await expectSkip('not_yet')
   })
@@ -237,8 +269,14 @@ describe('processDueWarmCloses: every skip and defer (TAC-560)', () => {
     ]) {
       vi.clearAllMocks()
       store.loadWarmCloseVenues.mockResolvedValue({ ok: true, data: [venue()] })
-      store.loadWarmCloseCandidates.mockResolvedValue({ ok: true, data: [candidate()] })
-      store.loadWarmCloseGuestFacts.mockResolvedValue({ ok: true, data: facts() })
+      store.loadWarmCloseCandidates.mockResolvedValue({
+        ok: true,
+        data: [candidate()],
+      })
+      store.loadWarmCloseGuestFacts.mockResolvedValue({
+        ok: true,
+        data: facts(),
+      })
       store.loadLastInboundCategory.mockResolvedValue('reply')
       loadPendingRowsBySlotMock.mockResolvedValue(slots)
       await expectSkip('card_pending')
@@ -246,7 +284,10 @@ describe('processDueWarmCloses: every skip and defer (TAC-560)', () => {
   })
 
   it('guest_unreadable: the guest read failed', async () => {
-    store.loadWarmCloseGuestFacts.mockResolvedValue({ ok: false, error: 'boom' })
+    store.loadWarmCloseGuestFacts.mockResolvedValue({
+      ok: false,
+      error: 'boom',
+    })
     await expectSkip('guest_unreadable')
   })
 
@@ -261,7 +302,10 @@ describe('processDueWarmCloses: every skip and defer (TAC-560)', () => {
 
 describe('processDueWarmCloses: venue-wide gates (TAC-560)', () => {
   it('skips a paused venue before it scans for candidates', async () => {
-    store.loadWarmCloseVenues.mockResolvedValue({ ok: true, data: [venue({ status: 'paused' })] })
+    store.loadWarmCloseVenues.mockResolvedValue({
+      ok: true,
+      data: [venue({ status: 'paused' })],
+    })
     const r = await processDueWarmCloses(NOW)
     expect(r.scanned).toBe(0)
     expect(store.loadWarmCloseCandidates).not.toHaveBeenCalled()
@@ -281,7 +325,11 @@ describe('processDueWarmCloses: venue-wide gates (TAC-560)', () => {
     const inQuietHours = new Date('2026-09-30T06:30:00.000Z')
     store.loadWarmCloseCandidates.mockResolvedValue({
       ok: true,
-      data: [candidate({ sentAt: new Date(inQuietHours.getTime() - 15 * 60 * 1000) })],
+      data: [
+        candidate({
+          sentAt: new Date(inQuietHours.getTime() - 15 * 60 * 1000),
+        }),
+      ],
     })
     const r = await processDueWarmCloses(inQuietHours)
     expect(r.scanned).toBe(0)
@@ -311,10 +359,17 @@ describe('processDueWarmCloses: venue-wide gates (TAC-560)', () => {
 
 describe('processDueWarmCloses: the claim release (TAC-560)', () => {
   it('releases the claim when the close was refused, so a later tick can retry', async () => {
-    handleFollowupMock.mockResolvedValue({ status: 'refused', reason: 'low_fidelity' })
+    handleFollowupMock.mockResolvedValue({
+      status: 'refused',
+      reason: 'low_fidelity',
+    })
     const r = await processDueWarmCloses(NOW)
     expect(r.closed).toBe(0)
-    expect(store.releaseWarmCloseClaim).toHaveBeenCalledWith(expect.anything(), GUEST, NOW)
+    expect(store.releaseWarmCloseClaim).toHaveBeenCalledWith(
+      expect.anything(),
+      GUEST,
+      NOW,
+    )
   })
 
   it('KEEPS the claim on a queued close, because an operator can still send it', async () => {
@@ -332,7 +387,10 @@ describe('processDueWarmCloses: the claim release (TAC-560)', () => {
   })
 
   it('KEEPS the claim when something already answered the guest', async () => {
-    handleFollowupMock.mockResolvedValue({ status: 'superseded', byMessageId: 'm-staff' })
+    handleFollowupMock.mockResolvedValue({
+      status: 'superseded',
+      byMessageId: 'm-staff',
+    })
     await processDueWarmCloses(NOW)
     expect(store.releaseWarmCloseClaim).not.toHaveBeenCalled()
   })
@@ -350,10 +408,12 @@ describe('processDueWarmCloses: failure posture (TAC-560)', () => {
       ok: true,
       data: [candidate({ guestId: 'g-bad' }), candidate()],
     })
-    store.loadWarmCloseGuestFacts.mockImplementation(async (_c: unknown, id: string) => {
-      if (id === 'g-bad') throw new Error('boom')
-      return { ok: true, data: facts() }
-    })
+    store.loadWarmCloseGuestFacts.mockImplementation(
+      async (_c: unknown, id: string) => {
+        if (id === 'g-bad') throw new Error('boom')
+        return { ok: true, data: facts() }
+      },
+    )
     const r = await processDueWarmCloses(NOW)
     expect(r.errored).toBe(1)
     expect(r.closed).toBe(1)

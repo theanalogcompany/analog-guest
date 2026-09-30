@@ -887,7 +887,12 @@ describe('categoryInstructionsFor — warm close (TAC-560)', () => {
     // closer into a fresh exchange" fights naming what the guest can message
     // about. Handing the model a false premise as fact is the TAC-484 / TAC-502
     // failure class.
-    const out = categoryInstructionsFor('acknowledgment', 'instagram', null, true)
+    const out = categoryInstructionsFor(
+      'acknowledgment',
+      'instagram',
+      null,
+      true,
+    )
     expect(out).toBe(WARM_CLOSE_INSTRUCTIONS)
     expect(out).not.toContain('wrapping up the thread')
     expect(out).not.toContain('do not turn the closer into a fresh exchange')
@@ -898,9 +903,9 @@ describe('categoryInstructionsFor — warm close (TAC-560)', () => {
     expect(categoryInstructionsFor('acknowledgment', 'instagram')).toBe(
       ACKNOWLEDGMENT_INSTRUCTIONS,
     )
-    expect(categoryInstructionsFor('acknowledgment', 'instagram', null, false)).toBe(
-      ACKNOWLEDGMENT_INSTRUCTIONS,
-    )
+    expect(
+      categoryInstructionsFor('acknowledgment', 'instagram', null, false),
+    ).toBe(ACKNOWLEDGMENT_INSTRUCTIONS)
   })
 
   it('beats the guest_arrived exception when both are somehow set', () => {
@@ -908,7 +913,12 @@ describe('categoryInstructionsFor — warm close (TAC-560)', () => {
     // guest and a warm close the last), but the order has to be decided rather
     // than accidental, and the close is the more specific claim about this turn.
     expect(
-      categoryInstructionsFor('guest_arrived', 'instagram', { hadPriorConversation: true }, true),
+      categoryInstructionsFor(
+        'guest_arrived',
+        'instagram',
+        { hadPriorConversation: true },
+        true,
+      ),
     ).toBe(WARM_CLOSE_INSTRUCTIONS)
   })
 
@@ -918,12 +928,19 @@ describe('categoryInstructionsFor — warm close (TAC-560)', () => {
     expect(categoryInstructionsFor('acknowledgment', 'text', null, true)).toBe(
       categoryInstructionsFor('acknowledgment', 'instagram', null, true),
     )
-    for (const claim of ['text', 'SMS', 'DM', 'number', 'Instagram', 'iMessage']) {
+    for (const claim of [
+      'text',
+      'SMS',
+      'DM',
+      'number',
+      'Instagram',
+      'iMessage',
+    ]) {
       expect(WARM_CLOSE_INSTRUCTIONS, claim).not.toContain(claim)
     }
   })
 
-  it('names no topic, so the venue\'s own voice rules carry them', () => {
+  it("names no topic, so the venue's own voice rules carry them", () => {
     for (const leaked of ['beans', 'specials', 'events', 'menu', 'coffee']) {
       expect(WARM_CLOSE_INSTRUCTIONS, leaked).not.toContain(leaked)
     }

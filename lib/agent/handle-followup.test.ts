@@ -1038,7 +1038,11 @@ describe('handleFollowup: never on Instagram (TAC-469)', () => {
     // asks for one bubble, and the warm close's NEVER_SPLIT_RNG must not leak
     // onto this path.
     it('does not force a single bubble', async () => {
-      await handleFollowup({ venueId: VENUE_ID, guestId: GUEST_ID, trigger: scanTrigger() })
+      await handleFollowup({
+        venueId: VENUE_ID,
+        guestId: GUEST_ID,
+        trigger: scanTrigger(),
+      })
       expect(dispatchReplyMock.mock.calls[0]?.[2]).not.toHaveProperty('rng')
     })
 
@@ -1302,10 +1306,12 @@ describe('handleFollowup — the warm close (TAC-560)', () => {
   })
 
   beforeEach(() => {
-    buildRuntimeContextMock.mockImplementation(async (args: { followupTrigger: RuntimeContext['followupTrigger'] }) => ({
-      ...makeCtx(args.followupTrigger),
-      conversationChannel: 'instagram',
-    }))
+    buildRuntimeContextMock.mockImplementation(
+      async (args: { followupTrigger: RuntimeContext['followupTrigger'] }) => ({
+        ...makeCtx(args.followupTrigger),
+        conversationChannel: 'instagram',
+      }),
+    )
     // Same trap the scan-greeting block documents: both are reset by the file's
     // own beforeEach with no default, and this block is one of the few that
     // generates and therefore reaches them.
@@ -1327,7 +1333,11 @@ describe('handleFollowup — the warm close (TAC-560)', () => {
   })
 
   it('sends through dispatchReply, never scheduleAndSend', async () => {
-    await handleFollowup({ venueId: VENUE_ID, guestId: GUEST_ID, trigger: warmTrigger() })
+    await handleFollowup({
+      venueId: VENUE_ID,
+      guestId: GUEST_ID,
+      trigger: warmTrigger(),
+    })
     expect(dispatchReplyMock).toHaveBeenCalledTimes(1)
     expect(scheduleAndSendMock).not.toHaveBeenCalled()
   })
@@ -1338,8 +1348,14 @@ describe('handleFollowup — the warm close (TAC-560)', () => {
   // at or above the split probability) rather than the literal, so a change to
   // either constant fails here.
   it('forces a single bubble', async () => {
-    await handleFollowup({ venueId: VENUE_ID, guestId: GUEST_ID, trigger: warmTrigger() })
-    const options = dispatchReplyMock.mock.calls[0]?.[2] as { rng?: () => number }
+    await handleFollowup({
+      venueId: VENUE_ID,
+      guestId: GUEST_ID,
+      trigger: warmTrigger(),
+    })
+    const options = dispatchReplyMock.mock.calls[0]?.[2] as {
+      rng?: () => number
+    }
     expect(options.rng).toBeTypeOf('function')
     expect(options.rng?.()).toBeGreaterThanOrEqual(SPLIT_PROBABILITY)
   })
@@ -1349,7 +1365,11 @@ describe('handleFollowup — the warm close (TAC-560)', () => {
   // answering everything before it, silencing the agent's reply to whatever the
   // guest says next.
   it('names the message the guest went quiet after', async () => {
-    await handleFollowup({ venueId: VENUE_ID, guestId: GUEST_ID, trigger: warmTrigger() })
+    await handleFollowup({
+      venueId: VENUE_ID,
+      guestId: GUEST_ID,
+      trigger: warmTrigger(),
+    })
     expect(dispatchReplyMock.mock.calls[0]?.[2]).toMatchObject({
       answersInboundId: 'our-last-msg',
     })
@@ -1362,12 +1382,22 @@ describe('handleFollowup — the warm close (TAC-560)', () => {
   // processor's candidate scan takes the guest's newest message, so a reply staff
   // typed by hand becomes the anchor and the pause restarts.
   it('exempts the reply check', async () => {
-    await handleFollowup({ venueId: VENUE_ID, guestId: GUEST_ID, trigger: warmTrigger() })
-    expect(dispatchReplyMock.mock.calls[0]?.[2]).toMatchObject({ replyCheck: 'exempt' })
+    await handleFollowup({
+      venueId: VENUE_ID,
+      guestId: GUEST_ID,
+      trigger: warmTrigger(),
+    })
+    expect(dispatchReplyMock.mock.calls[0]?.[2]).toMatchObject({
+      replyCheck: 'exempt',
+    })
   })
 
   it('records it as acknowledgment, so no messages.category widening is needed', async () => {
-    await handleFollowup({ venueId: VENUE_ID, guestId: GUEST_ID, trigger: warmTrigger() })
+    await handleFollowup({
+      venueId: VENUE_ID,
+      guestId: GUEST_ID,
+      trigger: warmTrigger(),
+    })
     expect(generateStageMock.mock.calls[0]?.[1]).toBe('acknowledgment')
   })
 
@@ -1375,30 +1405,40 @@ describe('handleFollowup — the warm close (TAC-560)', () => {
   // is refused here rather than routed, so nothing can reach a text send by this
   // path.
   it('refuses a text conversation', async () => {
-    buildRuntimeContextMock.mockImplementation(async (args: { followupTrigger: RuntimeContext['followupTrigger'] }) => ({
-      ...makeCtx(args.followupTrigger),
-      conversationChannel: 'text',
-    }))
+    buildRuntimeContextMock.mockImplementation(
+      async (args: { followupTrigger: RuntimeContext['followupTrigger'] }) => ({
+        ...makeCtx(args.followupTrigger),
+        conversationChannel: 'text',
+      }),
+    )
     const result = await handleFollowup({
       venueId: VENUE_ID,
       guestId: GUEST_ID,
       trigger: warmTrigger(),
     })
-    expect(result).toEqual({ status: 'refused', reason: 'warm_close_is_instagram_only' })
+    expect(result).toEqual({
+      status: 'refused',
+      reason: 'warm_close_is_instagram_only',
+    })
     expect(generateStageMock).not.toHaveBeenCalled()
     expect(dispatchReplyMock).not.toHaveBeenCalled()
   })
 
   it('refuses an unresolved channel too', async () => {
-    buildRuntimeContextMock.mockImplementation(async (args: { followupTrigger: RuntimeContext['followupTrigger'] }) => ({
-      ...makeCtx(args.followupTrigger),
-      conversationChannel: null,
-    }))
+    buildRuntimeContextMock.mockImplementation(
+      async (args: { followupTrigger: RuntimeContext['followupTrigger'] }) => ({
+        ...makeCtx(args.followupTrigger),
+        conversationChannel: null,
+      }),
+    )
     const result = await handleFollowup({
       venueId: VENUE_ID,
       guestId: GUEST_ID,
       trigger: warmTrigger(),
     })
-    expect(result).toEqual({ status: 'refused', reason: 'warm_close_is_instagram_only' })
+    expect(result).toEqual({
+      status: 'refused',
+      reason: 'warm_close_is_instagram_only',
+    })
   })
 })

@@ -61,7 +61,10 @@ describe('FOLLOWUP_RULES_DEFAULT', () => {
       cron_hour_local: 10,
     })
     for (const [key, value] of Object.entries(MIGRATION_028_LITERAL)) {
-      expect(FOLLOWUP_RULES_DEFAULT[key as keyof typeof FOLLOWUP_RULES_DEFAULT], key).toEqual(value)
+      expect(
+        FOLLOWUP_RULES_DEFAULT[key as keyof typeof FOLLOWUP_RULES_DEFAULT],
+        key,
+      ).toEqual(value)
     }
   })
 
@@ -69,7 +72,10 @@ describe('FOLLOWUP_RULES_DEFAULT', () => {
     // The exact key set, so a twelfth key cannot arrive silently. TAC-560's
     // `warm_close_pause_minutes` is the only one so far.
     expect(Object.keys(FOLLOWUP_RULES_DEFAULT).sort()).toEqual(
-      [...Object.keys(MIGRATION_028_LITERAL), 'warm_close_pause_minutes'].sort(),
+      [
+        ...Object.keys(MIGRATION_028_LITERAL),
+        'warm_close_pause_minutes',
+      ].sort(),
     )
     expect(FOLLOWUP_RULES_DEFAULT.warm_close_pause_minutes).toBe(10)
   })

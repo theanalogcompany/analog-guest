@@ -1135,7 +1135,11 @@ describe("runtimeToProse — ## What you're hoping to get to block (TAC-324)", (
 // TAC-560: the pause-triggered warm close.
 describe('runtimeToProse — ## Closing this conversation (TAC-560)', () => {
   const render = (over: Record<string, unknown> = {}): string =>
-    runtimeToProse({ mechanics: [], warmClose: true, ...over }, 'acknowledgment', NOW)
+    runtimeToProse(
+      { mechanics: [], warmClose: true, ...over },
+      'acknowledgment',
+      NOW,
+    )
 
   /** Just this block, so a later block's wording cannot satisfy or trip a check. */
   const block = (out: string): string => {
@@ -1147,12 +1151,12 @@ describe('runtimeToProse — ## Closing this conversation (TAC-560)', () => {
   }
 
   it('omits the block on every other turn', () => {
-    expect(runtimeToProse({ mechanics: [] }, 'acknowledgment', NOW)).not.toContain(
-      '## Closing this conversation',
-    )
-    expect(runtimeToProse({ mechanics: [], warmClose: false }, 'reply', NOW)).not.toContain(
-      '## Closing this conversation',
-    )
+    expect(
+      runtimeToProse({ mechanics: [] }, 'acknowledgment', NOW),
+    ).not.toContain('## Closing this conversation')
+    expect(
+      runtimeToProse({ mechanics: [], warmClose: false }, 'reply', NOW),
+    ).not.toContain('## Closing this conversation')
   })
 
   // THE PREMISE IS THE WHOLE REASON THE BLOCK EXISTS. Le Mil's rule 15 fires on
@@ -1170,7 +1174,7 @@ describe('runtimeToProse — ## Closing this conversation (TAC-560)', () => {
   // It must NOT name the three topics. They are Le Mil's choice, carried in that
   // venue's own voice rules; restating them here would ship one venue's product
   // decision into every venue's prompt.
-  it('points at the venue\'s own voice rules rather than naming any topic', () => {
+  it("points at the venue's own voice rules rather than naming any topic", () => {
     const out = render()
     expect(out).toContain(
       'Send the warm close your voice rules describe for a first conversation that is winding down: let them know the line is open, and name the things they can message about anytime, in your own words.',
@@ -1203,7 +1207,12 @@ describe('runtimeToProse — ## Closing this conversation (TAC-560)', () => {
         today,
         mechanics: [],
         warmClose: true,
-        recentVisits: [{ visitedAt: new Date(NOW.getTime() - 86_400_000), items: ['cortado'] }],
+        recentVisits: [
+          {
+            visitedAt: new Date(NOW.getTime() - 86_400_000),
+            items: ['cortado'],
+          },
+        ],
         emojiDirective: 'none',
       },
       'acknowledgment',

@@ -52,7 +52,10 @@ import {
 } from './pending-slots'
 import { extractReportedOrder } from './extract-reported-order'
 import { renderableIntentions } from './intentions/derive'
-import { recordIntentionEligibility, recordIntentionPrompts } from './intentions/record'
+import {
+  recordIntentionEligibility,
+  recordIntentionPrompts,
+} from './intentions/record'
 import { markWarmCloseSent } from './warm-close-store'
 import { recordInboundTurnOutcome } from './record-inbound-turn-outcome'
 import { isVenueProcessingHalted } from '@/lib/venues/status'

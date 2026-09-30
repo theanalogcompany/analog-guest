@@ -36,7 +36,10 @@ import { randomUUID } from 'node:crypto'
 import { createAdminClient } from '@/lib/db/admin'
 import { parseFollowupRules } from '@/lib/schemas'
 import { isVenueProcessingHalted } from '@/lib/venues/status'
-import { captureWarmCloseSent, captureWarmCloseSkipped } from '@/lib/analytics/posthog'
+import {
+  captureWarmCloseSent,
+  captureWarmCloseSkipped,
+} from '@/lib/analytics/posthog'
 import { isQuietHour } from './followup-rules'
 import type { AgentResult } from './types'
 import { handleFollowup } from './handle-followup'
@@ -139,7 +142,12 @@ export async function processDueWarmCloses(
   now: Date = new Date(),
   supabase: AdminSupabaseClient = createAdminClient(),
 ): Promise<ProcessWarmClosesResult> {
-  const result: ProcessWarmClosesResult = { scanned: 0, closed: 0, skipped: {}, errored: 0 }
+  const result: ProcessWarmClosesResult = {
+    scanned: 0,
+    closed: 0,
+    skipped: {},
+    errored: 0,
+  }
   const bump = (reason: WarmCloseSkipReason) => {
     result.skipped[reason] = (result.skipped[reason] ?? 0) + 1
   }
@@ -168,7 +176,11 @@ export async function processDueWarmCloses(
     // The window is bounded by the max age, so the scan is small: at two hours
     // this is a handful of rows per venue.
     const windowStart = new Date(now.getTime() - 2 * 60 * 60 * 1000)
-    const candidates = await loadWarmCloseCandidates(supabase, venue.id, windowStart)
+    const candidates = await loadWarmCloseCandidates(
+      supabase,
+      venue.id,
+      windowStart,
+    )
     if (!candidates.ok) {
       console.error('[warm-close] could not read candidates', {
         venueId: venue.id,
@@ -260,7 +272,10 @@ async function considerCandidate(
   // Cheapest first, and both are pure.
   if (isWarmCloseTooLate(candidate.sentAt, now)) return 'too_late'
 
-  const askedQuestion = weAskedAQuestion(candidate.body, candidate.renderedIntentionCount)
+  const askedQuestion = weAskedAQuestion(
+    candidate.body,
+    candidate.renderedIntentionCount,
+  )
   const floorMs = warmCloseFloorMs(gate.pauseMs, askedQuestion)
   if (!isWarmCloseDue(candidate.sentAt, now, floorMs)) return 'not_yet'
 
@@ -284,12 +299,24 @@ async function considerCandidate(
   // resolving the channel properly is dispatchReply's job and it re-checks.
   if (facts.data.instagramScopedId === null) return 'not_instagram'
   if (facts.data.firstContactedAt === null) return 'not_first_conversation'
-  if (!isFirstConversation(facts.data.firstContactedAt, now, gate.conversationWindowMs)) {
+  if (
+    !isFirstConversation(
+      facts.data.firstContactedAt,
+      now,
+      gate.conversationWindowMs,
+    )
+  ) {
     return 'not_first_conversation'
   }
 
   // The belt behind the model's own self-report. See loadLastInboundCategory.
-  if ((await loadLastInboundCategory(supabase, candidate.venueId, candidate.guestId)) === 'acknowledgment') {
+  if (
+    (await loadLastInboundCategory(
+      supabase,
+      candidate.venueId,
+      candidate.guestId,
+    )) === 'acknowledgment'
+  ) {
     return 'closed_in_conversation'
   }
 
@@ -297,8 +324,14 @@ async function considerCandidate(
   // landing under them would answer for them. loadPendingRowsBySlot is the ONE
   // per-guest pending read in the repo (a fresh query here would trip the source
   // guard in pending-slots.test.ts) and it fails OPEN to two empty slots.
-  const pending = await loadPendingRowsBySlot(candidate.venueId, candidate.guestId)
-  if (pending !== null && (pending.obligation !== null || pending.conversation.length > 0)) {
+  const pending = await loadPendingRowsBySlot(
+    candidate.venueId,
+    candidate.guestId,
+  )
+  if (
+    pending !== null &&
+    (pending.obligation !== null || pending.conversation.length > 0)
+  ) {
     return 'card_pending'
   }
 

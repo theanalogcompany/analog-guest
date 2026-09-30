@@ -28,7 +28,8 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.unstubAllEnvs()
-  if (originalExternalCronSecret === undefined) delete process.env.EXTERNAL_CRON_SECRET
+  if (originalExternalCronSecret === undefined)
+    delete process.env.EXTERNAL_CRON_SECRET
   else process.env.EXTERNAL_CRON_SECRET = originalExternalCronSecret
   if (originalCronSecret === undefined) delete process.env.CRON_SECRET
   else process.env.CRON_SECRET = originalCronSecret

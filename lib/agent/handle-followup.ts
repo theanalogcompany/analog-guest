@@ -176,7 +176,9 @@ function answeredMessageIdOf(trigger: FollowupTrigger): string | null {
  * It still sets reply_to_message_id (see answeredMessageIdOf), which is what
  * stops it reading as an answer to everything before it.
  */
-function replyCheckFor(trigger: FollowupTrigger): { inboundMessageId: string } | 'exempt' {
+function replyCheckFor(
+  trigger: FollowupTrigger,
+): { inboundMessageId: string } | 'exempt' {
   if (trigger.reason === 'warm_close') return 'exempt'
   const id = scanMessageIdOf(trigger)
   return id === null ? 'exempt' : { inboundMessageId: id }
@@ -388,16 +390,20 @@ export async function handleFollowup(input: {
     // 2026-09-29, the warm close is INSTAGRAM ONLY for now, so a text
     // conversation is refused here rather than routed. The SMS arm is a
     // follow-up.
-    const isInstagramScanArrival = input.trigger.reason === 'instagram_scan_arrival'
+    const isInstagramScanArrival =
+      input.trigger.reason === 'instagram_scan_arrival'
     const isWarmClose = input.trigger.reason === 'warm_close'
     const routesThroughDispatchReply = isInstagramScanArrival || isWarmClose
     if (isWarmClose && ctx.conversationChannel !== 'instagram') {
       const reason = 'warm_close_is_instagram_only'
-      console.warn('[agent] warm close refused: not an Instagram conversation', {
-        agentRunId,
-        guestId: ctx.guest.id,
-        channel: ctx.conversationChannel,
-      })
+      console.warn(
+        '[agent] warm close refused: not an Instagram conversation',
+        {
+          agentRunId,
+          guestId: ctx.guest.id,
+          channel: ctx.conversationChannel,
+        },
+      )
       trace.update({ output: { status: 'refused', reason } })
       return { status: 'refused', reason }
     }

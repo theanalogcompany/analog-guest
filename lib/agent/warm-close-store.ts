@@ -35,7 +35,8 @@ type AdminSupabaseClient = SupabaseClient<Database>
 /** How many candidate outbound rows one tick looks at, per venue. */
 export const WARM_CLOSE_SCAN_LIMIT = 50
 
-export type StoreResult<T> = { ok: true; data: T } | { ok: false; error: string }
+export type StoreResult<T> =
+  { ok: true; data: T } | { ok: false; error: string }
 
 /** A venue the scan has to consider. */
 export interface WarmCloseVenue {
@@ -87,7 +88,9 @@ export async function loadWarmCloseVenues(
 ): Promise<StoreResult<WarmCloseVenue[]>> {
   const { data, error } = await supabase
     .from('venues')
-    .select('id, timezone, status, instagram_account_id, venue_configs(followup_rules)')
+    .select(
+      'id, timezone, status, instagram_account_id, venue_configs(followup_rules)',
+    )
   if (error) return { ok: false, error: error.message }
 
   return {
@@ -103,7 +106,9 @@ export async function loadWarmCloseVenues(
         timezone: row.timezone ?? null,
         status: row.status ?? null,
         instagramAccountId: row.instagram_account_id ?? null,
-        followupRules: (config as { followup_rules?: unknown } | null)?.followup_rules ?? null,
+        followupRules:
+          (config as { followup_rules?: unknown } | null)?.followup_rules ??
+          null,
       }
     }),
   }
@@ -206,9 +211,13 @@ export async function loadWarmCloseGuestFacts(
   if (!data) return { ok: false, error: 'guest not found' }
 
   const firstContactedAt =
-    typeof data.first_contacted_at === 'string' ? new Date(data.first_contacted_at) : null
+    typeof data.first_contacted_at === 'string'
+      ? new Date(data.first_contacted_at)
+      : null
   const warmCloseSentAt =
-    typeof data.warm_close_sent_at === 'string' ? new Date(data.warm_close_sent_at) : null
+    typeof data.warm_close_sent_at === 'string'
+      ? new Date(data.warm_close_sent_at)
+      : null
 
   return {
     ok: true,
@@ -222,7 +231,10 @@ export async function loadWarmCloseGuestFacts(
         warmCloseSentAt !== null && Number.isFinite(warmCloseSentAt.getTime())
           ? warmCloseSentAt
           : null,
-      optedOutAt: typeof data.opted_out_at === 'string' ? new Date(data.opted_out_at) : null,
+      optedOutAt:
+        typeof data.opted_out_at === 'string'
+          ? new Date(data.opted_out_at)
+          : null,
       instagramScopedId: data.instagram_scoped_id ?? null,
       phoneNumber: data.phone_number ?? null,
     },
@@ -316,10 +328,13 @@ export async function releaseWarmCloseClaim(
     .eq('id', guestId)
     .eq('warm_close_sent_at', claimedAt.toISOString())
   if (error) {
-    console.warn('[warm-close] could not release claim; this guest will not be closed again', {
-      guestId,
-      error: error.message,
-    })
+    console.warn(
+      '[warm-close] could not release claim; this guest will not be closed again',
+      {
+        guestId,
+        error: error.message,
+      },
+    )
   }
 }
 
@@ -343,5 +358,8 @@ export async function markWarmCloseSent(
     .is('warm_close_sent_at', null)
     .select('id')
   if (error) return { ok: false, error: error.message }
-  return { ok: true, data: (data ?? []).length === 1 ? 'marked' : 'already_marked' }
+  return {
+    ok: true,
+    data: (data ?? []).length === 1 ? 'marked' : 'already_marked',
+  }
 }

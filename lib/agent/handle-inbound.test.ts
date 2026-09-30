@@ -270,7 +270,8 @@ vi.mock('@/lib/analytics/posthog', () => ({
   captureAgentLatencyHigh: vi.fn(),
   captureDraftQueued: (...a: unknown[]) => captureDraftQueuedMock(...a),
   captureWarmCloseSent: (...a: unknown[]) => captureWarmCloseSentMock(...a),
-  captureCrisisSafetyReplySent: (...a: unknown[]) => captureCrisisSafetyReplySentMock(...a),
+  captureCrisisSafetyReplySent: (...a: unknown[]) =>
+    captureCrisisSafetyReplySentMock(...a),
   captureDraftRegenerated: vi.fn(),
   captureDraftDropped: (...a: unknown[]) => captureDraftDroppedMock(...a),
   captureIntentionPromptRecordingFailed: (...a: unknown[]) =>
@@ -4229,7 +4230,10 @@ describe('TAC-540 — each verify check owns its own span window', () => {
 describe('handleInbound — the warm close marker (TAC-560)', () => {
   beforeEach(() => {
     markWarmCloseSentMock.mockResolvedValue({ ok: true, data: 'marked' })
-    generateStageMock.mockResolvedValue({ status: 'success', result: successResult() })
+    generateStageMock.mockResolvedValue({
+      status: 'success',
+      result: successResult(),
+    })
   })
 
   it('writes the marker when the model reports this reply WAS the close', async () => {
@@ -4257,13 +4261,19 @@ describe('handleInbound — the warm close marker (TAC-560)', () => {
     })
     await handleInbound(INBOUND_ID)
     expect(captureWarmCloseSentMock).toHaveBeenCalledWith(
-      expect.objectContaining({ via: 'in_conversation', markerOutcome: 'marked' }),
+      expect.objectContaining({
+        via: 'in_conversation',
+        markerOutcome: 'marked',
+      }),
     )
   })
 
   it('reports an existing marker rather than overwriting it', async () => {
     // A guest the timer closed moments earlier keeps that earlier timestamp.
-    markWarmCloseSentMock.mockResolvedValue({ ok: true, data: 'already_marked' })
+    markWarmCloseSentMock.mockResolvedValue({
+      ok: true,
+      data: 'already_marked',
+    })
     generateStageMock.mockResolvedValue({
       status: 'success',
       result: { ...successResult(), closedTheConversation: true },

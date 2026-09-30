@@ -8,7 +8,10 @@
 
 import { describe, expect, it } from 'vitest'
 
-import { callsNamed, queryRecorder } from '@/lib/messaging/instagram/testing/query-recorder'
+import {
+  callsNamed,
+  queryRecorder,
+} from '@/lib/messaging/instagram/testing/query-recorder'
 import {
   claimWarmClose,
   loadLastInboundCategory,
@@ -49,22 +52,52 @@ describe('loadWarmCloseVenues (TAC-560)', () => {
     const { client, queries } = queryRecorder({ venues: [ok([])] })
     await loadWarmCloseVenues(client)
     const [select] = callsNamed(queries[0], 'select')[0] as [string]
-    for (const column of ['id', 'timezone', 'status', 'instagram_account_id', 'followup_rules']) {
+    for (const column of [
+      'id',
+      'timezone',
+      'status',
+      'instagram_account_id',
+      'followup_rules',
+    ]) {
       expect(select, column).toContain(column)
     }
   })
 
   it('reads an embedded config as either an object or a one-element array', async () => {
     const asArray = queryRecorder({
-      venues: [ok([{ id: VENUE, timezone: 'UTC', status: 'pending', instagram_account_id: 'ig', venue_configs: [{ followup_rules: { weekly_cap: 3 } }] }])],
+      venues: [
+        ok([
+          {
+            id: VENUE,
+            timezone: 'UTC',
+            status: 'pending',
+            instagram_account_id: 'ig',
+            venue_configs: [{ followup_rules: { weekly_cap: 3 } }],
+          },
+        ]),
+      ],
     })
     const fromArray = await loadWarmCloseVenues(asArray.client)
     const asObject = queryRecorder({
-      venues: [ok([{ id: VENUE, timezone: 'UTC', status: 'pending', instagram_account_id: 'ig', venue_configs: { followup_rules: { weekly_cap: 3 } } }])],
+      venues: [
+        ok([
+          {
+            id: VENUE,
+            timezone: 'UTC',
+            status: 'pending',
+            instagram_account_id: 'ig',
+            venue_configs: { followup_rules: { weekly_cap: 3 } },
+          },
+        ]),
+      ],
     })
     const fromObject = await loadWarmCloseVenues(asObject.client)
-    expect(fromArray.ok && fromArray.data[0].followupRules).toEqual({ weekly_cap: 3 })
-    expect(fromObject.ok && fromObject.data[0].followupRules).toEqual({ weekly_cap: 3 })
+    expect(fromArray.ok && fromArray.data[0].followupRules).toEqual({
+      weekly_cap: 3,
+    })
+    expect(fromObject.ok && fromObject.data[0].followupRules).toEqual({
+      weekly_cap: 3,
+    })
   })
 })
 
@@ -74,13 +107,20 @@ describe('loadWarmCloseCandidates (TAC-560)', () => {
     await loadWarmCloseCandidates(client, VENUE, WINDOW_START)
     const q = queries[0]
     expect(callsNamed(q, 'eq')).toEqual(
-      expect.arrayContaining([['venue_id', VENUE], ['channel', 'instagram']]),
+      expect.arrayContaining([
+        ['venue_id', VENUE],
+        ['channel', 'instagram'],
+      ]),
     )
-    expect(callsNamed(q, 'gte')).toEqual([['created_at', WINDOW_START.toISOString()]])
+    expect(callsNamed(q, 'gte')).toEqual([
+      ['created_at', WINDOW_START.toISOString()],
+    ])
     // Newest first is load-bearing: the newest row per guest is what decides
     // whether our outbound is still our last word. Ascending would hand the
     // oldest row in the window to a guest who has since replied.
-    expect(callsNamed(q, 'order')).toEqual([['created_at', { ascending: false }]])
+    expect(callsNamed(q, 'order')).toEqual([
+      ['created_at', { ascending: false }],
+    ])
   })
 
   it('does NOT filter direction in SQL, so a newer inbound stays visible', async () => {
@@ -105,7 +145,16 @@ describe('loadWarmCloseCandidates (TAC-560)', () => {
     // The newest row is theirs, so they are marked seen and our older outbound
     // never becomes a candidate. This is how the timer resets on a reply.
     const { client } = queryRecorder({
-      messages: [ok([row({ id: 'm-in', direction: 'inbound', created_at: '2026-09-29T14:05:00.000Z' }), row()])],
+      messages: [
+        ok([
+          row({
+            id: 'm-in',
+            direction: 'inbound',
+            created_at: '2026-09-29T14:05:00.000Z',
+          }),
+          row(),
+        ]),
+      ],
     })
     const r = await loadWarmCloseCandidates(client, VENUE, WINDOW_START)
     expect(r.ok && r.data).toEqual([])
@@ -121,7 +170,16 @@ describe('loadWarmCloseCandidates (TAC-560)', () => {
       { review_state: 'auto_sent', status: 'failed' },
     ]) {
       const { client } = queryRecorder({
-        messages: [ok([row({ id: 'm-new', created_at: '2026-09-29T14:05:00.000Z', ...undelivered }), row()])],
+        messages: [
+          ok([
+            row({
+              id: 'm-new',
+              created_at: '2026-09-29T14:05:00.000Z',
+              ...undelivered,
+            }),
+            row(),
+          ]),
+        ],
       })
       const r = await loadWarmCloseCandidates(client, VENUE, WINDOW_START)
       expect(r.ok && r.data, JSON.stringify(undelivered)).toEqual([])
@@ -129,12 +187,20 @@ describe('loadWarmCloseCandidates (TAC-560)', () => {
   })
 
   it('counts rendered intentions off the carrier, and reads a missing one as none', async () => {
-    const withOne = queryRecorder({ messages: [ok([row({ rendered_intentions: [{ key: 'learn_name' }] })])] })
+    const withOne = queryRecorder({
+      messages: [ok([row({ rendered_intentions: [{ key: 'learn_name' }] })])],
+    })
     const a = await loadWarmCloseCandidates(withOne.client, VENUE, WINDOW_START)
     expect(a.ok && a.data[0].renderedIntentionCount).toBe(1)
 
-    const withNone = queryRecorder({ messages: [ok([row({ rendered_intentions: null })])] })
-    const b = await loadWarmCloseCandidates(withNone.client, VENUE, WINDOW_START)
+    const withNone = queryRecorder({
+      messages: [ok([row({ rendered_intentions: null })])],
+    })
+    const b = await loadWarmCloseCandidates(
+      withNone.client,
+      VENUE,
+      WINDOW_START,
+    )
     expect(b.ok && b.data[0].renderedIntentionCount).toBe(0)
   })
 })
@@ -142,19 +208,25 @@ describe('loadWarmCloseCandidates (TAC-560)', () => {
 describe('loadWarmCloseGuestFacts (TAC-560)', () => {
   it('selects every field a gate reads, scoped to the guest', async () => {
     const { client, queries } = queryRecorder({
-      guests: [ok({
-        created_via: 'qr_scan',
-        first_contacted_at: '2026-09-29T13:50:00.000Z',
-        warm_close_sent_at: null,
-        opted_out_at: null,
-        instagram_scoped_id: 'igsid',
-        phone_number: null,
-      })],
+      guests: [
+        ok({
+          created_via: 'qr_scan',
+          first_contacted_at: '2026-09-29T13:50:00.000Z',
+          warm_close_sent_at: null,
+          opted_out_at: null,
+          instagram_scoped_id: 'igsid',
+          phone_number: null,
+        }),
+      ],
     })
     const r = await loadWarmCloseGuestFacts(client, GUEST)
     const [select] = callsNamed(queries[0], 'select')[0] as [string]
     for (const column of [
-      'created_via', 'first_contacted_at', 'warm_close_sent_at', 'opted_out_at', 'instagram_scoped_id',
+      'created_via',
+      'first_contacted_at',
+      'warm_close_sent_at',
+      'opted_out_at',
+      'instagram_scoped_id',
     ]) {
       expect(select, column).toContain(column)
     }
@@ -164,21 +236,25 @@ describe('loadWarmCloseGuestFacts (TAC-560)', () => {
 
   it('reads an unparseable timestamp as absent rather than as a date', async () => {
     const { client } = queryRecorder({
-      guests: [ok({
-        created_via: 'qr_scan',
-        first_contacted_at: 'nonsense',
-        warm_close_sent_at: null,
-        opted_out_at: null,
-        instagram_scoped_id: 'igsid',
-        phone_number: null,
-      })],
+      guests: [
+        ok({
+          created_via: 'qr_scan',
+          first_contacted_at: 'nonsense',
+          warm_close_sent_at: null,
+          opted_out_at: null,
+          instagram_scoped_id: 'igsid',
+          phone_number: null,
+        }),
+      ],
     })
     const r = await loadWarmCloseGuestFacts(client, GUEST)
     expect(r.ok && r.data.firstContactedAt).toBeNull()
   })
 
   it('is an error, not a default, when the guest cannot be read', async () => {
-    const { client } = queryRecorder({ guests: [{ data: null, error: { message: 'boom' } }] })
+    const { client } = queryRecorder({
+      guests: [{ data: null, error: { message: 'boom' } }],
+    })
     const r = await loadWarmCloseGuestFacts(client, GUEST)
     expect(r.ok).toBe(false)
   })
@@ -186,17 +262,27 @@ describe('loadWarmCloseGuestFacts (TAC-560)', () => {
 
 describe('loadLastInboundCategory (TAC-560)', () => {
   it('reads the newest inbound for this guest at this venue', async () => {
-    const { client, queries } = queryRecorder({ messages: [ok({ category: 'acknowledgment' })] })
+    const { client, queries } = queryRecorder({
+      messages: [ok({ category: 'acknowledgment' })],
+    })
     const category = await loadLastInboundCategory(client, VENUE, GUEST)
     expect(category).toBe('acknowledgment')
     expect(callsNamed(queries[0], 'eq')).toEqual(
-      expect.arrayContaining([['venue_id', VENUE], ['guest_id', GUEST], ['direction', 'inbound']]),
+      expect.arrayContaining([
+        ['venue_id', VENUE],
+        ['guest_id', GUEST],
+        ['direction', 'inbound'],
+      ]),
     )
-    expect(callsNamed(queries[0], 'order')).toEqual([['created_at', { ascending: false }]])
+    expect(callsNamed(queries[0], 'order')).toEqual([
+      ['created_at', { ascending: false }],
+    ])
   })
 
   it('reads an unreadable answer as no signal rather than as a sign-off', async () => {
-    const { client } = queryRecorder({ messages: [{ data: null, error: { message: 'boom' } }] })
+    const { client } = queryRecorder({
+      messages: [{ data: null, error: { message: 'boom' } }],
+    })
     expect(await loadLastInboundCategory(client, VENUE, GUEST)).toBeNull()
   })
 })
@@ -206,7 +292,9 @@ describe('claimWarmClose (TAC-560)', () => {
     const { client, queries } = queryRecorder({ guests: [ok([{ id: GUEST }])] })
     const r = await claimWarmClose(client, GUEST, NOW)
     expect(r).toEqual({ status: 'claimed' })
-    expect(callsNamed(queries[0], 'update')).toEqual([[{ warm_close_sent_at: NOW.toISOString() }]])
+    expect(callsNamed(queries[0], 'update')).toEqual([
+      [{ warm_close_sent_at: NOW.toISOString() }],
+    ])
     expect(callsNamed(queries[0], 'eq')).toEqual([['id', GUEST]])
     // THE PREDICATE IS THE WHOLE MECHANISM. Without it two ticks both "claim",
     // and a guest already closed weeks ago gets closed again.
@@ -219,8 +307,13 @@ describe('claimWarmClose (TAC-560)', () => {
   })
 
   it('is a failure, never a win, when the update errors', async () => {
-    const { client } = queryRecorder({ guests: [{ data: null, error: { message: 'boom' } }] })
-    expect(await claimWarmClose(client, GUEST, NOW)).toEqual({ status: 'failed', error: 'boom' })
+    const { client } = queryRecorder({
+      guests: [{ data: null, error: { message: 'boom' } }],
+    })
+    expect(await claimWarmClose(client, GUEST, NOW)).toEqual({
+      status: 'failed',
+      error: 'boom',
+    })
   })
 })
 
@@ -230,9 +323,14 @@ describe('releaseWarmCloseClaim (TAC-560)', () => {
     // set in between.
     const { client, queries } = queryRecorder({ guests: [ok([{ id: GUEST }])] })
     await releaseWarmCloseClaim(client, GUEST, NOW)
-    expect(callsNamed(queries[0], 'update')).toEqual([[{ warm_close_sent_at: null }]])
+    expect(callsNamed(queries[0], 'update')).toEqual([
+      [{ warm_close_sent_at: null }],
+    ])
     expect(callsNamed(queries[0], 'eq')).toEqual(
-      expect.arrayContaining([['id', GUEST], ['warm_close_sent_at', NOW.toISOString()]]),
+      expect.arrayContaining([
+        ['id', GUEST],
+        ['warm_close_sent_at', NOW.toISOString()],
+      ]),
     )
   })
 })
@@ -240,10 +338,15 @@ describe('releaseWarmCloseClaim (TAC-560)', () => {
 describe('markWarmCloseSent (TAC-560)', () => {
   it('marks, and reports an existing marker rather than overwriting it', async () => {
     const fresh = queryRecorder({ guests: [ok([{ id: GUEST }])] })
-    expect(await markWarmCloseSent(fresh.client, GUEST, NOW)).toEqual({ ok: true, data: 'marked' })
+    expect(await markWarmCloseSent(fresh.client, GUEST, NOW)).toEqual({
+      ok: true,
+      data: 'marked',
+    })
     // `is null` still guards: a guest the timer closed moments earlier keeps that
     // earlier timestamp.
-    expect(callsNamed(fresh.queries[0], 'is')).toEqual([['warm_close_sent_at', null]])
+    expect(callsNamed(fresh.queries[0], 'is')).toEqual([
+      ['warm_close_sent_at', null],
+    ])
 
     const already = queryRecorder({ guests: [ok([])] })
     expect(await markWarmCloseSent(already.client, GUEST, NOW)).toEqual({

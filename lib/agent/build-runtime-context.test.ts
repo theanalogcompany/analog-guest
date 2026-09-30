@@ -541,3 +541,23 @@ function balancedCallText(src: string, from: number): string {
   }
   throw new Error('unbalanced call text')
 }
+
+// TAC-560: the other end of the same wiring, and the same reason. A mutant
+// hardcoding `warmClose: false` here survived every test that could reach this
+// file, because buildRuntimeContext has no behavioural harness (see the header
+// above). With it hardcoded the close renders no block and reads as an ordinary
+// acknowledgment, which is the feature shipping inert.
+//
+// Source-level, like everything else in this file. It catches the flag being
+// hardcoded or read off the wrong thing; it does not prove the value is right at
+// runtime, which handle-followup.test.ts covers from the trigger side.
+describe('buildRuntimeContext: the warm-close flag (TAC-560)', () => {
+  const src = readFileSync(join(__dirname, 'build-runtime-context.ts'), 'utf-8')
+
+  it('derives warmClose from the trigger reason, never a literal', () => {
+    expect(src).toContain(
+      "warmClose: input.followupTrigger?.reason === 'warm_close',",
+    )
+    expect(src).not.toMatch(/warmClose:\s*(?:true|false)\s*,/)
+  })
+})

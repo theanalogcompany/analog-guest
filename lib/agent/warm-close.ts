@@ -79,8 +79,13 @@ export const WARM_CLOSE_QUESTION_FLOOR_MULTIPLIER = 2
  * Doubles when our own last message asked them something: closing warmly on top
  * of a question we just asked reads as abandoning it.
  */
-export function warmCloseFloorMs(pauseMs: number, weAskedAQuestion: boolean): number {
-  return weAskedAQuestion ? pauseMs * WARM_CLOSE_QUESTION_FLOOR_MULTIPLIER : pauseMs
+export function warmCloseFloorMs(
+  pauseMs: number,
+  weAskedAQuestion: boolean,
+): number {
+  return weAskedAQuestion
+    ? pauseMs * WARM_CLOSE_QUESTION_FLOOR_MULTIPLIER
+    : pauseMs
 }
 
 /**
@@ -90,7 +95,11 @@ export function warmCloseFloorMs(pauseMs: number, weAskedAQuestion: boolean): nu
  * floor the guest has had, not a deadline to beat, and a tick landing on the
  * exact millisecond should fire rather than wait another minute.
  */
-export function isWarmCloseDue(lastOutboundAt: Date, now: Date, floorMs: number): boolean {
+export function isWarmCloseDue(
+  lastOutboundAt: Date,
+  now: Date,
+  floorMs: number,
+): boolean {
   return now.getTime() - lastOutboundAt.getTime() >= floorMs
 }
 

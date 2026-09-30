@@ -79,7 +79,9 @@ describe('weAskedAQuestion (TAC-560)', () => {
   })
 
   it('is false for an ordinary statement with nothing rendered', () => {
-    expect(weAskedAQuestion('the cortado is our house pour, glad it landed', 0)).toBe(false)
+    expect(
+      weAskedAQuestion('the cortado is our house pour, glad it landed', 0),
+    ).toBe(false)
   })
 
   it('is false on an empty body', () => {
