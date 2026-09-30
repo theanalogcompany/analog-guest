@@ -59,14 +59,6 @@
  *                   classifierConfidence, inboundLength, inboundBody,
  *                   autoRoutedToUnknown }
  *
- * - corpus_retrieval_below_threshold
- *     Fires when the best-match similarity is below 0.5 (looser bar than the
- *     fail-closed gate of 1 above 0.3). Catches "thin retrieval" runs that
- *     succeed structurally but lack venue-voice grounding.
- *     Properties: { agentRunId, venueId, guestId, totalMatches,
- *                   strongMatchCount, topSimilarity, inboundBody,
- *                   topMatchPreview }
- *
  * - agent_latency_high
  *     Fires when handleInbound or handleFollowup total elapsed > 10s.
  *     Skipped on the duplicate-skip return path (fast, not interesting).
@@ -118,6 +110,7 @@
 
 import { PostHog } from 'posthog-node'
 import { logger } from '@/lib/observability/logger'
+
 import { postToSlack, truncate } from './slack'
 
 const SLACK_FIELD_TRUNCATE_CHARS = 300
@@ -168,9 +161,55 @@ export const CLASSIFICATION_CONFIDENCE_LOW_THRESHOLD = 0.7
 // `unknown` so the agent ships a holding response. Original pick is preserved
 // on the PostHog event payload for triage. Sits below the 0.7 LOW threshold.
 export const CLASSIFICATION_CONFIDENCE_REROUTE_THRESHOLD = 0.3
-export const CORPUS_TOP_SIMILARITY_LOW_THRESHOLD = 0.5
-export const AGENT_LATENCY_HIGH_THRESHOLD_MS = 10_000
 export const WEBHOOK_SILENCE_THRESHOLD_HOURS = 24
+
+/**
+ * Per-kind latency thresholds for the `agent_latency_high` event.
+ *
+ * PER-KIND BECAUSE ONE NUMBER CANNOT SERVE BOTH. Measured over 30 days to
+ * 2026-09-29, from the Langfuse traces endpoint:
+ *
+ *   agent.inbound    n=276  p50 18.0s  p90 28.0s  p95 31.5s  p99 40.7s  max 68.5s
+ *   agent.followup   n=132  p50  0.2s  p90  0.7s  p95  1.0s  p99 20.8s  max 21.9s
+ *
+ * They differ by ~90x at p50, because most followups never reach a model call.
+ * The single shared 10_000 that used to live here fired on **99.3% of inbound
+ * turns** (274/276) and relayed every one to Slack, which is how an alert
+ * channel gets trained into background noise.
+ *
+ * Chosen to sit in the genuine tail rather than on the body of the
+ * distribution, and deliberately NOT so high that the alarm can never fire —
+ * a gate whose true-positive history you cannot produce is not a gate:
+ *
+ *   inbound  35_000 -> fired on 7/276 = 2.5% of the measured window (above p95)
+ *   followup 20_000 -> fired on 2/132 = 1.5% (followup max is 21.9s, so this
+ *                      is reachable; 25_000 would have made it dead)
+ *
+ * Re-derive from the same source if the pipeline's shape changes, and check BOTH
+ * numbers still fire in the low single-digit percents. The query is in
+ * `lib/observability/CLAUDE.md`.
+ */
+export const AGENT_LATENCY_HIGH_THRESHOLD_MS = {
+  inbound: 35_000,
+  followup: 20_000,
+  // `satisfies`, not `:` — a `Record<AgentLatencyKind, number>` annotation would
+  // also accept a missing key via widening in some positions, and this must fail
+  // `tsc` if a third kind is added without a measured threshold.
+} satisfies Record<AgentLatencyKind, number>
+
+/**
+ * Whether a run's elapsed time clears the bar for its kind.
+ *
+ * A helper rather than exposing the record to call sites: three orchestrators
+ * compare against this, and an indexing expression at each is three chances to
+ * index with the wrong kind.
+ */
+export function isAgentLatencyHigh(
+  kind: AgentLatencyKind,
+  totalElapsedMs: number,
+): boolean {
+  return totalElapsedMs > AGENT_LATENCY_HIGH_THRESHOLD_MS[kind]
+}
 
 // ---------------------------------------------------------------------------
 // Named-event helpers
@@ -379,47 +418,10 @@ function formatClassificationLowConfidence(
   return lines.join('\n')
 }
 
-export interface CorpusRetrievalBelowThresholdProps {
-  agentRunId: string
-  venueId: string
-  guestId: string
-  totalMatches: number
-  strongMatchCount: number
-  topSimilarity: number
-  inboundBody: string | null
-  topMatchPreview: string | null
-}
-
-export async function captureCorpusRetrievalBelowThreshold(
-  props: CorpusRetrievalBelowThresholdProps,
-): Promise<void> {
-  await capturePostHogEvent('corpus_retrieval_below_threshold', props.guestId, {
-    ...props,
-  })
-  await postToSlack(formatCorpusRetrievalBelowThreshold(props))
-}
-
-function formatCorpusRetrievalBelowThreshold(
-  props: CorpusRetrievalBelowThresholdProps,
-): string {
-  const lines = [
-    `*Corpus retrieval thin* — top similarity \`${props.topSimilarity.toFixed(2)}\` (${props.strongMatchCount} strong matches above 0.3, ${props.totalMatches} total)`,
-    `venue: \`${props.venueId}\``,
-    `guest: \`${props.guestId}\``,
-    `run: \`${props.agentRunId}\``,
-  ]
-  if (props.inboundBody) {
-    lines.push(
-      `inbound: "${truncate(props.inboundBody, SLACK_FIELD_TRUNCATE_CHARS)}"`,
-    )
-  }
-  if (props.topMatchPreview) {
-    lines.push(
-      `top match preview: "${truncate(props.topMatchPreview, SLACK_FIELD_TRUNCATE_CHARS)}"`,
-    )
-  }
-  return lines.join('\n')
-}
+// `corpus_retrieval_below_threshold` (and CORPUS_TOP_SIMILARITY_LOW_THRESHOLD)
+// lived here until decision 0008 (2026-09-29): voice is a static per-venue
+// pack, so there is no similarity left to be thin. Historical PostHog rows
+// under that event name describe the retrieval era.
 
 // TAC-350: emitted from verifyGroundingStage (lib/agent/stages.ts) when the
 // independent grounding backstop catches an unverified claim in a reply the
@@ -432,8 +434,7 @@ function formatCorpusRetrievalBelowThreshold(
  * is queued, never sent.
  *
  * Slack-relays. A gate whose true-positive history cannot be produced on
- * demand is an unproven gate (CLAUDE.md, "Gotchas worth carrying everywhere" —
- * `comp_regex_backstop`
+ * demand is an unproven gate (CLAUDE.md, Common gotchas — `comp_regex_backstop`
  * read as a working comp backstop for two months on a single hit that was a
  * false positive). This one is expected to be quiet, which is exactly why each
  * firing should be visible rather than sitting in a PostHog count nobody
@@ -464,15 +465,34 @@ export async function captureUnverifiedUrlHeld(
   await postToSlack(formatUnverifiedUrlHeld(props))
 }
 
+/**
+ * Decision 0003 (rewritten 2026-09-29): where the draft was when a
+ * post-generation check fired.
+ *
+ *   'held' — the check ran BEFORE the send (followups, the holding message)
+ *            and the draft queued or blocked as a result.
+ *   'sent' — the check ran AFTER dispatch on the inbound path; the reply had
+ *            already reached the guest and this event is the Slack forward
+ *            for an upstream fix, not a hold notice.
+ *
+ * REQUIRED on every check event rather than defaulted, so each producer has
+ * to state which claim it is making — a headline that misstates whether a
+ * guest saw the reply is worse than none (the TAC-424 lesson).
+ */
+export type CheckDisposition = 'held' | 'sent'
+
 export interface UngroundedClaimCaughtProps {
   agentRunId: string
   venueId: string
   guestId: string
   inboundBody: string
-  // The reply text that was caught — never sent to the guest (the approval
-  // gate blanks it before persisting), safe to log here for debugging.
+  // The reply text that was caught. Under disposition 'held' it was never
+  // sent (the approval gate blanks it before persisting); under 'sent' it
+  // already reached the guest and is logged so the claim can be fixed
+  // upstream.
   replyBody: string
   ungroundedClaims: string[]
+  disposition: CheckDisposition
 }
 
 export async function captureUngroundedClaimCaught(
@@ -541,6 +561,7 @@ export interface GroundingVerifierUnavailableProps {
   /** Provider/SDK error text. Never contains guest or venue content. */
   error: string
   errorCode?: string
+  disposition: CheckDisposition
 }
 
 export async function captureGroundingVerifierUnavailable(
@@ -564,9 +585,12 @@ function formatGroundingVerifierUnavailable(
   // if the posture is ever revisited, the headline must not have to be
   // rediscovered, and a formatter that cannot express "it proceeded" is how
   // the pre-TAC-424 line came to say the wrong thing for a whole ticket.
-  const headline = props.failedClosed
-    ? '*Grounding check did not complete* — no verdict, draft queued for review'
-    : '*Grounding check did not complete* — no verdict, reply proceeded ungated'
+  const headline =
+    props.disposition === 'sent'
+      ? '*Grounding check did not complete* — no verdict, and the reply was ALREADY SENT (post-send check)'
+      : props.failedClosed
+        ? '*Grounding check did not complete* — no verdict, draft queued for review'
+        : '*Grounding check did not complete* — no verdict, reply proceeded ungated'
   return [
     headline,
     `venue: \`${props.venueId}\``,
@@ -742,7 +766,9 @@ function formatUngroundedClaimCaught(
     .map((c) => `"${truncate(c, SLACK_FIELD_TRUNCATE_CHARS)}"`)
     .join(', ')
   const lines = [
-    `*Ungrounded claim caught* — reply never sent, queued for review`,
+    props.disposition === 'sent'
+      ? `*Ungrounded claim caught* — reply ALREADY SENT (post-send check); fix upstream`
+      : `*Ungrounded claim caught* — reply never sent, queued for review`,
     `venue: \`${props.venueId}\``,
     `guest: \`${props.guestId}\``,
     `run: \`${props.agentRunId}\``,
@@ -804,17 +830,16 @@ export interface ProsePromiseCaughtProps {
    * captureDraftRegenerated, captureAgentLatencyHigh.
    */
   guestInboundBody: string | null
-  // The reply text that was caught. Queued, never sent, and not blanked, so
-  // it is safe to log here on the same basis as the mechanic-offer event.
+  // The reply text that was caught. Under 'held' it queued unblanked; under
+  // 'sent' it already reached the guest.
   replyBody: string
+  disposition: CheckDisposition
 }
 
 export async function captureProsePromiseCaught(
   props: ProsePromiseCaughtProps,
 ): Promise<void> {
-  await capturePostHogEvent('prose_promise_caught', props.guestId, {
-    ...props,
-  })
+  await capturePostHogEvent('prose_promise_caught', props.guestId, { ...props })
   await postToSlack(formatProsePromiseCaught(props))
 }
 
@@ -824,7 +849,9 @@ function formatProsePromiseCaught(props: ProsePromiseCaughtProps): string {
       ? 'not named by the check'
       : `${props.commitmentType}: ${props.commitmentDescription}`
   const lines = [
-    `*Promise caught with no commitment behind it* — queued for review`,
+    props.disposition === 'sent'
+      ? `*Promise caught with no commitment behind it* — reply ALREADY SENT (post-send check); the promise is live and untracked`
+      : `*Promise caught with no commitment behind it* — queued for review`,
     `venue: \`${props.venueId}\``,
     `guest: \`${props.guestId}\``,
     `run: \`${props.agentRunId}\``,
@@ -875,6 +902,7 @@ export interface ProsePromiseCheckUnavailableProps {
   retried: boolean
   error: string
   errorCode?: string
+  disposition: CheckDisposition
 }
 
 export async function captureProsePromiseCheckUnavailable(
@@ -890,7 +918,9 @@ function formatProsePromiseCheckUnavailable(
   props: ProsePromiseCheckUnavailableProps,
 ): string {
   const lines = [
-    `*Prose-promise check did not complete* — failed CLOSED, draft queued`,
+    props.disposition === 'sent'
+      ? `*Prose-promise check did not complete* — no verdict, and the reply was ALREADY SENT (post-send check)`
+      : `*Prose-promise check did not complete* — failed CLOSED, draft queued`,
     `venue: \`${props.venueId}\``,
     `guest: \`${props.guestId}\``,
     `run: \`${props.agentRunId}\``,
@@ -944,8 +974,10 @@ export interface CancellationClaimUnbackedProps {
    * found, and a future change to either should have to break both.
    */
   bodyClaimedIt: boolean
-  // The held reply. Never sent, so safe to log here.
+  // The flagged reply. Under 'held' it never sent; under 'sent' the guest
+  // has already read a cancellation the ledger does not carry.
   replyBody: string
+  disposition: CheckDisposition
 }
 
 export async function captureCancellationClaimUnbacked(
@@ -960,10 +992,14 @@ export async function captureCancellationClaimUnbacked(
 function formatCancellationClaimUnbacked(
   props: CancellationClaimUnbackedProps,
 ): string {
+  const disposition =
+    props.disposition === 'sent'
+      ? 'ALREADY SENT (post-send check)'
+      : 'held, not sent'
   const lines = [
     props.bodyClaimedIt
-      ? `*Reply claimed a cancellation nothing carries* — held, not sent`
-      : `*Reply emitted a cancellation id that resolves to nothing* — held, not sent. The body does not read as claiming one.`,
+      ? `*Reply claimed a cancellation nothing carries* — ${disposition}`
+      : `*Reply emitted a cancellation id that resolves to nothing* — ${disposition}. The body does not read as claiming one.`,
     `venue: \`${props.venueId}\``,
     `guest: \`${props.guestId}\``,
     `run: \`${props.agentRunId}\``,
@@ -1000,9 +1036,7 @@ export interface CommitmentCancelledProps {
 export async function captureCommitmentCancelled(
   props: CommitmentCancelledProps,
 ): Promise<void> {
-  await capturePostHogEvent('commitment_cancelled', props.guestId, {
-    ...props,
-  })
+  await capturePostHogEvent('commitment_cancelled', props.guestId, { ...props })
   await postToSlack(formatCommitmentCancelled(props))
 }
 
@@ -1030,6 +1064,7 @@ export interface CancellationCheckUnavailableProps {
   retried: boolean
   error: string
   errorCode?: string
+  disposition: CheckDisposition
 }
 
 export async function captureCancellationCheckUnavailable(
@@ -1045,7 +1080,9 @@ function formatCancellationCheckUnavailable(
   props: CancellationCheckUnavailableProps,
 ): string {
   const lines = [
-    `*Cancellation-claim check did not complete* — failed CLOSED, draft queued`,
+    props.disposition === 'sent'
+      ? `*Cancellation-claim check did not complete* — no verdict, and the reply was ALREADY SENT (post-send check)`
+      : `*Cancellation-claim check did not complete* — failed CLOSED, draft queued`,
     `venue: \`${props.venueId}\``,
     `guest: \`${props.guestId}\``,
     `run: \`${props.agentRunId}\``,
@@ -1076,9 +1113,10 @@ export interface ClosedVenueArrivalCaughtProps {
   venueId: string
   guestId: string
   source: 'structured' | 'text_backstop'
-  // The reply that was caught. It is queued for operator review rather than
-  // blanked, so it is already operator-visible and safe to log here.
+  // The reply that was caught. Under 'held' it queued unblanked (operator-
+  // visible anyway); under 'sent' it already reached the guest.
   replyBody: string
+  disposition: CheckDisposition
 }
 
 export async function captureClosedVenueArrivalCaught(
@@ -1094,7 +1132,9 @@ function formatClosedVenueArrivalCaught(
   props: ClosedVenueArrivalCaughtProps,
 ): string {
   const lines = [
-    `*Arrival confirmed at a closed venue* — queued for review`,
+    props.disposition === 'sent'
+      ? `*Arrival confirmed at a closed venue* — reply ALREADY SENT (post-send check)`
+      : `*Arrival confirmed at a closed venue* — queued for review`,
     `venue: \`${props.venueId}\``,
     `guest: \`${props.guestId}\``,
     `run: \`${props.agentRunId}\``,
@@ -1109,9 +1149,11 @@ export interface MechanicOfferBackstopCaughtProps {
   venueId: string
   guestId: string
   mechanicId: string
-  // The reply text that was caught — still queued for operator review (not
-  // blanked, unlike the knowledge-gap backstop), safe to log here.
+  // The reply text that was caught. Under 'held' it queued unblanked (unlike
+  // the knowledge-gap backstop); under 'sent' the offer already reached the
+  // guest.
   replyBody: string
+  disposition: CheckDisposition
 }
 
 export async function captureMechanicOfferBackstopCaught(
@@ -1127,7 +1169,9 @@ function formatMechanicOfferBackstopCaught(
   props: MechanicOfferBackstopCaughtProps,
 ): string {
   const lines = [
-    `*Mechanic offer caught without approval* — queued for review`,
+    props.disposition === 'sent'
+      ? `*Mechanic offer caught without approval* — reply ALREADY SENT (post-send check); the offer is live`
+      : `*Mechanic offer caught without approval* — queued for review`,
     `venue: \`${props.venueId}\``,
     `guest: \`${props.guestId}\``,
     `run: \`${props.agentRunId}\``,
@@ -1137,12 +1181,18 @@ function formatMechanicOfferBackstopCaught(
   return lines.join('\n')
 }
 
+/**
+ * Which orchestrator measured the run. `handle-operator-decline` reports
+ * `followup` too — its shape and latency profile match the followup path.
+ */
+export type AgentLatencyKind = 'inbound' | 'followup'
+
 export interface AgentLatencyHighProps {
   agentRunId: string
   venueId: string
   guestId: string
   totalElapsedMs: number
-  kind: 'inbound' | 'followup'
+  kind: AgentLatencyKind
   // Threaded through from the orchestrator's success path. inboundBody is
   // null for followups (no inbound). generatedBody is null on failure paths
   // that didn't reach a successful generation.
@@ -1150,32 +1200,29 @@ export interface AgentLatencyHighProps {
   generatedBody: string | null
 }
 
+/**
+ * POSTHOG ONLY — NO SLACK RELAY, DELIBERATELY.
+ *
+ * Latency is a *distribution*, and a per-run threshold is the wrong instrument
+ * for it: any single number either fires constantly (the old 10_000 hit 99.3% of
+ * inbound turns and Slacked every one) or sits so high it never fires at all.
+ * Neither tells you latency got worse.
+ *
+ * The aggregate question — "did p95 move?" — belongs to a Langfuse threshold
+ * alert over a rolling window, which is configured in the Langfuse console, not
+ * here. See `lib/observability/CLAUDE.md`.
+ *
+ * What this event is still good for: per-run forensics. When the aggregate alert
+ * fires, this is how you find which runs and which venues. That is worth a
+ * PostHog event and is worth nobody's attention in real time.
+ *
+ * Do not re-add `postToSlack` here without also changing the threshold model.
+ * `lib/analytics/posthog.test.ts` pins the absence.
+ */
 export async function captureAgentLatencyHigh(
   props: AgentLatencyHighProps,
 ): Promise<void> {
   await capturePostHogEvent('agent_latency_high', props.guestId, { ...props })
-  await postToSlack(formatAgentLatencyHigh(props))
-}
-
-function formatAgentLatencyHigh(props: AgentLatencyHighProps): string {
-  const seconds = (props.totalElapsedMs / 1000).toFixed(1)
-  const lines = [
-    `*Agent latency high* — ${seconds}s (${props.kind})`,
-    `venue: \`${props.venueId}\``,
-    `guest: \`${props.guestId}\``,
-    `run: \`${props.agentRunId}\``,
-  ]
-  if (props.inboundBody) {
-    lines.push(
-      `inbound: "${truncate(props.inboundBody, SLACK_FIELD_TRUNCATE_CHARS)}"`,
-    )
-  }
-  if (props.generatedBody) {
-    lines.push(
-      `generated: "${truncate(props.generatedBody, SLACK_FIELD_TRUNCATE_CHARS)}"`,
-    )
-  }
-  return lines.join('\n')
 }
 
 // TAC-212: emitted from the inbound + followup orchestrators when the
@@ -2255,9 +2302,7 @@ export interface CommitmentEscalatedProps {
 export async function captureCommitmentEscalated(
   props: CommitmentEscalatedProps,
 ): Promise<void> {
-  await capturePostHogEvent('commitment_escalated', props.guestId, {
-    ...props,
-  })
+  await capturePostHogEvent('commitment_escalated', props.guestId, { ...props })
   const detail: Record<CommitmentEscalationReason, string> = {
     aging_obligation: `open for ${props.ageDays} days with no resolution`,
     hold_nearing_close: 'still unclaimed and the venue closes soon',
@@ -2897,4 +2942,61 @@ export async function captureInstagramDeletionUnmatchedAccount(
       `_Normal for a stale or already-disconnected account. If EVERY deletion request looks like this, the signed_request user_id does not match venues.instagram_account_id and nothing is being erased._`,
     ].join('\n'),
   )
+}
+
+// TAC-560: the warm "line is open" close.
+//
+// Slack-relayed on a SEND because this is a proactive guest-facing message with
+// no operator and no inbound behind it, and at pilot volume the relay IS the
+// answer to "has this ever fired, and by which path". The skip event is PostHog
+// only: `not_yet` alone would fire on every tick, so a relay there would train
+// people to ignore the channel (the `agent_latency_high` lesson).
+export interface WarmCloseSentProps {
+  agentRunId: string | null
+  venueId: string
+  guestId: string
+  /**
+   * Which path closed the conversation. `in_conversation` is the guest saying
+   * thanks and the model reporting it; `pause_timer` is this ticket's cron.
+   */
+  via: 'in_conversation' | 'pause_timer'
+  /** The outbound row the close answers, or null on the in-conversation path. */
+  answersMessageId?: string | null
+  /** How long the guest had been silent, on the timer path. */
+  pauseMs?: number
+  /** Whether our own last message had asked them something. */
+  weAskedAQuestion?: boolean
+  /** On the in-conversation path: whether the marker was already set. */
+  markerOutcome?: 'marked' | 'already_marked' | 'write_failed'
+}
+
+export async function captureWarmCloseSent(
+  props: WarmCloseSentProps,
+): Promise<void> {
+  await capturePostHogEvent('warm_close_sent', props.guestId, { ...props })
+  await postToSlack(
+    [
+      `*Warm close sent* via \`${props.via}\`: the guest's first conversation ended with the line left open.`,
+      props.via === 'pause_timer'
+        ? `they had been quiet for ${Math.round((props.pauseMs ?? 0) / 60_000)}m${props.weAskedAQuestion ? ', and our last message had asked them something' : ''}`
+        : `marker: \`${props.markerOutcome ?? 'unknown'}\``,
+      `venue: \`${props.venueId}\``,
+      `guest: \`${props.guestId}\``,
+    ].join('\n'),
+  )
+}
+
+export interface WarmCloseSkippedProps {
+  venueId: string
+  guestId: string
+  messageId: string
+  reason: string
+  /** Set when the skip was a send that did not land, not a pre-claim refusal. */
+  agentStatus?: string
+}
+
+export async function captureWarmCloseSkipped(
+  props: WarmCloseSkippedProps,
+): Promise<void> {
+  await capturePostHogEvent('warm_close_skipped', props.guestId, { ...props })
 }

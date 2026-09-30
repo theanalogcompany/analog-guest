@@ -1,10 +1,31 @@
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
+
 import { describe, expect, it } from 'vitest'
 import {
+  FOLLOWUP_LOG_REASONS,
   FOLLOWUP_REASONS,
   FOLLOWUP_RULES_DEFAULT,
   FollowupRulesSchema,
   parseFollowupRules,
 } from './followup-rules'
+
+// The eleven values migration 028's jsonb_build_object backfilled into every
+// existing venue_configs row. Frozen: a later default belongs beside this, not
+// inside it. See the assertion below.
+const MIGRATION_028_LITERAL = {
+  post_visit_enabled: true,
+  cold_lapsed_enabled: true,
+  perk_unlock_enabled: true,
+  absence_window_days: 21,
+  lapsed_eligible_states: ['regular', 'raving_fan'],
+  cold_dedup_days: 30,
+  weekly_cap: 1,
+  recent_conversation_hours: 48,
+  quiet_hours_start_local: '21:00',
+  quiet_hours_end_local: '08:00',
+  cron_hour_local: 10,
+} as const
 
 describe('FOLLOWUP_RULES_DEFAULT', () => {
   it('round-trips through the Zod schema unchanged', () => {
@@ -18,7 +39,19 @@ describe('FOLLOWUP_RULES_DEFAULT', () => {
   it('matches the literal jsonb_build_object written by migration 028', () => {
     // This is the cross-check against db/migrations/028. Update both in
     // lockstep if any default changes.
-    expect(FOLLOWUP_RULES_DEFAULT).toEqual({
+    //
+    // TAC-560 split this in two rather than adding a key to the object above.
+    // `warm_close_pause_minutes` POSTDATES migration 028, so it is not in that
+    // backfill literal and never will be: rows written before it existed do not
+    // carry it and take the Zod default. Folding it into this assertion would
+    // have quietly redefined what the test's own name claims — that these are
+    // the values 028 wrote — and the guard's real property is that those eleven
+    // are unchanged.
+    //
+    // A key added to FOLLOWUP_RULES_DEFAULT now fails the exact-key-set
+    // assertion below until someone states which side of the 028 line it falls
+    // on, which is the decision worth forcing.
+    expect(MIGRATION_028_LITERAL).toEqual({
       post_visit_enabled: true,
       cold_lapsed_enabled: true,
       perk_unlock_enabled: true,
@@ -31,6 +64,31 @@ describe('FOLLOWUP_RULES_DEFAULT', () => {
       quiet_hours_end_local: '08:00',
       cron_hour_local: 10,
     })
+    for (const [key, value] of Object.entries(MIGRATION_028_LITERAL)) {
+      expect(
+        FOLLOWUP_RULES_DEFAULT[key as keyof typeof FOLLOWUP_RULES_DEFAULT],
+        key,
+      ).toEqual(value)
+    }
+  })
+
+  it('adds exactly the post-028 keys, and no others, by accident', () => {
+    // The exact key set, so a twelfth key cannot arrive silently. TAC-560's
+    // `warm_close_pause_minutes` (TAC-560) and `inquiry_followup_enabled`
+    // (TAC-386) are the two so far. This assertion is what forced each of them
+    // to be declared post-028 deliberately rather than folded into the backfill
+    // literal, which is the whole reason it is written as an exact key set.
+    expect(Object.keys(FOLLOWUP_RULES_DEFAULT).sort()).toEqual(
+      [
+        ...Object.keys(MIGRATION_028_LITERAL),
+        'warm_close_pause_minutes',
+        'inquiry_followup_enabled',
+      ].sort(),
+    )
+    expect(FOLLOWUP_RULES_DEFAULT.warm_close_pause_minutes).toBe(10)
+    // TAC-386: on by default, so the mechanism is live at a venue nobody has
+    // configured. The kill switch is for turning it OFF.
+    expect(FOLLOWUP_RULES_DEFAULT.inquiry_followup_enabled).toBe(true)
   })
 })
 
@@ -149,5 +207,64 @@ describe('FOLLOWUP_REASONS', () => {
       'cold_lapsed',
       'perk_unlock',
     ])
+  })
+})
+
+// TAC-386: FOLLOWUP_LOG_REASONS and migration 066's CHECK list are two
+// statements of the same set, in two languages, and nothing in the type system
+// connects them. So the test reads the migration and compares, rather than a
+// comment asking the next person to remember.
+//
+// This is the same posture as the MIGRATION_028_LITERAL cross-check above, with
+// one difference that matters: this one parses the real file, so it fails if the
+// SQL changes, where 028's is a transcription that would not.
+describe('FOLLOWUP_LOG_REASONS matches the followup_log CHECK (TAC-386)', () => {
+  const migration = readFileSync(
+    join(
+      __dirname,
+      '..',
+      '..',
+      'db',
+      'migrations',
+      '066_inquiry_followups.sql',
+    ),
+    'utf8',
+  )
+
+  /** The reason list out of the `add constraint ... check (reason in (...))`. */
+  function reasonsInMigration(): string[] {
+    const block = migration.match(
+      /add constraint followup_log_reason_check\s*\n\s*check \(reason in \(([\s\S]*?)\)\)/,
+    )
+    expect(
+      block,
+      'the CHECK block should be findable in migration 066',
+    ).toBeTruthy()
+    return Array.from((block?.[1] ?? '').matchAll(/'([a-z_0-9]+)'/g)).map(
+      (m) => m[1],
+    )
+  }
+
+  it('finds the CHECK block at all', () => {
+    // Guards the guard: a regex that stopped matching would make every
+    // assertion below vacuously pass against an empty list.
+    expect(reasonsInMigration().length).toBeGreaterThan(1)
+  })
+
+  it('lists exactly the same reasons, in the same order', () => {
+    expect(reasonsInMigration()).toEqual([...FOLLOWUP_LOG_REASONS])
+  })
+
+  it('is a strict superset of what the engine detects', () => {
+    // The distinction the two constants exist to hold. If these ever became
+    // equal, the four exhaustive switches over EngineFollowupReason would have
+    // silently acquired a branch they have nothing to say about.
+    for (const reason of FOLLOWUP_REASONS) {
+      expect(FOLLOWUP_LOG_REASONS).toContain(reason)
+    }
+    expect(FOLLOWUP_LOG_REASONS.length).toBeGreaterThan(FOLLOWUP_REASONS.length)
+    expect(FOLLOWUP_REASONS as readonly string[]).not.toContain(
+      'inquiry_followup',
+    )
   })
 })

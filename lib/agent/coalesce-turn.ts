@@ -22,7 +22,8 @@
  *      is already on its way lands before a model call is spent. An
  *      optimisation, not a correctness requirement: every acceptance criterion
  *      is met with the settle at zero, because (2) and (3) catch whatever it
- *      misses.
+ *      misses. CURRENTLY ZERO on that exact reasoning - see the constant's
+ *      docstring for the measurement; the mechanism stays as the lever.
  *
  *   2. CLAIM. Exactly one run per (venue, guest) proceeds. The loser records
  *      itself as folded into the winner's turn and exits. This is the
@@ -70,37 +71,42 @@ export const INBOUND_COALESCING_ENABLED = true
  * How long a run waits after `loadInbound` before claiming, so a fragment
  * already in flight lands first.
  *
- * 3 SECONDS SINCE TAC-540, DOWN FROM 8. Both numbers are on the record
- * because the trade moved rather than the reasoning.
+ * ZERO, DOWN FROM 3 SECONDS (TAC-540), DOWN FROM 8 (TAC-526). All three
+ * numbers are on the record because each cut re-priced the same trade rather
+ * than changing the reasoning.
  *
- * TAC-526 chose 8s against a 7s observed burst gap, so the settle caught that
- * burst before a model call was spent. What made 8s expensive is that it sits
- * in front of EVERY turn, bursty or not: Instagram first-bubble p50 was
- * ~16-18s before it and ~23-25s after, with the guest seeing nothing for all
- * of it. TAC-540 pays 5s of that back.
+ * THE SETTLE WAS NEVER THE CORRECTNESS MECHANISM, which is what makes zero
+ * safe. TAC-526's own costing says every acceptance criterion passes at
+ * `COALESCE_SETTLE_MS = 0`: the claim stops the second reply, the winner's
+ * post-claim adoption folds anything already inserted (the Instagram webhook
+ * awaits the whole delivery's inserts before invoking any run), and the
+ * pre-dispatch extension check adopts a message that lands mid-pipeline.
+ * `coalesce-inbound.test.ts` covers a 5-second-gap burst still producing one
+ * reply and no second one via exactly that extension path.
  *
- * THE SETTLE WAS NEVER THE CORRECTNESS MECHANISM, which is what makes the cut
- * affordable. TAC-526's own costing says every acceptance criterion passes at
- * `COALESCE_SETTLE_MS = 0`, because the claim stops the second reply and the
- * pre-dispatch extension check adopts a message the settle missed. Shortening
- * it moves bursts from the cheap path (caught by the settle, one generation)
- * to the more expensive one (caught by the extension, a generation spent and
- * discarded) — it does not let a second reply out. `coalesce-inbound.test.ts`
- * covers a 5-second gap for exactly this: the case the old settle caught and
- * this one does not, still producing one reply and no second one.
+ * WHAT ZERO COSTS, measured rather than argued: a 30-day
+ * `scripts/measurement/coalesce-window.ts` run (2026-09, 251 inbound) found
+ * FOUR bursts a 3s settle would have folded, all Instagram. At zero, each
+ * such burst is caught by the extension instead - a fully generated and
+ * verified draft discarded and re-run, and that burst's reply lands a few
+ * seconds later than the settle path would have delivered it. In exchange,
+ * every other turn starts its pipeline 3s sooner. Roughly 4 discarded
+ * generation sets a month against 3s removed from ~250 turns.
  *
- * So the trade, against TAC-526's measured ~22% burst rate: ~5s better on
- * every turn, and roughly one extra discarded generation set per burst that
- * falls between 3s and 8s. If that proves wrong the lever is this one
- * constant, and `scripts/measurement/coalesce-window.ts` is what supplies the
- * evidence to move it rather than the argument.
+ * The pipeline itself is the fold window now: every millisecond spent on
+ * classify/retrieve/generate is time in which the extension check will still
+ * adopt a late fragment, and the pipeline is longer than the settle it
+ * replaced. If burst behaviour shifts - a new venue with chattier guests -
+ * the lever is this one constant, and `coalesce-window.ts` is what supplies
+ * the evidence to move it rather than the argument. Extension-caught bursts
+ * are visible in `inbound_turn_outcomes` (losers record
+ * `coalesced_into_turn`) and in Langfuse, so the trade going bad is
+ * observable without re-running the harness.
  *
- * NO LONGER ON THE LATENCY LEDGER: this used to delay the read receipt, which
- * fired inside `scheduleAndSend` behind the settle. TAC-540 moved Seen to the
- * Instagram webhook, ahead of the settle entirely, so the guest now gets a
- * Seen tick about a second after they send whatever this constant is.
+ * The read receipt is unaffected either way: TAC-540 moved Seen to the
+ * Instagram webhook, ahead of the settle entirely.
  */
-export const COALESCE_SETTLE_MS = 3_000
+export const COALESCE_SETTLE_MS = 0
 
 /**
  * How long a claim is honoured before another run may take it over.

@@ -216,9 +216,14 @@ function makeCtx(overrides: Partial<RuntimeContext> = {}): RuntimeContext {
     } as RuntimeContext['currentMessage'],
     followupTrigger: null,
     scanArrival: null,
+    warmClose: false,
+    inquiryFollowup: null,
     conversationChannel: 'text',
     recentMessages: [],
     conversationWindowMs: 48 * 60 * 60 * 1000,
+    // TAC-567: these fixtures are established guests, not a first
+    // conversation, so every intention is eligible as before.
+    firstConversation: false,
     recognition: {} as RuntimeContext['recognition'],
     mechanics: [],
     recentVisits: [],
@@ -249,7 +254,9 @@ function makeGeneration(): GenerateMessageResult {
     arrivalCapture: {},
     cancelsCommitmentId: '',
     intentionQuestion: '',
+    closedTheConversation: false,
     intentionQuestionDuplicateStripped: false,
+    intentionQuestionDroppedForBodyQuestion: false,
     attempts: 1,
     attemptScores: [0.78],
     attemptHistory: [],
@@ -2235,6 +2242,7 @@ describe('scheduleAndSend — the intention question is its own message (TAC-554
       ...makeGeneration(),
       body: `${answer} ${question}`,
       intentionQuestion: question,
+      closedTheConversation: false,
     }
   }
 

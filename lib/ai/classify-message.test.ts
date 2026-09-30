@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 // Relative imports — vitest doesn't pick up Next's `@/*` alias under our setup.
-import { classifyMessage } from './classify-message'
+import { classifyMessage, MAX_CLASSIFIER_INPUT_CHARS } from './classify-message'
+import { CLASSIFY_JEV_PROMPT_VERSION } from './classify-message-jev'
+import { PROMPT_VERSION } from './prompts/system-template'
 
 // Mock the AI SDK and the model client so no real Anthropic call goes out.
 const generateObjectMock = vi.fn()
@@ -192,7 +194,7 @@ describe('classifyMessage — schema accepts new categories', () => {
       if (!r.ok) return
       expect(r.data.category).toBe(cat)
       expect(r.data.classifierConfidence).toBe(0.9)
-      expect(r.data.promptVersion).toBe('v1.72.0')
+      expect(r.data.promptVersion).toBe('v1.77.0')
     })
   }
 })
@@ -812,4 +814,297 @@ describe('classifyMessage — correctsPendingReply pass-through (TAC-397)', () =
       expect(r.data.correctsPendingReply).toBe(value)
     },
   )
+})
+
+// TAC-386: followUpWorthy, the third independent boolean on this call. The line
+// it draws was ruled 2026-09-30 and widened the trigger from visit-implying
+// questions to any inquiry our answer helps the guest ACT on.
+describe('CLASSIFY_SYSTEM_PROMPT — followUpWorthy instruction (TAC-386)', () => {
+  beforeEach(() => {
+    generateObjectMock.mockReset()
+    generateObjectMock.mockResolvedValue({
+      object: {
+        category: 'reply',
+        classifierConfidence: 0.9,
+        reasoning: 'noop',
+        crisisSafety: false,
+        correctsPendingReply: false,
+        followUpWorthy: false,
+      },
+    })
+  })
+
+  async function systemPrompt(): Promise<string> {
+    await classifyMessage({ inboundBody: 'where do I park' })
+    return generateObjectMock.mock.calls[0]?.[0]?.system as string
+  }
+
+  it('introduces the field as independent of category', async () => {
+    expect(await systemPrompt()).toContain(
+      'Separately again, set followUpWorthy',
+    )
+  })
+
+  it('states the rule as our answer helping them do something afterwards', async () => {
+    const prompt = await systemPrompt()
+    expect(prompt).toContain('would help the guest do something afterwards')
+  })
+
+  // The four excluded shapes each have a named false-positive measurement arm
+  // with a bar of ZERO, so each one being NAMED in the prompt is load-bearing
+  // rather than decorative. A prompt that dropped one of these lines would move
+  // its arm and nothing else would notice.
+  it.each([
+    ['pure facts', 'a pure fact with no action behind it'],
+    ['small talk', 'small talk or a passing comment'],
+    ['complaints', 'a complaint or a report that something was wrong'],
+    ['crisis', "anything involving someone's safety or an emergency"],
+    // Ruled 2026-09-30, NARROWLY: the first version said "a business, press,
+    // wholesale or hiring inquiry" and a private-event rental still fired,
+    // because the model read it as a venue service rather than a business
+    // enquiry. Each of these is now named.
+    ['catering', 'catering'],
+    ['private events and space rental', 'renting out the space'],
+    ['bookings', 'taking a booking or reservation'],
+    ['wholesale and partnership', 'wholesale, press, hiring or partnership'],
+    // Restored 2026-09-30. It was in the visit-era instruction and the widening
+    // dropped it; TAC-297's arrival capture owns these.
+    ['explicit arrivals', 'already arriving or on their way'],
+  ])('excludes %s explicitly', async (_label, phrase) => {
+    expect(await systemPrompt()).toContain(phrase)
+  })
+
+  // The carve-out inside the operator-arranged exclusion. Without it the line
+  // would also catch a guest asking what is on this month, which stays eligible.
+  it('keeps PUBLIC events eligible inside the operator-arranged exclusion', async () => {
+    const prompt = await systemPrompt()
+    expect(prompt).toContain('PUBLIC events coming up is not one of these')
+    expect(prompt).toContain('do you have any events coming up')
+  })
+
+  // The distinction the hours arm turns on: "what time do you close" is a fact,
+  // "how do I get there" is a fact the guest then acts on. Ruling 1 of
+  // 2026-09-17 excluded a bare hours question and the widening kept that.
+  it('draws the factual-but-actionable line, with hours on the excluded side', async () => {
+    const prompt = await systemPrompt()
+    expect(prompt).toContain('A question can be factual and still qualify')
+    expect(prompt).toContain('Asking when you close is not')
+    expect(prompt).toContain('what time do you close')
+  })
+
+  it('names the inquiry shapes that DO qualify', async () => {
+    const prompt = await systemPrompt()
+    for (const shape of [
+      'where to park',
+      'which beans',
+      'how to brew',
+      'bring a dog',
+      'what to order or try',
+    ]) {
+      expect(prompt).toContain(shape)
+    }
+  })
+
+  // No named speaker anywhere in the pipeline's outreach (ruled 2026-09-30).
+  // The classifier prompt is not guest-facing, but it also has no business
+  // naming a host, and this is the cheap place to notice if one appears.
+  it('names no venue host', async () => {
+    const prompt = await systemPrompt()
+    expect(prompt).not.toContain('Himanshu')
+    expect(prompt).not.toContain('Neha')
+  })
+})
+
+describe('classifyMessage — followUpWorthy round-trip (TAC-386)', () => {
+  beforeEach(() => {
+    generateObjectMock.mockReset()
+  })
+
+  it.each([true, false])(
+    'returns the model’s value unchanged (%s)',
+    async (value) => {
+      generateObjectMock.mockResolvedValue({
+        object: {
+          category: 'new_question',
+          classifierConfidence: 0.9,
+          reasoning: 'noop',
+          crisisSafety: false,
+          correctsPendingReply: false,
+          followUpWorthy: value,
+        },
+      })
+      const r = await classifyMessage({ inboundBody: 'where do I park' })
+      expect(r.ok).toBe(true)
+      if (!r.ok) return
+      expect(r.data.followUpWorthy).toBe(value)
+    },
+  )
+
+  it('is independent of category, like the other two booleans', async () => {
+    generateObjectMock.mockResolvedValue({
+      object: {
+        category: 'recommendation_request',
+        classifierConfidence: 0.8,
+        reasoning: 'noop',
+        crisisSafety: false,
+        correctsPendingReply: false,
+        followUpWorthy: true,
+      },
+    })
+    const r = await classifyMessage({ inboundBody: 'what should I try' })
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+    expect(r.data.followUpWorthy).toBe(true)
+    expect(r.data.category).toBe('recommendation_request')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Jev gate: classifyMessage tries Jev first when enabled and falls back to
+// Haiku on ANY Jev failure. The module flag constant ships false, so every
+// test here forces the gate through the injected second parameter - both
+// directions, per the openCoalescedTurn precedent the source cites.
+// classify-message-jev is deliberately NOT mocked: the real module runs
+// against an injected fetchImpl, so these tests cover the wiring end to end.
+// ---------------------------------------------------------------------------
+
+describe('classifyMessage — jev gate', () => {
+  const JEV_ENV = { JEV_API_KEY: 'apikey_' + 'a'.repeat(60) }
+
+  const JEV_OK_BODY = {
+    model: 'jev-1.13.0',
+    answers: {
+      category: {
+        type: 'choice',
+        choice: 'acknowledgment',
+        confidence: 0.85,
+        probabilities: { acknowledgment: 0.85, reply: 0.15 },
+      },
+      crisis: { type: 'noul', noul: 0.01 },
+      corrects_pending: { type: 'noul', noul: 0.05 },
+    },
+  }
+
+  // Snapshot the request body inside the mock (live-reference rule).
+  function jevFetch(status: number, captured?: { body?: string }) {
+    return vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
+      if (captured) captured.body = String(init?.body)
+      return new Response(JSON.stringify(JEV_OK_BODY), { status })
+    }) as unknown as typeof fetch
+  }
+
+  beforeEach(() => {
+    generateObjectMock.mockReset()
+    // Haiku-shaped result, distinguishable from the Jev one by category,
+    // reasoning AND promptVersion — a gate wired to the wrong arm cannot
+    // satisfy both arms' assertions.
+    generateObjectMock.mockResolvedValue({
+      object: {
+        category: 'reply',
+        classifierConfidence: 0.9,
+        reasoning: 'haiku-mock',
+        crisisSafety: false,
+        correctsPendingReply: false,
+        followUpWorthy: false,
+      },
+    })
+  })
+
+  it('returns the Jev result and never calls Haiku when Jev succeeds', async () => {
+    const r = await classifyMessage(
+      { inboundBody: 'ok cool, thanks' },
+      { enabled: true, env: JEV_ENV, fetchImpl: jevFetch(200) },
+    )
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+    expect(r.data.promptVersion).toBe(CLASSIFY_JEV_PROMPT_VERSION)
+    expect(r.data.category).toBe('acknowledgment')
+    expect(generateObjectMock).not.toHaveBeenCalled()
+  })
+
+  it('falls back to Haiku when Jev returns a 500, and traces the fallback', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      const r = await classifyMessage(
+        { inboundBody: 'ok cool, thanks' },
+        { enabled: true, env: JEV_ENV, fetchImpl: jevFetch(500) },
+      )
+      expect(generateObjectMock).toHaveBeenCalledTimes(1)
+      expect(r.ok).toBe(true)
+      if (!r.ok) return
+      // The Haiku-shaped result, not the Jev one.
+      expect(r.data.category).toBe('reply')
+      expect(r.data.reasoning).toBe('haiku-mock')
+      // Derived, not pinned: the Haiku fallback stamps the live template
+      // version, and a literal here strands on every PROMPT_VERSION bump
+      // (.claude/rules/prompt-versioning.md).
+      expect(r.data.promptVersion).toBe(PROMPT_VERSION)
+      // The silent degrade carries its event and errorCode (errors-as-values rule).
+      expect(warnSpy).toHaveBeenCalledWith(
+        'classify-message: jev failed, falling back to haiku',
+        { event: 'jev_classification_fallback', errorCode: 'jev_http_500' },
+      )
+    } finally {
+      warnSpy.mockRestore()
+    }
+  })
+
+  it('never attempts fetch when enabled is false', async () => {
+    const fetchSpy = vi.fn(async () => {
+      throw new Error('fetch must not be called when the gate is off')
+    }) as unknown as typeof fetch
+    const r = await classifyMessage(
+      { inboundBody: 'ok cool, thanks' },
+      { enabled: false, env: JEV_ENV, fetchImpl: fetchSpy },
+    )
+    expect(fetchSpy).not.toHaveBeenCalled()
+    expect(generateObjectMock).toHaveBeenCalledTimes(1)
+    expect(r.ok).toBe(true)
+  })
+
+  it('attempts Jev when enabled is omitted (module flag is ON since 2026-09-29)', async () => {
+    // Reversed, not deleted, from "never attempts fetch when enabled is
+    // omitted (module flag ships false)": that test failed on purpose when
+    // JEV_CLASSIFICATION_ENABLED flipped, and this is the coverage decision
+    // it demanded - the omitted-flag default IS the live production path now.
+    // Jev succeeds here, so the Haiku arm must never be consulted; the two
+    // arms' fixtures are distinguishable by category and promptVersion.
+    const fetchSpy = jevFetch(200)
+    const r = await classifyMessage(
+      { inboundBody: 'ok cool, thanks' },
+      { env: JEV_ENV, fetchImpl: fetchSpy },
+    )
+    expect(fetchSpy).toHaveBeenCalledTimes(1)
+    expect(generateObjectMock).not.toHaveBeenCalled()
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+    expect(r.data.category).toBe('acknowledgment')
+    expect(r.data.promptVersion).toBe(CLASSIFY_JEV_PROMPT_VERSION)
+  })
+
+  it('sends Jev the SAME truncated inbound the Haiku prompt would use, plus the crisis-check block', async () => {
+    const captured: { body?: string } = {}
+    const longBody = 'a'.repeat(MAX_CLASSIFIER_INPUT_CHARS + 500)
+    const r = await classifyMessage(
+      { inboundBody: longBody },
+      { enabled: true, env: JEV_ENV, fetchImpl: jevFetch(200, captured) },
+    )
+    expect(r.ok).toBe(true)
+    expect(captured.body).toBeDefined()
+    const parsed = JSON.parse(captured.body!) as {
+      state: {
+        inbound_message: string
+        inbound_message_full_for_crisis_check?: string
+      }
+    }
+    // Identical inputs across both arms: the category-facing text is the
+    // truncated view, byte-for-byte what the Haiku prompt embeds.
+    expect(parsed.state.inbound_message).toBe(
+      'a'.repeat(MAX_CLASSIFIER_INPUT_CHARS) + ' [...truncated]',
+    )
+    expect(parsed.state.inbound_message).toMatch(/ \[\.\.\.truncated\]$/)
+    // And the crisis check still sees the fuller text (TAC-348's guarantee
+    // must survive the vendor swap).
+    expect(parsed.state.inbound_message_full_for_crisis_check).toBe(longBody)
+  })
 })

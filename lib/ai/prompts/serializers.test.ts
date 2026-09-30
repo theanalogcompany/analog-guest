@@ -1132,6 +1132,106 @@ describe("runtimeToProse — ## What you're hoping to get to block (TAC-324)", (
   })
 })
 
+// TAC-560: the pause-triggered warm close.
+describe('runtimeToProse — ## Closing this conversation (TAC-560)', () => {
+  const render = (over: Record<string, unknown> = {}): string =>
+    runtimeToProse(
+      { mechanics: [], warmClose: true, ...over },
+      'acknowledgment',
+      NOW,
+    )
+
+  /** Just this block, so a later block's wording cannot satisfy or trip a check. */
+  const block = (out: string): string => {
+    const start = out.indexOf('## Closing this conversation')
+    expect(start).toBeGreaterThanOrEqual(0)
+    const rest = out.slice(start)
+    const next = rest.indexOf('\n## ')
+    return next === -1 ? rest : rest.slice(0, next)
+  }
+
+  it('omits the block on every other turn', () => {
+    expect(
+      runtimeToProse({ mechanics: [] }, 'acknowledgment', NOW),
+    ).not.toContain('## Closing this conversation')
+    expect(
+      runtimeToProse({ mechanics: [], warmClose: false }, 'reply', NOW),
+    ).not.toContain('## Closing this conversation')
+  })
+
+  // THE PREMISE IS THE WHOLE REASON THE BLOCK EXISTS. Le Mil's rule 15 fires on
+  // "(they say thanks, ok, or signal they're done)", which is FALSE on a pause,
+  // so without this the rule's own condition is unmet and the model can read it
+  // as not applying. Pinned as one contiguous clause, not fragments: the TAC-409
+  // lesson is that a sentence can be reversed while every asserted fragment
+  // survives.
+  it('states that the conversation has gone quiet, and that nothing is owed', () => {
+    expect(render()).toContain(
+      "This is the guest's first conversation with the venue, and it has gone quiet. They have not replied for a while, and nothing here is waiting on an answer from them.",
+    )
+  })
+
+  // It must NOT name the three topics. They are Le Mil's choice, carried in that
+  // venue's own voice rules; restating them here would ship one venue's product
+  // decision into every venue's prompt.
+  it("points at the venue's own voice rules rather than naming any topic", () => {
+    const out = render()
+    expect(out).toContain(
+      'Send the warm close your voice rules describe for a first conversation that is winding down: let them know the line is open, and name the things they can message about anytime, in your own words.',
+    )
+    for (const leaked of ['beans', 'specials', 'events', 'menu', 'coffee']) {
+      expect(block(out), leaked).not.toContain(leaked)
+    }
+  })
+
+  it('asks for one message and no question', () => {
+    // One message is in rule 15 and in this ticket's criteria; dispatch enforces
+    // it separately with NEVER_SPLIT_RNG. No question keeps the close from
+    // reopening the conversation it is closing.
+    expect(render()).toContain(
+      'One short message. Do not ask a question, do not open a new topic, and do not mention the pause or that they stopped replying.',
+    )
+  })
+
+  it('models no em dash', () => {
+    // R3 bans them in output and the prompt should not model one.
+    expect(block(render())).not.toContain('\u2014')
+    expect(block(render())).not.toContain('\u2013')
+  })
+
+  it('pins the full block order on a warm-close turn', () => {
+    // The POSITION is a choice, not a measurement, exactly as TAC-536's is. This
+    // exists so moving it is deliberate.
+    const out = runtimeToProse(
+      {
+        today,
+        mechanics: [],
+        warmClose: true,
+        recentVisits: [
+          {
+            visitedAt: new Date(NOW.getTime() - 86_400_000),
+            items: ['cortado'],
+          },
+        ],
+        emojiDirective: 'none',
+      },
+      'acknowledgment',
+      NOW,
+    )
+    const order = out
+      .split('\n')
+      .filter((l) => l.startsWith('## '))
+      .map((l) => l.trim())
+    expect(order).toEqual([
+      '## Right now',
+      '## Closing this conversation',
+      '## What this guest can access',
+      '## Visit history',
+      '## Emoji for this message',
+    ])
+  })
+})
+
 // TAC-536: the two axes a scan greeting may state, and the one line whose
 // wording the 2026-09-25 ruling corrected.
 describe('runtimeToProse — ## Guest just arrived (TAC-536)', () => {
@@ -1329,16 +1429,39 @@ describe("runtimeToProse — ## What you're hoping to get to first-touch opener 
   // name back", and it did exactly that, overriding `owner` framing's "Do not
   // name yourself unless the guest asks" to produce "I'm Himanshu" on a live
   // scan.
-  it('makes the introduction conditional, and no longer overrides the voice setting', () => {
+  // TAC-567 (2026-09-30) DELETED the clause entirely, and this test inverts with
+  // it: it used to assert the conditional introduction was present. On device the
+  // clause produced "hey, welcome! you've reached Le Mil's on Polk Street" to a
+  // guest who had just scanned Le Mil's code, so the ruling is that there is
+  // nobody to introduce. TAC-541 had already cut its override half; this is the
+  // rest of the sentence.
+  it('says hello and asks the order, and never says who they have reached', () => {
     const out = runtimeToProse(
       { mechanics: [], openIntentions, firstTouchAfterQrScan: true },
       'reply',
       NOW,
     )
-    expect(out).toContain(
-      "Say hello. If their message doesn't name a person, say who they've reached as well.",
-    )
+    expect(out).toContain('Say hello. Ask what they just got.')
+    expect(out).not.toMatch(/reached/i)
+    expect(out).not.toMatch(/name a person/i)
   })
+
+  // THE CANARY ON THE DELETION, and it is deliberately wider than the sentence
+  // that was removed. A reworded revival ("tell them which shop this is",
+  // "introduce the venue") would pass a literal-revert check, so both openers are
+  // swept for the ACT of introducing rather than for the old phrasing. This is
+  // the one thing standing between the ruling and a well-meaning restoration.
+  it.each(['text', 'instagram'] as const)(
+    'the %s opener never asks the venue to identify itself (TAC-567)',
+    (channel) => {
+      const opener = firstTouchOpenerFor(channel)
+      expect(opener).not.toMatch(/reached/i)
+      expect(opener).not.toMatch(/name a person/i)
+      expect(opener).not.toMatch(/introduce/i)
+      expect(opener).not.toMatch(/who (you|they) are/i)
+      expect(opener).not.toMatch(/say who/i)
+    },
+  )
 
   // THE CANARY, and it is the whole of TAC-541's opener half. Restoring the
   // override in either channel's copy fails here. Deliberately matched on the
@@ -1539,6 +1662,110 @@ describe("runtimeToProse — ## What you're hoping to get to openings (TAC-436)"
   })
 })
 
+// TAC-567, ruled 2026-09-30: on a guest's FIRST conversation the reply itself
+// asks nothing, so the only question that turn is the intention bubble.
+//
+// This is the prompt half. The bubble half is structural (the two-question gate in
+// composeReplyWithIntention) and cannot be talked past; a question the model
+// INVENTS in the body has no code gate that could supply a reply instead, which is
+// why this text exists at all.
+describe("runtimeToProse — ## What you're hoping to get to first conversation (TAC-567)", () => {
+  const openIntentions = ["You don't know this guest's name yet."]
+  const render = (firstConversation: boolean) =>
+    runtimeToProse(
+      { mechanics: [], openIntentions, firstConversation },
+      'reply',
+      NOW,
+    )
+
+  // PINNED AS ONE CONTIGUOUS LITERAL, never as fragments. A sentence can be
+  // reversed while every asserted fragment survives - three mutants did exactly
+  // that on this directory's rules and passed 36 of 36 assertions.
+  const RESTRAINT =
+    'This is your first conversation with this guest. The reply itself asks\n' +
+    'them nothing: no question of your own, however natural one would be\n' +
+    'here. The only question this turn is the one listed above, and only if a\n' +
+    'line above fits.'
+
+  it('renders the approved wording on a first conversation', () => {
+    expect(render(true)).toContain(RESTRAINT)
+  })
+
+  it('renders nothing of it once the guest is past their first conversation', () => {
+    const out = render(false)
+    expect(out).not.toContain('This is your first conversation with this guest')
+    expect(out).not.toContain('The reply itself asks')
+  })
+
+  // ABSENT READS AS FALSE. Every caller that does not know about this field - the
+  // regen path's hand-built runtime, a test fixture, a future harness - gets the
+  // pre-ticket prompt rather than a restraint on a turn that is not a first
+  // conversation. The safe direction is fewer suppressions, not more.
+  it('treats an absent flag as not a first conversation', () => {
+    const out = runtimeToProse({ mechanics: [], openIntentions }, 'reply', NOW)
+    expect(out).not.toContain('This is your first conversation with this guest')
+  })
+
+  // POSITION IS THE MECHANISM, not a detail. Proximity reads as authority in this
+  // prompt (six defects paid for it), and this text has to outrank the paragraph's
+  // own "one short question on the end is fine" example, which sits above it and
+  // says the opposite for a turn like this one.
+  it('lands after the natural-opening example, last in the paragraph', () => {
+    const out = render(true)
+    const example = out.indexOf('short question on the end is fine')
+    const wait = out.indexOf('If nothing fits, let it wait.')
+    const restraint = out.indexOf(RESTRAINT)
+    expect(example).toBeGreaterThan(-1)
+    expect(restraint).toBeGreaterThan(example)
+    expect(restraint).toBeGreaterThan(wait)
+  })
+
+  // The block still ends where it did: this text is inside the intentions block,
+  // so the emoji directive keeps its own measured last-block position and the
+  // intentions block keeps its own (11% raise rate from third, 37% from last).
+  it('stays inside the intentions block, ahead of the emoji directive', () => {
+    const out = runtimeToProse(
+      {
+        mechanics: [],
+        openIntentions,
+        firstConversation: true,
+        emojiDirective: 'none',
+      },
+      'reply',
+      NOW,
+    )
+    const restraint = out.indexOf(RESTRAINT)
+    const emoji = out.indexOf('emoji')
+    expect(restraint).toBeGreaterThan(-1)
+    expect(emoji).toBeGreaterThan(restraint)
+  })
+
+  // No worked question, deliberately: an invented question is the defect itself,
+  // and a quoted example is the thing a model reproduces verbatim. Same reasoning
+  // as are_they_new_here's promptLine carrying none.
+  it('models no question of its own and no em dash', () => {
+    expect(RESTRAINT).not.toContain('?')
+    expect(RESTRAINT).not.toMatch(/[—–]/)
+  })
+
+  // The block is omitted wholesale on these two categories, and this text rides
+  // it, so it must go too. Rendering a first-conversation restraint on an apology
+  // turn would be a second authority on a turn TAC-436 deliberately left silent.
+  it.each(['opt_out', 'comp_complaint'] as const)(
+    'is suppressed with the block on %s',
+    (category) => {
+      const out = runtimeToProse(
+        { mechanics: [], openIntentions, firstConversation: true },
+        category,
+        NOW,
+      )
+      expect(out).not.toContain(
+        'This is your first conversation with this guest',
+      )
+    },
+  )
+})
+
 // TAC-436: the STRUCTURAL half of ruling 1's apology carve-out. The block
 // renders LAST in the user prompt and COMP_COMPLAINT_INSTRUCTIONS lives in the
 // SYSTEM prompt, so on proximity the block wins — the same failure class
@@ -1713,17 +1940,20 @@ describe('runtimeToProse — R1 carve-out signal line (TAC-324)', () => {
 // TAC-495: the first-visit opener's channel variants.
 // ---------------------------------------------------------------------------
 //
-// The SMS opener is TAC-423's wording as approved on 2026-09-22. The Instagram
-// opener swaps ONE phrase and nothing else, down from two: the old second swap
-// turned "who they're texting" into "who they're messaging", and "who they've
-// reached" is true on both channels, so it is gone. The literals here are
-// transcribed from the approved wording; the full strings are pinned against
-// the assembled prompt in compose-prompt.test.ts.
+// The SMS opener is TAC-423's wording as approved on 2026-09-22, minus the
+// identity sentence TAC-567 deleted on 2026-09-30. The Instagram opener swaps ONE
+// phrase and nothing else, down from two: the old second swap turned "who they're
+// texting" into "who they're messaging", and the clause that needed it is gone
+// altogether now. The literals here are transcribed from the approved wording;
+// the full strings are pinned against the assembled prompt in
+// compose-prompt.test.ts.
 describe('firstTouchOpenerFor — channel variants (TAC-495)', () => {
+  // TAC-567 removed the identity sentence from both. One swap remains, so the
+  // two literals still differ in exactly one clause.
   const SMS_OPENER =
-    "This is the guest's first message on this number, sent right after they scanned the sign at your pickup counter. They have just ordered and collected it. Say hello. If their message doesn't name a person, say who they've reached as well. Ask what they just got."
+    "This is the guest's first message on this number, sent right after they scanned the sign at your pickup counter. They have just ordered and collected it. Say hello. Ask what they just got."
   const INSTAGRAM_OPENER =
-    "This is the guest's first message, sent right after they scanned the sign at your pickup counter. They have just ordered and collected it. Say hello. If their message doesn't name a person, say who they've reached as well. Ask what they just got."
+    "This is the guest's first message, sent right after they scanned the sign at your pickup counter. They have just ordered and collected it. Say hello. Ask what they just got."
 
   it('the SMS opener is the approved wording and the Instagram opener swaps one phrase', () => {
     expect(firstTouchOpenerFor('text')).toBe(SMS_OPENER)
@@ -1756,7 +1986,7 @@ describe('firstTouchOpenerFor — channel variants (TAC-495)', () => {
     for (const phrase of [
       'sent right after they scanned the sign at your pickup counter.',
       'They have just ordered and collected it.',
-      "Say hello. If their message doesn't name a person, say who they've reached as well.",
+      'Say hello.',
       'Ask what they just got.',
     ]) {
       expect(firstTouchOpenerFor('text')).toContain(phrase)
@@ -2719,6 +2949,43 @@ describe('runtimeToProse — ## Guest context block (TAC-296)', () => {
     expect(out).toContain('First name: Sarah')
     expect(out).toContain('Pronouns: she/her')
     expect(out).toContain('Home base: Bernal Heights, SF')
+  })
+
+  // TAC-558. The write half is GuestContextPatchSchema; this is the read half,
+  // and it is what makes storing the answer worth anything: a later turn sees
+  // what the guest said about their own history.
+  it("renders the guest's account of their history at the venue", () => {
+    const out = runtimeToProse(
+      {
+        today,
+        guestContext: {
+          guest_details: {
+            first_name: 'Sarah',
+            history_here: 'been coming since they opened',
+          },
+        },
+      },
+      'reply',
+    )
+    expect(out).toContain('## Guest context')
+    expect(out).toContain('History here: been coming since they opened')
+  })
+
+  // It is the only renderable field here, so the block must still appear. A
+  // fixture carrying a name alongside would pass with the new field ignored
+  // entirely, which is the fixture-cannot-reach-the-code shape.
+  it('renders the block for a guest whose only detail is their history here', () => {
+    const out = runtimeToProse(
+      {
+        today,
+        guestContext: {
+          guest_details: { history_here: 'first time in today' },
+        },
+      },
+      'reply',
+    )
+    expect(out).toContain('## Guest context')
+    expect(out).toContain('History here: first time in today')
   })
 
   it('renders preferences as bulleted lines', () => {
@@ -4198,5 +4465,139 @@ describe('formatActiveCommitments — the id also carries a cancellation (TAC-51
     expect(out).toContain(
       'The id is system-internal: never read it aloud, never include it in your reply to the guest.',
     )
+  })
+})
+
+// TAC-386: the inquiry follow-up's block. Both halves of what happened arrive
+// here as data, because they differ on every send.
+describe('runtimeToProse — ## Following up on what they asked (TAC-386)', () => {
+  const INQUIRY = {
+    question: 'where do I park around there',
+    answer:
+      'Street parking on Polk is usually fine before 9. The lot behind the building is permit only.',
+  }
+
+  const render = (over: Record<string, unknown> = {}): string =>
+    runtimeToProse(
+      { mechanics: [], inquiryFollowup: INQUIRY, ...over },
+      'follow_up',
+      NOW,
+    )
+
+  /** Just this block, so a later block's wording cannot satisfy or trip a check. */
+  const block = (out: string): string => {
+    const start = out.indexOf('## Following up on what they asked')
+    expect(start).toBeGreaterThanOrEqual(0)
+    const rest = out.slice(start)
+    const next = rest.indexOf('\n## ')
+    return next === -1 ? rest : rest.slice(0, next)
+  }
+
+  it('renders only when the field is set', () => {
+    expect(runtimeToProse({ mechanics: [] }, 'follow_up', NOW)).not.toContain(
+      '## Following up on what they asked',
+    )
+    expect(render()).toContain('## Following up on what they asked')
+  })
+
+  it('carries the guest question VERBATIM', () => {
+    // The one thing the message must reference. A paraphrase loses exactly the
+    // detail that makes the check-in worth sending.
+    expect(block(render())).toContain(`"${INQUIRY.question}"`)
+  })
+
+  it('carries OUR ANSWER verbatim too, not just the question', () => {
+    // Ruled 2026-09-30: the follow-up references what they asked AND what we
+    // suggested. Before that ruling only the question was passed, so this is
+    // the assertion that would have failed on the earlier shape.
+    expect(block(render())).toContain(`"${INQUIRY.answer}"`)
+    expect(block(render())).toContain('What we told them:')
+  })
+
+  it('does not truncate a long answer', () => {
+    const long = `${'a really specific recommendation '.repeat(20)}end`
+    const out = block(render({ inquiryFollowup: { ...INQUIRY, answer: long } }))
+    expect(out).toContain(long)
+  })
+
+  it('tells the model not to ask or assert the visit', () => {
+    const out = block(render())
+    expect(out).toContain('Do not ask or suggest whether they came in')
+    expect(out).toContain('do not say or imply that we know whether they did')
+    expect(out).toContain('Do not ask them to come in')
+  })
+
+  it('uses timing-neutral wording', () => {
+    // Ruled 2026-09-30. "Earlier today" is false on every send that rolled to
+    // the next open period, and that is most of them.
+    const out = block(render())
+    expect(out).toContain('Recently they asked us something')
+    for (const timing of ['Earlier today', 'earlier today', 'this morning']) {
+      expect(out, timing).not.toContain(timing)
+    }
+  })
+
+  it('speaks as "we" and names no host', () => {
+    const out = block(render())
+    expect(out).toContain('we')
+    for (const name of ['Himanshu', 'Neha']) {
+      expect(out, name).not.toContain(name)
+    }
+  })
+
+  it('offers no example phrase for the model to copy', () => {
+    // Jaipal's standing rule. The block describes the MOVE; the words come from
+    // the venue's own voice rules. The only quoted strings in it are the two
+    // data fields.
+    const out = block(render())
+    const quoted = Array.from(out.matchAll(/"([^"]+)"/g)).map((m) => m[1])
+    expect(quoted).toEqual([INQUIRY.question, INQUIRY.answer])
+  })
+
+  it('models no em dash', () => {
+    const out = block(render())
+    expect(out).not.toContain('—')
+    expect(out).not.toContain('–')
+  })
+
+  // Ruled 2026-09-30 after two of fifteen bodies contradicted and apologised for
+  // our own answer, because the block handed it over as data without saying it
+  // was final.
+  it('says what we told them is settled, not to be corrected or apologised for', () => {
+    const out = block(render())
+    expect(out).toContain('What we told them is what we said')
+    for (const move of [
+      'correct it',
+      're-verify it',
+      'walk it back',
+      'apologise for it',
+    ]) {
+      expect(out, move).toContain(move)
+    }
+  })
+
+  // Ruled 2026-09-30: "hope your pup had a good time if you made it in" breaches
+  // ruling 11. A conditional reference to the visit is still a reference.
+  it('rules out a CONDITIONAL visit reference, not just an assertion', () => {
+    expect(block(render())).toContain(
+      'Do not ask or suggest whether they came in, even conditionally',
+    )
+  })
+
+  // Ruled 2026-09-30 after seven of fifteen opened with a birthday wish, which
+  // pushed the repetition bar over on its own. Note there is no occasion BLOCK
+  // to suppress: the birthday is a freeform `observations` entry on the guest,
+  // so this is an instruction rather than data withheld upstream.
+  it('carries one subject and names the occasion case', () => {
+    const out = block(render())
+    expect(out).toContain('one subject and nothing else')
+    expect(out).toContain('Do not raise a birthday or any other occasion')
+  })
+
+  it('renders no follow-up-context block alongside it', () => {
+    // triggerReasonToFollowupReason returns null for this reason, so the shared
+    // `## Follow-up context` machinery never fires. Its framing is "you visited
+    // N days ago", which is the assertion ruling 11 bars.
+    expect(render()).not.toContain('## Follow-up context')
   })
 })

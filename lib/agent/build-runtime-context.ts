@@ -29,6 +29,9 @@ import { parseFollowupRules } from '@/lib/schemas/followup-rules'
 import { parseIntentionRules } from '@/lib/schemas/intention-rules'
 import { isScanReferral } from '@/lib/schemas/referral-source'
 import { scanCarryForwardAt } from './scan-arrival'
+// TAC-567: TAC-560's predicate, reused rather than a second definition of
+// "first conversation". warm-close.ts is pure and builds no client at import.
+import { isFirstConversation } from './warm-close'
 import { loadScanCarryForward } from './scan-arrival-store'
 import {
   resolveConversationChannel,
@@ -178,7 +181,7 @@ export async function buildRuntimeContext(input: {
     supabase
       .from('guests')
       .select(
-        'id, phone_number, instagram_scoped_id, first_name, created_at, created_via, is_demo, context, last_visit_at',
+        'id, phone_number, instagram_scoped_id, first_name, created_at, created_via, first_contacted_at, is_demo, context, last_visit_at',
       )
       .eq('id', input.guestId)
       .single(),
@@ -433,6 +436,10 @@ export async function buildRuntimeContext(input: {
     firstName: guestRow.first_name,
     createdAt: new Date(guestRow.created_at),
     createdVia: guestRow.created_via,
+    // TAC-567: read only to resolve isFirstConversation below.
+    firstContactedAt: guestRow.first_contacted_at
+      ? new Date(guestRow.first_contacted_at)
+      : null,
     isDemo: guestRow.is_demo,
     context: parsedGuestContext,
     // TAC-244: anchor source for `cold_lapsed` follow-up reasons. `null` for
@@ -470,6 +477,20 @@ export async function buildRuntimeContext(input: {
     60 *
     60 *
     1000
+
+  // TAC-567: resolved ONCE here, beside the window it measures against, and
+  // carried on the context. Two readers need it (the intention derivation and
+  // the prompt), and a second derivation of "first conversation" is exactly the
+  // drift TAC-380 ruling 1 exists to prevent.
+  //
+  // TAC-560's predicate, unchanged. `first_contacted_at ?? created_at` is the
+  // anchor (ruled 2026-09-30): the column is null only for rows predating it,
+  // and created_at marks the same moment for a guest either webhook created.
+  const firstConversation = isFirstConversation(
+    guest.firstContactedAt ?? guest.createdAt,
+    computedAt,
+    conversationWindowMs,
+  )
 
   const mechanicCandidates: EligibilityCandidate[] = (
     mechanicsResult.data ?? []
@@ -542,7 +563,8 @@ export async function buildRuntimeContext(input: {
     // "Have we heard what they ordered" reuses the visit-history query rather
     // than issuing another: the RAW row count, before extractRecentVisits's
     // parse-projection, since we heard it even if raw_data is unparseable.
-    const hasQualifyingTransaction = (visitHistoryResult.data?.length ?? 0) > 0
+    const recordedVisitCount = visitHistoryResult.data?.length ?? 0
+    const hasQualifyingTransaction = recordedVisitCount > 0
 
     // TAC-436 ruling 3: arms understand_order off the EARLIEST confirmed visit,
     // from either source, rather than off QR enrollment alone.
@@ -732,6 +754,12 @@ export async function buildRuntimeContext(input: {
         hasQualifyingTransaction,
         firstName: guest.firstName,
         homeBase: parsedGuestContext.guest_details?.home_base,
+        // TAC-558. The RAW row count, not recentVisits.length: closing
+        // are_they_new_here must not depend on raw_data parsing, or a guest with
+        // five visits of which four are unparseable gets asked whether this is
+        // their first time. See hasRepeatVisitsOnRecord.
+        recordedVisitCount,
+        venueHistory: parsedGuestContext.guest_details?.history_here,
       }),
       visitConfirmedAt,
       openRecommendationTimes,
@@ -741,6 +769,9 @@ export async function buildRuntimeContext(input: {
       rows: intentionRows,
       inboundTimes,
       inboundHistoryFrom,
+      // TAC-567: only understand_order, learn_name and are_they_new_here may be
+      // raised while this is true.
+      isFirstConversation: firstConversation,
       // Ruling 1: one definition of "still in the same conversation" across
       // followups and intentions. Le Mil's followup_rules is NULL, so it runs on
       // the code default (48h), at which the brake rarely fires. That is the
@@ -800,6 +831,7 @@ export async function buildRuntimeContext(input: {
     conversationChannel: channelResolution.channel,
     recentMessages,
     conversationWindowMs,
+    firstConversation,
     recognition,
     mechanics,
     recentVisits,
@@ -807,6 +839,22 @@ export async function buildRuntimeContext(input: {
     // TAC-380: empty on every followup run and while the brake is engaged.
     // The serializer omits the block entirely when empty.
     openIntentions: intentions.open,
+    // TAC-560: true only on the pause-triggered warm close. Read off the
+    // trigger rather than derived, because whether this turn is a close is the
+    // caller's decision (the processor claimed it), not something re-inferable
+    // from the guest's state here.
+    warmClose: input.followupTrigger?.reason === 'warm_close',
+    // TAC-386: the question and our answer both come off the trigger, which the
+    // processor filled in after resolving the answer from `messages`. Nothing
+    // here reads the database for them.
+    inquiryFollowup:
+      input.followupTrigger?.reason === 'inquiry_followup' &&
+      input.followupTrigger.inquiryFollowup
+        ? {
+            question: input.followupTrigger.inquiryFollowup.question,
+            answer: input.followupTrigger.inquiryFollowup.answer,
+          }
+        : null,
     intentionDerivation: {
       newlyEligible: intentions.newlyEligible,
       brakeEngaged: intentions.brakeEngaged,

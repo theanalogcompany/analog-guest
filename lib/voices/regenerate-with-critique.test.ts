@@ -3,6 +3,9 @@
 import { readFile } from 'node:fs/promises'
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+// Derived from the live constant: a stale fixture literal ships green, and
+// nothing fails (see .claude/rules/prompt-versioning.md).
+import { PROMPT_VERSION } from '@/lib/ai/prompts/system-template'
 
 vi.mock('@/lib/db/admin', () => ({
   createAdminClient: vi.fn(),
@@ -32,7 +35,7 @@ vi.mock('@/lib/ai', () => ({
   verifyProsePromise: vi.fn(),
 }))
 vi.mock('@/lib/rag', () => ({
-  retrieveContext: vi.fn(),
+  loadVoicePack: vi.fn(),
 }))
 vi.mock('@/lib/observability', () => ({
   noopAgentTrace: {
@@ -57,7 +60,7 @@ import {
   verifyProsePromise,
 } from '@/lib/ai'
 import { createAdminClient } from '@/lib/db/admin'
-import { retrieveContext } from '@/lib/rag'
+import { loadVoicePack } from '@/lib/rag'
 import { regenerateWithCritique } from './regenerate-with-critique'
 
 // TAC-350: default grounding-backstop result — "nothing to flag" — used by
@@ -212,7 +215,7 @@ beforeEach(() => {
   vi.mocked(buildAiRuntime).mockReset()
   vi.mocked(classifyMessage).mockReset()
   vi.mocked(generateMessage).mockReset()
-  vi.mocked(retrieveContext).mockReset()
+  vi.mocked(loadVoicePack).mockReset()
   vi.mocked(retrieveKnowledgeWithContextStage).mockReset()
   // Default: retrieval succeeds with nothing. Every test that cares sets its
   // own; without a default the stage resolves undefined and regen throws on
@@ -318,7 +321,8 @@ describe('regenerateWithCritique — crisis-safety refusal (TAC-348)', () => {
         reasoning: 'r',
         crisisSafety: true,
         correctsPendingReply: false,
-        promptVersion: 'v1.72.0',
+        followUpWorthy: false,
+        promptVersion: PROMPT_VERSION,
       },
     })
   })
@@ -335,13 +339,13 @@ describe('regenerateWithCritique — crisis-safety refusal (TAC-348)', () => {
     expect(r.error).toContain('crisis-safety')
   })
 
-  it('never calls retrieveContext or generateMessage for a crisis-safety inbound', async () => {
+  it('never calls loadVoicePack or generateMessage for a crisis-safety inbound', async () => {
     await regenerateWithCritique({
       venueId: VENUE_ID,
       originalMessageId: OUTBOUND_ID,
       critique: 'x',
     })
-    expect(retrieveContext).not.toHaveBeenCalled()
+    expect(loadVoicePack).not.toHaveBeenCalled()
     expect(retrieveKnowledgeWithContextStage).not.toHaveBeenCalled()
     expect(generateMessage).not.toHaveBeenCalled()
   })
@@ -382,10 +386,11 @@ describe('regenerateWithCritique — happy path', () => {
         reasoning: 'r',
         crisisSafety: false,
         correctsPendingReply: false,
+        followUpWorthy: false,
         promptVersion: 'v1.8.0',
       },
     })
-    vi.mocked(retrieveContext).mockResolvedValue({
+    vi.mocked(loadVoicePack).mockResolvedValue({
       ok: true,
       data: [
         {
@@ -394,7 +399,7 @@ describe('regenerateWithCritique — happy path', () => {
           text: 'venue speaks like this',
           sourceType: 'sample_text',
           confidence: 0.9,
-          similarity: 0.5,
+          similarity: 1,
         },
       ],
     })
@@ -414,7 +419,9 @@ describe('regenerateWithCritique — happy path', () => {
         arrivalCapture: {},
         cancelsCommitmentId: '',
         intentionQuestion: '',
+        closedTheConversation: false,
         intentionQuestionDuplicateStripped: false,
+        intentionQuestionDroppedForBodyQuestion: false,
         attempts: 1,
         attemptScores: [0.85],
         attemptHistory: [],
@@ -781,7 +788,9 @@ describe('regenerateWithCritique — happy path', () => {
         arrivalCapture: {},
         cancelsCommitmentId: '',
         intentionQuestion: '',
+        closedTheConversation: false,
         intentionQuestionDuplicateStripped: false,
+        intentionQuestionDroppedForBodyQuestion: false,
         attempts: 1,
         attemptScores: [0.85],
         attemptHistory: [],
@@ -835,8 +844,11 @@ describe('regenerateWithCritique — happy path', () => {
 // 'lets EACH arm take its own tag-preference fallback'. What this file still
 // owns is that regen DELEGATES, asserted at the bottom of the file.
 
-describe('regenerateWithCritique — corpus thinness', () => {
-  it('fails closed when no strong matches above 0.3', async () => {
+// Reversed from 'corpus thinness' when decision 0008 made voice a static
+// pack: there is no similarity left to be thin, so the closed failure modes
+// are a pack that will not load and a venue with no corpus at all.
+describe('regenerateWithCritique — voice pack failures', () => {
+  beforeEach(() => {
     vi.mocked(createAdminClient).mockReturnValue(
       makeAdminMock(newDbState()) as unknown as ReturnType<
         typeof createAdminClient
@@ -853,23 +865,18 @@ describe('regenerateWithCritique — corpus thinness', () => {
         reasoning: 'r',
         crisisSafety: false,
         correctsPendingReply: false,
+        followUpWorthy: false,
         promptVersion: 'v1.8.0',
       },
     })
-    vi.mocked(retrieveContext).mockResolvedValue({
-      ok: true,
-      data: [
-        {
-          id: 'c1',
-          voiceCorpusId: 'vc1',
-          text: 't',
-          sourceType: 'sample_text',
-          confidence: 0.9,
-          similarity: 0.1,
-        },
-      ],
-    })
+  })
 
+  it('fails closed when the pack load errors', async () => {
+    vi.mocked(loadVoicePack).mockResolvedValue({
+      ok: false,
+      error: 'db down',
+      errorCode: 'db_query_failed',
+    })
     const r = await regenerateWithCritique({
       venueId: VENUE_ID,
       originalMessageId: OUTBOUND_ID,
@@ -878,7 +885,22 @@ describe('regenerateWithCritique — corpus thinness', () => {
     expect(r.ok).toBe(false)
     if (!r.ok) {
       expect(r.errorCode).toBe('retrieve_failed')
-      expect(r.error).toContain('insufficient_corpus_matches')
+      expect(r.error).toContain('db down')
+    }
+    expect(generateMessage).not.toHaveBeenCalled()
+  })
+
+  it('fails closed when the venue has an empty voice pack', async () => {
+    vi.mocked(loadVoicePack).mockResolvedValue({ ok: true, data: [] })
+    const r = await regenerateWithCritique({
+      venueId: VENUE_ID,
+      originalMessageId: OUTBOUND_ID,
+      critique: 'x',
+    })
+    expect(r.ok).toBe(false)
+    if (!r.ok) {
+      expect(r.errorCode).toBe('retrieve_failed')
+      expect(r.error).toContain('empty_voice_pack')
     }
     expect(generateMessage).not.toHaveBeenCalled()
   })
@@ -920,10 +942,11 @@ describe('regenerateWithCritique — knowledge retrieval delegates to stages.ts 
         reasoning: 'r',
         crisisSafety: false,
         correctsPendingReply: false,
+        followUpWorthy: false,
         promptVersion: 'v1.8.0',
       },
     })
-    vi.mocked(retrieveContext).mockResolvedValue({
+    vi.mocked(loadVoicePack).mockResolvedValue({
       ok: true,
       data: [
         {
@@ -932,7 +955,7 @@ describe('regenerateWithCritique — knowledge retrieval delegates to stages.ts 
           text: 't',
           sourceType: 'sample_text',
           confidence: 0.9,
-          similarity: 0.8,
+          similarity: 1,
         },
       ],
     })
@@ -955,7 +978,9 @@ describe('regenerateWithCritique — knowledge retrieval delegates to stages.ts 
         arrivalCapture: {},
         cancelsCommitmentId: '',
         intentionQuestion: '',
+        closedTheConversation: false,
         intentionQuestionDuplicateStripped: false,
+        intentionQuestionDroppedForBodyQuestion: false,
         userPrompt: 'p',
         systemPrompt: 's',
         dashViolationPersisted: false,
