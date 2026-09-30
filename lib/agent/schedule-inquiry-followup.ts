@@ -33,7 +33,35 @@ import {
   INQUIRY_FOLLOWUP_DELAY_HOURS,
 } from '@/lib/followups/inquiry-followup-timing'
 import type { MessageCategory } from '@/lib/ai/types'
+import type { VenueInfo } from '@/lib/schemas'
 import type { RuntimeContext } from './types'
+
+/**
+ * Exactly what arming a follow-up reads off the turn.
+ *
+ * A narrow structural type rather than the whole `RuntimeContext`, following
+ * `VenueOpenStateInput`'s precedent: a caller holding only these can pass them,
+ * and a test fixture does not have to build a venue, a persona and a corpus it
+ * never reads. `RuntimeContext` satisfies it structurally, so handle-inbound
+ * passes `ctx` unchanged.
+ */
+export interface ScheduleInquiryInput {
+  classification: Pick<
+    NonNullable<RuntimeContext['classification']>,
+    'category' | 'crisisSafety' | 'followUpWorthy'
+  > | null
+  currentMessage: Pick<
+    NonNullable<RuntimeContext['currentMessage']>,
+    'id' | 'body'
+  > | null
+  conversationChannel: RuntimeContext['conversationChannel']
+  venue: {
+    id: string
+    timezone: string
+    venueInfo: Pick<VenueInfo, 'hours'>
+  }
+  guest: { id: string }
+}
 
 /**
  * Categories an inquiry follow-up never arms behind, whatever the classifier
@@ -75,7 +103,7 @@ const UNIQUE_VIOLATION = '23505'
  * Pure decisions first, then one insert. Never throws.
  */
 export async function scheduleInquiryFollowup(
-  ctx: RuntimeContext,
+  ctx: ScheduleInquiryInput,
   supabase = createAdminClient(),
 ): Promise<ScheduleInquiryOutcome> {
   try {

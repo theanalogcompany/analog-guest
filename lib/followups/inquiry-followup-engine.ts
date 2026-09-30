@@ -38,7 +38,7 @@ import { createAdminClient } from '@/lib/db/admin'
 import { handleFollowup } from '@/lib/agent/handle-followup'
 import { isQuietHour } from '@/lib/agent/followup-rules'
 import { loadPendingRowsBySlot } from '@/lib/agent/pending-slots'
-import { isVenueClosed } from '@/lib/agent/venue-open-state'
+import { resolveVenueOpenState } from '@/lib/agent/venue-open-state'
 import {
   MAX_HISTORY_DAYS,
   MAX_HISTORY_MESSAGES,
@@ -49,7 +49,7 @@ import {
   instagramWindowState,
   loadLastGuestActionAt,
 } from '@/lib/messaging/instagram/window'
-import { parseFollowupRules, VenueInfoSchema } from '@/lib/schemas'
+import { parseFollowupRules, VenueHoursSchema } from '@/lib/schemas'
 import { parseIntentionRules } from '@/lib/schemas/intention-rules'
 import { isVenueProcessingHalted } from '@/lib/venues/status'
 import type { AgentResult } from '@/lib/agent/types'
@@ -135,7 +135,7 @@ interface VenueGate {
   weeklyCap: number
   conversationWindowMs: number
   unansweredStreak: number
-  hours: ReturnType<typeof VenueInfoSchema.parse>['hours'] | null
+  hours: ReturnType<typeof VenueHoursSchema.parse> | null
 }
 
 async function resolveVenueGate(
@@ -148,7 +148,14 @@ async function resolveVenueGate(
   const intentionRules = parseIntentionRules(
     intentionRaw.ok ? intentionRaw.data : null,
   )
-  const parsedInfo = VenueInfoSchema.safeParse(venue.venueInfo)
+  // JUST THE HOURS, through VenueHoursSchema, not the whole VenueInfo. Parsing
+  // the whole blob would make a venue with a half-filled venue_info lose its
+  // hours entirely and so never send, which is a much bigger refusal than the
+  // missing field deserves. VenueHoursSchema is all-optional and is what
+  // instagram-scan-greeting.ts reads for the same purpose.
+  const parsedHours = VenueHoursSchema.safeParse(
+    (venue.venueInfo as { hours?: unknown } | null)?.hours ?? null,
+  )
   return {
     venue,
     enabled: rules.inquiry_followup_enabled,
@@ -167,7 +174,7 @@ async function resolveVenueGate(
         rules.quiet_hours_start_local,
         rules.quiet_hours_end_local,
       ),
-    hours: parsedInfo.success ? parsedInfo.data.hours : null,
+    hours: parsedHours.success ? parsedHours.data : null,
   }
 }
 
@@ -347,11 +354,23 @@ async function considerRow(
       ? resolve(supabase, row, 'expired', 'past_horizon')
       : 'venue_closed_now'
   }
+  // `!== 'open'` rather than `isVenueClosed`, and this is the one place in the
+  // repo that deliberately inverts venue-open-state.ts's house rule.
+  //
+  // That module exists because `!== 'open'` folds `unknown` in with `closed`,
+  // and for its callers that is a bug: they decide whether to hold a reply a
+  // guest is WAITING for, so a venue whose hours nobody filled in must behave as
+  // open. This caller decides whether to START an unprompted conversation, and
+  // ruling 4 of 2026-09-17 is explicit that unreadable hours do not send. So
+  // `unknown` belongs with `closed` here.
+  //
+  // The comparison is written out rather than routed through isVenueClosed
+  // precisely so nobody reads it as having forgotten which one to use.
   const venueForHours = {
     venueInfo: { hours: gate.hours },
     timezone: gate.venue.timezone,
   }
-  if (isVenueClosed(venueForHours, now)) {
+  if (resolveVenueOpenState(venueForHours, now).state !== 'open') {
     return pastHorizon
       ? resolve(supabase, row, 'expired', 'past_horizon')
       : 'venue_closed_now'

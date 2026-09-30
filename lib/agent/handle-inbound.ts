@@ -51,6 +51,7 @@ import {
   loadPendingRowsBySlot,
 } from './pending-slots'
 import { extractReportedOrder } from './extract-reported-order'
+import { scheduleInquiryFollowup } from './schedule-inquiry-followup'
 import { renderableIntentions } from './intentions/derive'
 import {
   recordIntentionEligibility,
@@ -1454,6 +1455,48 @@ async function runInboundTurn(
         })
         .catch((e) => {
           console.error('[agent] extractReportedOrder threw unexpectedly', {
+            agentRunId,
+            error: e instanceof Error ? e.message : String(e),
+          })
+        }),
+    )
+
+    // TAC-386: arm the inquiry follow-up. Non-blocking by design (waitUntil),
+    // the same posture as extractReportedOrder above and for the same reason: a
+    // slow or failed write must never delay or block the reply. It never throws
+    // and reports its own outcome, so a failure costs a missed follow-up rather
+    // than a broken turn.
+    //
+    // Placed here, post-classify, because `followUpWorthy` is what it reads, and
+    // after the crisis short-circuit's early return above, so a guest in crisis
+    // never arms one. The module re-checks crisisSafety anyway; the placement is
+    // not the only thing stopping it.
+    waitUntil(
+      scheduleInquiryFollowup(ctx)
+        .then((outcome) => {
+          if (outcome.kind === 'armed') {
+            console.log('[agent] inquiry follow-up armed', {
+              agentRunId,
+              dueAt: outcome.dueAt.toISOString(),
+            })
+          } else if (outcome.kind === 'failed') {
+            console.warn(
+              '[agent] inquiry follow-up could not be armed (continuing)',
+              { agentRunId, error: outcome.error },
+            )
+          } else {
+            // Every other outcome is an ordinary decision not to arm one, and
+            // they are the common case. Logged at debug volume because the
+            // reason is the only interesting part when a follow-up is missing.
+            console.log('[agent] inquiry follow-up not armed', {
+              agentRunId,
+              outcome: outcome.kind,
+              reason: 'reason' in outcome ? outcome.reason : undefined,
+            })
+          }
+        })
+        .catch((e) => {
+          console.error('[agent] scheduleInquiryFollowup threw unexpectedly', {
             agentRunId,
             error: e instanceof Error ? e.message : String(e),
           })
