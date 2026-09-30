@@ -86,7 +86,7 @@
     "husky": "^9.1.7",
     "js-yaml": "4.1.1",
     "jscpd": "^5.3.3",
-    "lint-staged": "^17.0.3",
+    "lint-staged": "^17.5.1",
     "prettier": "^3.9.9",
     "tailwindcss": "^4",
     "tsx": "^4.21.0",
