@@ -663,8 +663,8 @@ describe('buildRuntimeContext: first conversation (TAC-567)', () => {
   })
 
   // The two readers. Either one missing is a silent half-fix: without the first
-  // the five suppressed intentions still render, without the second the prompt
-  // loses the restraint that stops an invented question.
+  // the suppressed intentions still render, without the second the prompt loses
+  // the restraint that stops an invented question.
   it('passes it to the intention derivation and carries it on the context', () => {
     expect(src).toContain('isFirstConversation: firstConversation,')
     expect(src).toMatch(/^ {4}firstConversation,$/m)
@@ -678,5 +678,20 @@ describe('buildRuntimeContext: first conversation (TAC-567)', () => {
       src.indexOf('const firstConversation = isFirstConversation('),
     )
     expect(call.slice(0, call.indexOf(')'))).toContain('conversationWindowMs')
+  })
+
+  // TAC-568: the 'after_warm_close' policy's one input. Source-level for the
+  // same reason the rest of this block is: the column has to be SELECTED or the
+  // field arrives undefined, `!== null` reads it as "closed", and every guest
+  // would get are_they_new_here on their first conversation from the first
+  // message - the exact behaviour the morning ruling removed.
+  it('selects warm_close_sent_at with the guest and passes it to the derivation', () => {
+    const guestQuery = src.slice(src.indexOf(".from('guests')"))
+    expect(guestQuery.slice(0, guestQuery.indexOf('.eq('))).toMatch(
+      /\bwarm_close_sent_at\b/,
+    )
+    expect(src).toContain(
+      'warmCloseSent: guestRow.warm_close_sent_at !== null,',
+    )
   })
 })

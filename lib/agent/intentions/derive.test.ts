@@ -56,6 +56,10 @@ function input(
     // waiver. This base fixture means "every gate closed", so it has to sit off
     // that turn. Tests about the waiver set the count to 1 explicitly.
     repliedMessageCount: 2,
+    // TAC-568: the guest has not been closed. `false` is the ordinary turn and
+    // the one every pre-existing test in this file was written against; tests
+    // about the 'after_warm_close' policy set it explicitly.
+    warmCloseSent: false,
     rules: INTENTION_RULES_DEFAULT,
     facts: NO_FACTS,
     // TAC-436: no confirmed visit by default, so understand_order stays closed
@@ -1760,8 +1764,9 @@ describe('deriveOpenIntentions — are_they_new_here (TAC-558)', () => {
   })
 })
 
-// TAC-567, ruled 2026-09-30 and narrowed by TAC-568 the same day: on a guest's
-// FIRST conversation only understand_order and learn_name may be raised.
+// TAC-567, ruled 2026-09-30 and amended by TAC-568 the same day: on a guest's
+// FIRST conversation only understand_order and learn_name may be raised, plus
+// are_they_new_here once the warm close has gone out.
 //
 // ONE FIXTURE, TWO ARMS, and that is what makes these tests mean something. The
 // input below opens ALL EIGHT intentions - 11 lifetime replies clears every
@@ -1802,23 +1807,145 @@ describe('deriveOpenIntentions — first conversation (TAC-567/TAC-568)', () => 
     ])
   })
 
-  it('opens only the ruled two on a first conversation', () => {
+  it('opens only the ruled two on a first conversation, before the close', () => {
     const { open } = deriveOpenIntentions(
-      input({ ...ALL_EIGHT_OPEN, isFirstConversation: true }),
+      input({
+        ...ALL_EIGHT_OPEN,
+        isFirstConversation: true,
+        warmCloseSent: false,
+      }),
     )
     expect(keysOf(open)).toEqual(['understand_order', 'learn_name'])
   })
 
-  // Each suppressed intention named individually, because the two list
-  // assertions above would both pass if five of the six were suppressed and one
-  // were suppressed for an unrelated reason.
+  // TAC-568'S AMENDMENT, AND THE TWO ARMS IT ASKS FOR, on ONE fixture that
+  // differs in a single boolean. Everything else is held: same guest, same
+  // recorded order, same reply count, same first conversation.
+  it('opens are_they_new_here on the SAME first conversation once the close has gone out', () => {
+    const { open } = deriveOpenIntentions(
+      input({
+        ...ALL_EIGHT_OPEN,
+        isFirstConversation: true,
+        warmCloseSent: true,
+      }),
+    )
+    expect(keysOf(open)).toContain('are_they_new_here')
+    // And only that one comes back. The other five stay suppressed, so the
+    // close is not a general amnesty on the first-conversation restraint.
+    expect(keysOf(open)).toEqual([
+      'understand_order',
+      'are_they_new_here',
+      'learn_name',
+    ])
+  })
+
+  // The same pair stated as the ruling words it, so a reader can check the
+  // ticket against one assertion rather than two tests.
+  it('is ineligible before the close and eligible after it', () => {
+    const before = deriveOpenIntentions(
+      input({
+        ...ALL_EIGHT_OPEN,
+        isFirstConversation: true,
+        warmCloseSent: false,
+      }),
+    )
+    const after = deriveOpenIntentions(
+      input({
+        ...ALL_EIGHT_OPEN,
+        isFirstConversation: true,
+        warmCloseSent: true,
+      }),
+    )
+    expect(keysOf(before.open)).not.toContain('are_they_new_here')
+    expect(keysOf(after.open)).toContain('are_they_new_here')
+  })
+
+  // THE HALF THE OPEN-SET FILTER ALONE WOULD MISS, on the new policy. Before the
+  // close it must not be RECORDED eligible either, or its expiry starts running
+  // while it cannot be asked; after the close it must be.
+  it('records eligibility for are_they_new_here only after the close', () => {
+    const before = deriveOpenIntentions(
+      input({
+        ...ALL_EIGHT_OPEN,
+        isFirstConversation: true,
+        warmCloseSent: false,
+      }),
+    )
+    const after = deriveOpenIntentions(
+      input({
+        ...ALL_EIGHT_OPEN,
+        isFirstConversation: true,
+        warmCloseSent: true,
+      }),
+    )
+    expect(before.newlyEligible.map((n) => n.key)).not.toContain(
+      'are_they_new_here',
+    )
+    expect(after.newlyEligible.map((n) => n.key)).toContain('are_they_new_here')
+  })
+
+  // THE STICKY-ROW PATH, for the deferred intention specifically. The tests
+  // above drive the arming loop (no row yet); this one gives are_they_new_here
+  // an eligibility row that already exists, so only the OPEN-SET FILTER can stop
+  // it rendering before the close.
   //
-  // are_they_new_here JOINED THIS LIST IN TAC-568, and it is the one that
-  // matters: the fixture arms it (a recorded order, 11 replies), so the control
-  // arm below proves it is still fully alive on a second conversation. A
-  // suppression that had accidentally retired the intention would fail there.
+  // It is not hypothetical for this intention: it arms on first_recorded_order
+  // and re-arms on a strictly newer order, so a row can predate the close.
+  it('filters a pre-existing are_they_new_here row until the close', () => {
+    const shared = {
+      ...ALL_EIGHT_OPEN,
+      isFirstConversation: true,
+      rows: {
+        prompted: [],
+        eligible: [
+          { intentionKey: 'are_they_new_here', eligibleAt: hoursAgo(2) },
+        ],
+      },
+    } as Partial<DeriveOpenIntentionsInput>
+
+    const before = deriveOpenIntentions(
+      input({ ...shared, warmCloseSent: false }),
+    )
+    expect(keysOf(before.open)).not.toContain('are_they_new_here')
+
+    const after = deriveOpenIntentions(
+      input({ ...shared, warmCloseSent: true }),
+    )
+    expect(keysOf(after.open)).toContain('are_they_new_here')
+  })
+
+  // warmCloseSent MUST NOT LEAK OUTSIDE A FIRST CONVERSATION. On a later
+  // conversation the policy is irrelevant and every intention is open either
+  // way; if this ever differed, the flag would have become a second, hidden
+  // suppression rule.
+  it('changes nothing outside a first conversation', () => {
+    const withClose = deriveOpenIntentions(
+      input({
+        ...ALL_EIGHT_OPEN,
+        isFirstConversation: false,
+        warmCloseSent: true,
+      }),
+    )
+    const without = deriveOpenIntentions(
+      input({
+        ...ALL_EIGHT_OPEN,
+        isFirstConversation: false,
+        warmCloseSent: false,
+      }),
+    )
+    expect(keysOf(withClose.open)).toEqual(keysOf(without.open))
+    expect(keysOf(withClose.open)).toHaveLength(8)
+  })
+
+  // Each suppressed intention named individually, because the list assertions
+  // above would all pass if four of the five were suppressed and one were
+  // suppressed for an unrelated reason.
+  //
+  // are_they_new_here IS NOT IN THIS LIST: TAC-568's amendment makes it
+  // 'after_warm_close' rather than 'suppressed', and its two arms are covered
+  // by their own tests above. Putting it here would assert the morning ruling
+  // that the amendment reversed.
   it.each([
-    'are_they_new_here',
     'got_the_recommendation',
     'did_they_like_it',
     'are_they_local',
@@ -1894,13 +2021,14 @@ describe('deriveOpenIntentions — first conversation (TAC-567/TAC-568)', () => 
   // The ruled sequence, as the production turn shape produces it. TAC-568
   // rewrote its ENDING: the order lands, and where turn 3 used to arm
   // are_they_new_here and let it outrank learn_name, the filter now drops it and
-  // the name is the only thing left to ask. That is the whole point of the
-  // ruling - the visit ends on something that either happened or did not,
-  // rather than on a question the model may decline to raise.
+  // the name is the only thing left to ask. The visit ends on something that
+  // either happened or did not, rather than on a question the model may decline
+  // to raise - and then, if the guest keeps talking after the close, the
+  // first-visit question is there after all.
   //
   // Nothing here sets a flag to make that happen: it is the gates and armings
-  // already shipped, read through the filter.
-  it('walks the ruled first-visit flow: the order, then the name, and it ends there', () => {
+  // already shipped, read through the policy.
+  it('walks the ruled first-visit flow: the order, then the name, then the close reopens it', () => {
     const turnOne = deriveOpenIntentions(
       input({
         isFirstConversation: true,
@@ -1925,8 +2053,27 @@ describe('deriveOpenIntentions — first conversation (TAC-567/TAC-568)', () => 
     // fails the moment the flag goes back to true.
     expect(keysOf(turnThree.open)).toEqual(['learn_name'])
 
+    // TURN FOUR: the guest kept chatting after the close. Same first
+    // conversation, same arming, one fact changed - and the question the ruled
+    // flow deferred is now at the head of the list, on priority 15.
+    const afterTheClose = deriveOpenIntentions(
+      input({
+        isFirstConversation: true,
+        warmCloseSent: true,
+        repliedMessageCount: 4,
+        visitConfirmedAt: hoursAgo(1),
+        recordedOrderTimes: [hoursAgo(1)],
+        facts: { ...NO_FACTS, hasQualifyingTransaction: true },
+      }),
+    )
+    expect(keysOf(afterTheClose.open)).toEqual([
+      'are_they_new_here',
+      'learn_name',
+    ])
+
     // The same turn, on a LATER conversation, is the control: identical inputs,
-    // one flag flipped, and the intention comes back at the head of the list.
+    // one flag flipped, and the intention is open there too. This is what makes
+    // the deferral a statement about WHEN rather than about the second visit.
     const laterVisit = deriveOpenIntentions(
       input({
         isFirstConversation: false,

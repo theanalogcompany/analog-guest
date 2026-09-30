@@ -363,10 +363,10 @@ export interface RuntimeContext {
    * carried rather than re-derived so the intention derivation and the prompt
    * cannot disagree about which turn is a first conversation.
    *
-   * Three readers: deriveOpenIntentions suppresses every intention whose
-   * definition says allowedOnFirstConversation is false; the serializer renders
-   * the first-conversation restraint into the intentions block; and
-   * closesFirstConversation (TAC-568) gates the warm close on it.
+   * Three readers: deriveOpenIntentions applies each intention's
+   * `onFirstConversation` policy; the serializer renders the first-conversation
+   * restraint into the intentions block; and closesFirstConversation (TAC-568)
+   * gates the warm close on it.
    *
    * IT IS TRUE ON A PROACTIVE TURN TOO, AND THAT IS NOT WHAT MAKES IT SAFE. This
    * is clock-derived and computed unconditionally, so a cron follow-up, a holding

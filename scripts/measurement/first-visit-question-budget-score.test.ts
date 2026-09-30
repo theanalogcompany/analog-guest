@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import {
   ALLOWED_KEYS,
@@ -147,13 +149,28 @@ describe('the allowed two', () => {
     expect([...ALLOWED_KEYS]).toEqual(['understand_order', 'learn_name'])
   })
 
-  // TAC-568 moved are_they_new_here OFF the first conversation, so the scorer's
-  // bar moved with it. Named explicitly rather than left to the list above: a
-  // run scored before 2026-09-30 counted this key as on-target, so a figure
-  // carried across that date is comparing two different bars.
+  // TAC-568 moved are_they_new_here behind the warm close, so the scorer's bar
+  // moved with it. Named explicitly rather than left to the list above: a run
+  // scored before 2026-09-30 counted this key as on-target, so a figure carried
+  // across that date is comparing two different bars.
   it('treats are_they_new_here as off-target now (TAC-568)', () => {
     expect([...ALLOWED_KEYS]).not.toContain('are_they_new_here')
   })
+
+  // WHAT MAKES THE BAR ABOVE CORRECT RATHER THAN MERELY STRICT. The intention is
+  // allowed on a first conversation once the close has gone out, so this scorer
+  // is only right while the harnesses feeding it model the PRE-close flow. That
+  // is an input to production code, not a claim in a comment, so it is read off
+  // the harness sources - a harness switched to `warmCloseSent: true` would make
+  // this constant wrong, and nothing else would say so.
+  it.each(['first-visit-question.ts', 'first-visit-question-budget.ts'])(
+    '%s drives the derivation with warmCloseSent: false',
+    (file) => {
+      const src = readFileSync(join(import.meta.dirname, file), 'utf8')
+      expect(src).toContain('warmCloseSent: false,')
+      expect(src).not.toContain('warmCloseSent: true')
+    },
+  )
 
   it.each([
     'are_they_local',

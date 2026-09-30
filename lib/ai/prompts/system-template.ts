@@ -1780,7 +1780,8 @@ import {
 //   THE OTHER TWO HALVES ARE NOT PROMPT TEXT, deliberately, and this entry says
 //   so because the wording alone reads like the whole fix. Eligibility is
 //   suppressed in lib/agent/intentions (allowedOnFirstConversation on the
-//   definition, applied twice in deriveOpenIntentions), and the never-two-
+//   definition, renamed onFirstConversation and widened to three states by
+//   v1.79.0, applied twice in deriveOpenIntentions), and the never-two-
 //   questions rule is a code gate in composeReplyWithIntention that drops the
 //   bubble when the reply already asked something. Prompt wording could not
 //   reach either: the TAC-554 lesson, one layer on.
@@ -1864,12 +1865,17 @@ import {
 // nothing. Handing the model a false premise as fact is the TAC-484 / TAC-502
 // failure class. See lib/ai/prompts/categories/warm-close.ts.
 // v1.79.0 (TAC-568 follow-on): NO TEMPLATE TEXT CHANGED, and the bump is
-//   deliberate anyway. `are_they_new_here` came off the first-conversation
-//   allowed set (allowedOnFirstConversation on its definition), so the
-//   "## What you're hoping to get to" block can render one fewer line on a
-//   first conversation than it could at v1.78.0. The composed prompt a first
-//   visit sees is therefore not the same document, which is what this constant
-//   versions — it is not a version of this FILE.
+//   deliberate anyway. `are_they_new_here` is no longer raisable from the start
+//   of a first conversation (`onFirstConversation: 'after_warm_close'` on its
+//   definition), so the "## What you're hoping to get to" block renders one
+//   fewer line on a first conversation until the warm close has gone out. The
+//   composed prompt a first visit sees is therefore not the same document,
+//   which is what this constant versions — it is not a version of this FILE.
+//
+//   DEFERRED, NOT REMOVED, and the distinction is the whole amendment. The
+//   first version of this ruling suppressed the intention outright; it closes on
+//   hasRepeatVisitsOnRecord, so by the second visit it is already satisfied and
+//   "not on a first conversation" would have meant "never".
 //
 //   RECORDED BECAUSE THE NEXT READER WILL LOOK FOR A DIFF HERE AND FIND NONE.
 //   A bump with no textual change looks like a mistake; the alternative, not
@@ -1879,8 +1885,10 @@ import {
 //   ruling indistinguishable in exactly the runs that exist to tell them apart.
 //
 //   FIRST_CONVERSATION_RESTRAINT is untouched and still says "the only question
-//   this turn is the one listed above" — true of two listed lines as it was of
-//   three, which is why it names no count and needed no edit.
+//   this turn is the one listed above" — true whether two lines are listed or
+//   three, which is why it names no count and needed no edit. That is also what
+//   makes the post-close turn safe: one more line renders, and the restraint
+//   still allows exactly one question.
 //
 // v1.78.0 (TAC-568): the # Conversation close self-report block changes MEANING,
 // and the `## Closing this conversation` user-prompt block and the warm-close
