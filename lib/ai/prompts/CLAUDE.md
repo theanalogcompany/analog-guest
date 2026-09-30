@@ -133,6 +133,35 @@ block-order test is the only thing that catches a move past it.
   greeting cron, and TAC-536's carry-forward reaches `visitConfirmedAt`, which goes to
   intention arming and never to the prompt. Full reasoning is the v1.73.0 header in
   `system-template.ts`.
+- **The RECOGNITION half of that rule works and the WARM half has never held, across four
+  measured runs.** Recognition went 0/20 in the control to 15/20 and 16/20 in the treatment,
+  bare labels 15/20 to 0/20. The warm half about the guest has been 9/20, 7/20 and 7/20
+  against a bar of 18, and **three separate prohibitions each displaced a phrase rather than
+  supplying the warmth**: banning the bare label produced "your usual" at 43%, banning the
+  well-wish produced "that one keeps ..." at 55%, and widening the length guide produced
+  "coming back to" at 40%. Same shape as TAC-334 (naming "good pick" produced "good call")
+  and TAC-525 (a narrow prohibition moved the fabrication). **Do not add a fourth
+  prohibition without new evidence.**
+- **The length guide was NOT the constraint, and that was measured rather than argued.**
+  The obvious reading is that `## Length` mirrors a four-word message so the reply
+  compresses and the model drops whichever half is not required. Le Mil's `lengthGuide` was
+  widened in production to ask for two sentences, one recognising and one about the guest;
+  median reply length went 11 words to 15 and the warm half did not move. Counting CLAUSES
+  on the misses is what settled it: **10 of 11 misses carried two clauses and spent the
+  second on a well-wish or an item detail**, so the model had the room and chose otherwise.
+  **Do not count clauses with `splitIntoSentences`** — that is TAC-319's dispatch splitter
+  and requires a capitalised opener after the terminal punctuation, so at a lowercase-writing
+  venue it returns 1 for every reply and is blind to the question.
+- **Widening the length guide BROKE the count ban, which had been clean.** Count claims were
+  0/20 at 11 median words and 1 genuine breach at 15 ("three times and counting"). More room
+  is more room for a number, so R21's inline count ban and any future length change have to
+  be re-measured together rather than separately.
+- **A persona change contaminates the control arm, and this is the trap for the next
+  measurement here.** The widened `lengthGuide` itself instructs recognition, so the control
+  (the prompt with R21 and R23 sliced out) went from 0/20 recognition and 0/20 warmth to
+  4/20 and 4/20, and produced a count claim of its own. The rule's delta is still large, but
+  a run before such a change and a run after it are not a single-variable comparison. The
+  arms within one run stay clean, because both read the same persona.
 
 ---
 
