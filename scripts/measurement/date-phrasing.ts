@@ -322,7 +322,9 @@ async function main(): Promise<void> {
   }
   const injected = buildInjectedEntries(now)
 
-  const scenarios = args.only ? SCENARIOS.filter((s) => s.id === args.only) : SCENARIOS
+  const scenarios = args.only
+    ? SCENARIOS.filter((s) => s.id === args.only)
+    : SCENARIOS
   if (scenarios.length === 0) {
     console.error(`✗ no scenario with id "${args.only}"`)
     process.exit(2)
@@ -336,7 +338,11 @@ async function main(): Promise<void> {
       venue: venue.slug,
       guestId: args.guest,
       reps: args.reps,
-      scenarios: scenarios.map((s) => ({ id: s.id, body: s.body, inject: s.inject })),
+      scenarios: scenarios.map((s) => ({
+        id: s.id,
+        body: s.body,
+        inject: s.inject,
+      })),
       // Recorded verbatim: a file that does not say what text the model saw
       // cannot be compared against another run, and these are computed from
       // the run's own clock rather than fixed.
@@ -406,7 +412,11 @@ async function main(): Promise<void> {
       ctx.classification = classification
       ctx.corpus = await retrieveCorpusStage(ctx)
       ctx.knowledgeCorpus = shouldRetrieveKnowledge(ctx)
-        ? await retrieveKnowledgeStage(ctx, classification.category, scenario.body)
+        ? await retrieveKnowledgeStage(
+            ctx,
+            classification.category,
+            scenario.body,
+          )
         : []
 
       const generated = await generateStage(ctx, classification.category)
@@ -415,7 +425,9 @@ async function main(): Promise<void> {
       const counts = countByKind(matches)
 
       const grounding =
-        generated.status === 'success' ? await verifyGroundingStage(ctx, generated.result) : null
+        generated.status === 'success'
+          ? await verifyGroundingStage(ctx, generated.result)
+          : null
 
       log.appendUnit({
         scenarioId: scenario.id,
@@ -428,21 +440,28 @@ async function main(): Promise<void> {
         conversationChannel: ctx.conversationChannel,
         status: generated.status,
         body,
-        voiceFidelity: generated.status === 'success' ? generated.result.voiceFidelity : null,
-        attempts: generated.status === 'success' ? generated.result.attempts : null,
+        voiceFidelity:
+          generated.status === 'success'
+            ? generated.result.voiceFidelity
+            : null,
+        attempts:
+          generated.status === 'success' ? generated.result.attempts : null,
         counts,
         matches,
         // skipped | clean | flagged | truncated. `flagged` means production
         // would have queued this rather than sent it.
         groundingStatus: grounding?.status ?? null,
-        groundingClaims: grounding?.status === 'flagged' ? grounding.claims : [],
+        groundingClaims:
+          grounding?.status === 'flagged' ? grounding.claims : [],
         // Recorded so the weekday case can be read without re-deriving it.
-        expectedWeekday: scenario.id === 'event-this-week' ? injected.thisWeekWeekday : null,
+        expectedWeekday:
+          scenario.id === 'event-this-week' ? injected.thisWeekWeekday : null,
         // The calendar as the model saw it, so a run log explains a lookup
         // that went wrong without re-deriving the window by hand.
-        calendar: computeCalendar(venue.timezone ?? 'America/Los_Angeles', now).map(
-          (d) => `${d.weekday} ${d.monthDay}`,
-        ),
+        calendar: computeCalendar(
+          venue.timezone ?? 'America/Los_Angeles',
+          now,
+        ).map((d) => `${d.weekday} ${d.monthDay}`),
       })
 
       const flags = [
@@ -480,8 +499,12 @@ async function main(): Promise<void> {
 
   await trace.flushAsync()
   console.log(`\nDone (${arm}). Run log: ${log.path}`)
-  console.log('Compare the two arms by scenarioId. ✗ is a date stated system-shaped;')
-  console.log('~ is a reply that named no date at all, which is not automatically a win.')
+  console.log(
+    'Compare the two arms by scenarioId. ✗ is a date stated system-shaped;',
+  )
+  console.log(
+    '~ is a reply that named no date at all, which is not automatically a win.',
+  )
 }
 
 main().catch((e: unknown) => {

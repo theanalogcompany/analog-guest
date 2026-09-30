@@ -26,7 +26,10 @@ const recorded: RecordedQuery[] = []
 // A plain literal, not a reference to the VENUE const below: `vi.mock` is
 // hoisted above every declaration in this file, so anything this initializer
 // touches must not be one of them. Each test resets it in `beforeEach`.
-let nextResult: { data: unknown; error: unknown } = { data: [{ venue_id: 'venue-1' }], error: null }
+let nextResult: { data: unknown; error: unknown } = {
+  data: [{ venue_id: 'venue-1' }],
+  error: null,
+}
 
 vi.mock('@/lib/db/admin', () => ({
   createAdminClient: () => ({
@@ -111,7 +114,10 @@ import {
   type InboundTurnState,
   type TurnClaimRow,
 } from './coalesce-turn'
-import { createTurnClaimsFake, type TurnClaimsFake } from './testing/turn-claims-fake'
+import {
+  createTurnClaimsFake,
+  type TurnClaimsFake,
+} from './testing/turn-claims-fake'
 import type { AgentResult } from './types'
 
 const VENUE = 'venue-1'
@@ -147,12 +153,19 @@ describe('claimInboundTurn', () => {
   it('wins on an empty table and writes the lease from CLAIM_LEASE_MS', async () => {
     const store = createTurnClaimsFake()
     const outcome = await claimInboundTurn(
-      { venueId: VENUE, guestId: GUEST, claimedMessageId: 'msg-1', agentRunId: 'run-a' },
+      {
+        venueId: VENUE,
+        guestId: GUEST,
+        claimedMessageId: 'msg-1',
+        agentRunId: 'run-a',
+      },
       makeDeps(store),
     )
     expect(outcome).toEqual({ status: 'won' })
     expect(store.rows()).toHaveLength(1)
-    expect(store.rows()[0].expiresAt.getTime()).toBe(T0.getTime() + CLAIM_LEASE_MS)
+    expect(store.rows()[0].expiresAt.getTime()).toBe(
+      T0.getTime() + CLAIM_LEASE_MS,
+    )
   })
 
   /**
@@ -166,11 +179,21 @@ describe('claimInboundTurn', () => {
     const deps = makeDeps(store)
     const [a, b] = await Promise.all([
       claimInboundTurn(
-        { venueId: VENUE, guestId: GUEST, claimedMessageId: 'msg-1', agentRunId: 'run-a' },
+        {
+          venueId: VENUE,
+          guestId: GUEST,
+          claimedMessageId: 'msg-1',
+          agentRunId: 'run-a',
+        },
         deps,
       ),
       claimInboundTurn(
-        { venueId: VENUE, guestId: GUEST, claimedMessageId: 'msg-2', agentRunId: 'run-b' },
+        {
+          venueId: VENUE,
+          guestId: GUEST,
+          claimedMessageId: 'msg-2',
+          agentRunId: 'run-b',
+        },
         deps,
       ),
     ])
@@ -206,11 +229,21 @@ describe('claimInboundTurn', () => {
     const deps = makeDeps(store)
     const [a, b] = await Promise.all([
       claimInboundTurn(
-        { venueId: VENUE, guestId: 'guest-1', claimedMessageId: 'm1', agentRunId: 'run-a' },
+        {
+          venueId: VENUE,
+          guestId: 'guest-1',
+          claimedMessageId: 'm1',
+          agentRunId: 'run-a',
+        },
         deps,
       ),
       claimInboundTurn(
-        { venueId: VENUE, guestId: 'guest-2', claimedMessageId: 'm2', agentRunId: 'run-b' },
+        {
+          venueId: VENUE,
+          guestId: 'guest-2',
+          claimedMessageId: 'm2',
+          agentRunId: 'run-b',
+        },
         deps,
       ),
     ])
@@ -223,7 +256,12 @@ describe('claimInboundTurn', () => {
     const store = createTurnClaimsFake()
     store.seed(claimRow({ agentRunId: 'run-a', claimedMessageId: 'msg-1' }))
     const outcome = await claimInboundTurn(
-      { venueId: VENUE, guestId: GUEST, claimedMessageId: 'msg-2', agentRunId: 'run-b' },
+      {
+        venueId: VENUE,
+        guestId: GUEST,
+        claimedMessageId: 'msg-2',
+        agentRunId: 'run-b',
+      },
       // one second into a two-minute lease
       makeDeps(store, { now: () => new Date(T0.getTime() + 1_000) }),
     )
@@ -240,7 +278,12 @@ describe('claimInboundTurn', () => {
     store.seed(claimRow({ agentRunId: 'run-dead' }))
     const after = new Date(T0.getTime() + CLAIM_LEASE_MS + 1)
     const outcome = await claimInboundTurn(
-      { venueId: VENUE, guestId: GUEST, claimedMessageId: 'msg-2', agentRunId: 'run-b' },
+      {
+        venueId: VENUE,
+        guestId: GUEST,
+        claimedMessageId: 'msg-2',
+        agentRunId: 'run-b',
+      },
       makeDeps(store, { now: () => after }),
     )
     expect(outcome).toEqual({ status: 'won' })
@@ -258,8 +301,15 @@ describe('claimInboundTurn', () => {
     const store = createTurnClaimsFake()
     store.seed(claimRow({ agentRunId: 'run-a' }))
     const outcome = await claimInboundTurn(
-      { venueId: VENUE, guestId: GUEST, claimedMessageId: 'msg-2', agentRunId: 'run-b' },
-      makeDeps(store, { now: () => new Date(T0.getTime() + CLAIM_LEASE_MS - 1) }),
+      {
+        venueId: VENUE,
+        guestId: GUEST,
+        claimedMessageId: 'msg-2',
+        agentRunId: 'run-b',
+      },
+      makeDeps(store, {
+        now: () => new Date(T0.getTime() + CLAIM_LEASE_MS - 1),
+      }),
     )
     expect(outcome.status).toBe('lost')
     expect(store.rows()[0].agentRunId).toBe('run-a')
@@ -269,7 +319,12 @@ describe('claimInboundTurn', () => {
     const store = createTurnClaimsFake()
     store.seed(claimRow({ agentRunId: 'run-a' }))
     const outcome = await claimInboundTurn(
-      { venueId: VENUE, guestId: GUEST, claimedMessageId: 'msg-2', agentRunId: 'run-b' },
+      {
+        venueId: VENUE,
+        guestId: GUEST,
+        claimedMessageId: 'msg-2',
+        agentRunId: 'run-b',
+      },
       makeDeps(store, { now: () => new Date(T0.getTime() + CLAIM_LEASE_MS) }),
     )
     expect(outcome.status).toBe('won')
@@ -289,11 +344,21 @@ describe('claimInboundTurn', () => {
     })
     const outcomes = await Promise.all([
       claimInboundTurn(
-        { venueId: VENUE, guestId: GUEST, claimedMessageId: 'msg-2', agentRunId: 'run-b' },
+        {
+          venueId: VENUE,
+          guestId: GUEST,
+          claimedMessageId: 'msg-2',
+          agentRunId: 'run-b',
+        },
         deps,
       ),
       claimInboundTurn(
-        { venueId: VENUE, guestId: GUEST, claimedMessageId: 'msg-3', agentRunId: 'run-c' },
+        {
+          venueId: VENUE,
+          guestId: GUEST,
+          claimedMessageId: 'msg-3',
+          agentRunId: 'run-c',
+        },
         deps,
       ),
     ])
@@ -328,7 +393,12 @@ describe('claimInboundTurn', () => {
       },
     })
     const outcome = await claimInboundTurn(
-      { venueId: VENUE, guestId: GUEST, claimedMessageId: 'msg-2', agentRunId: 'run-b' },
+      {
+        venueId: VENUE,
+        guestId: GUEST,
+        claimedMessageId: 'msg-2',
+        agentRunId: 'run-b',
+      },
       deps,
     )
     expect(outcome).toEqual({ status: 'won' })
@@ -349,7 +419,12 @@ describe('claimInboundTurn', () => {
       },
     })
     const outcome = await claimInboundTurn(
-      { venueId: VENUE, guestId: GUEST, claimedMessageId: 'msg-2', agentRunId: 'run-b' },
+      {
+        venueId: VENUE,
+        guestId: GUEST,
+        claimedMessageId: 'msg-2',
+        agentRunId: 'run-b',
+      },
       deps,
     )
     // Bounded: a third party can always take it, and a caller that fails open
@@ -367,7 +442,12 @@ describe('claimInboundTurn', () => {
       const store = createTurnClaimsFake()
       store.failNext('insert')
       const outcome = await claimInboundTurn(
-        { venueId: VENUE, guestId: GUEST, claimedMessageId: 'msg-1', agentRunId: 'run-a' },
+        {
+          venueId: VENUE,
+          guestId: GUEST,
+          claimedMessageId: 'msg-1',
+          agentRunId: 'run-a',
+        },
         makeDeps(store),
       )
       expect(outcome.status).toBe('unavailable')
@@ -378,7 +458,12 @@ describe('claimInboundTurn', () => {
       store.seed(claimRow())
       store.failNext('read')
       const outcome = await claimInboundTurn(
-        { venueId: VENUE, guestId: GUEST, claimedMessageId: 'msg-2', agentRunId: 'run-b' },
+        {
+          venueId: VENUE,
+          guestId: GUEST,
+          claimedMessageId: 'msg-2',
+          agentRunId: 'run-b',
+        },
         makeDeps(store),
       )
       expect(outcome.status).toBe('unavailable')
@@ -389,8 +474,15 @@ describe('claimInboundTurn', () => {
       store.seed(claimRow({ agentRunId: 'run-dead' }))
       store.failNext('takeOver')
       const outcome = await claimInboundTurn(
-        { venueId: VENUE, guestId: GUEST, claimedMessageId: 'msg-2', agentRunId: 'run-b' },
-        makeDeps(store, { now: () => new Date(T0.getTime() + CLAIM_LEASE_MS + 1) }),
+        {
+          venueId: VENUE,
+          guestId: GUEST,
+          claimedMessageId: 'msg-2',
+          agentRunId: 'run-b',
+        },
+        makeDeps(store, {
+          now: () => new Date(T0.getTime() + CLAIM_LEASE_MS + 1),
+        }),
       )
       expect(outcome.status).toBe('unavailable')
     })
@@ -445,7 +537,9 @@ describe('pickNewer', () => {
 
   it('returns a strictly later message', () => {
     const later = '2026-09-23T15:32:43.000Z'
-    expect(pickNewer([{ id: 'b', created_at: later }], new Date(T), 'a')).toEqual({
+    expect(
+      pickNewer([{ id: 'b', created_at: later }], new Date(T), 'a'),
+    ).toEqual({
       id: 'b',
       createdAt: new Date(later),
     })
@@ -523,7 +617,8 @@ describe('the shipped constants', () => {
     // bound automatically rather than silently outside it.
     const WORST_CASE_TURN_FLOOR_MS = 18_000
     expect(CLAIM_LEASE_MS).toBeGreaterThan(
-      (WORST_CASE_TURN_FLOOR_MS + COALESCE_SETTLE_MS) * (MAX_TURN_EXTENSIONS + 1),
+      (WORST_CASE_TURN_FLOOR_MS + COALESCE_SETTLE_MS) *
+        (MAX_TURN_EXTENSIONS + 1),
     )
   })
 
@@ -534,7 +629,14 @@ describe('the shipped constants', () => {
 
 describe('the default store is bound to migration 057', () => {
   const MIGRATION = readFileSync(
-    join(__dirname, '..', '..', 'db', 'migrations', '057_inbound_turn_coalescing.sql'),
+    join(
+      __dirname,
+      '..',
+      '..',
+      'db',
+      'migrations',
+      '057_inbound_turn_coalescing.sql',
+    ),
     'utf8',
   )
 
@@ -548,7 +650,9 @@ describe('the default store is bound to migration 057', () => {
    * fake enforces the key itself.
    */
   it('declares primary key (venue_id, guest_id)', () => {
-    expect(MIGRATION.replace(/\s+/g, ' ')).toContain('primary key (venue_id, guest_id)')
+    expect(MIGRATION.replace(/\s+/g, ' ')).toContain(
+      'primary key (venue_id, guest_id)',
+    )
   })
 
   it('declares every column the default store reads and writes', () => {
@@ -613,15 +717,24 @@ describe('the DEFAULT store issues the right queries', () => {
   })
 
   it('maps a 23505 to a conflict rather than an error', async () => {
-    nextResult = { data: null, error: { code: '23505', message: 'duplicate key' } }
+    nextResult = {
+      data: null,
+      error: { code: '23505', message: 'duplicate key' },
+    }
     const deps = defaultCoalesceDeps()
     // Read as an error instead, every racing run would fail OPEN and reply —
     // the claim would be inert and the defect unchanged.
-    expect(await deps.store.insertClaim(claimRow())).toEqual({ ok: true, conflict: true })
+    expect(await deps.store.insertClaim(claimRow())).toEqual({
+      ok: true,
+      conflict: true,
+    })
   })
 
   it('reports a non-23505 insert failure as an error, so the caller fails open', async () => {
-    nextResult = { data: null, error: { code: '42P01', message: 'relation does not exist' } }
+    nextResult = {
+      data: null,
+      error: { code: '42P01', message: 'relation does not exist' },
+    }
     const deps = defaultCoalesceDeps()
     const r = await deps.store.insertClaim(claimRow())
     expect(r.ok).toBe(false)
@@ -630,7 +743,11 @@ describe('the DEFAULT store issues the right queries', () => {
   /** M7. Unscoped, a release deletes the claim a takeover just granted. */
   it('scopes the DELETE to venue, guest AND agent_run_id', async () => {
     const deps = defaultCoalesceDeps()
-    await deps.store.deleteClaim({ venueId: VENUE, guestId: GUEST, agentRunId: 'run-a' })
+    await deps.store.deleteClaim({
+      venueId: VENUE,
+      guestId: GUEST,
+      agentRunId: 'run-a',
+    })
     const del = recorded.find((q) => q.op === 'delete')
     expect(del?.table).toBe('inbound_turn_claims')
     expect(del?.filters).toEqual([
@@ -737,7 +854,9 @@ describe('the DEFAULT findNewerInbound query', () => {
     // `gte`, deliberately: two messages of one Instagram delivery can share a
     // millisecond, and a strict `gt` on the timestamp drops the sibling this
     // query exists to find. `pickNewer`'s id tiebreak excludes the row itself.
-    expect(recorded.at(-1)?.bounds).toEqual([['gte', 'created_at', AFTER.toISOString()]])
+    expect(recorded.at(-1)?.bounds).toEqual([
+      ['gte', 'created_at', AFTER.toISOString()],
+    ])
   })
 
   it('orders on (created_at, id) DESC and takes two', async () => {
@@ -777,7 +896,10 @@ describe('the DEFAULT findNewerInbound query', () => {
 })
 
 describe('findUncoveredInbound tells "nothing" apart from "could not check"', () => {
-  const answered = { id: 'msg-1', createdAt: new Date('2026-09-23T15:32:36.000Z') }
+  const answered = {
+    id: 'msg-1',
+    createdAt: new Date('2026-09-23T15:32:36.000Z'),
+  }
   const turnOf = (enabled: boolean): InboundTurnState => ({
     claim: { venueId: VENUE, guestId: GUEST },
     extensionsUsed: 0,
@@ -790,18 +912,29 @@ describe('findUncoveredInbound tells "nothing" apart from "could not check"', ()
 
   it('reports none when the read succeeded and found nothing', async () => {
     expect(
-      await findUncoveredInbound({ venueId: VENUE, guestId: GUEST }, turnOf(true), {
-        findNewerInbound: async () => ({ ok: true, newer: null }),
-      }),
+      await findUncoveredInbound(
+        { venueId: VENUE, guestId: GUEST },
+        turnOf(true),
+        {
+          findNewerInbound: async () => ({ ok: true, newer: null }),
+        },
+      ),
     ).toEqual({ status: 'none' })
   })
 
   it('reports found when there is something newer', async () => {
-    const message = { id: 'msg-2', createdAt: new Date('2026-09-23T15:32:43.000Z') }
+    const message = {
+      id: 'msg-2',
+      createdAt: new Date('2026-09-23T15:32:43.000Z'),
+    }
     expect(
-      await findUncoveredInbound({ venueId: VENUE, guestId: GUEST }, turnOf(true), {
-        findNewerInbound: async () => ({ ok: true, newer: message }),
-      }),
+      await findUncoveredInbound(
+        { venueId: VENUE, guestId: GUEST },
+        turnOf(true),
+        {
+          findNewerInbound: async () => ({ ok: true, newer: message }),
+        },
+      ),
     ).toEqual({ status: 'found', message })
   })
 
@@ -813,20 +946,31 @@ describe('findUncoveredInbound tells "nothing" apart from "could not check"', ()
    * docstring claimed every null "means carry on".
    */
   it('reports unreadable when the read FAILED, never none', async () => {
-    const r = await findUncoveredInbound({ venueId: VENUE, guestId: GUEST }, turnOf(true), {
-      findNewerInbound: async () => ({ ok: false, error: 'connection reset' }),
-    })
+    const r = await findUncoveredInbound(
+      { venueId: VENUE, guestId: GUEST },
+      turnOf(true),
+      {
+        findNewerInbound: async () => ({
+          ok: false,
+          error: 'connection reset',
+        }),
+      },
+    )
     expect(r).toEqual({ status: 'unreadable', error: 'connection reset' })
   })
 
   it('does not look at all when coalescing is off', async () => {
     let called = false
-    const r = await findUncoveredInbound({ venueId: VENUE, guestId: GUEST }, turnOf(false), {
-      findNewerInbound: async () => {
-        called = true
-        return { ok: true, newer: null }
+    const r = await findUncoveredInbound(
+      { venueId: VENUE, guestId: GUEST },
+      turnOf(false),
+      {
+        findNewerInbound: async () => {
+          called = true
+          return { ok: true, newer: null }
+        },
       },
-    })
+    )
     expect(r).toEqual({ status: 'none' })
     expect(called).toBe(false)
   })
@@ -863,7 +1007,12 @@ describe('never throws, which the module claims at the top', () => {
   it('claimInboundTurn reports unavailable instead of throwing', async () => {
     const deps = makeDeps(createTurnClaimsFake(), { store: throwingStore })
     const outcome = await claimInboundTurn(
-      { venueId: VENUE, guestId: GUEST, claimedMessageId: 'msg-1', agentRunId: 'run-a' },
+      {
+        venueId: VENUE,
+        guestId: GUEST,
+        claimedMessageId: 'msg-1',
+        agentRunId: 'run-a',
+      },
       deps,
     )
     // `unavailable`, never `lost`: the caller must proceed as it does today.
@@ -924,21 +1073,30 @@ describe('shouldRetryTurn — the bound, and which outcomes earn a second attemp
   })
 
   it('retries a failed turn at depth 0', () => {
-    expect(shouldRetryTurn({ status: 'failed', stage: 'context_build', error: 'x' }, base())).toBe(
-      true,
-    )
+    expect(
+      shouldRetryTurn(
+        { status: 'failed', stage: 'context_build', error: 'x' },
+        base(),
+      ),
+    ).toBe(true)
   })
 
   it('does NOT retry at the bound', () => {
     // MAX_TURN_RETRIES = 1, so depth 1 is the retry itself and gets no second.
     expect(
-      shouldRetryTurn({ status: 'failed', stage: 'context_build', error: 'x' }, base({ retryDepth: 1 })),
+      shouldRetryTurn(
+        { status: 'failed', stage: 'context_build', error: 'x' },
+        base({ retryDepth: 1 }),
+      ),
     ).toBe(false)
   })
 
   it('does NOT retry past the bound either', () => {
     expect(
-      shouldRetryTurn({ status: 'failed', stage: 'context_build', error: 'x' }, base({ retryDepth: 9 })),
+      shouldRetryTurn(
+        { status: 'failed', stage: 'context_build', error: 'x' },
+        base({ retryDepth: 9 }),
+      ),
     ).toBe(false)
   })
 
@@ -965,14 +1123,40 @@ describe('shouldRetryTurn — the bound, and which outcomes earn a second attemp
    */
   it.each([
     ['sent', { status: 'sent', outboundMessageId: 'o1' }, false],
-    ['queued', { status: 'queued', outboundMessageId: 'c1', triggers: [], primaryTrigger: 'x' }, false],
+    [
+      'queued',
+      {
+        status: 'queued',
+        outboundMessageId: 'c1',
+        triggers: [],
+        primaryTrigger: 'x',
+      },
+      false,
+    ],
     ['skipped_duplicate', { status: 'skipped_duplicate' }, false],
-    ['refused', { status: 'refused', reason: 'low_fidelity', attemptScores: [0.1] }, true],
+    [
+      'refused',
+      { status: 'refused', reason: 'low_fidelity', attemptScores: [0.1] },
+      true,
+    ],
     // A draft that lost a slot loses it again: the card that took the slot is
     // still there, so a retry is a guaranteed-useless second generation.
-    ['dropped', { status: 'dropped', reason: 'slot_occupied', protectedDraftId: 'd', triggers: [] }, false],
+    [
+      'dropped',
+      {
+        status: 'dropped',
+        reason: 'slot_occupied',
+        protectedDraftId: 'd',
+        triggers: [],
+      },
+      false,
+    ],
     ['superseded', { status: 'superseded', byMessageId: 'm' }, false],
-    ['coalesced', { status: 'coalesced', intoAgentRunId: 'r', intoMessageId: 'm' }, false],
+    [
+      'coalesced',
+      { status: 'coalesced', intoAgentRunId: 'r', intoMessageId: 'm' },
+      false,
+    ],
     ['silenced', { status: 'silenced' }, false],
     ['failed', { status: 'failed', stage: 'generation', error: 'x' }, true],
   ] as const)('%s → %s', (_name, result, expected) => {

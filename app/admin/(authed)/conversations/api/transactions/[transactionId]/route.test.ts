@@ -9,7 +9,8 @@ vi.mock('@/lib/db/server', () => ({
   createServerClient: vi.fn(),
 }))
 vi.mock('@/lib/auth', async () => {
-  const actual = await vi.importActual<typeof import('@/lib/auth')>('@/lib/auth')
+  const actual =
+    await vi.importActual<typeof import('@/lib/auth')>('@/lib/auth')
   return {
     ...actual,
     verifyAnalogAdminAccess: vi.fn(),
@@ -37,9 +38,15 @@ interface AdminMockState {
   deleteError: { message: string } | null
 }
 
-function newAdminState(overrides: Partial<AdminMockState> = {}): AdminMockState {
+function newAdminState(
+  overrides: Partial<AdminMockState> = {},
+): AdminMockState {
   return {
-    transaction: { id: TRANSACTION_ID, venue_id: VENUE_ID, source: 'guest_reported' },
+    transaction: {
+      id: TRANSACTION_ID,
+      venue_id: VENUE_ID,
+      source: 'guest_reported',
+    },
     lookupError: null,
     deleteCalls: [],
     deleteError: null,
@@ -52,7 +59,10 @@ function makeAdminMock(state: AdminMockState) {
     from: (_table: string) => ({
       select: (_cols: string) => ({
         eq: (_f: string, _v: unknown) => ({
-          maybeSingle: async () => ({ data: state.transaction, error: state.lookupError }),
+          maybeSingle: async () => ({
+            data: state.transaction,
+            error: state.lookupError,
+          }),
         }),
       }),
       delete: () => ({
@@ -86,10 +96,15 @@ beforeEach(() => {
 describe('DELETE /admin/conversations/api/transactions/[transactionId] — auth', () => {
   it('returns 401 when no session', async () => {
     vi.mocked(createServerClient).mockResolvedValue(
-      makeSessionMock(null) as unknown as Awaited<ReturnType<typeof createServerClient>>,
+      makeSessionMock(null) as unknown as Awaited<
+        ReturnType<typeof createServerClient>
+      >,
     )
 
-    const res = await DELETE(new Request('http://test'), buildParams(TRANSACTION_ID))
+    const res = await DELETE(
+      new Request('http://test'),
+      buildParams(TRANSACTION_ID),
+    )
     expect(res.status).toBe(401)
   })
 
@@ -99,9 +114,14 @@ describe('DELETE /admin/conversations/api/transactions/[transactionId] — auth'
         ReturnType<typeof createServerClient>
       >,
     )
-    vi.mocked(verifyAnalogAdminAccess).mockRejectedValue(new AuthError(403, 'not an analog admin'))
+    vi.mocked(verifyAnalogAdminAccess).mockRejectedValue(
+      new AuthError(403, 'not an analog admin'),
+    )
 
-    const res = await DELETE(new Request('http://test'), buildParams(TRANSACTION_ID))
+    const res = await DELETE(
+      new Request('http://test'),
+      buildParams(TRANSACTION_ID),
+    )
     expect(res.status).toBe(403)
   })
 })
@@ -121,7 +141,10 @@ describe('DELETE /admin/conversations/api/transactions/[transactionId] — valid
   })
 
   it('returns 400 for an invalid transactionId', async () => {
-    const res = await DELETE(new Request('http://test'), buildParams('not-a-uuid'))
+    const res = await DELETE(
+      new Request('http://test'),
+      buildParams('not-a-uuid'),
+    )
     expect(res.status).toBe(400)
   })
 
@@ -131,7 +154,10 @@ describe('DELETE /admin/conversations/api/transactions/[transactionId] — valid
       makeAdminMock(state) as unknown as ReturnType<typeof createAdminClient>,
     )
 
-    const res = await DELETE(new Request('http://test'), buildParams(TRANSACTION_ID))
+    const res = await DELETE(
+      new Request('http://test'),
+      buildParams(TRANSACTION_ID),
+    )
     expect(res.status).toBe(404)
   })
 
@@ -146,18 +172,26 @@ describe('DELETE /admin/conversations/api/transactions/[transactionId] — valid
       makeAdminMock(state) as unknown as ReturnType<typeof createAdminClient>,
     )
 
-    const res = await DELETE(new Request('http://test'), buildParams(TRANSACTION_ID))
+    const res = await DELETE(
+      new Request('http://test'),
+      buildParams(TRANSACTION_ID),
+    )
     expect(res.status).toBe(403)
     expect(state.deleteCalls).toHaveLength(0)
   })
 
   it('returns 400 and does not delete a non-guest_reported transaction', async () => {
-    const state = newAdminState({ transaction: { id: TRANSACTION_ID, venue_id: VENUE_ID, source: 'square' } })
+    const state = newAdminState({
+      transaction: { id: TRANSACTION_ID, venue_id: VENUE_ID, source: 'square' },
+    })
     vi.mocked(createAdminClient).mockReturnValue(
       makeAdminMock(state) as unknown as ReturnType<typeof createAdminClient>,
     )
 
-    const res = await DELETE(new Request('http://test'), buildParams(TRANSACTION_ID))
+    const res = await DELETE(
+      new Request('http://test'),
+      buildParams(TRANSACTION_ID),
+    )
     expect(res.status).toBe(400)
     expect(state.deleteCalls).toHaveLength(0)
   })
@@ -168,7 +202,10 @@ describe('DELETE /admin/conversations/api/transactions/[transactionId] — valid
       makeAdminMock(state) as unknown as ReturnType<typeof createAdminClient>,
     )
 
-    const res = await DELETE(new Request('http://test'), buildParams(TRANSACTION_ID))
+    const res = await DELETE(
+      new Request('http://test'),
+      buildParams(TRANSACTION_ID),
+    )
     expect(res.status).toBe(200)
     const body = await res.json()
     expect(body).toEqual({ success: true, deleted: true })
@@ -181,7 +218,10 @@ describe('DELETE /admin/conversations/api/transactions/[transactionId] — valid
       makeAdminMock(state) as unknown as ReturnType<typeof createAdminClient>,
     )
 
-    const res = await DELETE(new Request('http://test'), buildParams(TRANSACTION_ID))
+    const res = await DELETE(
+      new Request('http://test'),
+      buildParams(TRANSACTION_ID),
+    )
     expect(res.status).toBe(500)
   })
 })

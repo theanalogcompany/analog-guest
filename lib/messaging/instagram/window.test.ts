@@ -24,8 +24,15 @@ describe('the constants', () => {
 
 describe('instagramWindowState', () => {
   it('is open straight after the guest writes', () => {
-    const state = instagramWindowState(GUEST_ACTION, new Date(GUEST_ACTION.getTime() + 20 * 1000))
-    expect(state).toEqual({ open: true, closesAt: META_CLOSE, remainingMs: 24 * HOUR - 20 * 1000 })
+    const state = instagramWindowState(
+      GUEST_ACTION,
+      new Date(GUEST_ACTION.getTime() + 20 * 1000),
+    )
+    expect(state).toEqual({
+      open: true,
+      closesAt: META_CLOSE,
+      remainingMs: 24 * HOUR - 20 * 1000,
+    })
   })
 
   it('is open one millisecond before the margin', () => {
@@ -45,7 +52,11 @@ describe('instagramWindowState', () => {
 
   it("stays closed after Meta's window has closed, with a negative remainder", () => {
     const now = new Date(META_CLOSE.getTime() + HOUR)
-    expect(instagramWindowState(GUEST_ACTION, now)).toMatchObject({ open: false, reason: 'closed', remainingMs: -HOUR })
+    expect(instagramWindowState(GUEST_ACTION, now)).toMatchObject({
+      open: false,
+      reason: 'closed',
+      remainingMs: -HOUR,
+    })
   })
 
   it('reopens on a newer guest action', () => {
@@ -68,7 +79,12 @@ describe('instagramWindowState', () => {
 describe('loadLastGuestActionAt', () => {
   it("reads Meta's time of the newest Instagram inbound row, and nothing else", async () => {
     const { client, queries } = queryRecorder({
-      messages: [{ data: { provider_sent_at: '2026-09-19T10:00:00.000+00:00' }, error: null }],
+      messages: [
+        {
+          data: { provider_sent_at: '2026-09-19T10:00:00.000+00:00' },
+          error: null,
+        },
+      ],
     })
     const result = await loadLastGuestActionAt(client, 'venue-1', 'guest-1')
     expect(result).toEqual({ ok: true, value: GUEST_ACTION })
@@ -83,24 +99,40 @@ describe('loadLastGuestActionAt', () => {
       ['channel', 'instagram'],
     ])
     // Rows saved without Meta's time are skipped, not read as "no action".
-    expect(callsNamed(query!, 'not')).toEqual([['provider_sent_at', 'is', null]])
-    expect(callsNamed(query!, 'order')).toEqual([['provider_sent_at', { ascending: false }]])
+    expect(callsNamed(query!, 'not')).toEqual([
+      ['provider_sent_at', 'is', null],
+    ])
+    expect(callsNamed(query!, 'order')).toEqual([
+      ['provider_sent_at', { ascending: false }],
+    ])
     expect(callsNamed(query!, 'limit')).toEqual([[1]])
   })
 
   it('never reads created_at, which is our clock and can lag by a redelivery', async () => {
-    const { client, queries } = queryRecorder({ messages: [{ data: null, error: null }] })
+    const { client, queries } = queryRecorder({
+      messages: [{ data: null, error: null }],
+    })
     await loadLastGuestActionAt(client, 'venue-1', 'guest-1')
     expect(JSON.stringify(queries[0]!.calls)).not.toContain('created_at')
   })
 
   it('returns null when no Instagram inbound row has a Meta time', async () => {
-    const { client } = queryRecorder({ messages: [{ data: null, error: null }] })
-    expect(await loadLastGuestActionAt(client, 'venue-1', 'guest-1')).toEqual({ ok: true, value: null })
+    const { client } = queryRecorder({
+      messages: [{ data: null, error: null }],
+    })
+    expect(await loadLastGuestActionAt(client, 'venue-1', 'guest-1')).toEqual({
+      ok: true,
+      value: null,
+    })
   })
 
   it('returns an error, not null, when the read fails', async () => {
-    const { client } = queryRecorder({ messages: [{ data: null, error: { message: 'boom' } }] })
-    expect(await loadLastGuestActionAt(client, 'venue-1', 'guest-1')).toEqual({ ok: false, error: 'boom' })
+    const { client } = queryRecorder({
+      messages: [{ data: null, error: { message: 'boom' } }],
+    })
+    expect(await loadLastGuestActionAt(client, 'venue-1', 'guest-1')).toEqual({
+      ok: false,
+      error: 'boom',
+    })
   })
 })

@@ -61,7 +61,13 @@ export function CommitModal({
 }: CommitModalProps) {
   const [classifyState, setClassifyState] = useState<
     | { status: 'pending' }
-    | { status: 'ready'; suggestion: { kind: 'edit_only' | 'edit_and_rule'; ruleText: string | null } }
+    | {
+        status: 'ready'
+        suggestion: {
+          kind: 'edit_only' | 'edit_and_rule'
+          ruleText: string | null
+        }
+      }
     | { status: 'error'; message: string }
   >({ status: 'pending' })
 
@@ -151,7 +157,8 @@ export function CommitModal({
             Commit to voice
           </DialogTitle>
           <DialogDescription className="sr-only">
-            Review the selected response, choose whether to add a rule, and commit it to this venue&apos;s voice.
+            Review the selected response, choose whether to add a rule, and
+            commit it to this venue&apos;s voice.
           </DialogDescription>
         </DialogHeader>
 
@@ -242,8 +249,7 @@ export function CommitModal({
           <Button
             onClick={confirm}
             disabled={
-              busy ||
-              (kind === 'edit_and_rule' && ruleText.trim().length === 0)
+              busy || (kind === 'edit_and_rule' && ruleText.trim().length === 0)
             }
             size="sm"
             className="hover:bg-clay-deep uppercase text-[10.5px] tracking-wider"

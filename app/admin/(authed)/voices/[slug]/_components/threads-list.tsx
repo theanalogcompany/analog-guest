@@ -90,8 +90,7 @@ export function ThreadsList({
         ) : (
           filtered.map((t) => {
             const isActive = t.guestId === selectedGuestId
-            const isRegular =
-              t.state === 'regular' || t.state === 'raving_fan'
+            const isRegular = t.state === 'regular' || t.state === 'raving_fan'
             return (
               <button
                 key={t.guestId}

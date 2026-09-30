@@ -14,6 +14,7 @@
 // taps that never received a send.
 
 import { createAdminClient } from '@/lib/db/admin'
+import { logger } from '@/lib/observability/logger'
 import type { RAGResult } from '@/lib/rag/types'
 
 import { linkFingerprintToGuest } from './reconcile'
@@ -24,7 +25,9 @@ type AdminClient = ReturnType<typeof createAdminClient>
 // one in the prefilled iMessage; we tolerate surrounding text/markup.
 const TAP_TOKEN_RE = /tt_[A-Za-z0-9_-]{16,64}/
 
-export function extractTapToken(body: string | null | undefined): string | null {
+export function extractTapToken(
+  body: string | null | undefined,
+): string | null {
   if (!body) return null
   const m = body.match(TAP_TOKEN_RE)
   return m ? m[0] : null
@@ -64,7 +67,11 @@ export async function reconcileTapFromInbound(opts: {
     .maybeSingle()
 
   if (claimError) {
-    return { ok: false, error: claimError.message, errorCode: 'tap_claim_failed' }
+    return {
+      ok: false,
+      error: claimError.message,
+      errorCode: 'tap_claim_failed',
+    }
   }
   if (!tap) {
     // Unknown token, wrong venue, or already matched — nothing to do.
@@ -85,7 +92,11 @@ export async function reconcileTapFromInbound(opts: {
     .eq('id', transactionId)
     .maybeSingle()
   if (txnLoadError) {
-    return { ok: false, error: txnLoadError.message, errorCode: 'tap_txn_load_failed' }
+    return {
+      ok: false,
+      error: txnLoadError.message,
+      errorCode: 'tap_txn_load_failed',
+    }
   }
 
   const nowIso = new Date().toISOString()
@@ -99,7 +110,11 @@ export async function reconcileTapFromInbound(opts: {
     })
     .eq('id', transactionId)
   if (linkError) {
-    return { ok: false, error: linkError.message, errorCode: 'tap_txn_link_failed' }
+    return {
+      ok: false,
+      error: linkError.message,
+      errorCode: 'tap_txn_link_failed',
+    }
   }
 
   // The payoff: map the fingerprint to the guest so future visits auto-match
@@ -112,7 +127,7 @@ export async function reconcileTapFromInbound(opts: {
       supabase,
     })
     if (!linked.ok) {
-      console.warn('tap reconcile: fingerprint link failed', {
+      logger.warn('tap reconcile: fingerprint link failed', {
         transactionId,
         error: linked.error,
       })
@@ -125,7 +140,10 @@ export async function reconcileTapFromInbound(opts: {
     // a guest who self-reported before their first tap.
     await supabase
       .from('guests')
-      .update({ last_visit_at: txn.occurred_at, last_visit_precision: 'pinned' })
+      .update({
+        last_visit_at: txn.occurred_at,
+        last_visit_precision: 'pinned',
+      })
       .eq('id', opts.guestId)
       .or(`last_visit_at.is.null,last_visit_at.lt.${txn.occurred_at}`)
   }
@@ -145,7 +163,9 @@ export async function expireStalePendingTaps(opts: {
   supabase?: AdminClient
 }): Promise<RAGResult<{ expired: number }>> {
   const supabase = opts.supabase ?? createAdminClient()
-  const cutoff = new Date(opts.now.getTime() - opts.ttlMinutes * 60_000).toISOString()
+  const cutoff = new Date(
+    opts.now.getTime() - opts.ttlMinutes * 60_000,
+  ).toISOString()
   const { data, error } = await supabase
     .from('pos_tap_events')
     .update({ status: 'expired' })

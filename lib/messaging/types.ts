@@ -1,12 +1,7 @@
 import { z } from 'zod'
 
 export type ReactionType =
-  | 'love'
-  | 'like'
-  | 'dislike'
-  | 'laugh'
-  | 'emphasize'
-  | 'question'
+  'love' | 'like' | 'dislike' | 'laugh' | 'emphasize' | 'question'
 
 // TAC-467: `to` is nullable on the three inputs that take a guest's phone
 // straight from GuestContext (send, typing, mark-as-read). A guest who came in
@@ -42,8 +37,7 @@ export type MarkAsReadInput = {
 }
 
 export type MessagingResult<T = void> =
-  | { ok: true; data: T }
-  | { ok: false; error: string; errorCode?: string }
+  { ok: true; data: T } | { ok: false; error: string; errorCode?: string }
 
 export const SendblueWebhookPayloadSchema = z.object({
   // Sendblue uses camelCase for this one field, snake_case for everything else.
@@ -74,4 +68,6 @@ export const SendblueWebhookPayloadSchema = z.object({
   group_display_name: z.string().nullable().optional(),
 })
 
-export type SendblueWebhookPayload = z.infer<typeof SendblueWebhookPayloadSchema>
+export type SendblueWebhookPayload = z.infer<
+  typeof SendblueWebhookPayloadSchema
+>

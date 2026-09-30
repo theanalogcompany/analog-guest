@@ -31,7 +31,9 @@ export async function loadSignals({
   venueId: string
 }): Promise<RecognitionResult<RawSignals>> {
   const supabase = createAdminClient()
-  const lookbackIso = new Date(Date.now() - VISIT_LOOKBACK_DAYS * MS_PER_DAY).toISOString()
+  const lookbackIso = new Date(
+    Date.now() - VISIT_LOOKBACK_DAYS * MS_PER_DAY,
+  ).toISOString()
 
   const [
     venueResult,
@@ -81,7 +83,11 @@ export async function loadSignals({
   ])
 
   if (venueResult.error) {
-    return { ok: false, error: venueResult.error.message, errorCode: 'load_venue_failed' }
+    return {
+      ok: false,
+      error: venueResult.error.message,
+      errorCode: 'load_venue_failed',
+    }
   }
   if (!venueResult.data) {
     return { ok: false, error: 'venue_not_found' }
@@ -139,7 +145,8 @@ export async function loadSignals({
 
   const engagementEventsByType: Record<string, number> = {}
   for (const row of engagementEventsResult.data ?? []) {
-    engagementEventsByType[row.event_type] = (engagementEventsByType[row.event_type] ?? 0) + 1
+    engagementEventsByType[row.event_type] =
+      (engagementEventsByType[row.event_type] ?? 0) + 1
   }
   const referralsMade = engagementEventsByType['referral_made'] ?? 0
 

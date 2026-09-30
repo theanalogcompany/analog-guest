@@ -29,7 +29,9 @@ const OPTIONS = {
   onUndelivered: 'card' as const,
 }
 
-function ctx(conversationChannel: RuntimeContext['conversationChannel']): RuntimeContext {
+function ctx(
+  conversationChannel: RuntimeContext['conversationChannel'],
+): RuntimeContext {
   return {
     agentRunId: 'run-1',
     venue: { id: 'venue-1' },
@@ -47,7 +49,12 @@ beforeEach(() => {
 
 describe('dispatchReply (TAC-469)', () => {
   it("sends a text conversation's reply through scheduleAndSend, exactly as before", async () => {
-    scheduleAndSendMock.mockResolvedValue({ outboundMessageId: 'row-1', providerMessageId: 'h1', generationId: 'g', bubbleCount: 1 })
+    scheduleAndSendMock.mockResolvedValue({
+      outboundMessageId: 'row-1',
+      providerMessageId: 'h1',
+      generationId: 'g',
+      bubbleCount: 1,
+    })
     const result = await dispatchReply(ctx('text'), GENERATION, OPTIONS)
 
     expect(result).toEqual({
@@ -63,25 +70,40 @@ describe('dispatchReply (TAC-469)', () => {
     })
     // Only scheduleAndSend's own options: nothing Instagram-shaped reaches the
     // text arm.
-    expect(scheduleAndSendMock).toHaveBeenCalledWith(expect.anything(), GENERATION, {
-      skipHumanFeelDelay: true,
-      reviewReason: 'demo_bypass',
-      rng: OPTIONS.rng,
-      renderedIntentions: [],
-    })
+    expect(scheduleAndSendMock).toHaveBeenCalledWith(
+      expect.anything(),
+      GENERATION,
+      {
+        skipHumanFeelDelay: true,
+        reviewReason: 'demo_bypass',
+        rng: OPTIONS.rng,
+        renderedIntentions: [],
+      },
+    )
     expect(dispatchInstagramReplyMock).not.toHaveBeenCalled()
   })
 
   it("lets the text arm's throw through, so its callers' failure handling is unchanged", async () => {
-    scheduleAndSendMock.mockRejectedValue(new Error('scheduleAndSend: sendMessage failed: boom'))
-    await expect(dispatchReply(ctx('text'), GENERATION, OPTIONS)).rejects.toThrow('sendMessage failed')
+    scheduleAndSendMock.mockRejectedValue(
+      new Error('scheduleAndSend: sendMessage failed: boom'),
+    )
+    await expect(
+      dispatchReply(ctx('text'), GENERATION, OPTIONS),
+    ).rejects.toThrow('sendMessage failed')
   })
 
   it("sends an Instagram conversation's reply through the Instagram arm", async () => {
-    dispatchInstagramReplyMock.mockResolvedValue({ kind: 'superseded', byMessageId: 'echo-1' })
+    dispatchInstagramReplyMock.mockResolvedValue({
+      kind: 'superseded',
+      byMessageId: 'echo-1',
+    })
     const result = await dispatchReply(ctx('instagram'), GENERATION, OPTIONS)
     expect(result).toEqual({ kind: 'superseded', byMessageId: 'echo-1' })
-    expect(dispatchInstagramReplyMock).toHaveBeenCalledWith(expect.anything(), GENERATION, OPTIONS)
+    expect(dispatchInstagramReplyMock).toHaveBeenCalledWith(
+      expect.anything(),
+      GENERATION,
+      OPTIONS,
+    )
     expect(scheduleAndSendMock).not.toHaveBeenCalled()
   })
 
@@ -90,6 +112,8 @@ describe('dispatchReply (TAC-469)', () => {
     expect(result).toEqual({ kind: 'not_sent', reason: 'channel_unresolved' })
     expect(scheduleAndSendMock).not.toHaveBeenCalled()
     expect(dispatchInstagramReplyMock).not.toHaveBeenCalled()
-    expect(fireRedAlertMock).toHaveBeenCalledWith(expect.objectContaining({ stage: 'send' }))
+    expect(fireRedAlertMock).toHaveBeenCalledWith(
+      expect.objectContaining({ stage: 'send' }),
+    )
   })
 })

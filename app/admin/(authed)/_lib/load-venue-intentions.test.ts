@@ -18,7 +18,8 @@ const VENUE_ID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
 const GUEST_ID = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'
 const NOW = new Date('2026-09-14T12:00:00.000Z')
 const DAY = 24 * 60 * 60 * 1000
-const daysAgoIso = (days: number) => new Date(NOW.getTime() - days * DAY).toISOString()
+const daysAgoIso = (days: number) =>
+  new Date(NOW.getTime() - days * DAY).toISOString()
 
 interface QueryCall {
   table: string
@@ -40,7 +41,16 @@ function mockTables(byTable: Record<string, Result>) {
     const result = byTable[table] ?? { data: [], error: null }
     const builder: Record<string, unknown> = {}
     let prompted = false
-    for (const method of ['select', 'eq', 'is', 'in', 'not', 'gte', 'order', 'limit']) {
+    for (const method of [
+      'select',
+      'eq',
+      'is',
+      'in',
+      'not',
+      'gte',
+      'order',
+      'limit',
+    ]) {
       builder[method] = vi.fn((...args: unknown[]) => {
         calls.push({ table, method, args })
         if (method === 'not') prompted = true
@@ -51,17 +61,23 @@ function mockTables(byTable: Record<string, Result>) {
     // key, `<table>:prompted`, and defaults to empty.
     builder.then = (resolve: (v: unknown) => unknown) =>
       Promise.resolve(
-        prompted ? (byTable[`${table}:prompted`] ?? { data: [], error: null }) : result,
+        prompted
+          ? (byTable[`${table}:prompted`] ?? { data: [], error: null })
+          : result,
       ).then(resolve)
     return builder
   })
-  vi.mocked(createAdminClient).mockReturnValue({ from } as unknown as ReturnType<
-    typeof createAdminClient
-  >)
+  vi.mocked(createAdminClient).mockReturnValue({
+    from,
+  } as unknown as ReturnType<typeof createAdminClient>)
   return { calls, from }
 }
 
-const eligibility = (key: string, eligibleDaysAgo: number, guestId = GUEST_ID) => ({
+const eligibility = (
+  key: string,
+  eligibleDaysAgo: number,
+  guestId = GUEST_ID,
+) => ({
   guest_id: guestId,
   intention_key: key,
   eligible_at: daysAgoIso(eligibleDaysAgo),
@@ -98,20 +114,33 @@ describe('loadVenueOpenIntentions', () => {
       transactions: { data: [], error: null },
     })
 
-    const { rows, degraded, cohortTruncated } = await loadVenueOpenIntentions(VENUE_ID, NOW)
+    const { rows, degraded, cohortTruncated } = await loadVenueOpenIntentions(
+      VENUE_ID,
+      NOW,
+    )
 
     expect(rows).toHaveLength(1)
     expect(rows[0].guestId).toBe(GUEST_ID)
     expect(rows[0].guestCreatedAt).toBe(daysAgoIso(2))
-    expect(rows[0].openKeys).toEqual(['understand_order', 'learn_name', 'why_theyre_here'])
+    expect(rows[0].openKeys).toEqual([
+      'understand_order',
+      'learn_name',
+      'why_theyre_here',
+    ])
     expect(degraded).toBe(false)
     expect(cohortTruncated).toBe(false)
   })
 
   it('labels the guest by name and phone', async () => {
     mockTables({
-      guest_intention_prompts: { data: [eligibility('are_they_local', 1)], error: null },
-      guests: { data: [guestRow({ first_name: 'Liam', last_name: 'Chen' })], error: null },
+      guest_intention_prompts: {
+        data: [eligibility('are_they_local', 1)],
+        error: null,
+      },
+      guests: {
+        data: [guestRow({ first_name: 'Liam', last_name: 'Chen' })],
+        error: null,
+      },
       transactions: { data: [], error: null },
     })
 
@@ -122,8 +151,16 @@ describe('loadVenueOpenIntentions', () => {
   // TAC-479: an Instagram guest with no name shows their handle, once fetched.
   it('labels an Instagram guest with no name by their handle', async () => {
     mockTables({
-      guest_intention_prompts: { data: [eligibility('are_they_local', 1)], error: null },
-      guests: { data: [guestRow({ phone_number: null, instagram_username: 'maya.oakland' })], error: null },
+      guest_intention_prompts: {
+        data: [eligibility('are_they_local', 1)],
+        error: null,
+      },
+      guests: {
+        data: [
+          guestRow({ phone_number: null, instagram_username: 'maya.oakland' }),
+        ],
+        error: null,
+      },
       transactions: { data: [], error: null },
     })
 
@@ -134,7 +171,9 @@ describe('loadVenueOpenIntentions', () => {
   // TAC-380 trap 1 on this surface. Without the prompted_at filter every
   // intention already asked would list here as still being pursued.
   it('reads unprompted rows, plus prompted rows of the re-armable keys, scoped to the venue, inside the longest window', async () => {
-    const { calls } = mockTables({ guest_intention_prompts: { data: [], error: null } })
+    const { calls } = mockTables({
+      guest_intention_prompts: { data: [], error: null },
+    })
 
     await loadVenueOpenIntentions(VENUE_ID, NOW)
 
@@ -147,7 +186,11 @@ describe('loadVenueOpenIntentions', () => {
       ['prompted_at', null],
     ])
     // The re-armed read: prompted rows of the two event-armed keys only.
-    expect(query.find((c) => c.method === 'not')?.args).toEqual(['prompted_at', 'is', null])
+    expect(query.find((c) => c.method === 'not')?.args).toEqual([
+      'prompted_at',
+      'is',
+      null,
+    ])
     expect(query.find((c) => c.method === 'in')?.args).toEqual([
       'intention_key',
       ['got_the_recommendation', 'did_they_like_it'],
@@ -167,7 +210,10 @@ describe('loadVenueOpenIntentions', () => {
   it('expires each intention by its own window, measured from eligibility', async () => {
     mockTables({
       guest_intention_prompts: {
-        data: [eligibility('understand_order', 5), eligibility('learn_name', 5)],
+        data: [
+          eligibility('understand_order', 5),
+          eligibility('learn_name', 5),
+        ],
         error: null,
       },
       guests: { data: [guestRow()], error: null },
@@ -183,7 +229,10 @@ describe('loadVenueOpenIntentions', () => {
   it('closes understand_order once the guest has a transaction, and nothing else', async () => {
     mockTables({
       guest_intention_prompts: {
-        data: [eligibility('understand_order', 1), eligibility('learn_name', 1)],
+        data: [
+          eligibility('understand_order', 1),
+          eligibility('learn_name', 1),
+        ],
         error: null,
       },
       guests: { data: [guestRow()], error: null },
@@ -206,7 +255,10 @@ describe('loadVenueOpenIntentions', () => {
       },
       guests: {
         data: [
-          guestRow({ first_name: 'Liam', context: { guest_details: { home_base: 'Mission' } } }),
+          guestRow({
+            first_name: 'Liam',
+            context: { guest_details: { home_base: 'Mission' } },
+          }),
         ],
         error: null,
       },
@@ -220,7 +272,10 @@ describe('loadVenueOpenIntentions', () => {
   // The orphaned invite_contact_save row is a real value in a bare-text column.
   it('ignores a retired key without querying further', async () => {
     const { from } = mockTables({
-      guest_intention_prompts: { data: [eligibility('invite_contact_save', 1)], error: null },
+      guest_intention_prompts: {
+        data: [eligibility('invite_contact_save', 1)],
+        error: null,
+      },
     })
 
     await expect(loadVenueOpenIntentions(VENUE_ID, NOW)).resolves.toEqual({
@@ -236,7 +291,10 @@ describe('loadVenueOpenIntentions', () => {
   // pursued.
   it('omits a guest whose every eligible intention is closed', async () => {
     mockTables({
-      guest_intention_prompts: { data: [eligibility('understand_order', 1)], error: null },
+      guest_intention_prompts: {
+        data: [eligibility('understand_order', 1)],
+        error: null,
+      },
       guests: { data: [guestRow()], error: null },
       transactions: { data: [{ guest_id: GUEST_ID }], error: null },
     })
@@ -252,7 +310,10 @@ describe('loadVenueOpenIntentions', () => {
   // from a literal. The whole point of the helper is the day that coincidence
   // ends. Same technique as lib/ui/token-bridge.test.ts.
   it('derives that cutoff from the constant rather than restating the number', () => {
-    const src = readFileSync(join(__dirname, 'load-venue-intentions.ts'), 'utf-8')
+    const src = readFileSync(
+      join(__dirname, 'load-venue-intentions.ts'),
+      'utf-8',
+    )
     const body = src.slice(src.indexOf('export function maxIntentionWindowMs'))
     const fn = body.slice(0, body.indexOf('\n}') + 2)
     expect(fn).toContain('INTENTION_DEFINITIONS')
@@ -265,39 +326,61 @@ describe('loadVenueOpenIntentions', () => {
   // this. Dropping the `+ 1` makes cohortTruncated permanently false and the
   // scan truncates silently — the TAC-316 failure.
   it('fetches one row past the cap so truncation is detectable at all', async () => {
-    const { calls } = mockTables({ guest_intention_prompts: { data: [], error: null } })
+    const { calls } = mockTables({
+      guest_intention_prompts: { data: [], error: null },
+    })
 
     await loadVenueOpenIntentions(VENUE_ID, NOW)
 
     expect(
-      calls.find((c) => c.table === 'guest_intention_prompts' && c.method === 'limit')?.args,
+      calls.find(
+        (c) => c.table === 'guest_intention_prompts' && c.method === 'limit',
+      )?.args,
     ).toEqual([INTENTION_COHORT_LIMIT + 1])
   })
 
   // The boundary is the whole reason for the probe row. Exactly-at-cap must
   // NOT claim truncation; `>=` here would report every full page as truncated.
   it('reports cohortTruncated false at exactly the cap', async () => {
-    const ids = Array.from({ length: INTENTION_COHORT_LIMIT }, (_, i) => `guest-${i}`)
+    const ids = Array.from(
+      { length: INTENTION_COHORT_LIMIT },
+      (_, i) => `guest-${i}`,
+    )
     mockTables({
-      guest_intention_prompts: { data: ids.map((id) => eligibility('learn_name', 1, id)), error: null },
+      guest_intention_prompts: {
+        data: ids.map((id) => eligibility('learn_name', 1, id)),
+        error: null,
+      },
       guests: { data: ids.map((id) => guestRow({ id })), error: null },
       transactions: { data: [], error: null },
     })
 
-    const { rows, cohortTruncated } = await loadVenueOpenIntentions(VENUE_ID, NOW)
+    const { rows, cohortTruncated } = await loadVenueOpenIntentions(
+      VENUE_ID,
+      NOW,
+    )
     expect(cohortTruncated).toBe(false)
     expect(rows).toHaveLength(INTENTION_COHORT_LIMIT)
   })
 
   it('marks the scan truncated and drops the probe row past the cap', async () => {
-    const ids = Array.from({ length: INTENTION_COHORT_LIMIT + 1 }, (_, i) => `guest-${i}`)
+    const ids = Array.from(
+      { length: INTENTION_COHORT_LIMIT + 1 },
+      (_, i) => `guest-${i}`,
+    )
     mockTables({
-      guest_intention_prompts: { data: ids.map((id) => eligibility('learn_name', 1, id)), error: null },
+      guest_intention_prompts: {
+        data: ids.map((id) => eligibility('learn_name', 1, id)),
+        error: null,
+      },
       guests: { data: ids.map((id) => guestRow({ id })), error: null },
       transactions: { data: [], error: null },
     })
 
-    const { rows, cohortTruncated } = await loadVenueOpenIntentions(VENUE_ID, NOW)
+    const { rows, cohortTruncated } = await loadVenueOpenIntentions(
+      VENUE_ID,
+      NOW,
+    )
     expect(cohortTruncated).toBe(true)
     expect(rows).toHaveLength(INTENTION_COHORT_LIMIT)
   })
@@ -308,7 +391,10 @@ describe('loadVenueOpenIntentions', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
     mockTables({
       guest_intention_prompts: {
-        data: [eligibility('understand_order', 1), eligibility('learn_name', 1)],
+        data: [
+          eligibility('understand_order', 1),
+          eligibility('learn_name', 1),
+        ],
         error: null,
       },
       guests: { data: [guestRow()], error: null },
@@ -324,10 +410,74 @@ describe('loadVenueOpenIntentions', () => {
     warn.mockRestore()
   })
 
+  // TAC-558, and this is the trap the comment at the fail-closed branch warns
+  // about. That branch used to mark PRESENCE; are_they_new_here closes on MORE
+  // THAN ONE visit, so a fail-closed count of 1 would read as "one visit on
+  // record, still worth asking" and fail OPEN on exactly the intention the
+  // unreadable read cannot judge. The eligibility row is what makes this
+  // reachable: without it the intention has no row and never renders anyway.
+  it('fails closed for are_they_new_here too, not just understand_order', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    mockTables({
+      guest_intention_prompts: {
+        data: [eligibility('are_they_new_here', 1)],
+        error: null,
+      },
+      guests: { data: [guestRow()], error: null },
+      transactions: { data: null, error: { message: 'connection reset' } },
+    })
+
+    const { rows, degraded } = await loadVenueOpenIntentions(VENUE_ID, NOW)
+    expect(rows).toHaveLength(0)
+    expect(degraded).toBe(true)
+    warn.mockRestore()
+  })
+
+  // The positive control for the pair above: with the read WORKING and a single
+  // visit on record, the intention is genuinely open. Without this, the
+  // fail-closed test passes against a loader that closes are_they_new_here
+  // unconditionally.
+  it('leaves are_they_new_here open on a single recorded visit', async () => {
+    mockTables({
+      guest_intention_prompts: {
+        data: [eligibility('are_they_new_here', 1)],
+        error: null,
+      },
+      guests: { data: [guestRow()], error: null },
+      transactions: { data: [{ guest_id: GUEST_ID }], error: null },
+    })
+
+    const { rows, degraded } = await loadVenueOpenIntentions(VENUE_ID, NOW)
+    expect(rows[0].openKeys).toEqual(['are_they_new_here'])
+    expect(degraded).toBe(false)
+  })
+
+  // A guest the record already shows twice is never asked. Two rows for one
+  // guest is what a repeat visit looks like to this loader.
+  it('closes are_they_new_here for a guest with two recorded visits', async () => {
+    mockTables({
+      guest_intention_prompts: {
+        data: [eligibility('are_they_new_here', 1)],
+        error: null,
+      },
+      guests: { data: [guestRow()], error: null },
+      transactions: {
+        data: [{ guest_id: GUEST_ID }, { guest_id: GUEST_ID }],
+        error: null,
+      },
+    })
+
+    const { rows } = await loadVenueOpenIntentions(VENUE_ID, NOW)
+    expect(rows).toHaveLength(0)
+  })
+
   it('degrades to empty and flags degraded when the eligibility read fails', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
     mockTables({
-      guest_intention_prompts: { data: null, error: { message: 'connection reset' } },
+      guest_intention_prompts: {
+        data: null,
+        error: { message: 'connection reset' },
+      },
     })
 
     await expect(loadVenueOpenIntentions(VENUE_ID, NOW)).resolves.toEqual({
@@ -341,7 +491,10 @@ describe('loadVenueOpenIntentions', () => {
   it('degrades to empty and flags degraded when the guests read fails', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
     mockTables({
-      guest_intention_prompts: { data: [eligibility('learn_name', 1)], error: null },
+      guest_intention_prompts: {
+        data: [eligibility('learn_name', 1)],
+        error: null,
+      },
       guests: { data: null, error: { message: 'connection reset' } },
       transactions: { data: [], error: null },
     })
@@ -358,7 +511,10 @@ describe('loadVenueOpenIntentions', () => {
   // and reads as open only while that prompt predates its eligible_at.
   it('lists a re-armed intention as open while its last prompt predates its anchor', async () => {
     mockTables({
-      guest_intention_prompts: { data: [eligibility('learn_name', 1)], error: null },
+      guest_intention_prompts: {
+        data: [eligibility('learn_name', 1)],
+        error: null,
+      },
       'guest_intention_prompts:prompted': {
         data: [
           {
@@ -387,8 +543,14 @@ describe('loadVenueOpenIntentions', () => {
   it('keeps the eligibility rows and flags degraded when the re-armed read fails', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
     mockTables({
-      guest_intention_prompts: { data: [eligibility('learn_name', 1)], error: null },
-      'guest_intention_prompts:prompted': { data: null, error: { message: 'connection reset' } },
+      guest_intention_prompts: {
+        data: [eligibility('learn_name', 1)],
+        error: null,
+      },
+      'guest_intention_prompts:prompted': {
+        data: null,
+        error: { message: 'connection reset' },
+      },
       guests: { data: [guestRow()], error: null },
       transactions: { data: [], error: null },
     })
@@ -406,7 +568,10 @@ describe('loadVenueOpenIntentions', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
     mockTables({
       guest_intention_prompts: { data: [], error: null },
-      'guest_intention_prompts:prompted': { data: null, error: { message: 'connection reset' } },
+      'guest_intention_prompts:prompted': {
+        data: null,
+        error: { message: 'connection reset' },
+      },
     })
 
     await expect(loadVenueOpenIntentions(VENUE_ID, NOW)).resolves.toEqual({
@@ -418,7 +583,9 @@ describe('loadVenueOpenIntentions', () => {
   })
 
   it('skips the follow-up queries entirely when nothing is eligible', async () => {
-    const { from } = mockTables({ guest_intention_prompts: { data: [], error: null } })
+    const { from } = mockTables({
+      guest_intention_prompts: { data: [], error: null },
+    })
 
     await loadVenueOpenIntentions(VENUE_ID, NOW)
     expect(from).toHaveBeenCalledTimes(2)

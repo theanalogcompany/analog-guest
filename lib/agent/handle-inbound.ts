@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { waitUntil } from '@vercel/functions'
 import {
-  AGENT_LATENCY_HIGH_THRESHOLD_MS,
+  isAgentLatencyHigh,
   captureAgentLatencyHigh,
   captureCrisisSafetyReplySent,
   captureDraftDropped,
@@ -9,15 +9,16 @@ import {
   captureDraftRegenerated,
   captureIntentionPromptRaised,
   captureIntentionPromptRecordingFailed,
+  captureWarmCloseSent,
 } from '@/lib/analytics/posthog'
 import { createAdminClient } from '@/lib/db/admin'
-import {
-  isEmptyContextUpdate,
-  updateGuestContext,
-} from '@/lib/guests/context'
+import { isEmptyContextUpdate, updateGuestContext } from '@/lib/guests/context'
 import { sendCommitmentArrivalPush } from '@/lib/notifications/send-commitment-push'
-import { sendDraftFlaggedPush, shouldSendDraftFlaggedPush } from '@/lib/notifications/send'
-import { startAgentTrace } from '@/lib/observability'
+import {
+  sendDraftFlaggedPush,
+  shouldSendDraftFlaggedPush,
+} from '@/lib/notifications/send'
+import { startAgentTrace, toAgentUsage } from '@/lib/observability'
 import { resolveCancellation } from '@/lib/schemas/guest-commitment'
 import { parseMessageChannel } from '@/lib/schemas/message-channel'
 import { capturePostHogEvent, fireRedAlert } from './alerts'
@@ -34,7 +35,10 @@ import {
   type CoalesceDeps,
   type InboundTurnState,
 } from './coalesce-turn'
-import { buildCrisisSafetyResult, CRISIS_SAFETY_REVIEW_REASON } from './crisis-safety'
+import {
+  buildCrisisSafetyResult,
+  CRISIS_SAFETY_REVIEW_REASON,
+} from './crisis-safety'
 import { dispatchArrivalCapture } from './dispatch-arrival-capture'
 import {
   anyKnowledgeGapCard,
@@ -44,7 +48,11 @@ import {
 } from './pending-slots'
 import { extractReportedOrder } from './extract-reported-order'
 import { renderableIntentions } from './intentions/derive'
-import { recordIntentionEligibility, recordIntentionPrompts } from './intentions/record'
+import {
+  recordIntentionEligibility,
+  recordIntentionPrompts,
+} from './intentions/record'
+import { markWarmCloseSent } from './warm-close-store'
 import { recordInboundTurnOutcome } from './record-inbound-turn-outcome'
 import { isVenueProcessingHalted } from '@/lib/venues/status'
 import { persistOrRegenQueuedDraft } from './schedule-and-send'
@@ -134,7 +142,9 @@ async function loadInbound(messageId: string): Promise<{
   const supabase = createAdminClient()
   const { data, error } = await supabase
     .from('messages')
-    .select('id, body, provider_message_id, created_at, venue_id, guest_id, direction, channel, referral_source')
+    .select(
+      'id, body, provider_message_id, created_at, venue_id, guest_id, direction, channel, referral_source',
+    )
     .eq('id', messageId)
     .single()
   if (error || !data) {
@@ -148,7 +158,9 @@ async function loadInbound(messageId: string): Promise<{
     )
   }
   if (!data.provider_message_id) {
-    throw new Error(`loadInbound: message ${messageId} has no provider_message_id`)
+    throw new Error(
+      `loadInbound: message ${messageId} has no provider_message_id`,
+    )
   }
   return {
     message: {
@@ -167,7 +179,9 @@ async function loadInbound(messageId: string): Promise<{
   }
 }
 
-async function findExistingReply(inboundMessageId: string): Promise<string | null> {
+async function findExistingReply(
+  inboundMessageId: string,
+): Promise<string | null> {
   const supabase = createAdminClient()
   const { data, error } = await supabase
     .from('messages')
@@ -211,7 +225,9 @@ async function findExistingReply(inboundMessageId: string): Promise<string | nul
 async function persistGenerationFailureCard(
   ctx: RuntimeContext,
   agentRunId: string,
-): Promise<{ kind: 'carded'; outboundMessageId: string } | { kind: 'skipped' }> {
+): Promise<
+  { kind: 'carded'; outboundMessageId: string } | { kind: 'skipped' }
+> {
   try {
     const supabase = createAdminClient()
     const { data: guestRow } = await supabase
@@ -220,10 +236,13 @@ async function persistGenerationFailureCard(
       .eq('id', ctx.guest.id)
       .maybeSingle()
     if (guestRow?.opted_out_at) {
-      console.warn('[agent] generation-failure card skipped — guest opted out', {
-        agentRunId,
-        guestId: ctx.guest.id,
-      })
+      console.warn(
+        '[agent] generation-failure card skipped — guest opted out',
+        {
+          agentRunId,
+          guestId: ctx.guest.id,
+        },
+      )
       return { kind: 'skipped' }
     }
 
@@ -243,7 +262,8 @@ async function persistGenerationFailureCard(
     // card in the queue, so nothing is silent: the operator is on the hook
     // either way, and the red alert above records the crash.
     const pendingRows =
-      (await loadPendingRowsBySlot(ctx.venue.id, ctx.guest.id)) ?? EMPTY_PENDING_ROWS
+      (await loadPendingRowsBySlot(ctx.venue.id, ctx.guest.id)) ??
+      EMPTY_PENDING_ROWS
     const slotDecision = decideSlotAction({
       rows: pendingRows,
       draftCommitment: null,
@@ -257,11 +277,16 @@ async function persistGenerationFailureCard(
     if (slotDecision.action === 'drop') {
       console.warn(
         '[agent] generation-failure card skipped — a non-gap pending draft holds the slot',
-        { agentRunId, guestId: ctx.guest.id, protectedDraftId: slotDecision.protectedDraftId },
+        {
+          agentRunId,
+          guestId: ctx.guest.id,
+          protectedDraftId: slotDecision.protectedDraftId,
+        },
       )
       return { kind: 'skipped' }
     }
-    const existingId = slotDecision.action === 'regen' ? slotDecision.draftId : null
+    const existingId =
+      slotDecision.action === 'regen' ? slotDecision.draftId : null
 
     // Arm a new deadline only when no knowledge-gap card sits in EITHER slot,
     // so a crash can't push out a deadline that's already running or start a
@@ -304,7 +329,11 @@ async function persistGenerationFailureCard(
     if (persisted.action === 'dropped') {
       console.warn(
         '[agent] generation-failure card skipped: a non-gap pending draft took the slot during the write',
-        { agentRunId, guestId: ctx.guest.id, protectedDraftId: persisted.protectedDraftId },
+        {
+          agentRunId,
+          guestId: ctx.guest.id,
+          protectedDraftId: persisted.protectedDraftId,
+        },
       )
       return { kind: 'skipped' }
     }
@@ -334,7 +363,10 @@ async function persistGenerationFailureCard(
       inboundBody: ctx.currentMessage?.body ?? null,
       generatedBody: '',
     })
-    if (persisted.action === 'silenced' || persisted.outboundMessageId === null) {
+    if (
+      persisted.action === 'silenced' ||
+      persisted.outboundMessageId === null
+    ) {
       // TAC-397: unreachable — a crash card uses regen_gap_card_only, which
       // never silences. Handled because that guarantee lives in
       // pending-slots.ts and a null id typed `string` is the bug nobody finds
@@ -403,6 +435,12 @@ function buildGenerationFailureGeneration(): GenerateMessageResult {
     commitment: {},
     arrivalCapture: {},
     cancelsCommitmentId: '',
+    // TAC-554: the crash card. Generation failed, so there is no
+    // getting-to-know-you question, and the card is blank anyway.
+    intentionQuestion: '',
+    // TAC-560: the crash card is a blank draft for an operator, not a close.
+    closedTheConversation: false,
+    intentionQuestionDuplicateStripped: false,
     attempts: 2,
     attemptScores: [],
     attemptHistory: [],
@@ -547,7 +585,8 @@ async function stopTypingUnlessSent(
     // dots for the full 20-second timeout — on a turn we already know is not
     // replying. `allSettled` because a rejected `typing_on` is not a reason to
     // skip the `off`.
-    if (turn.typingInFlight !== null) await Promise.allSettled([turn.typingInFlight])
+    if (turn.typingInFlight !== null)
+      await Promise.allSettled([turn.typingInFlight])
     await signalTyping({ ...shown, channel: 'instagram' }, 'off')
   } catch (e) {
     console.error('[agent] typing_off failed (cosmetic)', {
@@ -579,12 +618,14 @@ function startTyping(turn: InboundTurnState, ctx: RuntimeContext): void {
   if (ctx.conversationChannel !== 'instagram') return
   const target = { venueId: ctx.venue.id, guestId: ctx.guest.id }
   turn.typingShownFor = target
-  const sending = signalTyping({ ...target, channel: 'instagram' }, 'on').catch((e: unknown) => {
-    console.error('[agent] typing_on threw unexpectedly', {
-      agentRunId: ctx.agentRunId,
-      error: e instanceof Error ? e.message : String(e),
-    })
-  })
+  const sending = signalTyping({ ...target, channel: 'instagram' }, 'on').catch(
+    (e: unknown) => {
+      console.error('[agent] typing_on threw unexpectedly', {
+        agentRunId: ctx.agentRunId,
+        error: e instanceof Error ? e.message : String(e),
+      })
+    },
+  )
   turn.typingInFlight = sending
   waitUntil(sending)
 }
@@ -634,12 +675,22 @@ export async function handleInbound(
   const turn = newInboundTurnState(enabled, options.retryDepth ?? 0)
   let result: AgentResult
   try {
-    result = await runInboundTurn(inboundMessageId, agentRunId, turn, coalesceDeps)
+    result = await runInboundTurn(
+      inboundMessageId,
+      agentRunId,
+      turn,
+      coalesceDeps,
+    )
   } catch (unexpected) {
     // Not redundant with runInboundTurn's own top-level catch: its `finally`
     // block awaits captureAgentLatencyHigh, which is guarded today but by a
     // guarantee living in another module. The ledger should not depend on it.
-    await recordSafely({ inboundMessageId, agentRunId, result: null, unexpected })
+    await recordSafely({
+      inboundMessageId,
+      agentRunId,
+      result: null,
+      unexpected,
+    })
     // TAC-540: started before the handoff, never awaited. See the happy path.
     waitUntil(stopTypingUnlessSent(turn, null))
     // `null` is the strongest case for a retry: the turn produced no result
@@ -715,10 +766,13 @@ async function closeCoalescedTurn(
     if (!released.ok) {
       // The lease is the backstop. Log rather than alert: the turn already
       // finished, and the next run takes over when the lease expires.
-      console.warn('[agent] inbound turn claim not released; leaving it to the lease', {
-        agentRunId,
-        error: released.error,
-      })
+      console.warn(
+        '[agent] inbound turn claim not released; leaving it to the lease',
+        {
+          agentRunId,
+          error: released.error,
+        },
+      )
     }
     turn.claim = null
 
@@ -730,18 +784,25 @@ async function closeCoalescedTurn(
     // retry needs the id the read failed to produce), so the obligation is to
     // make it VISIBLE rather than to guess.
     if (uncovered.status === 'unreadable') {
-      console.error('[agent] inbound turn could not check for an uncovered message', {
+      console.error(
+        '[agent] inbound turn could not check for an uncovered message',
+        {
+          agentRunId,
+          answeredMessageId: turn.answered?.id ?? null,
+          error: uncovered.error,
+        },
+      )
+      await capturePostHogEvent(
+        'inbound_turn_handoff_check_failed',
         agentRunId,
-        answeredMessageId: turn.answered?.id ?? null,
-        error: uncovered.error,
-      })
-      await capturePostHogEvent('inbound_turn_handoff_check_failed', agentRunId, {
-        agentRunId,
-        venueId: claim.venueId,
-        guestId: claim.guestId,
-        answeredMessageId: turn.answered?.id ?? null,
-        error: uncovered.error,
-      })
+        {
+          agentRunId,
+          venueId: claim.venueId,
+          guestId: claim.guestId,
+          answeredMessageId: turn.answered?.id ?? null,
+          error: uncovered.error,
+        },
+      )
       return
     }
     if (uncovered.status === 'none') {
@@ -758,12 +819,15 @@ async function closeCoalescedTurn(
       // fails deterministically would otherwise re-invoke itself forever.
       if (shouldRetryTurn(result, turn) && turn.answered !== null) {
         const retryMessageId = turn.answered.id
-        console.warn('[agent] inbound turn failed with nothing newer; retrying once', {
-          agentRunId,
-          retryMessageId,
-          outcome: result === null ? 'threw' : result.status,
-          retryDepth: turn.retryDepth + 1,
-        })
+        console.warn(
+          '[agent] inbound turn failed with nothing newer; retrying once',
+          {
+            agentRunId,
+            retryMessageId,
+            outcome: result === null ? 'threw' : result.status,
+            retryDepth: turn.retryDepth + 1,
+          },
+        )
         await capturePostHogEvent('inbound_turn_retried', agentRunId, {
           agentRunId,
           venueId: claim.venueId,
@@ -799,7 +863,10 @@ async function closeCoalescedTurn(
     // take the claim we were holding. Held, it would stand down immediately
     // and the message would go unanswered — the handoff defeating itself.
     waitUntil(
-      handleInbound(uncovered.message.id, { coalescing: turn.enabled, coalesceDeps: deps }).catch((e) => {
+      handleInbound(uncovered.message.id, {
+        coalescing: turn.enabled,
+        coalesceDeps: deps,
+      }).catch((e) => {
         console.error('[agent] inbound turn handoff failed', {
           agentRunId,
           handingOffMessageId: uncovered.message.id,
@@ -834,11 +901,14 @@ async function recordSafely(input: {
   try {
     await recordInboundTurnOutcome(input)
   } catch (e) {
-    console.error('[agent] inbound turn outcome recorder threw; outcome not recorded', {
-      agentRunId: input.agentRunId,
-      inboundMessageId: input.inboundMessageId,
-      error: e instanceof Error ? e.message : String(e),
-    })
+    console.error(
+      '[agent] inbound turn outcome recorder threw; outcome not recorded',
+      {
+        agentRunId: input.agentRunId,
+        inboundMessageId: input.inboundMessageId,
+        error: e instanceof Error ? e.message : String(e),
+      },
+    )
   }
 }
 
@@ -877,7 +947,11 @@ async function runInboundTurn(
   let generatedBody: string | null = null
 
   try {
-    console.log('[agent] inbound start', { agentRunId, inboundMessageId, traceId: trace.id })
+    console.log('[agent] inbound start', {
+      agentRunId,
+      inboundMessageId,
+      traceId: trace.id,
+    })
 
     // Idempotency
     const existing = await findExistingReply(inboundMessageId)
@@ -892,7 +966,9 @@ async function runInboundTurn(
         inboundMessageId,
         reason: 'duplicate',
       })
-      trace.update({ output: { status: 'skipped_duplicate', existingReplyId: existing } })
+      trace.update({
+        output: { status: 'skipped_duplicate', existingReplyId: existing },
+      })
       skipLatencyEmit = true
       return { status: 'skipped_duplicate' }
     }
@@ -965,7 +1041,12 @@ async function runInboundTurn(
           inboundMessageId,
           intoAgentRunId: opened.intoAgentRunId,
         })
-        trace.update({ output: { status: 'coalesced', intoAgentRunId: opened.intoAgentRunId } })
+        trace.update({
+          output: {
+            status: 'coalesced',
+            intoAgentRunId: opened.intoAgentRunId,
+          },
+        })
         skipLatencyEmit = true
         return {
           status: 'coalesced',
@@ -973,7 +1054,8 @@ async function runInboundTurn(
           intoMessageId: opened.intoMessageId,
         }
       }
-      if (opened.claimed) turn.claim = { venueId: invoked.venueId, guestId: invoked.guestId }
+      if (opened.claimed)
+        turn.claim = { venueId: invoked.venueId, guestId: invoked.guestId }
       if (opened.degraded !== null) {
         // Fail-open happened. Worth a line: the reply is going out unclaimed,
         // which is today's behaviour, but a run of these means the claim is
@@ -1008,7 +1090,10 @@ async function runInboundTurn(
     }
     // What this turn covers. The handoff compares against it, so it must be
     // the message actually answered rather than the one we were invoked for.
-    turn.answered = { id: inbound.message.id, createdAt: inbound.message.receivedAt }
+    turn.answered = {
+      id: inbound.message.id,
+      createdAt: inbound.message.receivedAt,
+    }
     trace.update({
       metadata: { venueId: inbound.venueId, guestId: inbound.guestId },
       content: { inboundBody: inbound.message.body },
@@ -1045,7 +1130,9 @@ async function runInboundTurn(
       // the red alert for the run. Unreachable for a Sendblue guest, whose
       // text arrives from the phone number the guest row holds.
       if (ctx.conversationChannel === null) {
-        throw new Error('conversation channel unresolved: the reply has nowhere to be routed')
+        throw new Error(
+          'conversation channel unresolved: the reply has nowhere to be routed',
+        )
       }
       contextSpan.end({
         output: {
@@ -1056,7 +1143,9 @@ async function runInboundTurn(
           // TAC-380: pre-classification. What actually renders is narrowed
           // later by renderableIntentions.
           openIntentionKeys: ctx.openIntentions.map((o) => o.key),
-          newlyEligibleIntentionKeys: ctx.intentionDerivation.newlyEligible.map((e) => e.key),
+          newlyEligibleIntentionKeys: ctx.intentionDerivation.newlyEligible.map(
+            (e) => e.key,
+          ),
           rearmedIntentionKeys: ctx.intentionDerivation.newlyEligible
             .filter((e) => e.rearm)
             .map((e) => e.key),
@@ -1092,7 +1181,7 @@ async function runInboundTurn(
     // classification, and is awaited at its old position further down.
     //
     // SAFE BECAUSE retrieveCorpusStage NEVER READS ctx.classification —
-    // checked line by line, not assumed. Since decision 0007 it reads ONLY
+    // checked line by line, not assumed. Since decision 0008 it reads ONLY
     // `ctx.venue.id` (the pack is static per venue; there is no query at
     // all), which is set before this point. So its result is identical
     // whichever order the two run in, and classifyStage mutates nothing for
@@ -1111,7 +1200,7 @@ async function runInboundTurn(
     // down. Claiming it here means every return path below is free to ignore
     // it.
     // Span keeps its historical name so Langfuse dashboards line up across
-    // the decision-0007 boundary; since then it times a static pack load,
+    // the decision-0008 boundary; since then it times a static pack load,
     // not a query.
     const retrieveSpan = trace.span('retrieve', { staticVoicePack: true })
     const retrievingCorpus = retrieveCorpusStage(ctx).then(
@@ -1120,7 +1209,11 @@ async function runInboundTurn(
     )
 
     // Classify
-    const classifySpan = trace.span(
+    // `generation()`, not `span()`: Langfuse only prices an observation of type
+    // GENERATION, so a plain span records a model call at $0 however many tokens
+    // it reports. The span NAME is unchanged, which is what select-trace-stages.ts
+    // and the latency queries key on — neither reads the observation type.
+    const classifySpan = trace.generation(
       'classify',
       { inboundLength: ctx.currentMessage?.body.length ?? 0 },
       { inboundBody: ctx.currentMessage?.body ?? null },
@@ -1133,6 +1226,8 @@ async function runInboundTurn(
           classifierConfidence: ctx.classification.classifierConfidence,
         },
         content: { reasoning: ctx.classification.reasoning },
+        model: ctx.classification.modelId,
+        usage: toAgentUsage(ctx.classification.usage ?? {}),
       })
       console.log('[agent] inbound classified', {
         agentRunId,
@@ -1174,7 +1269,9 @@ async function runInboundTurn(
     // non-negotiable). The reply is a fixed string, never generated — see
     // lib/agent/crisis-safety.ts for why.
     if (ctx.classification.crisisSafety) {
-      const crisisSpan = trace.span('crisis_safety', { category: ctx.classification.category })
+      const crisisSpan = trace.span('crisis_safety', {
+        category: ctx.classification.category,
+      })
       try {
         const result = buildCrisisSafetyResult()
         const dispatched = await dispatchReply(ctx, result, {
@@ -1188,7 +1285,10 @@ async function runInboundTurn(
           onUndelivered: 'card',
         })
         if (dispatched.kind !== 'sent') {
-          crisisSpan.end({ level: 'WARNING', output: { outcome: dispatched.kind } })
+          crisisSpan.end({
+            level: 'WARNING',
+            output: { outcome: dispatched.kind },
+          })
           retrieveSpan.end({ output: { discarded: 'crisis_safety' } })
           return undeliveredAgentResult(ctx, dispatched)
         }
@@ -1204,7 +1304,8 @@ async function runInboundTurn(
             reason: dispatched.undelivered.reason,
             cardId: dispatched.undelivered.cardId,
           })
-          if (dispatched.undelivered.cardId !== null) pushSendFailureCard(ctx, dispatched.undelivered.cardId)
+          if (dispatched.undelivered.cardId !== null)
+            pushSendFailureCard(ctx, dispatched.undelivered.cardId)
         }
         crisisSpan.end({ output: { outboundMessageId } })
         console.log('[agent] inbound crisis-safety reply sent', {
@@ -1231,8 +1332,14 @@ async function runInboundTurn(
       } catch (e) {
         // scheduleAndSend already fired the appropriate stage-specific alert.
         const errMsg = e instanceof Error ? e.message : String(e)
-        const stage: 'send' | 'persist' = errMsg.includes('persist failed') ? 'persist' : 'send'
-        crisisSpan.end({ level: 'ERROR', statusMessage: errMsg, output: { stage } })
+        const stage: 'send' | 'persist' = errMsg.includes('persist failed')
+          ? 'persist'
+          : 'send'
+        crisisSpan.end({
+          level: 'ERROR',
+          statusMessage: errMsg,
+          output: { stage },
+        })
         retrieveSpan.end({ output: { discarded: 'crisis_safety' } })
         return { status: 'failed', stage, error: errMsg }
       }
@@ -1283,17 +1390,23 @@ async function runInboundTurn(
         })
           .then((outcome) => {
             if (outcome.kind === 'failed') {
-              console.warn('[agent] intention eligibility write failed (continuing)', {
-                agentRunId,
-                error: outcome.error,
-              })
+              console.warn(
+                '[agent] intention eligibility write failed (continuing)',
+                {
+                  agentRunId,
+                  error: outcome.error,
+                },
+              )
             }
           })
           .catch((e) => {
-            console.error('[agent] recordIntentionEligibility threw unexpectedly', {
-              agentRunId,
-              error: e instanceof Error ? e.message : String(e),
-            })
+            console.error(
+              '[agent] recordIntentionEligibility threw unexpectedly',
+              {
+                agentRunId,
+                error: e instanceof Error ? e.message : String(e),
+              },
+            )
           }),
       )
     }
@@ -1318,10 +1431,13 @@ async function runInboundTurn(
               precision: outcome.precision,
             })
           } else if (outcome.kind === 'failed') {
-            console.warn('[agent] inbound self-reported order extraction failed (continuing)', {
-              agentRunId,
-              error: outcome.error,
-            })
+            console.warn(
+              '[agent] inbound self-reported order extraction failed (continuing)',
+              {
+                agentRunId,
+                error: outcome.error,
+              },
+            )
           }
         })
         .catch((e) => {
@@ -1337,14 +1453,16 @@ async function runInboundTurn(
     // position, in outcome and in what it alerts on. A turn that returned
     // before here — a classification failure, the crisis short-circuit — has
     // discarded it, which is the ticket's own ruling and now costs one DB
-    // read on those paths (decision 0007 removed the Voyage embed and RPC).
+    // read on those paths (decision 0008 removed the Voyage embed and RPC).
     const corpusResult = await retrievingCorpus
     try {
       if (!corpusResult.ok) throw corpusResult.error
       ctx.corpus = corpusResult.value
       retrieveSpan.end({
         output: { packSize: ctx.corpus.length },
-        content: trace.captureContent ? buildCorpusContent(ctx.corpus) : undefined,
+        content: trace.captureContent
+          ? buildCorpusContent(ctx.corpus)
+          : undefined,
       })
       console.log('[agent] inbound voice pack loaded', {
         agentRunId,
@@ -1411,7 +1529,12 @@ async function runInboundTurn(
     }
 
     // Generate
-    const generateSpan = trace.span('generate', { category: ctx.classification.category })
+    // A GENERATION, not a span: this is the most expensive model call in the turn
+    // and Langfuse prices only GENERATION observations. Recorded as a plain span
+    // it reported $0 however many tokens it burned.
+    const generateSpan = trace.generation('generate', {
+      category: ctx.classification.category,
+    })
     let gen = await generateStage(ctx, ctx.classification.category)
     if (gen.status === 'failed') {
       // TAC-309: retry once before giving up. generateMessage's internal
@@ -1463,7 +1586,11 @@ async function runInboundTurn(
       const card = await persistGenerationFailureCard(ctx, agentRunId)
       if (card.kind === 'carded') {
         trace.update({
-          output: { status: 'queued', outboundMessageId: card.outboundMessageId, generationFailed: true },
+          output: {
+            status: 'queued',
+            outboundMessageId: card.outboundMessageId,
+            generationFailed: true,
+          },
         })
         return {
           status: 'queued',
@@ -1483,13 +1610,18 @@ async function runInboundTurn(
       // body content lives only on the success path; THE-215 will fix this
       // when threading the trace into the regen loop directly.
       gen.attemptScores.forEach((score, i) => {
-        const attemptSpan = generateSpan.span(`generate.attempt_${i + 1}`, { attempt: i + 1 })
+        const attemptSpan = generateSpan.span(`generate.attempt_${i + 1}`, {
+          attempt: i + 1,
+        })
         attemptSpan.end({ output: { voiceFidelity: score } })
       })
       generateSpan.end({
         level: 'WARNING',
         statusMessage: 'fidelity_loop_exhausted',
-        output: { attemptScores: gen.attemptScores, finalScore: gen.finalScore },
+        output: {
+          attemptScores: gen.attemptScores,
+          finalScore: gen.finalScore,
+        },
       })
       await fireRedAlert({
         agentRunId,
@@ -1500,10 +1632,16 @@ async function runInboundTurn(
         errorMessage: 'fidelity_loop_exhausted',
         extra: { attemptScores: gen.attemptScores, finalScore: gen.finalScore },
       })
-      return { status: 'refused', reason: 'low_fidelity', attemptScores: gen.attemptScores }
+      return {
+        status: 'refused',
+        reason: 'low_fidelity',
+        attemptScores: gen.attemptScores,
+      }
     }
     gen.result.attemptScores.forEach((score, i) => {
-      const attemptSpan = generateSpan.span(`generate.attempt_${i + 1}`, { attempt: i + 1 })
+      const attemptSpan = generateSpan.span(`generate.attempt_${i + 1}`, {
+        attempt: i + 1,
+      })
       const attempt = gen.result.attemptHistory[i]
       attemptSpan.end({
         output: { voiceFidelity: score },
@@ -1526,7 +1664,14 @@ async function runInboundTurn(
         cacheWriteTokens: gen.result.cacheWriteTokens,
         bodyLength: gen.result.body.length,
       },
-      content: trace.captureContent ? buildGenerateContent(gen.result) : undefined,
+      content: trace.captureContent
+        ? buildGenerateContent(gen.result)
+        : undefined,
+      // Native pricing, summed over every attempt. Separate from the output
+      // fields above on purpose: these two are what the metrics API can
+      // aggregate, the output object can only be scraped per observation.
+      model: gen.result.modelId,
+      usage: toAgentUsage(gen.result.usage ?? {}),
     })
     generatedBody = gen.result.body
     console.log('[agent] inbound generated', {
@@ -1620,11 +1765,14 @@ async function runInboundTurn(
       // staff need to hand over both. Batching them into one push would be a
       // cross-repo Contract change: the payload carries a single commitmentId
       // and the operator app routes the tap on it.
-      console.log('[agent] inbound arrival imminent — transitioned to pending_ack', {
-        agentRunId,
-        commitmentIds: arrival.commitmentRows.map((r) => r.id),
-        failedCount: arrival.failedCount,
-      })
+      console.log(
+        '[agent] inbound arrival imminent — transitioned to pending_ack',
+        {
+          agentRunId,
+          commitmentIds: arrival.commitmentRows.map((r) => r.id),
+          failedCount: arrival.failedCount,
+        },
+      )
       for (const commitmentRow of arrival.commitmentRows) {
         waitUntil(
           sendCommitmentArrivalPush({
@@ -1640,55 +1788,78 @@ async function runInboundTurn(
             venueTimezone: ctx.venue.timezone,
             agentRunId,
           }).catch((e) => {
-            console.error('apns: sendCommitmentArrivalPush threw unexpectedly', {
-              agentRunId,
-              commitmentId: commitmentRow.id,
-              error: e instanceof Error ? e.message : String(e),
-            })
+            console.error(
+              'apns: sendCommitmentArrivalPush threw unexpectedly',
+              {
+                agentRunId,
+                commitmentId: commitmentRow.id,
+                error: e instanceof Error ? e.message : String(e),
+              },
+            )
           }),
         )
       }
       if (arrival.failedCount > 0) {
         // Some of this guest's obligations did not move. They stay `open`, so
         // nothing is lost, but staff will not see them on this arrival.
-        console.warn('[agent] inbound arrival: some obligations failed to transition', {
-          agentRunId,
-          failedCount: arrival.failedCount,
-          transitionedCount: arrival.commitmentRows.length,
-        })
+        console.warn(
+          '[agent] inbound arrival: some obligations failed to transition',
+          {
+            agentRunId,
+            failedCount: arrival.failedCount,
+            transitionedCount: arrival.commitmentRows.length,
+          },
+        )
       }
     } else if (arrival.kind === 'scheduled_recorded') {
-      console.log('[agent] inbound arrival scheduled — cron will fire at expected_arrival', {
-        agentRunId,
-        commitmentIds: arrival.commitmentRows.map((r) => r.id),
-        expectedArrival: arrival.commitmentRows[0]?.expected_arrival ?? null,
-        failedCount: arrival.failedCount,
-      })
+      console.log(
+        '[agent] inbound arrival scheduled — cron will fire at expected_arrival',
+        {
+          agentRunId,
+          commitmentIds: arrival.commitmentRows.map((r) => r.id),
+          expectedArrival: arrival.commitmentRows[0]?.expected_arrival ?? null,
+          failedCount: arrival.failedCount,
+        },
+      )
     } else if (arrival.kind === 'closed_venue_skipped') {
       // TAC-363 ruling 1(a). The guest said they are heading over while the
       // venue is shut. Nothing is recorded and no operator is woken; the reply
       // is what tells them when the venue opens.
-      console.log('[agent] inbound arrival ignored — venue closed', { agentRunId })
+      console.log('[agent] inbound arrival ignored — venue closed', {
+        agentRunId,
+      })
     } else if (arrival.kind === 'no_open_obligations') {
-      console.log('[agent] inbound arrival with nothing owed to record it against', {
-        agentRunId,
-      })
-    } else if (arrival.kind === 'imminent_lost' || arrival.kind === 'scheduled_lost') {
-      console.log('[agent] inbound arrival CAS lost (commitment already transitioned)', {
-        agentRunId,
-        kind: arrival.kind,
-      })
+      console.log(
+        '[agent] inbound arrival with nothing owed to record it against',
+        {
+          agentRunId,
+        },
+      )
+    } else if (
+      arrival.kind === 'imminent_lost' ||
+      arrival.kind === 'scheduled_lost'
+    ) {
+      console.log(
+        '[agent] inbound arrival CAS lost (commitment already transitioned)',
+        {
+          agentRunId,
+          kind: arrival.kind,
+        },
+      )
     } else if (arrival.kind === 'invalid_signal') {
       console.warn('[agent] inbound arrival capture invalid', {
         agentRunId,
         reason: arrival.reason,
       })
     } else if (arrival.kind === 'failed') {
-      console.warn('[agent] inbound arrival capture dispatch failed (continuing)', {
-        agentRunId,
-        error: arrival.error,
-        errorCode: arrival.errorCode,
-      })
+      console.warn(
+        '[agent] inbound arrival capture dispatch failed (continuing)',
+        {
+          agentRunId,
+          error: arrival.error,
+          errorCode: arrival.errorCode,
+        },
+      )
     }
 
     // Decision 0003, rewritten 2026-09-29: the five post-generation LLM
@@ -1715,7 +1886,10 @@ async function runInboundTurn(
       { status: 'skipped' },
       { status: 'skipped' },
       {
-        resolution: resolveCancellation(gen.result.cancelsCommitmentId, ctx.activeCommitments),
+        resolution: resolveCancellation(
+          gen.result.cancelsCommitmentId,
+          ctx.activeCommitments,
+        ),
         claim: 'skipped',
       },
       { status: 'skipped' },
@@ -1723,7 +1897,8 @@ async function runInboundTurn(
     console.log('[agent] inbound approval decision', {
       agentRunId,
       action: approval.action,
-      primaryTrigger: approval.action === 'queue' ? approval.primaryTrigger : null,
+      primaryTrigger:
+        approval.action === 'queue' ? approval.primaryTrigger : null,
       triggers: approval.action === 'queue' ? approval.triggers : [],
       voiceFidelity: gen.result.voiceFidelity,
       modelRequiresApproval: gen.result.requiresOperatorApproval,
@@ -1748,11 +1923,14 @@ async function runInboundTurn(
     // this is the expected outcome on a very common turn shape, not an
     // incident. The trace still records it, so a single run is explainable.
     if (approval.action === 'silence') {
-      console.log('[agent] inbound draft silenced: nothing to answer, a card is already waiting', {
-        agentRunId,
-        guestId: ctx.guest.id,
-        category: ctx.classification.category,
-      })
+      console.log(
+        '[agent] inbound draft silenced: nothing to answer, a card is already waiting',
+        {
+          agentRunId,
+          guestId: ctx.guest.id,
+          category: ctx.classification.category,
+        },
+      )
       trace.update({
         output: { status: 'silenced', category: ctx.classification.category },
         content: { silencedDraft: gen.result.body },
@@ -1761,12 +1939,15 @@ async function runInboundTurn(
     }
 
     if (approval.action === 'drop') {
-      console.warn('[agent] inbound draft dropped: a pending card holds its slot', {
-        agentRunId,
-        reason: approval.reason,
-        protectedDraftId: approval.protectedDraftId,
-        triggers: approval.triggers,
-      })
+      console.warn(
+        '[agent] inbound draft dropped: a pending card holds its slot',
+        {
+          agentRunId,
+          reason: approval.reason,
+          protectedDraftId: approval.protectedDraftId,
+          triggers: approval.triggers,
+        },
+      )
       await captureDraftDropped({
         agentRunId,
         venueId: ctx.venue.id,
@@ -1908,11 +2089,14 @@ async function runInboundTurn(
               protectedDraftId: persistResult.protectedDraftId,
             },
           })
-          console.warn('[agent] inbound draft dropped in race recovery: a pending card took its slot', {
-            agentRunId,
-            reason: persistResult.reason,
-            protectedDraftId: persistResult.protectedDraftId,
-          })
+          console.warn(
+            '[agent] inbound draft dropped in race recovery: a pending card took its slot',
+            {
+              agentRunId,
+              reason: persistResult.reason,
+              protectedDraftId: persistResult.protectedDraftId,
+            },
+          )
           await captureDraftDropped({
             agentRunId,
             venueId: ctx.venue.id,
@@ -1944,7 +2128,11 @@ async function runInboundTurn(
             triggers: approval.triggers,
           }
         }
-        const { outboundMessageId, action: persistAction, priorReviewReason } = persistResult
+        const {
+          outboundMessageId,
+          action: persistAction,
+          priorReviewReason,
+        } = persistResult
         queueSpan.end({
           output: {
             outboundMessageId,
@@ -2064,7 +2252,11 @@ async function runInboundTurn(
       } catch (e) {
         // persistOrRegenQueuedDraft already fired a red alert.
         const errMsg = e instanceof Error ? e.message : String(e)
-        queueSpan.end({ level: 'ERROR', statusMessage: errMsg, output: { stage: 'persist' } })
+        queueSpan.end({
+          level: 'ERROR',
+          statusMessage: errMsg,
+          output: { stage: 'persist' },
+        })
         return { status: 'failed', stage: 'persist', error: errMsg }
       }
     }
@@ -2104,7 +2296,12 @@ async function runInboundTurn(
         // claim, one ledger row. A fresh handleInbound would mint a second run
         // id and a second row for one guest action, which is what breaks the
         // ledger's denominator.
-        return await runInboundTurn(uncovered.message.id, agentRunId, turn, coalesceDeps)
+        return await runInboundTurn(
+          uncovered.message.id,
+          agentRunId,
+          turn,
+          coalesceDeps,
+        )
       }
     }
 
@@ -2120,8 +2317,13 @@ async function runInboundTurn(
         reviewReason: approval.reason,
         // TAC-436 ruling 4: the SAME hoisted value the queue branch stores
         // and this branch records against, so what a card carries and what
-        // an auto-send carries cannot drift. Audit only on this path — the
-        // recording below is what actually closes the intentions.
+        // an auto-send carries cannot drift. The recording below is what
+        // actually closes the intentions.
+        //
+        // TAC-554 gave this a SECOND job, so it is no longer audit-only on
+        // this path: dispatch reads its length through intentionTailFor to
+        // decide whether the getting-to-know-you question earns its own
+        // message. Passing it is now load-bearing rather than bookkeeping.
         renderedIntentions,
         // TAC-469: the Instagram reply check. If this message already has an
         // answer (usually one staff typed in the Instagram app), send nothing.
@@ -2130,11 +2332,19 @@ async function runInboundTurn(
         onUndelivered: 'card',
       })
       if (dispatched.kind !== 'sent') {
-        sendSpan.end({ level: 'WARNING', output: { outcome: dispatched.kind } })
+        sendSpan.end({
+          level: 'WARNING',
+          output: { outcome: dispatched.kind },
+        })
         trace.update({ output: { status: dispatched.kind } })
         return undeliveredAgentResult(ctx, dispatched)
       }
-      const { outboundMessageId, providerMessageId, generationId, bubbleCount } = dispatched
+      const {
+        outboundMessageId,
+        providerMessageId,
+        generationId,
+        bubbleCount,
+      } = dispatched
       if (dispatched.undelivered !== null) {
         // Part of a split Instagram reply went out; the rest became a card (or
         // couldn't, and the Slack event says why).
@@ -2144,7 +2354,8 @@ async function runInboundTurn(
           reason: dispatched.undelivered.reason,
           cardId: dispatched.undelivered.cardId,
         })
-        if (dispatched.undelivered.cardId !== null) pushSendFailureCard(ctx, dispatched.undelivered.cardId)
+        if (dispatched.undelivered.cardId !== null)
+          pushSendFailureCard(ctx, dispatched.undelivered.cardId)
       }
       // Decision 0003 rewrite: the five post-generation checks run HERE, off
       // the critical path, against the reply that just went out. waitUntil
@@ -2228,11 +2439,14 @@ async function runInboundTurn(
               } else if (outcome.kind === 'closed_pessimistically') {
                 // Ruling 4: nothing re-asks, but these closed without a
                 // verdict. Alerted so a run of them is visible.
-                console.warn('[agent] intention classifier failed twice; rendered intentions closed', {
-                  agentRunId,
-                  closedKeys: outcome.closedKeys,
-                  error: outcome.classifierError,
-                })
+                console.warn(
+                  '[agent] intention classifier failed twice; rendered intentions closed',
+                  {
+                    agentRunId,
+                    closedKeys: outcome.closedKeys,
+                    error: outcome.classifierError,
+                  },
+                )
                 await captureIntentionPromptRecordingFailed({
                   agentRunId,
                   via: 'auto_send',
@@ -2266,7 +2480,56 @@ async function runInboundTurn(
               }
             })
             .catch((e) => {
-              console.error('[agent] recordIntentionPrompts threw unexpectedly', {
+              console.error(
+                '[agent] recordIntentionPrompts threw unexpectedly',
+                {
+                  agentRunId,
+                  error: e instanceof Error ? e.message : String(e),
+                },
+              )
+            }),
+        )
+      }
+      // TAC-560: the in-conversation half of the once-per-guest-ever marker.
+      //
+      // When the model reports that this reply WAS the warm close (the guest said
+      // thanks, and the venue's own voice rule closed the conversation), record
+      // it, so the pause timer never sends a second one.
+      //
+      // Fire-and-forget, after the send, mirroring the intention recorder above:
+      // the guest already has the message, so a failed marker write must never
+      // turn a delivered reply into a failed request. The cost of that failure is
+      // one guest who could receive the close twice, which the timer's own belt
+      // (a last inbound that classified `acknowledgment`) is there to catch.
+      //
+      // NOT gated on the channel. The in-conversation close happens on SMS too,
+      // and marking it there is right even while the TIMER is Instagram-only:
+      // the marker means "this guest has been closed", not "the timer ran".
+      if (gen.result.closedTheConversation) {
+        const venueId = ctx.venue.id
+        const guestId = ctx.guest.id
+        const answersMessageId = ctx.currentMessage?.id ?? null
+        waitUntil(
+          markWarmCloseSent(createAdminClient(), guestId, new Date())
+            .then(async (marked) => {
+              if (!marked.ok) {
+                console.warn('[agent] warm close marker write failed', {
+                  agentRunId,
+                  guestId,
+                  error: marked.error,
+                })
+              }
+              await captureWarmCloseSent({
+                agentRunId,
+                venueId,
+                guestId,
+                via: 'in_conversation',
+                answersMessageId,
+                markerOutcome: marked.ok ? marked.data : 'write_failed',
+              })
+            })
+            .catch((e) => {
+              console.error('[agent] warm close marker threw unexpectedly', {
                 agentRunId,
                 error: e instanceof Error ? e.message : String(e),
               })
@@ -2304,12 +2567,19 @@ async function runInboundTurn(
     } catch (e) {
       // scheduleAndSend already fired the appropriate stage-specific alert.
       const errMsg = e instanceof Error ? e.message : String(e)
-      const stage: 'send' | 'persist' = errMsg.includes('persist failed') ? 'persist' : 'send'
-      sendSpan.end({ level: 'ERROR', statusMessage: errMsg, output: { stage } })
+      const stage: 'send' | 'persist' = errMsg.includes('persist failed')
+        ? 'persist'
+        : 'send'
+      sendSpan.end({
+        level: 'ERROR',
+        statusMessage: errMsg,
+        output: { stage },
+      })
       return { status: 'failed', stage, error: errMsg }
     }
   } catch (unexpected) {
-    const errMsg = unexpected instanceof Error ? unexpected.message : String(unexpected)
+    const errMsg =
+      unexpected instanceof Error ? unexpected.message : String(unexpected)
     const errStack = unexpected instanceof Error ? unexpected.stack : undefined
     trace.update({ output: { status: 'failed', error: errMsg } })
     await fireRedAlert({
@@ -2329,7 +2599,7 @@ async function runInboundTurn(
     // settle and every extension, which is the number worth having.
     if (!skipLatencyEmit && entryExtensionDepth === 0) {
       const totalElapsedMs = Date.now() - start
-      if (totalElapsedMs > AGENT_LATENCY_HIGH_THRESHOLD_MS) {
+      if (isAgentLatencyHigh('inbound', totalElapsedMs)) {
         await captureAgentLatencyHigh({
           agentRunId,
           venueId: ctx?.venue.id ?? knownVenueId ?? 'unknown',

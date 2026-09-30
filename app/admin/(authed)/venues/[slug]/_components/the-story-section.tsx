@@ -1,4 +1,7 @@
-import { KnowledgeEntryList, type KnowledgeEntryListRow } from './knowledge-entry-list'
+import {
+  KnowledgeEntryList,
+  type KnowledgeEntryListRow,
+} from './knowledge-entry-list'
 import { SectionShell } from '@/app/admin/_components/section-shell'
 
 export function TheStorySection({

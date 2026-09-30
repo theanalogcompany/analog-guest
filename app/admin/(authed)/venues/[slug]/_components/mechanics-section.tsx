@@ -5,7 +5,13 @@ import { useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
 import { GUEST_STATES } from '@/lib/recognition'
 import {
@@ -16,8 +22,14 @@ import {
 } from '@/lib/schemas'
 import { StatusDot } from '@/lib/ui'
 import type { VenueDetailMechanicRow } from '../../../_lib/load-venue-detail'
-import { findMissingMechanicFields, parseMechanicTriggerType } from '../../_lib/mechanic-fields'
-import { EmptySectionNote, SectionShell } from '@/app/admin/_components/section-shell'
+import {
+  findMissingMechanicFields,
+  parseMechanicTriggerType,
+} from '../../_lib/mechanic-fields'
+import {
+  EmptySectionNote,
+  SectionShell,
+} from '@/app/admin/_components/section-shell'
 
 interface UnclaimedForMechanic {
   id: string
@@ -53,10 +65,12 @@ function formFromRow(row: VenueDetailMechanicRow): MechanicCreate {
     qualification: row.qualification,
     rewardDescription: row.rewardDescription,
     minState: row.minState as MechanicCreate['minState'],
-    redemptionPolicy: row.redemptionPolicy as MechanicCreate['redemptionPolicy'],
+    redemptionPolicy:
+      row.redemptionPolicy as MechanicCreate['redemptionPolicy'],
     redemptionWindowDays: row.redemptionWindowDays,
     requiresOperatorApproval: row.requiresOperatorApproval,
-    triggerType: (parseMechanicTriggerType(row.trigger) ?? 'guest_initiated_request') as MechanicCreate['triggerType'],
+    triggerType: (parseMechanicTriggerType(row.trigger) ??
+      'guest_initiated_request') as MechanicCreate['triggerType'],
     expirationRule: row.expirationRule,
   }
 }
@@ -77,7 +91,10 @@ function MechanicForm({
           placeholder="Name"
           className="h-auto bg-highlight py-1.5 text-sm"
         />
-        <Select value={form.type} onValueChange={(v) => onChange({ type: v as MechanicCreate['type'] })}>
+        <Select
+          value={form.type}
+          onValueChange={(v) => onChange({ type: v as MechanicCreate['type'] })}
+        >
           <SelectTrigger className="h-auto bg-highlight py-1.5 text-sm">
             <SelectValue />
           </SelectTrigger>
@@ -104,14 +121,23 @@ function MechanicForm({
       />
       <Textarea
         value={form.rewardDescription ?? ''}
-        onChange={(e) => onChange({ rewardDescription: e.target.value || null })}
+        onChange={(e) =>
+          onChange({ rewardDescription: e.target.value || null })
+        }
         placeholder="Reward description"
         className="min-h-[50px] resize-vertical bg-highlight text-sm leading-snug"
       />
       <div className="grid grid-cols-2 gap-2">
         <div className="flex flex-col gap-1">
-          <label className="text-[10px] uppercase tracking-wide text-ink-faint">Min state</label>
-          <Select value={form.minState} onValueChange={(v) => onChange({ minState: v as MechanicCreate['minState'] })}>
+          <label className="text-[10px] uppercase tracking-wide text-ink-faint">
+            Min state
+          </label>
+          <Select
+            value={form.minState}
+            onValueChange={(v) =>
+              onChange({ minState: v as MechanicCreate['minState'] })
+            }
+          >
             <SelectTrigger className="h-auto bg-highlight py-1.5 text-sm">
               <SelectValue />
             </SelectTrigger>
@@ -125,13 +151,16 @@ function MechanicForm({
           </Select>
         </div>
         <div className="flex flex-col gap-1">
-          <label className="text-[10px] uppercase tracking-wide text-ink-faint">Redemption policy</label>
+          <label className="text-[10px] uppercase tracking-wide text-ink-faint">
+            Redemption policy
+          </label>
           <Select
             value={form.redemptionPolicy}
             onValueChange={(v) =>
               onChange({
                 redemptionPolicy: v as MechanicCreate['redemptionPolicy'],
-                redemptionWindowDays: v === 'one_time' ? null : form.redemptionWindowDays,
+                redemptionWindowDays:
+                  v === 'one_time' ? null : form.redemptionWindowDays,
               })
             }
           >
@@ -169,7 +198,9 @@ function MechanicForm({
       <label className="flex items-center gap-2 text-sm text-ink">
         <Checkbox
           checked={form.requiresOperatorApproval}
-          onCheckedChange={(checked) => onChange({ requiresOperatorApproval: checked === true })}
+          onCheckedChange={(checked) =>
+            onChange({ requiresOperatorApproval: checked === true })
+          }
         />
         Requires operator approval
       </label>
@@ -180,7 +211,9 @@ function MechanicForm({
           </label>
           <Select
             value={form.triggerType}
-            onValueChange={(v) => onChange({ triggerType: v as MechanicCreate['triggerType'] })}
+            onValueChange={(v) =>
+              onChange({ triggerType: v as MechanicCreate['triggerType'] })
+            }
           >
             <SelectTrigger className="h-auto bg-highlight py-1.5 text-sm">
               <SelectValue />
@@ -200,7 +233,9 @@ function MechanicForm({
           </label>
           <Input
             value={form.expirationRule ?? ''}
-            onChange={(e) => onChange({ expirationRule: e.target.value || null })}
+            onChange={(e) =>
+              onChange({ expirationRule: e.target.value || null })
+            }
             className="h-auto bg-highlight py-1.5 text-sm"
           />
         </div>
@@ -294,14 +329,23 @@ export function MechanicsSection({
   }
 
   async function deactivate(mechanicId: string) {
-    if (!window.confirm('Deactivate this mechanic? It will stop appearing as eligible for any guest.')) return
+    if (
+      !window.confirm(
+        'Deactivate this mechanic? It will stop appearing as eligible for any guest.',
+      )
+    )
+      return
     setBusy(true)
     setError(null)
     try {
-      const res = await fetch(`/admin/venues/api/mechanics/${mechanicId}`, { method: 'DELETE' })
+      const res = await fetch(`/admin/venues/api/mechanics/${mechanicId}`, {
+        method: 'DELETE',
+      })
       if (!res.ok) {
         const j = await res.json().catch(() => ({}))
-        setError((j.detail as string) || (j.error as string) || 'Deactivate failed')
+        setError(
+          (j.detail as string) || (j.error as string) || 'Deactivate failed',
+        )
         return
       }
       router.refresh()
@@ -317,7 +361,12 @@ export function MechanicsSection({
       title="Mechanics"
       headerAction={
         !adding && (
-          <Button variant="link" size="sm" onClick={startAdd} className="h-auto p-0 text-[11px] text-clay font-medium hover:text-clay-deep">
+          <Button
+            variant="link"
+            size="sm"
+            onClick={startAdd}
+            className="h-auto p-0 text-[11px] text-clay font-medium hover:text-clay-deep"
+          >
             + Add mechanic
           </Button>
         )
@@ -326,9 +375,17 @@ export function MechanicsSection({
       <div className="flex flex-col gap-4">
         {adding && (
           <div className="border-b border-stone-light/40 pb-4">
-            <MechanicForm form={addForm} onChange={(patch) => setAddForm((f) => ({ ...f, ...patch }))} />
+            <MechanicForm
+              form={addForm}
+              onChange={(patch) => setAddForm((f) => ({ ...f, ...patch }))}
+            />
             <div className="mt-3 flex justify-end gap-3 text-[11px]">
-              <Button variant="ghost" size="sm" onClick={() => setAdding(false)} disabled={busy}>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setAdding(false)}
+                disabled={busy}
+              >
                 Cancel
               </Button>
               <Button onClick={submitAdd} disabled={busy} size="sm">
@@ -353,18 +410,37 @@ export function MechanicsSection({
               const showGapWarning =
                 m.isActive &&
                 (missing.length > 0 ||
-                  (triggerType === 'manual_invite' && !m.requiresOperatorApproval))
-              const unclaimed = unclaimedColumnsPerRow.find((u) => u.id === m.id)?.columns ?? []
+                  (triggerType === 'manual_invite' &&
+                    !m.requiresOperatorApproval))
+              const unclaimed =
+                unclaimedColumnsPerRow.find((u) => u.id === m.id)?.columns ?? []
 
               if (isEditing) {
                 return (
-                  <li key={m.id} className="border-b border-stone-light/40 pb-4 last:border-b-0 last:pb-0">
-                    <MechanicForm form={editForm} onChange={(patch) => setEditForm((f) => ({ ...f, ...patch }))} />
+                  <li
+                    key={m.id}
+                    className="border-b border-stone-light/40 pb-4 last:border-b-0 last:pb-0"
+                  >
+                    <MechanicForm
+                      form={editForm}
+                      onChange={(patch) =>
+                        setEditForm((f) => ({ ...f, ...patch }))
+                      }
+                    />
                     <div className="mt-3 flex justify-end gap-3 text-[11px]">
-                      <Button variant="ghost" size="sm" onClick={() => setEditingId(null)} disabled={busy}>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => setEditingId(null)}
+                        disabled={busy}
+                      >
                         Cancel
                       </Button>
-                      <Button onClick={() => submitEdit(m.id)} disabled={busy} size="sm">
+                      <Button
+                        onClick={() => submitEdit(m.id)}
+                        disabled={busy}
+                        size="sm"
+                      >
                         {busy ? 'Saving…' : 'Save'}
                       </Button>
                     </div>
@@ -412,7 +488,11 @@ export function MechanicsSection({
                       )}
                     </div>
                   </div>
-                  {m.description && <p className="mt-1 text-sm text-ink-soft">{m.description}</p>}
+                  {m.description && (
+                    <p className="mt-1 text-sm text-ink-soft">
+                      {m.description}
+                    </p>
+                  )}
                   <dl className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
                     <div>
                       <dt className="text-ink-faint">Qualification</dt>
@@ -430,15 +510,21 @@ export function MechanicsSection({
                       <dt className="text-ink-faint">Redemption policy</dt>
                       <dd className="text-ink">
                         {m.redemptionPolicy}
-                        {m.redemptionWindowDays !== null ? ` · ${m.redemptionWindowDays}d` : ''}
+                        {m.redemptionWindowDays !== null
+                          ? ` · ${m.redemptionWindowDays}d`
+                          : ''}
                       </dd>
                     </div>
                     <div>
                       <dt className="text-ink-faint">Requires approval</dt>
-                      <dd className="text-ink">{m.requiresOperatorApproval ? 'Yes' : 'No'}</dd>
+                      <dd className="text-ink">
+                        {m.requiresOperatorApproval ? 'Yes' : 'No'}
+                      </dd>
                     </div>
                     <div>
-                      <dt className="text-ink-faint italic">Trigger (not yet read by the agent)</dt>
+                      <dt className="text-ink-faint italic">
+                        Trigger (not yet read by the agent)
+                      </dt>
                       <dd className="text-ink">{triggerType ?? '—'}</dd>
                     </div>
                     <div>
@@ -448,16 +534,23 @@ export function MechanicsSection({
                       <dd className="text-ink">{m.expirationRule ?? '—'}</dd>
                     </div>
                     <div>
-                      <dt className="text-ink-faint italic">Redemption (not editable)</dt>
-                      <dd className="text-ink-faint">{JSON.stringify(m.redemption)}</dd>
+                      <dt className="text-ink-faint italic">
+                        Redemption (not editable)
+                      </dt>
+                      <dd className="text-ink-faint">
+                        {JSON.stringify(m.redemption)}
+                      </dd>
                     </div>
                   </dl>
                   {showGapWarning && (
                     <div className="mt-2 flex items-center gap-1.5 text-xs text-clay">
                       <StatusDot tone="bad" label="readiness gap" />
                       {[
-                        missing.length > 0 ? `missing: ${missing.join(', ')}` : null,
-                        triggerType === 'manual_invite' && !m.requiresOperatorApproval
+                        missing.length > 0
+                          ? `missing: ${missing.join(', ')}`
+                          : null,
+                        triggerType === 'manual_invite' &&
+                        !m.requiresOperatorApproval
                           ? 'manual_invite without requires_operator_approval'
                           : null,
                       ]
@@ -476,7 +569,11 @@ export function MechanicsSection({
           </ul>
         )}
 
-        {error && <p className="border-l-2 border-clay bg-clay/5 px-2 py-1 text-xs text-clay-deep">{error}</p>}
+        {error && (
+          <p className="border-l-2 border-clay bg-clay/5 px-2 py-1 text-xs text-clay-deep">
+            {error}
+          </p>
+        )}
       </div>
     </SectionShell>
   )

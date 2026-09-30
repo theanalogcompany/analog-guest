@@ -64,7 +64,10 @@ function params(id = VALID_UUID): { params: Promise<{ id: string }> } {
 
 beforeEach(() => {
   verifyMock.mockReset()
-  verifyMock.mockResolvedValue({ operatorId: OP_ID, venueScope: grantedVenues([VENUE_A]) })
+  verifyMock.mockResolvedValue({
+    operatorId: OP_ID,
+    venueScope: grantedVenues([VENUE_A]),
+  })
   markAcknowledgedMock.mockReset()
   capturePostHogMock.mockReset()
   capturePostHogMock.mockResolvedValue(undefined)
@@ -115,7 +118,10 @@ describe('POST /api/operator/commitments/[id]/acknowledge', () => {
         ok: true,
         data: { transitioned: false, row: null },
       })
-      probeMock.mockResolvedValueOnce({ data: { id: VALID_UUID }, error: null })
+      probeMock.mockResolvedValueOnce({
+        data: { id: VALID_UUID },
+        error: null,
+      })
       const res = await POST(makeRequest(), params())
       expect(res.status).toBe(409)
       expect(await res.json()).toEqual({ error: 'already_acknowledged' })
@@ -136,7 +142,7 @@ describe('POST /api/operator/commitments/[id]/acknowledge', () => {
   })
 
   describe('200', () => {
-    it("returns {ok: true} on CAS win + fires PostHog with commitment metadata", async () => {
+    it('returns {ok: true} on CAS win + fires PostHog with commitment metadata', async () => {
       const transitionedRow = {
         id: VALID_UUID,
         venue_id: VENUE_A,
@@ -179,13 +185,15 @@ describe('POST /api/operator/commitments/[id]/acknowledge', () => {
   })
 })
 
-
 // TAC-530. markAcknowledged is mocked here and denies on an empty allowlist
 // in lib/guests/commitments.test.ts. What this route owns is forwarding the
 // scope verbatim, which no test asserted before.
 describe('POST /api/operator/commitments/[id]/acknowledge \u2014 venue scope pass-through (TAC-530)', () => {
   it('passes the operator\u2019s allowlist to markAcknowledged unchanged, including when empty', async () => {
-    verifyMock.mockResolvedValue({ operatorId: OP_ID, venueScope: grantedVenues([]) })
+    verifyMock.mockResolvedValue({
+      operatorId: OP_ID,
+      venueScope: grantedVenues([]),
+    })
     markAcknowledgedMock.mockResolvedValueOnce({
       ok: true,
       data: { transitioned: false, row: null },
@@ -193,7 +201,9 @@ describe('POST /api/operator/commitments/[id]/acknowledge \u2014 venue scope pas
     probeMock.mockResolvedValueOnce({ data: null, error: null })
     const res = await POST(makeRequest(), params())
     expect(res.status).toBe(404)
-    expect(markAcknowledgedMock.mock.calls[0]![0]).toMatchObject({ venueScope: grantedVenues([]) })
+    expect(markAcknowledgedMock.mock.calls[0]![0]).toMatchObject({
+      venueScope: grantedVenues([]),
+    })
   })
 
   // The twin. Without it, substituting a deny-all CONSTANT for the operator's
@@ -201,7 +211,10 @@ describe('POST /api/operator/commitments/[id]/acknowledge \u2014 venue scope pas
   // scope" from "always sends grantedVenues([])". Found in code review by
   // exactly that mutant.
   it('passes a NON-EMPTY allowlist to markAcknowledged unchanged', async () => {
-    verifyMock.mockResolvedValue({ operatorId: OP_ID, venueScope: grantedVenues([VENUE_A]) })
+    verifyMock.mockResolvedValue({
+      operatorId: OP_ID,
+      venueScope: grantedVenues([VENUE_A]),
+    })
     markAcknowledgedMock.mockResolvedValueOnce({
       ok: true,
       data: { transitioned: false, row: null },

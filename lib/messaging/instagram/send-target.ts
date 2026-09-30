@@ -84,7 +84,11 @@ export async function loadInstagramSendTarget(
   resolveToken: ResolveInstagramTokenFn = resolveInstagramAccessToken,
 ): Promise<InstagramSendTargetResult> {
   const [venueResult, guestResult, tokenResult] = await Promise.all([
-    supabase.from('venues').select('instagram_account_id').eq('id', input.venueId).maybeSingle(),
+    supabase
+      .from('venues')
+      .select('instagram_account_id')
+      .eq('id', input.venueId)
+      .maybeSingle(),
     supabase
       .from('guests')
       .select('instagram_scoped_id')
@@ -93,8 +97,18 @@ export async function loadInstagramSendTarget(
       .maybeSingle(),
     resolveToken(supabase, input.venueId),
   ])
-  if (venueResult.error) return { ok: false, problem: 'lookup_failed', error: venueResult.error.message }
-  if (guestResult.error) return { ok: false, problem: 'lookup_failed', error: guestResult.error.message }
+  if (venueResult.error)
+    return {
+      ok: false,
+      problem: 'lookup_failed',
+      error: venueResult.error.message,
+    }
+  if (guestResult.error)
+    return {
+      ok: false,
+      problem: 'lookup_failed',
+      error: guestResult.error.message,
+    }
 
   const recipientId = guestResult.data?.instagram_scoped_id ?? null
   if (typeof recipientId !== 'string' || recipientId.trim() === '') {
@@ -104,11 +118,17 @@ export async function loadInstagramSendTarget(
   if (typeof accountId !== 'string' || accountId.trim() === '') {
     return { ok: false, problem: 'venue_has_no_instagram_account' }
   }
-  if (!tokenResult.ok) return { ok: false, problem: 'token_unreadable', error: tokenResult.error }
+  if (!tokenResult.ok)
+    return { ok: false, problem: 'token_unreadable', error: tokenResult.error }
   const resolved = tokenResult.resolved
   if (resolved === null) return { ok: false, problem: 'token_missing' }
   return {
     ok: true,
-    target: { accountId, recipientId, token: resolved.token, tokenSource: resolved.source },
+    target: {
+      accountId,
+      recipientId,
+      token: resolved.token,
+      tokenSource: resolved.source,
+    },
   }
 }

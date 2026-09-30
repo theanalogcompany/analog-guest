@@ -1,6 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { markAsRead, sendMessage, sendTypingIndicator } from '@/lib/messaging'
-import { cancelCommitmentForGuest, createCommitmentFromPending } from '@/lib/guests/commitments'
+import {
+  cancelCommitmentForGuest,
+  createCommitmentFromPending,
+} from '@/lib/guests/commitments'
 import { persistOrRegenQueuedDraft, scheduleAndSend } from './schedule-and-send'
 import { BUBBLE_DELIMITER, INTER_BUBBLE_GAP_MS } from './split-message'
 import type { RuntimeContext } from './types'
@@ -33,17 +36,30 @@ import type { GenerateMessageResult } from '@/lib/ai'
 
 interface ScenarioRecorder {
   inserts: Array<Record<string, unknown>>
-  updates: Array<{ payload: Record<string, unknown>; id: string; reviewState: string }>
+  updates: Array<{
+    payload: Record<string, unknown>
+    id: string
+    reviewState: string
+  }>
   // Stack-of-responses each builder pops from.
-  insertResponses: Array<{ data: { id: string } | null; error: { code?: string; message: string } | null }>
-  updateResponses: Array<{ data: { id: string } | null; error: { code?: string; message: string } | null }>
+  insertResponses: Array<{
+    data: { id: string } | null
+    error: { code?: string; message: string } | null
+  }>
+  updateResponses: Array<{
+    data: { id: string } | null
+    error: { code?: string; message: string } | null
+  }>
   priorReasonResponses: Array<{
     data: { review_reason: string | null; body?: string } | null
     error: { message: string } | null
   }>
   // TAC-394: loadPendingRowsBySlot rows. `data` is one row, an array of rows,
   // or null for none.
-  findPendingResponses: Array<{ data: unknown; error: { message: string } | null }>
+  findPendingResponses: Array<{
+    data: unknown
+    error: { message: string } | null
+  }>
 }
 
 let scenario: ScenarioRecorder
@@ -64,7 +80,10 @@ vi.mock('@/lib/db/admin', () => ({
     from: () => ({
       insert: (payload: Record<string, unknown>) => {
         scenario.inserts.push(payload)
-        const resp = scenario.insertResponses.shift() ?? { data: null, error: { message: 'no insert response queued' } }
+        const resp = scenario.insertResponses.shift() ?? {
+          data: null,
+          error: { message: 'no insert response queued' },
+        }
         return {
           select: () => ({
             single: () => Promise.resolve(resp),
@@ -136,7 +155,10 @@ function makeFindPendingBuilder() {
     eq: () => chain,
     order: () => chain,
     limit: async () => {
-      const resp = scenario.findPendingResponses.shift() ?? { data: null, error: null }
+      const resp = scenario.findPendingResponses.shift() ?? {
+        data: null,
+        error: null,
+      }
       const data =
         resp.data === null || resp.data === undefined
           ? []
@@ -177,7 +199,9 @@ vi.mock('@/lib/guests/commitments', () => ({
   // the same auto-send path. Unmocked it arrives `undefined` here, which is
   // invisible while every fixture cancels nothing and throws the moment one
   // does.
-  cancelCommitmentForGuest: vi.fn().mockResolvedValue({ ok: true, data: { transitioned: true } }),
+  cancelCommitmentForGuest: vi
+    .fn()
+    .mockResolvedValue({ ok: true, data: { transitioned: true } }),
 }))
 
 function makeCtx(overrides: Partial<RuntimeContext> = {}): RuntimeContext {
@@ -185,9 +209,14 @@ function makeCtx(overrides: Partial<RuntimeContext> = {}): RuntimeContext {
     agentRunId: 'run-1',
     venue: { id: 'venue-1' } as RuntimeContext['venue'],
     guest: { id: 'guest-1', firstName: 'Sam' } as RuntimeContext['guest'],
-    currentMessage: { id: 'inbound-1', body: 'hi', providerMessageId: 'p1' } as RuntimeContext['currentMessage'],
+    currentMessage: {
+      id: 'inbound-1',
+      body: 'hi',
+      providerMessageId: 'p1',
+    } as RuntimeContext['currentMessage'],
     followupTrigger: null,
     scanArrival: null,
+    warmClose: false,
     conversationChannel: 'text',
     recentMessages: [],
     conversationWindowMs: 48 * 60 * 60 * 1000,
@@ -214,12 +243,15 @@ function makeGeneration(): GenerateMessageResult {
     unverifiedUrls: [],
     requiresOperatorApproval: false,
     approvalReason: '',
-  complaintIntent: 'none' as const,
+    complaintIntent: 'none' as const,
     knowledgeGap: false,
     contextUpdate: {},
     commitment: {},
     arrivalCapture: {},
     cancelsCommitmentId: '',
+    intentionQuestion: '',
+    closedTheConversation: false,
+    intentionQuestionDuplicateStripped: false,
     attempts: 1,
     attemptScores: [0.78],
     attemptHistory: [],
@@ -278,7 +310,10 @@ describe('persistOrRegenQueuedDraft (TAC-264)', () => {
       data: { review_reason: 'model_flagged' },
       error: null,
     })
-    scenario.updateResponses.push({ data: { id: 'existing-msg-1' }, error: null })
+    scenario.updateResponses.push({
+      data: { id: 'existing-msg-1' },
+      error: null,
+    })
 
     const result = await persistOrRegenQueuedDraft(
       makeCtx(),
@@ -375,7 +410,10 @@ describe('persistOrRegenQueuedDraft (TAC-264)', () => {
       data: { review_reason: 'model_flagged', body: 'the text being replaced' },
       error: null,
     })
-    scenario.updateResponses.push({ data: { id: 'racing-msg-1' }, error: null })
+    scenario.updateResponses.push({
+      data: { id: 'racing-msg-1' },
+      error: null,
+    })
 
     const result = await persistOrRegenQueuedDraft(
       makeCtx(),
@@ -431,7 +469,10 @@ describe('persistOrRegenQueuedDraft (TAC-264)', () => {
     // Prior-reason capture comes back empty — row is no longer pending.
     scenario.priorReasonResponses.push({ data: null, error: null })
     // Loop ticks again with existingId cleared → INSERT.
-    scenario.insertResponses.push({ data: { id: 'fresh-msg-after-toctou' }, error: null })
+    scenario.insertResponses.push({
+      data: { id: 'fresh-msg-after-toctou' },
+      error: null,
+    })
 
     const result = await persistOrRegenQueuedDraft(
       makeCtx(),
@@ -460,10 +501,18 @@ describe('persistOrRegenQueuedDraft (TAC-264)', () => {
     })
 
     await expect(
-      persistOrRegenQueuedDraft(makeCtx(), makeGeneration(), 'model_flagged', null),
+      persistOrRegenQueuedDraft(
+        makeCtx(),
+        makeGeneration(),
+        'model_flagged',
+        null,
+      ),
     ).rejects.toThrow(/relation does not exist/)
     expect(fireRedAlertMock).toHaveBeenCalledTimes(1)
-    const alertArg = fireRedAlertMock.mock.calls[0][0] as { stage: string; extra?: { regen?: boolean } }
+    const alertArg = fireRedAlertMock.mock.calls[0][0] as {
+      stage: string
+      extra?: { regen?: boolean }
+    }
     expect(alertArg.stage).toBe('persist')
     expect(alertArg.extra?.regen).toBe(false)
   })
@@ -488,7 +537,10 @@ describe('persistOrRegenQueuedDraft (TAC-264)', () => {
       ),
     ).rejects.toThrow(/connection reset/)
     expect(fireRedAlertMock).toHaveBeenCalledTimes(1)
-    const alertArg = fireRedAlertMock.mock.calls[0][0] as { stage: string; extra?: { regen?: boolean } }
+    const alertArg = fireRedAlertMock.mock.calls[0][0] as {
+      stage: string
+      extra?: { regen?: boolean }
+    }
     expect(alertArg.stage).toBe('persist')
     expect(alertArg.extra?.regen).toBe(true)
   })
@@ -507,13 +559,19 @@ describe('persistOrRegenQueuedDraft (TAC-264)', () => {
       error: { code: '23505', message: 'duplicate key' },
     })
     // The slot re-read surfaces the racing row.
-    scenario.findPendingResponses.push({ data: { id: 'racing-msg-1' }, error: null })
+    scenario.findPendingResponses.push({
+      data: { id: 'racing-msg-1' },
+      error: null,
+    })
     // Attempt 2: prior-reason SELECT returns null (racing row was acted on
     // between our INSERT-race and our UPDATE — TOCTOU vs. dispatch).
     scenario.priorReasonResponses.push({ data: null, error: null })
     // Attempt 3: pending slot is now empty (the racing row got dispatched),
     // fresh INSERT succeeds.
-    scenario.insertResponses.push({ data: { id: 'fresh-after-double-fault' }, error: null })
+    scenario.insertResponses.push({
+      data: { id: 'fresh-after-double-fault' },
+      error: null,
+    })
 
     const result = await persistOrRegenQueuedDraft(
       makeCtx(),
@@ -545,7 +603,12 @@ describe('persistOrRegenQueuedDraft (TAC-264)', () => {
     }
 
     await expect(
-      persistOrRegenQueuedDraft(makeCtx(), makeGeneration(), 'model_flagged', null),
+      persistOrRegenQueuedDraft(
+        makeCtx(),
+        makeGeneration(),
+        'model_flagged',
+        null,
+      ),
     ).rejects.toThrow(/race-recovery/)
     expect(fireRedAlertMock).toHaveBeenCalledTimes(1)
   })
@@ -564,15 +627,27 @@ describe('persistOrRegenQueuedDraft — pending_until (TAC-308)', () => {
 
   it('stamps the clock on INSERT when a card is being armed', async () => {
     scenario.insertResponses.push({ data: { id: 'new-draft' }, error: null })
-    await persistOrRegenQueuedDraft(makeCtx(), makeGeneration(), 'knowledge_gap', null, {
-      pendingUntil: WHEN,
-    })
+    await persistOrRegenQueuedDraft(
+      makeCtx(),
+      makeGeneration(),
+      'knowledge_gap',
+      null,
+      {
+        pendingUntil: WHEN,
+      },
+    )
     expect(scenario.inserts[0]?.pending_until).toBe(WHEN.toISOString())
   })
 
   it('leaves the clock null on INSERT for an ordinary queued draft', async () => {
     scenario.insertResponses.push({ data: { id: 'new-draft' }, error: null })
-    await persistOrRegenQueuedDraft(makeCtx(), makeGeneration(), 'model_flagged', null, {})
+    await persistOrRegenQueuedDraft(
+      makeCtx(),
+      makeGeneration(),
+      'model_flagged',
+      null,
+      {},
+    )
     expect(scenario.inserts[0]?.pending_until).toBeNull()
   })
 
@@ -581,9 +656,18 @@ describe('persistOrRegenQueuedDraft — pending_until (TAC-308)', () => {
   // timeout regen can't re-arm the clock it just fired (which would send a
   // second holding message five minutes later).
   it('omits pending_until from the UPDATE payload so an existing clock survives', async () => {
-    scenario.priorReasonResponses.push({ data: { review_reason: 'knowledge_gap' }, error: null })
+    scenario.priorReasonResponses.push({
+      data: { review_reason: 'knowledge_gap' },
+      error: null,
+    })
     scenario.updateResponses.push({ data: { id: 'existing' }, error: null })
-    await persistOrRegenQueuedDraft(makeCtx(), makeGeneration(), 'knowledge_gap', 'existing', {})
+    await persistOrRegenQueuedDraft(
+      makeCtx(),
+      makeGeneration(),
+      'knowledge_gap',
+      'existing',
+      {},
+    )
     expect(scenario.updates[0]?.payload).not.toHaveProperty('pending_until')
   })
 
@@ -593,9 +677,15 @@ describe('persistOrRegenQueuedDraft — pending_until (TAC-308)', () => {
       error: null,
     })
     scenario.updateResponses.push({ data: { id: 'existing' }, error: null })
-    await persistOrRegenQueuedDraft(makeCtx(), makeGeneration(), 'knowledge_gap', 'existing', {
-      pendingUntil: WHEN,
-    })
+    await persistOrRegenQueuedDraft(
+      makeCtx(),
+      makeGeneration(),
+      'knowledge_gap',
+      'existing',
+      {
+        pendingUntil: WHEN,
+      },
+    )
     expect(scenario.updates[0]?.payload.pending_until).toBe(WHEN.toISOString())
   })
 
@@ -603,7 +693,12 @@ describe('persistOrRegenQueuedDraft — pending_until (TAC-308)', () => {
   // entirely and must keep behaving exactly as it did.
   it('is backward compatible with call sites that pass no options', async () => {
     scenario.insertResponses.push({ data: { id: 'new-draft' }, error: null })
-    await persistOrRegenQueuedDraft(makeCtx(), makeGeneration(), 'model_flagged', null)
+    await persistOrRegenQueuedDraft(
+      makeCtx(),
+      makeGeneration(),
+      'model_flagged',
+      null,
+    )
     expect(scenario.inserts[0]?.pending_until).toBeNull()
   })
 })
@@ -679,9 +774,15 @@ describe('persistOrRegenQueuedDraft — blankBody (TAC-309)', () => {
   // deleted from the corpus, sitting in a field an operator can swipe.
   it('persists an empty body on INSERT and discards the generated text', async () => {
     scenario.insertResponses.push({ data: { id: 'gap-card' }, error: null })
-    await persistOrRegenQueuedDraft(makeCtx(), makeGeneration(), 'knowledge_gap', null, {
-      blankBody: true,
-    })
+    await persistOrRegenQueuedDraft(
+      makeCtx(),
+      makeGeneration(),
+      'knowledge_gap',
+      null,
+      {
+        blankBody: true,
+      },
+    )
     expect(scenario.inserts[0]?.body).toBe('')
     expect(scenario.inserts[0]?.body).not.toContain('regenerated draft body')
   })
@@ -690,9 +791,15 @@ describe('persistOrRegenQueuedDraft — blankBody (TAC-309)', () => {
   // does not exist.
   it('nulls voice_fidelity alongside the body', async () => {
     scenario.insertResponses.push({ data: { id: 'gap-card' }, error: null })
-    await persistOrRegenQueuedDraft(makeCtx(), makeGeneration(), 'knowledge_gap', null, {
-      blankBody: true,
-    })
+    await persistOrRegenQueuedDraft(
+      makeCtx(),
+      makeGeneration(),
+      'knowledge_gap',
+      null,
+      {
+        blankBody: true,
+      },
+    )
     expect(scenario.inserts[0]?.voice_fidelity).toBeNull()
   })
 
@@ -704,9 +811,15 @@ describe('persistOrRegenQueuedDraft — blankBody (TAC-309)', () => {
       error: null,
     })
     scenario.updateResponses.push({ data: { id: 'gap-card' }, error: null })
-    await persistOrRegenQueuedDraft(makeCtx(), makeGeneration(), 'knowledge_gap', 'gap-card', {
-      blankBody: true,
-    })
+    await persistOrRegenQueuedDraft(
+      makeCtx(),
+      makeGeneration(),
+      'knowledge_gap',
+      'gap-card',
+      {
+        blankBody: true,
+      },
+    )
     expect(scenario.updates[0]?.payload.body).toBe('')
     expect(scenario.updates[0]?.payload.voice_fidelity).toBeNull()
   })
@@ -715,7 +828,13 @@ describe('persistOrRegenQueuedDraft — blankBody (TAC-309)', () => {
   // model's text to review on every other trigger.
   it('leaves a normal queued draft prefilled', async () => {
     scenario.insertResponses.push({ data: { id: 'normal' }, error: null })
-    await persistOrRegenQueuedDraft(makeCtx(), makeGeneration(), 'model_flagged', null, {})
+    await persistOrRegenQueuedDraft(
+      makeCtx(),
+      makeGeneration(),
+      'model_flagged',
+      null,
+      {},
+    )
     expect(scenario.inserts[0]?.body).toBe('regenerated draft body')
     expect(scenario.inserts[0]?.voice_fidelity).toBe(0.78)
   })
@@ -742,7 +861,8 @@ function queueSends(...ids: string[]): void {
 }
 
 function queueInserts(...ids: string[]): void {
-  for (const id of ids) scenario.insertResponses.push({ data: { id }, error: null })
+  for (const id of ids)
+    scenario.insertResponses.push({ data: { id }, error: null })
 }
 
 function generationWithBody(body: string): GenerateMessageResult {
@@ -762,8 +882,12 @@ describe('scheduleAndSend — deterministic splitting (TAC-313 dispatch shape, T
     scenario = freshScenario()
     fireRedAlertMock.mockClear()
     vi.mocked(sendMessage).mockReset()
-    vi.mocked(markAsRead).mockReset().mockResolvedValue({ ok: true } as never)
-    vi.mocked(sendTypingIndicator).mockReset().mockResolvedValue({ ok: true } as never)
+    vi.mocked(markAsRead)
+      .mockReset()
+      .mockResolvedValue({ ok: true } as never)
+    vi.mocked(sendTypingIndicator)
+      .mockReset()
+      .mockResolvedValue({ ok: true } as never)
     vi.mocked(createCommitmentFromPending)
       .mockReset()
       .mockResolvedValue({ ok: true, data: { id: 'commitment-1' } } as never)
@@ -780,10 +904,14 @@ describe('scheduleAndSend — deterministic splitting (TAC-313 dispatch shape, T
     queueInserts('msg-1')
     const rng = vi.fn(() => 0)
 
-    const result = await scheduleAndSend(makeCtx(), generationWithBody('Open until 4'), {
-      skipHumanFeelDelay: true,
-      rng,
-    })
+    const result = await scheduleAndSend(
+      makeCtx(),
+      generationWithBody('Open until 4'),
+      {
+        skipHumanFeelDelay: true,
+        rng,
+      },
+    )
 
     expect(rng).not.toHaveBeenCalled()
     expect(vi.mocked(sendMessage)).toHaveBeenCalledTimes(1)
@@ -806,9 +934,14 @@ describe('scheduleAndSend — deterministic splitting (TAC-313 dispatch shape, T
       SPLIT,
     )
 
-    const sent = vi.mocked(sendMessage).mock.calls.map((c) => (c[0] as { body: string }).body)
+    const sent = vi
+      .mocked(sendMessage)
+      .mock.calls.map((c) => (c[0] as { body: string }).body)
     // Terminal periods are stripped on split pieces; ? and ! would survive.
-    expect(sent).toEqual(['Espresso with foam on top', 'Stronger than a cortado'])
+    expect(sent).toEqual([
+      'Espresso with foam on top',
+      'Stronger than a cortado',
+    ])
   })
 
   it('sends the same multi-sentence body as ONE untouched block when the flip says no', async () => {
@@ -822,7 +955,8 @@ describe('scheduleAndSend — deterministic splitting (TAC-313 dispatch shape, T
     )
 
     expect(vi.mocked(sendMessage)).toHaveBeenCalledTimes(1)
-    const sent = (vi.mocked(sendMessage).mock.calls[0]![0] as { body: string }).body
+    const sent = (vi.mocked(sendMessage).mock.calls[0]![0] as { body: string })
+      .body
     expect(sent).toBe('Espresso with foam on top. Stronger than a cortado.')
     expect(result.bubbleCount).toBe(1)
   })
@@ -838,7 +972,10 @@ describe('scheduleAndSend — deterministic splitting (TAC-313 dispatch shape, T
     )
 
     expect(scenario.inserts).toHaveLength(2)
-    expect(scenario.inserts.map((r) => r.body)).toEqual(['First one here', 'Second one here'])
+    expect(scenario.inserts.map((r) => r.body)).toEqual([
+      'First one here',
+      'Second one here',
+    ])
   })
 
   it('stamps every row of a response with the SAME generation_id', async () => {
@@ -854,17 +991,27 @@ describe('scheduleAndSend — deterministic splitting (TAC-313 dispatch shape, T
     const ids = scenario.inserts.map((r) => r.generation_id)
     expect(new Set(ids).size).toBe(1)
     expect(ids[0]).toBe(result.generationId)
-    expect(ids[0]).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i)
+    expect(ids[0]).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i,
+    )
   })
 
   it('mints a DIFFERENT generation_id per dispatch', async () => {
     queueSends('p1')
     queueInserts('m1')
-    const first = await scheduleAndSend(makeCtx(), generationWithBody('one'), NO_DELAY)
+    const first = await scheduleAndSend(
+      makeCtx(),
+      generationWithBody('one'),
+      NO_DELAY,
+    )
 
     queueSends('p2')
     queueInserts('m2')
-    const second = await scheduleAndSend(makeCtx(), generationWithBody('two'), NO_DELAY)
+    const second = await scheduleAndSend(
+      makeCtx(),
+      generationWithBody('two'),
+      NO_DELAY,
+    )
 
     expect(first.generationId).not.toBe(second.generationId)
   })
@@ -901,7 +1048,8 @@ describe('scheduleAndSend — deterministic splitting (TAC-313 dispatch shape, T
     )
 
     expect(result.bubbleCount).toBe(1)
-    const sent = (vi.mocked(sendMessage).mock.calls[0]![0] as { body: string }).body
+    const sent = (vi.mocked(sendMessage).mock.calls[0]![0] as { body: string })
+      .body
     expect(sent).toBe('First one here. Second one here.')
   })
 
@@ -1042,7 +1190,10 @@ describe('scheduleAndSend — deterministic splitting (TAC-313 dispatch shape, T
 
   it('THROWS when the first bubble persists badly (no id to return)', async () => {
     queueSends('p1')
-    scenario.insertResponses.push({ data: null, error: { message: 'db down' } })
+    scenario.insertResponses.push({
+      data: null,
+      error: { message: 'db down' },
+    })
 
     await expect(
       scheduleAndSend(makeCtx(), generationWithBody('single'), NO_DELAY),
@@ -1052,7 +1203,10 @@ describe('scheduleAndSend — deterministic splitting (TAC-313 dispatch shape, T
   it('truncates rather than throwing when a LATER bubble persists badly', async () => {
     queueSends('p1', 'p2')
     queueInserts('m1')
-    scenario.insertResponses.push({ data: null, error: { message: 'db down' } })
+    scenario.insertResponses.push({
+      data: null,
+      error: { message: 'db down' },
+    })
 
     const result = await scheduleAndSend(
       makeCtx(),
@@ -1066,7 +1220,11 @@ describe('scheduleAndSend — deterministic splitting (TAC-313 dispatch shape, T
 
   it('throws without sending when the body yields no bubbles', async () => {
     await expect(
-      scheduleAndSend(makeCtx(), generationWithBody(BUBBLE_DELIMITER), NO_DELAY),
+      scheduleAndSend(
+        makeCtx(),
+        generationWithBody(BUBBLE_DELIMITER),
+        NO_DELAY,
+      ),
     ).rejects.toThrow(/no sendable bubbles/)
 
     expect(vi.mocked(sendMessage)).not.toHaveBeenCalled()
@@ -1117,7 +1275,9 @@ describe('persistOrRegenQueuedDraft — delimiter strip (TAC-313)', () => {
 
     await persistOrRegenQueuedDraft(
       makeCtx(),
-      generationWithBody(`I'd go for the Frosty Gandhi${BUBBLE_DELIMITER}Espresso, chai, peppermint`),
+      generationWithBody(
+        `I'd go for the Frosty Gandhi${BUBBLE_DELIMITER}Espresso, chai, peppermint`,
+      ),
       'model_flagged',
       null,
     )
@@ -1128,7 +1288,10 @@ describe('persistOrRegenQueuedDraft — delimiter strip (TAC-313)', () => {
   })
 
   it('collapses the delimiter on the regen UPDATE path too', async () => {
-    scenario.priorReasonResponses.push({ data: { review_reason: 'model_flagged' }, error: null })
+    scenario.priorReasonResponses.push({
+      data: { review_reason: 'model_flagged' },
+      error: null,
+    })
     scenario.updateResponses.push({ data: { id: 'existing-1' }, error: null })
 
     await persistOrRegenQueuedDraft(
@@ -1142,7 +1305,12 @@ describe('persistOrRegenQueuedDraft — delimiter strip (TAC-313)', () => {
   })
 
   it('leaves no bracketed BREAK in a persisted draft for any near-miss variant', async () => {
-    for (const variant of ['[[BREAK]]', '[BREAK]', '[[break]]', '[[ BREAK ]]']) {
+    for (const variant of [
+      '[[BREAK]]',
+      '[BREAK]',
+      '[[break]]',
+      '[[ BREAK ]]',
+    ]) {
       scenario = freshScenario()
       scenario.insertResponses.push({ data: { id: 'msg-1' }, error: null })
 
@@ -1189,14 +1357,26 @@ describe('persistOrRegenQueuedDraft — TAC-364 review detail', () => {
   it('writes both columns on the INSERT path', async () => {
     scenario.insertResponses.push({ data: { id: 'new-msg-1' }, error: null })
 
-    await persistOrRegenQueuedDraft(makeCtx(), makeGeneration(), 'commitment_type_gated', null, {
-      reviewTriggers: ['fidelity_below_auto_send_floor', 'commitment_type_gated'],
-      ungroundedClaims: ['We open at 6am on Sundays.'],
-    })
+    await persistOrRegenQueuedDraft(
+      makeCtx(),
+      makeGeneration(),
+      'commitment_type_gated',
+      null,
+      {
+        reviewTriggers: [
+          'fidelity_below_auto_send_floor',
+          'commitment_type_gated',
+        ],
+        ungroundedClaims: ['We open at 6am on Sundays.'],
+      },
+    )
 
     expect(scenario.inserts[0]).toMatchObject({
       review_reason: 'commitment_type_gated',
-      review_triggers: ['fidelity_below_auto_send_floor', 'commitment_type_gated'],
+      review_triggers: [
+        'fidelity_below_auto_send_floor',
+        'commitment_type_gated',
+      ],
       ungrounded_claims: ['We open at 6am on Sundays.'],
     })
   })
@@ -1209,7 +1389,12 @@ describe('persistOrRegenQueuedDraft — TAC-364 review detail', () => {
     // exactly one thing.
     scenario.insertResponses.push({ data: { id: 'new-msg-1' }, error: null })
 
-    await persistOrRegenQueuedDraft(makeCtx(), makeGeneration(), 'generation_failed', null)
+    await persistOrRegenQueuedDraft(
+      makeCtx(),
+      makeGeneration(),
+      'generation_failed',
+      null,
+    )
 
     expect(scenario.inserts[0]).toMatchObject({
       review_triggers: null,
@@ -1223,11 +1408,17 @@ describe('persistOrRegenQueuedDraft — TAC-364 review detail', () => {
     // exists is still true with or without a body, so the triggers stay.
     scenario.insertResponses.push({ data: { id: 'new-msg-1' }, error: null })
 
-    await persistOrRegenQueuedDraft(makeCtx(), makeGeneration(), 'knowledge_gap', null, {
-      blankBody: true,
-      reviewTriggers: ['knowledge_gap'],
-      ungroundedClaims: ['should not survive blanking'],
-    })
+    await persistOrRegenQueuedDraft(
+      makeCtx(),
+      makeGeneration(),
+      'knowledge_gap',
+      null,
+      {
+        blankBody: true,
+        reviewTriggers: ['knowledge_gap'],
+        ungroundedClaims: ['should not survive blanking'],
+      },
+    )
 
     expect(scenario.inserts[0]).toMatchObject({
       body: '',
@@ -1246,7 +1437,10 @@ describe('persistOrRegenQueuedDraft — TAC-364 review detail', () => {
       data: { review_reason: 'knowledge_gap_backstop' },
       error: null,
     })
-    scenario.updateResponses.push({ data: { id: 'existing-msg-1' }, error: null })
+    scenario.updateResponses.push({
+      data: { id: 'existing-msg-1' },
+      error: null,
+    })
 
     await persistOrRegenQueuedDraft(
       makeCtx(),
@@ -1277,10 +1471,16 @@ describe('persistOrRegenQueuedDraft — TAC-364 review detail', () => {
   it('writes [] — not null — when the check ran and found nothing', async () => {
     scenario.insertResponses.push({ data: { id: 'new-msg-1' }, error: null })
 
-    await persistOrRegenQueuedDraft(makeCtx(), makeGeneration(), 'model_flagged', null, {
-      reviewTriggers: ['model_flagged'],
-      ungroundedClaims: [],
-    })
+    await persistOrRegenQueuedDraft(
+      makeCtx(),
+      makeGeneration(),
+      'model_flagged',
+      null,
+      {
+        reviewTriggers: ['model_flagged'],
+        ungroundedClaims: [],
+      },
+    )
 
     expect(scenario.inserts[0]!.ungrounded_claims).toEqual([])
     expect(scenario.inserts[0]!.ungrounded_claims).not.toBeNull()
@@ -1289,10 +1489,16 @@ describe('persistOrRegenQueuedDraft — TAC-364 review detail', () => {
   it('writes null when the caller says the check did not run', async () => {
     scenario.insertResponses.push({ data: { id: 'new-msg-1' }, error: null })
 
-    await persistOrRegenQueuedDraft(makeCtx(), makeGeneration(), 'model_flagged', null, {
-      reviewTriggers: ['model_flagged'],
-      ungroundedClaims: null,
-    })
+    await persistOrRegenQueuedDraft(
+      makeCtx(),
+      makeGeneration(),
+      'model_flagged',
+      null,
+      {
+        reviewTriggers: ['model_flagged'],
+        ungroundedClaims: null,
+      },
+    )
 
     expect(scenario.inserts[0]!.ungrounded_claims).toBeNull()
   })
@@ -1303,12 +1509,24 @@ describe('persistOrRegenQueuedDraft — TAC-364 review detail', () => {
     scenario.insertResponses.push({ data: { id: 'a' }, error: null })
     scenario.insertResponses.push({ data: { id: 'b' }, error: null })
 
-    await persistOrRegenQueuedDraft(makeCtx(), makeGeneration(), 'model_flagged', null, {
-      ungroundedClaims: [],
-    })
-    await persistOrRegenQueuedDraft(makeCtx(), makeGeneration(), 'model_flagged', null, {
-      ungroundedClaims: null,
-    })
+    await persistOrRegenQueuedDraft(
+      makeCtx(),
+      makeGeneration(),
+      'model_flagged',
+      null,
+      {
+        ungroundedClaims: [],
+      },
+    )
+    await persistOrRegenQueuedDraft(
+      makeCtx(),
+      makeGeneration(),
+      'model_flagged',
+      null,
+      {
+        ungroundedClaims: null,
+      },
+    )
 
     expect(scenario.inserts[0]!.ungrounded_claims).toEqual([])
     expect(scenario.inserts[1]!.ungrounded_claims).toBeNull()
@@ -1333,7 +1551,10 @@ describe('persistOrRegenQueuedDraft — TAC-364 review detail', () => {
       data: { review_reason: 'knowledge_gap_backstop' },
       error: null,
     })
-    scenario.updateResponses.push({ data: { id: 'existing-msg-1' }, error: null })
+    scenario.updateResponses.push({
+      data: { id: 'existing-msg-1' },
+      error: null,
+    })
 
     await persistOrRegenQueuedDraft(
       makeCtx(),
@@ -1343,7 +1564,10 @@ describe('persistOrRegenQueuedDraft — TAC-364 review detail', () => {
     )
 
     const payload = scenario.updates[0].payload
-    expect(payload).toMatchObject({ review_triggers: null, ungrounded_claims: null })
+    expect(payload).toMatchObject({
+      review_triggers: null,
+      ungrounded_claims: null,
+    })
     // Present-and-null, not absent. An absent key is the preserve-by-default
     // shape, and that is exactly the mutation above.
     expect(payload).toHaveProperty('review_triggers')
@@ -1416,7 +1640,10 @@ describe('persistOrRegenQueuedDraft — two pending slots (TAC-394)', () => {
       { data: null, error: { code: '23505', message: 'duplicate key' } },
       { data: { id: 'new-msg-1' }, error: null },
     )
-    scenario.findPendingResponses.push({ data: null, error: { message: 'connection reset' } })
+    scenario.findPendingResponses.push({
+      data: null,
+      error: { message: 'connection reset' },
+    })
 
     const result = await persistOrRegenQueuedDraft(
       makeCtx(),
@@ -1438,14 +1665,22 @@ describe('persistOrRegenQueuedDraft — two pending slots (TAC-394)', () => {
   // draft's own slot, and reachable from OLD code in migration 041's deploy
   // window. It must not be mistaken for an ordinary write failure.
   it('reports a unique violation on the regen UPDATE as its own red alert and writes nothing', async () => {
-    scenario.priorReasonResponses.push({ data: { review_reason: 'model_flagged' }, error: null })
+    scenario.priorReasonResponses.push({
+      data: { review_reason: 'model_flagged' },
+      error: null,
+    })
     scenario.updateResponses.push({
       data: null,
       error: { code: '23505', message: 'duplicate key' },
     })
 
     await expect(
-      persistOrRegenQueuedDraft(makeCtx(), makeGeneration(), 'model_flagged', 'card-conv'),
+      persistOrRegenQueuedDraft(
+        makeCtx(),
+        makeGeneration(),
+        'model_flagged',
+        'card-conv',
+      ),
     ).rejects.toThrow(/unique violation/)
 
     expect(fireRedAlertMock).toHaveBeenCalledTimes(1)
@@ -1483,11 +1718,21 @@ describe('persistOrRegenQueuedDraft — rendered_intentions (TAC-385)', () => {
   it('writes the rendered set on the INSERT path', async () => {
     scenario.insertResponses.push({ data: { id: 'new-msg-1' }, error: null })
 
-    await persistOrRegenQueuedDraft(makeCtx(), makeGeneration(), 'model_flagged', null, {
-      renderedIntentions: [
-        { key: 'understand_order', promptLine: 'unused on the wire', eligibleAt: ANCHOR },
-      ],
-    })
+    await persistOrRegenQueuedDraft(
+      makeCtx(),
+      makeGeneration(),
+      'model_flagged',
+      null,
+      {
+        renderedIntentions: [
+          {
+            key: 'understand_order',
+            promptLine: 'unused on the wire',
+            eligibleAt: ANCHOR,
+          },
+        ],
+      },
+    )
 
     // promptLine is deliberately NOT carried: recording reads only
     // classifierDescription, off the definition, so storing the line would be a
@@ -1503,7 +1748,12 @@ describe('persistOrRegenQueuedDraft — rendered_intentions (TAC-385)', () => {
     // openIntentions: [] by construction and have nothing to record.
     scenario.insertResponses.push({ data: { id: 'new-msg-1' }, error: null })
 
-    await persistOrRegenQueuedDraft(makeCtx(), makeGeneration(), 'generation_failed', null)
+    await persistOrRegenQueuedDraft(
+      makeCtx(),
+      makeGeneration(),
+      'generation_failed',
+      null,
+    )
 
     expect(scenario.inserts[0]!.rendered_intentions).toBeNull()
   })
@@ -1515,12 +1765,22 @@ describe('persistOrRegenQueuedDraft — rendered_intentions (TAC-385)', () => {
     // attempted to raise — TAC-332's failure through a new door.
     scenario.insertResponses.push({ data: { id: 'new-msg-1' }, error: null })
 
-    await persistOrRegenQueuedDraft(makeCtx(), makeGeneration(), 'knowledge_gap', null, {
-      blankBody: true,
-      renderedIntentions: [
-        { key: 'understand_order', promptLine: 'unused on the wire', eligibleAt: ANCHOR },
-      ],
-    })
+    await persistOrRegenQueuedDraft(
+      makeCtx(),
+      makeGeneration(),
+      'knowledge_gap',
+      null,
+      {
+        blankBody: true,
+        renderedIntentions: [
+          {
+            key: 'understand_order',
+            promptLine: 'unused on the wire',
+            eligibleAt: ANCHOR,
+          },
+        ],
+      },
+    )
 
     expect(scenario.inserts[0]!.body).toBe('')
     expect(scenario.inserts[0]!.rendered_intentions).toBeNull()
@@ -1531,7 +1791,10 @@ describe('persistOrRegenQueuedDraft — rendered_intentions (TAC-385)', () => {
       data: { review_reason: 'knowledge_gap' },
       error: null,
     })
-    scenario.updateResponses.push({ data: { id: 'existing-msg-1' }, error: null })
+    scenario.updateResponses.push({
+      data: { id: 'existing-msg-1' },
+      error: null,
+    })
 
     await persistOrRegenQueuedDraft(
       makeCtx(),
@@ -1540,7 +1803,11 @@ describe('persistOrRegenQueuedDraft — rendered_intentions (TAC-385)', () => {
       'existing-msg-1',
       {
         renderedIntentions: [
-          { key: 'learn_name', promptLine: 'unused on the wire', eligibleAt: ANCHOR },
+          {
+            key: 'learn_name',
+            promptLine: 'unused on the wire',
+            eligibleAt: ANCHOR,
+          },
         ],
       },
     )
@@ -1569,7 +1836,10 @@ describe('persistOrRegenQueuedDraft — rendered_intentions (TAC-385)', () => {
       data: { review_reason: 'model_flagged' },
       error: null,
     })
-    scenario.updateResponses.push({ data: { id: 'existing-msg-1' }, error: null })
+    scenario.updateResponses.push({
+      data: { id: 'existing-msg-1' },
+      error: null,
+    })
 
     await persistOrRegenQueuedDraft(
       makeCtx(),
@@ -1579,7 +1849,11 @@ describe('persistOrRegenQueuedDraft — rendered_intentions (TAC-385)', () => {
       {
         blankBody: true,
         renderedIntentions: [
-          { key: 'understand_order', promptLine: 'unused on the wire', eligibleAt: ANCHOR },
+          {
+            key: 'understand_order',
+            promptLine: 'unused on the wire',
+            eligibleAt: ANCHOR,
+          },
         ],
       },
     )
@@ -1594,7 +1868,10 @@ describe('persistOrRegenQueuedDraft — rendered_intentions (TAC-385)', () => {
       data: { review_reason: 'model_flagged' },
       error: null,
     })
-    scenario.updateResponses.push({ data: { id: 'existing-msg-1' }, error: null })
+    scenario.updateResponses.push({
+      data: { id: 'existing-msg-1' },
+      error: null,
+    })
 
     await persistOrRegenQueuedDraft(
       makeCtx(),
@@ -1636,14 +1913,22 @@ describe('persistOrRegenQueuedDraft — rendered_intentions (TAC-385)', () => {
 describe('scheduleAndSend — rendered_intentions (TAC-436)', () => {
   const ANCHOR = new Date('2026-09-14T10:00:00.000Z')
   const RENDERED = [
-    { key: 'understand_order' as const, promptLine: 'unused on the wire', eligibleAt: ANCHOR },
+    {
+      key: 'understand_order' as const,
+      promptLine: 'unused on the wire',
+      eligibleAt: ANCHOR,
+    },
   ]
 
   beforeEach(() => {
     scenario = freshScenario()
     vi.mocked(sendMessage).mockReset()
-    vi.mocked(markAsRead).mockReset().mockResolvedValue({ ok: true } as never)
-    vi.mocked(sendTypingIndicator).mockReset().mockResolvedValue({ ok: true } as never)
+    vi.mocked(markAsRead)
+      .mockReset()
+      .mockResolvedValue({ ok: true } as never)
+    vi.mocked(sendTypingIndicator)
+      .mockReset()
+      .mockResolvedValue({ ok: true } as never)
   })
 
   afterEach(() => {
@@ -1669,7 +1954,11 @@ describe('scheduleAndSend — rendered_intentions (TAC-436)', () => {
     queueSends('provider-1')
     queueInserts('msg-1')
 
-    await scheduleAndSend(makeCtx(), generationWithBody('Open until 4'), NO_DELAY)
+    await scheduleAndSend(
+      makeCtx(),
+      generationWithBody('Open until 4'),
+      NO_DELAY,
+    )
 
     expect(scenario.inserts[0]!.rendered_intentions).toBeNull()
   })
@@ -1710,9 +1999,15 @@ describe('scheduleAndSend — rendered_intentions (TAC-436)', () => {
 
     scenario = freshScenario()
     scenario.insertResponses.push({ data: { id: 'new-msg-1' }, error: null })
-    await persistOrRegenQueuedDraft(makeCtx(), makeGeneration(), 'model_flagged', null, {
-      renderedIntentions: RENDERED,
-    })
+    await persistOrRegenQueuedDraft(
+      makeCtx(),
+      makeGeneration(),
+      'model_flagged',
+      null,
+      {
+        renderedIntentions: RENDERED,
+      },
+    )
     const queued = scenario.inserts[0]!.rendered_intentions
 
     expect(autoSent).toEqual(queued)
@@ -1724,8 +2019,12 @@ describe('scheduleAndSend — no pre-send pause (TAC-421)', () => {
     scenario = freshScenario()
     fireRedAlertMock.mockClear()
     vi.mocked(sendMessage).mockReset()
-    vi.mocked(markAsRead).mockReset().mockResolvedValue({ ok: true } as never)
-    vi.mocked(sendTypingIndicator).mockReset().mockResolvedValue({ ok: true } as never)
+    vi.mocked(markAsRead)
+      .mockReset()
+      .mockResolvedValue({ ok: true } as never)
+    vi.mocked(sendTypingIndicator)
+      .mockReset()
+      .mockResolvedValue({ ok: true } as never)
     vi.mocked(createCommitmentFromPending)
       .mockReset()
       .mockResolvedValue({ ok: true, data: { id: 'commitment-1' } } as never)
@@ -1737,56 +2036,48 @@ describe('scheduleAndSend — no pre-send pause (TAC-421)', () => {
     vi.restoreAllMocks()
   })
 
-  it(
-    'marks as read, shows typing, then sends — with no timer awaited in between',
-    async () => {
-      queueSends('provider-1')
-      queueInserts('msg-1')
+  it('marks as read, shows typing, then sends — with no timer awaited in between', async () => {
+    queueSends('provider-1')
+    queueInserts('msg-1')
 
-      // skipHumanFeelDelay deliberately NOT set: this is the ordinary
-      // auto-send path, the one that used to sleep. The clock is never
-      // advanced below.
-      await scheduleAndSend(makeCtx(), generationWithBody('Open until 4'), {
-        rng: () => 0.99,
-      })
+    // skipHumanFeelDelay deliberately NOT set: this is the ordinary
+    // auto-send path, the one that used to sleep. The clock is never
+    // advanced below.
+    await scheduleAndSend(makeCtx(), generationWithBody('Open until 4'), {
+      rng: () => 0.99,
+    })
 
-      const read = vi.mocked(markAsRead).mock.invocationCallOrder[0]!
-      const typing = vi.mocked(sendTypingIndicator).mock.invocationCallOrder[0]!
-      const sent = vi.mocked(sendMessage).mock.invocationCallOrder[0]!
+    const read = vi.mocked(markAsRead).mock.invocationCallOrder[0]!
+    const typing = vi.mocked(sendTypingIndicator).mock.invocationCallOrder[0]!
+    const sent = vi.mocked(sendMessage).mock.invocationCallOrder[0]!
 
-      expect(read).toBeLessThan(typing)
-      expect(typing).toBeLessThan(sent)
-      expect(vi.mocked(sendMessage)).toHaveBeenCalledTimes(1)
-    },
-    2000,
-  )
+    expect(read).toBeLessThan(typing)
+    expect(typing).toBeLessThan(sent)
+    expect(vi.mocked(sendMessage)).toHaveBeenCalledTimes(1)
+  }, 2000)
 
-  it(
-    'still holds the second bubble behind INTER_BUBBLE_GAP_MS',
-    async () => {
-      queueSends('p1', 'p2')
-      queueInserts('m1', 'm2')
+  it('still holds the second bubble behind INTER_BUBBLE_GAP_MS', async () => {
+    queueSends('p1', 'p2')
+    queueInserts('m1', 'm2')
 
-      const dispatch = scheduleAndSend(
-        makeCtx(),
-        generationWithBody('First one here. Second one here.'),
-        { rng: () => 0 },
-      )
+    const dispatch = scheduleAndSend(
+      makeCtx(),
+      generationWithBody('First one here. Second one here.'),
+      { rng: () => 0 },
+    )
 
-      // Flush microtasks WITHOUT moving the clock. The first bubble clears;
-      // the second must still be waiting on its gap. Advancing first and then
-      // asserting two sends would pass with the gap removed, which is the
-      // version of this test worth avoiding.
-      await vi.advanceTimersByTimeAsync(0)
-      expect(vi.mocked(sendMessage)).toHaveBeenCalledTimes(1)
+    // Flush microtasks WITHOUT moving the clock. The first bubble clears;
+    // the second must still be waiting on its gap. Advancing first and then
+    // asserting two sends would pass with the gap removed, which is the
+    // version of this test worth avoiding.
+    await vi.advanceTimersByTimeAsync(0)
+    expect(vi.mocked(sendMessage)).toHaveBeenCalledTimes(1)
 
-      await vi.advanceTimersByTimeAsync(INTER_BUBBLE_GAP_MS)
-      await dispatch
+    await vi.advanceTimersByTimeAsync(INTER_BUBBLE_GAP_MS)
+    await dispatch
 
-      expect(vi.mocked(sendMessage)).toHaveBeenCalledTimes(2)
-    },
-    2000,
-  )
+    expect(vi.mocked(sendMessage)).toHaveBeenCalledTimes(2)
+  }, 2000)
 
   // The engine-followup shape. This is the SECOND of the two paths that used
   // to sleep, and the one where the wait bought least: `buildRuntimeContext`
@@ -1796,24 +2087,20 @@ describe('scheduleAndSend — no pre-send pause (TAC-421)', () => {
   // guard in schedule-and-send.ts is a TypeError on every engine followup in
   // production that survives the entire suite — the orchestrator tests mock
   // ./schedule-and-send, so they cannot reach it either.
-  it(
-    'sends a followup with no read receipt when there is no inbound to mark',
-    async () => {
-      queueSends('provider-1')
-      queueInserts('msg-1')
+  it('sends a followup with no read receipt when there is no inbound to mark', async () => {
+    queueSends('provider-1')
+    queueInserts('msg-1')
 
-      await scheduleAndSend(
-        makeCtx({ currentMessage: null }),
-        generationWithBody('Open until 4'),
-        { rng: () => 0.99 },
-      )
+    await scheduleAndSend(
+      makeCtx({ currentMessage: null }),
+      generationWithBody('Open until 4'),
+      { rng: () => 0.99 },
+    )
 
-      expect(vi.mocked(markAsRead)).not.toHaveBeenCalled()
-      expect(vi.mocked(sendTypingIndicator)).toHaveBeenCalledTimes(1)
-      expect(vi.mocked(sendMessage)).toHaveBeenCalledTimes(1)
-    },
-    2000,
-  )
+    expect(vi.mocked(markAsRead)).not.toHaveBeenCalled()
+    expect(vi.mocked(sendTypingIndicator)).toHaveBeenCalledTimes(1)
+    expect(vi.mocked(sendMessage)).toHaveBeenCalledTimes(1)
+  }, 2000)
 })
 
 // ---------------------------------------------------------------------------
@@ -1844,8 +2131,12 @@ describe('applyInlineCancellation (TAC-513)', () => {
   beforeEach(() => {
     scenario = freshScenario()
     vi.mocked(sendMessage).mockReset()
-    vi.mocked(markAsRead).mockReset().mockResolvedValue({ ok: true } as never)
-    vi.mocked(sendTypingIndicator).mockReset().mockResolvedValue({ ok: true } as never)
+    vi.mocked(markAsRead)
+      .mockReset()
+      .mockResolvedValue({ ok: true } as never)
+    vi.mocked(sendTypingIndicator)
+      .mockReset()
+      .mockResolvedValue({ ok: true } as never)
     vi.mocked(createCommitmentFromPending)
       .mockReset()
       .mockResolvedValue({ ok: true, data: { id: 'commitment-1' } } as never)
@@ -1858,10 +2149,10 @@ describe('applyInlineCancellation (TAC-513)', () => {
     queueSends('p1')
     queueInserts('m1')
 
-    await scheduleAndSend(
-      makeCtx({ activeCommitments: [TONIC] }),
-      { ...generationWithBody("that one's off then"), cancelsCommitmentId: TONIC.id },
-    )
+    await scheduleAndSend(makeCtx({ activeCommitments: [TONIC] }), {
+      ...generationWithBody("that one's off then"),
+      cancelsCommitmentId: TONIC.id,
+    })
 
     expect(vi.mocked(cancelCommitmentForGuest)).toHaveBeenCalledTimes(1)
     const arg = vi.mocked(cancelCommitmentForGuest).mock.calls[0]![0]
@@ -1877,13 +2168,10 @@ describe('applyInlineCancellation (TAC-513)', () => {
     queueSends('p1')
     queueInserts('m1')
 
-    await scheduleAndSend(
-      makeCtx({ activeCommitments: [TONIC] }),
-      {
-        ...generationWithBody("that one's off then"),
-        cancelsCommitmentId: '00000000-0000-4000-8000-000000000000',
-      },
-    )
+    await scheduleAndSend(makeCtx({ activeCommitments: [TONIC] }), {
+      ...generationWithBody("that one's off then"),
+      cancelsCommitmentId: '00000000-0000-4000-8000-000000000000',
+    })
 
     expect(vi.mocked(cancelCommitmentForGuest)).not.toHaveBeenCalled()
   })
@@ -1892,8 +2180,173 @@ describe('applyInlineCancellation (TAC-513)', () => {
     queueSends('p1')
     queueInserts('m1')
 
-    await scheduleAndSend(makeCtx({ activeCommitments: [TONIC] }), generationWithBody('sure thing'))
+    await scheduleAndSend(
+      makeCtx({ activeCommitments: [TONIC] }),
+      generationWithBody('sure thing'),
+    )
 
     expect(vi.mocked(cancelCommitmentForGuest)).not.toHaveBeenCalled()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// TAC-554: the WIRING. The pure rule is pinned exhaustively in
+// sentence-split.test.ts; what these assert is that the text arm actually
+// passes the question and the gate through to it.
+//
+// This is the class of mutant this repo keeps finding alive: the author's
+// mutants ask what the code computes, and the survivors ask whether anything
+// calls it. Dropping the third argument at this call site, or dropping the
+// gate, leaves every test in sentence-split.test.ts green.
+// ---------------------------------------------------------------------------
+
+describe('scheduleAndSend — the intention question is its own message (TAC-554)', () => {
+  const ANCHOR_554 = new Date('2026-09-01T00:00:00.000Z')
+  const RENDERED_554 = [
+    {
+      key: 'learn_name' as const,
+      promptLine: 'unused on the wire',
+      eligibleAt: ANCHOR_554,
+    },
+  ]
+
+  beforeEach(() => {
+    scenario = freshScenario()
+    fireRedAlertMock.mockClear()
+    vi.mocked(sendMessage).mockReset()
+    vi.mocked(markAsRead)
+      .mockReset()
+      .mockResolvedValue({ ok: true } as never)
+    vi.mocked(sendTypingIndicator)
+      .mockReset()
+      .mockResolvedValue({ ok: true } as never)
+    vi.mocked(createCommitmentFromPending)
+      .mockReset()
+      .mockResolvedValue({ ok: true, data: { id: 'commitment-1' } } as never)
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  function generationAsking(
+    answer: string,
+    question: string,
+  ): GenerateMessageResult {
+    return {
+      ...makeGeneration(),
+      body: `${answer} ${question}`,
+      intentionQuestion: question,
+      closedTheConversation: false,
+    }
+  }
+
+  it('sends the question as its own last message, and one row per message', async () => {
+    queueSends('provider-1', 'provider-2')
+    queueInserts('msg-1', 'msg-2')
+
+    const result = await scheduleAndSend(
+      makeCtx(),
+      generationAsking(
+        'Open until 3 on Sundays.',
+        "by the way, what's your name?",
+      ),
+      {
+        skipHumanFeelDelay: true,
+        rng: () => 0.99,
+        renderedIntentions: RENDERED_554,
+      },
+    )
+
+    expect(vi.mocked(sendMessage)).toHaveBeenCalledTimes(2)
+    expect(vi.mocked(sendMessage).mock.calls[0]![0]).toMatchObject({
+      body: 'Open until 3 on Sundays',
+    })
+    expect(vi.mocked(sendMessage).mock.calls[1]![0]).toMatchObject({
+      body: "by the way, what's your name?",
+    })
+    expect(scenario.inserts).toHaveLength(2)
+    expect(scenario.inserts[1]!.body).toBe("by the way, what's your name?")
+    expect(result.bubbleCount).toBe(2)
+  })
+
+  // THE GATE. renderableIntentions already excludes opt_out, comp_complaint
+  // and pending-question turns, so a question emitted on a turn where nothing
+  // rendered must be folded into the one message rather than bubbled.
+  it('folds the question into one message when no intention rendered', async () => {
+    queueSends('provider-1')
+    queueInserts('msg-1')
+
+    const result = await scheduleAndSend(
+      makeCtx(),
+      generationAsking(
+        'Open until 3 on Sundays.',
+        "by the way, what's your name?",
+      ),
+      { skipHumanFeelDelay: true, rng: () => 0.99 },
+    )
+
+    expect(vi.mocked(sendMessage)).toHaveBeenCalledTimes(1)
+    expect(vi.mocked(sendMessage).mock.calls[0]![0]).toMatchObject({
+      body: "Open until 3 on Sundays. by the way, what's your name?",
+    })
+    expect(result.bubbleCount).toBe(1)
+  })
+
+  it('folds the question in when the rendered set is explicitly empty', async () => {
+    queueSends('provider-1')
+    queueInserts('msg-1')
+
+    await scheduleAndSend(
+      makeCtx(),
+      generationAsking('Open until 3 on Sundays.', "what's your name?"),
+      { skipHumanFeelDelay: true, rng: () => 0.99, renderedIntentions: [] },
+    )
+
+    expect(vi.mocked(sendMessage)).toHaveBeenCalledTimes(1)
+  })
+
+  // A turn that asks nothing must behave exactly as it did before TAC-554,
+  // even with a rendered intention present — the block rendering is not the
+  // same thing as the model choosing to ask.
+  it('is unchanged when the model asked nothing, rendered set or not', async () => {
+    queueSends('provider-1')
+    queueInserts('msg-1')
+
+    await scheduleAndSend(makeCtx(), generationWithBody('Open until 4'), {
+      skipHumanFeelDelay: true,
+      rng: () => 0,
+      renderedIntentions: RENDERED_554,
+    })
+
+    expect(vi.mocked(sendMessage)).toHaveBeenCalledTimes(1)
+    expect(vi.mocked(sendMessage).mock.calls[0]![0]).toMatchObject({
+      body: 'Open until 4',
+    })
+  })
+
+  it('keeps the total within the bubble cap when the answer is long', async () => {
+    queueSends('provider-1', 'provider-2', 'provider-3')
+    queueInserts('msg-1', 'msg-2', 'msg-3')
+
+    const result = await scheduleAndSend(
+      makeCtx(),
+      generationAsking('One here. Two here. Three here.', "what's your name?"),
+      {
+        skipHumanFeelDelay: true,
+        rng: () => 0,
+        renderedIntentions: RENDERED_554,
+      },
+    )
+
+    // The answer keeps all three of its sentences in one message rather than
+    // taking a third slot the question needs.
+    expect(result.bubbleCount).toBe(2)
+    expect(vi.mocked(sendMessage).mock.calls[0]![0]).toMatchObject({
+      body: 'One here. Two here. Three here',
+    })
+    expect(vi.mocked(sendMessage).mock.calls[1]![0]).toMatchObject({
+      body: "what's your name?",
+    })
   })
 })

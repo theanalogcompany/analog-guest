@@ -8,6 +8,7 @@ import { GuestContextPatchSchema } from '@/lib/schemas/guest-context'
 import { isMessageChannel } from '@/lib/schemas/message-channel'
 import { parseVenueLinks } from '@/lib/schemas/venue-info'
 import { captureGenerationTruncated } from '@/lib/analytics/posthog'
+import { logger } from '@/lib/observability/logger'
 import { getGenerationModel } from './client'
 import { composePrompt } from './compose-prompt'
 import { containsEmoji } from './emoji-cadence'
@@ -280,7 +281,150 @@ export const GeneratedMessageSchema = z.object({
   // through v1.17.0 the id was missing from the block, the model reached for
   // the code instead, and every arrival capture no-op'd.
   cancelsCommitmentId: z.string(),
+  // TAC-560: did THIS reply close the guest's first conversation, in the way the
+  // venue's own voice rules describe (the line is open, here is what you can
+  // message us about anytime)?
+  //
+  // A BARE REQUIRED BOOLEAN, for the reason knowledgeGap is: Anthropic counts
+  // only optionals against the 24-property cap, this schema sits at exactly 20
+  // against a repo budget of 22 (lib/ai/schema-budget.test.ts), and a required
+  // field costs nothing there.
+  //
+  // WHAT IT IS FOR. The close is once per guest EVER, from either path, and the
+  // timer needs to know the in-conversation close already went out. Nothing
+  // structural marks that turn: it is an ordinary reply to "thanks!", stored
+  // under whatever the classifier picked. So the model reports it, and
+  // handle-inbound.ts writes guests.warm_close_sent_at post-dispatch.
+  //
+  // SELF-REPORT IS NOT TRUSTED ALONE, on this repo's own record (TAC-350: 8 of 8
+  // fabrications self-reported clean). The timer carries an independent belt: a
+  // last inbound that classified `acknowledgment` IS the sign-off turn, so it
+  // stands down whatever this field said. Both signals point the same way, and
+  // over-marking (no close) is the cheaper mistake than under-marking (two).
+  closedTheConversation: z.boolean(),
+  // TAC-554: the getting-to-know-you question this reply is asking, alone, and
+  // NOT in `body`. Empty string on every turn that is not asking one, which is
+  // most turns.
+  //
+  // WHY A SEPARATE FIELD AT ALL. Jaipal ruled that a question raised from the
+  // `## What you're hoping to get to` block always goes out as its own message
+  // bubble, after the answer. A persona rule saying exactly that failed twice
+  // on device on 2026-09-29, and dispatch is why: resolveDispatchBubbles splits
+  // on sentence boundaries it can detect, so one of those replies rode a fair
+  // coin and lost, and the other had no detectable boundary before its question
+  // and could not have split at any probability. Bubble structure is not
+  // something prompt wording can reach.
+  //
+  // WHAT THIS FIELD IS NOT: it is not the text we send as a second message
+  // directly from here. composeReplyWithIntention CONCATENATES it back onto the
+  // body immediately below, so `GenerateMessageResult.body` stays the complete
+  // reply exactly as it always has, and every check that reads the body — the
+  // dash substitution, self-talk, unverified links, the grounding verifier, the
+  // prose-promise and cancellation checks, the comp regex — still sees the
+  // question. The field rides alongside as the exact TAIL of the body, true by
+  // construction because we did the joining. Dispatch peels it off.
+  //
+  // A BARE REQUIRED STRING, the cancelsCommitmentId reasoning verbatim:
+  // Anthropic counts only optionals against the 24-property cap, this schema
+  // sits at 20 against a repo budget of 22 (lib/ai/schema-budget.test.ts), and
+  // a required string costs zero.
+  intentionQuestion: z.string(),
 })
+
+/**
+ * A one-line-regex duplicate of hasRenderableContent in
+ * lib/agent/sentence-split.ts, deliberately, with a pointer in each file.
+ *
+ * lib/agent imports lib/ai and never the reverse, so sharing it would mean
+ * either a cycle or a new shared module for one predicate. The two also do
+ * different jobs: here it NORMALIZES a contentless question to '' so nothing
+ * downstream ever sees one, and there it DEFENDS against a caller that didn't.
+ * Both are one line, and the duplication is bounded and stated rather than
+ * discovered.
+ */
+function hasRenderableContent(piece: string): boolean {
+  return /[\p{L}\p{N}]/u.test(piece)
+}
+
+/** Letters and digits only, case-folded. */
+function normalizeForDuplicate(text: string): string {
+  return text.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '')
+}
+
+/**
+ * If the answer already ends with the question, cut it off.
+ *
+ * THE ONE FAILURE A STRUCTURAL MECHANISM CANNOT PREVENT is the model putting
+ * the question in BOTH fields, which would compose to "...what's your name?
+ * what's your name?" — a duplicated question in the guest's thread. Approved
+ * 2026-09-29 on the condition that its firing rate is reported rather than
+ * silent, which is what `intentionQuestionDuplicateStripped` on the result is
+ * for: a guard nobody can count is how comp_regex_backstop became an illusion.
+ *
+ * It only ever REMOVES a trailing duplicate, never adds or reorders, so the
+ * worst case is a slightly shorter answer rather than wrong text.
+ *
+ * Comparison is on letters and digits alone, case-folded, so the model
+ * re-punctuating or re-casing its own sentence still matches. The scan walks
+ * back from the end and stops as soon as the candidate suffix is longer than
+ * the question, which is sound because prepending characters can only keep or
+ * grow a normalized length.
+ */
+export function stripTrailingDuplicate(
+  answer: string,
+  question: string,
+): string {
+  const q = normalizeForDuplicate(question)
+  if (q === '') return answer
+  for (let i = answer.length - 1; i >= 0; i -= 1) {
+    const candidate = normalizeForDuplicate(answer.slice(i))
+    if (candidate.length > q.length) break
+    if (candidate === q) return answer.slice(0, i).trim()
+  }
+  return answer
+}
+
+/**
+ * Join the model's two halves into the one complete reply, and hand back the
+ * tail dispatch will peel off again.
+ *
+ * Called at the replaceDashes seam, which is the single normalization point
+ * every downstream read already flows through. THE ORDER MATTERS: replaceDashes
+ * runs on each part BEFORE they are joined, so `body` ends with
+ * `intentionQuestion` character for character. Substituting on the joined
+ * string instead would let a dash inside the question change it after the fact
+ * and break the identity dispatch relies on.
+ */
+export function composeReplyWithIntention(
+  rawBody: string,
+  rawQuestion: string,
+): { body: string; intentionQuestion: string; duplicateStripped: boolean } {
+  const answerIn = replaceDashes(rawBody)
+  const question = replaceDashes(rawQuestion)
+
+  // Normalize a question that is absent, whitespace, or has nothing a guest
+  // would read (see hasRenderableContent) to '' here, once, so no downstream
+  // reader has to think about it. This is also where replaceDashes' refusal
+  // case lands: a field containing only an em dash comes back as "—".
+  if (question.trim() === '' || !hasRenderableContent(question)) {
+    return { body: answerIn, intentionQuestion: '', duplicateStripped: false }
+  }
+
+  const answer = stripTrailingDuplicate(answerIn, question)
+  const duplicateStripped = answer !== answerIn
+
+  // The model put the whole reply in the field, or the answer was nothing but
+  // a repeat of the question. One message, which is the question.
+  if (answer.trim() === '') {
+    return { body: question, intentionQuestion: question, duplicateStripped }
+  }
+
+  return {
+    body: `${answer} ${question}`,
+    intentionQuestion: question,
+    duplicateStripped,
+  }
+}
 
 /**
  * Generate an outbound message in the venue's voice with a self-assessed
@@ -326,8 +470,12 @@ export async function generateMessage(
   // may be sent at all.
   const allowedUrls = parseVenueLinks(input.venueInfo.links).map((l) => l.url)
 
-  const { systemPrompt, cacheableSystemPrefix, volatileSystemSuffix, userPrompt } =
-    composePrompt(input)
+  const {
+    systemPrompt,
+    cacheableSystemPrefix,
+    volatileSystemSuffix,
+    userPrompt,
+  } = composePrompt(input)
   const augmentedSystemPrompt = `${systemPrompt}\n\n${VOICE_FIDELITY_INSTRUCTION}`
   // Same bytes as augmentedSystemPrompt, split at the stability boundary so a
   // cache breakpoint can sit between them. The voice-fidelity instruction
@@ -355,6 +503,8 @@ export async function generateMessage(
       commitment: z.infer<typeof CommitmentEmissionSchema>
       arrivalCapture: z.infer<typeof ArrivalCaptureEmissionSchema>
       cancelsCommitmentId: string
+      intentionQuestion: string
+      closedTheConversation: boolean
     } | null = null
     const attemptScores: number[] = []
     const attemptHistory: GenerateMessageAttempt[] = []
@@ -390,6 +540,25 @@ export async function generateMessage(
     // same prefix shows up as two reads rather than being averaged away.
     let cacheReadTokens = 0
     let cacheWriteTokens = 0
+    // THE SAME SUMMING, for the buckets Langfuse prices natively. Summed rather
+    // than last-attempt because a retry is a second Sonnet call that was really
+    // paid for: 12.6% of generations run one (measured 2026-09-29) and reporting
+    // only the final attempt would hide that cost entirely.
+    //
+    // uncachedInputTokens is kept separate from cacheRead/cacheWrite because
+    // Langfuse's input buckets are DISJOINT and it sums them for cost - see
+    // AgentUsage in lib/observability/langfuse.ts. Do not add them together here.
+    let uncachedInputTokens = 0
+    let outputTokens = 0
+    // The model the provider actually served, last attempt wins. Every attempt in
+    // one call uses the same model, so last-wins and first-wins agree; reading it
+    // from the response rather than from getGenerationModel() is what makes a
+    // provider-side alias change visible instead of silently mis-attributed.
+    let servedModelId: string | undefined
+    // TAC-554: whether the duplicate guard fired on the attempt that shipped.
+    // Assigned per attempt alongside lastResult, so it describes the same
+    // attempt the body came from rather than any earlier one.
+    let duplicateStripped = false
     // Order-preserving and deduped, so a link flagged on attempt 1 is still
     // named on attempt 3 alongside anything new attempt 2 invented.
     const unverifiedUrlsSeen: string[] = []
@@ -399,7 +568,12 @@ export async function generateMessage(
       const userPromptForAttempt = regenFeedback
         ? `${userPrompt}\n\n${regenFeedback}`
         : userPrompt
-      const { object: rawObject, usage, providerMetadata } = await generateObject({
+      const {
+        object: rawObject,
+        usage,
+        providerMetadata,
+        response,
+      } = await generateObject({
         model: getGenerationModel(),
         // Two adjacent system messages, not one `system` string: the provider
         // maps each to its own Anthropic system text block and honours a
@@ -458,13 +632,39 @@ export async function generateMessage(
       // a provider that does not cache, hence the ?? 0.
       cacheReadTokens += usage?.cachedInputTokens ?? 0
       cacheWriteTokens +=
-        (providerMetadata?.anthropic?.cacheCreationInputTokens as number | null | undefined) ?? 0
+        (providerMetadata?.anthropic?.cacheCreationInputTokens as
+          number | null | undefined) ?? 0
+      // inputTokens is the SDK's TOTAL (noCache + cacheRead + cacheWrite), so the
+      // uncached portion comes off inputTokenDetails. Subtracting here instead
+      // would double-bill every cached token once this reaches Langfuse.
+      uncachedInputTokens += usage?.inputTokenDetails?.noCacheTokens ?? 0
+      outputTokens += usage?.outputTokens ?? 0
+      servedModelId = response?.modelId ?? servedModelId
       // Dashes are substituted, never regenerated. Done HERE rather than at
       // return so every downstream read — the break condition below, the
       // attempt history, the shipped body — sees one body, and so a dash can
       // never be the reason another generation call is spent.
-      const object = { ...rawObject, body: replaceDashes(rawObject.body) }
+      // TAC-554: compose the two halves into one complete reply here, at the
+      // seam replaceDashes already owned, so every read below — the break
+      // condition, the attempt history, the shipped body, and every backstop
+      // downstream — sees ONE body carrying the question, exactly as it did
+      // before this field existed.
+      const composed = composeReplyWithIntention(
+        rawObject.body,
+        rawObject.intentionQuestion,
+      )
+      if (composed.duplicateStripped) {
+        console.warn(
+          '[ai] generateMessage: stripped a duplicated intention question from the answer',
+        )
+      }
+      const object = {
+        ...rawObject,
+        body: composed.body,
+        intentionQuestion: composed.intentionQuestion,
+      }
       lastResult = object
+      duplicateStripped = composed.duplicateStripped
       attemptScores.push(object.voiceFidelity)
       attemptHistory.push({
         body: object.body,
@@ -478,8 +678,12 @@ export async function generateMessage(
         commitment: object.commitment,
         arrivalCapture: object.arrivalCapture,
         cancelsCommitmentId: object.cancelsCommitmentId,
+        intentionQuestion: object.intentionQuestion,
+        closedTheConversation: object.closedTheConversation,
         userPromptOverride:
-          userPromptForAttempt !== userPrompt ? userPromptForAttempt : undefined,
+          userPromptForAttempt !== userPrompt
+            ? userPromptForAttempt
+            : undefined,
       })
       // No dash check here on purpose: replaceDashes already ran on this body,
       // so there is nothing left to catch and nothing a further attempt could
@@ -502,11 +706,16 @@ export async function generateMessage(
       }
       // feedbackParts is non-empty here whenever any check has ever fired, so
       // this only stays null while every failure so far has been fidelity.
-      regenFeedback = feedbackParts.length > 0 ? feedbackParts.join('\n\n') : null
+      regenFeedback =
+        feedbackParts.length > 0 ? feedbackParts.join('\n\n') : null
     }
 
     if (lastResult === null) {
-      return { ok: false, error: 'no_result_returned', errorCode: 'ai_generation_failed' }
+      return {
+        ok: false,
+        error: 'no_result_returned',
+        errorCode: 'ai_generation_failed',
+      }
     }
 
     return {
@@ -541,6 +750,19 @@ export async function generateMessage(
         // SAID back (TAC-296 precedent).
         arrivalCapture: lastResult.arrivalCapture,
         cancelsCommitmentId: lastResult.cancelsCommitmentId,
+        // TAC-560: did this reply close the guest's first conversation? The
+        // in-conversation half of a once-per-guest-ever marker; handle-inbound.ts
+        // writes guests.warm_close_sent_at post-dispatch when it is true, so the
+        // pause timer never sends a second close.
+        closedTheConversation: lastResult.closedTheConversation,
+        // TAC-554: the exact tail of `body`. Dispatch splits there so the
+        // question goes out as its own last message. '' means this turn asked
+        // nothing, and dispatch then behaves exactly as it did before.
+        intentionQuestion: lastResult.intentionQuestion,
+        // Whether the duplicate guard fired on the shipped attempt. Carried so
+        // the guard is countable — it edits guest-facing text, and that was
+        // approved on the condition it is reported rather than silent.
+        intentionQuestionDuplicateStripped: duplicateStripped,
         attempts,
         attemptScores,
         attemptHistory,
@@ -552,6 +774,27 @@ export async function generateMessage(
         promptVersion: PROMPT_VERSION,
         cacheReadTokens,
         cacheWriteTokens,
+        // The same three cache/input numbers again, in the shape toAgentUsage
+        // consumes, so the orchestrator can price the `generate` generation
+        // without reassembling them. cacheReadTokens/cacheWriteTokens above stay
+        // because the prompt-cache accounting in the span's output object is
+        // documented and queried; these two representations must agree, and
+        // generate-message.test.ts asserts they do.
+        modelId: servedModelId,
+        usage: {
+          inputTokens: uncachedInputTokens + cacheReadTokens + cacheWriteTokens,
+          outputTokens,
+          totalTokens:
+            uncachedInputTokens +
+            cacheReadTokens +
+            cacheWriteTokens +
+            outputTokens,
+          cachedInputTokens: cacheReadTokens,
+          inputTokenDetails: {
+            noCacheTokens: uncachedInputTokens,
+            cacheWriteTokens,
+          },
+        },
         // THE-225: recompute on the final shipped body rather than threading
         // loop state. Equivalent and lets us drop the variable.
         //
@@ -582,7 +825,8 @@ export async function generateMessage(
         // PostHog observation so a change in that rate announces itself
         // instead of being discovered in a UAT session.
         emojiDirectiveViolated:
-          input.runtime.emojiDirective === 'none' && containsEmoji(lastResult.body),
+          input.runtime.emojiDirective === 'none' &&
+          containsEmoji(lastResult.body),
       },
     }
   } catch (e) {
@@ -599,12 +843,17 @@ export async function generateMessage(
       const causeName = cause instanceof Error ? cause.name : null
       const causeMessage = cause instanceof Error ? cause.message : null
       const innerCause =
-        cause instanceof Error ? (cause as Error & { cause?: unknown }).cause : undefined
+        cause instanceof Error
+          ? (cause as Error & { cause?: unknown }).cause
+          : undefined
       const issues =
-        innerCause && typeof innerCause === 'object' && innerCause !== null && 'issues' in innerCause
+        innerCause &&
+        typeof innerCause === 'object' &&
+        innerCause !== null &&
+        'issues' in innerCause
           ? (innerCause as { issues: unknown }).issues
           : undefined
-      console.log('[agent] generation diagnostic', {
+      logger.info('[agent] generation diagnostic', {
         attempts,
         text: e.text ? e.text.slice(0, 1000) : null,
         finishReason: e.finishReason,

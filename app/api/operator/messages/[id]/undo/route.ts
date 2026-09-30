@@ -29,7 +29,8 @@ import { captureOperatorMessageActionUndone } from '@/lib/analytics/posthog'
 import { createAdminClient } from '@/lib/db/admin'
 import { venueFilterIds } from '@/lib/auth/venue-scope'
 
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 const ParamsSchema = z.object({ id: z.string().regex(UUID_RE) })
 
 const UNDO_WINDOW_MS = 3000

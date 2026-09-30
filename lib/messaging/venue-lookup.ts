@@ -20,7 +20,11 @@ export async function getVenueMessagingNumber(
     if (error.code === 'PGRST116') {
       return { ok: false, error: 'venue_not_found' }
     }
-    return { ok: false, error: error.message, errorCode: 'venue_lookup_failed' }
+    return {
+      ok: false,
+      error: error.message,
+      errorCode: 'venue_lookup_failed',
+    }
   }
 
   if (!venue.messaging_phone_number) {

@@ -1,19 +1,19 @@
 import { randomUUID } from 'node:crypto'
 import { waitUntil } from '@vercel/functions'
 import {
-  AGENT_LATENCY_HIGH_THRESHOLD_MS,
+  isAgentLatencyHigh,
   captureAgentLatencyHigh,
   captureDraftDropped,
   captureDraftQueued,
   captureDraftRegenerated,
   captureManualFollowupSlotOccupied,
 } from '@/lib/analytics/posthog'
-import {
-  isEmptyContextUpdate,
-  updateGuestContext,
-} from '@/lib/guests/context'
+import { isEmptyContextUpdate, updateGuestContext } from '@/lib/guests/context'
 import { dispatchArrivalCapture } from './dispatch-arrival-capture'
-import { sendDraftFlaggedPush, shouldSendDraftFlaggedPush } from '@/lib/notifications/send'
+import {
+  sendDraftFlaggedPush,
+  shouldSendDraftFlaggedPush,
+} from '@/lib/notifications/send'
 import { startAgentTrace } from '@/lib/observability'
 import { capturePostHogEvent, fireRedAlert } from './alerts'
 import { buildRuntimeContext } from './build-runtime-context'
@@ -21,6 +21,7 @@ import type { CommitmentIdentity, SlotDropReason } from './pending-slots'
 import { dispatchReply } from './dispatch-reply'
 import { undeliveredAgentResult } from './handle-inbound'
 import { persistOrRegenQueuedDraft, scheduleAndSend } from './schedule-and-send'
+import { NEVER_SPLIT_RNG } from './warm-close'
 import {
   applyApprovalPolicyStage,
   operatorInstructionQuery,
@@ -80,13 +81,16 @@ async function reportFollowupDrop(args: {
 }): Promise<void> {
   const { ctx, agentRunId, drop } = args
   if (drop.reason === 'slot_occupied') {
-    console.warn('[agent] manual followup refused: a card for this guest is already waiting', {
-      agentRunId,
-      triggerReason: args.triggerReason,
-      waitingDraftId: drop.protectedDraftId,
-      triggers: args.triggers,
-      viaRaceRecovery: args.viaRaceRecovery,
-    })
+    console.warn(
+      '[agent] manual followup refused: a card for this guest is already waiting',
+      {
+        agentRunId,
+        triggerReason: args.triggerReason,
+        waitingDraftId: drop.protectedDraftId,
+        triggers: args.triggers,
+        viaRaceRecovery: args.viaRaceRecovery,
+      },
+    )
     await captureManualFollowupSlotOccupied({
       agentRunId,
       venueId: ctx.venue.id,
@@ -96,14 +100,17 @@ async function reportFollowupDrop(args: {
     })
     return
   }
-  console.warn('[agent] followup draft dropped: a pending card holds its slot', {
-    agentRunId,
-    triggerReason: args.triggerReason,
-    reason: drop.reason,
-    protectedDraftId: drop.protectedDraftId,
-    triggers: args.triggers,
-    viaRaceRecovery: args.viaRaceRecovery,
-  })
+  console.warn(
+    '[agent] followup draft dropped: a pending card holds its slot',
+    {
+      agentRunId,
+      triggerReason: args.triggerReason,
+      reason: drop.reason,
+      protectedDraftId: drop.protectedDraftId,
+      triggers: args.triggers,
+      viaRaceRecovery: args.viaRaceRecovery,
+    },
+  )
   await captureDraftDropped({
     agentRunId,
     venueId: ctx.venue.id,
@@ -133,12 +140,53 @@ function scanMessageIdOf(trigger: FollowupTrigger): string | null {
   return trigger.instagramScanArrival?.scanMessageId ?? null
 }
 
-function scanReplyCheckFor(trigger: FollowupTrigger): { inboundMessageId: string } | 'exempt' {
+/**
+ * The message this proactive send answers, or null.
+ *
+ * TAC-560 widened this from the scan row alone. Both reasons that reach
+ * dispatchReply have to name something, for the same reason: a reply naming no
+ * inbound is read by the Instagram reply check as answering everything before
+ * it, so a send that named nothing would silence the agent's own reply to
+ * whatever the guest says next.
+ *
+ * A warm close names OUR OWN last outbound, not an inbound, and that is the
+ * honest answer to "what is this a reply to": it is the message the guest went
+ * quiet after. The reply check compares timestamps and ids, not directions.
+ */
+function answeredMessageIdOf(trigger: FollowupTrigger): string | null {
+  return trigger.warmClose?.answersMessageId ?? scanMessageIdOf(trigger)
+}
+
+/**
+ * The reply check's input, or 'exempt'.
+ *
+ * A WARM CLOSE IS EXEMPT, and this is the one place the two dispatchReply reasons
+ * genuinely differ. That check asks "has this guest's MESSAGE already been
+ * answered", keyed on an inbound row; a warm close answers no message, so there
+ * is no inbound to hand it and an outbound id would resolve to nothing.
+ *
+ * What the check exists to prevent is handled upstream instead, and more
+ * directly: the processor's candidate scan takes the guest's NEWEST message,
+ * whatever it is. A reply staff typed by hand arrives as an echo, which is an
+ * outbound row that reached the guest, so it BECOMES the anchor and the pause
+ * restarts from it. Staff answering by hand delays the close rather than racing
+ * it.
+ *
+ * Note this is not the same as exempting the close from naming what it follows.
+ * It still sets reply_to_message_id (see answeredMessageIdOf), which is what
+ * stops it reading as an answer to everything before it.
+ */
+function replyCheckFor(
+  trigger: FollowupTrigger,
+): { inboundMessageId: string } | 'exempt' {
+  if (trigger.reason === 'warm_close') return 'exempt'
   const id = scanMessageIdOf(trigger)
   return id === null ? 'exempt' : { inboundMessageId: id }
 }
 
-function triggerToCategory(reason: FollowupTrigger['reason']): Classification['category'] {
+function triggerToCategory(
+  reason: FollowupTrigger['reason'],
+): Classification['category'] {
   switch (reason) {
     case 'day_1':
     case 'day_3':
@@ -170,6 +218,21 @@ function triggerToCategory(reason: FollowupTrigger['reason']): Classification['c
     // which is false for the common case here.
     case 'instagram_scan_arrival':
       return 'guest_arrived'
+    // TAC-560. `acknowledgment` and NOT a category of its own, deliberately: a
+    // new messages.category value needs a CHECK widening on `messages`, which is
+    // a hard stop (db/migrations/CLAUDE.md), and the close does not need one. It
+    // IS a sign-off, which is what that category means since migration 016.
+    //
+    // The cost is honest and recorded: a warm close is not separable by
+    // `category` in SQL. It is separable by guests.warm_close_sent_at and by the
+    // warm_close_sent PostHog event.
+    //
+    // The category's own INSTRUCTIONS would be false here ("The guest is
+    // wrapping up the thread or signing off" is untrue when the guest sent
+    // nothing), so composePrompt replaces them on this turn via the warmClose
+    // flag. See lib/ai/prompts/categories/warm-close.ts.
+    case 'warm_close':
+      return 'acknowledgment'
   }
 }
 
@@ -317,10 +380,38 @@ export async function handleFollowup(input: {
     // still re-derives it immediately before going out
     // (dispatch-instagram-reply.ts), so nothing here is trusting the window
     // rather than checking it.
-    const isInstagramScanArrival = input.trigger.reason === 'instagram_scan_arrival'
-    if (ctx.conversationChannel !== 'text' && !isInstagramScanArrival) {
+    //
+    // TAC-560 carves out the SECOND, on a stronger version of the same argument.
+    // A warm close fires TEN MINUTES after our own last message, which itself
+    // answered something the guest sent, so the window is not merely likely open,
+    // it cannot have closed. The send still re-derives it.
+    //
+    // The mirror of that carve-out is the refusal directly below it: ruled
+    // 2026-09-29, the warm close is INSTAGRAM ONLY for now, so a text
+    // conversation is refused here rather than routed. The SMS arm is a
+    // follow-up.
+    const isInstagramScanArrival =
+      input.trigger.reason === 'instagram_scan_arrival'
+    const isWarmClose = input.trigger.reason === 'warm_close'
+    const routesThroughDispatchReply = isInstagramScanArrival || isWarmClose
+    if (isWarmClose && ctx.conversationChannel !== 'instagram') {
+      const reason = 'warm_close_is_instagram_only'
+      console.warn(
+        '[agent] warm close refused: not an Instagram conversation',
+        {
+          agentRunId,
+          guestId: ctx.guest.id,
+          channel: ctx.conversationChannel,
+        },
+      )
+      trace.update({ output: { status: 'refused', reason } })
+      return { status: 'refused', reason }
+    }
+    if (ctx.conversationChannel !== 'text' && !routesThroughDispatchReply) {
       const reason =
-        ctx.conversationChannel === 'instagram' ? 'instagram_followups_are_manual' : 'channel_unresolved'
+        ctx.conversationChannel === 'instagram'
+          ? 'instagram_followups_are_manual'
+          : 'channel_unresolved'
       console.warn('[agent] followup refused: not a text conversation', {
         agentRunId,
         guestId: ctx.guest.id,
@@ -343,24 +434,28 @@ export async function handleFollowup(input: {
       // trigger, not a guest message — the crisis signal is never applicable
       // on this path.
       crisisSafety: false,
-    // TAC-397: a followup has no guest inbound, so there is nothing that could
-    // be correcting a pending reply. False here keeps a followup on the
-    // own-card path, which is what resolveConversationDisposition expects.
+      // TAC-397: a followup has no guest inbound, so there is nothing that could
+      // be correcting a pending reply. False here keeps a followup on the
+      // own-card path, which is what resolveConversationDisposition expects.
       correctsPendingReply: false,
     }
 
-    // Load the static voice pack (decision 0007; span name kept for
+    // Load the static voice pack (decision 0008; span name kept for
     // Langfuse continuity)
-    const retrieveSpan = trace.span('retrieve', { triggerReason: input.trigger.reason })
+    const retrieveSpan = trace.span('retrieve', {
+      triggerReason: input.trigger.reason,
+    })
     try {
       ctx.corpus = await retrieveCorpusStage(ctx)
       retrieveSpan.end({
         output: { packSize: ctx.corpus.length },
-        content: trace.captureContent ? buildCorpusContent(ctx.corpus) : undefined,
+        content: trace.captureContent
+          ? buildCorpusContent(ctx.corpus)
+          : undefined,
       })
-      console.log('[agent] followup corpus retrieved', {
+      console.log('[agent] followup voice pack loaded', {
         agentRunId,
-        matchCount: ctx.corpus.length,
+        packSize: ctx.corpus.length,
       })
     } catch (e) {
       const errMsg = e instanceof Error ? e.message : String(e)
@@ -448,13 +543,18 @@ export async function handleFollowup(input: {
     }
     if (gen.status === 'refused') {
       gen.attemptScores.forEach((score, i) => {
-        const attemptSpan = generateSpan.span(`generate.attempt_${i + 1}`, { attempt: i + 1 })
+        const attemptSpan = generateSpan.span(`generate.attempt_${i + 1}`, {
+          attempt: i + 1,
+        })
         attemptSpan.end({ output: { voiceFidelity: score } })
       })
       generateSpan.end({
         level: 'WARNING',
         statusMessage: 'fidelity_loop_exhausted',
-        output: { attemptScores: gen.attemptScores, finalScore: gen.finalScore },
+        output: {
+          attemptScores: gen.attemptScores,
+          finalScore: gen.finalScore,
+        },
       })
       await fireRedAlert({
         agentRunId,
@@ -465,10 +565,16 @@ export async function handleFollowup(input: {
         errorMessage: 'fidelity_loop_exhausted',
         extra: { attemptScores: gen.attemptScores, finalScore: gen.finalScore },
       })
-      return { status: 'refused', reason: 'low_fidelity', attemptScores: gen.attemptScores }
+      return {
+        status: 'refused',
+        reason: 'low_fidelity',
+        attemptScores: gen.attemptScores,
+      }
     }
     gen.result.attemptScores.forEach((score, i) => {
-      const attemptSpan = generateSpan.span(`generate.attempt_${i + 1}`, { attempt: i + 1 })
+      const attemptSpan = generateSpan.span(`generate.attempt_${i + 1}`, {
+        attempt: i + 1,
+      })
       const attempt = gen.result.attemptHistory[i]
       attemptSpan.end({
         output: { voiceFidelity: score },
@@ -483,7 +589,9 @@ export async function handleFollowup(input: {
         promptVersion: gen.result.promptVersion,
         bodyLength: gen.result.body.length,
       },
-      content: trace.captureContent ? buildGenerateContent(gen.result) : undefined,
+      content: trace.captureContent
+        ? buildGenerateContent(gen.result)
+        : undefined,
     })
     generatedBody = gen.result.body
     console.log('[agent] followup generated', {
@@ -634,13 +742,16 @@ export async function handleFollowup(input: {
       verifyClosedVenueArrivalStage(ctx, gen.result),
     ])
     if (groundingSettled.status === 'rejected') {
-      console.warn('[agent] followup verifyGroundingStage threw unexpectedly (degrading to skipped)', {
-        agentRunId,
-        error:
-          groundingSettled.reason instanceof Error
-            ? groundingSettled.reason.message
-            : String(groundingSettled.reason),
-      })
+      console.warn(
+        '[agent] followup verifyGroundingStage threw unexpectedly (degrading to skipped)',
+        {
+          agentRunId,
+          error:
+            groundingSettled.reason instanceof Error
+              ? groundingSettled.reason.message
+              : String(groundingSettled.reason),
+        },
+      )
     }
     if (prosePromiseSettled.status === 'rejected') {
       console.warn(
@@ -679,7 +790,9 @@ export async function handleFollowup(input: {
       )
     }
     const groundingBackstop: GroundingBackstopResult =
-      groundingSettled.status === 'fulfilled' ? groundingSettled.value : { status: 'skipped' }
+      groundingSettled.status === 'fulfilled'
+        ? groundingSettled.value
+        : { status: 'skipped' }
     const mechanicOfferBackstop: MechanicOfferBackstopResult =
       mechanicOfferSettled.status === 'fulfilled'
         ? mechanicOfferSettled.value
@@ -710,17 +823,26 @@ export async function handleFollowup(input: {
           }
 
     if (groundingBackstop.status === 'flagged') {
-      console.warn('[agent] followup grounding backstop caught an unverified claim', {
-        agentRunId,
-        claimCount: groundingBackstop.claims.length,
-      })
+      console.warn(
+        '[agent] followup grounding backstop caught an unverified claim',
+        {
+          agentRunId,
+          claimCount: groundingBackstop.claims.length,
+        },
+      )
     }
     // TAC-424: see handle-inbound.ts for why both outcomes log the same line.
-    if (groundingBackstop.status === 'truncated' || groundingBackstop.status === 'degraded') {
-      console.warn('[agent] followup grounding backstop did not complete — queuing (fail closed)', {
-        agentRunId,
-        outcome: groundingBackstop.status,
-      })
+    if (
+      groundingBackstop.status === 'truncated' ||
+      groundingBackstop.status === 'degraded'
+    ) {
+      console.warn(
+        '[agent] followup grounding backstop did not complete — queuing (fail closed)',
+        {
+          agentRunId,
+          outcome: groundingBackstop.status,
+        },
+      )
     }
     if (
       mechanicOfferBackstop.status === 'flagged' ||
@@ -772,7 +894,8 @@ export async function handleFollowup(input: {
       agentRunId,
       triggerReason: input.trigger.reason,
       action: approval.action,
-      primaryTrigger: approval.action === 'queue' ? approval.primaryTrigger : null,
+      primaryTrigger:
+        approval.action === 'queue' ? approval.primaryTrigger : null,
       triggers: approval.action === 'queue' ? approval.triggers : [],
       voiceFidelity: gen.result.voiceFidelity,
       modelRequiresApproval: gen.result.requiresOperatorApproval,
@@ -818,7 +941,8 @@ export async function handleFollowup(input: {
             pendingCancellation: approval.pendingCancellation,
             reviewTriggers: approval.triggers,
             ungroundedClaims: approval.ungroundedClaims,
-            callerPolicy: input.trigger.reason === 'manual' ? 'never_regen' : 'regen',
+            callerPolicy:
+              input.trigger.reason === 'manual' ? 'never_regen' : 'regen',
             // TAC-397: always false on this path — a followup has no guest
             // message, so its disposition is never 'correction'. Stated
             // rather than omitted so the value is a decision, not a default.
@@ -863,13 +987,20 @@ export async function handleFollowup(input: {
           // TAC-397: unreachable — a followup's disposition is always
           // own_card, having no guest message to judge. Handled because that
           // guarantee lives in pending-slots.ts, not here.
-          console.warn('[agent] followup persist returned silenced — unexpected', {
-            agentRunId,
-            guestId: ctx.guest.id,
-          })
+          console.warn(
+            '[agent] followup persist returned silenced — unexpected',
+            {
+              agentRunId,
+              guestId: ctx.guest.id,
+            },
+          )
           return { status: 'silenced' }
         }
-        const { outboundMessageId, action: persistAction, priorReviewReason } = persistResult
+        const {
+          outboundMessageId,
+          action: persistAction,
+          priorReviewReason,
+        } = persistResult
         queueSpan.end({
           output: {
             outboundMessageId,
@@ -983,7 +1114,11 @@ export async function handleFollowup(input: {
         }
       } catch (e) {
         const errMsg = e instanceof Error ? e.message : String(e)
-        queueSpan.end({ level: 'ERROR', statusMessage: errMsg, output: { stage: 'persist' } })
+        queueSpan.end({
+          level: 'ERROR',
+          statusMessage: errMsg,
+          output: { stage: 'persist' },
+        })
         return { status: 'failed', stage: 'persist', error: errMsg }
       }
     }
@@ -1030,10 +1165,13 @@ export async function handleFollowup(input: {
     // if a future change gives followups a disposition, this is a compile
     // error at the right place instead of a silent send.
     if (approval.action === 'silence') {
-      console.warn('[agent] followup silenced — unexpected: a followup has no message to judge', {
-        agentRunId,
-        guestId: ctx.guest.id,
-      })
+      console.warn(
+        '[agent] followup silenced — unexpected: a followup has no message to judge',
+        {
+          agentRunId,
+          guestId: ctx.guest.id,
+        },
+      )
       return { status: 'silenced' }
     }
     const demoBypassReviewReason: 'demo_bypass' | undefined = approval.reason
@@ -1055,17 +1193,27 @@ export async function handleFollowup(input: {
       // on the reason makes the blast radius on the follow-up cron and the
       // Command Center button provably zero rather than argued. A test pins
       // that every other reason still calls scheduleAndSend.
-      const dispatched = isInstagramScanArrival
+      const dispatched = routesThroughDispatchReply
         ? await dispatchReply(ctx, gen.result, {
             skipHumanFeelDelay: true,
             reviewReason: demoBypassReviewReason,
+            // TAC-560: the warm close is ONE message, always. Rule 15 asks for
+            // one and so does this ticket's acceptance criteria, and
+            // resolveDispatchBubbles would otherwise split a two-sentence close
+            // on a fair coin about half the time. NEVER_SPLIT_RNG removes the
+            // coin rather than tuning it, using the rng parameter TAC-319 built
+            // for exactly this kind of caller.
+            //
+            // A scan greeting keeps the ordinary coin: nothing in TAC-536 asks
+            // for one bubble.
+            ...(isWarmClose ? { rng: NEVER_SPLIT_RNG } : {}),
             // The scan row. NOT OPTIONAL: a reply naming no inbound is read by
             // the reply check as answering everything before it, so a greeting
             // that named nothing would silence the agent's own reply to
             // whatever the guest says next. Same reason the holding message
             // passes it.
-            answersInboundId: scanMessageIdOf(input.trigger) ?? undefined,
-            replyCheck: scanReplyCheckFor(input.trigger),
+            answersInboundId: answeredMessageIdOf(input.trigger) ?? undefined,
+            replyCheck: replyCheckFor(input.trigger),
             onUndelivered: 'card',
           })
         : {
@@ -1093,7 +1241,12 @@ export async function handleFollowup(input: {
         })
         return undeliveredAgentResult(ctx, dispatched)
       }
-      const { outboundMessageId, providerMessageId, generationId, bubbleCount } = dispatched
+      const {
+        outboundMessageId,
+        providerMessageId,
+        generationId,
+        bubbleCount,
+      } = dispatched
       sendSpan.end({
         output: {
           outboundMessageId,
@@ -1134,12 +1287,19 @@ export async function handleFollowup(input: {
       return { status: 'sent', outboundMessageId }
     } catch (e) {
       const errMsg = e instanceof Error ? e.message : String(e)
-      const stage: 'send' | 'persist' = errMsg.includes('persist failed') ? 'persist' : 'send'
-      sendSpan.end({ level: 'ERROR', statusMessage: errMsg, output: { stage } })
+      const stage: 'send' | 'persist' = errMsg.includes('persist failed')
+        ? 'persist'
+        : 'send'
+      sendSpan.end({
+        level: 'ERROR',
+        statusMessage: errMsg,
+        output: { stage },
+      })
       return { status: 'failed', stage, error: errMsg }
     }
   } catch (unexpected) {
-    const errMsg = unexpected instanceof Error ? unexpected.message : String(unexpected)
+    const errMsg =
+      unexpected instanceof Error ? unexpected.message : String(unexpected)
     const errStack = unexpected instanceof Error ? unexpected.stack : undefined
     trace.update({ output: { status: 'failed', error: errMsg } })
     await fireRedAlert({
@@ -1154,7 +1314,7 @@ export async function handleFollowup(input: {
     return { status: 'failed', stage: 'context_build', error: errMsg }
   } finally {
     const totalElapsedMs = Date.now() - start
-    if (totalElapsedMs > AGENT_LATENCY_HIGH_THRESHOLD_MS) {
+    if (isAgentLatencyHigh('followup', totalElapsedMs)) {
       await captureAgentLatencyHigh({
         agentRunId,
         venueId: ctx?.venue.id ?? input.venueId,

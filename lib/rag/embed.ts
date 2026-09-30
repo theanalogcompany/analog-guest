@@ -1,4 +1,8 @@
-import { EMBEDDING_DIMENSIONS, EMBEDDING_MODEL, getVoyageClient } from './client'
+import {
+  EMBEDDING_DIMENSIONS,
+  EMBEDDING_MODEL,
+  getVoyageClient,
+} from './client'
 import type { EmbedTextResult, EmbeddingInputType, RAGResult } from './types'
 
 /**

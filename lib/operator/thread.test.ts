@@ -23,8 +23,14 @@ const CONTRACT_REACHED_GUEST_FILTER =
 // The helper makes two sequential .from('messages') calls. We dispatch the
 // second-call mock from a queue, so each test can stage exactly the responses
 // it needs without coupling test order to mock-call order.
-let nextSelectResponses: Array<{ data: unknown; error: { message: string } | null }> = []
-let nextMaybeSingleResponse: { data: unknown; error: { message: string } | null } = {
+let nextSelectResponses: Array<{
+  data: unknown
+  error: { message: string } | null
+}> = []
+let nextMaybeSingleResponse: {
+  data: unknown
+  error: { message: string } | null
+} = {
   data: null,
   error: null,
 }
@@ -73,7 +79,10 @@ afterEach(() => {
 
 describe('loadGuestThread', () => {
   it('short-circuits to out_of_allowlist when the operator has no venue grants', async () => {
-    const result = await loadGuestThread({ messageId: VALID_UUID, venueScope: grantedVenues([]) })
+    const result = await loadGuestThread({
+      messageId: VALID_UUID,
+      venueScope: grantedVenues([]),
+    })
     expect(result).toEqual({ ok: false, errorCode: 'out_of_allowlist' })
     expect(fromMock).not.toHaveBeenCalled()
   })
@@ -88,7 +97,6 @@ describe('loadGuestThread', () => {
     expect(eqIdMock).toHaveBeenCalledWith('id', VALID_UUID)
   })
 
-
   // TAC-530, code review. Bearer-only path: a fleet-wide scope is producible
   // only by the analog-admin cookie path and must not be honoured here. Before
   // bearerAllowsVenue this GRANTED, returning the thread for any venue.
@@ -97,7 +105,10 @@ describe('loadGuestThread', () => {
       data: { venue_id: VENUE_B, guest_id: GUEST_X },
       error: null,
     }
-    const result = await loadGuestThread({ messageId: VALID_UUID, venueScope: ALL_VENUES })
+    const result = await loadGuestThread({
+      messageId: VALID_UUID,
+      venueScope: ALL_VENUES,
+    })
     expect(result).toEqual({ ok: false, errorCode: 'out_of_allowlist' })
   })
 
@@ -125,11 +136,36 @@ describe('loadGuestThread', () => {
     nextSelectResponses = [
       {
         data: [
-          { id: 'm5', direction: 'outbound', body: 'fifth', created_at: '2026-05-26T18:14:55Z' },
-          { id: 'm4', direction: 'inbound', body: 'fourth', created_at: '2026-05-26T18:14:54Z' },
-          { id: 'm3', direction: 'outbound', body: 'third', created_at: '2026-05-26T18:14:53Z' },
-          { id: 'm2', direction: 'inbound', body: 'second', created_at: '2026-05-26T18:14:52Z' },
-          { id: 'm1', direction: 'inbound', body: 'first', created_at: '2026-05-26T18:14:51Z' },
+          {
+            id: 'm5',
+            direction: 'outbound',
+            body: 'fifth',
+            created_at: '2026-05-26T18:14:55Z',
+          },
+          {
+            id: 'm4',
+            direction: 'inbound',
+            body: 'fourth',
+            created_at: '2026-05-26T18:14:54Z',
+          },
+          {
+            id: 'm3',
+            direction: 'outbound',
+            body: 'third',
+            created_at: '2026-05-26T18:14:53Z',
+          },
+          {
+            id: 'm2',
+            direction: 'inbound',
+            body: 'second',
+            created_at: '2026-05-26T18:14:52Z',
+          },
+          {
+            id: 'm1',
+            direction: 'inbound',
+            body: 'first',
+            created_at: '2026-05-26T18:14:51Z',
+          },
         ],
         error: null,
       },
@@ -140,7 +176,13 @@ describe('loadGuestThread', () => {
     })
     expect(result.ok).toBe(true)
     if (result.ok) {
-      expect(result.messages.map((m) => m.id)).toEqual(['m1', 'm2', 'm3', 'm4', 'm5'])
+      expect(result.messages.map((m) => m.id)).toEqual([
+        'm1',
+        'm2',
+        'm3',
+        'm4',
+        'm5',
+      ])
     }
     // Verify the SQL shape: equal-eq on (venue_id, guest_id), neq body '',
     // the reached-guest filter, order DESC, limit 200.
@@ -191,9 +233,24 @@ describe('loadGuestThread', () => {
     nextSelectResponses = [
       {
         data: [
-          { id: 'm3', direction: 'outbound', body: 'good', created_at: '2026-05-26T18:14:53Z' },
-          { id: 'm2', direction: 'sideways', body: 'bad', created_at: '2026-05-26T18:14:52Z' },
-          { id: 'm1', direction: 'inbound', body: 'good', created_at: '2026-05-26T18:14:51Z' },
+          {
+            id: 'm3',
+            direction: 'outbound',
+            body: 'good',
+            created_at: '2026-05-26T18:14:53Z',
+          },
+          {
+            id: 'm2',
+            direction: 'sideways',
+            body: 'bad',
+            created_at: '2026-05-26T18:14:52Z',
+          },
+          {
+            id: 'm1',
+            direction: 'inbound',
+            body: 'good',
+            created_at: '2026-05-26T18:14:51Z',
+          },
         ],
         error: null,
       },
@@ -209,7 +266,10 @@ describe('loadGuestThread', () => {
   })
 
   it('returns db_error on first-lookup failure', async () => {
-    nextMaybeSingleResponse = { data: null, error: { message: 'connection lost' } }
+    nextMaybeSingleResponse = {
+      data: null,
+      error: { message: 'connection lost' },
+    }
     const result = await loadGuestThread({
       messageId: VALID_UUID,
       venueScope: grantedVenues([VENUE_A]),
@@ -264,7 +324,10 @@ describe('loadGuestThread: only messages that reached the guest (TAC-395)', () =
       error: null,
     }
     nextSelectResponses = [{ data: [], error: null }]
-    await loadGuestThread({ messageId: VALID_UUID, venueScope: grantedVenues([VENUE_A]) })
+    await loadGuestThread({
+      messageId: VALID_UUID,
+      venueScope: grantedVenues([VENUE_A]),
+    })
     expect(orMock).toHaveBeenCalledTimes(1)
     expect(orMock).toHaveBeenCalledWith(CONTRACT_REACHED_GUEST_FILTER)
   })
@@ -279,16 +342,29 @@ describe('loadGuestThread: only messages that reached the guest (TAC-395)', () =
     nextSelectResponses = [
       {
         data: [
-          { id: 'm1', direction: 'inbound', body: 'what time do you open on sundaus', created_at: '2026-09-14T16:31:23Z' },
+          {
+            id: 'm1',
+            direction: 'inbound',
+            body: 'what time do you open on sundaus',
+            created_at: '2026-09-14T16:31:23Z',
+          },
         ],
         error: null,
       },
     ]
-    const result = await loadGuestThread({ messageId: VALID_UUID, venueScope: grantedVenues([VENUE_A]) })
+    const result = await loadGuestThread({
+      messageId: VALID_UUID,
+      venueScope: grantedVenues([VENUE_A]),
+    })
     expect(result).toEqual({
       ok: true,
       messages: [
-        { id: 'm1', direction: 'inbound', body: 'what time do you open on sundaus', createdAt: '2026-09-14T16:31:23Z' },
+        {
+          id: 'm1',
+          direction: 'inbound',
+          body: 'what time do you open on sundaus',
+          createdAt: '2026-09-14T16:31:23Z',
+        },
       ],
     })
     expect(selectMock).toHaveBeenCalledWith('venue_id, guest_id')
@@ -308,14 +384,38 @@ describe('loadGuestThread: only messages that reached the guest (TAC-395)', () =
     nextSelectResponses = [
       {
         data: [
-          { id: 'm3', direction: 'outbound', body: 'draft', created_at: '2026-09-14T16:31:50Z', status: 'pending_review', review_state: 'pending' },
-          { id: 'm2', direction: 'outbound', body: 'skipped', created_at: '2026-09-14T16:26:34Z', status: 'pending_review', review_state: 'skipped' },
-          { id: 'm1', direction: 'inbound', body: 'hi', created_at: '2026-09-14T16:26:03Z', status: 'received', review_state: null },
+          {
+            id: 'm3',
+            direction: 'outbound',
+            body: 'draft',
+            created_at: '2026-09-14T16:31:50Z',
+            status: 'pending_review',
+            review_state: 'pending',
+          },
+          {
+            id: 'm2',
+            direction: 'outbound',
+            body: 'skipped',
+            created_at: '2026-09-14T16:26:34Z',
+            status: 'pending_review',
+            review_state: 'skipped',
+          },
+          {
+            id: 'm1',
+            direction: 'inbound',
+            body: 'hi',
+            created_at: '2026-09-14T16:26:03Z',
+            status: 'received',
+            review_state: null,
+          },
         ],
         error: null,
       },
     ]
-    const result = await loadGuestThread({ messageId: VALID_UUID, venueScope: grantedVenues([VENUE_A]) })
+    const result = await loadGuestThread({
+      messageId: VALID_UUID,
+      venueScope: grantedVenues([VENUE_A]),
+    })
     expect(result.ok).toBe(true)
     if (result.ok) {
       expect(result.messages.map((m) => m.id)).toEqual(['m1', 'm2', 'm3'])

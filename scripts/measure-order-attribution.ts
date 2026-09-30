@@ -30,10 +30,23 @@ import { readFileSync } from 'node:fs'
 import { extractRecentVisits } from '@/lib/agent/extract-recent-visits'
 import { generateMessage } from '@/lib/ai/generate-message'
 import { formatTimeDelta } from '@/lib/ai/prompts/serializers'
-import type { GenerateMessageInput, RecentMessage, Visit, VoiceCorpusChunk } from '@/lib/ai/types'
-import { verifyGrounding, VERIFY_GROUNDING_PROMPT_VERSION } from '@/lib/ai/verify-grounding'
+import type {
+  GenerateMessageInput,
+  RecentMessage,
+  Visit,
+  VoiceCorpusChunk,
+} from '@/lib/ai/types'
+import {
+  verifyGrounding,
+  VERIFY_GROUNDING_PROMPT_VERSION,
+} from '@/lib/ai/verify-grounding'
 import { selectVoicePack } from '@/lib/rag'
-import { BrandPersonaSchema, VenueInfoSchema, type BrandPersona, type VenueInfo } from '@/lib/schemas'
+import {
+  BrandPersonaSchema,
+  VenueInfoSchema,
+  type BrandPersona,
+  type VenueInfo,
+} from '@/lib/schemas'
 import { filterActiveContext } from '@/lib/schemas/venue-info'
 import type { MessageChannel } from '@/lib/schemas/message-channel'
 import { scoreConflationClaims } from './measure-order-attribution-scoring'
@@ -121,7 +134,12 @@ const VARIANT_1: Variant = {
   whatThisChecks:
     'Does the reply claim a repeat/streak that never happened? This is the incident itself, replayed. The bar for a proposed fix is 0/N here; the baseline under the CURRENT prompt is unknown until this runs.',
   recentMessages: [
-    { direction: 'inbound', body: 'i got the blossom tonic', createdAt: minutesAgo(2), delivery: 'delivered' },
+    {
+      direction: 'inbound',
+      body: 'i got the blossom tonic',
+      createdAt: minutesAgo(2),
+      delivery: 'delivered',
+    },
     {
       direction: 'outbound',
       body: "one of my favorites, honestly. how'd you like it?",
@@ -144,7 +162,12 @@ const VARIANT_2: Variant = {
   whatThisChecks:
     'Guardrail against overcorrection: a flag here on a genuine repeat would mean a fix suppressed something true. The bar is UNCHANGED (0 new flags) before and after any prompt change — this variant should stay clean under both the current prompt and any proposed fix.',
   recentMessages: [
-    { direction: 'inbound', body: 'i got the blossom tonic', createdAt: minutesAgo(2), delivery: 'delivered' },
+    {
+      direction: 'inbound',
+      body: 'i got the blossom tonic',
+      createdAt: minutesAgo(2),
+      delivery: 'delivered',
+    },
     {
       direction: 'outbound',
       body: "one of my favorites, honestly. how'd you like it?",
@@ -164,7 +187,8 @@ const VARIANT_3: Variant = {
   whatThisChecks:
     'Does the conflation survive when there is no cross-turn attribution step at all — both facts sit in one message? A different flag rate here than variant 1 would mean the failure is turn-boundary-specific, not a general attribution error.',
   recentMessages: [],
-  currentMessage: 'i got the blossom tonic today and the pink panther yesterday',
+  currentMessage:
+    'i got the blossom tonic today and the pink panther yesterday',
 }
 
 // --- Variant 4: the incident WITH the structured order history it really had.
@@ -228,8 +252,14 @@ const VARIANT_4_VISITS: Visit[] = extractRecentVisits(
 // CLAUDE.md bans for admin surfaces under TAC-381. That ban exists so a
 // display surface cannot be coupled to the agent's prompt vocabulary; this
 // script's whole job is to assert on that vocabulary.)
-const VARIANT_4_RENDERED_DELTA = formatTimeDelta(VARIANT_4_VISITS[0].visitedAt, RUN_STARTED_AT)
-if (VARIANT_4_VISITS.length !== 1 || VARIANT_4_VISITS[0].items.join(',') !== 'blossom tonic') {
+const VARIANT_4_RENDERED_DELTA = formatTimeDelta(
+  VARIANT_4_VISITS[0].visitedAt,
+  RUN_STARTED_AT,
+)
+if (
+  VARIANT_4_VISITS.length !== 1 ||
+  VARIANT_4_VISITS[0].items.join(',') !== 'blossom tonic'
+) {
   throw new Error(
     `variant 4 visit reconstruction failed: expected one visit reading "blossom tonic", got ${JSON.stringify(VARIANT_4_VISITS)}`,
   )
@@ -244,13 +274,18 @@ const VARIANT_4: Variant = {
   id: 4,
   label: 'incident + the ## Visit history the live prompt actually had',
   whatThisChecks:
-    'The same exchange as variant 1, plus the structured Blossom Tonic transaction the live prompt carried in ## Visit history. Variant 1 came back 0/20 without it, so this is the standing hypothesis for why the incident happened and variant 1 did not reproduce it: the same order fact present twice, as structured history and as the guest\'s own words. Same bar as variant 1 — 0/N fabrications. A rate above variant 1\'s here localises the defect to the duplicate; a rate equal to it rules the block out.',
+    "The same exchange as variant 1, plus the structured Blossom Tonic transaction the live prompt carried in ## Visit history. Variant 1 came back 0/20 without it, so this is the standing hypothesis for why the incident happened and variant 1 did not reproduce it: the same order fact present twice, as structured history and as the guest's own words. Same bar as variant 1 — 0/N fabrications. A rate above variant 1's here localises the defect to the duplicate; a rate equal to it rules the block out.",
   recentMessages: VARIANT_1.recentMessages,
   currentMessage: VARIANT_1.currentMessage,
   recentVisits: VARIANT_4_VISITS,
 }
 
-const VARIANTS: readonly Variant[] = [VARIANT_1, VARIANT_2, VARIANT_3, VARIANT_4]
+const VARIANTS: readonly Variant[] = [
+  VARIANT_1,
+  VARIANT_2,
+  VARIANT_3,
+  VARIANT_4,
+]
 
 type VenueExport = {
   venue_slug: string
@@ -288,11 +323,15 @@ function loadLeMils(): LoadedVenue {
 
   const persona = BrandPersonaSchema.safeParse(raw.brand_persona)
   if (!persona.success) {
-    throw new Error(`brand_persona failed BrandPersonaSchema: ${JSON.stringify(persona.error.issues)}`)
+    throw new Error(
+      `brand_persona failed BrandPersonaSchema: ${JSON.stringify(persona.error.issues)}`,
+    )
   }
   const venueInfo = VenueInfoSchema.safeParse(raw.venue_info)
   if (!venueInfo.success) {
-    throw new Error(`venue_info failed VenueInfoSchema: ${JSON.stringify(venueInfo.error.issues)}`)
+    throw new Error(
+      `venue_info failed VenueInfoSchema: ${JSON.stringify(venueInfo.error.issues)}`,
+    )
   }
   if (!Array.isArray(raw.voice_corpus) || raw.voice_corpus.length === 0) {
     throw new Error('voice_corpus is missing or empty in the export')
@@ -304,7 +343,10 @@ function loadLeMils(): LoadedVenue {
     persona: persona.data,
     venueInfo: {
       ...venueInfo.data,
-      currentContext: filterActiveContext(venueInfo.data.currentContext, RUN_STARTED_AT),
+      currentContext: filterActiveContext(
+        venueInfo.data.currentContext,
+        RUN_STARTED_AT,
+      ),
     },
     corpus: raw.voice_corpus,
   }
@@ -347,7 +389,10 @@ function buildVoicePack(): VoiceCorpusChunk[] {
   }))
 }
 
-function buildInput(variant: Variant, ragChunks: VoiceCorpusChunk[]): GenerateMessageInput {
+function buildInput(
+  variant: Variant,
+  ragChunks: VoiceCorpusChunk[],
+): GenerateMessageInput {
   return {
     category: 'reply',
     persona: LE_MILS.persona,
@@ -388,7 +433,9 @@ function buildInput(variant: Variant, ragChunks: VoiceCorpusChunk[]): GenerateMe
 
 type GenerationOutcome = {
   attempt: number
-  generation: { ok: true; body: string; voiceFidelity: number } | { ok: false; error: string }
+  generation:
+    | { ok: true; body: string; voiceFidelity: number }
+    | { ok: false; error: string }
   // null only when generation itself failed, so verifyGrounding never ran.
   verify:
     | { ok: true; hasUngroundedClaim: boolean; ungroundedClaims: string[] }
@@ -435,7 +482,11 @@ async function runOneAttempt(
   if (!verifyResult.ok) {
     return {
       attempt,
-      generation: { ok: true, body: genResult.data.body, voiceFidelity: genResult.data.voiceFidelity },
+      generation: {
+        ok: true,
+        body: genResult.data.body,
+        voiceFidelity: genResult.data.voiceFidelity,
+      },
       verify: { ok: false, error: verifyResult.error },
       conflationShaped: false,
       matchedClaims: [],
@@ -445,7 +496,11 @@ async function runOneAttempt(
   const score = scoreConflationClaims(verifyResult.data.ungroundedClaims)
   return {
     attempt,
-    generation: { ok: true, body: genResult.data.body, voiceFidelity: genResult.data.voiceFidelity },
+    generation: {
+      ok: true,
+      body: genResult.data.body,
+      voiceFidelity: genResult.data.voiceFidelity,
+    },
     verify: {
       ok: true,
       hasUngroundedClaim: verifyResult.data.hasUngroundedClaim,
@@ -456,13 +511,18 @@ async function runOneAttempt(
   }
 }
 
-async function runVariant(variant: Variant, n: number): Promise<GenerationOutcome[]> {
-  // The voice pack is static (decision 0007): identical for every variant
+async function runVariant(
+  variant: Variant,
+  n: number,
+): Promise<GenerationOutcome[]> {
+  // The voice pack is static (decision 0008): identical for every variant
   // and attempt, exactly as production now behaves. Printing it makes the
   // run auditable — which voice examples the model saw is part of what a
   // later "after" run has to match.
   const ragChunks = buildVoicePack()
-  console.log(`  voice pack: ${ragChunks.length} entries (static, selectVoicePack ordering):`)
+  console.log(
+    `  voice pack: ${ragChunks.length} entries (static, selectVoicePack ordering):`,
+  )
   for (const c of ragChunks) {
     console.log(`    [${c.sourceType}] ${JSON.stringify(c.text.slice(0, 90))}`)
   }
@@ -471,8 +531,14 @@ async function runVariant(variant: Variant, n: number): Promise<GenerationOutcom
   for (let i = 1; i <= n; i++) {
     const outcome = await runOneAttempt(variant, i, ragChunks)
     outcomes.push(outcome)
-    const marker = outcome.conflationShaped ? 'CONFLATION' : outcome.verify?.ok && outcome.verify.hasUngroundedClaim ? 'flagged (other)' : 'clean'
-    const body = outcome.generation.ok ? JSON.stringify(outcome.generation.body) : `GENERATION FAILED: ${outcome.generation.error}`
+    const marker = outcome.conflationShaped
+      ? 'CONFLATION'
+      : outcome.verify?.ok && outcome.verify.hasUngroundedClaim
+        ? 'flagged (other)'
+        : 'clean'
+    const body = outcome.generation.ok
+      ? JSON.stringify(outcome.generation.body)
+      : `GENERATION FAILED: ${outcome.generation.error}`
     // EVERY body is printed, not just the flagged ones. verifyGrounding is a
     // sample at temperature 0.2, not an oracle of record (CLAUDE.md's
     // single-verdict-sampling gotcha), and the keyword heuristic can both
@@ -483,25 +549,42 @@ async function runVariant(variant: Variant, n: number): Promise<GenerationOutcom
   return outcomes
 }
 
-function printVariantSummary(variant: Variant, outcomes: GenerationOutcome[]): void {
+function printVariantSummary(
+  variant: Variant,
+  outcomes: GenerationOutcome[],
+): void {
   const total = outcomes.length
   const genFailures = outcomes.filter((o) => !o.generation.ok)
-  const verifyFailures = outcomes.filter((o) => o.verify !== null && !o.verify.ok)
-  const flagged = outcomes.filter((o) => o.verify?.ok && o.verify.hasUngroundedClaim)
+  const verifyFailures = outcomes.filter(
+    (o) => o.verify !== null && !o.verify.ok,
+  )
+  const flagged = outcomes.filter(
+    (o) => o.verify?.ok && o.verify.hasUngroundedClaim,
+  )
   const conflationShaped = outcomes.filter((o) => o.conflationShaped)
 
   console.log(`\n--- Summary: variant ${variant.id} — ${variant.label} ---`)
   console.log(`generations: ${total}`)
-  if (genFailures.length > 0) console.log(`generateMessage failures: ${genFailures.length}/${total}`)
-  if (verifyFailures.length > 0) console.log(`verifyGrounding failures: ${verifyFailures.length}/${total}`)
-  console.log(`flagged by verifyGrounding (any ungrounded claim): ${flagged.length}/${total}`)
-  console.log(`conflation-shaped flags (heuristic match, see scoring file): ${conflationShaped.length}/${total}`)
+  if (genFailures.length > 0)
+    console.log(`generateMessage failures: ${genFailures.length}/${total}`)
+  if (verifyFailures.length > 0)
+    console.log(`verifyGrounding failures: ${verifyFailures.length}/${total}`)
+  console.log(
+    `flagged by verifyGrounding (any ungrounded claim): ${flagged.length}/${total}`,
+  )
+  console.log(
+    `conflation-shaped flags (heuristic match, see scoring file): ${conflationShaped.length}/${total}`,
+  )
 
   if (flagged.length > 0) {
-    console.log('\nFlagged replies, raw text for a human to read (a keyword match alone can miscount):')
+    console.log(
+      '\nFlagged replies, raw text for a human to read (a keyword match alone can miscount):',
+    )
     for (const o of flagged) {
       if (!o.generation.ok || !o.verify?.ok) continue
-      console.log(`  [attempt ${o.attempt}] body: ${JSON.stringify(o.generation.body)}`)
+      console.log(
+        `  [attempt ${o.attempt}] body: ${JSON.stringify(o.generation.body)}`,
+      )
       for (const claim of o.verify.ungroundedClaims) {
         console.log(`    claim: ${claim}`)
       }
@@ -509,7 +592,10 @@ function printVariantSummary(variant: Variant, outcomes: GenerationOutcome[]): v
   }
 }
 
-function parseArgs(argv: readonly string[]): { n: number; variantIds: readonly VariantId[] } {
+function parseArgs(argv: readonly string[]): {
+  n: number
+  variantIds: readonly VariantId[]
+} {
   let n = DEFAULT_N
   let variantIds: readonly VariantId[] = ALL_VARIANT_IDS
   const args = argv.slice(2)
@@ -529,8 +615,13 @@ function parseArgs(argv: readonly string[]): { n: number; variantIds: readonly V
       const ids = (value ?? '')
         .split(',')
         .map((s) => Number.parseInt(s.trim(), 10))
-      if (ids.length === 0 || ids.some((id) => !ALL_VARIANT_IDS.includes(id as VariantId))) {
-        console.error(`✗ --variants must be a comma-separated list from {1,2,3,4}, got "${value}"`)
+      if (
+        ids.length === 0 ||
+        ids.some((id) => !ALL_VARIANT_IDS.includes(id as VariantId))
+      ) {
+        console.error(
+          `✗ --variants must be a comma-separated list from {1,2,3,4}, got "${value}"`,
+        )
         process.exit(1)
       }
       variantIds = ids as VariantId[]
@@ -554,7 +645,9 @@ async function main(): Promise<void> {
   const { n, variantIds } = parseArgs(process.argv)
   const variants = VARIANTS.filter((v) => variantIds.includes(v.id))
 
-  console.log('TAC-483 order-attribution measurement — ships no fix, measures the live prompt as-is.')
+  console.log(
+    'TAC-483 order-attribution measurement — ships no fix, measures the live prompt as-is.',
+  )
   // TAC-502: the verifier's prompt version is printed because this script
   // has no run log, so without it nothing records which verifier produced a
   // run's numbers. It moved v1.5.0 -> v1.6.0 when the grounding check gained
@@ -575,11 +668,20 @@ async function main(): Promise<void> {
   console.log(
     `  venue_info: ${LE_MILS.venueInfo.menu.items.length} menu items, ${LE_MILS.venueInfo.menu.highlights.length} highlights, ${LE_MILS.venueInfo.currentContext.length} active context notes, ${LE_MILS.venueInfo.staff.length} staff`,
   )
-  console.log(`  voice_corpus: ${LE_MILS.corpus.length} entries available for retrieval`)
-  console.log(`  knowledge_corpus: [] (not in the export — see buildInput's note)`)
-  console.log(`Run started: ${RUN_STARTED_AT.toISOString()} (history deltas are relative to this)\n`)
+  console.log(
+    `  voice_corpus: ${LE_MILS.corpus.length} entries available for retrieval`,
+  )
+  console.log(
+    `  knowledge_corpus: [] (not in the export — see buildInput's note)`,
+  )
+  console.log(
+    `Run started: ${RUN_STARTED_AT.toISOString()} (history deltas are relative to this)\n`,
+  )
 
-  const allSummaries: Array<{ variant: Variant; outcomes: GenerationOutcome[] }> = []
+  const allSummaries: Array<{
+    variant: Variant
+    outcomes: GenerationOutcome[]
+  }> = []
   for (const variant of variants) {
     console.log(`=== Variant ${variant.id}: ${variant.label} ===`)
     console.log(variant.whatThisChecks)

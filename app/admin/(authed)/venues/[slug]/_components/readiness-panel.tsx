@@ -18,7 +18,10 @@ function ThresholdRow({
   return (
     <div className="flex items-center justify-between gap-3 border-b border-stone-light/40 py-2 last:border-b-0">
       <span className="flex items-center gap-2 text-sm text-ink">
-        <StatusDot tone={met ? 'good' : 'neutral'} label={met ? 'met' : 'below threshold'} />
+        <StatusDot
+          tone={met ? 'good' : 'neutral'}
+          label={met ? 'met' : 'below threshold'}
+        />
         {label}
       </span>
       <span className="text-xs tabular-nums text-ink-faint">
@@ -30,21 +33,41 @@ function ThresholdRow({
 }
 
 export function ReadinessPanel({ readiness }: { readiness: ReadinessReport }) {
-  const { voiceCorpus, knowledge, mechanics, currentContext, brandPersona, approvalPolicy } =
-    readiness
-  const unpopulatedPersonaFields = brandPersona.fields.filter((f) => !f.populated)
+  const {
+    voiceCorpus,
+    knowledge,
+    mechanics,
+    currentContext,
+    brandPersona,
+    approvalPolicy,
+  } = readiness
+  const unpopulatedPersonaFields = brandPersona.fields.filter(
+    (f) => !f.populated,
+  )
 
   return (
-    <SectionShell title="Readiness" subtitle="derived live — nothing here is stored">
+    <SectionShell
+      title="Readiness"
+      subtitle="derived live — nothing here is stored"
+    >
       <div className="flex flex-col gap-4">
         <div>
-          <ThresholdRow label="Voice corpus candidates" count={voiceCorpus.count} threshold={voiceCorpus.threshold} met={voiceCorpus.met} />
+          <ThresholdRow
+            label="Voice corpus candidates"
+            count={voiceCorpus.count}
+            threshold={voiceCorpus.threshold}
+            met={voiceCorpus.met}
+          />
           <ThresholdRow
             label="Knowledge chunks"
             count={knowledge.processedCount}
             threshold={knowledge.threshold}
             met={knowledge.met}
-            extra={knowledge.unprocessedCount > 0 ? `${knowledge.unprocessedCount} not retrievable` : undefined}
+            extra={
+              knowledge.unprocessedCount > 0
+                ? `${knowledge.unprocessedCount} not retrievable`
+                : undefined
+            }
           />
           <ThresholdRow
             label="currentContext entries with a date"
@@ -75,10 +98,15 @@ export function ReadinessPanel({ readiness }: { readiness: ReadinessReport }) {
         <div>
           <p className="mb-1.5 text-xs uppercase tracking-wide text-ink-faint">
             Mechanics · {mechanics.activeCount} active
-            {mechanics.inactiveCount > 0 ? `, ${mechanics.inactiveCount} inactive` : ''}
+            {mechanics.inactiveCount > 0
+              ? `, ${mechanics.inactiveCount} inactive`
+              : ''}
           </p>
-          {mechanics.issues.length === 0 && mechanics.manualInviteWithoutApproval.length === 0 ? (
-            <p className="text-sm text-ink-soft">Every active mechanic is fully parameterized.</p>
+          {mechanics.issues.length === 0 &&
+          mechanics.manualInviteWithoutApproval.length === 0 ? (
+            <p className="text-sm text-ink-soft">
+              Every active mechanic is fully parameterized.
+            </p>
           ) : (
             <ul className="flex flex-col gap-1 text-sm text-clay">
               {mechanics.issues.map((issue) => (
@@ -98,7 +126,9 @@ export function ReadinessPanel({ readiness }: { readiness: ReadinessReport }) {
         </div>
 
         <div>
-          <p className="mb-1.5 text-xs uppercase tracking-wide text-ink-faint">brand_persona</p>
+          <p className="mb-1.5 text-xs uppercase tracking-wide text-ink-faint">
+            brand_persona
+          </p>
           {unpopulatedPersonaFields.length === 0 ? (
             <p className="text-sm text-ink-soft">Every field is populated.</p>
           ) : (
@@ -120,13 +150,16 @@ export function ReadinessPanel({ readiness }: { readiness: ReadinessReport }) {
               <>
                 {' · '}
                 {Object.entries(approvalPolicy.perCategory)
-                  .map(([category, disposition]) => `${category}: ${disposition}`)
+                  .map(
+                    ([category, disposition]) => `${category}: ${disposition}`,
+                  )
                   .join(', ')}
               </>
             )}
           </p>
           <p className="mt-1 text-xs text-ink-faint">
-            Effective policy, code defaults included. Edit in the Approval policy section.
+            Effective policy, code defaults included. Edit in the Approval
+            policy section.
           </p>
         </div>
       </div>

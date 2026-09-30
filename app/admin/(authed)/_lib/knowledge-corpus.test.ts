@@ -62,11 +62,14 @@ function newState(overrides: Partial<MockState> = {}): MockState {
 function makeSupabaseMock(state: MockState) {
   return {
     from: (_table: string) => ({
-      insert: (row: Record<string, unknown> | Array<Record<string, unknown>>) => ({
+      insert: (
+        row: Record<string, unknown> | Array<Record<string, unknown>>,
+      ) => ({
         select: (_cols: string) => ({
           single: async () => {
             state.insertCalls.push(row)
-            if (state.insertError) return { data: null, error: state.insertError }
+            if (state.insertError)
+              return { data: null, error: state.insertError }
             return { data: state.insertedRow, error: null }
           },
           // multi-row insert().select() without .single() — used by split
@@ -84,7 +87,8 @@ function makeSupabaseMock(state: MockState) {
           select: (_cols: string) => ({
             maybeSingle: async () => {
               state.eqDeleteCalls.push(v)
-              if (state.deleteError) return { data: null, error: state.deleteError }
+              if (state.deleteError)
+                return { data: null, error: state.deleteError }
               return { data: state.deletedRow, error: null }
             },
           }),
@@ -110,7 +114,9 @@ function makeSupabaseMock(state: MockState) {
 // single-row helpers above. Build a dedicated mock for split/merge-adjacent
 // tests that exercise this path, rather than overloading makeSupabaseMock
 // with a runtime shape switch.
-function makeSplitSupabaseMock(state: MockState & { insertedRows: Array<{ id: string }> }) {
+function makeSplitSupabaseMock(
+  state: MockState & { insertedRows: Array<{ id: string }> },
+) {
   return {
     from: (_table: string) => ({
       select: (_cols: string) => ({
@@ -155,7 +161,9 @@ describe('addKnowledgeEntry', () => {
   it('inserts, embeds, returns the new id + chunk count', async () => {
     const state = newState()
     vi.mocked(createAdminClient).mockReturnValue(
-      makeSupabaseMock(state) as unknown as ReturnType<typeof createAdminClient>,
+      makeSupabaseMock(state) as unknown as ReturnType<
+        typeof createAdminClient
+      >,
     )
     vi.mocked(ingestKnowledgeCorpusEntry).mockResolvedValue({
       ok: true,
@@ -170,7 +178,11 @@ describe('addKnowledgeEntry', () => {
       addedByOperatorId: OPERATOR_ID,
     })
 
-    expect(result).toEqual({ ok: true, corpusId: NEW_ID, embeddedChunkCount: 2 })
+    expect(result).toEqual({
+      ok: true,
+      corpusId: NEW_ID,
+      embeddedChunkCount: 2,
+    })
     expect(state.insertCalls[0]).toMatchObject({
       venue_id: VENUE_ID,
       primary_tags: ['sourcing'],
@@ -185,7 +197,9 @@ describe('addKnowledgeEntry', () => {
   it('rolls back the inserted row on embed failure', async () => {
     const state = newState()
     vi.mocked(createAdminClient).mockReturnValue(
-      makeSupabaseMock(state) as unknown as ReturnType<typeof createAdminClient>,
+      makeSupabaseMock(state) as unknown as ReturnType<
+        typeof createAdminClient
+      >,
     )
     vi.mocked(ingestKnowledgeCorpusEntry).mockResolvedValue({
       ok: false,
@@ -206,9 +220,14 @@ describe('addKnowledgeEntry', () => {
   })
 
   it('returns db_error on insert failure without calling embed', async () => {
-    const state = newState({ insertError: { message: 'connection lost' }, insertedRow: null })
+    const state = newState({
+      insertError: { message: 'connection lost' },
+      insertedRow: null,
+    })
     vi.mocked(createAdminClient).mockReturnValue(
-      makeSupabaseMock(state) as unknown as ReturnType<typeof createAdminClient>,
+      makeSupabaseMock(state) as unknown as ReturnType<
+        typeof createAdminClient
+      >,
     )
 
     const result = await addKnowledgeEntry({
@@ -228,28 +247,46 @@ describe('editKnowledgeEntry', () => {
   it('re-embeds and reports reEmbedded=true when content is provided', async () => {
     const state = newState()
     vi.mocked(createAdminClient).mockReturnValue(
-      makeSupabaseMock(state) as unknown as ReturnType<typeof createAdminClient>,
+      makeSupabaseMock(state) as unknown as ReturnType<
+        typeof createAdminClient
+      >,
     )
     vi.mocked(ingestKnowledgeCorpusEntry).mockResolvedValue({
       ok: true,
       data: { embeddedChunkCount: 1 },
     })
 
-    const result = await editKnowledgeEntry({ corpusId: ORIGINAL_ID, content: 'updated text' })
+    const result = await editKnowledgeEntry({
+      corpusId: ORIGINAL_ID,
+      content: 'updated text',
+    })
 
-    expect(result).toEqual({ ok: true, corpusId: ORIGINAL_ID, reEmbedded: true })
+    expect(result).toEqual({
+      ok: true,
+      corpusId: ORIGINAL_ID,
+      reEmbedded: true,
+    })
     expect(ingestKnowledgeCorpusEntry).toHaveBeenCalledWith(ORIGINAL_ID)
   })
 
   it('skips the embed call for a tags-only edit', async () => {
     const state = newState()
     vi.mocked(createAdminClient).mockReturnValue(
-      makeSupabaseMock(state) as unknown as ReturnType<typeof createAdminClient>,
+      makeSupabaseMock(state) as unknown as ReturnType<
+        typeof createAdminClient
+      >,
     )
 
-    const result = await editKnowledgeEntry({ corpusId: ORIGINAL_ID, primaryTags: ['events'] })
+    const result = await editKnowledgeEntry({
+      corpusId: ORIGINAL_ID,
+      primaryTags: ['events'],
+    })
 
-    expect(result).toEqual({ ok: true, corpusId: ORIGINAL_ID, reEmbedded: false })
+    expect(result).toEqual({
+      ok: true,
+      corpusId: ORIGINAL_ID,
+      reEmbedded: false,
+    })
     expect(ingestKnowledgeCorpusEntry).not.toHaveBeenCalled()
   })
 
@@ -257,7 +294,8 @@ describe('editKnowledgeEntry', () => {
     const result = await editKnowledgeEntry({ corpusId: ORIGINAL_ID })
     expect(result).toEqual({
       ok: false,
-      error: 'no_op: pass at least one of content, primaryTags, or secondaryTags',
+      error:
+        'no_op: pass at least one of content, primaryTags, or secondaryTags',
       errorCode: 'no_op',
     })
   })
@@ -265,7 +303,9 @@ describe('editKnowledgeEntry', () => {
   it('surfaces embed_failed when re-embedding fails, matching the is_processed=false fix-path contract', async () => {
     const state = newState()
     vi.mocked(createAdminClient).mockReturnValue(
-      makeSupabaseMock(state) as unknown as ReturnType<typeof createAdminClient>,
+      makeSupabaseMock(state) as unknown as ReturnType<
+        typeof createAdminClient
+      >,
     )
     vi.mocked(ingestKnowledgeCorpusEntry).mockResolvedValue({
       ok: false,
@@ -273,7 +313,10 @@ describe('editKnowledgeEntry', () => {
       errorCode: 'voyage_api_error',
     })
 
-    const result = await editKnowledgeEntry({ corpusId: ORIGINAL_ID, content: 'retry me' })
+    const result = await editKnowledgeEntry({
+      corpusId: ORIGINAL_ID,
+      content: 'retry me',
+    })
 
     expect(result.ok).toBe(false)
     if (!result.ok) expect(result.errorCode).toBe('embed_failed')
@@ -284,7 +327,9 @@ describe('removeKnowledgeEntry', () => {
   it('deletes and returns ok on an existing row', async () => {
     const state = newState({ deletedRow: { id: ORIGINAL_ID } })
     vi.mocked(createAdminClient).mockReturnValue(
-      makeSupabaseMock(state) as unknown as ReturnType<typeof createAdminClient>,
+      makeSupabaseMock(state) as unknown as ReturnType<
+        typeof createAdminClient
+      >,
     )
 
     const result = await removeKnowledgeEntry(ORIGINAL_ID)
@@ -294,7 +339,9 @@ describe('removeKnowledgeEntry', () => {
   it('returns not_found when the row does not exist', async () => {
     const state = newState({ deletedRow: null })
     vi.mocked(createAdminClient).mockReturnValue(
-      makeSupabaseMock(state) as unknown as ReturnType<typeof createAdminClient>,
+      makeSupabaseMock(state) as unknown as ReturnType<
+        typeof createAdminClient
+      >,
     )
 
     const result = await removeKnowledgeEntry(ORIGINAL_ID)
@@ -311,7 +358,9 @@ describe('splitKnowledgeEntry — atomicity', () => {
     const result = await splitKnowledgeEntry({
       originalId: ORIGINAL_ID,
       venueId: VENUE_ID,
-      pieces: [{ content: 'only one', primaryTags: ['other'], secondaryTags: [] }],
+      pieces: [
+        { content: 'only one', primaryTags: ['other'], secondaryTags: [] },
+      ],
     })
     expect(result).toEqual({
       ok: false,
@@ -352,7 +401,9 @@ describe('splitKnowledgeEntry — atomicity', () => {
     expect(state.eqDeleteCalls).toEqual([ORIGINAL_ID])
     expect(state.inDeleteCalls).toEqual([])
     // New rows inherit the original's source_type and carry split provenance.
-    const insertedPayload = state.insertCalls[0] as Array<Record<string, unknown>>
+    const insertedPayload = state.insertCalls[0] as Array<
+      Record<string, unknown>
+    >
     expect(insertedPayload[0]).toMatchObject({
       source_type: 'interview_extraction',
       metadata: { splitFrom: ORIGINAL_ID },
@@ -371,7 +422,11 @@ describe('splitKnowledgeEntry — atomicity', () => {
     )
     vi.mocked(ingestKnowledgeCorpusEntry)
       .mockResolvedValueOnce({ ok: true, data: { embeddedChunkCount: 1 } })
-      .mockResolvedValueOnce({ ok: false, error: 'voyage 502', errorCode: 'voyage_api_error' })
+      .mockResolvedValueOnce({
+        ok: false,
+        error: 'voyage 502',
+        errorCode: 'voyage_api_error',
+      })
 
     const result = await splitKnowledgeEntry({
       originalId: ORIGINAL_ID,
@@ -413,7 +468,10 @@ describe('splitKnowledgeEntry — atomicity', () => {
 
   it('refuses without inserting when the original belongs to a different venue than requested', async () => {
     const state = newState({
-      fetchedRow: { source_type: 'interview_extraction', venue_id: 'some-other-venue' },
+      fetchedRow: {
+        source_type: 'interview_extraction',
+        venue_id: 'some-other-venue',
+      },
     })
     vi.mocked(createAdminClient).mockReturnValue(
       makeSplitSupabaseMock(
@@ -456,7 +514,9 @@ describe('mergeKnowledgeEntries — atomicity', () => {
   it('happy path: inserts the merged row, embeds it, deletes both originals last', async () => {
     const state = newState()
     vi.mocked(createAdminClient).mockReturnValue(
-      makeSupabaseMock(state) as unknown as ReturnType<typeof createAdminClient>,
+      makeSupabaseMock(state) as unknown as ReturnType<
+        typeof createAdminClient
+      >,
     )
     vi.mocked(ingestKnowledgeCorpusEntry).mockResolvedValue({
       ok: true,
@@ -483,7 +543,9 @@ describe('mergeKnowledgeEntries — atomicity', () => {
   it('a failed embed deletes the new row and leaves both originals intact', async () => {
     const state = newState()
     vi.mocked(createAdminClient).mockReturnValue(
-      makeSupabaseMock(state) as unknown as ReturnType<typeof createAdminClient>,
+      makeSupabaseMock(state) as unknown as ReturnType<
+        typeof createAdminClient
+      >,
     )
     vi.mocked(ingestKnowledgeCorpusEntry).mockResolvedValue({
       ok: false,

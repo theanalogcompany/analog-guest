@@ -206,10 +206,13 @@ export async function processDueCommitments(
 
   const dueResult = await findScheduledOpenCommitments()
   if (!dueResult.ok) {
-    console.error('[cron commitments-due] findScheduledOpenCommitments failed', {
-      error: dueResult.error,
-      errorCode: dueResult.errorCode,
-    })
+    console.error(
+      '[cron commitments-due] findScheduledOpenCommitments failed',
+      {
+        error: dueResult.error,
+        errorCode: dueResult.errorCode,
+      },
+    )
     return summary
   }
   summary.scanned = dueResult.data.length
@@ -365,7 +368,8 @@ export async function processDueCommitments(
     // EVERY past arrival — the exact defect clause 2 and this clause exist to
     // close.
     const expectedMin = venueLocalMinutes(venueTimezone, expectedArrival)
-    const arrivalIsAtOrBeforeOpening = expectedMin !== null && expectedMin <= openMin
+    const arrivalIsAtOrBeforeOpening =
+      expectedMin !== null && expectedMin <= openMin
 
     // THE CARVE-OUT IS BOUNDED TO OPENING, NOT TO THE WHOLE DAY. Left
     // unbounded it re-creates the very defect clause 2 closes: a 06:00 arrival
@@ -428,10 +432,13 @@ export async function processDueCommitments(
         venueTimezone,
         agentRunId: null,
       }).catch((e) => {
-        console.error('[cron commitments-due] sendCommitmentArrivalPush threw', {
-          commitmentId: transitionedRow.id,
-          error: e instanceof Error ? e.message : String(e),
-        })
+        console.error(
+          '[cron commitments-due] sendCommitmentArrivalPush threw',
+          {
+            commitmentId: transitionedRow.id,
+            error: e instanceof Error ? e.message : String(e),
+          },
+        )
       }),
     )
   }
@@ -441,7 +448,12 @@ export async function processDueCommitments(
 
 async function loadVenueClocks(
   venueIds: readonly string[],
-): Promise<Map<string, { timezone: string; status: string | null; hours: VenueInfo['hours'] }>> {
+): Promise<
+  Map<
+    string,
+    { timezone: string; status: string | null; hours: VenueInfo['hours'] }
+  >
+> {
   const out = new Map<
     string,
     { timezone: string; status: string | null; hours: VenueInfo['hours'] }
@@ -453,7 +465,10 @@ async function loadVenueClocks(
     // gating the arrival push costs no extra round trip. Dropping it from
     // this select makes the gate below read `undefined` and go inert.
     supabase.from('venues').select('id, timezone, status').in('id', venueIds),
-    supabase.from('venue_configs').select('venue_id, venue_info').in('venue_id', venueIds),
+    supabase
+      .from('venue_configs')
+      .select('venue_id, venue_info')
+      .in('venue_id', venueIds),
   ])
   if (venues.error || !venues.data) {
     console.warn('[cron commitments-due] loadVenueClocks: venues load failed', {
@@ -470,14 +485,19 @@ async function loadVenueClocks(
   if (configs.error || !configs.data) {
     // Not fatal: every row falls back to the fixed hour, which is the
     // documented behaviour for hours nobody can read.
-    console.warn('[cron commitments-due] loadVenueClocks: venue_configs load failed', {
-      error: configs.error?.message,
-    })
+    console.warn(
+      '[cron commitments-due] loadVenueClocks: venue_configs load failed',
+      {
+        error: configs.error?.message,
+      },
+    )
   } else {
     for (const row of configs.data) {
       const raw = row.venue_info
       if (raw == null || typeof raw !== 'object' || Array.isArray(raw)) continue
-      const parsed = VenueHoursSchema.safeParse((raw as Record<string, unknown>).hours ?? {})
+      const parsed = VenueHoursSchema.safeParse(
+        (raw as Record<string, unknown>).hours ?? {},
+      )
       if (parsed.success) hoursByVenue.set(row.venue_id, parsed.data)
     }
   }

@@ -21,6 +21,7 @@
 // Reuses CRON_SECRET — no new env var, so no new validator.
 
 import { processCommitmentLifecycle } from '@/lib/guests/commitment-lifecycle-due'
+import { logger } from '@/lib/observability/logger'
 
 function isAuthorized(request: Request): boolean {
   if (process.env.NODE_ENV !== 'production') return true
@@ -35,7 +36,7 @@ export async function GET(request: Request): Promise<Response> {
   }
 
   const summary = await processCommitmentLifecycle(new Date())
-  console.log('[cron commitment-lifecycle] tick complete', summary)
+  logger.info('[cron commitment-lifecycle] tick complete', { summary })
 
   return Response.json({ ok: true, ...summary })
 }

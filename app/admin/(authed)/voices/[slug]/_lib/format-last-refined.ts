@@ -2,7 +2,10 @@
 // formatTimeDelta over in lib/ai/prompts/serializers.ts but with longer-
 // range buckets ("3d", "2w") since refinement events fire infrequently.
 
-export function formatLastRefined(when: Date | null, now: Date = new Date()): string {
+export function formatLastRefined(
+  when: Date | null,
+  now: Date = new Date(),
+): string {
   if (!when) return '—'
   const diffMs = now.getTime() - when.getTime()
   if (diffMs < 0) return 'just now'

@@ -52,30 +52,46 @@
  * alone rather than guessing at the right behaviour.
  */
 
-import { commentMarker, isBookkeepingComment, isBotComment, isContextChatComment, unescapeBrackets } from './comment-provenance.mjs';
+import {
+  commentMarker,
+  isBookkeepingComment,
+  isBotComment,
+  isContextChatComment,
+  unescapeBrackets,
+} from './comment-provenance.mjs'
 
-export const EXIT = { OK: 0, USAGE: 2 };
+export const EXIT = { OK: 0, USAGE: 2 }
 
 // Each of these always asks Jaipal something (.claude/process.md's Comments
 // table) — the marker alone decides, whatever the comment says.
-const ALWAYS_LABEL_MARKERS = new Set(['PLAN', 'NEEDS-INPUT', 'BUILD-SKIPPED', 'AUDIT-SKIPPED', 'SILENT-RUN', 'TURN-LIMIT']);
+const ALWAYS_LABEL_MARKERS = new Set([
+  'PLAN',
+  'NEEDS-INPUT',
+  'BUILD-SKIPPED',
+  'AUDIT-SKIPPED',
+  'SILENT-RUN',
+  'TURN-LIMIT',
+])
 
 // A hard-stop plan is approved; the build is Jaipal's own session. Nothing
 // left for the label to flag.
-const NEVER_LABEL_MARKERS = new Set(['HUMAN-REVIEW-REQUIRED']);
+const NEVER_LABEL_MARKERS = new Set(['HUMAN-REVIEW-REQUIRED'])
 
 function headingPattern(number, word) {
   // Tolerates both real forms seen in this repo's audits: a bold
   // `**3. QUESTIONS**` (TAC-396, TAC-325) and a markdown `## 3. QUESTIONS`
   // (TAC-389). The number's dot, the trailing asterisks and the case are
   // all optional/insensitive so a minor reformatting doesn't defeat it.
-  return new RegExp(`(?:^|\\n)[ \\t]*(?:#{1,6}|\\*{1,2})[ \\t]*${number}\\.?[ \\t]*${word}[ \\t]*\\*{0,2}[ \\t]*(?=\\n|$)`, 'i');
+  return new RegExp(
+    `(?:^|\\n)[ \\t]*(?:#{1,6}|\\*{1,2})[ \\t]*${number}\\.?[ \\t]*${word}[ \\t]*\\*{0,2}[ \\t]*(?=\\n|$)`,
+    'i',
+  )
 }
 
-const QUESTIONS_HEADING = headingPattern(3, 'QUESTIONS');
-const FINDINGS_HEADING = headingPattern(4, 'FINDINGS');
-const DECIDED_WITHOUT_ASKING_HEADING = /\*\*\s*Decided without asking\s*\*\*/i;
-const NUMBERED_QUESTION_LINE = /^[ \t]*\d+\.[ \t]+\S/m;
+const QUESTIONS_HEADING = headingPattern(3, 'QUESTIONS')
+const FINDINGS_HEADING = headingPattern(4, 'FINDINGS')
+const DECIDED_WITHOUT_ASKING_HEADING = /\*\*\s*Decided without asking\s*\*\*/i
+const NUMBERED_QUESTION_LINE = /^[ \t]*\d+\.[ \t]+\S/m
 
 /**
  * Whether an [AUDIT] comment's `3. QUESTIONS` section asks Jaipal at least
@@ -87,15 +103,15 @@ const NUMBERED_QUESTION_LINE = /^[ \t]*\d+\.[ \t]+\S/m;
  * that might be covering a real question.
  */
 export function auditHasOpenQuestions(body) {
-  const text = unescapeBrackets(body ?? '');
-  const start = QUESTIONS_HEADING.exec(text);
-  if (!start) return true;
-  const afterHeading = text.slice(start.index + start[0].length);
-  const end = FINDINGS_HEADING.exec(afterHeading);
-  const section = end ? afterHeading.slice(0, end.index) : afterHeading;
-  const decided = DECIDED_WITHOUT_ASKING_HEADING.exec(section);
-  const questionsOnly = decided ? section.slice(0, decided.index) : section;
-  return NUMBERED_QUESTION_LINE.test(questionsOnly);
+  const text = unescapeBrackets(body ?? '')
+  const start = QUESTIONS_HEADING.exec(text)
+  if (!start) return true
+  const afterHeading = text.slice(start.index + start[0].length)
+  const end = FINDINGS_HEADING.exec(afterHeading)
+  const section = end ? afterHeading.slice(0, end.index) : afterHeading
+  const decided = DECIDED_WITHOUT_ASKING_HEADING.exec(section)
+  const questionsOnly = decided ? section.slice(0, decided.index) : section
+  return NUMBERED_QUESTION_LINE.test(questionsOnly)
 }
 
 /**
@@ -103,35 +119,37 @@ export function auditHasOpenQuestions(body) {
  * `createdAt` order. Each comment needs only `body` and `createdAt`.
  */
 export function deriveNeedsDecision(comments) {
-  const sorted = [...(comments ?? [])].sort((a, b) => Date.parse(a?.createdAt ?? '') - Date.parse(b?.createdAt ?? ''));
+  const sorted = [...(comments ?? [])].sort(
+    (a, b) => Date.parse(a?.createdAt ?? '') - Date.parse(b?.createdAt ?? ''),
+  )
 
-  let state = false;
+  let state = false
   for (const comment of sorted) {
-    const body = comment?.body ?? '';
+    const body = comment?.body ?? ''
 
-    if (isBookkeepingComment(body)) continue;
+    if (isBookkeepingComment(body)) continue
 
     if (isBotComment(body)) {
-      const marker = commentMarker(body);
-      if (marker === null) continue; // a CC comment with no marker: unchanged
+      const marker = commentMarker(body)
+      if (marker === null) continue // a CC comment with no marker: unchanged
       if (ALWAYS_LABEL_MARKERS.has(marker)) {
-        state = true;
+        state = true
       } else if (NEVER_LABEL_MARKERS.has(marker)) {
-        state = false;
+        state = false
       } else if (marker === 'AUDIT') {
-        state = auditHasOpenQuestions(body);
+        state = auditHasOpenQuestions(body)
       }
       // any other recognised or unrecognised bot marker: unchanged
-      continue;
+      continue
     }
 
-    if (isContextChatComment(body)) continue; // plain CHAT: context, unchanged
+    if (isContextChatComment(body)) continue // plain CHAT: context, unchanged
 
     // Whatever is left is either unprefixed human input or a
     // `**[FROM CLAUDE CHAT — RULING` comment — both are a ruling.
-    state = false;
+    state = false
   }
-  return state;
+  return state
 }
 
 export const USAGE = [
@@ -139,7 +157,7 @@ export const USAGE = [
   'stdin: candidates, each with id, identifier, hasNeedsDecision, hasNeedsAction,',
   '  comments: [{ body, createdAt }]',
   'stdout: the writes to make, as [{ id, identifier, action: "add"|"remove" }]',
-].join('\n');
+].join('\n')
 
 /**
  * The writes to make for a set of candidates, in the order given. A
@@ -147,15 +165,19 @@ export const USAGE = [
  * module header.
  */
 export function reconcile(candidates) {
-  const writes = [];
+  const writes = []
   for (const candidate of candidates ?? []) {
-    if (candidate?.hasNeedsAction) continue;
-    const derived = deriveNeedsDecision(candidate?.comments);
-    const has = Boolean(candidate?.hasNeedsDecision);
-    if (derived === has) continue;
-    writes.push({ id: candidate.id, identifier: candidate.identifier, action: derived ? 'add' : 'remove' });
+    if (candidate?.hasNeedsAction) continue
+    const derived = deriveNeedsDecision(candidate?.comments)
+    const has = Boolean(candidate?.hasNeedsDecision)
+    if (derived === has) continue
+    writes.push({
+      id: candidate.id,
+      identifier: candidate.identifier,
+      action: derived ? 'add' : 'remove',
+    })
   }
-  return writes;
+  return writes
 }
 
 /**
@@ -164,19 +186,19 @@ export function reconcile(candidates) {
  */
 export function run({ stdin, stdout, stderr }) {
   const usage = (why) => {
-    stderr(`${why}\n${USAGE}\n`);
-    return EXIT.USAGE;
-  };
-
-  let candidates;
-  try {
-    candidates = JSON.parse(stdin);
-  } catch {
-    return usage('stdin is not JSON');
+    stderr(`${why}\n${USAGE}\n`)
+    return EXIT.USAGE
   }
-  if (!Array.isArray(candidates)) return usage('stdin is not a JSON array');
 
-  const writes = reconcile(candidates);
-  stdout(`${JSON.stringify(writes)}\n`);
-  return EXIT.OK;
+  let candidates
+  try {
+    candidates = JSON.parse(stdin)
+  } catch {
+    return usage('stdin is not JSON')
+  }
+  if (!Array.isArray(candidates)) return usage('stdin is not a JSON array')
+
+  const writes = reconcile(candidates)
+  stdout(`${JSON.stringify(writes)}\n`)
+  return EXIT.OK
 }

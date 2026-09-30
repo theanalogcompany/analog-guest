@@ -22,7 +22,11 @@ import {
 } from './instagram-fields'
 import { normalizeRecognitionState } from './recognition-state'
 import type { GuestRecognitionState } from './recognition-state'
-import { venueFilterIds, venueScopeDeniesAll, type VenueScope } from '@/lib/auth/venue-scope'
+import {
+  venueFilterIds,
+  venueScopeDeniesAll,
+  type VenueScope,
+} from '@/lib/auth/venue-scope'
 
 export type { GuestRecognitionState } from './recognition-state'
 
@@ -159,8 +163,7 @@ export interface QueueDraft {
 }
 
 export type ListPendingQueueResult =
-  | { ok: true; drafts: QueueDraft[] }
-  | { ok: false; error: string }
+  { ok: true; drafts: QueueDraft[] } | { ok: false; error: string }
 
 // TAC-299: extra non-policy review_reason values that can land on
 // messages.review_reason without going through applyApprovalPolicyStage.
@@ -181,7 +184,8 @@ export type ListPendingQueueResult =
 //     timeout, missing configuration), so the Instagram dispatch wrote the
 //     reply as a card instead. Outside APPROVAL_TRIGGERS for the decline's
 //     reason: the gate had already said send.
-type ExtraReviewReason = 'operator_decline_initiated' | 'generation_failed' | 'instagram_send_failed'
+type ExtraReviewReason =
+  'operator_decline_initiated' | 'generation_failed' | 'instagram_send_failed'
 
 // Operator-facing copy for `messages.review_reason`.
 //
@@ -216,7 +220,10 @@ type ExtraReviewReason = 'operator_decline_initiated' | 'generation_failed' | 'i
 // review_state='pending', so neither can reach a card. Containment is the
 // queue predicate, not this map — do not add copy for them on the assumption
 // that it would ever be read.
-const REVIEW_REASON_LABELS: Record<ApprovalTrigger | ExtraReviewReason, string> = {
+const REVIEW_REASON_LABELS: Record<
+  ApprovalTrigger | ExtraReviewReason,
+  string
+> = {
   // --- Obligation: yes/no on money -----------------------------------------
   // TAC-297: structural commitment-type gate, top of PRIMARY_TRIGGER_PRIORITY.
   // Says what is at stake (something free) and whose call it is, rather than
@@ -238,7 +245,8 @@ const REVIEW_REASON_LABELS: Record<ApprovalTrigger | ExtraReviewReason, string> 
   // above, and it closes the same way because it is the same kind of decision
   // in the opposite direction: something the guest was promised is being taken
   // back, and that is the operator's to authorise.
-  commitment_cancellation_gated: 'This cancels something already promised. Your call.',
+  commitment_cancellation_gated:
+    'This cancels something already promised. Your call.',
   // TAC-513, copy approved verbatim (2026-09-21), and the stronger of the two
   // options put to Jaipal. It says what the text claims AND that the system has
   // not done it, then tells the operator what to do about it.
@@ -260,7 +268,8 @@ const REVIEW_REASON_LABELS: Record<ApprovalTrigger | ExtraReviewReason, string> 
   // here, the check just did not complete. Mirrors prose_promise_check_failed
   // and grounding_check_failed, and claims nothing was found, which is the
   // wrong-reason-copy rule TAC-364 exists for.
-  prose_cancellation_check_failed: "I couldn't check this one for a cancellation.",
+  prose_cancellation_check_failed:
+    "I couldn't check this one for a cancellation.",
   // Hedged because it is a regex on prose, not a structured emission: it can
   // be wrong, and the copy should not assert more confidence than the check
   // has. (Its only production hit to date matched the word "refund" inside the
@@ -268,7 +277,8 @@ const REVIEW_REASON_LABELS: Record<ApprovalTrigger | ExtraReviewReason, string> 
   comp_regex_backstop: "This sounds like it's offering something on the house.",
   // v1.23.0 complaint floor. Names both halves of what the operator is
   // judging: a complaint happened, and the reply promises something about it.
-  complaint_commitment_floor: 'Someone complained and this promises to make it right.',
+  complaint_commitment_floor:
+    'Someone complained and this promises to make it right.',
   // TAC-355. "isn't on" is the venue's own vocabulary for a perk that isn't
   // running. Deliberately doesn't name the mechanic — that would need the
   // identified id persisted on the row, which is out of scope here.
@@ -314,7 +324,8 @@ const REVIEW_REASON_LABELS: Record<ApprovalTrigger | ExtraReviewReason, string> 
   // which reads as a clean result — exactly the confusion this ticket exists
   // to remove. "Nothing in this draft was checked" says the same thing about
   // the check without making a claim about the draft.
-  grounding_check_degraded: "Tried twice and couldn't run. Nothing in this draft was checked.",
+  grounding_check_degraded:
+    "Tried twice and couldn't run. Nothing in this draft was checked.",
   // Venue-wide policy, ranked last in PRIMARY_TRIGGER_PRIORITY, so this shows
   // only when nothing more specific co-fired. "right now" because the flag is
   // a switch someone threw and can throw back.
@@ -386,7 +397,8 @@ const REVIEW_REASON_LABELS: Record<ApprovalTrigger | ExtraReviewReason, string> 
   // TAC-469, copy approved in the plan (2026-09-19). "Check the thread"
   // because a send that timed out may have gone out after all, and the echo
   // would be in the Instagram thread.
-  instagram_send_failed: "This reply didn't send on Instagram. Check the thread before sending it again.",
+  instagram_send_failed:
+    "This reply didn't send on Instagram. Check the thread before sending it again.",
 
   // --- You're mid-thread with this guest ------------------------------------
   // Ranked 9th, so it only ever wins when nothing else fired: the draft itself
@@ -413,7 +425,8 @@ const REVIEW_REASON_LABELS: Record<ApprovalTrigger | ExtraReviewReason, string> 
   // TAC-299: the operator swiped left on a heads-up card and /draft-decline
   // persisted this apology. "You passed on the last one" points at their own
   // action, which is the context that makes the draft make sense.
-  operator_decline_initiated: "You passed on the last one, so here's another go.",
+  operator_decline_initiated:
+    "You passed on the last one, so here's another go.",
 }
 
 /**
@@ -451,7 +464,8 @@ const REVIEW_REASON_FALLBACK = 'Needs review'
 const COMMITMENT_SENTENCE = {
   comp: (d: string) => `Approving this comps ${d}. Your call.`,
   hold: (d: string) => `Approving this sets aside ${d} for them. Your call.`,
-  discount: (d: string) => `Approving this promises a discount on ${d}. Your call.`,
+  discount: (d: string) =>
+    `Approving this promises a discount on ${d}. Your call.`,
 } satisfies Record<'comp' | 'hold' | 'discount', (d: string) => string>
 
 /**
@@ -471,7 +485,10 @@ const COMMITMENT_SENTENCE = {
 const MAX_CARD_DESCRIPTION_CHARS = 60
 
 function sanitizeCardDescription(raw: string): string {
-  const flattened = raw.replace(/[\u2014\u2013]/g, ' ').replace(/\s+/g, ' ').trim()
+  const flattened = raw
+    .replace(/[\u2014\u2013]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
   if (flattened.length <= MAX_CARD_DESCRIPTION_CHARS) return flattened
   const cut = flattened.slice(0, MAX_CARD_DESCRIPTION_CHARS)
   const lastSpace = cut.lastIndexOf(' ')
@@ -499,7 +516,9 @@ function sanitizeCardDescription(raw: string): string {
  */
 function labelForTrigger(code: string, info: CardCarrierInfo | null): string {
   if (code === 'prose_promise_backstop' && info?.obligation != null) {
-    return COMMITMENT_SENTENCE[info.obligation.type](info.obligation.description)
+    return COMMITMENT_SENTENCE[info.obligation.type](
+      info.obligation.description,
+    )
   }
   // ONLY when the row carries nothing at all. `info` non-null with a null
   // `obligation` means the row DOES carry something this sentence cannot name —
@@ -512,10 +531,16 @@ function labelForTrigger(code: string, info: CardCarrierInfo | null): string {
   if (code === 'comp_regex_backstop' && info === null) {
     return "This sounds like it's offering something on the house. Approving won't create anything."
   }
-  return (REVIEW_REASON_LABELS as Record<string, string>)[code] ?? REVIEW_REASON_FALLBACK
+  return (
+    (REVIEW_REASON_LABELS as Record<string, string>)[code] ??
+    REVIEW_REASON_FALLBACK
+  )
 }
 
-function normalizeReviewReason(raw: string | null, info: CardCarrierInfo | null): string | null {
+function normalizeReviewReason(
+  raw: string | null,
+  info: CardCarrierInfo | null,
+): string | null {
   if (raw === null) return null
   return labelForTrigger(raw, info)
 }
@@ -557,7 +582,10 @@ function normalizeReviewTriggers(raw: string[] | null): string[] {
  * already-normalized codes, not the raw column, or the alignment guarantee is
  * theirs to keep rather than this function's.
  */
-function toReviewTriggerLabels(codes: string[], info: CardCarrierInfo | null): string[] {
+function toReviewTriggerLabels(
+  codes: string[],
+  info: CardCarrierInfo | null,
+): string[] {
   return codes.map((t) => labelForTrigger(t, info))
 }
 
@@ -641,16 +669,23 @@ function normalizeReplyingTo(
 ): { messageId: string; body: string; createdAt: string } | null {
   if (typeof messageId !== 'string' || messageId.length === 0) return null
   // An EMPTY body is legitimate and must not reach the guards below.
-  if (typeof body === 'string' && typeof createdAt === 'string' && createdAt.length > 0) {
+  if (
+    typeof body === 'string' &&
+    typeof createdAt === 'string' &&
+    createdAt.length > 0
+  ) {
     return { messageId, body, createdAt }
   }
-  console.error('[operator] queue draft names a replied-to message it could not resolve', {
-    draftId,
-    // Flags, never the body: this says which column was missing and nothing
-    // about what the guest wrote.
-    hasBody: typeof body === 'string',
-    hasCreatedAt: typeof createdAt === 'string' && createdAt.length > 0,
-  })
+  console.error(
+    '[operator] queue draft names a replied-to message it could not resolve',
+    {
+      draftId,
+      // Flags, never the body: this says which column was missing and nothing
+      // about what the guest wrote.
+      hasBody: typeof body === 'string',
+      hasCreatedAt: typeof createdAt === 'string' && createdAt.length > 0,
+    },
+  )
   return null
 }
 
@@ -662,7 +697,9 @@ function normalizeReplyingTo(
  * anything that is not a positive finite number reads as 0.
  */
 function normalizeOtherPendingCount(raw: number | null | undefined): number {
-  return typeof raw === 'number' && Number.isFinite(raw) && raw > 0 ? Math.trunc(raw) : 0
+  return typeof raw === 'number' && Number.isFinite(raw) && raw > 0
+    ? Math.trunc(raw)
+    : 0
 }
 
 function normalizeRecentContext(raw: Json | null): QueueRecentContextEntry[] {
@@ -751,7 +788,8 @@ async function loadCardCarriers(
   }
 
   for (const row of data ?? []) {
-    if (row.pending_commitment === null || row.pending_commitment === undefined) continue
+    if (row.pending_commitment === null || row.pending_commitment === undefined)
+      continue
     const parsed = PendingCommitmentSchema.safeParse(row.pending_commitment)
     if (!parsed.success) {
       // Same posture dispatchOperatorOutbound takes on a malformed carrier:
@@ -767,7 +805,8 @@ async function loadCardCarriers(
     const clean = sanitizeCardDescription(description)
     const nameable = type === 'comp' || type === 'hold' || type === 'discount'
     carriers.set(row.id, {
-      obligation: nameable && clean.length > 0 ? { type, description: clean } : null,
+      obligation:
+        nameable && clean.length > 0 ? { type, description: clean } : null,
     })
   }
 
@@ -850,14 +889,26 @@ export async function listPendingQueue(
       reviewTriggers: reviewTriggerCodes,
       reviewTriggerLabels: toReviewTriggerLabels(reviewTriggerCodes, carrier),
       ungroundedClaims: normalizeUngroundedClaims(row.ungrounded_claims),
-      otherPendingDraftsForGuest: normalizeOtherPendingCount(row.other_pending_for_guest),
-      replacedDraft: normalizeReplacedDraft(row.replaced_draft_body, row.replaced_draft_at),
+      otherPendingDraftsForGuest: normalizeOtherPendingCount(
+        row.other_pending_for_guest,
+      ),
+      replacedDraft: normalizeReplacedDraft(
+        row.replaced_draft_body,
+        row.replaced_draft_at,
+      ),
       // TAC-473. Every cast below is the one `guestPhoneFallback` documents
       // above: generated types call every RPC return column non-null, and
       // regenerating them would put back a `string` that is not true.
-      guestChannel: queueGuestChannel(row.guest_channel as string | null, row.draft_id),
-      replyWindowExpiresAt: replyWindowExpiresAt(row.last_guest_action_at as string | null),
-      instagramUsername: instagramUsername(row.instagram_username as string | null),
+      guestChannel: queueGuestChannel(
+        row.guest_channel as string | null,
+        row.draft_id,
+      ),
+      replyWindowExpiresAt: replyWindowExpiresAt(
+        row.last_guest_action_at as string | null,
+      ),
+      instagramUsername: instagramUsername(
+        row.instagram_username as string | null,
+      ),
       recognitionState: normalizeRecognitionState(row.recognition_state),
       pendingSinceMs: Math.max(0, nowMs - createdAt),
       // TAC-534. Same cast as the columns above: generated types call every RPC

@@ -2,10 +2,19 @@ import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { MECHANIC_TRIGGER_TYPES } from '@/lib/schemas'
-import { buildExtractionSystemPrompt, MECHANIC_APPROVAL_CRITERIA } from './extract'
+import {
+  buildExtractionSystemPrompt,
+  MECHANIC_APPROVAL_CRITERIA,
+} from './extract'
 
-const fixtureMarkdown = readFileSync(resolve(__dirname, 'fixtures/venue-spec-example.md'), 'utf-8')
-const venueInfoSchemaSource = readFileSync(resolve(__dirname, '../../lib/schemas/venue-info.ts'), 'utf-8')
+const fixtureMarkdown = readFileSync(
+  resolve(__dirname, 'fixtures/venue-spec-example.md'),
+  'utf-8',
+)
+const venueInfoSchemaSource = readFileSync(
+  resolve(__dirname, '../../lib/schemas/venue-info.ts'),
+  'utf-8',
+)
 
 describe('venue-spec-example.md fixture (TAC-342 regression canary)', () => {
   // v03 of the onboarding question set renumbered "operating reality" from
@@ -49,11 +58,15 @@ describe('buildExtractionSystemPrompt (TAC-331)', () => {
   const prompt = buildExtractionSystemPrompt(fixtureMarkdown)
 
   it('routes opinionated recommendations to knowledge_corpus, never venue_info', () => {
-    expect(prompt).toContain('OPINIONATED RECOMMENDATIONS ALWAYS ROUTE TO knowledge_corpus, NEVER venue_info')
+    expect(prompt).toContain(
+      'OPINIONATED RECOMMENDATIONS ALWAYS ROUTE TO knowledge_corpus, NEVER venue_info',
+    )
   })
 
   it('states the mood rule for prescriptive content that stays in venue_info', () => {
-    expect(prompt).toContain('Mood rule for content that legitimately stays in venue_info prose')
+    expect(prompt).toContain(
+      'Mood rule for content that legitimately stays in venue_info prose',
+    )
   })
 
   it('includes the worked latte example in attributed indicative form', () => {
@@ -73,7 +86,9 @@ describe('buildExtractionSystemPrompt (TAC-343 Phase 0 — knowledge_corpus gran
   })
 
   it('instructs splitting a multi-item passage into multiple entries, not one', () => {
-    expect(prompt).toContain('Five signature drinks discussed is five entries, not one')
+    expect(prompt).toContain(
+      'Five signature drinks discussed is five entries, not one',
+    )
   })
 
   it('requires each entry to name its own subject', () => {
@@ -126,8 +141,12 @@ describe('venue-spec-example.md fixture (TAC-346 regression canaries)', () => {
     const mechanic1Start = fixtureMarkdown.indexOf('### Mechanic 1')
     const mechanic2Start = fixtureMarkdown.indexOf('### Mechanic 2')
     const mechanic2End = fixtureMarkdown.indexOf('> Notes on the new fields')
-    expect(fixtureMarkdown.slice(mechanic1Start, mechanic2Start)).toContain('"requires_operator_approval": true')
-    expect(fixtureMarkdown.slice(mechanic2Start, mechanic2End)).not.toContain('requires_operator_approval')
+    expect(fixtureMarkdown.slice(mechanic1Start, mechanic2Start)).toContain(
+      '"requires_operator_approval": true',
+    )
+    expect(fixtureMarkdown.slice(mechanic2Start, mechanic2End)).not.toContain(
+      'requires_operator_approval',
+    )
   })
 })
 
@@ -193,7 +212,9 @@ describe('venue-spec-example.md fixture — permanent-field placement fixes (UAT
     const end = fixtureMarkdown.indexOf('### Entry 1', start)
     const intro = fixtureMarkdown.slice(start, end)
     expect(intro).toContain('OPERATIONAL FACTS')
-    expect(intro).toContain('policies and logistics venue_info has no field for')
+    expect(intro).toContain(
+      'policies and logistics venue_info has no field for',
+    )
   })
 })
 
@@ -201,36 +222,52 @@ describe('buildExtractionSystemPrompt (TAC-346)', () => {
   const prompt = buildExtractionSystemPrompt(fixtureMarkdown)
 
   it('bans manual_entry and padding for voice_corpus', () => {
-    expect(prompt).toContain('Do NOT use source_type=\'manual_entry\' for voice_corpus under any circumstance')
+    expect(prompt).toContain(
+      "Do NOT use source_type='manual_entry' for voice_corpus under any circumstance",
+    )
     expect(prompt).toContain('Do not manufacture entries to reach 5')
   })
 
   it('bans joking, sarcastic, or hypothetical scenario answers in voice_corpus', () => {
-    expect(prompt).toContain('Do NOT include joking, sarcastic, or hypothetical scenario answers')
+    expect(prompt).toContain(
+      'Do NOT include joking, sarcastic, or hypothetical scenario answers',
+    )
   })
 
   // Revision to change A (owner decision): voice comes from how the
   // operator talks to guests generally, not only from texts.
   it('accepts short spoken lines addressed to a guest as qualifying voice_corpus content', () => {
     expect(prompt).toContain('a short SPOKEN line addressed to a guest')
-    expect(prompt).toContain('something the operator would plausibly say to a guest across the counter')
-    expect(prompt).toContain('Texting-specific conventions (length, emojis, tone) already live in brand_persona')
+    expect(prompt).toContain(
+      'something the operator would plausibly say to a guest across the counter',
+    )
+    expect(prompt).toContain(
+      'Texting-specific conventions (length, emojis, tone) already live in brand_persona',
+    )
   })
 
   it('still bans long narrative/reflective passages and lines addressed to the interviewer in voice_corpus', () => {
-    expect(prompt).toContain('Do NOT include long narrative or reflective passages about the business\'s history, mission, or sourcing')
-    expect(prompt).toContain('the operator explaining a perk or policy TO THE INTERVIEWER rather than saying it TO a guest')
+    expect(prompt).toContain(
+      "Do NOT include long narrative or reflective passages about the business's history, mission, or sourcing",
+    )
+    expect(prompt).toContain(
+      'the operator explaining a perk or policy TO THE INTERVIEWER rather than saying it TO a guest',
+    )
   })
 
   it('removes the 8-25 knowledge_corpus cap and covers operational facts', () => {
     expect(prompt).not.toContain('8-25 substantive narrative chunks')
     expect(prompt).toContain('There is no target range and no cap')
-    expect(prompt).toContain('EVERYTHING TRUE ABOUT THE VENUE THAT ISN\'T A STRUCTURED FIELD IN venue_info')
+    expect(prompt).toContain(
+      "EVERYTHING TRUE ABOUT THE VENUE THAT ISN'T A STRUCTURED FIELD IN venue_info",
+    )
   })
 
   it('states the currentContext-vs-permanent exclusivity rule and the ISO-only expiresAt rule', () => {
     expect(prompt).toContain('a fact belongs in EXACTLY ONE place, never both')
-    expect(prompt).toContain('it MUST be a full ISO 8601 date (YYYY-MM-DD) — never a relative phrase')
+    expect(prompt).toContain(
+      'it MUST be a full ISO 8601 date (YYYY-MM-DD) — never a relative phrase',
+    )
   })
 
   it('resolves relative dates against the interview date input, never leaving a relative phrase unresolved', () => {

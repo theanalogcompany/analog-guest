@@ -57,8 +57,7 @@ export const COMP_PATTERNS: readonly RegExp[] = [
 ]
 
 export type CompMatchResult =
-  | { matched: true; pattern: string }
-  | { matched: false }
+  { matched: true; pattern: string } | { matched: false }
 
 /**
  * Scan a drafted message body against COMP_PATTERNS. On the first match,

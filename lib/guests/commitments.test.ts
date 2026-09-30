@@ -243,7 +243,9 @@ describe('createCommitmentFromPending', () => {
   it('inserts an open row with agent created_by + source message link', async () => {
     const state = newState()
     vi.mocked(createAdminClient).mockReturnValue(
-      makeSupabaseMock(state) as unknown as ReturnType<typeof createAdminClient>,
+      makeSupabaseMock(state) as unknown as ReturnType<
+        typeof createAdminClient
+      >,
     )
     const r = await createCommitmentFromPending({
       guestId: GUEST_ID,
@@ -268,7 +270,9 @@ describe('createCommitmentFromPending', () => {
   it('returns db_write_failed on insert error', async () => {
     const state = newState({ insertError: { message: 'fk violation' } })
     vi.mocked(createAdminClient).mockReturnValue(
-      makeSupabaseMock(state) as unknown as ReturnType<typeof createAdminClient>,
+      makeSupabaseMock(state) as unknown as ReturnType<
+        typeof createAdminClient
+      >,
     )
     const r = await createCommitmentFromPending({
       guestId: GUEST_ID,
@@ -313,7 +317,9 @@ describe('createCommitmentFromPending — TAC-318 dedup', () => {
 
   function mockWith(state: MockState) {
     vi.mocked(createAdminClient).mockReturnValue(
-      makeSupabaseMock(state) as unknown as ReturnType<typeof createAdminClient>,
+      makeSupabaseMock(state) as unknown as ReturnType<
+        typeof createAdminClient
+      >,
     )
   }
 
@@ -343,7 +349,10 @@ describe('createCommitmentFromPending — TAC-318 dedup', () => {
   }
 
   it('does NOT attempt the insert when an open row already matches', async () => {
-    const state = newState({ selectReturn: [OPEN_REC], updateReturn: [OPEN_REC] })
+    const state = newState({
+      selectReturn: [OPEN_REC],
+      updateReturn: [OPEN_REC],
+    })
     mockWith(state)
 
     const r = await mint(REC)
@@ -372,7 +381,9 @@ describe('createCommitmentFromPending — TAC-318 dedup', () => {
   })
 
   it('matches case- and whitespace-insensitively, mirroring lower(trim(...))', async () => {
-    const state = newState({ selectReturn: [makeRow({ description: 'blossom tonic' })] })
+    const state = newState({
+      selectReturn: [makeRow({ description: 'blossom tonic' })],
+    })
     mockWith(state)
 
     const r = await mint({ ...REC, description: '  BLOSSOM TONIC  ' })
@@ -383,7 +394,10 @@ describe('createCommitmentFromPending — TAC-318 dedup', () => {
 
   it('bumps updated_at on the existing row but never created_at', async () => {
     const bumped = makeRow({ ...OPEN_REC, updated_at: NOW.toISOString() })
-    const state = newState({ selectReturn: [OPEN_REC], updateReturn: [bumped] })
+    const state = newState({
+      selectReturn: [OPEN_REC],
+      updateReturn: [bumped],
+    })
     mockWith(state)
 
     const r = await mint(REC)
@@ -417,14 +431,18 @@ describe('createCommitmentFromPending — TAC-318 dedup', () => {
   })
 
   it('inserts when the open rows are for a different description', async () => {
-    const state = newState({ selectReturn: [makeRow({ description: 'SoFi' })] })
+    const state = newState({
+      selectReturn: [makeRow({ description: 'SoFi' })],
+    })
     mockWith(state)
 
     const r = await mint(REC)
 
     // The negative half: dedup must not swallow a genuinely new promise.
     expect(state.insertCallCount).toBe(1)
-    expect(state.insertedPayload).toMatchObject({ description: 'Blossom Tonic' })
+    expect(state.insertedPayload).toMatchObject({
+      description: 'Blossom Tonic',
+    })
     expect(r.ok).toBe(true)
   })
 
@@ -442,7 +460,9 @@ describe('createCommitmentFromPending — TAC-318 dedup', () => {
       // `status: 'bogus'` is off GuestCommitmentStatusSchema's closed enum.
       // The realistic route here is a future migration widening one of the
       // enums without updating the Zod schema.
-      selectReturn: [makeRow({ status: 'bogus', description: 'Blossom Tonic' })],
+      selectReturn: [
+        makeRow({ status: 'bogus', description: 'Blossom Tonic' }),
+      ],
     })
     mockWith(state)
 
@@ -524,7 +544,11 @@ describe('createCommitmentFromPending — TAC-318 dedup', () => {
   })
 
   it('dedups a comp without touching its code or lifecycle', async () => {
-    const openComp = makeRow({ type: 'comp', description: 'oat latte', code: '7K2P' })
+    const openComp = makeRow({
+      type: 'comp',
+      description: 'oat latte',
+      code: '7K2P',
+    })
     const state = newState({
       selectReturn: [openComp],
       updateReturn: [openComp],
@@ -562,7 +586,9 @@ describe('createCommitmentFromPending — TAC-318 dedup', () => {
     // EMPTY read and asserted only that `.eq('status','open')` was called,
     // which proved the filter existed but nothing about the matcher.
     const state = newState({
-      selectReturn: [makeRow({ status: 'pending_ack', description: 'Blossom Tonic' })],
+      selectReturn: [
+        makeRow({ status: 'pending_ack', description: 'Blossom Tonic' }),
+      ],
     })
     mockWith(state)
 
@@ -578,7 +604,10 @@ describe('createCommitmentFromPending — TAC-318 dedup', () => {
     await mint(REC)
 
     // The other half of the pair above: the JS guard is belt, this is braces.
-    expect(state.selectEqCalls).toContainEqual({ field: 'status', value: 'open' })
+    expect(state.selectEqCalls).toContainEqual({
+      field: 'status',
+      value: 'open',
+    })
   })
 })
 
@@ -590,7 +619,9 @@ describe('createCommitmentFromPending — TAC-318 cross-type resolution', () => 
 
   function mockWith(state: MockState) {
     vi.mocked(createAdminClient).mockReturnValue(
-      makeSupabaseMock(state) as unknown as ReturnType<typeof createAdminClient>,
+      makeSupabaseMock(state) as unknown as ReturnType<
+        typeof createAdminClient
+      >,
     )
   }
 
@@ -706,7 +737,10 @@ describe('createCommitmentFromPending — TAC-318 cross-type resolution', () => 
       venueId: VENUE_ID,
       // A non-null emission value, so the assertion proves the derivation
       // WINS rather than merely that null-in gave null-out.
-      pendingCommitment: { ...COMP_ON_SAME_ITEM, expiresAt: '2027-01-01T00:00:00Z' },
+      pendingCommitment: {
+        ...COMP_ON_SAME_ITEM,
+        expiresAt: '2027-01-01T00:00:00Z',
+      },
       sourceMessageId: MESSAGE_ID,
       now: NOW,
     })
@@ -721,7 +755,10 @@ describe('createCommitmentFromPending — TAC-318 cross-type resolution', () => 
     //   2027-01-01  the emission's own value          — ignored, server-derived
     //   2026-07-27  created_at + 60d                  — CORRECT
     //   2026-07-27T15:30 would be NOW + 60d           — wrong, see below
-    expect(state.updatePayload).toHaveProperty('expires_at', '2026-07-27T12:00:00.000Z')
+    expect(state.updatePayload).toHaveProperty(
+      'expires_at',
+      '2026-07-27T12:00:00.000Z',
+    )
     expect(state.updatePayload).not.toHaveProperty(
       'expires_at',
       '2027-01-01T00:00:00.000Z',
@@ -746,7 +783,9 @@ describe('createCommitmentFromPending — TAC-318 cross-type resolution', () => 
 
     const nowPlusHorizon = new Date(NOW)
     nowPlusHorizon.setUTCDate(nowPlusHorizon.getUTCDate() + 60)
-    expect(state.updatePayload?.expires_at).not.toBe(nowPlusHorizon.toISOString())
+    expect(state.updatePayload?.expires_at).not.toBe(
+      nowPlusHorizon.toISOString(),
+    )
     expect(state.updatePayload?.expires_at).toBe('2026-07-27T12:00:00.000Z')
   })
 
@@ -765,8 +804,15 @@ describe('createCommitmentFromPending — TAC-318 cross-type resolution', () => 
   })
 
   it('never downgrades a comp to a recommendation', async () => {
-    const openComp = makeRow({ type: 'comp', description: 'croissant', code: '7K2P' })
-    const state = newState({ selectReturn: [openComp], updateReturn: [openComp] })
+    const openComp = makeRow({
+      type: 'comp',
+      description: 'croissant',
+      code: '7K2P',
+    })
+    const state = newState({
+      selectReturn: [openComp],
+      updateReturn: [openComp],
+    })
     mockWith(state)
 
     const r = await createCommitmentFromPending({
@@ -862,7 +908,9 @@ describe('guest_commitments_open_dedup — SQL/JS mirror', () => {
   })
 
   it('is scoped to venue_id, guest_id and status=open', () => {
-    expect(sql).toContain('(venue_id, guest_id, lower(trim(both from description)))')
+    expect(sql).toContain(
+      '(venue_id, guest_id, lower(trim(both from description)))',
+    )
     expect(sql).toContain("where (status = 'open')")
   })
 
@@ -885,7 +933,9 @@ describe('guest_commitments_open_dedup — SQL/JS mirror', () => {
 describe('commitmentDedupKey', () => {
   it('mirrors lower(trim(...)) from the migration 037 index', () => {
     expect(commitmentDedupKey('  Blossom Tonic  ')).toBe('blossom tonic')
-    expect(commitmentDedupKey('BLOSSOM TONIC')).toBe(commitmentDedupKey('blossom tonic'))
+    expect(commitmentDedupKey('BLOSSOM TONIC')).toBe(
+      commitmentDedupKey('blossom tonic'),
+    )
   })
 
   it('strips whitespace Postgres trim(both from) would leave behind', () => {
@@ -911,10 +961,14 @@ describe('commitmentDedupKey', () => {
 describe('transitionToPendingAck', () => {
   it('returns transitioned=true with the row when CAS wins (rowcount=1)', async () => {
     const state = newState({
-      updateReturn: [makeRow({ status: 'pending_ack', arrival_signal: 'imminent' })],
+      updateReturn: [
+        makeRow({ status: 'pending_ack', arrival_signal: 'imminent' }),
+      ],
     })
     vi.mocked(createAdminClient).mockReturnValue(
-      makeSupabaseMock(state) as unknown as ReturnType<typeof createAdminClient>,
+      makeSupabaseMock(state) as unknown as ReturnType<
+        typeof createAdminClient
+      >,
     )
     const r = await transitionToPendingAck({
       commitmentId: COMMITMENT_ID,
@@ -930,14 +984,22 @@ describe('transitionToPendingAck', () => {
       expect(r.data.row?.status).toBe('pending_ack')
       expect(r.data.row?.arrival_signal).toBe('imminent')
     }
-    expect(state.updateEqCalls).toContainEqual({ field: 'id', value: COMMITMENT_ID })
-    expect(state.updateEqCalls).toContainEqual({ field: 'status', value: 'open' })
+    expect(state.updateEqCalls).toContainEqual({
+      field: 'id',
+      value: COMMITMENT_ID,
+    })
+    expect(state.updateEqCalls).toContainEqual({
+      field: 'status',
+      value: 'open',
+    })
   })
 
   it('returns transitioned=false when CAS loses (rowcount=0) — empty data', async () => {
     const state = newState({ updateReturn: [] })
     vi.mocked(createAdminClient).mockReturnValue(
-      makeSupabaseMock(state) as unknown as ReturnType<typeof createAdminClient>,
+      makeSupabaseMock(state) as unknown as ReturnType<
+        typeof createAdminClient
+      >,
     )
     const r = await transitionToPendingAck({
       commitmentId: COMMITMENT_ID,
@@ -960,7 +1022,9 @@ describe('transitionToPendingAck', () => {
       updateReturn: null,
     })
     vi.mocked(createAdminClient).mockReturnValue(
-      makeSupabaseMock(state) as unknown as ReturnType<typeof createAdminClient>,
+      makeSupabaseMock(state) as unknown as ReturnType<
+        typeof createAdminClient
+      >,
     )
     const r = await transitionToPendingAck({
       commitmentId: COMMITMENT_ID,
@@ -1007,9 +1071,13 @@ describe('arrival CAS is venue- and guest-scoped (TAC-363)', () => {
   ]
 
   it('transitionToPendingAck reaches only the caller\u2019s own open row', async () => {
-    const state = newState({ updateReturn: [makeRow({ status: 'pending_ack' })] })
+    const state = newState({
+      updateReturn: [makeRow({ status: 'pending_ack' })],
+    })
     vi.mocked(createAdminClient).mockReturnValue(
-      makeSupabaseMock(state) as unknown as ReturnType<typeof createAdminClient>,
+      makeSupabaseMock(state) as unknown as ReturnType<
+        typeof createAdminClient
+      >,
     )
     await transitionToPendingAck({
       commitmentId: COMMITMENT_ID,
@@ -1035,7 +1103,9 @@ describe('arrival CAS is venue- and guest-scoped (TAC-363)', () => {
     // status, so this row moved and the caller got a clean CAS win back.
     const state = newState({ updateReturn: [] })
     vi.mocked(createAdminClient).mockReturnValue(
-      makeSupabaseMock(state) as unknown as ReturnType<typeof createAdminClient>,
+      makeSupabaseMock(state) as unknown as ReturnType<
+        typeof createAdminClient
+      >,
     )
     await transitionToPendingAck({
       commitmentId: COMMITMENT_ID,
@@ -1052,7 +1122,9 @@ describe('arrival CAS is venue- and guest-scoped (TAC-363)', () => {
   it('an id belonging to ANOTHER VENUE does not transition', async () => {
     const state = newState({ updateReturn: [] })
     vi.mocked(createAdminClient).mockReturnValue(
-      makeSupabaseMock(state) as unknown as ReturnType<typeof createAdminClient>,
+      makeSupabaseMock(state) as unknown as ReturnType<
+        typeof createAdminClient
+      >,
     )
     await transitionToPendingAck({
       commitmentId: COMMITMENT_ID,
@@ -1062,13 +1134,19 @@ describe('arrival CAS is venue- and guest-scoped (TAC-363)', () => {
       arrivalSignal: 'imminent',
       now: NOW,
     })
-    expect(rowsMatching(state.updateEqCalls, [makeRow({ venue_id: OTHER_VENUE_ID })])).toEqual([])
+    expect(
+      rowsMatching(state.updateEqCalls, [
+        makeRow({ venue_id: OTHER_VENUE_ID }),
+      ]),
+    ).toEqual([])
   })
 
   it('scheduleArrival is scoped the same way', async () => {
     const state = newState({ updateReturn: [] })
     vi.mocked(createAdminClient).mockReturnValue(
-      makeSupabaseMock(state) as unknown as ReturnType<typeof createAdminClient>,
+      makeSupabaseMock(state) as unknown as ReturnType<
+        typeof createAdminClient
+      >,
     )
     await scheduleArrival({
       commitmentId: COMMITMENT_ID,
@@ -1079,7 +1157,11 @@ describe('arrival CAS is venue- and guest-scoped (TAC-363)', () => {
       now: NOW,
     })
     expect(rowsMatching(state.updateEqCalls, WORLD)).toHaveLength(1)
-    expect(rowsMatching(state.updateEqCalls, [makeRow({ guest_id: OTHER_GUEST_ID })])).toEqual([])
+    expect(
+      rowsMatching(state.updateEqCalls, [
+        makeRow({ guest_id: OTHER_GUEST_ID }),
+      ]),
+    ).toEqual([])
   })
 })
 
@@ -1096,7 +1178,9 @@ describe('scheduleArrival', () => {
       ],
     })
     vi.mocked(createAdminClient).mockReturnValue(
-      makeSupabaseMock(state) as unknown as ReturnType<typeof createAdminClient>,
+      makeSupabaseMock(state) as unknown as ReturnType<
+        typeof createAdminClient
+      >,
     )
     const r = await scheduleArrival({
       commitmentId: COMMITMENT_ID,
@@ -1118,7 +1202,9 @@ describe('scheduleArrival', () => {
   it('returns transitioned=false when row is not open (CAS gate fires)', async () => {
     const state = newState({ updateReturn: [] })
     vi.mocked(createAdminClient).mockReturnValue(
-      makeSupabaseMock(state) as unknown as ReturnType<typeof createAdminClient>,
+      makeSupabaseMock(state) as unknown as ReturnType<
+        typeof createAdminClient
+      >,
     )
     const r = await scheduleArrival({
       commitmentId: COMMITMENT_ID,
@@ -1157,7 +1243,9 @@ describe('markAcknowledged', () => {
       ],
     })
     vi.mocked(createAdminClient).mockReturnValue(
-      makeSupabaseMock(state) as unknown as ReturnType<typeof createAdminClient>,
+      makeSupabaseMock(state) as unknown as ReturnType<
+        typeof createAdminClient
+      >,
     )
     const r = await markAcknowledged({
       commitmentId: COMMITMENT_ID,
@@ -1170,14 +1258,22 @@ describe('markAcknowledged', () => {
       expect(r.data.transitioned).toBe(true)
       expect(r.data.row?.status).toBe('acknowledged')
     }
-    expect(state.updateEqCalls).toContainEqual({ field: 'status', value: 'pending_ack' })
-    expect(state.updateInCalls).toContainEqual({ field: 'venue_id', values: [VENUE_ID] })
+    expect(state.updateEqCalls).toContainEqual({
+      field: 'status',
+      value: 'pending_ack',
+    })
+    expect(state.updateInCalls).toContainEqual({
+      field: 'venue_id',
+      values: [VENUE_ID],
+    })
   })
 
   it('returns transitioned=false on CAS loss (out-of-allowlist OR already acknowledged)', async () => {
     const state = newState({ updateReturn: [] })
     vi.mocked(createAdminClient).mockReturnValue(
-      makeSupabaseMock(state) as unknown as ReturnType<typeof createAdminClient>,
+      makeSupabaseMock(state) as unknown as ReturnType<
+        typeof createAdminClient
+      >,
     )
     const r = await markAcknowledged({
       commitmentId: COMMITMENT_ID,
@@ -1208,7 +1304,9 @@ describe('markCancelled (TAC-299)', () => {
       updateReturn: [makeRow({ status: 'cancelled' })],
     })
     vi.mocked(createAdminClient).mockReturnValue(
-      makeSupabaseMock(state) as unknown as ReturnType<typeof createAdminClient>,
+      makeSupabaseMock(state) as unknown as ReturnType<
+        typeof createAdminClient
+      >,
     )
     const r = await markCancelled({
       commitmentId: COMMITMENT_ID,
@@ -1223,8 +1321,14 @@ describe('markCancelled (TAC-299)', () => {
     }
     expect(state.updatePayload).toMatchObject({ status: 'cancelled' })
     // CAS gate: status='pending_ack' (the only valid prior state)
-    expect(state.updateEqCalls).toContainEqual({ field: 'status', value: 'pending_ack' })
-    expect(state.updateInCalls).toContainEqual({ field: 'venue_id', values: [VENUE_ID] })
+    expect(state.updateEqCalls).toContainEqual({
+      field: 'status',
+      value: 'pending_ack',
+    })
+    expect(state.updateInCalls).toContainEqual({
+      field: 'venue_id',
+      values: [VENUE_ID],
+    })
   })
 
   it('does NOT write cancelled_at or cancelled_by columns (no migration)', async () => {
@@ -1232,7 +1336,9 @@ describe('markCancelled (TAC-299)', () => {
       updateReturn: [makeRow({ status: 'cancelled' })],
     })
     vi.mocked(createAdminClient).mockReturnValue(
-      makeSupabaseMock(state) as unknown as ReturnType<typeof createAdminClient>,
+      makeSupabaseMock(state) as unknown as ReturnType<
+        typeof createAdminClient
+      >,
     )
     await markCancelled({
       commitmentId: COMMITMENT_ID,
@@ -1247,7 +1353,9 @@ describe('markCancelled (TAC-299)', () => {
   it('returns transitioned=false on CAS loss (already acknowledged OR out-of-allowlist)', async () => {
     const state = newState({ updateReturn: [] })
     vi.mocked(createAdminClient).mockReturnValue(
-      makeSupabaseMock(state) as unknown as ReturnType<typeof createAdminClient>,
+      makeSupabaseMock(state) as unknown as ReturnType<
+        typeof createAdminClient
+      >,
     )
     const r = await markCancelled({
       commitmentId: COMMITMENT_ID,
@@ -1268,7 +1376,9 @@ describe('markCancelled (TAC-299)', () => {
       updateReturn: null,
     })
     vi.mocked(createAdminClient).mockReturnValue(
-      makeSupabaseMock(state) as unknown as ReturnType<typeof createAdminClient>,
+      makeSupabaseMock(state) as unknown as ReturnType<
+        typeof createAdminClient
+      >,
     )
     const r = await markCancelled({
       commitmentId: COMMITMENT_ID,
@@ -1287,15 +1397,22 @@ describe('markCancelled (TAC-299)', () => {
 describe('findEarliestAcknowledgedArrival', () => {
   function mockWith(state: MockState) {
     vi.mocked(createAdminClient).mockReturnValue(
-      makeSupabaseMock(state) as unknown as ReturnType<typeof createAdminClient>,
+      makeSupabaseMock(state) as unknown as ReturnType<
+        typeof createAdminClient
+      >,
     )
   }
 
   it('returns the acknowledged_at of the earliest acknowledged commitment', async () => {
-    const state = newState({ selectReturn: [{ acknowledged_at: '2026-09-10T14:00:00.000Z' }] })
+    const state = newState({
+      selectReturn: [{ acknowledged_at: '2026-09-10T14:00:00.000Z' }],
+    })
     mockWith(state)
 
-    const r = await findEarliestAcknowledgedArrival({ venueId: VENUE_ID, guestId: GUEST_ID })
+    const r = await findEarliestAcknowledgedArrival({
+      venueId: VENUE_ID,
+      guestId: GUEST_ID,
+    })
 
     expect(r.ok).toBe(true)
     if (r.ok) expect(r.data).toEqual(new Date('2026-09-10T14:00:00.000Z'))
@@ -1307,14 +1424,28 @@ describe('findEarliestAcknowledgedArrival', () => {
   // would pass every assertion above while reading another venue's rows or the
   // LATEST arrival instead of the earliest.
   it('scopes to this venue, this guest, and acknowledged rows with a timestamp', async () => {
-    const state = newState({ selectReturn: [{ acknowledged_at: '2026-09-10T14:00:00.000Z' }] })
+    const state = newState({
+      selectReturn: [{ acknowledged_at: '2026-09-10T14:00:00.000Z' }],
+    })
     mockWith(state)
 
-    await findEarliestAcknowledgedArrival({ venueId: VENUE_ID, guestId: GUEST_ID })
+    await findEarliestAcknowledgedArrival({
+      venueId: VENUE_ID,
+      guestId: GUEST_ID,
+    })
 
-    expect(state.selectEqCalls).toContainEqual({ field: 'venue_id', value: VENUE_ID })
-    expect(state.selectEqCalls).toContainEqual({ field: 'guest_id', value: GUEST_ID })
-    expect(state.selectEqCalls).toContainEqual({ field: 'status', value: 'acknowledged' })
+    expect(state.selectEqCalls).toContainEqual({
+      field: 'venue_id',
+      value: VENUE_ID,
+    })
+    expect(state.selectEqCalls).toContainEqual({
+      field: 'guest_id',
+      value: GUEST_ID,
+    })
+    expect(state.selectEqCalls).toContainEqual({
+      field: 'status',
+      value: 'acknowledged',
+    })
     expect(state.selectNotCalls).toContainEqual({
       field: 'acknowledged_at',
       op: 'is',
@@ -1326,10 +1457,15 @@ describe('findEarliestAcknowledgedArrival', () => {
   // from the anchor, so a later visit must not renew an ask about the first
   // order nobody heard. A mutant flipping ascending to false fails here.
   it('asks for the EARLIEST arrival, not the latest', async () => {
-    const state = newState({ selectReturn: [{ acknowledged_at: '2026-09-10T14:00:00.000Z' }] })
+    const state = newState({
+      selectReturn: [{ acknowledged_at: '2026-09-10T14:00:00.000Z' }],
+    })
     mockWith(state)
 
-    await findEarliestAcknowledgedArrival({ venueId: VENUE_ID, guestId: GUEST_ID })
+    await findEarliestAcknowledgedArrival({
+      venueId: VENUE_ID,
+      guestId: GUEST_ID,
+    })
 
     expect(state.selectOrderCalls).toContainEqual({
       field: 'acknowledged_at',
@@ -1342,7 +1478,10 @@ describe('findEarliestAcknowledgedArrival', () => {
     const state = newState({ selectReturn: [] })
     mockWith(state)
 
-    const r = await findEarliestAcknowledgedArrival({ venueId: VENUE_ID, guestId: GUEST_ID })
+    const r = await findEarliestAcknowledgedArrival({
+      venueId: VENUE_ID,
+      guestId: GUEST_ID,
+    })
 
     expect(r.ok).toBe(true)
     if (r.ok) expect(r.data).toBeNull()
@@ -1351,20 +1490,31 @@ describe('findEarliestAcknowledgedArrival', () => {
   // Never Invalid Date. The derivation carries this straight into an expiry
   // comparison, and NaN there silently never expires.
   it('returns null rather than an Invalid Date for an unparseable timestamp', async () => {
-    const state = newState({ selectReturn: [{ acknowledged_at: 'not a date' }] })
+    const state = newState({
+      selectReturn: [{ acknowledged_at: 'not a date' }],
+    })
     mockWith(state)
 
-    const r = await findEarliestAcknowledgedArrival({ venueId: VENUE_ID, guestId: GUEST_ID })
+    const r = await findEarliestAcknowledgedArrival({
+      venueId: VENUE_ID,
+      guestId: GUEST_ID,
+    })
 
     expect(r.ok).toBe(true)
     if (r.ok) expect(r.data).toBeNull()
   })
 
   it('returns db_read_failed on a supabase error rather than null', async () => {
-    const state = newState({ selectError: { message: 'connection lost' }, selectReturn: null })
+    const state = newState({
+      selectError: { message: 'connection lost' },
+      selectReturn: null,
+    })
     mockWith(state)
 
-    const r = await findEarliestAcknowledgedArrival({ venueId: VENUE_ID, guestId: GUEST_ID })
+    const r = await findEarliestAcknowledgedArrival({
+      venueId: VENUE_ID,
+      guestId: GUEST_ID,
+    })
 
     // Distinguishable from "no arrival": the caller holds the arrival-armed
     // half of the turn rather than reading a hiccup as "never visited".
@@ -1376,10 +1526,15 @@ describe('findEarliestAcknowledgedArrival', () => {
 describe('findActiveCommitmentsForGuest', () => {
   it('returns rows from the DB, parsed', async () => {
     const state = newState({
-      selectReturn: [makeRow({ status: 'open' }), makeRow({ id: 'eee', status: 'pending_ack' })],
+      selectReturn: [
+        makeRow({ status: 'open' }),
+        makeRow({ id: 'eee', status: 'pending_ack' }),
+      ],
     })
     vi.mocked(createAdminClient).mockReturnValue(
-      makeSupabaseMock(state) as unknown as ReturnType<typeof createAdminClient>,
+      makeSupabaseMock(state) as unknown as ReturnType<
+        typeof createAdminClient
+      >,
     )
     const r = await findActiveCommitmentsForGuest({
       venueId: VENUE_ID,
@@ -1391,7 +1546,10 @@ describe('findActiveCommitmentsForGuest', () => {
       expect(r.data[0].status).toBe('open')
       expect(r.data[1].status).toBe('pending_ack')
     }
-    expect(state.selectInCalls).toContainEqual({ field: 'status', values: ['open', 'pending_ack'] })
+    expect(state.selectInCalls).toContainEqual({
+      field: 'status',
+      values: ['open', 'pending_ack'],
+    })
   })
 
   it('fails OPEN on a malformed row — drops it, keeps the rest', async () => {
@@ -1403,7 +1561,9 @@ describe('findActiveCommitmentsForGuest', () => {
       ],
     })
     vi.mocked(createAdminClient).mockReturnValue(
-      makeSupabaseMock(state) as unknown as ReturnType<typeof createAdminClient>,
+      makeSupabaseMock(state) as unknown as ReturnType<
+        typeof createAdminClient
+      >,
     )
     const r = await findActiveCommitmentsForGuest({
       venueId: VENUE_ID,
@@ -1419,7 +1579,9 @@ describe('findActiveCommitmentsForGuest', () => {
       selectReturn: null,
     })
     vi.mocked(createAdminClient).mockReturnValue(
-      makeSupabaseMock(state) as unknown as ReturnType<typeof createAdminClient>,
+      makeSupabaseMock(state) as unknown as ReturnType<
+        typeof createAdminClient
+      >,
     )
     const r = await findActiveCommitmentsForGuest({
       venueId: VENUE_ID,
@@ -1444,14 +1606,19 @@ describe('findScheduledOpenCommitments', () => {
       ],
     })
     vi.mocked(createAdminClient).mockReturnValue(
-      makeSupabaseMock(state) as unknown as ReturnType<typeof createAdminClient>,
+      makeSupabaseMock(state) as unknown as ReturnType<
+        typeof createAdminClient
+      >,
     )
     const r = await findScheduledOpenCommitments()
     expect(r.ok).toBe(true)
     if (r.ok) expect(r.data).toHaveLength(1)
     // Both filters land via .eq() — imminent rows must be excluded at the SQL
     // boundary so a pathological cron tick can't transition them.
-    expect(state.selectEqCalls).toContainEqual({ field: 'status', value: 'open' })
+    expect(state.selectEqCalls).toContainEqual({
+      field: 'status',
+      value: 'open',
+    })
     expect(state.selectEqCalls).toContainEqual({
       field: 'arrival_signal',
       value: 'scheduled',
@@ -1464,7 +1631,9 @@ describe('findScheduledOpenCommitments', () => {
 describe('createCommitmentFromPending — TAC-341 horizons', () => {
   function mockWith(state: MockState) {
     vi.mocked(createAdminClient).mockReturnValue(
-      makeSupabaseMock(state) as unknown as ReturnType<typeof createAdminClient>,
+      makeSupabaseMock(state) as unknown as ReturnType<
+        typeof createAdminClient
+      >,
     )
   }
 
@@ -1505,7 +1674,9 @@ describe('createCommitmentFromPending — TAC-341 horizons', () => {
   // still deduped, still rendered — it just carries no horizon, so the
   // lifecycle scan's `expires_at IS NOT NULL` filter can never see it.
   it('leaves a recommendation with a null horizon', async () => {
-    const state = newState({ insertedReturn: makeRow({ type: 'recommendation' }) })
+    const state = newState({
+      insertedReturn: makeRow({ type: 'recommendation' }),
+    })
     mockWith(state)
     await createCommitmentFromPending({
       guestId: GUEST_ID,
@@ -1653,7 +1824,9 @@ describe('createCommitmentFromPending — upgrade to a hold on unreadable hours'
       configRow: { venue_info: { hours: {} } },
     })
     vi.mocked(createAdminClient).mockReturnValue(
-      makeSupabaseMock(state) as unknown as ReturnType<typeof createAdminClient>,
+      makeSupabaseMock(state) as unknown as ReturnType<
+        typeof createAdminClient
+      >,
     )
 
     await createCommitmentFromPending({
@@ -1670,7 +1843,10 @@ describe('createCommitmentFromPending — upgrade to a hold on unreadable hours'
     })
 
     expect(state.insertCallCount).toBe(0)
-    expect(state.updatePayload).toHaveProperty('escalated_at', NOW.toISOString())
+    expect(state.updatePayload).toHaveProperty(
+      'escalated_at',
+      NOW.toISOString(),
+    )
     expect(captureCommitmentEscalated).toHaveBeenCalledWith(
       expect.objectContaining({
         reason: 'hold_horizon_unknown',
@@ -1692,7 +1868,9 @@ describe('createCommitmentFromPending — upgrade to a hold on unreadable hours'
       configRow: { venue_info: { hours: {} } },
     })
     vi.mocked(createAdminClient).mockReturnValue(
-      makeSupabaseMock(state) as unknown as ReturnType<typeof createAdminClient>,
+      makeSupabaseMock(state) as unknown as ReturnType<
+        typeof createAdminClient
+      >,
     )
 
     await createCommitmentFromPending({
@@ -1722,11 +1900,16 @@ describe('findOpenObligations', () => {
   it('scans only open obligations carrying a horizon', async () => {
     const state = newState({ selectReturn: [] })
     vi.mocked(createAdminClient).mockReturnValue(
-      makeSupabaseMock(state) as unknown as ReturnType<typeof createAdminClient>,
+      makeSupabaseMock(state) as unknown as ReturnType<
+        typeof createAdminClient
+      >,
     )
     await findOpenObligations()
 
-    expect(state.selectEqCalls).toContainEqual({ field: 'status', value: 'open' })
+    expect(state.selectEqCalls).toContainEqual({
+      field: 'status',
+      value: 'open',
+    })
     expect(state.selectNotCalls).toContainEqual({
       field: 'expires_at',
       op: 'is',
@@ -1734,7 +1917,11 @@ describe('findOpenObligations', () => {
     })
     const typeFilter = state.selectInCalls.find((c) => c.field === 'type')
     expect(typeFilter).toBeDefined()
-    expect([...(typeFilter?.values ?? [])].sort()).toEqual(['comp', 'discount', 'hold'])
+    expect([...(typeFilter?.values ?? [])].sort()).toEqual([
+      'comp',
+      'discount',
+      'hold',
+    ])
   })
 
   // The regression check for the 2026-09-14 scope cut, at the layer that
@@ -1743,7 +1930,9 @@ describe('findOpenObligations', () => {
   it('never admits recommendations', async () => {
     const state = newState({ selectReturn: [] })
     vi.mocked(createAdminClient).mockReturnValue(
-      makeSupabaseMock(state) as unknown as ReturnType<typeof createAdminClient>,
+      makeSupabaseMock(state) as unknown as ReturnType<
+        typeof createAdminClient
+      >,
     )
     await findOpenObligations()
     const typeFilter = state.selectInCalls.find((c) => c.field === 'type')
@@ -1755,7 +1944,9 @@ describe('findOpenObligations', () => {
       selectReturn: [makeRow(), { id: 'broken' }, makeRow({ id: 'also-fine' })],
     })
     vi.mocked(createAdminClient).mockReturnValue(
-      makeSupabaseMock(state) as unknown as ReturnType<typeof createAdminClient>,
+      makeSupabaseMock(state) as unknown as ReturnType<
+        typeof createAdminClient
+      >,
     )
     const r = await findOpenObligations()
     expect(r.ok).toBe(true)
@@ -1767,24 +1958,36 @@ describe('findOpenObligations', () => {
 
 describe('markEscalated', () => {
   it('CAS-gates on open AND not-yet-escalated', async () => {
-    const state = newState({ updateReturn: [makeRow({ escalated_at: NOW.toISOString() })] })
+    const state = newState({
+      updateReturn: [makeRow({ escalated_at: NOW.toISOString() })],
+    })
     vi.mocked(createAdminClient).mockReturnValue(
-      makeSupabaseMock(state) as unknown as ReturnType<typeof createAdminClient>,
+      makeSupabaseMock(state) as unknown as ReturnType<
+        typeof createAdminClient
+      >,
     )
     const r = await markEscalated({ commitmentId: COMMITMENT_ID, now: NOW })
 
     expect(r.ok && r.data.transitioned).toBe(true)
-    expect(state.updateEqCalls).toContainEqual({ field: 'status', value: 'open' })
+    expect(state.updateEqCalls).toContainEqual({
+      field: 'status',
+      value: 'open',
+    })
     // The half that makes escalation fire exactly once under overlapping
     // ticks. Without it both ticks win their CAS and the guest's operator
     // gets two alerts for one commitment.
-    expect(state.updateIsCalls).toContainEqual({ field: 'escalated_at', value: null })
+    expect(state.updateIsCalls).toContainEqual({
+      field: 'escalated_at',
+      value: null,
+    })
   })
 
   it('does not change status — an escalated commitment is still owed', async () => {
     const state = newState()
     vi.mocked(createAdminClient).mockReturnValue(
-      makeSupabaseMock(state) as unknown as ReturnType<typeof createAdminClient>,
+      makeSupabaseMock(state) as unknown as ReturnType<
+        typeof createAdminClient
+      >,
     )
     await markEscalated({ commitmentId: COMMITMENT_ID, now: NOW })
     expect(state.updatePayload).toEqual({
@@ -1796,7 +1999,9 @@ describe('markEscalated', () => {
   it('reports a lost CAS as transitioned=false, not as an error', async () => {
     const state = newState({ updateReturn: [] })
     vi.mocked(createAdminClient).mockReturnValue(
-      makeSupabaseMock(state) as unknown as ReturnType<typeof createAdminClient>,
+      makeSupabaseMock(state) as unknown as ReturnType<
+        typeof createAdminClient
+      >,
     )
     const r = await markEscalated({ commitmentId: COMMITMENT_ID, now: NOW })
     expect(r.ok).toBe(true)
@@ -1808,7 +2013,9 @@ describe('markExpired', () => {
   it('moves an open row to expired, CAS-gated on open', async () => {
     const state = newState({ updateReturn: [makeRow({ status: 'expired' })] })
     vi.mocked(createAdminClient).mockReturnValue(
-      makeSupabaseMock(state) as unknown as ReturnType<typeof createAdminClient>,
+      makeSupabaseMock(state) as unknown as ReturnType<
+        typeof createAdminClient
+      >,
     )
     const r = await markExpired({ commitmentId: COMMITMENT_ID, now: NOW })
 
@@ -1819,13 +2026,18 @@ describe('markExpired', () => {
     })
     // status='open' is what makes pending_ack, acknowledged and cancelled
     // rows untouchable here — not a guard in the processor loop.
-    expect(state.updateEqCalls).toContainEqual({ field: 'status', value: 'open' })
+    expect(state.updateEqCalls).toContainEqual({
+      field: 'status',
+      value: 'open',
+    })
   })
 
   it('leaves a row that moved to pending_ack alone', async () => {
     const state = newState({ updateReturn: [] })
     vi.mocked(createAdminClient).mockReturnValue(
-      makeSupabaseMock(state) as unknown as ReturnType<typeof createAdminClient>,
+      makeSupabaseMock(state) as unknown as ReturnType<
+        typeof createAdminClient
+      >,
     )
     const r = await markExpired({ commitmentId: COMMITMENT_ID, now: NOW })
     expect(r.ok && r.data.transitioned).toBe(false)
@@ -1840,9 +2052,13 @@ describe('cancelCommitmentForGuest (TAC-513)', () => {
   it('flips an OPEN commitment to cancelled', async () => {
     // The incident state exactly. If this ever stops passing the ticket is
     // unfixed.
-    const state = newState({ updateReturn: [makeRow({ status: 'cancelled' })] })
+    const state = newState({
+      updateReturn: [makeRow({ status: 'cancelled' })],
+    })
     vi.mocked(createAdminClient).mockReturnValue(
-      makeSupabaseMock(state) as unknown as ReturnType<typeof createAdminClient>,
+      makeSupabaseMock(state) as unknown as ReturnType<
+        typeof createAdminClient
+      >,
     )
     const r = await cancelCommitmentForGuest({
       commitmentId: COMMITMENT_ID,
@@ -1862,9 +2078,13 @@ describe('cancelCommitmentForGuest (TAC-513)', () => {
     // Asserted on the filter rather than a returned row: the mock ignores
     // filters, so a returned row proves nothing about the predicate. Dropping
     // 'open' here is the mutant that un-fixes the ticket.
-    const state = newState({ updateReturn: [makeRow({ status: 'cancelled' })] })
+    const state = newState({
+      updateReturn: [makeRow({ status: 'cancelled' })],
+    })
     vi.mocked(createAdminClient).mockReturnValue(
-      makeSupabaseMock(state) as unknown as ReturnType<typeof createAdminClient>,
+      makeSupabaseMock(state) as unknown as ReturnType<
+        typeof createAdminClient
+      >,
     )
     await cancelCommitmentForGuest({
       commitmentId: COMMITMENT_ID,
@@ -1881,9 +2101,13 @@ describe('cancelCommitmentForGuest (TAC-513)', () => {
   it('scopes the update to the commitment, the venue AND the guest', async () => {
     // The cross-guest guard, in Postgres rather than in application code.
     // Dropping guest_id lets a hallucinated id cancel another guest's comp.
-    const state = newState({ updateReturn: [makeRow({ status: 'cancelled' })] })
+    const state = newState({
+      updateReturn: [makeRow({ status: 'cancelled' })],
+    })
     vi.mocked(createAdminClient).mockReturnValue(
-      makeSupabaseMock(state) as unknown as ReturnType<typeof createAdminClient>,
+      makeSupabaseMock(state) as unknown as ReturnType<
+        typeof createAdminClient
+      >,
     )
     await cancelCommitmentForGuest({
       commitmentId: COMMITMENT_ID,
@@ -1891,9 +2115,18 @@ describe('cancelCommitmentForGuest (TAC-513)', () => {
       guestId: GUEST_ID,
       now: NOW,
     })
-    expect(state.updateEqCalls).toContainEqual({ field: 'id', value: COMMITMENT_ID })
-    expect(state.updateEqCalls).toContainEqual({ field: 'venue_id', value: VENUE_ID })
-    expect(state.updateEqCalls).toContainEqual({ field: 'guest_id', value: GUEST_ID })
+    expect(state.updateEqCalls).toContainEqual({
+      field: 'id',
+      value: COMMITMENT_ID,
+    })
+    expect(state.updateEqCalls).toContainEqual({
+      field: 'venue_id',
+      value: VENUE_ID,
+    })
+    expect(state.updateEqCalls).toContainEqual({
+      field: 'guest_id',
+      value: GUEST_ID,
+    })
   })
 
   it('reports transitioned=false when the CAS matches nothing', async () => {
@@ -1901,7 +2134,9 @@ describe('cancelCommitmentForGuest (TAC-513)', () => {
     // The caller logs this and does not fail the dispatch.
     const state = newState({ updateReturn: [] })
     vi.mocked(createAdminClient).mockReturnValue(
-      makeSupabaseMock(state) as unknown as ReturnType<typeof createAdminClient>,
+      makeSupabaseMock(state) as unknown as ReturnType<
+        typeof createAdminClient
+      >,
     )
     const r = await cancelCommitmentForGuest({
       commitmentId: COMMITMENT_ID,
@@ -1919,9 +2154,13 @@ describe('cancelCommitmentForGuest (TAC-513)', () => {
   it('writes status and updated_at, and no audit columns', async () => {
     // No cancelled_at / cancelled_by exist. Pinned with an exact key set so
     // adding one silently is a failure rather than a surprise in Studio.
-    const state = newState({ updateReturn: [makeRow({ status: 'cancelled' })] })
+    const state = newState({
+      updateReturn: [makeRow({ status: 'cancelled' })],
+    })
     vi.mocked(createAdminClient).mockReturnValue(
-      makeSupabaseMock(state) as unknown as ReturnType<typeof createAdminClient>,
+      makeSupabaseMock(state) as unknown as ReturnType<
+        typeof createAdminClient
+      >,
     )
     await cancelCommitmentForGuest({
       commitmentId: COMMITMENT_ID,
@@ -1942,7 +2181,9 @@ describe('cancelCommitmentForGuest (TAC-513)', () => {
   it('returns an error value on a DB failure, never throws', async () => {
     const state = newState({ updateError: { message: 'boom' } })
     vi.mocked(createAdminClient).mockReturnValue(
-      makeSupabaseMock(state) as unknown as ReturnType<typeof createAdminClient>,
+      makeSupabaseMock(state) as unknown as ReturnType<
+        typeof createAdminClient
+      >,
     )
     const r = await cancelCommitmentForGuest({
       commitmentId: COMMITMENT_ID,
@@ -1957,7 +2198,9 @@ describe('cancelCommitmentForGuest (TAC-513)', () => {
   it('returns an error value when the returned row is malformed', async () => {
     const state = newState({ updateReturn: [{ id: COMMITMENT_ID }] })
     vi.mocked(createAdminClient).mockReturnValue(
-      makeSupabaseMock(state) as unknown as ReturnType<typeof createAdminClient>,
+      makeSupabaseMock(state) as unknown as ReturnType<
+        typeof createAdminClient
+      >,
     )
     const r = await cancelCommitmentForGuest({
       commitmentId: COMMITMENT_ID,
@@ -1972,9 +2215,13 @@ describe('cancelCommitmentForGuest (TAC-513)', () => {
   it('leaves markCancelled untouched: it still gates on pending_ack alone', async () => {
     // TAC-389 owns the decline path. This is the guard that the new helper was
     // added BESIDE markCancelled rather than by widening it.
-    const state = newState({ updateReturn: [makeRow({ status: 'cancelled' })] })
+    const state = newState({
+      updateReturn: [makeRow({ status: 'cancelled' })],
+    })
     vi.mocked(createAdminClient).mockReturnValue(
-      makeSupabaseMock(state) as unknown as ReturnType<typeof createAdminClient>,
+      makeSupabaseMock(state) as unknown as ReturnType<
+        typeof createAdminClient
+      >,
     )
     await markCancelled({
       commitmentId: COMMITMENT_ID,
@@ -1982,7 +2229,10 @@ describe('cancelCommitmentForGuest (TAC-513)', () => {
       venueScope: grantedVenues([VENUE_ID]),
       now: NOW,
     })
-    expect(state.updateEqCalls).toContainEqual({ field: 'status', value: 'pending_ack' })
+    expect(state.updateEqCalls).toContainEqual({
+      field: 'status',
+      value: 'pending_ack',
+    })
     expect(state.updateInCalls).not.toContainEqual({
       field: 'status',
       values: ['open', 'pending_ack'],

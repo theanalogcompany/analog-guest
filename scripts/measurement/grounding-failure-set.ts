@@ -108,17 +108,23 @@ export function loadGroundingFailureSet(
  * working, not a failure, and folding the two into one number is how a
  * reproduction rate starts lying.
  */
-export function reproducibleCases(set: GroundingFailureSet): GroundingFailureCase[] {
+export function reproducibleCases(
+  set: GroundingFailureSet,
+): GroundingFailureCase[] {
   return set.cases.filter((c) => c.verdict_expected === 'flagged')
 }
 
 /** Negative controls — the cases where the verifier, not the generator, was wrong. */
-export function negativeControls(set: GroundingFailureSet): GroundingFailureCase[] {
+export function negativeControls(
+  set: GroundingFailureSet,
+): GroundingFailureCase[] {
   return set.cases.filter((c) => c.verdict_expected === 'clean')
 }
 
 /** Case counts per shape, for the per-shape reporting the runner contract requires. */
-export function countByShape(cases: GroundingFailureCase[]): Record<string, number> {
+export function countByShape(
+  cases: GroundingFailureCase[],
+): Record<string, number> {
   const counts: Record<string, number> = {}
   for (const c of cases) counts[c.shape] = (counts[c.shape] ?? 0) + 1
   return counts

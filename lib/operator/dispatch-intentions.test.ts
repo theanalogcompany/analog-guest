@@ -50,10 +50,13 @@ vi.mock('@/lib/db/admin', () => ({
       select: (cols?: string) => {
         if (typeof cols === 'string') selectArgs.push(cols)
         return {
-        eq: () => ({
-          maybeSingle: () => (table === 'guests' ? guestMaybeSingleMock() : rowMaybeSingleMock()),
-          eq: () => ({ maybeSingle: () => guestMaybeSingleMock() }),
-        }),
+          eq: () => ({
+            maybeSingle: () =>
+              table === 'guests'
+                ? guestMaybeSingleMock()
+                : rowMaybeSingleMock(),
+            eq: () => ({ maybeSingle: () => guestMaybeSingleMock() }),
+          }),
         }
       },
       update: () =>
@@ -71,7 +74,12 @@ vi.mock('@/lib/db/admin', () => ({
                       { error: null },
                       {
                         select: () =>
-                          step({ data: [{ id: MESSAGE_ID, review_state: 'approved' }], error: null }),
+                          step({
+                            data: [
+                              { id: MESSAGE_ID, review_state: 'approved' },
+                            ],
+                            error: null,
+                          }),
                       },
                     ),
                 },
@@ -84,9 +92,12 @@ vi.mock('@/lib/db/admin', () => ({
 vi.mock('@/lib/messaging/send', () => ({
   sendMessage: (...a: unknown[]) => sendMessageMock(...a),
 }))
-vi.mock('@/lib/guests/commitments', () => ({ createCommitmentFromPending: vi.fn() }))
+vi.mock('@/lib/guests/commitments', () => ({
+  createCommitmentFromPending: vi.fn(),
+}))
 vi.mock('@/lib/analytics/posthog', () => ({
-  captureIntentionPromptRecordingFailed: (...a: unknown[]) => captureRecordingFailedMock(...a),
+  captureIntentionPromptRecordingFailed: (...a: unknown[]) =>
+    captureRecordingFailedMock(...a),
   // TAC-436: this factory is an ALLOW-LIST. An export omitted here arrives
   // `undefined` at the call site and throws inside the waitUntil .then(),
   // where nothing in this file would surface it.
@@ -203,7 +214,9 @@ describe('dispatchOperatorOutbound — recording the ask (TAC-385)', () => {
       action: 'approve',
     })
 
-    const messagesSelect = selectArgs.find((c) => c.includes('pending_commitment'))
+    const messagesSelect = selectArgs.find((c) =>
+      c.includes('pending_commitment'),
+    )
     expect(messagesSelect).toBeDefined()
     expect(messagesSelect).toContain('rendered_intentions')
   })
@@ -213,7 +226,9 @@ describe('dispatchOperatorOutbound — recording the ask (TAC-385)', () => {
   // inbound timestamps — stamping it at row creation would age every prompt.
   it('stamps now, not the draft created_at', async () => {
     const createdAt = new Date('2026-09-10T08:00:00.000Z')
-    rowMaybeSingleMock.mockResolvedValue(row({ created_at: createdAt.toISOString() }))
+    rowMaybeSingleMock.mockResolvedValue(
+      row({ created_at: createdAt.toISOString() }),
+    )
     await dispatchOperatorOutbound({
       messageId: MESSAGE_ID,
       operatorId: 'op-1',
@@ -591,7 +606,9 @@ describe('dispatchOperatorOutbound — recording the ask (TAC-385)', () => {
     await settle()
 
     const { openIntentions } = recordIntentionPromptsMock.mock.calls[0][0]
-    expect(openIntentions.map((o: { key: string }) => o.key)).toEqual(['learn_name'])
+    expect(openIntentions.map((o: { key: string }) => o.key)).toEqual([
+      'learn_name',
+    ])
   })
 
   // Migration 040 renames learn_first_order to understand_order, and rows the
@@ -600,7 +617,9 @@ describe('dispatchOperatorOutbound — recording the ask (TAC-385)', () => {
   // asked again.
   it('resolves the learn_first_order alias', async () => {
     rowMaybeSingleMock.mockResolvedValue(
-      row({ rendered_intentions: [{ key: 'learn_first_order', eligibleAt: ANCHOR }] }),
+      row({
+        rendered_intentions: [{ key: 'learn_first_order', eligibleAt: ANCHOR }],
+      }),
     )
     await dispatchOperatorOutbound({
       messageId: MESSAGE_ID,
@@ -611,7 +630,9 @@ describe('dispatchOperatorOutbound — recording the ask (TAC-385)', () => {
     await settle()
 
     const { openIntentions } = recordIntentionPromptsMock.mock.calls[0][0]
-    expect(openIntentions.map((o: { key: string }) => o.key)).toEqual(['understand_order'])
+    expect(openIntentions.map((o: { key: string }) => o.key)).toEqual([
+      'understand_order',
+    ])
   })
 
   it('drops an entry whose eligibleAt cannot be parsed', async () => {
@@ -632,11 +653,15 @@ describe('dispatchOperatorOutbound — recording the ask (TAC-385)', () => {
     await settle()
 
     const { openIntentions } = recordIntentionPromptsMock.mock.calls[0][0]
-    expect(openIntentions.map((o: { key: string }) => o.key)).toEqual(['learn_name'])
+    expect(openIntentions.map((o: { key: string }) => o.key)).toEqual([
+      'learn_name',
+    ])
   })
 
   it('survives a malformed payload without failing the dispatch', async () => {
-    rowMaybeSingleMock.mockResolvedValue(row({ rendered_intentions: { nope: true } }))
+    rowMaybeSingleMock.mockResolvedValue(
+      row({ rendered_intentions: { nope: true } }),
+    )
     const r = await dispatchOperatorOutbound({
       messageId: MESSAGE_ID,
       operatorId: 'op-1',

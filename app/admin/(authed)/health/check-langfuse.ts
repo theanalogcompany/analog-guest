@@ -46,8 +46,7 @@ export function checkLangfuse(env: EnvLike = process.env): CheckLangfuseRow {
   const secretKey = env.LANGFUSE_SECRET_KEY?.trim() ?? ''
   // Match the wrapper's alias logic in lib/observability/langfuse.ts:
   // BASE_URL preferred, HOST accepted as legacy alias.
-  const host =
-    env.LANGFUSE_BASE_URL?.trim() || env.LANGFUSE_HOST?.trim() || ''
+  const host = env.LANGFUSE_BASE_URL?.trim() || env.LANGFUSE_HOST?.trim() || ''
   const enabled = env.LANGFUSE_ENABLED?.trim() ?? ''
 
   // 1. Not configured — operator hasn't touched any Langfuse env. No-op mode
@@ -55,7 +54,8 @@ export function checkLangfuse(env: EnvLike = process.env): CheckLangfuseRow {
   if (!publicKey && !secretKey && !host) {
     return {
       label: 'Langfuse',
-      detail: 'Not configured (no LANGFUSE_* env vars set — local dev / no-op mode)',
+      detail:
+        'Not configured (no LANGFUSE_* env vars set — local dev / no-op mode)',
       tone: 'neutral',
     }
   }
@@ -84,7 +84,11 @@ export function checkLangfuse(env: EnvLike = process.env): CheckLangfuseRow {
     return { label: 'Langfuse', detail, tone: 'bad' }
   }
 
-  if (!KNOWN_LANGFUSE_HOSTS.includes(host as (typeof KNOWN_LANGFUSE_HOSTS)[number])) {
+  if (
+    !KNOWN_LANGFUSE_HOSTS.includes(
+      host as (typeof KNOWN_LANGFUSE_HOSTS)[number],
+    )
+  ) {
     return {
       label: 'Langfuse',
       detail: `Misconfigured — unrecognized host: ${host} (expected ${KNOWN_LANGFUSE_HOSTS.join(' or ')})`,

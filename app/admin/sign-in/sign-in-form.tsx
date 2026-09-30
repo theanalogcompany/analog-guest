@@ -46,7 +46,10 @@ export function SignInForm() {
       options: { emailRedirectTo: redirectTo },
     })
     if (error) {
-      setState({ kind: 'error', message: "Couldn't send the link. Try again." })
+      setState({
+        kind: 'error',
+        message: "Couldn't send the link. Try again.",
+      })
       return
     }
     setState({ kind: 'sent' })

@@ -69,7 +69,9 @@ describe('addCorpusEntry — happy path', () => {
   it('inserts row, embeds, returns the new corpus id + chunk count', async () => {
     const state = newState()
     vi.mocked(createAdminClient).mockReturnValue(
-      makeSupabaseMock(state) as unknown as ReturnType<typeof createAdminClient>,
+      makeSupabaseMock(state) as unknown as ReturnType<
+        typeof createAdminClient
+      >,
     )
     vi.mocked(ingestCorpusEntry).mockResolvedValue({
       ok: true,
@@ -104,7 +106,9 @@ describe('addCorpusEntry — happy path', () => {
   it('omits added_by_operator_id when not provided', async () => {
     const state = newState()
     vi.mocked(createAdminClient).mockReturnValue(
-      makeSupabaseMock(state) as unknown as ReturnType<typeof createAdminClient>,
+      makeSupabaseMock(state) as unknown as ReturnType<
+        typeof createAdminClient
+      >,
     )
     vi.mocked(ingestCorpusEntry).mockResolvedValue({
       ok: true,
@@ -126,7 +130,9 @@ describe('addCorpusEntry — embed failure rolls back row', () => {
   it('deletes the inserted row and returns embed_failed', async () => {
     const state = newState()
     vi.mocked(createAdminClient).mockReturnValue(
-      makeSupabaseMock(state) as unknown as ReturnType<typeof createAdminClient>,
+      makeSupabaseMock(state) as unknown as ReturnType<
+        typeof createAdminClient
+      >,
     )
     vi.mocked(ingestCorpusEntry).mockResolvedValue({
       ok: false,
@@ -157,7 +163,9 @@ describe('addCorpusEntry — db error paths', () => {
       insertedRow: null,
     })
     vi.mocked(createAdminClient).mockReturnValue(
-      makeSupabaseMock(state) as unknown as ReturnType<typeof createAdminClient>,
+      makeSupabaseMock(state) as unknown as ReturnType<
+        typeof createAdminClient
+      >,
     )
 
     const result = await addCorpusEntry({

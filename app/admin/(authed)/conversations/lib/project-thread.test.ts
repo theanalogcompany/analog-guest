@@ -12,7 +12,9 @@ import {
 // the ticket), nothing mocked.
 
 let seq = 0
-function row(overrides: Partial<ConversationMessageRow> = {}): ConversationMessageRow {
+function row(
+  overrides: Partial<ConversationMessageRow> = {},
+): ConversationMessageRow {
   seq += 1
   return {
     id: `00000000-0000-0000-0000-${String(seq).padStart(12, '0')}`,
@@ -36,7 +38,11 @@ function row(overrides: Partial<ConversationMessageRow> = {}): ConversationMessa
 
 describe('projectThread', () => {
   it('renders every row: delivered, skipped draft, blank card, and split all survive projection', () => {
-    const delivered1 = row({ direction: 'inbound', status: 'received', review_state: null })
+    const delivered1 = row({
+      direction: 'inbound',
+      status: 'received',
+      review_state: null,
+    })
     const delivered2 = row({ status: 'delivered' })
     // The cca03314 shape: superseded pending draft, never sent.
     const skipped = row({ status: 'pending_review', review_state: 'skipped' })
@@ -52,7 +58,14 @@ describe('projectThread', () => {
     const splitA = row({ generation_id: gen, body: 'first bubble' })
     const splitB = row({ generation_id: gen, body: 'second bubble' })
 
-    const out = projectThread([delivered1, delivered2, skipped, blank, splitA, splitB])
+    const out = projectThread([
+      delivered1,
+      delivered2,
+      skipped,
+      blank,
+      splitA,
+      splitB,
+    ])
 
     // 6 rows → 5 responses (the split merges), none dropped.
     expect(out).toHaveLength(5)
@@ -67,13 +80,20 @@ describe('projectThread', () => {
 
   it('groups a two-row split into one response with both fragments, keyed on the first bubble', () => {
     const gen = 'aaaaaaaa-0000-0000-0000-000000000002'
-    const a = row({ generation_id: gen, body: 'sound good?', langfuse_trace_id: 'trace-1' })
+    const a = row({
+      generation_id: gen,
+      body: 'sound good?',
+      langfuse_trace_id: 'trace-1',
+    })
     const b = row({ generation_id: gen, body: 'see you at 8' })
     const out = projectThread([a, b])
 
     expect(out).toHaveLength(1)
     expect(out[0].id).toBe(a.id)
-    expect(out[0].bubbles.map((x) => x.body)).toEqual(['sound good?', 'see you at 8'])
+    expect(out[0].bubbles.map((x) => x.body)).toEqual([
+      'sound good?',
+      'see you at 8',
+    ])
     expect(out[0].body).toBe('sound good?\nsee you at 8')
     expect(out[0].createdAt).toEqual(new Date(a.created_at))
     expect(out[0].langfuseTraceId).toBe('trace-1')
@@ -82,13 +102,20 @@ describe('projectThread', () => {
   it('grouping is keyed, not adjacent: an inbound between two bubbles does not break the group', () => {
     const gen = 'aaaaaaaa-0000-0000-0000-000000000003'
     const a = row({ generation_id: gen, body: 'bubble one' })
-    const interleaved = row({ direction: 'inbound', status: 'received', review_state: null })
+    const interleaved = row({
+      direction: 'inbound',
+      status: 'received',
+      review_state: null,
+    })
     const b = row({ generation_id: gen, body: 'bubble two' })
 
     const out = projectThread([a, interleaved, b])
     expect(out).toHaveLength(2)
     const split = out.find((r) => r.id === a.id)
-    expect(split?.bubbles.map((x) => x.body)).toEqual(['bubble one', 'bubble two'])
+    expect(split?.bubbles.map((x) => x.body)).toEqual([
+      'bubble one',
+      'bubble two',
+    ])
     const inbound = out.find((r) => r.id === interleaved.id)
     expect(inbound?.direction).toBe('inbound')
   })
@@ -117,7 +144,11 @@ describe('projectThread', () => {
   })
 
   it('a blank-body single row keeps its (empty) bubble and empty joined body', () => {
-    const blank = row({ body: '', review_state: 'pending', status: 'pending_review' })
+    const blank = row({
+      body: '',
+      review_state: 'pending',
+      status: 'pending_review',
+    })
     const out = projectThread([blank])
     expect(out).toHaveLength(1)
     expect(out[0].bubbles).toHaveLength(1)
@@ -150,14 +181,22 @@ describe('projectThread', () => {
 
     const out = projectThread([card, reaction, media, normal])
     const byId = new Map(out.map((r) => [r.id, r]))
-    expect(byId.get(card.id)?.bubbles[0].placeholder).toBe('no draft — blank card (knowledge_gap)')
+    expect(byId.get(card.id)?.bubbles[0].placeholder).toBe(
+      'no draft — blank card (knowledge_gap)',
+    )
     expect(byId.get(reaction.id)?.bubbles[0].placeholder).toBe('reaction: love')
-    expect(byId.get(media.id)?.bubbles[0].placeholder).toBe('media message (2 attachments)')
+    expect(byId.get(media.id)?.bubbles[0].placeholder).toBe(
+      'media message (2 attachments)',
+    )
     expect(byId.get(normal.id)?.bubbles[0].placeholder).toBeNull()
   })
 
   it('carries review/state fields through as opaque values', () => {
-    const weird = row({ status: 'quarantined', review_state: 'escalated', review_reason: 'x' })
+    const weird = row({
+      status: 'quarantined',
+      review_state: 'escalated',
+      review_reason: 'x',
+    })
     const out = projectThread([weird])
     expect(out[0].status).toBe('quarantined')
     expect(out[0].reviewState).toBe('escalated')
@@ -167,25 +206,40 @@ describe('projectThread', () => {
 
 describe('deriveResponseState', () => {
   it('normal for dispatched rows: received/sending/sent/delivered with dispatched review states', () => {
-    expect(deriveResponseState({ status: 'received', reviewState: null }).kind).toBe('normal')
-    expect(deriveResponseState({ status: 'sent', reviewState: 'auto_sent' }).kind).toBe('normal')
-    expect(deriveResponseState({ status: 'delivered', reviewState: 'approved' }).kind).toBe('normal')
-    expect(deriveResponseState({ status: 'sent', reviewState: 'edited' }).kind).toBe('normal')
+    expect(
+      deriveResponseState({ status: 'received', reviewState: null }).kind,
+    ).toBe('normal')
+    expect(
+      deriveResponseState({ status: 'sent', reviewState: 'auto_sent' }).kind,
+    ).toBe('normal')
+    expect(
+      deriveResponseState({ status: 'delivered', reviewState: 'approved' })
+        .kind,
+    ).toBe('normal')
+    expect(
+      deriveResponseState({ status: 'sent', reviewState: 'edited' }).kind,
+    ).toBe('normal')
     // 'sending' is a real code-written status (Sendblue QUEUED via the status
     // webhook), and out-of-order callbacks can leave a delivered row there
     // permanently — it traveled, so it renders normal and counts in stats.
-    expect(deriveResponseState({ status: 'sending', reviewState: 'auto_sent' }).kind).toBe('normal')
+    expect(
+      deriveResponseState({ status: 'sending', reviewState: 'auto_sent' }).kind,
+    ).toBe('normal')
   })
 
   it('skipped drafts are never-sent — superseded', () => {
-    expect(deriveResponseState({ status: 'pending_review', reviewState: 'skipped' })).toEqual({
+    expect(
+      deriveResponseState({ status: 'pending_review', reviewState: 'skipped' }),
+    ).toEqual({
       kind: 'annotated',
       label: 'never sent — superseded',
     })
   })
 
   it('pending drafts are pending review; a stranded dispatch is NOT mislabeled as pending', () => {
-    expect(deriveResponseState({ status: 'pending_review', reviewState: 'pending' })).toEqual({
+    expect(
+      deriveResponseState({ status: 'pending_review', reviewState: 'pending' }),
+    ).toEqual({
       kind: 'annotated',
       label: 'pending review',
     })
@@ -194,25 +248,36 @@ describe('deriveResponseState', () => {
     // it, so this viewer is the only place an operator can spot it — the
     // truthful literal beats a "pending review" label promising someone else
     // will handle it.
-    expect(deriveResponseState({ status: 'pending_review', reviewState: 'approved' })).toEqual({
+    expect(
+      deriveResponseState({
+        status: 'pending_review',
+        reviewState: 'approved',
+      }),
+    ).toEqual({
       kind: 'annotated',
       label: 'status=pending_review · review_state=approved',
     })
   })
 
   it('failed sends are labeled', () => {
-    expect(deriveResponseState({ status: 'failed', reviewState: 'approved' })).toEqual({
+    expect(
+      deriveResponseState({ status: 'failed', reviewState: 'approved' }),
+    ).toEqual({
       kind: 'annotated',
       label: 'failed to send',
     })
   })
 
   it('unknown values render as literal text instead of throwing or hiding the row', () => {
-    expect(deriveResponseState({ status: 'quarantined', reviewState: null })).toEqual({
+    expect(
+      deriveResponseState({ status: 'quarantined', reviewState: null }),
+    ).toEqual({
       kind: 'annotated',
       label: 'status=quarantined · review_state=null',
     })
-    expect(deriveResponseState({ status: 'sent', reviewState: 'escalated' })).toEqual({
+    expect(
+      deriveResponseState({ status: 'sent', reviewState: 'escalated' }),
+    ).toEqual({
       kind: 'annotated',
       label: 'status=sent · review_state=escalated',
     })
@@ -221,14 +286,26 @@ describe('deriveResponseState', () => {
 
 describe('wasDispatched', () => {
   it('true only for the normal dispatched path — the safe direction for stats is exclusion', () => {
-    expect(wasDispatched({ status: 'delivered', reviewState: 'auto_sent' })).toBe(true)
+    expect(
+      wasDispatched({ status: 'delivered', reviewState: 'auto_sent' }),
+    ).toBe(true)
     expect(wasDispatched({ status: 'received', reviewState: null })).toBe(true)
-    expect(wasDispatched({ status: 'sending', reviewState: 'auto_sent' })).toBe(true)
-    expect(wasDispatched({ status: 'pending_review', reviewState: 'skipped' })).toBe(false)
-    expect(wasDispatched({ status: 'pending_review', reviewState: 'pending' })).toBe(false)
-    expect(wasDispatched({ status: 'failed', reviewState: 'approved' })).toBe(false)
+    expect(wasDispatched({ status: 'sending', reviewState: 'auto_sent' })).toBe(
+      true,
+    )
+    expect(
+      wasDispatched({ status: 'pending_review', reviewState: 'skipped' }),
+    ).toBe(false)
+    expect(
+      wasDispatched({ status: 'pending_review', reviewState: 'pending' }),
+    ).toBe(false)
+    expect(wasDispatched({ status: 'failed', reviewState: 'approved' })).toBe(
+      false,
+    )
     // Unknown values count as not-dispatched: a response rate should never be
     // deflated or inflated by rows we can't classify.
-    expect(wasDispatched({ status: 'quarantined', reviewState: null })).toBe(false)
+    expect(wasDispatched({ status: 'quarantined', reviewState: null })).toBe(
+      false,
+    )
   })
 })

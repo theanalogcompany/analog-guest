@@ -51,7 +51,9 @@ afterEach(() => {
 describe('GET /api/cron/instagram-token-refresh', () => {
   it('skips auth in development', async () => {
     vi.stubEnv('NODE_ENV', 'development')
-    const res = await GET(new Request('http://localhost/api/cron/instagram-token-refresh'))
+    const res = await GET(
+      new Request('http://localhost/api/cron/instagram-token-refresh'),
+    )
     expect(res.status).toBe(200)
     expect(processMock).toHaveBeenCalledOnce()
   })
@@ -60,7 +62,9 @@ describe('GET /api/cron/instagram-token-refresh', () => {
     vi.stubEnv('NODE_ENV', 'production')
     delete process.env.CRON_SECRET
     delete process.env.EXTERNAL_CRON_SECRET
-    const res = await GET(new Request('http://localhost/api/cron/instagram-token-refresh'))
+    const res = await GET(
+      new Request('http://localhost/api/cron/instagram-token-refresh'),
+    )
     expect(res.status).toBe(401)
     expect(processMock).not.toHaveBeenCalled()
   })

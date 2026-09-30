@@ -29,16 +29,25 @@ const WINDOW_48H = 48 * MS_PER_HOUR
 
 const daysAgo = (n: number) => new Date(NOW.getTime() - n * MS_PER_DAY)
 const hoursAgo = (n: number) => new Date(NOW.getTime() - n * MS_PER_HOUR)
-const keysOf = (open: readonly OpenIntention[]): IntentionKey[] => open.map((o) => o.key)
+const keysOf = (open: readonly OpenIntention[]): IntentionKey[] =>
+  open.map((o) => o.key)
 
-const NO_FACTS = { hasQualifyingTransaction: false, hasFirstName: false, hasHomeBase: false }
+const NO_FACTS = {
+  hasQualifyingTransaction: false,
+  hasFirstName: false,
+  hasHomeBase: false,
+  hasRepeatVisitsOnRecord: false,
+  hasVenueHistoryOnFile: false,
+}
 
 /**
  * A baseline where nothing is eligible: an inbound_message guest (so
  * understand_order is unarmed), no replies, no events. Each test turns on
  * exactly what it's about.
  */
-function input(overrides: Partial<DeriveOpenIntentionsInput> = {}): DeriveOpenIntentionsInput {
+function input(
+  overrides: Partial<DeriveOpenIntentionsInput> = {},
+): DeriveOpenIntentionsInput {
   return {
     now: NOW,
     responseRate: 0,
@@ -66,7 +75,10 @@ function input(overrides: Partial<DeriveOpenIntentionsInput> = {}): DeriveOpenIn
 }
 
 /** A guest who replies to everything, with `replies` lifetime inbound messages. */
-const engaged = (replies: number) => ({ responseRate: 100, repliedMessageCount: replies })
+const engaged = (replies: number) => ({
+  responseRate: 100,
+  repliedMessageCount: replies,
+})
 
 function promptedRow(
   key: string,
@@ -88,7 +100,9 @@ describe('window constants', () => {
   // ASKS about the first order must not outlast how long TAC-323's extractor
   // still LISTENS for one.
   it('never lets the understand_order ask-window outlast the listen-window', () => {
-    expect(UNDERSTAND_ORDER_WINDOW_DAYS).toBeLessThanOrEqual(REPORTED_ORDER_WINDOW_DAYS)
+    expect(UNDERSTAND_ORDER_WINDOW_DAYS).toBeLessThanOrEqual(
+      REPORTED_ORDER_WINDOW_DAYS,
+    )
   })
 })
 
@@ -97,7 +111,12 @@ describe('deriveOpenIntentions — state rows (trap 1)', () => {
   // eligibility row means "askable since eligible_at", not "already asked".
   it('leaves an intention OPEN when only an eligibility row exists (prompted_at null)', () => {
     const result = deriveOpenIntentions(
-      input({ rows: { prompted: [], eligible: [{ intentionKey: 'learn_name', eligibleAt: daysAgo(1) }] } }),
+      input({
+        rows: {
+          prompted: [],
+          eligible: [{ intentionKey: 'learn_name', eligibleAt: daysAgo(1) }],
+        },
+      }),
     )
     expect(keysOf(result.open)).toContain('learn_name')
   })
@@ -106,7 +125,10 @@ describe('deriveOpenIntentions — state rows (trap 1)', () => {
     const result = deriveOpenIntentions(
       input({
         ...engaged(11),
-        rows: { prompted: [promptedRow('learn_name', daysAgo(1))], eligible: [] },
+        rows: {
+          prompted: [promptedRow('learn_name', daysAgo(1))],
+          eligible: [],
+        },
       }),
     )
     expect(keysOf(result.open)).not.toContain('learn_name')
@@ -115,7 +137,11 @@ describe('deriveOpenIntentions — state rows (trap 1)', () => {
 
   it('fails closed when the rows could not be read', () => {
     const result = deriveOpenIntentions(input({ ...engaged(11), rows: null }))
-    expect(result).toEqual({ open: [], newlyEligible: [], brakeEngaged: false })
+    expect(result).toEqual({
+      open: [],
+      newlyEligible: [],
+      brakeEngaged: false,
+    })
   })
 
   // TAC-380 deploy window: rows the OLD code writes between applying migration
@@ -125,11 +151,16 @@ describe('deriveOpenIntentions — state rows (trap 1)', () => {
   it('reads a legacy learn_first_order prompt as a closed understand_order', () => {
     const result = deriveOpenIntentions(
       input({
-        rows: { prompted: [promptedRow('learn_first_order', hoursAgo(2))], eligible: [] },
+        rows: {
+          prompted: [promptedRow('learn_first_order', hoursAgo(2))],
+          eligible: [],
+        },
       }),
     )
     expect(keysOf(result.open)).not.toContain('understand_order')
-    expect(result.newlyEligible.map((e) => e.key)).not.toContain('understand_order')
+    expect(result.newlyEligible.map((e) => e.key)).not.toContain(
+      'understand_order',
+    )
   })
 
   // invite_contact_save is retired; its one production row is left orphaned
@@ -138,7 +169,10 @@ describe('deriveOpenIntentions — state rows (trap 1)', () => {
     const result = deriveOpenIntentions(
       input({
         ...engaged(3),
-        rows: { prompted: [promptedRow('invite_contact_save', daysAgo(1))], eligible: [] },
+        rows: {
+          prompted: [promptedRow('invite_contact_save', daysAgo(1))],
+          eligible: [],
+        },
       }),
     )
     expect(keysOf(result.open)).toEqual(['learn_name'])
@@ -162,7 +196,9 @@ describe('deriveOpenIntentions — arming', () => {
   // R1 still holds: no confirmed visit, no ask about an order. Before ruling 3
   // this was "no scan"; the guarantee is the same and its scope is wider.
   it('never arms understand_order with no confirmed visit, however engaged the guest', () => {
-    const result = deriveOpenIntentions(input({ ...engaged(11), visitConfirmedAt: null }))
+    const result = deriveOpenIntentions(
+      input({ ...engaged(11), visitConfirmedAt: null }),
+    )
     expect(keysOf(result.open)).not.toContain('understand_order')
   })
 
@@ -171,7 +207,9 @@ describe('deriveOpenIntentions — arming', () => {
       input({ visitConfirmedAt: daysAgo(UNDERSTAND_ORDER_WINDOW_DAYS + 1) }),
     )
     expect(keysOf(result.open)).not.toContain('understand_order')
-    expect(result.newlyEligible.map((e) => e.key)).not.toContain('understand_order')
+    expect(result.newlyEligible.map((e) => e.key)).not.toContain(
+      'understand_order',
+    )
   })
 
   // TAC-518. The whole point of reading the referral on THIS TURN: a guest who
@@ -182,7 +220,11 @@ describe('deriveOpenIntentions — arming', () => {
   it('arms understand_order for an engaged, long-standing guest whose visit was just confirmed', () => {
     const scanAt = hoursAgo(1)
     const result = deriveOpenIntentions(
-      input({ ...engaged(40), visitConfirmedAt: scanAt, inboundTimes: [daysAgo(3), NOW] }),
+      input({
+        ...engaged(40),
+        visitConfirmedAt: scanAt,
+        inboundTimes: [daysAgo(3), NOW],
+      }),
     )
     expect(keysOf(result.open)).toContain('understand_order')
     expect(result.newlyEligible).toContainEqual({
@@ -202,11 +244,16 @@ describe('deriveOpenIntentions — arming', () => {
     const result = deriveOpenIntentions(
       input({
         visitConfirmedAt: hoursAgo(1),
-        rows: { prompted: [promptedRow('understand_order', daysAgo(30))], eligible: [] },
+        rows: {
+          prompted: [promptedRow('understand_order', daysAgo(30))],
+          eligible: [],
+        },
       }),
     )
     expect(keysOf(result.open)).not.toContain('understand_order')
-    expect(result.newlyEligible.map((e) => e.key)).not.toContain('understand_order')
+    expect(result.newlyEligible.map((e) => e.key)).not.toContain(
+      'understand_order',
+    )
   })
 
   // The ruling's own closure, unchanged: hearing the order closes the ask,
@@ -228,7 +275,9 @@ describe('deriveOpenIntentions — arming', () => {
       input({ ...engaged(3), openRecommendationTimes: [hoursAgo(50)] }),
     )
     expect(keysOf(result.open)).toContain('got_the_recommendation')
-    expect(result.newlyEligible.find((e) => e.key === 'got_the_recommendation')).toEqual({
+    expect(
+      result.newlyEligible.find((e) => e.key === 'got_the_recommendation'),
+    ).toEqual({
       key: 'got_the_recommendation',
       eligibleAt: hoursAgo(2),
       rearm: false,
@@ -241,12 +290,19 @@ describe('deriveOpenIntentions — arming', () => {
       input({
         ...engaged(3),
         openRecommendationTimes: [
-          new Date(NOW.getTime() - WINDOW_48H - EVENT_ARMED_WINDOW_DAYS * MS_PER_DAY - MS_PER_HOUR),
+          new Date(
+            NOW.getTime() -
+              WINDOW_48H -
+              EVENT_ARMED_WINDOW_DAYS * MS_PER_DAY -
+              MS_PER_HOUR,
+          ),
         ],
       }),
     )
     expect(keysOf(result.open)).not.toContain('got_the_recommendation')
-    expect(result.newlyEligible.map((e) => e.key)).not.toContain('got_the_recommendation')
+    expect(result.newlyEligible.map((e) => e.key)).not.toContain(
+      'got_the_recommendation',
+    )
   })
 
   it('arms did_they_like_it off a recorded order, and not without one', () => {
@@ -272,7 +328,11 @@ describe('deriveOpenIntentions — arming', () => {
         facts: { ...NO_FACTS, hasQualifyingTransaction: true },
       }),
     )
-    expect(result.newlyEligible).toContainEqual({ key: 'did_they_like_it', eligibleAt: hoursAgo(2), rearm: false })
+    expect(result.newlyEligible).toContainEqual({
+      key: 'did_they_like_it',
+      eligibleAt: hoursAgo(2),
+      rearm: false,
+    })
   })
   // Ruling 2: an event arms only once it is from a different conversation.
   // Raising "did you try it?" in the exchange where it was suggested closes the
@@ -282,7 +342,9 @@ describe('deriveOpenIntentions — arming', () => {
       input({ ...engaged(3), openRecommendationTimes: [hoursAgo(1)] }),
     )
     expect(keysOf(result.open)).not.toContain('got_the_recommendation')
-    expect(result.newlyEligible.map((e) => e.key)).not.toContain('got_the_recommendation')
+    expect(result.newlyEligible.map((e) => e.key)).not.toContain(
+      'got_the_recommendation',
+    )
   })
 
   it('does not arm did_they_like_it inside the conversation the order was reported in', () => {
@@ -294,7 +356,9 @@ describe('deriveOpenIntentions — arming', () => {
       }),
     )
     expect(keysOf(result.open)).not.toContain('did_they_like_it')
-    expect(result.newlyEligible.map((e) => e.key)).not.toContain('did_they_like_it')
+    expect(result.newlyEligible.map((e) => e.key)).not.toContain(
+      'did_they_like_it',
+    )
   })
 
   // One number: the window comes from config (recent_conversation_hours), never
@@ -303,23 +367,46 @@ describe('deriveOpenIntentions — arming', () => {
   // nothing askable once the conversation length reached the window.
   it('takes the conversation length from config, short or long', () => {
     const short = deriveOpenIntentions(
-      input({ ...engaged(3), conversationWindowMs: 6 * MS_PER_HOUR, openRecommendationTimes: [hoursAgo(7)] }),
+      input({
+        ...engaged(3),
+        conversationWindowMs: 6 * MS_PER_HOUR,
+        openRecommendationTimes: [hoursAgo(7)],
+      }),
     )
-    expect(short.newlyEligible).toContainEqual({ key: 'got_the_recommendation', eligibleAt: hoursAgo(1), rearm: false })
+    expect(short.newlyEligible).toContainEqual({
+      key: 'got_the_recommendation',
+      eligibleAt: hoursAgo(1),
+      rearm: false,
+    })
 
     const long = deriveOpenIntentions(
-      input({ ...engaged(3), conversationWindowMs: 96 * MS_PER_HOUR, openRecommendationTimes: [hoursAgo(100)] }),
+      input({
+        ...engaged(3),
+        conversationWindowMs: 96 * MS_PER_HOUR,
+        openRecommendationTimes: [hoursAgo(100)],
+      }),
     )
-    expect(long.newlyEligible).toContainEqual({ key: 'got_the_recommendation', eligibleAt: hoursAgo(4), rearm: false })
+    expect(long.newlyEligible).toContainEqual({
+      key: 'got_the_recommendation',
+      eligibleAt: hoursAgo(4),
+      rearm: false,
+    })
   })
 
   // Ruling 1: the newest recommendation still inside its window, never the
   // first one ever. Two are askable here, so "earliest" and "newest" differ.
   it('arms off the newest askable recommendation, not the first one ever', () => {
     const result = deriveOpenIntentions(
-      input({ ...engaged(3), openRecommendationTimes: [daysAgo(30), hoursAgo(50), hoursAgo(100)] }),
+      input({
+        ...engaged(3),
+        openRecommendationTimes: [daysAgo(30), hoursAgo(50), hoursAgo(100)],
+      }),
     )
-    expect(result.newlyEligible).toContainEqual({ key: 'got_the_recommendation', eligibleAt: hoursAgo(2), rearm: false })
+    expect(result.newlyEligible).toContainEqual({
+      key: 'got_the_recommendation',
+      eligibleAt: hoursAgo(2),
+      rearm: false,
+    })
   })
 
   // Ruling 2, held at render time. The line doesn't say which recommendation it
@@ -328,10 +415,15 @@ describe('deriveOpenIntentions — arming', () => {
   // earlier version fell back to the older recommendation, and a test pinned it.
   it('arms nothing off an older recommendation while the newest is still in this conversation', () => {
     const result = deriveOpenIntentions(
-      input({ ...engaged(3), openRecommendationTimes: [hoursAgo(1), hoursAgo(60)] }),
+      input({
+        ...engaged(3),
+        openRecommendationTimes: [hoursAgo(1), hoursAgo(60)],
+      }),
     )
     expect(keysOf(result.open)).not.toContain('got_the_recommendation')
-    expect(result.newlyEligible.map((e) => e.key)).not.toContain('got_the_recommendation')
+    expect(result.newlyEligible.map((e) => e.key)).not.toContain(
+      'got_the_recommendation',
+    )
   })
 
   it('holds an already-open row off the prompt while the newest recommendation is in this conversation', () => {
@@ -339,11 +431,21 @@ describe('deriveOpenIntentions — arming', () => {
       input({
         ...engaged(3),
         openRecommendationTimes: [hoursAgo(1), hoursAgo(60)],
-        rows: { prompted: [], eligible: [{ intentionKey: 'got_the_recommendation', eligibleAt: hoursAgo(12) }] },
+        rows: {
+          prompted: [],
+          eligible: [
+            {
+              intentionKey: 'got_the_recommendation',
+              eligibleAt: hoursAgo(12),
+            },
+          ],
+        },
       }),
     )
     expect(keysOf(result.open)).not.toContain('got_the_recommendation')
-    expect(result.newlyEligible.map((e) => e.key)).not.toContain('got_the_recommendation')
+    expect(result.newlyEligible.map((e) => e.key)).not.toContain(
+      'got_the_recommendation',
+    )
   })
 
   // A repeated recommendation is deduped onto its existing row (TAC-318), which
@@ -356,7 +458,15 @@ describe('deriveOpenIntentions — arming', () => {
         ...engaged(3),
         openRecommendationTimes: [daysAgo(90), hoursAgo(60)],
         openRecommendationTouchedTimes: [hoursAgo(1), hoursAgo(60)],
-        rows: { prompted: [], eligible: [{ intentionKey: 'got_the_recommendation', eligibleAt: hoursAgo(12) }] },
+        rows: {
+          prompted: [],
+          eligible: [
+            {
+              intentionKey: 'got_the_recommendation',
+              eligibleAt: hoursAgo(12),
+            },
+          ],
+        },
       }),
     )
     expect(keysOf(result.open)).not.toContain('got_the_recommendation')
@@ -370,7 +480,15 @@ describe('deriveOpenIntentions — arming', () => {
       input({
         ...engaged(3),
         openRecommendationsUnreadable: true,
-        rows: { prompted: [], eligible: [{ intentionKey: 'got_the_recommendation', eligibleAt: hoursAgo(12) }] },
+        rows: {
+          prompted: [],
+          eligible: [
+            {
+              intentionKey: 'got_the_recommendation',
+              eligibleAt: hoursAgo(12),
+            },
+          ],
+        },
       }),
     )
     expect(keysOf(result.open)).not.toContain('got_the_recommendation')
@@ -387,7 +505,9 @@ describe('deriveOpenIntentions — arming', () => {
       }),
     )
     expect(keysOf(result.open)).not.toContain('got_the_recommendation')
-    expect(result.newlyEligible.map((e) => e.key)).not.toContain('got_the_recommendation')
+    expect(result.newlyEligible.map((e) => e.key)).not.toContain(
+      'got_the_recommendation',
+    )
   })
 
   // Nor re-arm. A re-suggestion lands on the same row (TAC-318 dedup), so it is a
@@ -399,13 +519,19 @@ describe('deriveOpenIntentions — arming', () => {
         openRecommendationTimes: [daysAgo(90)],
         openRecommendationTouchedTimes: [hoursAgo(60)],
         rows: {
-          prompted: [promptedRow('got_the_recommendation', daysAgo(80), { eligibleAt: daysAgo(88) })],
+          prompted: [
+            promptedRow('got_the_recommendation', daysAgo(80), {
+              eligibleAt: daysAgo(88),
+            }),
+          ],
           eligible: [],
         },
       }),
     )
     expect(keysOf(result.open)).not.toContain('got_the_recommendation')
-    expect(result.newlyEligible.map((e) => e.key)).not.toContain('got_the_recommendation')
+    expect(result.newlyEligible.map((e) => e.key)).not.toContain(
+      'got_the_recommendation',
+    )
   })
 
   // A re-armable row with no anchor could never be stamped closed. Nothing writes
@@ -415,7 +541,12 @@ describe('deriveOpenIntentions — arming', () => {
       input({
         ...engaged(3),
         openRecommendationTimes: [hoursAgo(50)],
-        rows: { prompted: [], eligible: [{ intentionKey: 'got_the_recommendation', eligibleAt: null }] },
+        rows: {
+          prompted: [],
+          eligible: [
+            { intentionKey: 'got_the_recommendation', eligibleAt: null },
+          ],
+        },
       }),
     )
     expect(keysOf(result.open)).not.toContain('got_the_recommendation')
@@ -431,7 +562,9 @@ describe('deriveOpenIntentions — re-arming', () => {
   // A recommendation made 12 days ago, askable (and anchored) 10 days ago.
   const OLD_ANCHOR = daysAgo(10)
   const promptedRecommendation = () =>
-    promptedRow('got_the_recommendation', daysAgo(9), { eligibleAt: OLD_ANCHOR })
+    promptedRow('got_the_recommendation', daysAgo(9), {
+      eligibleAt: OLD_ANCHOR,
+    })
   // The guest replied to that prompt within the hour. A re-arm waits while its
   // own last prompt went unanswered, so the cases below answer it unless they
   // are about exactly that.
@@ -461,7 +594,12 @@ describe('deriveOpenIntentions — re-arming', () => {
       input({
         ...engaged(3),
         openRecommendationTimes: [daysAgo(12), hoursAgo(50)],
-        rows: { prompted: [], eligible: [{ intentionKey: 'got_the_recommendation', eligibleAt: OLD_ANCHOR }] },
+        rows: {
+          prompted: [],
+          eligible: [
+            { intentionKey: 'got_the_recommendation', eligibleAt: OLD_ANCHOR },
+          ],
+        },
       }),
     )
     expect(keysOf(result.open)).toContain('got_the_recommendation')
@@ -479,14 +617,22 @@ describe('deriveOpenIntentions — re-arming', () => {
         recordedOrderTimes: [daysAgo(12), hoursAgo(50)],
         facts: { ...NO_FACTS, hasQualifyingTransaction: true },
         rows: {
-          prompted: [promptedRow('did_they_like_it', daysAgo(9), { eligibleAt: OLD_ANCHOR })],
+          prompted: [
+            promptedRow('did_they_like_it', daysAgo(9), {
+              eligibleAt: OLD_ANCHOR,
+            }),
+          ],
           eligible: [],
         },
         inboundTimes: ANSWERED,
       }),
     )
     expect(keysOf(result.open)).toContain('did_they_like_it')
-    expect(result.newlyEligible).toContainEqual({ key: 'did_they_like_it', eligibleAt: hoursAgo(2), rearm: true })
+    expect(result.newlyEligible).toContainEqual({
+      key: 'did_they_like_it',
+      eligibleAt: hoursAgo(2),
+      rearm: true,
+    })
   })
 
   it('does not re-arm off the recommendation the row is already anchored on', () => {
@@ -496,13 +642,19 @@ describe('deriveOpenIntentions — re-arming', () => {
         ...engaged(3),
         openRecommendationTimes: [hoursAgo(98)],
         rows: {
-          prompted: [promptedRow('got_the_recommendation', hoursAgo(40), { eligibleAt: hoursAgo(50) })],
+          prompted: [
+            promptedRow('got_the_recommendation', hoursAgo(40), {
+              eligibleAt: hoursAgo(50),
+            }),
+          ],
           eligible: [],
         },
       }),
     )
     expect(keysOf(result.open)).not.toContain('got_the_recommendation')
-    expect(result.newlyEligible.map((e) => e.key)).not.toContain('got_the_recommendation')
+    expect(result.newlyEligible.map((e) => e.key)).not.toContain(
+      'got_the_recommendation',
+    )
   })
 
   // Ruling 2's one definition of a different visit. The second recommendation
@@ -515,13 +667,19 @@ describe('deriveOpenIntentions — re-arming', () => {
         ...engaged(3),
         openRecommendationTimes: [hoursAgo(120), hoursAgo(100)],
         rows: {
-          prompted: [promptedRow('got_the_recommendation', hoursAgo(70), { eligibleAt: hoursAgo(72) })],
+          prompted: [
+            promptedRow('got_the_recommendation', hoursAgo(70), {
+              eligibleAt: hoursAgo(72),
+            }),
+          ],
           eligible: [],
         },
         inboundTimes: [hoursAgo(69), NOW],
       }),
     )
-    expect(result.newlyEligible.map((e) => e.key)).not.toContain('got_the_recommendation')
+    expect(result.newlyEligible.map((e) => e.key)).not.toContain(
+      'got_the_recommendation',
+    )
   })
 
   // The stored anchor is compared as stored, never an old event recomputed
@@ -535,18 +693,30 @@ describe('deriveOpenIntentions — re-arming', () => {
         conversationWindowMs: 96 * MS_PER_HOUR,
         openRecommendationTimes: [hoursAgo(100)],
         rows: {
-          prompted: [promptedRow('got_the_recommendation', hoursAgo(50), { eligibleAt: hoursAgo(52) })],
+          prompted: [
+            promptedRow('got_the_recommendation', hoursAgo(50), {
+              eligibleAt: hoursAgo(52),
+            }),
+          ],
           eligible: [],
         },
       }),
     )
-    expect(result.newlyEligible.map((e) => e.key)).not.toContain('got_the_recommendation')
+    expect(result.newlyEligible.map((e) => e.key)).not.toContain(
+      'got_the_recommendation',
+    )
   })
 
   // Asking a guest's name twice is nagging.
   it('never re-arms a first-contact intention', () => {
     const result = deriveOpenIntentions(
-      input({ ...engaged(11), rows: { prompted: [promptedRow('learn_name', daysAgo(20))], eligible: [] } }),
+      input({
+        ...engaged(11),
+        rows: {
+          prompted: [promptedRow('learn_name', daysAgo(20))],
+          eligible: [],
+        },
+      }),
     )
     expect(keysOf(result.open)).not.toContain('learn_name')
     expect(result.newlyEligible.map((e) => e.key)).not.toContain('learn_name')
@@ -577,7 +747,9 @@ describe('deriveOpenIntentions — re-arming', () => {
         inboundTimes: ANSWERED,
       }),
     )
-    expect(result.newlyEligible.map((e) => e.key)).not.toContain('got_the_recommendation')
+    expect(result.newlyEligible.map((e) => e.key)).not.toContain(
+      'got_the_recommendation',
+    )
   })
 
   // Found in review. A re-arm used to clear the old prompt, which erased the
@@ -594,7 +766,9 @@ describe('deriveOpenIntentions — re-arming', () => {
       }),
     )
     expect(keysOf(result.open)).not.toContain('got_the_recommendation')
-    expect(result.newlyEligible.map((e) => e.key)).not.toContain('got_the_recommendation')
+    expect(result.newlyEligible.map((e) => e.key)).not.toContain(
+      'got_the_recommendation',
+    )
   })
 
   // The brake's own lift: a prompt the visible history can't judge doesn't count
@@ -609,7 +783,11 @@ describe('deriveOpenIntentions — re-arming', () => {
         inboundHistoryFrom: daysAgo(5),
       }),
     )
-    expect(result.newlyEligible).toContainEqual({ key: 'got_the_recommendation', eligibleAt: hoursAgo(2), rearm: true })
+    expect(result.newlyEligible).toContainEqual({
+      key: 'got_the_recommendation',
+      eligibleAt: hoursAgo(2),
+      rearm: true,
+    })
   })
 
   it('does not let a pessimistic closure hold up a re-arm', () => {
@@ -619,14 +797,21 @@ describe('deriveOpenIntentions — re-arming', () => {
         openRecommendationTimes: [daysAgo(12), hoursAgo(50)],
         rows: {
           prompted: [
-            promptedRow('got_the_recommendation', daysAgo(9), { eligibleAt: OLD_ANCHOR, promptSource: 'pessimistic' }),
+            promptedRow('got_the_recommendation', daysAgo(9), {
+              eligibleAt: OLD_ANCHOR,
+              promptSource: 'pessimistic',
+            }),
           ],
           eligible: [],
         },
         inboundTimes: [NOW],
       }),
     )
-    expect(result.newlyEligible).toContainEqual({ key: 'got_the_recommendation', eligibleAt: hoursAgo(2), rearm: true })
+    expect(result.newlyEligible).toContainEqual({
+      key: 'got_the_recommendation',
+      eligibleAt: hoursAgo(2),
+      rearm: true,
+    })
   })
 
   // The brake regression the review asked for, over two turns. Turn one: two
@@ -636,7 +821,10 @@ describe('deriveOpenIntentions — re-arming', () => {
   it('keeps the brake engaged when a newer order arrives after two ignored prompts', () => {
     const prompted = [
       promptedRow('are_they_local', hoursAgo(200), { messageId: 'm1' }),
-      promptedRow('did_they_like_it', hoursAgo(149), { messageId: 'm2', eligibleAt: hoursAgo(151) }),
+      promptedRow('did_they_like_it', hoursAgo(149), {
+        messageId: 'm2',
+        eligibleAt: hoursAgo(151),
+      }),
     ]
     const orderTurn = {
       ...engaged(5),
@@ -645,12 +833,18 @@ describe('deriveOpenIntentions — re-arming', () => {
       inboundTimes: [hoursAgo(150), NOW],
     }
 
-    const turnOne = deriveOpenIntentions(input({ ...orderTurn, rows: { prompted, eligible: [] } }))
+    const turnOne = deriveOpenIntentions(
+      input({ ...orderTurn, rows: { prompted, eligible: [] } }),
+    )
     expect(turnOne.brakeEngaged).toBe(true)
-    expect(turnOne.newlyEligible.map((e) => e.key)).not.toContain('did_they_like_it')
+    expect(turnOne.newlyEligible.map((e) => e.key)).not.toContain(
+      'did_they_like_it',
+    )
 
     const rearmed = [prompted[0], { ...prompted[1], eligibleAt: hoursAgo(2) }]
-    const turnTwo = deriveOpenIntentions(input({ ...orderTurn, rows: { prompted: rearmed, eligible: [] } }))
+    const turnTwo = deriveOpenIntentions(
+      input({ ...orderTurn, rows: { prompted: rearmed, eligible: [] } }),
+    )
     expect(turnTwo.brakeEngaged).toBe(true)
     expect(turnTwo.open).toEqual([])
   })
@@ -668,7 +862,9 @@ describe('deriveOpenIntentions — conversational gate', () => {
   // four; the conversational pair get their own case underneath, with their
   // events present, or it would pass for the wrong reason.
   it('opens the first-contact intentions below the floor, on the reply count alone', () => {
-    const result = deriveOpenIntentions(input({ responseRate: 49, repliedMessageCount: 50 }))
+    const result = deriveOpenIntentions(
+      input({ responseRate: 49, repliedMessageCount: 50 }),
+    )
     expect(keysOf(result.open)).toEqual([
       'learn_name',
       'are_they_local',
@@ -686,7 +882,9 @@ describe('deriveOpenIntentions — conversational gate', () => {
       }),
     )
     expect(keysOf(result.open)).not.toContain('got_the_recommendation')
-    expect(result.newlyEligible.map((e) => e.key)).not.toContain('got_the_recommendation')
+    expect(result.newlyEligible.map((e) => e.key)).not.toContain(
+      'got_the_recommendation',
+    )
   })
 
   it('opens that same conversational intention once the rate clears the floor', () => {
@@ -699,13 +897,19 @@ describe('deriveOpenIntentions — conversational gate', () => {
   // TAC-436 audit question 1. The waiver is learn_name's alone, and it applies
   // on the guest's first-ever inbound only.
   it('opens learn_name on a guest first-ever message, with nothing else', () => {
-    const result = deriveOpenIntentions(input({ responseRate: 0, repliedMessageCount: 1 }))
+    const result = deriveOpenIntentions(
+      input({ responseRate: 0, repliedMessageCount: 1 }),
+    )
     expect(keysOf(result.open)).toEqual(['learn_name'])
   })
 
   it('opens learn_name on a first-ever message beside understand_order, in priority order', () => {
     const result = deriveOpenIntentions(
-      input({ responseRate: 0, repliedMessageCount: 1, visitConfirmedAt: hoursAgo(1) }),
+      input({
+        responseRate: 0,
+        repliedMessageCount: 1,
+        visitConfirmedAt: hoursAgo(1),
+      }),
     )
     expect(keysOf(result.open)).toEqual(['understand_order', 'learn_name'])
   })
@@ -714,12 +918,16 @@ describe('deriveOpenIntentions — conversational gate', () => {
   // learn_name closes again until the ordinary stagger opens it. Without this,
   // a blanket zero on replies_only passes every other test in this file.
   it('closes learn_name again on the SECOND message, before its ordinary count', () => {
-    const result = deriveOpenIntentions(input({ responseRate: 0, repliedMessageCount: 2 }))
+    const result = deriveOpenIntentions(
+      input({ responseRate: 0, repliedMessageCount: 2 }),
+    )
     expect(result.open).toEqual([])
   })
 
   it('does not waive the count for the other three on a first-ever message', () => {
-    const result = deriveOpenIntentions(input({ responseRate: 0, repliedMessageCount: 1 }))
+    const result = deriveOpenIntentions(
+      input({ responseRate: 0, repliedMessageCount: 1 }),
+    )
     expect(keysOf(result.open)).not.toContain('are_they_local')
     expect(keysOf(result.open)).not.toContain('their_rhythm')
     expect(keysOf(result.open)).not.toContain('why_theyre_here')
@@ -754,7 +962,9 @@ describe('deriveOpenIntentions — conversational gate', () => {
   // A ratio tier would open every intention the moment responseRate reaches
   // 100 — which for a guest who replies to everything is the fourth inbound.
   it('does not open every tier at once when the ratio is already at 100', () => {
-    const result = deriveOpenIntentions(input({ responseRate: 100, repliedMessageCount: 4 }))
+    const result = deriveOpenIntentions(
+      input({ responseRate: 100, repliedMessageCount: 4 }),
+    )
     expect(keysOf(result.open)).toEqual(['learn_name'])
   })
 
@@ -781,7 +991,9 @@ describe('deriveOpenIntentions — conversational gate', () => {
 
   it('anchors a first-contact intention to the turn its gate was first seen open', () => {
     const result = deriveOpenIntentions(input(engaged(3)))
-    expect(result.newlyEligible).toEqual([{ key: 'learn_name', eligibleAt: NOW, rearm: false }])
+    expect(result.newlyEligible).toEqual([
+      { key: 'learn_name', eligibleAt: NOW, rearm: false },
+    ])
   })
 })
 
@@ -791,7 +1003,12 @@ describe('deriveOpenIntentions — eligibility-anchored expiry (ruling 5)', () =
       input({
         rows: {
           prompted: [],
-          eligible: [{ intentionKey: 'learn_name', eligibleAt: daysAgo(FIRST_CONTACT_WINDOW_DAYS - 1) }],
+          eligible: [
+            {
+              intentionKey: 'learn_name',
+              eligibleAt: daysAgo(FIRST_CONTACT_WINDOW_DAYS - 1),
+            },
+          ],
         },
       }),
     )
@@ -803,7 +1020,12 @@ describe('deriveOpenIntentions — eligibility-anchored expiry (ruling 5)', () =
       input({
         rows: {
           prompted: [],
-          eligible: [{ intentionKey: 'learn_name', eligibleAt: daysAgo(FIRST_CONTACT_WINDOW_DAYS + 1) }],
+          eligible: [
+            {
+              intentionKey: 'learn_name',
+              eligibleAt: daysAgo(FIRST_CONTACT_WINDOW_DAYS + 1),
+            },
+          ],
         },
       }),
     )
@@ -817,7 +1039,12 @@ describe('deriveOpenIntentions — eligibility-anchored expiry (ruling 5)', () =
       input({
         responseRate: 0,
         repliedMessageCount: 2, // off the first-ever turn; see input()
-        rows: { prompted: [], eligible: [{ intentionKey: 'are_they_local', eligibleAt: daysAgo(2) }] },
+        rows: {
+          prompted: [],
+          eligible: [
+            { intentionKey: 'are_they_local', eligibleAt: daysAgo(2) },
+          ],
+        },
       }),
     )
     expect(keysOf(result.open)).toEqual(['are_they_local'])
@@ -827,7 +1054,10 @@ describe('deriveOpenIntentions — eligibility-anchored expiry (ruling 5)', () =
     const result = deriveOpenIntentions(
       input({
         ...engaged(3),
-        rows: { prompted: [], eligible: [{ intentionKey: 'learn_name', eligibleAt: daysAgo(1) }] },
+        rows: {
+          prompted: [],
+          eligible: [{ intentionKey: 'learn_name', eligibleAt: daysAgo(1) }],
+        },
       }),
     )
     expect(result.newlyEligible).toEqual([])
@@ -861,7 +1091,12 @@ describe('deriveOpenIntentions — satisfaction proxies', () => {
 })
 
 describe('deriveOpenIntentions — priority', () => {
-  it('returns open intentions in priority order, event-armed right after understand_order', () => {
+  // TAC-558 put are_they_new_here at the head of this list, which is what
+  // "first in line once active" buys: this fixture has a recorded order, so it
+  // arms, and it outranks every intention it can meet. understand_order is
+  // absent for the reason it always was here - hasQualifyingTransaction closes
+  // it - which is also why the two can never appear together.
+  it('returns open intentions in priority order, are_they_new_here first once an order is on record', () => {
     const result = deriveOpenIntentions(
       input({
         ...engaged(11),
@@ -871,6 +1106,7 @@ describe('deriveOpenIntentions — priority', () => {
       }),
     )
     expect(keysOf(result.open)).toEqual([
+      'are_they_new_here',
       'got_the_recommendation',
       'did_they_like_it',
       'learn_name',
@@ -903,7 +1139,9 @@ describe('deriveOpenIntentions — brake', () => {
 })
 
 describe('isIntentionBrakeEngaged', () => {
-  const brake = (overrides: Partial<Parameters<typeof isIntentionBrakeEngaged>[0]>) =>
+  const brake = (
+    overrides: Partial<Parameters<typeof isIntentionBrakeEngaged>[0]>,
+  ) =>
     isIntentionBrakeEngaged({
       prompted: [],
       inboundTimes: [NOW],
@@ -955,7 +1193,9 @@ describe('isIntentionBrakeEngaged', () => {
   })
 
   it('never engages with fewer prompts than the streak', () => {
-    expect(brake({ prompted: [promptedRow('learn_name', hoursAgo(200))] })).toBe(false)
+    expect(
+      brake({ prompted: [promptedRow('learn_name', hoursAgo(200))] }),
+    ).toBe(false)
   })
 
   // One send can raise two intentions. Counting rows would let a single ignored
@@ -978,7 +1218,10 @@ describe('isIntentionBrakeEngaged', () => {
       brake({
         prompted: [
           promptedRow('are_they_local', hoursAgo(200), { messageId: 'm1' }),
-          promptedRow('their_rhythm', hoursAgo(149), { messageId: 'm2', promptSource: 'pessimistic' }),
+          promptedRow('their_rhythm', hoursAgo(149), {
+            messageId: 'm2',
+            promptSource: 'pessimistic',
+          }),
         ],
         inboundTimes: [hoursAgo(150), NOW],
       }),
@@ -989,8 +1232,14 @@ describe('isIntentionBrakeEngaged', () => {
     expect(
       brake({
         prompted: [
-          promptedRow('are_they_local', hoursAgo(200), { messageId: 'm1', promptSource: null }),
-          promptedRow('their_rhythm', hoursAgo(149), { messageId: 'm2', promptSource: null }),
+          promptedRow('are_they_local', hoursAgo(200), {
+            messageId: 'm1',
+            promptSource: null,
+          }),
+          promptedRow('their_rhythm', hoursAgo(149), {
+            messageId: 'm2',
+            promptSource: null,
+          }),
         ],
         inboundTimes: [hoursAgo(150), NOW],
       }),
@@ -1062,38 +1311,57 @@ describe('resolveIntentionKey', () => {
 describe('resolveInboundHistoryFrom', () => {
   const CUTOFF = daysAgo(14)
   const base = { responseCap: 30, rowCap: 90, historyCutoff: CUTOFF }
-  const responses = (...hoursAgoList: number[]) => hoursAgoList.map((h) => ({ createdAt: hoursAgo(h) }))
+  const responses = (...hoursAgoList: number[]) =>
+    hoursAgoList.map((h) => ({ createdAt: hoursAgo(h) }))
 
   it('starts at the history cutoff when neither cap bit', () => {
     expect(
-      resolveInboundHistoryFrom({ ...base, recentMessages: responses(100, 50, 1), rowsFetched: 3 }),
+      resolveInboundHistoryFrom({
+        ...base,
+        recentMessages: responses(100, 50, 1),
+        rowsFetched: 3,
+      }),
     ).toEqual(CUTOFF)
   })
 
   it('starts at the cutoff one response below the response cap', () => {
-    const recentMessages = Array.from({ length: 29 }, (_, i) => ({ createdAt: hoursAgo(29 - i) }))
-    expect(resolveInboundHistoryFrom({ ...base, recentMessages, rowsFetched: 29 })).toEqual(CUTOFF)
+    const recentMessages = Array.from({ length: 29 }, (_, i) => ({
+      createdAt: hoursAgo(29 - i),
+    }))
+    expect(
+      resolveInboundHistoryFrom({ ...base, recentMessages, rowsFetched: 29 }),
+    ).toEqual(CUTOFF)
   })
 
   // At the cap the window may be truncated, so visibility starts at the oldest
   // response loaded. Exactly 30 that happen to be the whole window read as
   // capped too; that only excludes more prompts (under-braking).
   it('starts at the oldest loaded response when the response cap bit', () => {
-    const recentMessages = Array.from({ length: 30 }, (_, i) => ({ createdAt: hoursAgo(60 - i) }))
-    expect(resolveInboundHistoryFrom({ ...base, recentMessages, rowsFetched: 30 })).toEqual(
-      hoursAgo(60),
-    )
+    const recentMessages = Array.from({ length: 30 }, (_, i) => ({
+      createdAt: hoursAgo(60 - i),
+    }))
+    expect(
+      resolveInboundHistoryFrom({ ...base, recentMessages, rowsFetched: 30 }),
+    ).toEqual(hoursAgo(60))
   })
 
   it('starts at the oldest loaded response when the row cap bit first', () => {
     expect(
-      resolveInboundHistoryFrom({ ...base, recentMessages: responses(40, 20, 2), rowsFetched: 90 }),
+      resolveInboundHistoryFrom({
+        ...base,
+        recentMessages: responses(40, 20, 2),
+        rowsFetched: 90,
+      }),
     ).toEqual(hoursAgo(40))
   })
 
   it('picks the oldest response whatever order it is handed, never the newest', () => {
     expect(
-      resolveInboundHistoryFrom({ ...base, recentMessages: responses(2, 40, 20), rowsFetched: 90 }),
+      resolveInboundHistoryFrom({
+        ...base,
+        recentMessages: responses(2, 40, 20),
+        rowsFetched: 90,
+      }),
     ).toEqual(hoursAgo(40))
   })
 
@@ -1108,16 +1376,25 @@ describe('resolveInboundHistoryFrom', () => {
   })
 
   it('falls back to the cutoff when capped with nothing loaded', () => {
-    expect(resolveInboundHistoryFrom({ ...base, recentMessages: [], rowsFetched: 90 })).toEqual(CUTOFF)
+    expect(
+      resolveInboundHistoryFrom({
+        ...base,
+        recentMessages: [],
+        rowsFetched: 90,
+      }),
+    ).toEqual(CUTOFF)
   })
 })
 
 describe('deriveIntentionState (shared core)', () => {
-  const entries = (pairs: [IntentionKey, IntentionStateEntry][]) => new Map(pairs)
+  const entries = (pairs: [IntentionKey, IntentionStateEntry][]) =>
+    new Map(pairs)
 
   it('is open when eligible, unprompted, unexpired and unsatisfied', () => {
     const open = deriveIntentionState({
-      entries: entries([['learn_name', { eligibleAt: daysAgo(1), promptedAt: null }]]),
+      entries: entries([
+        ['learn_name', { eligibleAt: daysAgo(1), promptedAt: null }],
+      ]),
       facts: NO_FACTS,
       now: NOW,
     })
@@ -1128,7 +1405,9 @@ describe('deriveIntentionState (shared core)', () => {
 
   it('is closed once prompted', () => {
     const open = deriveIntentionState({
-      entries: entries([['learn_name', { eligibleAt: daysAgo(1), promptedAt: hoursAgo(2) }]]),
+      entries: entries([
+        ['learn_name', { eligibleAt: daysAgo(1), promptedAt: hoursAgo(2) }],
+      ]),
       facts: NO_FACTS,
       now: NOW,
     })
@@ -1138,7 +1417,12 @@ describe('deriveIntentionState (shared core)', () => {
   // Re-arming keeps the last prompt on the row and moves eligible_at past it.
   it('reopens an event-armed intention whose last prompt predates its anchor', () => {
     const open = deriveIntentionState({
-      entries: entries([['got_the_recommendation', { eligibleAt: hoursAgo(2), promptedAt: daysAgo(9) }]]),
+      entries: entries([
+        [
+          'got_the_recommendation',
+          { eligibleAt: hoursAgo(2), promptedAt: daysAgo(9) },
+        ],
+      ]),
       facts: NO_FACTS,
       now: NOW,
     })
@@ -1147,7 +1431,12 @@ describe('deriveIntentionState (shared core)', () => {
 
   it('keeps an event-armed intention closed once prompted at or after its anchor', () => {
     const open = deriveIntentionState({
-      entries: entries([['got_the_recommendation', { eligibleAt: hoursAgo(2), promptedAt: hoursAgo(1) }]]),
+      entries: entries([
+        [
+          'got_the_recommendation',
+          { eligibleAt: hoursAgo(2), promptedAt: hoursAgo(1) },
+        ],
+      ]),
       facts: NO_FACTS,
       now: NOW,
     })
@@ -1157,7 +1446,9 @@ describe('deriveIntentionState (shared core)', () => {
   // First-contact intentions never re-arm, so nothing may reopen one.
   it('never reopens a first-contact intention, whatever its anchor', () => {
     const open = deriveIntentionState({
-      entries: entries([['learn_name', { eligibleAt: hoursAgo(2), promptedAt: daysAgo(9) }]]),
+      entries: entries([
+        ['learn_name', { eligibleAt: hoursAgo(2), promptedAt: daysAgo(9) }],
+      ]),
       facts: NO_FACTS,
       now: NOW,
     })
@@ -1187,18 +1478,33 @@ const bothOpen: OpenIntention[] = [
 ]
 
 describe('applyCurrentTurnSuppression', () => {
-  const menuItems = [{ name: 'Gibraltar / Cortado' }, { name: 'Almond Croissant' }]
+  const menuItems = [
+    { name: 'Gibraltar / Cortado' },
+    { name: 'Almond Croissant' },
+  ]
 
   it('passes the set through unchanged when there is no current inbound', () => {
-    expect(applyCurrentTurnSuppression(bothOpen, null, menuItems)).toEqual(bothOpen)
+    expect(applyCurrentTurnSuppression(bothOpen, null, menuItems)).toEqual(
+      bothOpen,
+    )
   })
 
   it('passes the set through unchanged when the inbound mentions no menu item', () => {
-    expect(applyCurrentTurnSuppression(bothOpen, 'is there parking nearby?', menuItems)).toEqual(bothOpen)
+    expect(
+      applyCurrentTurnSuppression(
+        bothOpen,
+        'is there parking nearby?',
+        menuItems,
+      ),
+    ).toEqual(bothOpen)
   })
 
   it('drops understand_order when the inbound names a menu item', () => {
-    const result = applyCurrentTurnSuppression(bothOpen, 'i got an oat cortado', menuItems)
+    const result = applyCurrentTurnSuppression(
+      bothOpen,
+      'i got an oat cortado',
+      menuItems,
+    )
     expect(keysOf(result)).toEqual(['learn_name'])
   })
 
@@ -1242,12 +1548,16 @@ describe('renderableIntentions (trap 4)', () => {
 // TAC-326: regression corpus through the real, unmocked bodyMentionsMenuItem.
 describe('applyCurrentTurnSuppression — real-word-collision regression corpus (TAC-326)', () => {
   it('"Hi Sana!" against a menu containing San Pellegrino does not suppress understand_order (the production symptom)', () => {
-    const result = applyCurrentTurnSuppression(bothOpen, 'Hi Sana!', [{ name: 'San Pellegrino' }])
+    const result = applyCurrentTurnSuppression(bothOpen, 'Hi Sana!', [
+      { name: 'San Pellegrino' },
+    ])
     expect(keysOf(result)).toContain('understand_order')
   })
 
   it('"nice, thanks" against a menu containing Hibiscus Ice Tea does not suppress understand_order', () => {
-    const result = applyCurrentTurnSuppression(bothOpen, 'nice, thanks', [{ name: 'Hibiscus Ice Tea' }])
+    const result = applyCurrentTurnSuppression(bothOpen, 'nice, thanks', [
+      { name: 'Hibiscus Ice Tea' },
+    ])
     expect(keysOf(result)).toContain('understand_order')
   })
 
@@ -1257,9 +1567,192 @@ describe('applyCurrentTurnSuppression — real-word-collision regression corpus 
   // make this pass without re-opening that discussion. Asserts CURRENT
   // behaviour so an accidental change gets noticed.
   it('a "San Francisco" mention against a menu containing San Pellegrino still suppresses understand_order today (known, deferred gap)', () => {
-    const result = applyCurrentTurnSuppression(bothOpen, 'anyone been to San Francisco', [
-      { name: 'San Pellegrino' },
-    ])
+    const result = applyCurrentTurnSuppression(
+      bothOpen,
+      'anyone been to San Francisco',
+      [{ name: 'San Pellegrino' }],
+    )
     expect(keysOf(result)).not.toContain('understand_order')
+  })
+})
+
+// TAC-558. The ticket's acceptance criteria are claims about WHEN this arms, so
+// they are pinned here on the real predicate rather than left to the measurement
+// run. The measurement confirms them end to end; these are what make them
+// properties.
+describe('deriveOpenIntentions — are_they_new_here (TAC-558)', () => {
+  // AC 1's "0 before the order", as a structural fact. With no recorded order
+  // there is no anchor, so the intention never becomes eligible at all - it is
+  // not merely unrendered, it is not recorded eligible either, which is what
+  // stops a later turn inheriting a sticky row from before the order.
+  it('does not arm before an order is on record, and records no eligibility', () => {
+    const result = deriveOpenIntentions(
+      input({ ...engaged(3), recordedOrderTimes: [] }),
+    )
+    expect(keysOf(result.open)).not.toContain('are_they_new_here')
+    expect(result.newlyEligible.map((e) => e.key)).not.toContain(
+      'are_they_new_here',
+    )
+  })
+
+  it('arms as soon as one order is on record', () => {
+    const result = deriveOpenIntentions(
+      input({ ...engaged(3), recordedOrderTimes: [hoursAgo(1)] }),
+    )
+    expect(keysOf(result.open)).toContain('are_they_new_here')
+    expect(result.newlyEligible.map((e) => e.key)).toContain(
+      'are_they_new_here',
+    )
+  })
+
+  // THE DISTINCTION FROM did_they_like_it, and the reason this needed its own
+  // arming kind. An order an hour old is still inside the conversation window, so
+  // recorded_order arming HOLDS - which is right for "did you try it?" and wrong
+  // here, because the counter session is the only moment this question fits. Both
+  // assertions in one test deliberately: apart, neither shows the contrast.
+  it('arms in the same conversation as the order, where did_they_like_it is held', () => {
+    const result = deriveOpenIntentions(
+      input({ ...engaged(3), recordedOrderTimes: [hoursAgo(1)] }),
+    )
+    expect(keysOf(result.open)).toContain('are_they_new_here')
+    expect(keysOf(result.open)).not.toContain('did_they_like_it')
+  })
+
+  // AC 3. A guest the record already shows as a returner is never asked.
+  it('is closed by a repeat visit on record', () => {
+    const result = deriveOpenIntentions(
+      input({
+        ...engaged(3),
+        recordedOrderTimes: [hoursAgo(1)],
+        facts: { ...NO_FACTS, hasRepeatVisitsOnRecord: true },
+      }),
+    )
+    expect(keysOf(result.open)).not.toContain('are_they_new_here')
+    expect(result.newlyEligible.map((e) => e.key)).not.toContain(
+      'are_they_new_here',
+    )
+  })
+
+  // The second proxy: the guest answered, so it closes whether or not the record
+  // ever catches up. This is what makes the answer worth storing rather than
+  // relying on prompted-once alone.
+  it("is closed by the guest's own account being on file", () => {
+    const result = deriveOpenIntentions(
+      input({
+        ...engaged(3),
+        recordedOrderTimes: [hoursAgo(1)],
+        facts: { ...NO_FACTS, hasVenueHistoryOnFile: true },
+      }),
+    )
+    expect(keysOf(result.open)).not.toContain('are_they_new_here')
+  })
+
+  // MUTUAL EXCLUSION WITH understand_order, which is what makes the ticket's
+  // "never competes with, or comes before, the order question" structural rather
+  // than a matter of priority. Whichever way the facts fall, exactly one of the
+  // two can be open: no order means no arming here, and an order closes that one.
+  it('can never be open at the same time as understand_order', () => {
+    const before = keysOf(
+      deriveOpenIntentions(
+        input({
+          ...engaged(3),
+          visitConfirmedAt: hoursAgo(2),
+          recordedOrderTimes: [],
+        }),
+      ).open,
+    )
+    expect(before).toContain('understand_order')
+    expect(before).not.toContain('are_they_new_here')
+
+    const after = keysOf(
+      deriveOpenIntentions(
+        input({
+          ...engaged(3),
+          visitConfirmedAt: hoursAgo(2),
+          recordedOrderTimes: [hoursAgo(1)],
+          facts: { ...NO_FACTS, hasQualifyingTransaction: true },
+        }),
+      ).open,
+    )
+    expect(after).toContain('are_they_new_here')
+    expect(after).not.toContain('understand_order')
+  })
+
+  // Prompted-once, and NEVER re-armed by a later order. A second order is not a
+  // new thing to ask about; it is the answer arriving another way.
+  it('stays closed once raised, even when a newer order lands', () => {
+    const result = deriveOpenIntentions(
+      input({
+        ...engaged(3),
+        recordedOrderTimes: [daysAgo(4), hoursAgo(1)],
+        rows: {
+          prompted: [promptedRow('are_they_new_here', daysAgo(3))],
+          eligible: [],
+        },
+      }),
+    )
+    expect(keysOf(result.open)).not.toContain('are_they_new_here')
+    expect(result.newlyEligible.map((e) => e.key)).not.toContain(
+      'are_they_new_here',
+    )
+  })
+
+  // The gate. Arming alone is not the right to ask: two replies is the shape of
+  // a guest who has scanned and named an order and nothing more, and the pacing
+  // rule wants a turn of daylight after the order question.
+  it('waits for the third reply, so it never lands on the turn the order is named', () => {
+    const shared = { recordedOrderTimes: [hoursAgo(1)] }
+    expect(
+      keysOf(deriveOpenIntentions(input({ ...engaged(2), ...shared })).open),
+    ).not.toContain('are_they_new_here')
+    expect(
+      keysOf(deriveOpenIntentions(input({ ...engaged(3), ...shared })).open),
+    ).toContain('are_they_new_here')
+  })
+
+  // The window runs from the EARLIEST order, and it is the 14-day first-contact
+  // one rather than the 3-day event window. An order 15 days old is past it.
+  it('expires 14 days after the earliest order, not 3', () => {
+    const atThirteen = keysOf(
+      deriveOpenIntentions(
+        input({ ...engaged(3), recordedOrderTimes: [daysAgo(13)] }),
+      ).open,
+    )
+    expect(atThirteen).toContain('are_they_new_here')
+
+    const atFifteen = keysOf(
+      deriveOpenIntentions(
+        input({ ...engaged(3), recordedOrderTimes: [daysAgo(15)] }),
+      ).open,
+    )
+    expect(atFifteen).not.toContain('are_they_new_here')
+  })
+
+  // EARLIEST, not newest - the anchor choice, which only a two-order fixture can
+  // show. Both orders are inside the window here, so a newest-wins bug would
+  // pass; the expiry pair above is what separates them.
+  it('anchors on the earliest order when several are on record', () => {
+    const result = deriveOpenIntentions(
+      input({
+        ...engaged(3),
+        recordedOrderTimes: [hoursAgo(1), daysAgo(13)],
+      }),
+    )
+    const entry = result.newlyEligible.find(
+      (e) => e.key === 'are_they_new_here',
+    )
+    expect(entry?.eligibleAt).toEqual(daysAgo(13))
+  })
+
+  // An unusable timestamp is skipped rather than arming at the epoch, which would
+  // make the intention instantly expired and silently unaskable forever.
+  it('ignores an unparseable order time', () => {
+    const result = deriveOpenIntentions(
+      input({
+        ...engaged(3),
+        recordedOrderTimes: [new Date(Number.NaN)],
+      }),
+    )
+    expect(keysOf(result.open)).not.toContain('are_they_new_here')
   })
 })

@@ -18,7 +18,11 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { ingestKnowledgeCorpusEntry } from '@/lib/rag'
-import { decideLoadAction, type LoadableRow, type Proposal } from './load-venue-knowledge-pure'
+import {
+  decideLoadAction,
+  type LoadableRow,
+  type Proposal,
+} from './load-venue-knowledge-pure'
 
 /** source_type for rows this loader CREATES. A replacement keeps whatever
  *  source_type its target already had — the row's origin did not change
@@ -40,7 +44,13 @@ export interface ApplyInput {
 
 export type ApplyOutcome =
   | { rowId: string; kind: 'inserted'; id: string; chunks: number }
-  | { rowId: string; kind: 'updated'; id: string; chunks: number; reason: string }
+  | {
+      rowId: string
+      kind: 'updated'
+      id: string
+      chunks: number
+      reason: string
+    }
   | { rowId: string; kind: 'skipped'; id: string }
 
 export interface ApplyResult {
@@ -56,7 +66,15 @@ interface ExistingRowForUpdate {
 }
 
 export async function applyLoad(input: ApplyInput): Promise<ApplyResult> {
-  const { supabase, venueId, proposalFile, entries, resolvedTargets, rows, now } = input
+  const {
+    supabase,
+    venueId,
+    proposalFile,
+    entries,
+    resolvedTargets,
+    rows,
+    now,
+  } = input
   const outcomes: ApplyOutcome[] = []
 
   for (const p of entries) {
@@ -85,7 +103,9 @@ export async function applyLoad(input: ApplyInput): Promise<ApplyResult> {
         .select('id')
         .single()
       if (insertErr || !insertedRow) {
-        throw new Error(`${p.row_id}: insert failed: ${insertErr?.message ?? 'no row returned'}`)
+        throw new Error(
+          `${p.row_id}: insert failed: ${insertErr?.message ?? 'no row returned'}`,
+        )
       }
 
       const embed = await ingestKnowledgeCorpusEntry(insertedRow.id)
@@ -130,7 +150,9 @@ export async function applyLoad(input: ApplyInput): Promise<ApplyResult> {
     // current.content would overwrite the record of what was there before
     // with the replacement itself. Keep the first value ever captured.
     const replacedContent =
-      typeof priorMeta.replacedContent === 'string' ? priorMeta.replacedContent : current.content
+      typeof priorMeta.replacedContent === 'string'
+        ? priorMeta.replacedContent
+        : current.content
 
     const { error: updateErr } = await supabase
       .from('knowledge_corpus')
@@ -153,7 +175,8 @@ export async function applyLoad(input: ApplyInput): Promise<ApplyResult> {
       })
       .eq('id', action.id)
       .eq('venue_id', venueId)
-    if (updateErr) throw new Error(`${p.row_id}: update failed: ${updateErr.message}`)
+    if (updateErr)
+      throw new Error(`${p.row_id}: update failed: ${updateErr.message}`)
 
     const embed = await ingestKnowledgeCorpusEntry(action.id)
     if (!embed.ok) {

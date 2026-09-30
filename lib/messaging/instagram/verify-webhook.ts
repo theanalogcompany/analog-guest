@@ -44,14 +44,10 @@ const SIGNATURE_PREFIX = 'sha256='
  *   body or a rotated secret all look like.
  */
 export type InstagramSignatureRejection =
-  | 'secret_unset'
-  | 'missing_header'
-  | 'malformed_header'
-  | 'mismatch'
+  'secret_unset' | 'missing_header' | 'malformed_header' | 'mismatch'
 
 export type InstagramSignatureResult =
-  | { ok: true }
-  | { ok: false; reason: InstagramSignatureRejection }
+  { ok: true } | { ok: false; reason: InstagramSignatureRejection }
 
 /**
  * Verify the `x-hub-signature-256` header on an Instagram webhook delivery.
@@ -70,17 +66,25 @@ export function verifyInstagramSignature(
 
   const header = headers.get(SIGNATURE_HEADER)
   if (header === null) return { ok: false, reason: 'missing_header' }
-  if (!header.startsWith(SIGNATURE_PREFIX) || header.length === SIGNATURE_PREFIX.length) {
+  if (
+    !header.startsWith(SIGNATURE_PREFIX) ||
+    header.length === SIGNATURE_PREFIX.length
+  ) {
     return { ok: false, reason: 'malformed_header' }
   }
 
   const received = Buffer.from(header.slice(SIGNATURE_PREFIX.length))
-  const computed = Buffer.from(createHmac('sha256', appSecret).update(rawBody).digest('hex'))
+  const computed = Buffer.from(
+    createHmac('sha256', appSecret).update(rawBody).digest('hex'),
+  )
 
   // Length check guards timingSafeEqual (it throws on length mismatch) and is
   // not a meaningful timing leak — the digest length is fixed/public.
-  if (received.length !== computed.length) return { ok: false, reason: 'mismatch' }
-  return timingSafeEqual(received, computed) ? { ok: true } : { ok: false, reason: 'mismatch' }
+  if (received.length !== computed.length)
+    return { ok: false, reason: 'mismatch' }
+  return timingSafeEqual(received, computed)
+    ? { ok: true }
+    : { ok: false, reason: 'mismatch' }
 }
 
 /**

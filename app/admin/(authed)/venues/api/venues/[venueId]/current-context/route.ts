@@ -49,7 +49,11 @@ export async function POST(
   if (!result.ok) {
     const status = result.errorCode === 'invalid_after_merge' ? 400 : 500
     return NextResponse.json(
-      { error: 'currentContext add failed', detail: result.error, errorCode: result.errorCode },
+      {
+        error: 'currentContext add failed',
+        detail: result.error,
+        errorCode: result.errorCode,
+      },
       { status },
     )
   }

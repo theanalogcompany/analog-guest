@@ -37,7 +37,11 @@
 // because on a comp_complaint push the title is the ONLY thing rendered.
 // Asserted in tests against planted guest text, not against key names.
 
-import { loadPushRecipients, countPendingDraftsForOperator, clearOperatorPushToken } from './recipients'
+import {
+  loadPushRecipients,
+  countPendingDraftsForOperator,
+  clearOperatorPushToken,
+} from './recipients'
 import {
   capturePushSent,
   capturePushTokenInvalid,
@@ -141,7 +145,8 @@ export const REASON_BY_REVIEW_REASON = {
   // GROUNDING_CHECK_FAILED. Present so the map is total.
   [APPROVAL_TRIGGERS.GROUNDING_CHECK_DEGRADED]: 'unverified, needs a look',
   [APPROVAL_TRIGGERS.PROSE_PROMISE_CHECK_FAILED]: 'unchecked, needs a look',
-  [APPROVAL_TRIGGERS.PROSE_CANCELLATION_CHECK_FAILED]: 'unchecked, needs a look',
+  [APPROVAL_TRIGGERS.PROSE_CANCELLATION_CHECK_FAILED]:
+    'unchecked, needs a look',
   // Generic on purpose: the trigger is generic. The complaint case it routes
   // today is carried by COMPLAINT_REASON instead, off the category.
   [APPROVAL_TRIGGERS.CATEGORY_REQUIRES_APPROVAL]: 'held for review',
@@ -155,7 +160,8 @@ export const REASON_BY_REVIEW_REASON = {
   string
 >
 
-const REASON_LOOKUP: Record<string, string | undefined> = REASON_BY_REVIEW_REASON
+const REASON_LOOKUP: Record<string, string | undefined> =
+  REASON_BY_REVIEW_REASON
 
 /**
  * Whether the guest's own words may be quoted in the push body.
@@ -200,7 +206,9 @@ export function resolvePushReason(
   // (crisis_safety_reply, operator_decline_initiated) that do not reach a push
   // today. A future one would render 'needs review', byte-identical to
   // model_flagged, with nothing to say it fell through. Hence the log line.
-  console.warn('[apns] no push reason mapped, falling back', { primaryTrigger })
+  console.warn('[apns] no push reason mapped, falling back', {
+    primaryTrigger,
+  })
   return FALLBACK_REASON
 }
 
@@ -292,10 +300,15 @@ export function buildPushBody(
 // arrived. Thin local aliases keep this file's call sites and its log lines
 // exactly as they were; the prefixes are passed in for that reason.
 const loadRecipients = (venueId: string) =>
-  loadPushRecipients(venueId, { logPrefix: '[apns] loadRecipients', verbose: true })
+  loadPushRecipients(venueId, {
+    logPrefix: '[apns] loadRecipients',
+    verbose: true,
+  })
 const countPendingForOperator = countPendingDraftsForOperator
 const nullOperatorToken = (operatorId: string) =>
-  clearOperatorPushToken(operatorId, { logPrefix: 'apns: nullOperatorToken failed' })
+  clearOperatorPushToken(operatorId, {
+    logPrefix: 'apns: nullOperatorToken failed',
+  })
 
 /**
  * Top-level push orchestrator. Never throws.
@@ -332,9 +345,12 @@ export async function sendDraftFlaggedPush(
 
   const recipients = await loadRecipients(input.venueId)
   if (recipients.length === 0) {
-    console.log('[apns] skipped: no operators with apns_device_token for venue', {
-      ...baseFields,
-    })
+    console.log(
+      '[apns] skipped: no operators with apns_device_token for venue',
+      {
+        ...baseFields,
+      },
+    )
     return
   }
   console.log('[apns] fanout begin', {
@@ -348,7 +364,11 @@ export async function sendDraftFlaggedPush(
     input.primaryTrigger,
     input.guestCategory,
   )
-  const body = buildPushBody(input.guestQuestion, input.guestCategory, input.guestIsCrisis)
+  const body = buildPushBody(
+    input.guestQuestion,
+    input.guestCategory,
+    input.guestIsCrisis,
+  )
 
   for (const recipient of recipients) {
     const badge = await countPendingForOperator(recipient.id)

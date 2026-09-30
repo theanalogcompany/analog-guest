@@ -18,7 +18,8 @@ export type InsertArgs = {
   operatorId: string | null
 }
 
-export type ParseArgsResult = { ok: true; args: InsertArgs } | { ok: false; error: string }
+export type ParseArgsResult =
+  { ok: true; args: InsertArgs } | { ok: false; error: string }
 
 export function parseInsertArgs(argv: readonly string[]): ParseArgsResult {
   let venueSlug: string | null = null
@@ -50,16 +51,21 @@ export function parseInsertArgs(argv: readonly string[]): ParseArgsResult {
         break
       case '--operator': {
         const value = next()
-        if (value === null) return { ok: false, error: '--operator needs a uuid' }
+        if (value === null)
+          return { ok: false, error: '--operator needs a uuid' }
         operatorId = value
         break
       }
       case '--expires-at': {
         const value = next()
-        if (value === null) return { ok: false, error: '--expires-at needs an ISO timestamp' }
+        if (value === null)
+          return { ok: false, error: '--expires-at needs an ISO timestamp' }
         const parsed = new Date(value)
         if (Number.isNaN(parsed.getTime())) {
-          return { ok: false, error: `--expires-at is not a date I can read: ${value}` }
+          return {
+            ok: false,
+            error: `--expires-at is not a date I can read: ${value}`,
+          }
         }
         expiresAtOverride = parsed
         break
@@ -70,7 +76,10 @@ export function parseInsertArgs(argv: readonly string[]): ParseArgsResult {
   }
 
   if (venueSlug === null) return { ok: false, error: '--venue is required' }
-  return { ok: true, args: { venueSlug, confirm, dryRun, expiresAtOverride, operatorId } }
+  return {
+    ok: true,
+    args: { venueSlug, confirm, dryRun, expiresAtOverride, operatorId },
+  }
 }
 
 /**
@@ -110,7 +119,8 @@ export type AccountDecision =
  * `venues.instagram_account_id` column exists to make impossible.
  */
 export function decideAccountClaim(claim: AccountClaim): AccountDecision {
-  const { targetVenueId, targetAccountId, holderVenueId, tokenAccountId } = claim
+  const { targetVenueId, targetAccountId, holderVenueId, tokenAccountId } =
+    claim
 
   if (holderVenueId !== null && holderVenueId !== targetVenueId) {
     return {
@@ -132,7 +142,9 @@ export function decideAccountClaim(claim: AccountClaim): AccountDecision {
     }
   }
 
-  return targetAccountId === null ? { action: 'claim' } : { action: 'already_pointed' }
+  return targetAccountId === null
+    ? { action: 'claim' }
+    : { action: 'already_pointed' }
 }
 
 /**

@@ -1,4 +1,7 @@
-import { KnowledgeEntryList, type KnowledgeEntryListRow } from './knowledge-entry-list'
+import {
+  KnowledgeEntryList,
+  type KnowledgeEntryListRow,
+} from './knowledge-entry-list'
 import { SectionShell } from '@/app/admin/_components/section-shell'
 
 // Distinct from MenuRosterSection (venue_info.menu.items — the technical,
@@ -12,7 +15,10 @@ export function MenuKnowledgeSection({
   entries: readonly KnowledgeEntryListRow[]
 }) {
   return (
-    <SectionShell title="Menu knowledge" subtitle="menu, recommendations, sourcing">
+    <SectionShell
+      title="Menu knowledge"
+      subtitle="menu, recommendations, sourcing"
+    >
       <KnowledgeEntryList
         venueId={venueId}
         entries={entries}

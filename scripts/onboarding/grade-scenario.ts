@@ -61,7 +61,9 @@ export const GRADE_MODEL_SONNET = 'claude-sonnet-4-6'
 export const SONNET_ESCALATED_CATEGORIES: ReadonlySet<string> = new Set()
 
 export function pickGradeModel(category: string): string {
-  return SONNET_ESCALATED_CATEGORIES.has(category) ? GRADE_MODEL_SONNET : GRADE_MODEL_HAIKU
+  return SONNET_ESCALATED_CATEGORIES.has(category)
+    ? GRADE_MODEL_SONNET
+    : GRADE_MODEL_HAIKU
 }
 
 const KNOWLEDGE_VERDICTS = [
@@ -79,7 +81,8 @@ const VOICE_VERDICTS = ['pass', 'fail'] as const
 export type VoiceVerdict = (typeof VOICE_VERDICTS)[number]
 
 const EXPECTED_BEHAVIOR_VERDICTS = ['pass', 'fail', 'not_applicable'] as const
-export type ExpectedBehaviorVerdict = (typeof EXPECTED_BEHAVIOR_VERDICTS)[number]
+export type ExpectedBehaviorVerdict =
+  (typeof EXPECTED_BEHAVIOR_VERDICTS)[number]
 
 const GradeScenarioSchema = z.object({
   knowledge_verdict: z.enum(KNOWLEDGE_VERDICTS),
@@ -119,11 +122,24 @@ const VOICE_RULES_DIGEST = `- Never use em or en dashes.
 /** Compact, readable digest of venue_info for grounding the knowledge_verdict. */
 function buildVenueInfoDigest(venueInfo: VenueInfo): string {
   const lines: string[] = []
-  if (venueInfo.contact.website) lines.push(`Website: ${venueInfo.contact.website}`)
-  if (venueInfo.contact.publicEmail) lines.push(`Email: ${venueInfo.contact.publicEmail}`)
-  if (venueInfo.contact.publicPhone) lines.push(`Phone: ${venueInfo.contact.publicPhone}`)
+  if (venueInfo.contact.website)
+    lines.push(`Website: ${venueInfo.contact.website}`)
+  if (venueInfo.contact.publicEmail)
+    lines.push(`Email: ${venueInfo.contact.publicEmail}`)
+  if (venueInfo.contact.publicPhone)
+    lines.push(`Phone: ${venueInfo.contact.publicPhone}`)
   const hours = venueInfo.hours
-  const hourEntries = (['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'] as const)
+  const hourEntries = (
+    [
+      'monday',
+      'tuesday',
+      'wednesday',
+      'thursday',
+      'friday',
+      'saturday',
+      'sunday',
+    ] as const
+  )
     .map((d) => (hours[d] ? `${d}: ${hours[d]}` : null))
     .filter((x): x is string => x !== null)
   if (hourEntries.length > 0) lines.push(`Hours: ${hourEntries.join(', ')}`)
@@ -131,13 +147,16 @@ function buildVenueInfoDigest(venueInfo: VenueInfo): string {
     const a = venueInfo.amenities
     const parts: string[] = []
     if (a.wifi !== undefined) parts.push(`wifi: ${a.wifi}`)
-    if (a.petFriendly !== undefined) parts.push(`pet friendly: ${a.petFriendly}`)
+    if (a.petFriendly !== undefined)
+      parts.push(`pet friendly: ${a.petFriendly}`)
     if (a.parking) parts.push(`parking: ${a.parking}`)
     if (a.seating) parts.push(`seating: ${a.seating}`)
     if (parts.length > 0) lines.push(`Amenities: ${parts.join(', ')}`)
   }
-  if (venueInfo.staff.length > 0) lines.push(`Staff: ${venueInfo.staff.join(', ')}`)
-  if (venueInfo.menu.highlights.length > 0) lines.push(`Menu highlights: ${venueInfo.menu.highlights.join('; ')}`)
+  if (venueInfo.staff.length > 0)
+    lines.push(`Staff: ${venueInfo.staff.join(', ')}`)
+  if (venueInfo.menu.highlights.length > 0)
+    lines.push(`Menu highlights: ${venueInfo.menu.highlights.join('; ')}`)
   // 2026-09-11 grader-accuracy fix: a prior version of this digest listed
   // only name+description, so a real menu MODIFIER (confirmed live: "Oat
   // Milk: 0.25" on every milk-based drink) was invisible to the grader —
@@ -150,8 +169,10 @@ function buildVenueInfoDigest(venueInfo: VenueInfo): string {
     if (item.price !== undefined) parts.push(`$${item.price}`)
     else if (item.priceNote) parts.push(item.priceNote)
     if (item.description) parts.push(item.description)
-    if (item.dietary.length > 0) parts.push(`dietary: ${item.dietary.join(', ')}`)
-    if (item.modifiers.length > 0) parts.push(`modifiers: ${item.modifiers.join(', ')}`)
+    if (item.dietary.length > 0)
+      parts.push(`dietary: ${item.dietary.join(', ')}`)
+    if (item.modifiers.length > 0)
+      parts.push(`modifiers: ${item.modifiers.join(', ')}`)
     if (item.availability) parts.push(`availability: ${item.availability}`)
     if (item.isOffMenu) parts.push('OFF-MENU (not publicly listed, but real)')
     lines.push(`Menu item: ${parts.join(' | ')}`)
@@ -171,7 +192,15 @@ export async function gradeScenario(input: {
   retrievedKnowledge: RetrievedKnowledgeChunk[]
   retrievedVoiceExamples: string[]
 }): Promise<GradeScenarioResult> {
-  const { scenario, replyBody, outcome, persona, venueInfo, retrievedKnowledge, retrievedVoiceExamples } = input
+  const {
+    scenario,
+    replyBody,
+    outcome,
+    persona,
+    venueInfo,
+    retrievedKnowledge,
+    retrievedVoiceExamples,
+  } = input
   const model = pickGradeModel(scenario.category)
 
   if (replyBody === null) {
@@ -229,7 +258,7 @@ knowledge_verdict: ${
 
 voice_verdict: ${
     isSafetyCritical
-      ? "ALWAYS return 'pass' for this scenario, with voice_reason \"voice not evaluated for safety-critical scenarios — clarity wins in an emergency\" and an empty voice_quote. This is a deliberate owner decision, not an oversight — do not grade tone, length, warmth, or persona-fit for a safety-critical reply under any circumstance."
+      ? 'ALWAYS return \'pass\' for this scenario, with voice_reason "voice not evaluated for safety-critical scenarios — clarity wins in an emergency" and an empty voice_quote. This is a deliberate owner decision, not an oversight — do not grade tone, length, warmth, or persona-fit for a safety-critical reply under any circumstance.'
       : `pass or fail against this venue's voice rules:
 ${VOICE_RULES_DIGEST}
 Venue persona — tone: "${persona.tone}", formality: ${persona.formality}, length guide: "${persona.lengthGuide}"${persona.bannedTopics.length > 0 ? `, banned topics: ${persona.bannedTopics.join(', ')}` : ''}.
@@ -244,7 +273,8 @@ Be specific and cite the actual quote for any failure. Do not be lenient — if 
 
   const { object, usage } = await generateObject({
     model: anthropic(model),
-    system: 'You are a strict, honest QA grader for a hospitality guest-messaging AI, evaluated against a pre-launch test suite.',
+    system:
+      'You are a strict, honest QA grader for a hospitality guest-messaging AI, evaluated against a pre-launch test suite.',
     prompt,
     schema: GradeScenarioSchema,
     temperature: 0.2,

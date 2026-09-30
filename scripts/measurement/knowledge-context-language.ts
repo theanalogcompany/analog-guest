@@ -24,7 +24,10 @@ const POUR_OVER = [/\bpour[\s-]?over\b/i, /\bv60\b/i]
 const MILK = [/\bmilk\b/i, /\blatte\b/i, /\bcortado\b/i]
 // The Budan recipe's own numbers. Their presence in a Bhadra answer is the
 // device failure verbatim, whether or not the words "pour over" appear.
-const RECIPE_NUMBERS = [/1\s*[:/]\s*1[56]\b/, /\b2[12]\s*[-–—]?\s*2?2?\s*g(?:rams)?\b/i]
+const RECIPE_NUMBERS = [
+  /1\s*[:/]\s*1[56]\b/,
+  /\b2[12]\s*[-–—]?\s*2?2?\s*g(?:rams)?\b/i,
+]
 
 function hits(body: string, patterns: RegExp[]): string[] {
   return patterns.flatMap((p) => {
@@ -53,5 +56,10 @@ export function classifyBhadraReply(body: string): BhadraVerdict {
  * the words are absent.
  */
 export function meetsBar(v: BhadraVerdict): boolean {
-  return v.namesCorrectMethod && v.namesMilk && !v.namesPourOver && !v.namesPourOverRecipeNumbers
+  return (
+    v.namesCorrectMethod &&
+    v.namesMilk &&
+    !v.namesPourOver &&
+    !v.namesPourOverRecipeNumbers
+  )
 }

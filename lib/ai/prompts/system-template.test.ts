@@ -3,7 +3,11 @@ import { describe, expect, it } from 'vitest'
 // vitest.config.ts. Other tests in this repo use relative imports too.
 import { ACKNOWLEDGMENT_INSTRUCTIONS } from './categories/acknowledgment'
 import { UNKNOWN_INSTRUCTIONS } from './categories/unknown'
-import { PROMPT_VERSION, SYSTEM_TEMPLATE, systemTemplateFor } from './system-template'
+import {
+  PROMPT_VERSION,
+  SYSTEM_TEMPLATE,
+  systemTemplateFor,
+} from './system-template'
 import {
   UNIVERSAL_RULES_DISPLAY,
   UNIVERSAL_RULES_UNDISPLAYED,
@@ -28,8 +32,8 @@ import {
 // SYSTEM_TEMPLATE body changes.
 
 describe('PROMPT_VERSION', () => {
-  it('is v1.70.0 (honest take first, then the specifics)', () => {
-    expect(PROMPT_VERSION).toBe('v1.70.0')
+  it('is v1.75.0 (a recognised order is received by saying so, with warmth)', () => {
+    expect(PROMPT_VERSION).toBe('v1.75.0')
   })
 })
 
@@ -72,9 +76,36 @@ describe('UNIVERSAL_RULES_DISPLAY ↔ SYSTEM_TEMPLATE lockstep (TAC-305, numberi
     // TAC-548 appends R39 after that.
     const ids = UNIVERSAL_RULES_DISPLAY.map((r) => r.id)
     expect(ids).toEqual([
-      'R1', 'R2', 'R3', 'R4', 'R5', 'R6', 'R7', 'R8', 'R9', 'R10', 'R11',
-      'R17', 'R18', 'R21', 'R23', 'R24', 'R25', 'R26', 'R27', 'R28',
-      'R29', 'R30', 'R31', 'R32', 'R33', 'R34', 'R35', 'R36', 'R37', 'R38',
+      'R1',
+      'R2',
+      'R3',
+      'R4',
+      'R5',
+      'R6',
+      'R7',
+      'R8',
+      'R9',
+      'R10',
+      'R11',
+      'R17',
+      'R18',
+      'R21',
+      'R23',
+      'R24',
+      'R25',
+      'R26',
+      'R27',
+      'R28',
+      'R29',
+      'R30',
+      'R31',
+      'R32',
+      'R33',
+      'R34',
+      'R35',
+      'R36',
+      'R37',
+      'R38',
       'R39',
     ])
   })
@@ -93,13 +124,16 @@ describe('UNIVERSAL_RULES_DISPLAY ↔ SYSTEM_TEMPLATE lockstep (TAC-305, numberi
     expect(SYSTEM_TEMPLATE).toContain('Let it stand')
   })
 
-
   it('shares the R17 price-scoping anchor across both sources (TAC-314)', () => {
     const r17 = UNIVERSAL_RULES_DISPLAY.find((r) => r.id === 'R17')
     expect(r17).toBeDefined()
     expect(r17?.summary).toContain('not part of an answer unless')
-    expect(SYSTEM_TEMPLATE).toContain('Price is not part of an answer unless the guest asked')
-    expect(SYSTEM_TEMPLATE).toContain('Describing a drink is not asking its price')
+    expect(SYSTEM_TEMPLATE).toContain(
+      'Price is not part of an answer unless the guest asked',
+    )
+    expect(SYSTEM_TEMPLATE).toContain(
+      'Describing a drink is not asking its price',
+    )
   })
 
   it('shares the R18 nearby-places anchor across both sources (TAC-314)', () => {
@@ -109,7 +143,9 @@ describe('UNIVERSAL_RULES_DISPLAY ↔ SYSTEM_TEMPLATE lockstep (TAC-305, numberi
     expect(SYSTEM_TEMPLATE).toContain(
       "speak with the same confidence you'd use about the menu",
     )
-    expect(SYSTEM_TEMPLATE).toContain('never fill the gap from general knowledge')
+    expect(SYSTEM_TEMPLATE).toContain(
+      'never fill the gap from general knowledge',
+    )
   })
 
   it('shares the R21 anchor phrase across both sources (TAC-334)', () => {
@@ -132,42 +168,54 @@ describe('UNIVERSAL_RULES_DISPLAY ↔ SYSTEM_TEMPLATE lockstep (TAC-305, numberi
     const r23 = UNIVERSAL_RULES_DISPLAY.find((r) => r.id === 'R23')
     expect(r23).toBeDefined()
     expect(r23?.summary).toContain('visit count')
-    expect(SYSTEM_TEMPLATE).toContain('Never state or imply a visit count, frequency')
+    expect(SYSTEM_TEMPLATE).toContain(
+      'Never state or imply a visit count, frequency',
+    )
   })
 
   it('shares the R24 anchor phrase across both sources (TAC-348)', () => {
     const r24 = UNIVERSAL_RULES_DISPLAY.find((r) => r.id === 'R24')
     expect(r24).toBeDefined()
     expect(r24?.summary).toContain('standard, widely known drink')
-    expect(SYSTEM_TEMPLATE).toContain("Don't explain what a standard, widely known drink is")
+    expect(SYSTEM_TEMPLATE).toContain(
+      "Don't explain what a standard, widely known drink is",
+    )
   })
 
   it('shares the R25 anchor phrase across both sources (TAC-348)', () => {
     const r25 = UNIVERSAL_RULES_DISPLAY.find((r) => r.id === 'R25')
     expect(r25).toBeDefined()
     expect(r25?.summary).toContain('comma-separated list')
-    expect(SYSTEM_TEMPLATE).toContain("Don't drop into a bare comma-separated list of components.")
+    expect(SYSTEM_TEMPLATE).toContain(
+      "Don't drop into a bare comma-separated list of components.",
+    )
   })
 
   it('shares the R26 anchor phrase across both sources (TAC-348)', () => {
     const r26 = UNIVERSAL_RULES_DISPLAY.find((r) => r.id === 'R26')
     expect(r26).toBeDefined()
     expect(r26?.summary).toContain('at most two')
-    expect(SYSTEM_TEMPLATE).toContain('When recommending items, offer at most two.')
+    expect(SYSTEM_TEMPLATE).toContain(
+      'When recommending items, offer at most two.',
+    )
   })
 
   it('shares the R27 anchor phrase across both sources (TAC-348)', () => {
     const r27 = UNIVERSAL_RULES_DISPLAY.find((r) => r.id === 'R27')
     expect(r27).toBeDefined()
     expect(r27?.summary).toContain('[Name]')
-    expect(SYSTEM_TEMPLATE).toContain("Saying 'let me check with [Name]' or '[Name] said to try the cortado' when you ARE [Name] is wrong")
+    expect(SYSTEM_TEMPLATE).toContain(
+      "Saying 'let me check with [Name]' or '[Name] said to try the cortado' when you ARE [Name] is wrong",
+    )
   })
 
   it('shares the R28 anchor phrase across both sources (TAC-348)', () => {
     const r28 = UNIVERSAL_RULES_DISPLAY.find((r) => r.id === 'R28')
     expect(r28).toBeDefined()
     expect(r28?.summary).toContain('criticize, blame')
-    expect(SYSTEM_TEMPLATE).toContain('Never criticize, blame, or speak negatively about a staff member')
+    expect(SYSTEM_TEMPLATE).toContain(
+      'Never criticize, blame, or speak negatively about a staff member',
+    )
   })
 
   // TAC-356: the same cross-source anchor treatment for the three newly
@@ -176,21 +224,27 @@ describe('UNIVERSAL_RULES_DISPLAY ↔ SYSTEM_TEMPLATE lockstep (TAC-305, numberi
     const r29 = UNIVERSAL_RULES_DISPLAY.find((r) => r.id === 'R29')
     expect(r29).toBeDefined()
     expect(r29?.summary).toContain('sentence fragment is fine')
-    expect(SYSTEM_TEMPLATE).toContain('A sentence fragment is fine when it reads naturally')
+    expect(SYSTEM_TEMPLATE).toContain(
+      'A sentence fragment is fine when it reads naturally',
+    )
   })
 
   it('shares the R30 anchor phrase across both sources (TAC-356)', () => {
     const r30 = UNIVERSAL_RULES_DISPLAY.find((r) => r.id === 'R30')
     expect(r30).toBeDefined()
     expect(r30?.summary).toContain('ask what they mean')
-    expect(SYSTEM_TEMPLATE).toContain("ask what they mean rather than guess at an interpretation")
+    expect(SYSTEM_TEMPLATE).toContain(
+      'ask what they mean rather than guess at an interpretation',
+    )
   })
 
   it('shares the R31 anchor phrase across both sources (TAC-356)', () => {
     const r31 = UNIVERSAL_RULES_DISPLAY.find((r) => r.id === 'R31')
     expect(r31).toBeDefined()
     expect(r31?.summary).toContain('specific product')
-    expect(SYSTEM_TEMPLATE).toContain('Do not name a specific product (a drink, a bean, a menu item)')
+    expect(SYSTEM_TEMPLATE).toContain(
+      'Do not name a specific product (a drink, a bean, a menu item)',
+    )
   })
 
   // TAC-359: the same cross-source anchor treatment for the three newly
@@ -199,7 +253,9 @@ describe('UNIVERSAL_RULES_DISPLAY ↔ SYSTEM_TEMPLATE lockstep (TAC-305, numberi
     const r32 = UNIVERSAL_RULES_DISPLAY.find((r) => r.id === 'R32')
     expect(r32).toBeDefined()
     expect(r32?.summary).toContain('reach out')
-    expect(SYSTEM_TEMPLATE).toContain('Never tell the guest to send a message, reach out, or get in touch')
+    expect(SYSTEM_TEMPLATE).toContain(
+      'Never tell the guest to send a message, reach out, or get in touch',
+    )
   })
 
   it('shares the R33 anchor phrase across both sources (TAC-359)', () => {
@@ -216,7 +272,9 @@ describe('UNIVERSAL_RULES_DISPLAY ↔ SYSTEM_TEMPLATE lockstep (TAC-305, numberi
     // TAC-301 part 2 narrowed the carve-out half; without this the display
     // could silently keep asserting holding is universally available.
     expect(r34?.summary).toContain('where the venue facts say')
-    expect(SYSTEM_TEMPLATE).toContain('You cannot place, confirm, or take an order.')
+    expect(SYSTEM_TEMPLATE).toContain(
+      'You cannot place, confirm, or take an order.',
+    )
   })
 
   // TAC-484: both BRANCHES are anchored, not just the rule's opening. A
@@ -227,7 +285,9 @@ describe('UNIVERSAL_RULES_DISPLAY ↔ SYSTEM_TEMPLATE lockstep (TAC-305, numberi
     const r35 = UNIVERSAL_RULES_DISPLAY.find((r) => r.id === 'R35')
     expect(r35).toBeDefined()
     expect(r35?.summary).toContain('say plainly what is actually true')
-    expect(r35?.summary).toContain('If the earlier message was wrong, say so and stop')
+    expect(r35?.summary).toContain(
+      'If the earlier message was wrong, say so and stop',
+    )
     expect(r35?.summary).toContain('If it was right, restate the fact plainly')
     // The boundary clause moves in lockstep with the rule body (2026-09-22).
     expect(r35?.summary).toContain(
@@ -308,7 +368,9 @@ describe('UNIVERSAL_RULES_DISPLAY ↔ SYSTEM_TEMPLATE lockstep (TAC-305, numberi
   // So: no month name and no four-digit year may appear in this rule's body.
   // A worked example here is abstract or it does not exist.
   it('quotes no concrete month or year in the rule body (TAC-520)', () => {
-    const start = SYSTEM_TEMPLATE.indexOf('Say a date the way someone working in the venue')
+    const start = SYSTEM_TEMPLATE.indexOf(
+      'Say a date the way someone working in the venue',
+    )
     const end = SYSTEM_TEMPLATE.indexOf('# Voice imperative')
     expect(start).toBeGreaterThan(-1)
     expect(end).toBeGreaterThan(start)
@@ -339,7 +401,9 @@ describe('UNIVERSAL_RULES_DISPLAY ↔ SYSTEM_TEMPLATE lockstep (TAC-305, numberi
     // would have passed it while breaking the promise in this comment — and a
     // correct future rule elsewhere using 19:00 as a negative example would
     // have failed it.
-    const start = SYSTEM_TEMPLATE.indexOf('Say a date the way someone working in the venue')
+    const start = SYSTEM_TEMPLATE.indexOf(
+      'Say a date the way someone working in the venue',
+    )
     const end = SYSTEM_TEMPLATE.indexOf('# Voice imperative')
     expect(start).toBeGreaterThan(-1)
     expect(end).toBeGreaterThan(start)
@@ -355,14 +419,20 @@ describe('UNIVERSAL_RULES_DISPLAY ↔ SYSTEM_TEMPLATE lockstep (TAC-305, numberi
     const r8 = UNIVERSAL_RULES_DISPLAY.find((r) => r.id === 'R8')
     expect(r8).toBeDefined()
     expect(r8?.summary).toContain('personally seen or been with the guest')
-    expect(SYSTEM_TEMPLATE).toContain('claiming to have seen, noticed, or been with the guest')
+    expect(SYSTEM_TEMPLATE).toContain(
+      'claiming to have seen, noticed, or been with the guest',
+    )
   })
 
   it('shares the R11-strengthened anchor phrase across both sources (TAC-348)', () => {
     const r11 = UNIVERSAL_RULES_DISPLAY.find((r) => r.id === 'R11')
     expect(r11).toBeDefined()
-    expect(r11?.summary).toContain('the whole description, not just the closing line')
-    expect(SYSTEM_TEMPLATE).toContain("This isn't only about the last sentence.")
+    expect(r11?.summary).toContain(
+      'the whole description, not just the closing line',
+    )
+    expect(SYSTEM_TEMPLATE).toContain(
+      "This isn't only about the last sentence.",
+    )
   })
 
   // TAC-324, added per QA suggestion: R1's overall summary is a paraphrase
@@ -377,8 +447,12 @@ describe('UNIVERSAL_RULES_DISPLAY ↔ SYSTEM_TEMPLATE lockstep (TAC-305, numberi
     expect(r1).toBeDefined()
     expect(r1?.summary).toContain('qr_scan')
     expect(r1?.summary).toContain('shared channel context')
-    expect(SYSTEM_TEMPLATE).toContain('treat the channel itself as the shared context')
-    expect(SYSTEM_TEMPLATE).toContain('Do not narrate the scan or thank them for it')
+    expect(SYSTEM_TEMPLATE).toContain(
+      'treat the channel itself as the shared context',
+    )
+    expect(SYSTEM_TEMPLATE).toContain(
+      'Do not narrate the scan or thank them for it',
+    )
   })
 })
 
@@ -397,12 +471,18 @@ describe('SYSTEM_TEMPLATE — single universal-rules heading (TAC-314)', () => {
     // R13-R16 must survive TAC-314 untouched (append-only numbering depends
     // on their positions staying fixed), and R19/R20 fill the gaps the
     // category strip left.
-    expect(SYSTEM_TEMPLATE).toContain('Open with a greeting only on the first message')
+    expect(SYSTEM_TEMPLATE).toContain(
+      'Open with a greeting only on the first message',
+    )
     expect(SYSTEM_TEMPLATE).toContain('## Operator instruction block')
     expect(SYSTEM_TEMPLATE).toContain('The Last Visit block tells you')
     expect(SYSTEM_TEMPLATE).toContain('## Unanswered question block')
-    expect(SYSTEM_TEMPLATE).toContain('Match the register and length of what the guest sent')
-    expect(SYSTEM_TEMPLATE).toContain('only authority on how long a message should be')
+    expect(SYSTEM_TEMPLATE).toContain(
+      'Match the register and length of what the guest sent',
+    )
+    expect(SYSTEM_TEMPLATE).toContain(
+      'only authority on how long a message should be',
+    )
   })
 })
 
@@ -420,7 +500,9 @@ describe('SYSTEM_TEMPLATE — arrivalCapture id discipline (TAC-302, v1.18.0)', 
   })
 
   it('marks the id as system-internal and never spoken to the guest', () => {
-    expect(SYSTEM_TEMPLATE).toContain('NEVER read it aloud, NEVER include it in your reply text to the guest')
+    expect(SYSTEM_TEMPLATE).toContain(
+      'NEVER read it aloud, NEVER include it in your reply text to the guest',
+    )
   })
 })
 
@@ -430,11 +512,15 @@ describe('SYSTEM_TEMPLATE — arrivalCapture emission discipline (TAC-302 follow
   })
 
   it('reframes the emit condition as a co-occurrence of arrival intent AND active commitments', () => {
-    expect(SYSTEM_TEMPLATE).toContain('Populate arrivalCapture whenever BOTH of the following are true')
+    expect(SYSTEM_TEMPLATE).toContain(
+      'Populate arrivalCapture whenever BOTH of the following are true',
+    )
   })
 
   it('covers confirmations and closers as arrival intent (not just direct time/direction statements)', () => {
-    expect(SYSTEM_TEMPLATE).toContain('a confirmation of a previously-discussed time')
+    expect(SYSTEM_TEMPLATE).toContain(
+      'a confirmation of a previously-discussed time',
+    )
     expect(SYSTEM_TEMPLATE).toContain('a closer that confirms intent to arrive')
   })
 
@@ -449,7 +535,9 @@ describe('SYSTEM_TEMPLATE — arrivalCapture emission discipline (TAC-302 follow
   })
 
   it('explicitly forbids the "end of conversation, no need" suppression reason', () => {
-    expect(SYSTEM_TEMPLATE).toContain('END-OF-CONVERSATION IS WHEN ARRIVAL DETECTION MATTERS MOST')
+    expect(SYSTEM_TEMPLATE).toContain(
+      'END-OF-CONVERSATION IS WHEN ARRIVAL DETECTION MATTERS MOST',
+    )
   })
 
   it('explicitly forbids the "previous turn already set expected_arrival" suppression reason', () => {
@@ -459,18 +547,24 @@ describe('SYSTEM_TEMPLATE — arrivalCapture emission discipline (TAC-302 follow
   })
 
   it('directs the model to STOP when it catches itself reasoning toward suppression', () => {
-    expect(SYSTEM_TEMPLATE).toContain('"no need to capture again because…" — STOP')
+    expect(SYSTEM_TEMPLATE).toContain(
+      '"no need to capture again because…" — STOP',
+    )
   })
 
   it('decouples the conversational heads-up ask from the structured detection', () => {
-    expect(SYSTEM_TEMPLATE).toContain('one-time courtesy in the venue\'s voice')
-    expect(SYSTEM_TEMPLATE).toContain('structured detection that fires every time arrival intent is present')
+    expect(SYSTEM_TEMPLATE).toContain("one-time courtesy in the venue's voice")
+    expect(SYSTEM_TEMPLATE).toContain(
+      'structured detection that fires every time arrival intent is present',
+    )
   })
 
   it('includes the prod-matched worked example showing emission despite prior heads-up ask', () => {
     expect(SYSTEM_TEMPLATE).toContain('Worked example')
-    expect(SYSTEM_TEMPLATE).toContain('ok i\'ll come in tomorrow around 8')
-    expect(SYSTEM_TEMPLATE).toContain('even though the heads-up was already asked')
+    expect(SYSTEM_TEMPLATE).toContain("ok i'll come in tomorrow around 8")
+    expect(SYSTEM_TEMPLATE).toContain(
+      'even though the heads-up was already asked',
+    )
   })
 
   it('does not use "see you then" or "see you tomorrow" in the guest-utterance example list (TAC-340)', () => {
@@ -496,8 +590,12 @@ describe('SYSTEM_TEMPLATE — Resource commitment self-flag (TAC-212, v1.14.0)',
   // the defective wording. Now asserts the value-transfer framing instead.
   it('tests for value transfer, not monetary instruments', () => {
     expect(SYSTEM_TEMPLATE).toContain('ANYTHING OF VALUE')
-    expect(SYSTEM_TEMPLATE).toContain('product, service, or money they did not pay for')
-    expect(SYSTEM_TEMPLATE).toContain('It does not matter whether money changes hands')
+    expect(SYSTEM_TEMPLATE).toContain(
+      'product, service, or money they did not pay for',
+    )
+    expect(SYSTEM_TEMPLATE).toContain(
+      'It does not matter whether money changes hands',
+    )
     expect(SYSTEM_TEMPLATE).toContain('set requiresOperatorApproval=true')
   })
 
@@ -529,7 +627,9 @@ describe('SYSTEM_TEMPLATE — Resource commitment self-flag (TAC-212, v1.14.0)',
   })
 
   it('cross-references the mechanic-eligibility approval annotation', () => {
-    expect(SYSTEM_TEMPLATE).toContain('the runtime context\'s "## What this guest can access" block marks a mechanic as requiring operator approval')
+    expect(SYSTEM_TEMPLATE).toContain(
+      'the runtime context\'s "## What this guest can access" block marks a mechanic as requiring operator approval',
+    )
   })
 
   it('directs the model to leave approvalReason empty when not flagging', () => {
@@ -551,7 +651,9 @@ describe('SYSTEM_TEMPLATE — voice vs knowledge', () => {
 
 describe('SYSTEM_TEMPLATE — R1: actions the guest didn’t take', () => {
   it("calls out 'tapped in' / 'thanks for stopping by' as forbidden", () => {
-    expect(SYSTEM_TEMPLATE).toContain('Don\'t reference actions the guest didn\'t take')
+    expect(SYSTEM_TEMPLATE).toContain(
+      "Don't reference actions the guest didn't take",
+    )
     expect(SYSTEM_TEMPLATE).toContain('tapped in')
     expect(SYSTEM_TEMPLATE).toContain('thanks for stopping by')
   })
@@ -569,11 +671,13 @@ describe('SYSTEM_TEMPLATE — R1: actions the guest didn’t take', () => {
   // present-tense location assumptions and was observed producing "Password's
   // on the board when you get here" sent to a guest who had already left. The
   // gate (the condition that triggers the exception) is unchanged.
-  it('carves out a narrow exception for a qr_scan guest\'s first message', () => {
+  it("carves out a narrow exception for a qr_scan guest's first message", () => {
     expect(SYSTEM_TEMPLATE).toContain(
       "when the context says this is the guest's first message after they scanned a sign at the venue",
     )
-    expect(SYSTEM_TEMPLATE).toContain('treat the channel itself as the shared context')
+    expect(SYSTEM_TEMPLATE).toContain(
+      'treat the channel itself as the shared context',
+    )
     expect(SYSTEM_TEMPLATE).toContain("without assuming they're still on-site")
   })
 
@@ -583,7 +687,9 @@ describe('SYSTEM_TEMPLATE — R1: actions the guest didn’t take', () => {
   // would be exactly the software-talking-about-itself failure this rule
   // exists to prevent everywhere else.
   it('explicitly forbids narrating the scan or thanking the guest for it', () => {
-    expect(SYSTEM_TEMPLATE).toContain('Do not narrate the scan or thank them for it')
+    expect(SYSTEM_TEMPLATE).toContain(
+      'Do not narrate the scan or thank them for it',
+    )
   })
 
   it('restates that the rest of the rule is unchanged by the exception', () => {
@@ -593,14 +699,16 @@ describe('SYSTEM_TEMPLATE — R1: actions the guest didn’t take', () => {
   })
 })
 
-describe('SYSTEM_TEMPLATE — R2: today\'s specific answer', () => {
+describe("SYSTEM_TEMPLATE — R2: today's specific answer", () => {
   it('directs the agent to give today\'s answer for "now" questions', () => {
-    expect(SYSTEM_TEMPLATE).toContain('today\'s specific answer')
+    expect(SYSTEM_TEMPLATE).toContain("today's specific answer")
     expect(SYSTEM_TEMPLATE).toContain('what time do you close')
   })
 
   it('anchors R2 to the ## Right now block in runtime context', () => {
-    expect(SYSTEM_TEMPLATE).toContain('date and venue local time from the ## Right now block')
+    expect(SYSTEM_TEMPLATE).toContain(
+      'date and venue local time from the ## Right now block',
+    )
   })
 })
 
@@ -609,22 +717,30 @@ describe('SYSTEM_TEMPLATE — R3: dash prohibition', () => {
     // The literal phrase is the canonical anchor — if this changes, every
     // downstream artifact (fixture, regex backstop, dash_violation event
     // copy) needs review.
-    expect(SYSTEM_TEMPLATE).toContain('Never use em dashes (—) or en dashes (–)')
+    expect(SYSTEM_TEMPLATE).toContain(
+      'Never use em dashes (—) or en dashes (–)',
+    )
   })
 
   it('declares R3 a hard rule', () => {
-    expect(SYSTEM_TEMPLATE).toMatch(/Never use em dashes[\s\S]{0,200}This is a hard rule/)
+    expect(SYSTEM_TEMPLATE).toMatch(
+      /Never use em dashes[\s\S]{0,200}This is a hard rule/,
+    )
   })
 
   it('includes the three rewrite examples', () => {
     expect(SYSTEM_TEMPLATE).toContain('we close at 11. come by anytime.')
-    expect(SYSTEM_TEMPLATE).toContain('iced isn\'t on the menu. only hot.')
+    expect(SYSTEM_TEMPLATE).toContain("iced isn't on the menu. only hot.")
     expect(SYSTEM_TEMPLATE).toContain('anyway, welcome. what can I get you.')
   })
 
   it('explains why dashes are banned (AI tell, not in venue corpora)', () => {
-    expect(SYSTEM_TEMPLATE).toContain('Em dashes read as AI writing in casual texts')
-    expect(SYSTEM_TEMPLATE).toContain('don\'t appear in real venue voice corpora')
+    expect(SYSTEM_TEMPLATE).toContain(
+      'Em dashes read as AI writing in casual texts',
+    )
+    expect(SYSTEM_TEMPLATE).toContain(
+      "don't appear in real venue voice corpora",
+    )
   })
 })
 
@@ -655,15 +771,19 @@ describe('SYSTEM_TEMPLATE — R6: yes/no answers', () => {
   })
 })
 
-describe('SYSTEM_TEMPLATE — R7: don\'t restate context', () => {
+describe("SYSTEM_TEMPLATE — R7: don't restate context", () => {
   it('forbids restating context covered earlier in the thread', () => {
-    expect(SYSTEM_TEMPLATE).toContain('Don\'t restate context already covered in the conversation')
+    expect(SYSTEM_TEMPLATE).toContain(
+      "Don't restate context already covered in the conversation",
+    )
   })
 })
 
-describe('SYSTEM_TEMPLATE — R8: don\'t invent details (THE-225)', () => {
+describe("SYSTEM_TEMPLATE — R8: don't invent details (THE-225)", () => {
   it('forbids inventing facts beyond runtime context', () => {
-    expect(SYSTEM_TEMPLATE).toContain('Never invent details beyond what your runtime context documents')
+    expect(SYSTEM_TEMPLATE).toContain(
+      'Never invent details beyond what your runtime context documents',
+    )
   })
 
   it('enumerates colorful-specificity examples that are forbidden', () => {
@@ -674,9 +794,11 @@ describe('SYSTEM_TEMPLATE — R8: don\'t invent details (THE-225)', () => {
     expect(SYSTEM_TEMPLATE).toContain('the line is short today')
   })
 
-  it('reminds the agent it isn\'t physically anywhere', () => {
-    expect(SYSTEM_TEMPLATE).toContain('The agent isn\'t physically anywhere')
-    expect(SYSTEM_TEMPLATE).toContain('Don\'t claim to see, hear, smell, or be near anything')
+  it("reminds the agent it isn't physically anywhere", () => {
+    expect(SYSTEM_TEMPLATE).toContain("The agent isn't physically anywhere")
+    expect(SYSTEM_TEMPLATE).toContain(
+      "Don't claim to see, hear, smell, or be near anything",
+    )
   })
 
   // TAC-308 dropped 'let me find out.' from this list. It was one of three
@@ -684,33 +806,33 @@ describe('SYSTEM_TEMPLATE — R8: don\'t invent details (THE-225)', () => {
   // machinery to deliver; the promise is now forbidden outright and the
   // # Knowledge gaps block routes the turn to an operator instead.
   it('offers the dash-free fallback phrasings, without the promise', () => {
-    expect(SYSTEM_TEMPLATE).toContain('\'not sure,\'')
-    expect(SYSTEM_TEMPLATE).toContain('\'no idea.\'')
-    expect(SYSTEM_TEMPLATE).toContain(
-      'Never promise to find out and come back',
-    )
+    expect(SYSTEM_TEMPLATE).toContain("'not sure,'")
+    expect(SYSTEM_TEMPLATE).toContain("'no idea.'")
+    expect(SYSTEM_TEMPLATE).toContain('Never promise to find out and come back')
   })
 
   // THE-233 tightened R8 with explicit named-product coverage.
   it('explicitly forbids naming undocumented menu items / drinks / dishes / perks / events / off-menu', () => {
     expect(SYSTEM_TEMPLATE).toContain(
-      'any named menu item, drink, dish, perk, event, or off-menu item that isn\'t documented in the venue spec or runtime context',
+      "any named menu item, drink, dish, perk, event, or off-menu item that isn't documented in the venue spec or runtime context",
     )
   })
 
-  it('lands the punch line: if the name isn\'t there, don\'t name it', () => {
-    expect(SYSTEM_TEMPLATE).toContain('If a product name isn\'t there, don\'t name it.')
+  it("lands the punch line: if the name isn't there, don't name it", () => {
+    expect(SYSTEM_TEMPLATE).toContain(
+      "If a product name isn't there, don't name it.",
+    )
   })
 })
 
-describe('SYSTEM_TEMPLATE — R9: admit uncertainty, don\'t deflect (THE-225)', () => {
+describe("SYSTEM_TEMPLATE — R9: admit uncertainty, don't deflect (THE-225)", () => {
   // TAC-308 rewrote this rule's opening. It used to endorse
   // "let me find out and get back to you" by name — the exact phrase behind
   // thirteen unkept promises in production. The anti-deflection half is
   // unchanged; the promise half is now a prohibition.
   it('forbids the promise and the invented deadline', () => {
     expect(SYSTEM_TEMPLATE).toContain(
-      'never say you\'ll find out and get back to them, and never name a time an answer will arrive',
+      "never say you'll find out and get back to them, and never name a time an answer will arrive",
     )
     expect(SYSTEM_TEMPLATE).not.toContain('let me find out and get back to you')
   })
@@ -723,18 +845,22 @@ describe('SYSTEM_TEMPLATE — R9: admit uncertainty, don\'t deflect (THE-225)', 
 
   it('includes the weather + gluten-free worked examples', () => {
     expect(SYSTEM_TEMPLATE).toContain('open mic is next Saturday')
-    expect(SYSTEM_TEMPLATE).toContain('every menu item that happens to lack gluten')
+    expect(SYSTEM_TEMPLATE).toContain(
+      'every menu item that happens to lack gluten',
+    )
   })
 
   it('lands the principle: a non-sequitur is worse than uncertainty', () => {
-    expect(SYSTEM_TEMPLATE).toContain('A non-sequitur is worse than admitting uncertainty')
+    expect(SYSTEM_TEMPLATE).toContain(
+      'A non-sequitur is worse than admitting uncertainty',
+    )
   })
 
   it('contains no em or en dashes inside the rule body (R3 self-consistency)', () => {
     // Slice out R9's prose by anchoring on its opening clause + the next rule
     // boundary (R10 starts with "When recommending other places").
     const start = SYSTEM_TEMPLATE.indexOf(
-      'When you don\'t have a confident answer, never pivot',
+      "When you don't have a confident answer, never pivot",
     )
     const end = SYSTEM_TEMPLATE.indexOf('When recommending other places')
     expect(start).toBeGreaterThan(-1)
@@ -757,8 +883,8 @@ describe('SYSTEM_TEMPLATE — R10: only documented venue recommendations (THE-22
   })
 
   it('offers natural-decline fallbacks for undocumented asks', () => {
-    expect(SYSTEM_TEMPLATE).toContain('I\'d ask around')
-    expect(SYSTEM_TEMPLATE).toContain('I don\'t go out much past here')
+    expect(SYSTEM_TEMPLATE).toContain("I'd ask around")
+    expect(SYSTEM_TEMPLATE).toContain("I don't go out much past here")
   })
 })
 
@@ -772,7 +898,9 @@ describe('SYSTEM_TEMPLATE — R11: deliver the answer, no sentiment-closer (TAC-
 
   it('frames the observed closers as the shape to avoid, not a fixed banlist', () => {
     expect(SYSTEM_TEMPLATE).toContain('trust me on this one')
-    expect(SYSTEM_TEMPLATE).toContain('Those are the shape to avoid, not a fixed list')
+    expect(SYSTEM_TEMPLATE).toContain(
+      'Those are the shape to avoid, not a fixed list',
+    )
   })
 
   it('carves out emotional turns so warmth is retained (over-firing guard)', () => {
@@ -784,8 +912,12 @@ describe('SYSTEM_TEMPLATE — R11: deliver the answer, no sentiment-closer (TAC-
 
   it('contains no em or en dashes inside the rule body (R3 self-consistency)', () => {
     // Slice from R11's opening clause to the next rule (greeting discipline).
-    const start = SYSTEM_TEMPLATE.indexOf('When delivering a recommendation, a description, or a fact')
-    const end = SYSTEM_TEMPLATE.indexOf('Open with a greeting only on the first message')
+    const start = SYSTEM_TEMPLATE.indexOf(
+      'When delivering a recommendation, a description, or a fact',
+    )
+    const end = SYSTEM_TEMPLATE.indexOf(
+      'Open with a greeting only on the first message',
+    )
     expect(start).toBeGreaterThan(-1)
     expect(end).toBeGreaterThan(start)
     const r11Body = SYSTEM_TEMPLATE.slice(start, end)
@@ -799,7 +931,9 @@ describe('SYSTEM_TEMPLATE — R11: deliver the answer, no sentiment-closer (TAC-
 // no assertion content changes.
 describe('SYSTEM_TEMPLATE — R13: greeting discipline', () => {
   it('limits greetings to first message or after long silence', () => {
-    expect(SYSTEM_TEMPLATE).toContain('Open with a greeting only on the first message of a thread')
+    expect(SYSTEM_TEMPLATE).toContain(
+      'Open with a greeting only on the first message of a thread',
+    )
     expect(SYSTEM_TEMPLATE).toContain('multi-day silence')
   })
 
@@ -813,13 +947,19 @@ describe('SYSTEM_TEMPLATE — R13: greeting discipline', () => {
   })
 
   it('lands the principle: greeting on every turn reads as scripted', () => {
-    expect(SYSTEM_TEMPLATE).toContain('Greeting on every turn reads as scripted')
+    expect(SYSTEM_TEMPLATE).toContain(
+      'Greeting on every turn reads as scripted',
+    )
   })
 
   it('contains no em or en dashes inside the rule body (R3 self-consistency)', () => {
     // Slice from R12's opening clause to the next rule (operator instruction).
-    const start = SYSTEM_TEMPLATE.indexOf('Open with a greeting only on the first message')
-    const end = SYSTEM_TEMPLATE.indexOf('If your runtime context includes a ## Operator instruction')
+    const start = SYSTEM_TEMPLATE.indexOf(
+      'Open with a greeting only on the first message',
+    )
+    const end = SYSTEM_TEMPLATE.indexOf(
+      'If your runtime context includes a ## Operator instruction',
+    )
     expect(start).toBeGreaterThan(-1)
     expect(end).toBeGreaterThan(start)
     const r12Body = SYSTEM_TEMPLATE.slice(start, end)
@@ -831,35 +971,47 @@ describe('SYSTEM_TEMPLATE — R13: greeting discipline', () => {
 // block above — pure rename, no assertion content changes.
 describe('SYSTEM_TEMPLATE — R14: Operator instruction block usage (THE-232)', () => {
   it('introduces the Operator instruction block', () => {
-    expect(SYSTEM_TEMPLATE).toContain('If your runtime context includes a ## Operator instruction block')
+    expect(SYSTEM_TEMPLATE).toContain(
+      'If your runtime context includes a ## Operator instruction block',
+    )
   })
 
   it('frames the operator note as intent, not output', () => {
-    expect(SYSTEM_TEMPLATE).toContain('directive for what to communicate, not the message to send verbatim')
-    expect(SYSTEM_TEMPLATE).toContain('operator\'s wording is intent, not output')
+    expect(SYSTEM_TEMPLATE).toContain(
+      'directive for what to communicate, not the message to send verbatim',
+    )
+    expect(SYSTEM_TEMPLATE).toContain(
+      "operator's wording is intent, not output",
+    )
   })
 
   it('forbids echoing the operator phrasing', () => {
-    expect(SYSTEM_TEMPLATE).toContain('Don\'t echo the operator\'s phrasing')
+    expect(SYSTEM_TEMPLATE).toContain("Don't echo the operator's phrasing")
   })
 
   it('forbids meta-acknowledgment of the instruction', () => {
-    expect(SYSTEM_TEMPLATE).toContain('\'got it,\'')
-    expect(SYSTEM_TEMPLATE).toContain('\'here\'s a reminder:\'')
+    expect(SYSTEM_TEMPLATE).toContain("'got it,'")
+    expect(SYSTEM_TEMPLATE).toContain("'here's a reminder:'")
   })
 
   it('forbids referring to the operator', () => {
-    expect(SYSTEM_TEMPLATE).toContain('\'I was asked to tell you\'')
+    expect(SYSTEM_TEMPLATE).toContain("'I was asked to tell you'")
   })
 
   it('includes the open-mic worked example', () => {
-    expect(SYSTEM_TEMPLATE).toContain('remind them about open mic next Saturday')
-    expect(SYSTEM_TEMPLATE).toContain('open mic this saturday at 8. you should come')
+    expect(SYSTEM_TEMPLATE).toContain(
+      'remind them about open mic next Saturday',
+    )
+    expect(SYSTEM_TEMPLATE).toContain(
+      'open mic this saturday at 8. you should come',
+    )
   })
 
   it('contains no em or en dashes inside the rule body (R3 self-consistency)', () => {
     // Slice from operator instruction opening to the next rule (Last Visit).
-    const start = SYSTEM_TEMPLATE.indexOf('If your runtime context includes a ## Operator instruction')
+    const start = SYSTEM_TEMPLATE.indexOf(
+      'If your runtime context includes a ## Operator instruction',
+    )
     const end = SYSTEM_TEMPLATE.indexOf('The Last Visit block tells you')
     expect(start).toBeGreaterThan(-1)
     expect(end).toBeGreaterThan(start)
@@ -875,7 +1027,9 @@ describe('SYSTEM_TEMPLATE — R14: Operator instruction block usage (THE-232)', 
 // unchanged from THE-229.
 describe('SYSTEM_TEMPLATE — R15: Last Visit block usage, scoped to backward references (THE-229, TAC-324)', () => {
   it('introduces the Last Visit block', () => {
-    expect(SYSTEM_TEMPLATE).toContain('The Last Visit block tells you what the guest most recently ordered')
+    expect(SYSTEM_TEMPLATE).toContain(
+      'The Last Visit block tells you what the guest most recently ordered',
+    )
   })
 
   it('directs the agent to reference items naturally, not recite', () => {
@@ -884,11 +1038,15 @@ describe('SYSTEM_TEMPLATE — R15: Last Visit block usage, scoped to backward re
   })
 
   it('forbids volunteering the date unless asked', () => {
-    expect(SYSTEM_TEMPLATE).toContain('Do not volunteer the date unless the guest asks about timing')
+    expect(SYSTEM_TEMPLATE).toContain(
+      'Do not volunteer the date unless the guest asks about timing',
+    )
   })
 
   it('caps references at one PAST item', () => {
-    expect(SYSTEM_TEMPLATE).toContain('do not list multiple past items if you reference at all')
+    expect(SYSTEM_TEMPLATE).toContain(
+      'do not list multiple past items if you reference at all',
+    )
     expect(SYSTEM_TEMPLATE).toContain('Pick one')
   })
 
@@ -933,8 +1091,12 @@ describe('SYSTEM_TEMPLATE — # Knowledge gaps (TAC-308, v1.25.0)', () => {
   // would hand them nothing to work with. This is the instruction that makes
   // the prefilled card useful.
   it('requires a best-attempt ANSWER in the body, not a holding line', () => {
-    expect(SYSTEM_TEMPLATE).toContain('still write your best attempt at the answer in the body')
-    expect(SYSTEM_TEMPLATE).toContain('Do not write "let me find out" as the body')
+    expect(SYSTEM_TEMPLATE).toContain(
+      'still write your best attempt at the answer in the body',
+    )
+    expect(SYSTEM_TEMPLATE).toContain(
+      'Do not write "let me find out" as the body',
+    )
   })
 
   it('tells the model the body is reviewed before the guest sees it', () => {
@@ -944,7 +1106,9 @@ describe('SYSTEM_TEMPLATE — # Knowledge gaps (TAC-308, v1.25.0)', () => {
   // Without this the gate would fire on "what's the weather" and create a
   // card no operator can action.
   it('excludes questions nobody at the venue could answer either', () => {
-    expect(SYSTEM_TEMPLATE).toContain('Nobody at the venue could answer it either')
+    expect(SYSTEM_TEMPLATE).toContain(
+      'Nobody at the venue could answer it either',
+    )
     expect(SYSTEM_TEMPLATE).toContain('That is a complete reply, not a gap')
   })
 
@@ -959,7 +1123,9 @@ describe('SYSTEM_TEMPLATE — # Knowledge gaps (TAC-308, v1.25.0)', () => {
   // taught this phrase; none may survive.
   it('contains NO instruction endorsing the unkeepable promise anywhere', () => {
     expect(SYSTEM_TEMPLATE).not.toContain('let me find out and get back to you')
-    expect(SYSTEM_TEMPLATE).not.toContain("say 'let me find out' without the artifact framing")
+    expect(SYSTEM_TEMPLATE).not.toContain(
+      "say 'let me find out' without the artifact framing",
+    )
     expect(SYSTEM_TEMPLATE).not.toContain("'let me find out.'")
   })
 
@@ -972,7 +1138,9 @@ describe('SYSTEM_TEMPLATE — # Knowledge gaps (TAC-308, v1.25.0)', () => {
 
 describe('SYSTEM_TEMPLATE — ## Unanswered question rule (TAC-308, v1.25.0)', () => {
   it('tells the agent not to re-promise while one is outstanding', () => {
-    expect(SYSTEM_TEMPLATE).toContain('If your runtime context includes an ## Unanswered question block')
+    expect(SYSTEM_TEMPLATE).toContain(
+      'If your runtime context includes an ## Unanswered question block',
+    )
     expect(SYSTEM_TEMPLATE).toContain("don't state or invent a deadline for it")
   })
 })
@@ -997,7 +1165,9 @@ describe('SYSTEM_TEMPLATE — splitting removed from the prompt (TAC-319, v1.31.
   })
 
   it('carries no macchiato worked example', () => {
-    expect(SYSTEM_TEMPLATE).not.toContain('Espresso with a small dollop of foam on top')
+    expect(SYSTEM_TEMPLATE).not.toContain(
+      'Espresso with a small dollop of foam on top',
+    )
     expect(SYSTEM_TEMPLATE).not.toContain('stronger than a cortado')
   })
 
@@ -1015,8 +1185,12 @@ describe('SYSTEM_TEMPLATE — splitting removed from the prompt (TAC-319, v1.31.
   // so the deletion took exactly one bullet.
   it('deleted exactly the splitting bullet, not its neighbors', () => {
     expect(SYSTEM_TEMPLATE).not.toContain('Frosty Gandhi')
-    expect(SYSTEM_TEMPLATE).toContain('When delivering a recommendation, a description, or a fact')
-    expect(SYSTEM_TEMPLATE).toContain('Open with a greeting only on the first message')
+    expect(SYSTEM_TEMPLATE).toContain(
+      'When delivering a recommendation, a description, or a fact',
+    )
+    expect(SYSTEM_TEMPLATE).toContain(
+      'Open with a greeting only on the first message',
+    )
   })
 })
 
@@ -1065,7 +1239,9 @@ describe('SYSTEM_TEMPLATE — R21: no volunteered advice on an unprompted guest 
     expect(SYSTEM_TEMPLATE).toContain(
       "A response that praises the guest's order reads as customer-service script",
     )
-    expect(SYSTEM_TEMPLATE).toContain('Those are the shape to avoid, not a fixed list')
+    expect(SYSTEM_TEMPLATE).toContain(
+      'Those are the shape to avoid, not a fixed list',
+    )
   })
 
   it('names the door-opening questions the trigger excludes (overcorrection guard)', () => {
@@ -1085,12 +1261,346 @@ describe('SYSTEM_TEMPLATE — R21: no volunteered advice on an unprompted guest 
     // (TAC-314 second round) now sits between it and the next heading, so
     // this range also covers R22's body. That's fine for this assertion —
     // R3 self-consistency should hold across the whole tail, not just R21.
-    const start = SYSTEM_TEMPLATE.indexOf('Venue knowledge is for answering with, not for leading with')
+    const start = SYSTEM_TEMPLATE.indexOf(
+      'Venue knowledge is for answering with, not for leading with',
+    )
     const end = SYSTEM_TEMPLATE.indexOf('# Voice imperative')
     expect(start).toBeGreaterThan(-1)
     expect(end).toBeGreaterThan(start)
     const tailBody = SYSTEM_TEMPLATE.slice(start, end)
     expect(tailBody).not.toMatch(/[—–]/)
+  })
+})
+
+// TAC-555: R21 gains the positive half of "receive it". Before this it said
+// "receive it" and then banned rating, comparing and suggesting, with no
+// statement of what receiving looks like, so the shortest safe move was a
+// bare receipt: a guest with cortado on 4 of 5 recorded visits typed "just
+// got a cortado" and the auto-sent reply was "nice".
+//
+// EVERY CLAUSE BELOW IS PINNED AS ONE EXACT CONTIGUOUS LITERAL, not as
+// fragments. TAC-409 and TAC-502 each record a sentence being reversed while
+// every asserted fragment survived, and TAC-502's landed on the very entry
+// citing TAC-409. A clause asserted in pieces can be inverted between them.
+describe('SYSTEM_TEMPLATE — R21: a recognised order is received by saying so (TAC-555)', () => {
+  // The positive half, whole. Splitting this would let "is not the same as
+  // saying as little as possible" invert to "is saying as little as
+  // possible" with every other fragment intact.
+  // A REAL SENTENCE, NOT A LABEL, is the ruled fix for the measured 43%
+  // templating breach ("your usual" in 6 of 14 replies). The bare-label
+  // sentence is what makes that a stated requirement rather than a hope.
+  it('requires a real sentence carrying both the recognition and the warmth', () => {
+    expect(SYSTEM_TEMPLATE).toContain(
+      "When the item they named is already in this guest's ## Visit history, write a real sentence, not a label. Two things always belong in it: that you know this is what they order, or that they have had it before, and something warm about them: about their coming back, or about the taste they have.",
+    )
+  })
+
+  // RULING 3 (2026-09-29), and this is the measured half. The first version
+  // asked for warmth "about the choice itself" and the model substituted a
+  // WELL-WISH about the drink in 8 of 20 replies, which was simultaneously
+  // the missing compliment and the 35% n=2 template. The exclusion is stated
+  // POSITIVELY (the warmth is about the guest) and the well-wish is DESCRIBED
+  // rather than quoted, because a quoted phrasing is the one thing the model
+  // reproduces verbatim and templated wording is this ticket's own defect.
+  //
+  // Pinned whole. Fragment-pinned, "it is not this" could invert to "it is
+  // this" with every other fragment surviving, which restores the defect.
+  it('rules a well-wish about the item out as the warm half', () => {
+    expect(SYSTEM_TEMPLATE).toContain(
+      'That warmth is about the guest and not about the drink. A wish that the item turns out well is a kind thing to say and it is not this, because it is about the order rather than about the person who chose it, so it never counts as the warm half.',
+    )
+  })
+
+  it('rejects a bare label naming the order and nothing else', () => {
+    expect(SYSTEM_TEMPLATE).toContain(
+      'Two or three words naming the order and nothing else is a label, not a sentence, and it is not this.',
+    )
+  })
+
+  // THE SCOPED REVERSAL. This rule's own ban on rating the choice is
+  // TAC-334's, sharpened post-UAT after "the right call" reached a guest, and
+  // it stays in force everywhere else. Pinned whole: a fragment-pinned
+  // version would survive widening "and only here" to every turn.
+  it('gives way on rating the choice ONLY when the item is already in their history', () => {
+    expect(SYSTEM_TEMPLATE).toContain(
+      "That warmth is also the one place this rule's ban on rating the choice gives way, and only for an item already in their ## Visit history, because a guest you recognize is not a stranger whose order you are grading.",
+    )
+  })
+
+  // RULING 4 (2026-09-29). "and only here" was measured LEAKING: on arm B,
+  // where the item is in no history at all, complimentsChoice went 2/10 in
+  // the control to 5/10 in the treatment, twice as the literal "good call" --
+  // one of this rule's OWN named banned shapes. Naming the block is what
+  // makes the scope checkable; the not-in-history branch below now says it
+  // again from the other side, because one statement of it demonstrably did
+  // not hold.
+  it('refuses a verdict on the choice for an item with no history', () => {
+    expect(SYSTEM_TEMPLATE).toContain(
+      'No verdict on the choice either, since the give-way above reaches only an order you already know; warmth about the item itself is still welcome there, but grading their pick is exactly what the start of this rule forbids.',
+    )
+  })
+
+  // The base prohibition must survive the carve-out, or the carve-out has
+  // eaten the rule it was scoped against.
+  it('keeps the base ban and its customer-service examples intact', () => {
+    expect(SYSTEM_TEMPLATE).toContain(
+      "Don't rate the choice, compare it to other options, or suggest something different for next time.",
+    )
+    expect(SYSTEM_TEMPLATE).toContain('good pick')
+    expect(SYSTEM_TEMPLATE).toContain('the right call')
+  })
+
+  // THE COUNT BAN, INLINE. Relying on R23 two bullets later demonstrably
+  // leaked once in fourteen ("third one in two weeks"), and the computable
+  // case is named because that is how it leaked: the model counted the
+  // bullets and did arithmetic on the deltas.
+  it('forbids a number inline, including when the dates make it computable', () => {
+    expect(SYSTEM_TEMPLATE).toContain(
+      'Frequency in words belongs to that recognition and is welcome: that they keep coming back to this one is the kind of thing to say. Frequency as a figure never is. No count of visits or orders, no ordinal placing this one in a sequence, and no span of time to measure them against.',
+    )
+  })
+
+  // RULING 5 (2026-09-29) narrowed the ban. The first version forbade "how
+  // often or how recently they come", which also forbade the warm, countless
+  // recognition the rule exists to produce; 4 of 20 replies tripped it saying
+  // nothing countable at all. Now: words yes, figures no. The two halves are
+  // pinned in ONE literal above, because splitting them would let the
+  // permission survive while the prohibition is deleted, or the reverse.
+  //
+  // THIS SENTENCE IS THE TAC-543 INTERACTION and it is new in v1.75.0. Since
+  // that ticket, ## Visit history renders the counts outright ("cortado
+  // (4x)"), so the model no longer has to do arithmetic on timestamps to name
+  // a number, which is how the v1.71.0 measurement leaked one ("third one in
+  // two weeks"). An inline ban that did not mention the block would be
+  // arguing against a page the model can read.
+  it('names the history block as the counts it must not repeat back', () => {
+    expect(SYSTEM_TEMPLATE).toContain(
+      'The ## Visit history block states those counts outright and its dates let more be worked out; none of that is yours to repeat back.',
+    )
+  })
+
+  // (c) and (d). Pinned whole because "only when it genuinely adds something"
+  // is the entire brake on it firing every turn.
+  it('permits one added detail or bean story, only when it adds something new', () => {
+    expect(SYSTEM_TEMPLATE).toContain(
+      "Sometimes one more thing belongs, and only when it genuinely adds something they would not already know. Either one specific and genuinely interesting detail about the item, drawn from the venue's own knowledge. Or, for a regular's usual drink and only when the moment invites it, the story of the bean behind it: where it comes from, and why that gives the drink the taste it has.",
+    )
+  })
+
+  it('makes taking the beans home an aside inside the story, never an offer', () => {
+    expect(SYSTEM_TEMPLATE).toContain(
+      'That the beans can go home with them to brew is a natural aside inside that story, never an offer.',
+    )
+  })
+
+  // THE SELLING CLAUSE, and it is about the SOURCE MATERIAL rather than about
+  // model manners. Le Mil's bean entries carry the origin story and the price
+  // list in one chunk (every one ends with sizes, dollar amounts and the
+  // shop URL), so this has to name the commercial half explicitly or the
+  // price rides along with the story.
+  it('excludes the commercial half of a knowledge entry from the story', () => {
+    expect(SYSTEM_TEMPLATE).toContain(
+      "All of it comes from the venue's own knowledge and nowhere else, and it has to read as sharing something you love rather than selling: where that knowledge also records how a bean is sold, in what sizes, at what price or on what website, none of that is part of the story. Say nothing about buying it and name no price unless the guest asks.",
+    )
+  })
+
+  it('caps the added detail at once per guest, never repeated, never on a first visit', () => {
+    expect(SYSTEM_TEMPLATE).toContain(
+      'Once per guest at most, never the same detail or story twice, and never to a guest whose first visit this is. It is entirely fine if it never comes up.',
+    )
+  })
+
+  it('forbids reciting the history back', () => {
+    expect(SYSTEM_TEMPLATE).toContain(
+      'Do not recite their history back to them in any of this.',
+    )
+  })
+
+  // THE FALSE-POSITIVE GUARD. This sentence is the only thing in the prompt
+  // standing between the change and a fabricated "your usual" for an item the
+  // guest has never ordered, which is the ticket's own 0/10 bar.
+  it('forbids saying anything about history when the item is NOT in it', () => {
+    expect(SYSTEM_TEMPLATE).toContain(
+      'If the item is not in their history, say nothing about their history: no recognition, nothing about them coming back, and no story.',
+    )
+  })
+
+  // The jurisdictional sentence, and it is load-bearing rather than
+  // decorative: `acknowledgment`'s "This is a close, not an opening" renders
+  // AFTER the universal rules, so without this it silently vetoes the clause
+  // on exactly the turn shape the device case came from. R22, R35 and R37
+  // each carry the same construction for the same reason (TAC-327/TAC-330).
+  it('states that a category register guidance cannot veto recognition', () => {
+    expect(SYSTEM_TEMPLATE).toContain(
+      "A category's register guidance, whether it frames the turn as a close or as small talk, is never authority over whether you recognize an order you know.",
+    )
+  })
+
+  // THE ## Length OVERRIDE, and it is why the first version templated. R20
+  // makes ## Length the only authority on length and R19 mirrors the guest, so
+  // a five-word inbound compressed the reply to a two-word label. Scoped to
+  // this turn only, or it becomes a general licence to run long.
+  it('overrides ## Length for one sentence, and for this turn only', () => {
+    expect(SYSTEM_TEMPLATE).toContain(
+      'Neither is the ## Length section: one real sentence is worth the room here, and that exception is this turn only.',
+    )
+  })
+
+  // THE OVERRIDE IS NOT SELF-EXECUTING, and this is the finding a smoke run
+  // produced before the full one: asserting the override inside R21 is not
+  // enough, because the two length rules PRE-EMPT it from above.
+  //
+  // R20 said "Nothing later in this prompt overrides it", categorically, 767
+  // characters before R21's override, so the prompt contained a flat
+  // contradiction and the model resolved it against R21: a treatment reply
+  // still came back as the two-word "the usual". R19's only escape clause was
+  // "when the ## Length section names an exception", and R21 is not that
+  // section. Neither could see R21.
+  //
+  // ## Length itself is `persona.lengthGuide`, per-venue data rendered by
+  // personaToProse, so it is not this file's to amend and not the right place:
+  // the fix is the two rules that claim authority over it.
+  //
+  // Neither wording was pinned before this, which is how the first version
+  // shipped believing the override worked.
+  it('R20 names the recognition exception, so the override is reachable at all', () => {
+    expect(SYSTEM_TEMPLATE).toContain(
+      'Nothing later in this prompt overrides it, with one exception, named in the rule below on receiving an order this guest has had before: there, one real sentence is worth the room.',
+    )
+  })
+
+  it('R19 lets a rule in the list, not only ## Length, name an exception to mirroring', () => {
+    expect(SYSTEM_TEMPLATE).toContain(
+      'When the ## Length section or another rule in this list names an exception, the exception beats mirroring.',
+    )
+  })
+
+  // R20's original authority claim must survive: the exception is one named
+  // carve-out, not a general demotion of ## Length.
+  it('keeps ## Length as the authority and keeps its own exception mechanism', () => {
+    expect(SYSTEM_TEMPLATE).toContain(
+      'The ## Length section below is the only authority on how long a message should be.',
+    )
+    expect(SYSTEM_TEMPLATE).toContain(
+      'Otherwise, when ## Length names an exception (for example, recommendations going deeper than the default), the exception holds.',
+    )
+  })
+
+  // NO QUOTED EXAMPLE, and the ban is the anti-template mechanism rather than
+  // a style preference: a quoted phrasing is the one thing the model
+  // reproduces verbatim, which is the defect the ticket names. R21's existing
+  // quotes are all things to AVOID and all sit outside this clause.
+  //
+  // The check looks for an OPENING quote (one preceded by whitespace or the
+  // clause start) rather than any apostrophe, because the clause legitimately
+  // contains "it's", "they've" and "guest's".
+  it('contains no quoted example phrase inside the recognition clause', () => {
+    const start = SYSTEM_TEMPLATE.indexOf(
+      'Receiving it is not the same as saying',
+    )
+    const end = SYSTEM_TEMPLATE.indexOf('The guest opens that door by asking')
+    expect(start).toBeGreaterThan(-1)
+    expect(end).toBeGreaterThan(start)
+    const clause = SYSTEM_TEMPLATE.slice(start, end)
+    expect(clause).not.toMatch(/(^|\s)['"‘“]/)
+  })
+})
+
+// R23 (TAC-555): the carve-out is NOT optional and is the part most likely to
+// be cut as redundant. R23 renders AFTER R21, so on most-proximate-wins it
+// beats the new recognition clause, and its own example "you come in so
+// often" is close enough to "the one they order most" that the model is
+// pulled both ways. Without this the change is silently vetoed, which is the
+// TAC-327 / TAC-330 case-2 failure class.
+// THE RAIL'S SUMMARY CONTENT IS OTHERWISE UNGUARDED, and that is a gap this
+// ticket found by mutant rather than by reading. The lockstep guard above
+// covers the id SEQUENCE and the displayed/undisplayed partition; nothing
+// covered what a summary SAYS, so reverting R21's rail entry to its
+// pre-ruling wording passed all 294 tests in this file. CLAUDE.md calls
+// UNIVERSAL_RULES_DISPLAY a dual source of truth that "must move in
+// lockstep", and until this that was a claim nothing could falsify.
+//
+// Deliberately NOT an equality assertion against the template: the summary is
+// a paraphrase for an operator reading the Voices rail, and pinning it whole
+// would make every prompt reword a two-file edit for no gain. What is pinned
+// is the DISTINCTIONS the rulings turn on, so a summary that silently loses
+// one fails. It guards R21 and R23 only, the two this ticket owns; the general
+// fix is the structured rules registry CLAUDE.md already names as a follow-up.
+describe('UNIVERSAL_RULES_DISPLAY — R21 and R23 carry this ticket rulings (TAC-555)', () => {
+  const summaryFor = (id: string) => {
+    const entry = UNIVERSAL_RULES_DISPLAY.find((r) => r.id === id)
+    expect(entry, `${id} is missing from the rail`).toBeDefined()
+    return entry?.summary ?? ''
+  }
+
+  // RULING 3.
+  it('says the warmth is about the guest, and that a well-wish is not it', () => {
+    const r21 = summaryFor('R21')
+    expect(r21).toContain(
+      'something warm about the guest, their coming back or their taste',
+    )
+    expect(r21).toContain(
+      'A wish that the item turns out well is not that warmth.',
+    )
+  })
+
+  // RULING 5. Both halves, because a summary keeping only the permission reads
+  // as licensing a count and keeping only the ban reverts the ruling.
+  it('permits frequency in words and refuses it as a figure', () => {
+    expect(summaryFor('R21')).toContain(
+      'Frequency in words is welcome; a figure never is, so no count, no ordinal and no span of time',
+    )
+  })
+
+  // RULING 4, both sides: the scope AND the consequence for a new item.
+  it('scopes the give-way to an item already in the history', () => {
+    const r21 = summaryFor('R21')
+    expect(r21).toContain('and only for an item already in their history')
+    expect(r21).toContain('no verdict on the choice either')
+  })
+
+  // R23's carve-out is what keeps the recognition reachable at all.
+  it('keeps R23 scoped to visits while permitting order recognition', () => {
+    expect(summaryFor('R23')).toContain(
+      'so is saying warmly that you know which item they keep coming back to',
+    )
+  })
+})
+
+describe('SYSTEM_TEMPLATE — R23: the order-recognition carve-out (TAC-555)', () => {
+  it('scopes the rule to how often they have been here, not to what they order', () => {
+    expect(SYSTEM_TEMPLATE).toContain(
+      'This rule is about how often they have been here, not about what they order: telling a guest you know which item they order most is the order-recognition guidance above, and is not a visit statistic.',
+    )
+  })
+
+  // The tally ban still covers BOTH kinds of number. Recognising an order is
+  // permitted; counting the orders is not, exactly as counting visits is not.
+  it('keeps every tally banned, orders as well as visits', () => {
+    expect(SYSTEM_TEMPLATE).toContain(
+      'What this rule forbids is naming a number, and that holds whether the number counts visits or orders.',
+    )
+  })
+
+  it('leaves the original prohibition and its examples intact', () => {
+    expect(SYSTEM_TEMPLATE).toContain(
+      'Never state or imply a visit count, frequency, or any statistic about how often the guest has been here',
+    )
+    expect(SYSTEM_TEMPLATE).toContain("'this is your fifth time'")
+    expect(SYSTEM_TEMPLATE).toContain("'you come in so often'")
+  })
+
+  // The ORDER is what makes the carve-out necessary, so it is asserted rather
+  // than assumed: if R23 ever moved above R21 the reasoning above changes.
+  it('renders after R21, which is why the carve-out lives here too', () => {
+    const r21 = SYSTEM_TEMPLATE.indexOf(
+      'Receiving it is not the same as saying',
+    )
+    const r23 = SYSTEM_TEMPLATE.indexOf(
+      'This rule is about how often they have been here',
+    )
+    expect(r21).toBeGreaterThan(-1)
+    expect(r23).toBeGreaterThan(r21)
   })
 })
 
@@ -1122,14 +1632,18 @@ describe('SYSTEM_TEMPLATE — R22: category register guidance carries no goal-st
   // R36, so the count grows again each time (still the same adjacency shape,
   // just more lines).
   it('is immediately followed by exactly R23-R39, then # Voice imperative (TAC-548)', () => {
-    const r22Idx = SYSTEM_TEMPLATE.indexOf("A category instruction's register guidance")
+    const r22Idx = SYSTEM_TEMPLATE.indexOf(
+      "A category instruction's register guidance",
+    )
     const voiceImperativeIdx = SYSTEM_TEMPLATE.indexOf('# Voice imperative')
     expect(r22Idx).toBeGreaterThan(-1)
     expect(voiceImperativeIdx).toBeGreaterThan(r22Idx)
     const between = SYSTEM_TEMPLATE.slice(r22Idx, voiceImperativeIdx).trim()
     // R22 itself, plus R23-R36 — exactly fifteen bullet lines, then nothing
     // but whitespace before the heading.
-    expect(between.split('\n').filter((line) => line.trim().length > 0)).toHaveLength(18)
+    expect(
+      between.split('\n').filter((line) => line.trim().length > 0),
+    ).toHaveLength(18)
   })
 
   it('is undisplayed: UNIVERSAL_RULES_DISPLAY has no R22 entry', () => {
@@ -1157,7 +1671,9 @@ describe('SYSTEM_TEMPLATE — R23: no visit-count or tracking language (TAC-348)
 
   it('contains no em or en dashes inside the rule body (R3 self-consistency)', () => {
     const start = SYSTEM_TEMPLATE.indexOf('Never state or imply a visit count')
-    const end = SYSTEM_TEMPLATE.indexOf("Don't explain what a standard, widely known drink is")
+    const end = SYSTEM_TEMPLATE.indexOf(
+      "Don't explain what a standard, widely known drink is",
+    )
     expect(start).toBeGreaterThan(-1)
     expect(end).toBeGreaterThan(start)
     expect(SYSTEM_TEMPLATE.slice(start, end)).not.toMatch(/[—–]/)
@@ -1165,7 +1681,7 @@ describe('SYSTEM_TEMPLATE — R23: no visit-count or tracking language (TAC-348)
 })
 
 describe('SYSTEM_TEMPLATE — R24: no over-explaining standard drinks (TAC-348)', () => {
-  it("bans explaining a standard drink unless asked", () => {
+  it('bans explaining a standard drink unless asked', () => {
     expect(SYSTEM_TEMPLATE).toContain(
       "Don't explain what a standard, widely known drink is (latte, cappuccino, americano, cortado) unless the guest asks what it is.",
     )
@@ -1178,7 +1694,9 @@ describe('SYSTEM_TEMPLATE — R24: no over-explaining standard drinks (TAC-348)'
   })
 
   it('contains no em or en dashes inside the rule body (R3 self-consistency)', () => {
-    const start = SYSTEM_TEMPLATE.indexOf("Don't explain what a standard, widely known drink is")
+    const start = SYSTEM_TEMPLATE.indexOf(
+      "Don't explain what a standard, widely known drink is",
+    )
     const end = SYSTEM_TEMPLATE.indexOf("When naming what's in a menu item")
     expect(start).toBeGreaterThan(-1)
     expect(end).toBeGreaterThan(start)
@@ -1194,9 +1712,15 @@ describe('SYSTEM_TEMPLATE — R25: clause, not a bare comma list, for menu ingre
   })
 
   it('bans a bare comma-separated component list, with a worked example', () => {
-    expect(SYSTEM_TEMPLATE).toContain("'a latte with oat milk and a shot of vanilla' reads as venue voice")
-    expect(SYSTEM_TEMPLATE).toContain("'Latte. Oat milk, vanilla.' reads like a spec sheet")
-    expect(SYSTEM_TEMPLATE).toContain("Don't drop into a bare comma-separated list of components.")
+    expect(SYSTEM_TEMPLATE).toContain(
+      "'a latte with oat milk and a shot of vanilla' reads as venue voice",
+    )
+    expect(SYSTEM_TEMPLATE).toContain(
+      "'Latte. Oat milk, vanilla.' reads like a spec sheet",
+    )
+    expect(SYSTEM_TEMPLATE).toContain(
+      "Don't drop into a bare comma-separated list of components.",
+    )
   })
 
   it('does not reintroduce the retired R12 worked example', () => {
@@ -1208,7 +1732,9 @@ describe('SYSTEM_TEMPLATE — R25: clause, not a bare comma list, for menu ingre
 
   it('contains no em or en dashes inside the rule body (R3 self-consistency)', () => {
     const start = SYSTEM_TEMPLATE.indexOf("When naming what's in a menu item")
-    const end = SYSTEM_TEMPLATE.indexOf('When recommending items, offer at most two')
+    const end = SYSTEM_TEMPLATE.indexOf(
+      'When recommending items, offer at most two',
+    )
     expect(start).toBeGreaterThan(-1)
     expect(end).toBeGreaterThan(start)
     expect(SYSTEM_TEMPLATE.slice(start, end)).not.toMatch(/[—–]/)
@@ -1217,22 +1743,32 @@ describe('SYSTEM_TEMPLATE — R25: clause, not a bare comma list, for menu ingre
 
 describe('SYSTEM_TEMPLATE — R26: recommend at most two, vary phrasing, describe the unfamiliar one (TAC-348)', () => {
   it('caps recommendations at two', () => {
-    expect(SYSTEM_TEMPLATE).toContain('When recommending items, offer at most two.')
+    expect(SYSTEM_TEMPLATE).toContain(
+      'When recommending items, offer at most two.',
+    )
   })
 
   it('directs varied phrasing across messages, without an unverifiable popularity claim', () => {
-    expect(SYSTEM_TEMPLATE).toContain("'try the X', 'X is good if you want something Y'")
+    expect(SYSTEM_TEMPLATE).toContain(
+      "'try the X', 'X is good if you want something Y'",
+    )
     // Dropped in plan review: claims a popularity the agent can't actually know.
     expect(SYSTEM_TEMPLATE).not.toContain('a lot of people like X')
   })
 
   it('directs describing only the unfamiliar item', () => {
-    expect(SYSTEM_TEMPLATE).toContain("Briefly describe any item the guest hasn't had before; skip the description for something they already know.")
+    expect(SYSTEM_TEMPLATE).toContain(
+      "Briefly describe any item the guest hasn't had before; skip the description for something they already know.",
+    )
   })
 
   it('contains no em or en dashes inside the rule body (R3 self-consistency)', () => {
-    const start = SYSTEM_TEMPLATE.indexOf('When recommending items, offer at most two')
-    const end = SYSTEM_TEMPLATE.indexOf('When you are speaking as a specific named person')
+    const start = SYSTEM_TEMPLATE.indexOf(
+      'When recommending items, offer at most two',
+    )
+    const end = SYSTEM_TEMPLATE.indexOf(
+      'When you are speaking as a specific named person',
+    )
     expect(start).toBeGreaterThan(-1)
     expect(end).toBeGreaterThan(start)
     expect(SYSTEM_TEMPLATE.slice(start, end)).not.toMatch(/[—–]/)
@@ -1261,12 +1797,18 @@ describe('SYSTEM_TEMPLATE — R27: never third-person yourself as a named person
   })
 
   it('carves out referring to OTHER staff by name as fine — this is a self-reference rule only', () => {
-    expect(SYSTEM_TEMPLATE).toContain('Referring to OTHER staff by name is fine; this rule is only about referring to yourself.')
+    expect(SYSTEM_TEMPLATE).toContain(
+      'Referring to OTHER staff by name is fine; this rule is only about referring to yourself.',
+    )
   })
 
   it('contains no em or en dashes inside the rule body (R3 self-consistency)', () => {
-    const start = SYSTEM_TEMPLATE.indexOf('When you are speaking as a specific named person')
-    const end = SYSTEM_TEMPLATE.indexOf('Never criticize, blame, or speak negatively about a staff member')
+    const start = SYSTEM_TEMPLATE.indexOf(
+      'When you are speaking as a specific named person',
+    )
+    const end = SYSTEM_TEMPLATE.indexOf(
+      'Never criticize, blame, or speak negatively about a staff member',
+    )
     expect(start).toBeGreaterThan(-1)
     expect(end).toBeGreaterThan(start)
     expect(SYSTEM_TEMPLATE.slice(start, end)).not.toMatch(/[—–]/)
@@ -1281,8 +1823,12 @@ describe('SYSTEM_TEMPLATE — R28: never blame or criticize staff to a guest (TA
   })
 
   it('names the observed failure phrase and directs ownership without blame', () => {
-    expect(SYSTEM_TEMPLATE).toContain("'that response from the barista wasn't okay' is not acceptable")
-    expect(SYSTEM_TEMPLATE).toContain('Take ownership of the outcome without assigning blame to a person.')
+    expect(SYSTEM_TEMPLATE).toContain(
+      "'that response from the barista wasn't okay' is not acceptable",
+    )
+    expect(SYSTEM_TEMPLATE).toContain(
+      'Take ownership of the outcome without assigning blame to a person.',
+    )
   })
 
   // TAC-356 appended R29-R31 after R28, so R28 is no longer the LAST bullet
@@ -1292,19 +1838,27 @@ describe('SYSTEM_TEMPLATE — R28: never blame or criticize staff to a guest (TA
   // that, TAC-484 appended R35 and TAC-520 appended R36, so the count grows
   // again.
   it('is immediately followed by exactly R29-R39, then # Voice imperative (TAC-548)', () => {
-    const r28Idx = SYSTEM_TEMPLATE.indexOf('Never criticize, blame, or speak negatively about a staff member')
+    const r28Idx = SYSTEM_TEMPLATE.indexOf(
+      'Never criticize, blame, or speak negatively about a staff member',
+    )
     const voiceImperativeIdx = SYSTEM_TEMPLATE.indexOf('# Voice imperative')
     expect(r28Idx).toBeGreaterThan(-1)
     expect(voiceImperativeIdx).toBeGreaterThan(r28Idx)
     const between = SYSTEM_TEMPLATE.slice(r28Idx, voiceImperativeIdx).trim()
     // R28 itself, plus R29-R36 — exactly nine bullet lines, then nothing
     // but whitespace before the heading.
-    expect(between.split('\n').filter((line) => line.trim().length > 0)).toHaveLength(12)
+    expect(
+      between.split('\n').filter((line) => line.trim().length > 0),
+    ).toHaveLength(12)
   })
 
   it('contains no em or en dashes inside the rule body (R3 self-consistency)', () => {
-    const start = SYSTEM_TEMPLATE.indexOf('Never criticize, blame, or speak negatively about a staff member')
-    const end = SYSTEM_TEMPLATE.indexOf('A sentence fragment is fine when it reads naturally')
+    const start = SYSTEM_TEMPLATE.indexOf(
+      'Never criticize, blame, or speak negatively about a staff member',
+    )
+    const end = SYSTEM_TEMPLATE.indexOf(
+      'A sentence fragment is fine when it reads naturally',
+    )
     expect(start).toBeGreaterThan(-1)
     expect(end).toBeGreaterThan(start)
     expect(SYSTEM_TEMPLATE.slice(start, end)).not.toMatch(/[—–]/)
@@ -1319,13 +1873,17 @@ describe('SYSTEM_TEMPLATE — R28: never blame or criticize staff to a guest (TA
 // carve-out (R30 against the `unknown` category).
 describe('SYSTEM_TEMPLATE — R29: sentence fragments are permitted, not mandated (TAC-356)', () => {
   it('permits a fragment with the worked example', () => {
-    expect(SYSTEM_TEMPLATE).toContain('A sentence fragment is fine when it reads naturally.')
-    expect(SYSTEM_TEMPLATE).toContain("'Open until 3' beats 'We are open until 3pm today.'")
+    expect(SYSTEM_TEMPLATE).toContain(
+      'A sentence fragment is fine when it reads naturally.',
+    )
+    expect(SYSTEM_TEMPLATE).toContain(
+      "'Open until 3' beats 'We are open until 3pm today.'",
+    )
   })
 
   it('states this is permission, not a mandate, and defers to a full-sentence venue voice', () => {
     expect(SYSTEM_TEMPLATE).toContain(
-      'This is permission, not a preference: it does not ask you to clip every reply short, and it never overrides this venue\'s own voice.',
+      "This is permission, not a preference: it does not ask you to clip every reply short, and it never overrides this venue's own voice.",
     )
     expect(SYSTEM_TEMPLATE).toContain(
       "If the venue's persona and corpus write in full sentences, keep writing full sentences.",
@@ -1333,7 +1891,9 @@ describe('SYSTEM_TEMPLATE — R29: sentence fragments are permitted, not mandate
   })
 
   it('contains no em or en dashes inside the rule body (R3 self-consistency)', () => {
-    const start = SYSTEM_TEMPLATE.indexOf('A sentence fragment is fine when it reads naturally')
+    const start = SYSTEM_TEMPLATE.indexOf(
+      'A sentence fragment is fine when it reads naturally',
+    )
     const end = SYSTEM_TEMPLATE.indexOf("If a guest's message is unclear")
     expect(start).toBeGreaterThan(-1)
     expect(end).toBeGreaterThan(start)
@@ -1344,9 +1904,11 @@ describe('SYSTEM_TEMPLATE — R29: sentence fragments are permitted, not mandate
 describe('SYSTEM_TEMPLATE — R30: ask what a guest means rather than guess (TAC-356)', () => {
   it('directs asking rather than guessing or defaulting to something generic', () => {
     expect(SYSTEM_TEMPLATE).toContain(
-      "ask what they mean rather than guess at an interpretation or answer with something generic that does not actually engage with what they said.",
+      'ask what they mean rather than guess at an interpretation or answer with something generic that does not actually engage with what they said.',
     )
-    expect(SYSTEM_TEMPLATE).toContain('a vague reference, a typo that changes the meaning, wording that could go two ways')
+    expect(SYSTEM_TEMPLATE).toContain(
+      'a vague reference, a typo that changes the meaning, wording that could go two ways',
+    )
   })
 
   // This is the one real interaction the audit found: unknown.ts's
@@ -1399,7 +1961,9 @@ describe('SYSTEM_TEMPLATE — R31: no product names in reply to a greeting or co
     expect(SYSTEM_TEMPLATE).toContain(
       "Nor does it restrict asking how an item went when that item already appears in this guest's ## Visit history, or is a recommendation to them still listed in ## Active commitments.",
     )
-    expect(SYSTEM_TEMPLATE).toContain('That covers only those items, never anything else the venue offers.')
+    expect(SYSTEM_TEMPLATE).toContain(
+      'That covers only those items, never anything else the venue offers.',
+    )
   })
 
   // TAC-359 appended R32-R34 after R31, so R31 is no longer the LAST bullet
@@ -1414,12 +1978,16 @@ describe('SYSTEM_TEMPLATE — R31: no product names in reply to a greeting or co
     const between = SYSTEM_TEMPLATE.slice(r31Idx, voiceImperativeIdx).trim()
     // R31 itself, plus R32-R36 — exactly six bullet lines, then nothing but
     // whitespace before the heading. TAC-484 appended R35.
-    expect(between.split('\n').filter((line) => line.trim().length > 0)).toHaveLength(9)
+    expect(
+      between.split('\n').filter((line) => line.trim().length > 0),
+    ).toHaveLength(9)
   })
 
   it('contains no em or en dashes inside the rule body (R3 self-consistency)', () => {
     const start = SYSTEM_TEMPLATE.indexOf('Do not name a specific product')
-    const end = SYSTEM_TEMPLATE.indexOf('Never tell the guest to send a message')
+    const end = SYSTEM_TEMPLATE.indexOf(
+      'Never tell the guest to send a message',
+    )
     expect(start).toBeGreaterThan(-1)
     expect(end).toBeGreaterThan(start)
     expect(SYSTEM_TEMPLATE.slice(start, end)).not.toMatch(/[—–]/)
@@ -1439,7 +2007,9 @@ describe('SYSTEM_TEMPLATE — R32: already in the conversation (TAC-359)', () =>
     expect(SYSTEM_TEMPLATE).toContain(
       'Never tell the guest to send a message, reach out, or get in touch as if that were a separate, future action.',
     )
-    expect(SYSTEM_TEMPLATE).toContain('If you have a question, ask it directly and expect the answer here.')
+    expect(SYSTEM_TEMPLATE).toContain(
+      'If you have a question, ask it directly and expect the answer here.',
+    )
   })
 
   // Checked against invite_contact_save (retired by TAC-380),
@@ -1460,13 +2030,21 @@ describe('SYSTEM_TEMPLATE — R32: already in the conversation (TAC-359)', () =>
   // intentions block "already covers" inviting future contact false. The
   // carve-out stays; only the claim that something else handles it is gone.
   it('no longer claims the intentions block covers inviting future contact (TAC-380)', () => {
-    expect(SYSTEM_TEMPLATE).not.toContain('first-touch intentions block already covers it')
-    expect(SYSTEM_TEMPLATE).toContain('That is a distinct, legitimate invitation.')
+    expect(SYSTEM_TEMPLATE).not.toContain(
+      'first-touch intentions block already covers it',
+    )
+    expect(SYSTEM_TEMPLATE).toContain(
+      'That is a distinct, legitimate invitation.',
+    )
   })
 
   it('contains no em or en dashes inside the rule body (R3 self-consistency)', () => {
-    const start = SYSTEM_TEMPLATE.indexOf('Never tell the guest to send a message')
-    const end = SYSTEM_TEMPLATE.indexOf('When venue knowledge describes a first-visit order')
+    const start = SYSTEM_TEMPLATE.indexOf(
+      'Never tell the guest to send a message',
+    )
+    const end = SYSTEM_TEMPLATE.indexOf(
+      'When venue knowledge describes a first-visit order',
+    )
     expect(start).toBeGreaterThan(-1)
     expect(end).toBeGreaterThan(start)
     expect(SYSTEM_TEMPLATE.slice(start, end)).not.toMatch(/[—–]/)
@@ -1478,7 +2056,9 @@ describe('SYSTEM_TEMPLATE — R33: first-visit recommendation shape (TAC-359)', 
     expect(SYSTEM_TEMPLATE).toContain(
       'When venue knowledge describes a first-visit order as a sequence or progression, recommend only the first step.',
     )
-    expect(SYSTEM_TEMPLATE).toContain('do not name items the knowledge marks as unavailable or coming soon')
+    expect(SYSTEM_TEMPLATE).toContain(
+      'do not name items the knowledge marks as unavailable or coming soon',
+    )
   })
 
   it('bans naming a bundled-free item as a separate recommendation', () => {
@@ -1496,8 +2076,12 @@ describe('SYSTEM_TEMPLATE — R33: first-visit recommendation shape (TAC-359)', 
   })
 
   it('contains no em or en dashes inside the rule body (R3 self-consistency)', () => {
-    const start = SYSTEM_TEMPLATE.indexOf('When venue knowledge describes a first-visit order')
-    const end = SYSTEM_TEMPLATE.indexOf('You cannot place, confirm, or take an order')
+    const start = SYSTEM_TEMPLATE.indexOf(
+      'When venue knowledge describes a first-visit order',
+    )
+    const end = SYSTEM_TEMPLATE.indexOf(
+      'You cannot place, confirm, or take an order',
+    )
     expect(start).toBeGreaterThan(-1)
     expect(end).toBeGreaterThan(start)
     expect(SYSTEM_TEMPLATE.slice(start, end)).not.toMatch(/[—–]/)
@@ -1506,11 +2090,15 @@ describe('SYSTEM_TEMPLATE — R33: first-visit recommendation shape (TAC-359)', 
 
 describe('SYSTEM_TEMPLATE — R34: cannot take orders (TAC-359)', () => {
   it('bans placing, confirming, or acknowledging an order, with a generic example', () => {
-    expect(SYSTEM_TEMPLATE).toContain('You cannot place, confirm, or take an order.')
+    expect(SYSTEM_TEMPLATE).toContain(
+      'You cannot place, confirm, or take an order.',
+    )
     expect(SYSTEM_TEMPLATE).toContain(
       "If a guest tells you the specifics of what they want ('a large oat latte, extra hot'), do not accept or acknowledge it as an order",
     )
-    expect(SYSTEM_TEMPLATE).toContain('tell them to place it with the venue directly, the way this venue actually takes orders')
+    expect(SYSTEM_TEMPLATE).toContain(
+      'tell them to place it with the venue directly, the way this venue actually takes orders',
+    )
   })
 
   // Decision: a hold applies only to an item that already exists and can be
@@ -1541,10 +2129,19 @@ describe('SYSTEM_TEMPLATE — R34: cannot take orders (TAC-359)', () => {
   })
 
   it('is free of venue-specific product names and ingredients from the motivating case', () => {
-    const start = SYSTEM_TEMPLATE.indexOf('You cannot place, confirm, or take an order')
+    const start = SYSTEM_TEMPLATE.indexOf(
+      'You cannot place, confirm, or take an order',
+    )
     const end = SYSTEM_TEMPLATE.indexOf('When a guest questions or pushes back')
     const body = SYSTEM_TEMPLATE.slice(start, end).toLowerCase()
-    for (const term of ['sofi', 'masala jaggery', 'jaggery', 'pink panther', 'khari', 'nankhatai']) {
+    for (const term of [
+      'sofi',
+      'masala jaggery',
+      'jaggery',
+      'pink panther',
+      'khari',
+      'nankhatai',
+    ]) {
       expect(body).not.toContain(term)
     }
   })
@@ -1555,16 +2152,22 @@ describe('SYSTEM_TEMPLATE — R34: cannot take orders (TAC-359)', () => {
   // R34 and the section break," which is what catches a rule being appended
   // without being classified.
   it('is immediately followed by exactly R35-R39, then # Voice imperative (TAC-548)', () => {
-    const r34Idx = SYSTEM_TEMPLATE.indexOf('You cannot place, confirm, or take an order')
+    const r34Idx = SYSTEM_TEMPLATE.indexOf(
+      'You cannot place, confirm, or take an order',
+    )
     const voiceImperativeIdx = SYSTEM_TEMPLATE.indexOf('# Voice imperative')
     expect(r34Idx).toBeGreaterThan(-1)
     expect(voiceImperativeIdx).toBeGreaterThan(r34Idx)
     const between = SYSTEM_TEMPLATE.slice(r34Idx, voiceImperativeIdx).trim()
-    expect(between.split('\n').filter((line) => line.trim().length > 0)).toHaveLength(6)
+    expect(
+      between.split('\n').filter((line) => line.trim().length > 0),
+    ).toHaveLength(6)
   })
 
   it('contains no em or en dashes inside the rule body (R3 self-consistency)', () => {
-    const start = SYSTEM_TEMPLATE.indexOf('You cannot place, confirm, or take an order')
+    const start = SYSTEM_TEMPLATE.indexOf(
+      'You cannot place, confirm, or take an order',
+    )
     const end = SYSTEM_TEMPLATE.indexOf('When a guest questions or pushes back')
     expect(start).toBeGreaterThan(-1)
     expect(end).toBeGreaterThan(start)
@@ -1651,37 +2254,53 @@ describe('SYSTEM_TEMPLATE — R35: correct a challenged message, never invent a 
   // use. If either category is reworded away from "close"/"holding response",
   // this fails and the clause needs rewording with it.
   it('names the two shapes the conflicting category blocks actually use', () => {
-    expect(SYSTEM_TEMPLATE).toContain('whether it frames the turn as a close or as a holding response')
+    expect(SYSTEM_TEMPLATE).toContain(
+      'whether it frames the turn as a close or as a holding response',
+    )
     expect(UNKNOWN_INSTRUCTIONS).toContain('holding response')
-    expect(ACKNOWLEDGMENT_INSTRUCTIONS).toContain('This is a close, not an opening')
+    expect(ACKNOWLEDGMENT_INSTRUCTIONS).toContain(
+      'This is a close, not an opening',
+    )
   })
 
   // TAC-520 appended R36, so R35 is no longer terminal either. Same rewrite
   // R34 got when R35 landed: pin the adjacency, do not delete the guard.
   it('is immediately followed by exactly R36-R39, then # Voice imperative (TAC-548)', () => {
-    const r35Idx = SYSTEM_TEMPLATE.indexOf('When a guest questions or pushes back')
+    const r35Idx = SYSTEM_TEMPLATE.indexOf(
+      'When a guest questions or pushes back',
+    )
     const voiceImperativeIdx = SYSTEM_TEMPLATE.indexOf('# Voice imperative')
     expect(r35Idx).toBeGreaterThan(-1)
     expect(voiceImperativeIdx).toBeGreaterThan(r35Idx)
     const between = SYSTEM_TEMPLATE.slice(r35Idx, voiceImperativeIdx).trim()
-    expect(between.split('\n').filter((line) => line.trim().length > 0)).toHaveLength(5)
+    expect(
+      between.split('\n').filter((line) => line.trim().length > 0),
+    ).toHaveLength(5)
   })
 
   it('contains no em or en dashes inside the rule body (R3 self-consistency)', () => {
-    const start = SYSTEM_TEMPLATE.indexOf('When a guest questions or pushes back')
+    const start = SYSTEM_TEMPLATE.indexOf(
+      'When a guest questions or pushes back',
+    )
     // Ends at R36's first words, not at the heading: TAC-520 appended a rule
     // after this one, and a range running to the heading would quietly make
     // this R35 test scan R36 too.
-    const end = SYSTEM_TEMPLATE.indexOf('Say a date the way someone working in the venue')
+    const end = SYSTEM_TEMPLATE.indexOf(
+      'Say a date the way someone working in the venue',
+    )
     expect(start).toBeGreaterThan(-1)
     expect(end).toBeGreaterThan(start)
     expect(SYSTEM_TEMPLATE.slice(start, end)).not.toMatch(/[—–]/)
   })
 
   it('is free of venue-specific product names from the motivating incident', () => {
-    const start = SYSTEM_TEMPLATE.indexOf('When a guest questions or pushes back')
+    const start = SYSTEM_TEMPLATE.indexOf(
+      'When a guest questions or pushes back',
+    )
     // Same scoping fix as the dash test above: ends at R36, not the heading.
-    const end = SYSTEM_TEMPLATE.indexOf('Say a date the way someone working in the venue')
+    const end = SYSTEM_TEMPLATE.indexOf(
+      'Say a date the way someone working in the venue',
+    )
     const body = SYSTEM_TEMPLATE.slice(start, end).toLowerCase()
     for (const term of ['pink panther', 'le mil', 'himanshu']) {
       expect(body).not.toContain(term)
@@ -1700,7 +2319,9 @@ describe('SYSTEM_TEMPLATE — R36: say a date the way a person in the venue woul
     expect(r36Idx).toBeGreaterThan(-1)
     expect(voiceImperativeIdx).toBeGreaterThan(r36Idx)
     const between = SYSTEM_TEMPLATE.slice(r36Idx, voiceImperativeIdx).trim()
-    expect(between.split('\n').filter((line) => line.trim().length > 0)).toHaveLength(4)
+    expect(
+      between.split('\n').filter((line) => line.trim().length > 0),
+    ).toHaveLength(4)
   })
 
   it('is appended after R35, never inserted (ids are positional and append-only)', () => {
@@ -1805,7 +2426,9 @@ describe('SYSTEM_TEMPLATE — R36: say a date the way a person in the venue woul
     // Without this the rule is unactionable: the stored date sits in the
     // system prompt and the clock sits in the user prompt, and nothing else
     // connects them.
-    expect(SYSTEM_TEMPLATE).toContain('use the date in the ## Right now block to judge that')
+    expect(SYSTEM_TEMPLATE).toContain(
+      'use the date in the ## Right now block to judge that',
+    )
   })
 })
 
@@ -1820,18 +2443,24 @@ describe('SYSTEM_TEMPLATE — R8 strengthened: no claiming to have personally wi
   })
 
   it('every pre-existing R8 assertion still holds (pure addition, nothing removed)', () => {
-    expect(SYSTEM_TEMPLATE).toContain('Never invent details beyond what your runtime context documents')
+    expect(SYSTEM_TEMPLATE).toContain(
+      'Never invent details beyond what your runtime context documents',
+    )
     expect(SYSTEM_TEMPLATE).toContain('family recipe')
     expect(SYSTEM_TEMPLATE).toContain('the line is short today')
-    expect(SYSTEM_TEMPLATE).toContain("If a product name isn't there, don't name it.")
+    expect(SYSTEM_TEMPLATE).toContain(
+      "If a product name isn't there, don't name it.",
+    )
   })
 })
 
 describe('SYSTEM_TEMPLATE — R11 strengthened: no flourish anywhere in the description, not just the closer (TAC-348)', () => {
   it('widens the prohibition from the closing sentence to the whole description', () => {
-    expect(SYSTEM_TEMPLATE).toContain("This isn't only about the last sentence.")
     expect(SYSTEM_TEMPLATE).toContain(
-      'Describe an item plainly the first time too: say what\'s good once, in one clause, and stop.',
+      "This isn't only about the last sentence.",
+    )
+    expect(SYSTEM_TEMPLATE).toContain(
+      "Describe an item plainly the first time too: say what's good once, in one clause, and stop.",
     )
   })
 
@@ -1843,7 +2472,9 @@ describe('SYSTEM_TEMPLATE — R11 strengthened: no flourish anywhere in the desc
 
   it('every pre-existing R11 assertion still holds (pure addition, nothing removed)', () => {
     expect(SYSTEM_TEMPLATE).toContain('trust me on this one')
-    expect(SYSTEM_TEMPLATE).toContain('Those are the shape to avoid, not a fixed list')
+    expect(SYSTEM_TEMPLATE).toContain(
+      'Those are the shape to avoid, not a fixed list',
+    )
     expect(SYSTEM_TEMPLATE).toContain('Let it stand')
   })
 })
@@ -1864,7 +2495,9 @@ describe('SYSTEM_TEMPLATE — universal rule classification completeness (TAC-34
     expect(blockStart).toBeGreaterThan(-1)
     expect(blockEnd).toBeGreaterThan(blockStart)
     const block = SYSTEM_TEMPLATE.slice(blockStart, blockEnd)
-    const bulletLines = block.split('\n').filter((line) => line.startsWith('- '))
+    const bulletLines = block
+      .split('\n')
+      .filter((line) => line.startsWith('- '))
 
     const displayedIds = UNIVERSAL_RULES_DISPLAY.map((r) => r.id)
     const undisplayedIds = UNIVERSAL_RULES_UNDISPLAYED
@@ -1884,7 +2517,13 @@ describe('SYSTEM_TEMPLATE — universal rule classification completeness (TAC-34
   // side's exact set here closes that gap completely.
   it('UNIVERSAL_RULES_UNDISPLAYED is exactly the mechanical/rendering-timing rule ids', () => {
     expect([...UNIVERSAL_RULES_UNDISPLAYED].sort()).toEqual([
-      'R13', 'R14', 'R15', 'R16', 'R19', 'R20', 'R22',
+      'R13',
+      'R14',
+      'R15',
+      'R16',
+      'R19',
+      'R20',
+      'R22',
     ])
   })
 })
@@ -1902,7 +2541,9 @@ describe('hold availability is venue-conditional (TAC-301 part 2)', () => {
 
   it('closes the workaround, not just the word', () => {
     // "I'll keep one back for you" is a hold whatever it is called.
-    expect(SYSTEM_TEMPLATE).toContain('do not offer anything that amounts to the same thing')
+    expect(SYSTEM_TEMPLATE).toContain(
+      'do not offer anything that amounts to the same thing',
+    )
   })
 
   // The single highest-leverage line in this change. The old worked example
@@ -1916,10 +2557,16 @@ describe('hold availability is venue-conditional (TAC-301 part 2)', () => {
   // workaround. Caught in code review, not by this test. Assert the shapes.
   it('demonstrates no hold or readiness anywhere in the template', () => {
     expect(SYSTEM_TEMPLATE).not.toContain("I'll set an almond croissant aside")
-    for (const readiness of ["I'll have it ready", 'have it waiting', "we'll have ready for them"]) {
+    for (const readiness of [
+      "I'll have it ready",
+      'have it waiting',
+      "we'll have ready for them",
+    ]) {
       expect(SYSTEM_TEMPLATE).not.toContain(readiness)
     }
-    expect(SYSTEM_TEMPLATE).toContain("next one's on us. text me when you're close.")
+    expect(SYSTEM_TEMPLATE).toContain(
+      "next one's on us. text me when you're close.",
+    )
   })
 
   // Code review caught that the first version of this DELETED the reservations
@@ -1932,11 +2579,15 @@ describe('hold availability is venue-conditional (TAC-301 part 2)', () => {
     expect(SYSTEM_TEMPLATE).toContain(
       'no specific reservations unless the "what this venue does and doesn\'t offer" section says this venue takes them',
     )
-    expect(SYSTEM_TEMPLATE).toContain('Whether a service is available at all is settled there')
+    expect(SYSTEM_TEMPLATE).toContain(
+      'Whether a service is available at all is settled there',
+    )
   })
 
   it("R34's carve-out points at # Commitments rather than asserting holding", () => {
-    expect(SYSTEM_TEMPLATE).not.toContain('holding aside an item that already exists')
+    expect(SYSTEM_TEMPLATE).not.toContain(
+      'holding aside an item that already exists',
+    )
     expect(SYSTEM_TEMPLATE).toContain(
       'setting something aside where # Commitments says that is available at this venue',
     )
@@ -1989,7 +2640,9 @@ describe('systemTemplateFor — channel variants (TAC-495)', () => {
     const smsLines = sms.split('\n')
     const igLines = ig.split('\n')
     expect(igLines).toHaveLength(smsLines.length)
-    const differing = smsLines.flatMap((line, i) => (line === igLines[i] ? [] : [line]))
+    const differing = smsLines.flatMap((line, i) =>
+      line === igLines[i] ? [] : [line],
+    )
     expect(differing).toHaveLength(CHANNEL_LINES.length)
     for (const prefix of CHANNEL_LINES) {
       expect(differing.some((line) => line.startsWith(prefix))).toBe(true)
@@ -2002,8 +2655,12 @@ describe('systemTemplateFor — channel variants (TAC-495)', () => {
   // says where the guest is).
   it('the Instagram template names no iMessage and no texting', () => {
     expect(ig).not.toMatch(/imessage/i)
-    expect(ig).not.toMatch(/\btext(ing|ed)\b|\btext me\b|would actually text\b/i)
-    expect(lineStarting(ig, CHANNEL_LINES[3])).toContain('through Instagram messages')
+    expect(ig).not.toMatch(
+      /\btext(ing|ed)\b|\btext me\b|would actually text\b/i,
+    )
+    expect(lineStarting(ig, CHANNEL_LINES[3])).toContain(
+      'through Instagram messages',
+    )
     expect(lineStarting(ig, CHANNEL_LINES[5])).toBe(
       '- Plain text. No HTML, no markdown formatting in the message body, no headers or bullet points.',
     )
@@ -2011,7 +2668,9 @@ describe('systemTemplateFor — channel variants (TAC-495)', () => {
 
   it('the Instagram R1 and R32 claim no phone number and no texting', () => {
     for (const prefix of [CHANNEL_LINES[0], CHANNEL_LINES[2]]) {
-      expect(lineStarting(ig, prefix)).not.toMatch(/\bnumber\b|\btext(ed|ing)?\b/i)
+      expect(lineStarting(ig, prefix)).not.toMatch(
+        /\bnumber\b|\btext(ed|ing)?\b/i,
+      )
     }
   })
 
@@ -2046,7 +2705,9 @@ describe('systemTemplateFor — channel variants (TAC-495)', () => {
 // each rule with an Instagram variant says so in its summary, and no other does.
 describe('UNIVERSAL_RULES_DISPLAY — channel variants are named on the rail (TAC-495)', () => {
   it('exactly R1, R5 and R32 mention their Instagram wording', () => {
-    const ids = UNIVERSAL_RULES_DISPLAY.filter((r) => /\bon instagram\b/i.test(r.summary)).map((r) => r.id)
+    const ids = UNIVERSAL_RULES_DISPLAY.filter((r) =>
+      /\bon instagram\b/i.test(r.summary),
+    ).map((r) => r.id)
     expect(ids).toEqual(['R1', 'R5', 'R32'])
   })
 })
@@ -2148,7 +2809,9 @@ describe('# Cancellations (TAC-513)', () => {
 // prose ('commitment: {} (empty — no commitment this turn)').
 describe('SYSTEM_TEMPLATE — # Commitments recommendation heads-up example (TAC-498)', () => {
   it('has no em or en dash', () => {
-    const start = SYSTEM_TEMPLATE.indexOf('For recommendations, only ask about arrival')
+    const start = SYSTEM_TEMPLATE.indexOf(
+      'For recommendations, only ask about arrival',
+    )
     const end = SYSTEM_TEMPLATE.indexOf('# Arrival capture')
     expect(start).toBeGreaterThan(-1)
     expect(end).toBeGreaterThan(start)
@@ -2222,12 +2885,16 @@ describe('SYSTEM_TEMPLATE — R37: answer why you want the name (TAC-541)', () =
     expect(start).toBeGreaterThan(-1)
     const body = SYSTEM_TEMPLATE.slice(start, end)
     expect(body).not.toMatch(/something else about them/i)
-    expect(body).not.toMatch(/\bnearby\b|lives or works|time of day|brings (them|this guest) in/i)
+    expect(body).not.toMatch(
+      /\bnearby\b|lives or works|time of day|brings (them|this guest) in/i,
+    )
   })
 
   it('is appended after R36, never inserted (ids are positional and append-only)', () => {
     expect(SYSTEM_TEMPLATE.indexOf(R37_START)).toBeGreaterThan(
-      SYSTEM_TEMPLATE.indexOf('Say a date the way someone working in the venue'),
+      SYSTEM_TEMPLATE.indexOf(
+        'Say a date the way someone working in the venue',
+      ),
     )
   })
 
@@ -2305,7 +2972,9 @@ describe('SYSTEM_TEMPLATE — R38: use the guest name sparingly (TAC-544)', () =
   // pin so that softening it to a preference fails on its own terms.
   it('states the consecutive-replies prohibition absolutely', () => {
     expect(SYSTEM_TEMPLATE).toContain('Never use it in two replies in a row.')
-    expect(body()).not.toMatch(/try not to use it|avoid using it|prefer not to/i)
+    expect(body()).not.toMatch(
+      /try not to use it|avoid using it|prefer not to/i,
+    )
   })
 
   // NO QUOTED EXAMPLE, DELIBERATELY (ticket: "It contains no quoted example on
@@ -2323,7 +2992,13 @@ describe('SYSTEM_TEMPLATE — R38: use the guest name sparingly (TAC-544)', () =
   // the prompt, and neither must the venue's own names (the R36/R37 canary).
   it('names no person or venue from the motivating incident', () => {
     const lower = body().toLowerCase()
-    for (const term of ['jaipal', 'himanshu', 'milana', 'le mil', 'blossom tonic']) {
+    for (const term of [
+      'jaipal',
+      'himanshu',
+      'milana',
+      'le mil',
+      'blossom tonic',
+    ]) {
       expect(lower).not.toContain(term)
     }
   })
@@ -2430,7 +3105,14 @@ describe('SYSTEM_TEMPLATE — R39: honest take first, then the specifics (TAC-54
   // prompt (the R36/R37/R38 canary).
   it('names no person, venue or item from the motivating incident', () => {
     const lower = body().toLowerCase()
-    for (const term of ['jaipal', 'himanshu', 'milana', 'le mil', 'bhadra', 'robusta']) {
+    for (const term of [
+      'jaipal',
+      'himanshu',
+      'milana',
+      'le mil',
+      'bhadra',
+      'robusta',
+    ]) {
       expect(lower).not.toContain(term)
     }
   })
@@ -2457,5 +3139,126 @@ describe('SYSTEM_TEMPLATE — R39: honest take first, then the specifics (TAC-54
     const r39 = UNIVERSAL_RULES_DISPLAY.find((r) => r.id === 'R39')
     expect(r39).toBeDefined()
     expect(r39?.summary).toContain('Give your honest take first')
+  })
+})
+
+describe('# Getting-to-know-you questions (TAC-554)', () => {
+  const blockOf = (template: string): string => {
+    const start = template.indexOf('# Getting-to-know-you questions')
+    const end = template.indexOf('# Universal voice rules', start)
+    return template.slice(start, end)
+  }
+
+  it('is its own emission block, beside the other emission blocks', () => {
+    expect(SYSTEM_TEMPLATE).toContain('# Getting-to-know-you questions')
+    expect(
+      SYSTEM_TEMPLATE.indexOf('# Getting-to-know-you questions'),
+    ).toBeGreaterThan(SYSTEM_TEMPLATE.indexOf('# Guest context capture'))
+    expect(
+      SYSTEM_TEMPLATE.indexOf('# Getting-to-know-you questions'),
+    ).toBeLessThan(SYSTEM_TEMPLATE.indexOf('# Universal voice rules'))
+  })
+
+  // PINNED AS CONTIGUOUS LITERALS, not fragments. The TAC-409/TAC-502 lesson is
+  // that a sentence can be reversed while every asserted fragment survives, and
+  // the operative instruction here — which field the question goes in — is
+  // exactly the kind a future edit would invert or "simplify".
+  it('says the question goes in the field and NOT in the body', () => {
+    expect(SYSTEM_TEMPLATE).toContain(
+      'When you do ask, the question goes in `intentionQuestion`, and NOT in\n`body`.',
+    )
+  })
+
+  it('says the body must read as finished without the question', () => {
+    expect(SYSTEM_TEMPLATE).toContain(
+      '`body` is the reply without it, complete on its own: it has to read as a\nfinished message to someone who never sees the question.',
+    )
+  })
+
+  it('says the question is written as its own message and is sent separately', () => {
+    expect(SYSTEM_TEMPLATE).toContain(
+      '`intentionQuestion` is that one question, by itself, written as a message of\nits own rather than as a clause tacked onto another sentence. It is sent to the\nguest a moment after the reply, as a separate message.',
+    )
+  })
+
+  // learn_name's own promptLine prescribes a softener in front of the question
+  // ("by the way, what's your name?"). That shape has to survive inside the
+  // field, or this block and that line would contradict each other.
+  it('keeps a softener inside the field rather than in the body', () => {
+    expect(SYSTEM_TEMPLATE).toContain(
+      'Anything the listed line\nasks you to put in front of it, such as a softener, belongs in here with it.',
+    )
+  })
+
+  it('names the empty string as the common case', () => {
+    expect(SYSTEM_TEMPLATE).toContain(
+      'Emit "" when you are not asking. Most turns emit "".',
+    )
+  })
+
+  // NO SECOND AUTHORITY ON WHETHER TO ASK. The intentions block owns that
+  // decision, and a block rendering in the SYSTEM prompt that also ruled on it
+  // would outrank the user-prompt block on proximity — the TAC-314/327/330/338
+  // failure class this repo keeps paying for.
+  it('defers the decision to ask to the intentions block', () => {
+    expect(SYSTEM_TEMPLATE).toContain(
+      "Whether to ask is that block's call, and it is usually\nno.",
+    )
+  })
+
+  it('renders on both channels', () => {
+    for (const channel of ['text', 'instagram'] as const) {
+      expect(systemTemplateFor(channel)).toContain(
+        '# Getting-to-know-you questions',
+      )
+      expect(systemTemplateFor(channel)).toContain(
+        'When you do ask, the question goes in `intentionQuestion`, and NOT in\n`body`.',
+      )
+    }
+  })
+
+  // The block is model-facing emission instruction, not a voice rule, so it
+  // must not leak into the universal-rules section the Voices rail mirrors.
+  it('is not a universal voice rule', () => {
+    const rules = SYSTEM_TEMPLATE.slice(
+      SYSTEM_TEMPLATE.indexOf('# Universal voice rules'),
+    )
+    expect(rules).not.toContain('intentionQuestion')
+  })
+
+  it('carries no em or en dash', () => {
+    expect(blockOf(SYSTEM_TEMPLATE)).not.toMatch(/[—–]/)
+  })
+})
+
+// TAC-558. The schema field and the render line are useless without this: a
+// field the model is never told about is a field nobody writes, which the
+// measurement smoke run demonstrated before these lines existed (question raised,
+// answer given, nothing stored).
+describe('# Guest context capture — history_here (TAC-558)', () => {
+  it('names history_here in the shape the model is shown', () => {
+    expect(SYSTEM_TEMPLATE).toContain(
+      '{ guest_details: { first_name, last_name, home_base, workplace, history_here },',
+    )
+  })
+
+  // ONE CONTIGUOUS CLAUSE, per TAC-409: a sentence can be reversed while every
+  // asserted fragment survives. This one says what the field holds and that it is
+  // recorded either way, which is the half a rewrite would quietly drop.
+  it('says what the field holds, and that it is captured either way', () => {
+    expect(SYSTEM_TEMPLATE).toContain(
+      'history_here is how long the guest has been coming to THIS venue, in their own words, recorded whichever way they answer.',
+    )
+  })
+
+  // BOTH DIRECTIONS. A single first-visit example would teach capture of the new
+  // case only, and the regular case is the one that has to inform later turns.
+  it('works both answers, not just the first-visit one', () => {
+    expect(SYSTEM_TEMPLATE).toContain(
+      '- "yeah first time in today" → structured: { guest_details: { history_here: "first time in today" } }',
+    )
+    expect(SYSTEM_TEMPLATE).toContain(
+      '- "been coming for about a year now" → structured: { guest_details: { history_here: "been coming about a year" } }',
+    )
   })
 })

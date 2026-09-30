@@ -12,7 +12,9 @@ import { seedVenue } from './onboarding/seed-supabase'
 async function main(): Promise<void> {
   const slug = process.argv[2]
   if (!slug) {
-    console.error('Usage: npm run seed-venue -- <slug> [--messaging-phone <e164>] [--force]')
+    console.error(
+      'Usage: npm run seed-venue -- <slug> [--messaging-phone <e164>] [--force]',
+    )
     process.exit(1)
   }
 
@@ -42,7 +44,9 @@ async function main(): Promise<void> {
   const files = await listVenueFiles(drive, folder.id)
   const draftFile = findByPrefix(files, '06-')
   if (!draftFile) {
-    console.error(`[seed] no file with prefix "06-" found in folder; run extract-venue-spec first`)
+    console.error(
+      `[seed] no file with prefix "06-" found in folder; run extract-venue-spec first`,
+    )
     process.exit(1)
   }
   console.log(`[seed] reading draft: ${draftFile.name}`)
@@ -68,13 +72,26 @@ async function main(): Promise<void> {
   )
 
   console.log(`[seed] writing to Supabase...`)
-  const result = await seedVenue({ parsed, messagingPhoneNumber, menuItems, force })
+  const result = await seedVenue({
+    parsed,
+    messagingPhoneNumber,
+    menuItems,
+    force,
+  })
 
-  const totalVoiceEmbedded = result.embeddedChunkCounts.reduce((a, b) => a + b, 0)
-  const totalKnowledgeEmbedded = result.knowledgeEmbeddedChunkCounts.reduce((a, b) => a + b, 0)
+  const totalVoiceEmbedded = result.embeddedChunkCounts.reduce(
+    (a, b) => a + b,
+    0,
+  )
+  const totalKnowledgeEmbedded = result.knowledgeEmbeddedChunkCounts.reduce(
+    (a, b) => a + b,
+    0,
+  )
   console.log(`[seed] ✓ venue ${result.venueId} seeded`)
   console.log(`[seed]   slug: ${parsed.slug}`)
-  console.log(`[seed]   messaging_phone_number: ${messagingPhoneNumber ?? '(null)'}`)
+  console.log(
+    `[seed]   messaging_phone_number: ${messagingPhoneNumber ?? '(null)'}`,
+  )
   console.log(`[seed]   mechanics inserted: ${result.mechanicsInsertedCount}`)
   console.log(
     `[seed]   voice_corpus rows inserted: ${result.insertedCorpusIds.length} (${totalVoiceEmbedded} chunks embedded)`,
@@ -82,10 +99,12 @@ async function main(): Promise<void> {
   console.log(
     `[seed]   knowledge_corpus rows inserted: ${result.insertedKnowledgeCorpusIds.length} (${totalKnowledgeEmbedded} chunks embedded)`,
   )
-  console.log(`[seed] note: status='pending', is_test=true. Flip to 'active' manually after spot-check.`)
+  console.log(
+    `[seed] note: status='pending', is_test=true. Flip to 'active' manually after spot-check.`,
+  )
 }
 
 main().catch((e: unknown) => {
-  console.error(e instanceof Error ? e.stack ?? e.message : String(e))
+  console.error(e instanceof Error ? (e.stack ?? e.message) : String(e))
   process.exit(1)
 })

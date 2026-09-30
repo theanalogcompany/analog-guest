@@ -49,12 +49,23 @@ export async function POST(
   })
   if (!result.ok) {
     const status =
-      result.errorCode === 'not_found' ? 404 : result.errorCode === 'embed_failed' ? 502 : 500
+      result.errorCode === 'not_found'
+        ? 404
+        : result.errorCode === 'embed_failed'
+          ? 502
+          : 500
     return NextResponse.json(
-      { error: 'currentContext promote failed', detail: result.error, errorCode: result.errorCode },
+      {
+        error: 'currentContext promote failed',
+        detail: result.error,
+        errorCode: result.errorCode,
+      },
       { status },
     )
   }
 
-  return NextResponse.json({ success: true, knowledgeCorpusId: result.knowledgeCorpusId })
+  return NextResponse.json({
+    success: true,
+    knowledgeCorpusId: result.knowledgeCorpusId,
+  })
 }

@@ -16,7 +16,9 @@ export const ClassifyCritiqueOutputSchema = z.object({
   reasoning: z.string(),
 })
 
-export type ClassifyCritiqueOutput = z.infer<typeof ClassifyCritiqueOutputSchema>
+export type ClassifyCritiqueOutput = z.infer<
+  typeof ClassifyCritiqueOutputSchema
+>
 
 export interface ClassifyCritiqueInput {
   critique: string
@@ -34,7 +36,9 @@ Heuristic:
 
 When edit_and_rule, write the rule text in the operator's voice — concrete and imperative. The rule should describe what NOT to do or what to do instead. Aim for one or two sentences. Don't reference this specific message.`
 
-export function buildClassifyCritiqueUserPrompt(input: ClassifyCritiqueInput): string {
+export function buildClassifyCritiqueUserPrompt(
+  input: ClassifyCritiqueInput,
+): string {
   return [
     '## Original (flagged) response',
     input.badResponse,

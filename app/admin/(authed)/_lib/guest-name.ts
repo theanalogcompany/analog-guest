@@ -64,7 +64,10 @@ export function guestNameWithPhone(g: GuestLikeRow): string {
  * there is no phone, to the Instagram handle or NO_PHONE_LABEL. Moved here from
  * guest-context.tsx (TAC-467), where `.match` on a null phone crashed the panel.
  */
-export function formatGuestPhone(phone: string | null, instagramUsername: string | null): string {
+export function formatGuestPhone(
+  phone: string | null,
+  instagramUsername: string | null,
+): string {
   if (!phone) return noPhoneLabel(instagramUsername)
   const m = phone.match(/^\+1(\d{3})(\d{3})(\d{4})$/)
   if (!m) return phone

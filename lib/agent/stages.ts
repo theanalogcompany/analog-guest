@@ -62,7 +62,10 @@ import {
   pendingFromEmission,
   resolveCancellation,
 } from '@/lib/schemas/guest-commitment'
-import { resolveCategoryPolicy, resolvePolicyDecision } from '@/lib/schemas/approval-policy'
+import {
+  resolveCategoryPolicy,
+  resolvePolicyDecision,
+} from '@/lib/schemas/approval-policy'
 import { parseVenueLinks } from '@/lib/schemas/venue-info'
 import { loadVoicePack, retrieveKnowledgeContext } from '@/lib/rag'
 import { fireRedAlert } from './alerts'
@@ -109,7 +112,7 @@ import type {
 import type { MessageCategory } from '@/lib/ai'
 
 // STRONG_MATCH_SIMILARITY / MIN_STRONG_MATCHES / CORPUS_RETRIEVE_LIMIT lived
-// here until decision 0007 (2026-09-29): voice is a static per-venue pack
+// here until decision 0008 (2026-09-29): voice is a static per-venue pack
 // (lib/rag/voice-pack.ts), not a similarity retrieval, so there is no match
 // to score. The inbound fail-closed direction survives as the empty-pack
 // throw in retrieveCorpusStage below.
@@ -528,7 +531,8 @@ export const APPROVAL_TRIGGERS = {
  * keep the human-readable label map exhaustive at compile time — adding
  * a new trigger above without a corresponding label there is a TS error.
  */
-export type ApprovalTrigger = (typeof APPROVAL_TRIGGERS)[keyof typeof APPROVAL_TRIGGERS]
+export type ApprovalTrigger =
+  (typeof APPROVAL_TRIGGERS)[keyof typeof APPROVAL_TRIGGERS]
 
 /**
  * TAC-364: `messages.review_reason` for a card written by
@@ -746,7 +750,11 @@ export function knowledgeGapWillQueue(
   ctx: Pick<RuntimeContext, 'currentMessage' | 'guest'>,
   knowledgeGap: boolean,
 ): boolean {
-  return knowledgeGap === true && ctx.currentMessage !== null && ctx.guest.isDemo !== true
+  return (
+    knowledgeGap === true &&
+    ctx.currentMessage !== null &&
+    ctx.guest.isDemo !== true
+  )
 }
 
 // TAC-394: KNOWLEDGE_GAP_CARD_REVIEW_REASONS and isKnowledgeGapCard moved to
@@ -754,7 +762,10 @@ export function knowledgeGapWillQueue(
 // file. Re-exported here so every existing import keeps working. The moved
 // review_reason values are literals there; stages.test.ts pins them against
 // APPROVAL_TRIGGERS and GENERATION_FAILED_REVIEW_REASON.
-export { isKnowledgeGapCard, KNOWLEDGE_GAP_CARD_REVIEW_REASONS } from './pending-slots'
+export {
+  isKnowledgeGapCard,
+  KNOWLEDGE_GAP_CARD_REVIEW_REASONS,
+} from './pending-slots'
 
 function pickPrimaryTrigger(triggers: readonly string[]): string {
   // Caller guarantees triggers.length > 0; the fallback to triggers[0]
@@ -771,7 +782,9 @@ function pickPrimaryTrigger(triggers: readonly string[]): string {
  * with a prefixed error message; caller catches and fires the appropriate
  * red alert.
  */
-export async function classifyStage(ctx: RuntimeContext): Promise<Classification> {
+export async function classifyStage(
+  ctx: RuntimeContext,
+): Promise<Classification> {
   if (!ctx.currentMessage) {
     throw new Error('classifyStage: no inbound message on context')
   }
@@ -816,11 +829,16 @@ export async function classifyStage(ctx: RuntimeContext): Promise<Classification
     // A correction is a fact about what the guest wrote, not about how
     // confident the category call was.
     correctsPendingReply: r.data.correctsPendingReply,
+    // Passed through unmodified so the orchestrator can price the `classify`
+    // generation in Langfuse. These describe the call that was made, so the
+    // confidence reroute above must not touch them.
+    modelId: r.data.modelId,
+    usage: r.data.usage,
   }
 }
 
 /**
- * Internal: load the venue's static voice pack (decision 0007, 2026-09-29).
+ * Internal: load the venue's static voice pack (decision 0008, 2026-09-29).
  * The SAME pack for every message — voice is one consistent style, so there
  * is no query, no embedding and no similarity here. Selection rule and the
  * production measurement behind the budgets: lib/rag/voice-pack.ts.
@@ -833,7 +851,9 @@ export async function classifyStage(ctx: RuntimeContext): Promise<Classification
  * What this deliberately deletes: the per-turn Voyage dependency, which was
  * a whole outage mode (embedding down = no inbound replies venue-wide).
  */
-export async function retrieveCorpusStage(ctx: RuntimeContext): Promise<CorpusMatch[]> {
+export async function retrieveCorpusStage(
+  ctx: RuntimeContext,
+): Promise<CorpusMatch[]> {
   const r = await loadVoicePack({ venueId: ctx.venue.id })
   if (!r.ok) {
     throw new Error(`retrieveCorpusStage: ${r.error}`)
@@ -1038,7 +1058,8 @@ export async function generateStage(
   ctx: RuntimeContext,
   category: Classification['category'],
 ): Promise<GenerateOutcome> {
-  if (!ctx.corpus) return { status: 'failed', error: 'corpus missing on context' }
+  if (!ctx.corpus)
+    return { status: 'failed', error: 'corpus missing on context' }
   // lib/rag types sourceType as plain string; lib/ai narrows it to a closed
   // union. The DB check constraint on voice_corpus.source_type guarantees
   // runtime values are inside that union, so the per-field cast is sound.
@@ -1314,9 +1335,17 @@ const UNGROUNDED_CLAIMS_BY_STATUS = {
 export async function verifyGroundingStage(
   ctx: Pick<
     RuntimeContext,
-    'agentRunId' | 'currentMessage' | 'guest' | 'venue' | 'knowledgeCorpus' | 'conversationChannel'
+    | 'agentRunId'
+    | 'currentMessage'
+    | 'guest'
+    | 'venue'
+    | 'knowledgeCorpus'
+    | 'conversationChannel'
   >,
-  generation: Pick<GenerateMessageResult, 'knowledgeGap' | 'body' | 'userPrompt'>,
+  generation: Pick<
+    GenerateMessageResult,
+    'knowledgeGap' | 'body' | 'userPrompt'
+  >,
   // Decision 0003 (rewritten 2026-09-29): 'held' when the caller runs this
   // check pre-send and its finding can still hold the draft (followups, the
   // holding message); 'sent' when post-send-checks.ts runs it after the
@@ -1463,7 +1492,9 @@ export function isCommitmentTypeGated(
   const commitmentDescription = generation.commitment.description?.trim()
   return Boolean(
     commitmentDescription &&
-      (commitmentType === 'comp' || commitmentType === 'hold' || commitmentType === 'discount'),
+    (commitmentType === 'comp' ||
+      commitmentType === 'hold' ||
+      commitmentType === 'discount'),
   )
 }
 
@@ -1542,7 +1573,10 @@ export type MechanicOfferBackstopResult =
  */
 export async function verifyMechanicOfferStage(
   ctx: Pick<RuntimeContext, 'agentRunId' | 'guest' | 'venue' | 'mechanics'>,
-  generation: Pick<GenerateMessageResult, 'body' | 'requiresOperatorApproval' | 'commitment'>,
+  generation: Pick<
+    GenerateMessageResult,
+    'body' | 'requiresOperatorApproval' | 'commitment'
+  >,
   disposition: CheckDisposition = 'held',
 ): Promise<MechanicOfferBackstopResult> {
   if (ctx.guest.isDemo === true) return { status: 'skipped' }
@@ -1807,7 +1841,8 @@ export async function verifyClosedVenueArrivalStage(
   // The same `now` the recognition snapshot and the arrival dispatch use, so
   // the gate cannot reach a different verdict from the one capture reached a
   // few lines earlier on the same turn.
-  if (!isVenueClosed(ctx.venue, ctx.recognition.computedAt)) return { status: 'skipped' }
+  if (!isVenueClosed(ctx.venue, ctx.recognition.computedAt))
+    return { status: 'skipped' }
   if (isClosedVenueArrivalEmitted(generation)) return { status: 'skipped' }
 
   let r = await verifyClosedVenueArrival({ replyBody: generation.body })
@@ -1815,13 +1850,17 @@ export async function verifyClosedVenueArrivalStage(
   // One immediate retry, transient faults only. Truncation is excluded by
   // errorCode rather than by message text, which is provider-formatted and
   // not a contract.
-  if (!r.ok && r.errorCode !== VERIFY_CLOSED_VENUE_ARRIVAL_TRUNCATED_ERROR_CODE) {
+  if (
+    !r.ok &&
+    r.errorCode !== VERIFY_CLOSED_VENUE_ARRIVAL_TRUNCATED_ERROR_CODE
+  ) {
     retried = true
     r = await verifyClosedVenueArrival({ replyBody: generation.body })
   }
 
   if (!r.ok) {
-    const truncated = r.errorCode === VERIFY_CLOSED_VENUE_ARRIVAL_TRUNCATED_ERROR_CODE
+    const truncated =
+      r.errorCode === VERIFY_CLOSED_VENUE_ARRIVAL_TRUNCATED_ERROR_CODE
     console.warn(
       `[agent] closed-venue arrival check ${truncated ? 'TRUNCATED' : 'degraded'} (${disposition === 'held' ? 'failing CLOSED' : 'post-send, reply already dispatched'}) for venue=${ctx.venue.id}: ${r.error}${r.errorCode ? ` (${r.errorCode})` : ''}${retried ? ' (after one retry)' : ''}`,
     )
@@ -1906,7 +1945,8 @@ export async function verifyCancellationClaimStage(
 
   if (ctx.guest.isDemo === true) return { resolution, claim: 'skipped' }
   if (resolution.status === 'resolved') return { resolution, claim: 'skipped' }
-  if (generation.body.trim().length === 0) return { resolution, claim: 'skipped' }
+  if (generation.body.trim().length === 0)
+    return { resolution, claim: 'skipped' }
 
   let r = await verifyCancellationClaim({ replyBody: generation.body })
   let retried = false
@@ -1919,7 +1959,8 @@ export async function verifyCancellationClaimStage(
   }
 
   if (!r.ok) {
-    const truncated = r.errorCode === VERIFY_CANCELLATION_CLAIM_TRUNCATED_ERROR_CODE
+    const truncated =
+      r.errorCode === VERIFY_CANCELLATION_CLAIM_TRUNCATED_ERROR_CODE
     console.warn(
       `[agent] cancellation-claim check ${truncated ? 'TRUNCATED' : 'degraded'} (${disposition === 'held' ? 'failing CLOSED' : 'post-send, reply already dispatched'}) for venue=${ctx.venue.id}: ${r.error}${r.errorCode ? ` (${r.errorCode})` : ''}`,
     )
@@ -2190,17 +2231,32 @@ export type ApprovalDecision =
  * we can already tell will not send, so the correction is rare rather than
  * routine.
  *
- * The three conditions mirror the gate, and each names the trigger it mirrors
+ * The two conditions mirror the gate, and each names the trigger it mirrors
  * so a reader can check them against it:
  *
  *   - the category's own policy       -> trigger 8, category_requires_approval
  *   - venues.hold_all_outbound        -> trigger 6, hold_all_outbound
- *   - a positively closed venue       -> TAC-540's own clause
  *
- * The closed-venue clause is not a gate trigger on its own (trigger 17 needs
- * an emitted arrival), and it is here because a closed venue is where a reply
- * is most likely to end up in front of an operator and least likely to be
- * something a guest should watch being typed.
+ * TAC-565 REMOVED A THIRD, "the venue is not positively closed". Replies
+ * still auto-send after hours — closed-hours answers, hours questions — and
+ * withholding the dots there left the guest on Seen for the whole generation
+ * on exactly the turns that feel slowest. Ruled: dots whenever a reply is
+ * being written for auto-send, open or closed. The clause was never a gate
+ * trigger of its own (trigger 17 needs an emitted arrival), so nothing about
+ * WHAT sends changed with it — only whether the guest watches it being
+ * written.
+ *
+ * WHAT THAT COSTS, since the clause was not arbitrary: a closed venue is
+ * where a draft is most likely to end up in front of an operator. Trigger 17
+ * is closed-only by construction, and `verifyClosedVenueArrivalStage` skips
+ * itself while open — the one way its trigger fires at an open venue is the
+ * orchestrator degrading a throw out of that stage to `check_failed`, which
+ * does not re-read the venue's state. So the `typing_off` correction runs
+ * more often after hours than during service: the guest watches dots for a
+ * few seconds and then they stop, which is the correction working. What it is
+ * NOT is a guest left watching dots for a reply that is never coming — that
+ * is the property `stopTypingUnlessSent` holds, and it holds on a closed
+ * venue exactly as it does on an open one.
  *
  * `hold_all_outbound` is not in the ticket's own wording and is included
  * anyway: at a venue carrying it, EVERY reply queues, so without it the dots
@@ -2216,13 +2272,23 @@ export type ApprovalDecision =
  * out.
  */
 export function mayAutoSendAfterClassification(ctx: RuntimeContext): boolean {
-  if (ctx.venue.holdAllOutbound === true && ctx.classification?.category !== 'opt_out') {
+  if (
+    ctx.venue.holdAllOutbound === true &&
+    ctx.classification?.category !== 'opt_out'
+  ) {
     return false
   }
-  if (resolveCategoryPolicy(ctx.venue.approvalPolicy, ctx.classification?.category) !== 'auto_send') {
+  if (
+    resolveCategoryPolicy(
+      ctx.venue.approvalPolicy,
+      ctx.classification?.category,
+    ) !== 'auto_send'
+  ) {
     return false
   }
-  return !isVenueClosed(ctx.venue, ctx.recognition.computedAt)
+  // No third condition. TAC-565 removed it: the venue's hours are
+  // deliberately not read here. See the header.
+  return true
 }
 
 export async function applyApprovalPolicyStage(
@@ -2271,7 +2337,9 @@ export async function applyApprovalPolicyStage(
   //
   // The STRUCTURAL half of this pair needs no parameter: it reads the
   // generation's own emission and the venue's hours, both already here.
-  closedVenueArrivalBackstop: ClosedVenueArrivalBackstopResult = { status: 'skipped' },
+  closedVenueArrivalBackstop: ClosedVenueArrivalBackstopResult = {
+    status: 'skipped',
+  },
 ): Promise<ApprovalDecision> {
   const triggers: string[] = []
 
@@ -2325,7 +2393,8 @@ export async function applyApprovalPolicyStage(
   // review_state='auto_sent', outside both indexes.
   const isManualFollowup = ctx.followupTrigger?.reason === 'manual'
   const pendingRows =
-    (await loadPendingRowsBySlot(ctx.venue.id, ctx.guest.id)) ?? EMPTY_PENDING_ROWS
+    (await loadPendingRowsBySlot(ctx.venue.id, ctx.guest.id)) ??
+    EMPTY_PENDING_ROWS
 
   // Trigger 5 (TAC-297): structural gate on commitment.type ∈ {comp, hold,
   // discount}. Fires regardless of requiresOperatorApproval self-flag.
@@ -2346,7 +2415,10 @@ export async function applyApprovalPolicyStage(
   // ONLY this trigger — an opt_out reply still passes through triggers 1–5
   // above unchanged. Composes with (does not short-circuit) the other
   // triggers, so existingPendingDraftId still routes regen-in-place correctly.
-  if (ctx.venue.holdAllOutbound === true && ctx.classification?.category !== 'opt_out') {
+  if (
+    ctx.venue.holdAllOutbound === true &&
+    ctx.classification?.category !== 'opt_out'
+  ) {
     triggers.push(APPROVAL_TRIGGERS.HOLD_ALL_OUTBOUND)
   }
 
@@ -2433,7 +2505,9 @@ export async function applyApprovalPolicyStage(
   // than handled separately — the gate has never distinguished "not run" from
   // "ran and found nothing", and the harness + followup callers both rely on
   // being able to omit the argument entirely.
-  const grounding: GroundingBackstopResult = groundingBackstop ?? { status: 'skipped' }
+  const grounding: GroundingBackstopResult = groundingBackstop ?? {
+    status: 'skipped',
+  }
   const backstopFired = grounding.status === 'flagged'
   if (backstopFired) {
     triggers.push(APPROVAL_TRIGGERS.KNOWLEDGE_GAP_BACKSTOP)
@@ -2691,7 +2765,9 @@ export async function applyApprovalPolicyStage(
   // name — both mean "no carrier from here", and resolveDraftCarrierIdentity
   // treats them identically.
   const promisedCommitment: PendingCommitment | null =
-    prosePromiseBackstop.status === 'flagged' ? prosePromiseBackstop.commitment : null
+    prosePromiseBackstop.status === 'flagged'
+      ? prosePromiseBackstop.commitment
+      : null
   // TAC-513: the cancellation carrier, from the model's own resolved emission
   // and nothing else.
   //
@@ -2715,8 +2791,10 @@ export async function applyApprovalPolicyStage(
   )
   const slot: PendingSlot = pendingSlotOf(draftCommitment)
   const slotOccupant = occupantOfSlot(pendingRows, slot)
-  const existingIsKnowledgeGapCard = slotOccupant !== null && isKnowledgeGapCard(slotOccupant)
-  const protectedCardCarveOutBase = existingIsKnowledgeGapCard && triggers.length === 0
+  const existingIsKnowledgeGapCard =
+    slotOccupant !== null && isKnowledgeGapCard(slotOccupant)
+  const protectedCardCarveOutBase =
+    existingIsKnowledgeGapCard && triggers.length === 0
 
   // TAC-397: which of the three cases this turn is, for the conversation slot.
   // Computed here because `pendingRows` is already read and `ctx.classification`
@@ -2736,7 +2814,8 @@ export async function applyApprovalPolicyStage(
       : resolveConversationDisposition({
           hasConversationOccupant: pendingRows.conversation.length > 0,
           category: ctx.classification?.category ?? null,
-          correctsPendingReply: ctx.classification?.correctsPendingReply ?? false,
+          correctsPendingReply:
+            ctx.classification?.correctsPendingReply ?? false,
           inboundBody: ctx.currentMessage.body,
         })
   // TAC-513 × TAC-397: a draft that WITHDRAWS a promise is never silenced.
@@ -2926,7 +3005,8 @@ export async function applyApprovalPolicyStage(
       triggers,
       protectedDraftId: slotDecision.protectedDraftId,
       protectedCommitment: commitmentIdentityOf(
-        occupantOfSlot(pendingRows, slotDecision.slot)?.pending_commitment ?? null,
+        occupantOfSlot(pendingRows, slotDecision.slot)?.pending_commitment ??
+          null,
       ),
       droppedCommitment: draftCommitment,
     }
@@ -3012,8 +3092,10 @@ export async function applyApprovalPolicyStage(
     // resolved against this guest's list.
     pendingCancellation,
     compMatchedPattern: comp.matched ? comp.pattern : null,
-    existingPendingDraftId: slotDecision.action === 'regen' ? slotDecision.draftId : null,
-    captureReplacedDraft: slotDecision.action === 'regen' && slotDecision.captureReplacedDraft,
+    existingPendingDraftId:
+      slotDecision.action === 'regen' ? slotDecision.draftId : null,
+    captureReplacedDraft:
+      slotDecision.action === 'regen' && slotDecision.captureReplacedDraft,
     conversationDisposition,
     slot,
     otherSlotOccupied: otherSlotOccupied(pendingRows, draftCommitment),
@@ -3077,7 +3159,10 @@ function isValidTimezone(tz: string): boolean {
   }
 }
 
-function computeToday(timezone: string, now: Date = new Date()): NonNullable<AiRuntimeContext['today']> {
+function computeToday(
+  timezone: string,
+  now: Date = new Date(),
+): NonNullable<AiRuntimeContext['today']> {
   // Caller (buildAiRuntime) is responsible for passing a validated timezone —
   // otherwise Intl.DateTimeFormat throws a RangeError mid-format.
   // en-CA renders dates as YYYY-MM-DD; en-GB renders 24h HH:MM. Both are
@@ -3107,7 +3192,6 @@ function computeToday(timezone: string, now: Date = new Date()): NonNullable<AiR
     calendar: computeCalendar(timezone, now),
   }
 }
-
 
 // TAC-244 / TAC-123: map the agent's FollowupTrigger.reason to the
 // AI-runtime's FollowupReason. day_* → post_visit_day_*; cold_lapsed and
@@ -3140,6 +3224,11 @@ function triggerReasonToFollowupReason(
     // follow-up block's framing (days since a visit, a re-engagement reason)
     // has nothing to say about someone standing at the counter now.
     case 'instagram_scan_arrival':
+    // TAC-560: a warm close renders `## Closing this conversation` instead. The
+    // follow-up block's framing (days since a visit, a re-engagement reason) has
+    // nothing to say about a conversation that went quiet ten minutes ago, and
+    // naming a past visit is exactly what its own category instruction forbids.
+    case 'warm_close':
       return null
   }
 }
@@ -3247,12 +3336,16 @@ export function deriveFollowupContext(
 // it) structurally unable to disagree about what "the opener turn" means.
 // `buildAiRuntime` below calls this with `new Date()`, identical to its
 // prior inline `Date.now()` call — zero behavior change there.
-export function computeFirstTouchAfterQrScan(ctx: RuntimeContext, now: Date): boolean {
+export function computeFirstTouchAfterQrScan(
+  ctx: RuntimeContext,
+  now: Date,
+): boolean {
   return (
     ctx.currentMessage !== null &&
     ctx.guest.createdVia === 'qr_scan' &&
     ctx.recentMessages.length === 0 &&
-    now.getTime() - ctx.guest.createdAt.getTime() <= REPORTED_ORDER_WINDOW_DAYS * MS_PER_DAY
+    now.getTime() - ctx.guest.createdAt.getTime() <=
+      REPORTED_ORDER_WINDOW_DAYS * MS_PER_DAY
   )
 }
 
@@ -3401,7 +3494,8 @@ export function buildAiRuntime(
     ? {
         name: ctx.followupTrigger.perkMechanic.name,
         qualification: ctx.followupTrigger.perkMechanic.qualification ?? '',
-        rewardDescription: ctx.followupTrigger.perkMechanic.rewardDescription ?? '',
+        rewardDescription:
+          ctx.followupTrigger.perkMechanic.rewardDescription ?? '',
       }
     : undefined
 
@@ -3483,6 +3577,9 @@ export function buildAiRuntime(
     // TAC-536: mapped straight through, never re-derived. Null on every turn
     // but a scan greeting, and the serializer omits the block on null.
     scanArrival: ctx.scanArrival,
+    // TAC-560: mapped straight through. Picks the `## Closing this conversation`
+    // block and replaces the category instructions; see composePrompt.
+    warmClose: ctx.warmClose,
     // TAC-362: this message's emoji call. undefined for the policies that
     // don't vary (never, sparingly) — the serializer then renders no block.
     emojiDirective,
@@ -3526,7 +3623,9 @@ export function buildAiRuntime(
     willBeReviewed:
       ctx.guest.isDemo !== true &&
       isFloorCategory(ctx.classification?.category) &&
-      resolveCategoryPolicy(ctx.venue.approvalPolicy, ctx.classification?.category) ===
-        'operator_approval',
+      resolveCategoryPolicy(
+        ctx.venue.approvalPolicy,
+        ctx.classification?.category,
+      ) === 'operator_approval',
   }
 }

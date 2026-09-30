@@ -19,7 +19,8 @@ vi.mock('@/lib/agent/knowledge-gap-timeout', () => ({
 // TAC-473: the second processor on this route.
 const processInstagramWindowWarningsMock = vi.fn()
 vi.mock('@/lib/agent/instagram-window-warning', () => ({
-  processInstagramWindowWarnings: (now: Date) => processInstagramWindowWarningsMock(now),
+  processInstagramWindowWarnings: (now: Date) =>
+    processInstagramWindowWarningsMock(now),
 }))
 
 const INSTAGRAM_SUMMARY = {
@@ -140,7 +141,10 @@ describe('GET /api/cron/pending-timeout', () => {
 
   // TAC-473 ------------------------------------------------------------------
   describe('the two processors are independently isolated', () => {
-    async function tick(): Promise<{ status: number; body: Record<string, unknown> }> {
+    async function tick(): Promise<{
+      status: number
+      body: Record<string, unknown>
+    }> {
       vi.stubEnv('NODE_ENV', 'production')
       process.env.EXTERNAL_CRON_SECRET = 'external-secret'
       const res = await GET(
@@ -148,7 +152,10 @@ describe('GET /api/cron/pending-timeout', () => {
           headers: { authorization: 'Bearer external-secret' },
         }),
       )
-      return { status: res.status, body: (await res.json()) as Record<string, unknown> }
+      return {
+        status: res.status,
+        body: (await res.json()) as Record<string, unknown>,
+      }
     }
 
     it('runs both on one tick, with the same clock', async () => {
@@ -171,12 +178,18 @@ describe('GET /api/cron/pending-timeout', () => {
       const { status, body } = await tick()
       expect(status).toBe(200)
       expect(processInstagramWindowWarningsMock).toHaveBeenCalledOnce()
-      expect(body).toMatchObject({ ok: true, knowledgeGaps: null, instagramWindows: INSTAGRAM_SUMMARY })
+      expect(body).toMatchObject({
+        ok: true,
+        knowledgeGaps: null,
+        instagramWindows: INSTAGRAM_SUMMARY,
+      })
     })
 
     it('still runs and reports the knowledge-gap half when the Instagram half throws', async () => {
       vi.spyOn(console, 'error').mockImplementation(() => {})
-      processInstagramWindowWarningsMock.mockRejectedValueOnce(new Error('boom'))
+      processInstagramWindowWarningsMock.mockRejectedValueOnce(
+        new Error('boom'),
+      )
       const { status, body } = await tick()
       expect(status).toBe(200)
       expect(processDueKnowledgeGapsMock).toHaveBeenCalledOnce()
@@ -187,7 +200,9 @@ describe('GET /api/cron/pending-timeout', () => {
     it('never runs the Instagram half without the bearer', async () => {
       vi.stubEnv('NODE_ENV', 'production')
       process.env.EXTERNAL_CRON_SECRET = 'external-secret'
-      const res = await GET(new Request('http://localhost/api/cron/pending-timeout'))
+      const res = await GET(
+        new Request('http://localhost/api/cron/pending-timeout'),
+      )
       expect(res.status).toBe(401)
       expect(processInstagramWindowWarningsMock).not.toHaveBeenCalled()
     })

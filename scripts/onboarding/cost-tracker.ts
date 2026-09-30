@@ -34,16 +34,32 @@ export const EST_GENERATE_INPUT_TOKENS_PER_ATTEMPT = 3500
 export const EST_GENERATE_OUTPUT_TOKENS_PER_ATTEMPT = 200
 
 export function estimateClassifyGenerateCostUsd(): number {
-  const inputTokens = EST_CLASSIFY_INPUT_TOKENS + EST_GENERATE_ATTEMPTS_AVG * EST_GENERATE_INPUT_TOKENS_PER_ATTEMPT
-  const outputTokens = EST_CLASSIFY_OUTPUT_TOKENS + EST_GENERATE_ATTEMPTS_AVG * EST_GENERATE_OUTPUT_TOKENS_PER_ATTEMPT
-  return (inputTokens / 1_000_000) * PRICE_PER_MTOK_INPUT + (outputTokens / 1_000_000) * PRICE_PER_MTOK_OUTPUT
+  const inputTokens =
+    EST_CLASSIFY_INPUT_TOKENS +
+    EST_GENERATE_ATTEMPTS_AVG * EST_GENERATE_INPUT_TOKENS_PER_ATTEMPT
+  const outputTokens =
+    EST_CLASSIFY_OUTPUT_TOKENS +
+    EST_GENERATE_ATTEMPTS_AVG * EST_GENERATE_OUTPUT_TOKENS_PER_ATTEMPT
+  return (
+    (inputTokens / 1_000_000) * PRICE_PER_MTOK_INPUT +
+    (outputTokens / 1_000_000) * PRICE_PER_MTOK_OUTPUT
+  )
 }
 
-export function measuredGradeCostUsd(input: { inputTokens: number; outputTokens: number; model: string }): number {
+export function measuredGradeCostUsd(input: {
+  inputTokens: number
+  outputTokens: number
+  model: string
+}): number {
   const isSonnet = input.model.includes('sonnet')
   const inPrice = isSonnet ? PRICE_PER_MTOK_INPUT : HAIKU_PRICE_PER_MTOK_INPUT
-  const outPrice = isSonnet ? PRICE_PER_MTOK_OUTPUT : HAIKU_PRICE_PER_MTOK_OUTPUT
-  return (input.inputTokens / 1_000_000) * inPrice + (input.outputTokens / 1_000_000) * outPrice
+  const outPrice = isSonnet
+    ? PRICE_PER_MTOK_OUTPUT
+    : HAIKU_PRICE_PER_MTOK_OUTPUT
+  return (
+    (input.inputTokens / 1_000_000) * inPrice +
+    (input.outputTokens / 1_000_000) * outPrice
+  )
 }
 
 export interface CostTrackerState {
@@ -54,7 +70,12 @@ export interface CostTrackerState {
 }
 
 export function newCostTracker(): CostTrackerState {
-  return { estimatedUsd: 0, measuredUsd: 0, scenariosRun: 0, scenariosGraded: 0 }
+  return {
+    estimatedUsd: 0,
+    measuredUsd: 0,
+    scenariosRun: 0,
+    scenariosGraded: 0,
+  }
 }
 
 export function totalCostUsd(state: CostTrackerState): number {
@@ -62,7 +83,11 @@ export function totalCostUsd(state: CostTrackerState): number {
 }
 
 export function addScenarioRun(state: CostTrackerState): CostTrackerState {
-  return { ...state, estimatedUsd: state.estimatedUsd + estimateClassifyGenerateCostUsd(), scenariosRun: state.scenariosRun + 1 }
+  return {
+    ...state,
+    estimatedUsd: state.estimatedUsd + estimateClassifyGenerateCostUsd(),
+    scenariosRun: state.scenariosRun + 1,
+  }
 }
 
 export function addGrade(
@@ -77,12 +102,17 @@ export function addGrade(
 }
 
 /** Would running one more scenario (run + grade) push the total past the cap? */
-export function wouldExceedCap(state: CostTrackerState, maxCostUsd: number | null): boolean {
+export function wouldExceedCap(
+  state: CostTrackerState,
+  maxCostUsd: number | null,
+): boolean {
   if (maxCostUsd === null) return false
   // Conservative: charge the next unit at the classify+generate estimate
   // plus a Haiku-grade estimate (~2000in/300out), since we don't know the
   // real grading cost until after the call.
   const nextUnitEstimate =
-    estimateClassifyGenerateCostUsd() + (2000 / 1_000_000) * HAIKU_PRICE_PER_MTOK_INPUT + (300 / 1_000_000) * HAIKU_PRICE_PER_MTOK_OUTPUT
+    estimateClassifyGenerateCostUsd() +
+    (2000 / 1_000_000) * HAIKU_PRICE_PER_MTOK_INPUT +
+    (300 / 1_000_000) * HAIKU_PRICE_PER_MTOK_OUTPUT
   return totalCostUsd(state) + nextUnitEstimate > maxCostUsd
 }

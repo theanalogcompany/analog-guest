@@ -1,5 +1,5 @@
 /**
- * The static per-venue voice pack (decision 0007, 2026-09-29 owner ruling).
+ * The static per-venue voice pack (decision 0008, 2026-09-29 owner ruling).
  *
  * Voice is one consistent style, loaded THE SAME WAY for every message. This
  * replaced per-message similarity retrieval (`retrieveContext` over
@@ -60,7 +60,8 @@ export function selectVoicePack(
       const aEdit = a.source_type === 'operator_edit' ? 1 : 0
       const bEdit = b.source_type === 'operator_edit' ? 1 : 0
       if (aEdit !== bEdit) return bEdit - aEdit
-      if (a.created_at !== b.created_at) return a.created_at < b.created_at ? 1 : -1
+      if (a.created_at !== b.created_at)
+        return a.created_at < b.created_at ? 1 : -1
       return a.id < b.id ? -1 : 1
     })
 

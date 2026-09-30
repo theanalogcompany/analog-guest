@@ -17,7 +17,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { GenerateMessageResult } from '@/lib/ai'
-import { createPendingRowsFake, type PendingIndexMode } from './testing/pending-rows-fake'
+import {
+  createPendingRowsFake,
+  type PendingIndexMode,
+} from './testing/pending-rows-fake'
 import { APPROVAL_TRIGGERS } from './stages'
 import type { RuntimeContext } from './types'
 
@@ -115,7 +118,12 @@ function ctxFor(opts: {
         ? { default: 'operator_approval', perCategory: {} }
         : { default: 'auto_send', perCategory: {} },
     },
-    guest: { id: GUEST, firstName: 'Sam', phoneNumber: '+15555550853', isDemo: false },
+    guest: {
+      id: GUEST,
+      firstName: 'Sam',
+      phoneNumber: '+15555550853',
+      isDemo: false,
+    },
     currentMessage: opts.manual
       ? null
       : {
@@ -124,7 +132,9 @@ function ctxFor(opts: {
           providerMessageId: 'p1',
           receivedAt: new Date(),
         },
-    followupTrigger: opts.manual ? { reason: 'manual', triggeredAt: new Date() } : null,
+    followupTrigger: opts.manual
+      ? { reason: 'manual', triggeredAt: new Date() }
+      : null,
     classification: {
       category: opts.category,
       classifierConfidence: 0.9,
@@ -148,7 +158,9 @@ function ctxFor(opts: {
   } as unknown as RuntimeContext
 }
 
-function generation(over: Partial<GenerateMessageResult> = {}): GenerateMessageResult {
+function generation(
+  over: Partial<GenerateMessageResult> = {},
+): GenerateMessageResult {
   return {
     body: 'a reply',
     voiceFidelity: 0.85,
@@ -162,12 +174,15 @@ function generation(over: Partial<GenerateMessageResult> = {}): GenerateMessageR
     commitment: {},
     arrivalCapture: {},
     cancelsCommitmentId: '',
+    intentionQuestion: '',
+    closedTheConversation: false,
+    intentionQuestionDuplicateStripped: false,
     attempts: 1,
     attemptScores: [0.85],
     attemptHistory: [],
     systemPrompt: '',
     userPrompt: '',
-    promptVersion: 'v1.70.0',
+    promptVersion: 'v1.75.0',
     cacheReadTokens: 0,
     cacheWriteTokens: 0,
     dashViolationPersisted: false,
@@ -231,7 +246,8 @@ async function runTurn(
   return { decision, persisted }
 }
 
-const COMP_REPLY = "Really sorry to hear that. Come back in and the next one's on us."
+const COMP_REPLY =
+  "Really sorry to hear that. Come back in and the next one's on us."
 const COMP_TURN = generation({
   body: COMP_REPLY,
   commitment: { type: 'comp', description: "the next one's on us" },
@@ -250,7 +266,10 @@ describe('AC4: two inbounds in quick succession, the first producing a gated com
   it('054: the comp card survives a held reply to the next question, which becomes a second card', async () => {
     const fake = useFake('054')
 
-    const turn1 = await runTurn(ctxFor({ category: 'comp_complaint' }), COMP_TURN)
+    const turn1 = await runTurn(
+      ctxFor({ category: 'comp_complaint' }),
+      COMP_TURN,
+    )
     expect(turn1.persisted).toMatchObject({ action: 'inserted' })
     const compCardId = turn1.persisted!.outboundMessageId as string
     const compCard = fake.snapshot(compCardId)
@@ -269,16 +288,18 @@ describe('AC4: two inbounds in quick succession, the first producing a gated com
     })
     expect(turn2.persisted).toMatchObject({ action: 'inserted' })
     expect(fake.snapshot(compCardId)).toEqual(compCard)
-    expect(fake.rows.filter((r) => r.review_state === 'pending').map((r) => r.body)).toEqual([
-      COMP_REPLY,
-      '7am on Sundays',
-    ])
+    expect(
+      fake.rows.filter((r) => r.review_state === 'pending').map((r) => r.body),
+    ).toEqual([COMP_REPLY, '7am on Sundays'])
   })
 
   it('054: the comp card survives an unheld reply to the next question, which sends', async () => {
     const fake = useFake('054')
 
-    const turn1 = await runTurn(ctxFor({ category: 'comp_complaint' }), COMP_TURN)
+    const turn1 = await runTurn(
+      ctxFor({ category: 'comp_complaint' }),
+      COMP_TURN,
+    )
     const compCardId = turn1.persisted!.outboundMessageId as string
     const compCard = fake.snapshot(compCardId)
 
@@ -289,7 +310,9 @@ describe('AC4: two inbounds in quick succession, the first producing a gated com
 
     expect(turn2.decision).toEqual({ action: 'send' })
     expect(fake.snapshot(compCardId)).toEqual(compCard)
-    expect(fake.rows.filter((r) => r.review_state === 'pending')).toHaveLength(1)
+    expect(fake.rows.filter((r) => r.review_state === 'pending')).toHaveLength(
+      1,
+    )
   })
 
   // Why migration 041 is applied BEFORE merge. New code against migration 020
@@ -302,17 +325,27 @@ describe('AC4: two inbounds in quick succession, the first producing a gated com
     vi.spyOn(console, 'warn').mockImplementation(() => {})
     const fake = useFake('020')
 
-    const turn1 = await runTurn(ctxFor({ category: 'comp_complaint' }), COMP_TURN)
+    const turn1 = await runTurn(
+      ctxFor({ category: 'comp_complaint' }),
+      COMP_TURN,
+    )
     const compCardId = turn1.persisted!.outboundMessageId as string
     const compCard = fake.snapshot(compCardId)
 
     await expect(
-      runTurn(ctxFor({ category: 'new_question', held: true }), generation({ body: '7am on Sundays' })),
+      runTurn(
+        ctxFor({ category: 'new_question', held: true }),
+        generation({ body: '7am on Sundays' }),
+      ),
     ).rejects.toThrow(/exceeded 3 race-recovery attempts/)
 
-    expect(fireRedAlertMock).toHaveBeenCalledWith(expect.objectContaining({ stage: 'persist' }))
+    expect(fireRedAlertMock).toHaveBeenCalledWith(
+      expect.objectContaining({ stage: 'persist' }),
+    )
     expect(fake.snapshot(compCardId)).toEqual(compCard)
-    expect(fake.rows.filter((r) => r.review_state === 'pending')).toHaveLength(1)
+    expect(fake.rows.filter((r) => r.review_state === 'pending')).toHaveLength(
+      1,
+    )
   })
 
   // TAC-397: the same answer one migration later, and the reason migration 054
@@ -338,15 +371,20 @@ describe('AC4: two inbounds in quick succession, the first producing a gated com
 
     // A DIFFERENT inbound, so under migration 054 this would be its own card.
     const secondCtx = ctxFor({ category: 'new_question', held: true })
-    ;(secondCtx as { currentMessage: { id: string } }).currentMessage.id = 'inbound-2'
+    ;(secondCtx as { currentMessage: { id: string } }).currentMessage.id =
+      'inbound-2'
 
     await expect(
       runTurn(secondCtx, generation({ body: 'and we close at 3' })),
     ).rejects.toThrow(/exceeded 3 race-recovery attempts/)
 
-    expect(fireRedAlertMock).toHaveBeenCalledWith(expect.objectContaining({ stage: 'persist' }))
+    expect(fireRedAlertMock).toHaveBeenCalledWith(
+      expect.objectContaining({ stage: 'persist' }),
+    )
     expect(fake.snapshot(firstCardId)).toEqual(firstCard)
-    expect(fake.rows.filter((r) => r.review_state === 'pending')).toHaveLength(1)
+    expect(fake.rows.filter((r) => r.review_state === 'pending')).toHaveLength(
+      1,
+    )
   })
 })
 
@@ -376,7 +414,10 @@ describe('race recovery decides a card the gate never saw (TAC-394)', () => {
 
     const result = await persistOrRegenQueuedDraft(
       ctxFor({ category: 'comp_complaint' }),
-      generation({ body: 'a free croissant next time', commitment: { type: 'comp', description: 'a free croissant' } }),
+      generation({
+        body: 'a free croissant next time',
+        commitment: { type: 'comp', description: 'a free croissant' },
+      }),
       'commitment_type_gated',
       null,
       { reviewTriggers: ['commitment_type_gated'], callerPolicy: 'regen' },
@@ -393,7 +434,11 @@ describe('race recovery decides a card the gate never saw (TAC-394)', () => {
         description: 'a free cortado on your next visit',
         code: '7K2P',
       },
-      droppedCommitment: { type: 'comp', description: 'a free croissant', code: null },
+      droppedCommitment: {
+        type: 'comp',
+        description: 'a free croissant',
+        code: null,
+      },
     })
     expect(fake.snapshot('card-a')).toEqual(cardA)
     expect(fake.rows).toHaveLength(1)
@@ -471,8 +516,13 @@ describe('race recovery decides a card the gate never saw (TAC-394)', () => {
       },
     )
 
-    expect(result).toMatchObject({ action: 'updated', outboundMessageId: 'gap-conv' })
-    expect(fake.snapshot('gap-conv')?.pending_until).toBe('2026-09-14T16:30:00.000Z')
+    expect(result).toMatchObject({
+      action: 'updated',
+      outboundMessageId: 'gap-conv',
+    })
+    expect(fake.snapshot('gap-conv')?.pending_until).toBe(
+      '2026-09-14T16:30:00.000Z',
+    )
   })
 
   // The retry reads BOTH slots: a gap card in the other slot holds the guest's
@@ -518,9 +568,14 @@ describe('race recovery decides a card the gate never saw (TAC-394)', () => {
       },
     )
 
-    expect(result).toMatchObject({ action: 'updated', outboundMessageId: 'conv' })
+    expect(result).toMatchObject({
+      action: 'updated',
+      outboundMessageId: 'conv',
+    })
     expect(fake.snapshot('conv')?.pending_until).toBeNull()
-    expect(fake.snapshot('gap-comp')?.pending_until).toBe('2026-09-14T16:30:00.000Z')
+    expect(fake.snapshot('gap-comp')?.pending_until).toBe(
+      '2026-09-14T16:30:00.000Z',
+    )
   })
 
   // A re-read withheld the clock because of a gap card, then an operator acted
@@ -642,7 +697,9 @@ describe('race recovery decides a card the gate never saw (TAC-394)', () => {
     const written = fake.rows.find((r) => r.id === result.outboundMessageId)
     expect(written?.review_state).toBe('pending')
     expect(written?.pending_until).toBeNull()
-    expect(fake.snapshot('gap-comp')?.pending_until).toBe('2026-09-14T16:30:00.000Z')
+    expect(fake.snapshot('gap-comp')?.pending_until).toBe(
+      '2026-09-14T16:30:00.000Z',
+    )
     expect(
       fake.rows
         .filter((r) => r.review_state === 'pending')
@@ -670,7 +727,10 @@ describe('race recovery decides a card the gate never saw (TAC-394)', () => {
       generation({ body: 'checking in' }),
       'category_requires_approval',
       null,
-      { reviewTriggers: ['category_requires_approval'], callerPolicy: 'never_regen' },
+      {
+        reviewTriggers: ['category_requires_approval'],
+        callerPolicy: 'never_regen',
+      },
     )
 
     expect(result).toMatchObject({
@@ -713,7 +773,10 @@ describe('race recovery decides a card the gate never saw (TAC-394)', () => {
       { blankBody: true, callerPolicy: 'regen_gap_card_only' },
     )
 
-    expect(result).toMatchObject({ action: 'dropped', reason: 'slot_occupied' })
+    expect(result).toMatchObject({
+      action: 'dropped',
+      reason: 'slot_occupied',
+    })
     expect(fake.snapshot('card-conv')).toEqual(conv)
   })
 })
@@ -743,7 +806,10 @@ describe('the gate reads the right slot whichever card was inserted first (TAC-3
       ctxFor({ category: 'comp_complaint' }),
       generation({
         body: 'So sorry. Your next cortado is on us.',
-        commitment: { type: 'comp', description: 'A free cortado on your next visit' },
+        commitment: {
+          type: 'comp',
+          description: 'A free cortado on your next visit',
+        },
       }),
     )
 
@@ -752,7 +818,10 @@ describe('the gate reads the right slot whichever card was inserted first (TAC-3
       slot: 'obligation',
       existingPendingDraftId: 'card-a',
     })
-    expect(turn.persisted).toMatchObject({ action: 'updated', outboundMessageId: 'card-a' })
+    expect(turn.persisted).toMatchObject({
+      action: 'updated',
+      outboundMessageId: 'card-a',
+    })
     expect(fake.snapshot('card-conv')?.body).toBe('we open at 7')
   })
 })
@@ -810,7 +879,6 @@ describe('findPendingQuestion with a knowledge-gap card in each slot (TAC-394)',
   })
 })
 
-
 describe('a prose promise becomes a tracked commitment on the card (TAC-401)', () => {
   // The reply that measured as the live leak: A2 #40, eligible-perks arm. No
   // carrier, clean grounding, no self-flag, no regex, and it auto-sends at
@@ -832,10 +900,17 @@ describe('a prose promise becomes a tracked commitment on the card (TAC-401)', (
     const fake = useFake('054')
     const gen = generation({ body: PROSE_PROMISE_REPLY })
 
-    const turn = await runTurn(ctxFor({ category: 'new_question' }), gen, 'regen', FLAGGED)
+    const turn = await runTurn(
+      ctxFor({ category: 'new_question' }),
+      gen,
+      'regen',
+      FLAGGED,
+    )
 
     expect(turn.persisted).toMatchObject({ action: 'inserted' })
-    const row = fake.rows.find((r) => r.id === turn.persisted!.outboundMessageId)
+    const row = fake.rows.find(
+      (r) => r.id === turn.persisted!.outboundMessageId,
+    )
     // This is the acceptance criterion: the promise is no longer an obligation
     // nothing tracks. dispatchOperatorOutbound reads this column on approval
     // and materializes a guest_commitments row from it.
@@ -869,7 +944,9 @@ describe('a prose promise becomes a tracked commitment on the card (TAC-401)', (
     expect(promiseTurn.decision.action).toBe('queue')
     if (promiseTurn.decision.action !== 'queue') return
     expect(promiseTurn.decision.slot).toBe('obligation')
-    expect(fake.rows.filter((r) => r.review_state === 'pending')).toHaveLength(2)
+    expect(fake.rows.filter((r) => r.review_state === 'pending')).toHaveLength(
+      2,
+    )
   })
 
   // RULING 3 AS NARROWED (2026-09-21), end to end, and this assertion is the
@@ -888,10 +965,17 @@ describe('a prose promise becomes a tracked commitment on the card (TAC-401)', (
       commitment: { type: 'recommendation', description: 'the Blossom Tonic' },
     })
 
-    const turn = await runTurn(ctxFor({ category: 'new_question' }), gen, 'regen', FLAGGED)
+    const turn = await runTurn(
+      ctxFor({ category: 'new_question' }),
+      gen,
+      'regen',
+      FLAGGED,
+    )
 
     expect(turn.persisted).toMatchObject({ action: 'inserted' })
-    const row = fake.rows.find((r) => r.id === turn.persisted!.outboundMessageId)
+    const row = fake.rows.find(
+      (r) => r.id === turn.persisted!.outboundMessageId,
+    )
     expect(row?.pending_commitment).toEqual({
       type: 'comp',
       description: 'a replacement cortado',
@@ -914,10 +998,17 @@ describe('a prose promise becomes a tracked commitment on the card (TAC-401)', (
       commitment: { type: 'comp', description: 'the oat latte', code: 'Z9Y8' },
     })
 
-    const turn = await runTurn(ctxFor({ category: 'new_question' }), gen, 'regen', FLAGGED)
+    const turn = await runTurn(
+      ctxFor({ category: 'new_question' }),
+      gen,
+      'regen',
+      FLAGGED,
+    )
 
     expect(turn.persisted).toMatchObject({ action: 'inserted' })
-    const row = fake.rows.find((r) => r.id === turn.persisted!.outboundMessageId)
+    const row = fake.rows.find(
+      (r) => r.id === turn.persisted!.outboundMessageId,
+    )
     expect(row?.pending_commitment).toEqual({
       type: 'comp',
       description: 'the oat latte',
@@ -937,12 +1028,13 @@ describe('a prose promise becomes a tracked commitment on the card (TAC-401)', (
     )
 
     expect(turn.persisted).toMatchObject({ action: 'inserted' })
-    const row = fake.rows.find((r) => r.id === turn.persisted!.outboundMessageId)
+    const row = fake.rows.find(
+      (r) => r.id === turn.persisted!.outboundMessageId,
+    )
     expect(row?.pending_commitment).toBeNull()
     expect(row?.review_reason).toBe('prose_promise_check_failed')
   })
 })
-
 
 // TAC-527: the 2026-09-23 incident, replayed end to end.
 //
@@ -981,7 +1073,9 @@ describe('the 2026-09-23 gulab jamun exchange (TAC-527)', () => {
     )
 
     expect(turn.persisted).toMatchObject({ action: 'inserted' })
-    const row = fake.rows.find((r) => r.id === turn.persisted!.outboundMessageId)
+    const row = fake.rows.find(
+      (r) => r.id === turn.persisted!.outboundMessageId,
+    )
     expect(row?.pending_commitment).toEqual({
       type: 'comp',
       description: 'a replacement gulab jamun',
@@ -1004,7 +1098,9 @@ describe('the 2026-09-23 gulab jamun exchange (TAC-527)', () => {
       FLAGGED_GULAB,
     )
 
-    const row = fake.rows.find((r) => r.id === turn.persisted!.outboundMessageId)
+    const row = fake.rows.find(
+      (r) => r.id === turn.persisted!.outboundMessageId,
+    )
     expect(row?.review_triggers).toContain('comp_regex_backstop')
     expect(row?.review_triggers).toContain('prose_promise_backstop')
     expect(row?.review_reason).toBe('prose_promise_backstop')
@@ -1024,7 +1120,9 @@ describe('the 2026-09-23 gulab jamun exchange (TAC-527)', () => {
       'regen',
       FLAGGED_GULAB,
     )
-    const bothRow = bothFake.rows.find((r) => r.id === both.persisted!.outboundMessageId)
+    const bothRow = bothFake.rows.find(
+      (r) => r.id === both.persisted!.outboundMessageId,
+    )
 
     // Trips NO comp pattern, flagged all the same. This is TAC-401's own
     // population: a promise the regex cannot see.
@@ -1067,7 +1165,9 @@ describe('the 2026-09-23 gulab jamun exchange (TAC-527)', () => {
     )
 
     expect(turn.persisted).toMatchObject({ action: 'inserted' })
-    const row = fake.rows.find((r) => r.id === turn.persisted!.outboundMessageId)
+    const row = fake.rows.find(
+      (r) => r.id === turn.persisted!.outboundMessageId,
+    )
     expect(row?.pending_commitment).toBeNull()
     expect(row?.review_reason).toBe('comp_regex_backstop')
   })
@@ -1119,10 +1219,14 @@ describe('a failed prose-promise check never costs the guest a reply (TAC-401)',
     expect(turn.decision.triggers).toContain('prose_promise_check_failed')
     expect(turn.persisted).toMatchObject({ action: 'inserted' })
     // The gap card is untouched — body, clock and all.
-    expect(fake.snapshot('gap-conv')?.pending_until).toBe('2026-09-14T16:30:00.000Z')
+    expect(fake.snapshot('gap-conv')?.pending_until).toBe(
+      '2026-09-14T16:30:00.000Z',
+    )
     expect(fake.snapshot('gap-conv')?.body).toBe('')
     // And the guest now holds two conversation cards, which is the point.
-    expect(fake.rows.filter((r) => r.review_state === 'pending')).toHaveLength(2)
+    expect(fake.rows.filter((r) => r.review_state === 'pending')).toHaveLength(
+      2,
+    )
   })
 
   // The race-recovery mirror. gapFlagsFromTriggers is what 23505 recovery
@@ -1154,7 +1258,10 @@ describe('a failed prose-promise check never costs the guest a reply (TAC-401)',
       },
     )
 
-    expect(result).toMatchObject({ action: 'updated', outboundMessageId: 'gap-conv' })
+    expect(result).toMatchObject({
+      action: 'updated',
+      outboundMessageId: 'gap-conv',
+    })
   })
 
   // The negative half. A check failure is an absence; a caught promise is a
@@ -1214,7 +1321,9 @@ describe('a failed prose-promise check never costs the guest a reply (TAC-401)',
     expect(turn.persisted).toMatchObject({ action: 'inserted' })
     // The gap card is untouched.
     expect(fake.snapshot('gap-conv')?.body).toBe('')
-    expect(fake.snapshot('gap-conv')?.pending_until).toBe('2026-09-14T16:30:00.000Z')
+    expect(fake.snapshot('gap-conv')?.pending_until).toBe(
+      '2026-09-14T16:30:00.000Z',
+    )
   })
 })
 
@@ -1293,7 +1402,9 @@ describe('a cancellation reaches messages.pending_cancellation (TAC-513)', () =>
       },
     )
     expect(first.persisted?.action).toBe('inserted')
-    expect(fake.rows.at(-1)?.pending_cancellation).toEqual({ commitmentId: TONIC.id })
+    expect(fake.rows.at(-1)?.pending_cancellation).toEqual({
+      commitmentId: TONIC.id,
+    })
     const cardId = first.persisted?.outboundMessageId
 
     // The guest's next turn. TAC-397: a regen in place now happens only on a
@@ -1342,7 +1453,8 @@ describe('a cancellation reaches messages.pending_cancellation (TAC-513)', () =>
 // ---------------------------------------------------------------------------
 describe("TAC-397 replay: the events-then-SoFi exchange (Le Mil's, 2026-09-18)", () => {
   const EVENTS_Q = 'any events coming up?'
-  const EVENTS_A = "we've got an open mic on the 24th and a cupping the week after"
+  const EVENTS_A =
+    "we've got an open mic on the 24th and a cupping the week after"
   const SOFI_COMPLAINT = 'my sofi was flat'
   const SOFI_A = "sorry about that, that's not how it should taste"
   // TAC-513's commitment shape, local to this block.
@@ -1359,7 +1471,12 @@ describe("TAC-397 replay: the events-then-SoFi exchange (Le Mil's, 2026-09-18)",
 
   async function replay() {
     const first = await runTurn(
-      ctxFor({ category: 'event_question', held: true, inboundId: 'in-events', body: EVENTS_Q }),
+      ctxFor({
+        category: 'event_question',
+        held: true,
+        inboundId: 'in-events',
+        body: EVENTS_Q,
+      }),
       generation({ body: EVENTS_A }),
     )
     const second = await runTurn(
@@ -1383,7 +1500,9 @@ describe("TAC-397 replay: the events-then-SoFi exchange (Le Mil's, 2026-09-18)",
 
     expect(first.persisted?.action).toBe('inserted')
     expect(second.persisted?.action).toBe('inserted')
-    expect(first.persisted?.outboundMessageId).not.toBe(second.persisted?.outboundMessageId)
+    expect(first.persisted?.outboundMessageId).not.toBe(
+      second.persisted?.outboundMessageId,
+    )
 
     const pending = fake.rows.filter((r) => r.review_state === 'pending')
     expect(pending).toHaveLength(2)
@@ -1409,7 +1528,9 @@ describe("TAC-397 replay: the events-then-SoFi exchange (Le Mil's, 2026-09-18)",
     expect(second.decision.action).toBe('queue')
     if (second.decision.action !== 'queue') return
     // previous_pending_held would be false here: nothing was replaced.
-    expect(second.decision.triggers).not.toContain(APPROVAL_TRIGGERS.PREVIOUS_PENDING_HELD)
+    expect(second.decision.triggers).not.toContain(
+      APPROVAL_TRIGGERS.PREVIOUS_PENDING_HELD,
+    )
     expect(second.decision.existingPendingDraftId).toBeNull()
     // It does report that the guest has another card waiting, which is true.
     expect(second.decision.otherSlotOccupied).toBe(false)
@@ -1431,7 +1552,12 @@ describe("TAC-397 replay: the events-then-SoFi exchange (Le Mil's, 2026-09-18)",
     const fake = useFake('054')
 
     const first = await runTurn(
-      ctxFor({ category: 'event_question', held: true, inboundId: 'in-events', body: EVENTS_Q }),
+      ctxFor({
+        category: 'event_question',
+        held: true,
+        inboundId: 'in-events',
+        body: EVENTS_Q,
+      }),
       generation({ body: EVENTS_A }),
     )
     const eventsCardId = first.persisted!.outboundMessageId as string
@@ -1449,7 +1575,9 @@ describe("TAC-397 replay: the events-then-SoFi exchange (Le Mil's, 2026-09-18)",
     )
 
     // One card, and it is the events card with the SoFi reply written over it.
-    expect(fake.rows.filter((r) => r.review_state === 'pending')).toHaveLength(1)
+    expect(fake.rows.filter((r) => r.review_state === 'pending')).toHaveLength(
+      1,
+    )
     expect(second.persisted?.outboundMessageId).toBe(eventsCardId)
     expect(fake.snapshot(eventsCardId)?.body).toBe(SOFI_A)
     // The difference from the incident: the replaced text is KEPT, so the
@@ -1463,7 +1591,12 @@ describe("TAC-397 replay: the events-then-SoFi exchange (Le Mil's, 2026-09-18)",
   it('an amendment of the events question rewrites that card and keeps the old text', async () => {
     const fake = useFake('054')
     const first = await runTurn(
-      ctxFor({ category: 'event_question', held: true, inboundId: 'in-events', body: EVENTS_Q }),
+      ctxFor({
+        category: 'event_question',
+        held: true,
+        inboundId: 'in-events',
+        body: EVENTS_Q,
+      }),
       generation({ body: EVENTS_A }),
     )
     const cardId = first.persisted!.outboundMessageId as string
@@ -1481,7 +1614,9 @@ describe("TAC-397 replay: the events-then-SoFi exchange (Le Mil's, 2026-09-18)",
 
     expect(second.persisted?.action).toBe('updated')
     expect(second.persisted?.outboundMessageId).toBe(cardId)
-    expect(fake.rows.filter((r) => r.review_state === 'pending')).toHaveLength(1)
+    expect(fake.rows.filter((r) => r.review_state === 'pending')).toHaveLength(
+      1,
+    )
 
     const card = fake.snapshot(cardId)
     expect(card?.body).toBe('nothing this weekend, next one is the 24th')
@@ -1503,20 +1638,32 @@ describe("TAC-397 replay: the events-then-SoFi exchange (Le Mil's, 2026-09-18)",
   it('a message needing no answer leaves the events card byte-identical (auto_send venue)', async () => {
     const fake = useFake('054')
     const first = await runTurn(
-      ctxFor({ category: 'event_question', held: true, inboundId: 'in-events', body: EVENTS_Q }),
+      ctxFor({
+        category: 'event_question',
+        held: true,
+        inboundId: 'in-events',
+        body: EVENTS_Q,
+      }),
       generation({ body: EVENTS_A }),
     )
     const cardId = first.persisted!.outboundMessageId as string
     const before = fake.snapshot(cardId)
 
     const second = await runTurn(
-      ctxFor({ category: 'acknowledgment', held: false, inboundId: 'in-haha', body: 'haha' }),
+      ctxFor({
+        category: 'acknowledgment',
+        held: false,
+        inboundId: 'in-haha',
+        body: 'haha',
+      }),
       generation({ body: 'glad you think so' }),
     )
 
     expect(second.decision.action).toBe('silence')
     expect(second.persisted).toBeNull()
-    expect(fake.rows.filter((r) => r.review_state === 'pending')).toHaveLength(1)
+    expect(fake.rows.filter((r) => r.review_state === 'pending')).toHaveLength(
+      1,
+    )
     expect(fake.snapshot(cardId)).toEqual(before)
   })
 
@@ -1524,15 +1671,27 @@ describe("TAC-397 replay: the events-then-SoFi exchange (Le Mil's, 2026-09-18)",
   it('a message needing no answer is silenced at a holding venue too', async () => {
     const fake = useFake('054')
     await runTurn(
-      ctxFor({ category: 'event_question', held: true, inboundId: 'in-events', body: EVENTS_Q }),
+      ctxFor({
+        category: 'event_question',
+        held: true,
+        inboundId: 'in-events',
+        body: EVENTS_Q,
+      }),
       generation({ body: EVENTS_A }),
     )
     const second = await runTurn(
-      ctxFor({ category: 'acknowledgment', held: true, inboundId: 'in-haha', body: 'haha' }),
+      ctxFor({
+        category: 'acknowledgment',
+        held: true,
+        inboundId: 'in-haha',
+        body: 'haha',
+      }),
       generation({ body: 'glad you think so' }),
     )
     expect(second.decision.action).toBe('silence')
-    expect(fake.rows.filter((r) => r.review_state === 'pending')).toHaveLength(1)
+    expect(fake.rows.filter((r) => r.review_state === 'pending')).toHaveLength(
+      1,
+    )
   })
 
   // TAC-397 + TAC-513: a draft that WITHDRAWS a promise is never silenced,
@@ -1543,7 +1702,12 @@ describe("TAC-397 replay: the events-then-SoFi exchange (Le Mil's, 2026-09-18)",
   it('a cancellation is never silenced, even on a chatter turn', async () => {
     const fake = useFake('054')
     await runTurn(
-      ctxFor({ category: 'event_question', held: true, inboundId: 'in-events', body: EVENTS_Q }),
+      ctxFor({
+        category: 'event_question',
+        held: true,
+        inboundId: 'in-events',
+        body: EVENTS_Q,
+      }),
       generation({ body: EVENTS_A }),
     )
 
@@ -1582,7 +1746,12 @@ describe("TAC-397 replay: the events-then-SoFi exchange (Le Mil's, 2026-09-18)",
   it('a later non-correction regen CLEARS the replaced text', async () => {
     const fake = useFake('054')
     const first = await runTurn(
-      ctxFor({ category: 'event_question', held: true, inboundId: 'in-events', body: EVENTS_Q }),
+      ctxFor({
+        category: 'event_question',
+        held: true,
+        inboundId: 'in-events',
+        body: EVENTS_Q,
+      }),
       generation({ body: EVENTS_A }),
     )
     const cardId = first.persisted!.outboundMessageId as string

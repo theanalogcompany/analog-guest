@@ -14,7 +14,9 @@ describe('stripLongDashes', () => {
   })
 
   it('replaces a spaced en dash with a comma', () => {
-    expect(stripLongDashes('open 9am – 5pm most days')).toBe('open 9am, 5pm most days')
+    expect(stripLongDashes('open 9am – 5pm most days')).toBe(
+      'open 9am, 5pm most days',
+    )
   })
 
   it('replaces a tight em dash (no surrounding spaces) with a hyphen', () => {
@@ -22,7 +24,9 @@ describe('stripLongDashes', () => {
   })
 
   it('leaves text with no dashes unchanged', () => {
-    expect(stripLongDashes('what are your hours today')).toBe('what are your hours today')
+    expect(stripLongDashes('what are your hours today')).toBe(
+      'what are your hours today',
+    )
   })
 
   it('handles multiple dashes in one string', () => {

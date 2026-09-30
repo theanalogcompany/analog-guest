@@ -88,7 +88,8 @@ describe('Instagram idioms, true but off-copy', () => {
 
 describe('reporting', () => {
   it('carries enough surrounding text to judge the line by reading', () => {
-    const body = 'Open until 3 today. Just text us when you are on your way and we will have it ready.'
+    const body =
+      'Open until 3 today. Just text us when you are on your way and we will have it ready.'
     const [match] = findChannelLanguage(body)
     expect(match?.kind).toBe('phone_claim')
     expect(match?.context).toContain('on your way')

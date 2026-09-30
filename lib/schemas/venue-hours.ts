@@ -105,7 +105,10 @@ function parseTime(raw: string): ParsedTime | null {
   // Zero-padded ("07") or past noon ("17") can only be 24-hour. A bare
   // single-digit hour with no meridiem is ambiguous.
   const explicit =
-    meridiem !== undefined || hourRaw > 12 || /^0\d/.test(match[1]) || hourRaw === 0
+    meridiem !== undefined ||
+    hourRaw > 12 ||
+    /^0\d/.test(match[1]) ||
+    hourRaw === 0
 
   return { minutes: hour * 60 + minute, explicit }
 }
@@ -181,9 +184,7 @@ function isClosedMarker(text: string): boolean {
 }
 
 export type DayHours =
-  | { kind: 'range'; range: DayRange }
-  | { kind: 'closed' }
-  | { kind: 'unknown' }
+  { kind: 'range'; range: DayRange } | { kind: 'closed' } | { kind: 'unknown' }
 
 /**
  * Classify one day's raw value into a range, a stated closure, or unknown.
@@ -223,7 +224,8 @@ export function classifyDay(value: string | undefined): DayHours {
 }
 
 function isWithin(range: DayRange, minutes: number): boolean {
-  if (!range.overnight) return minutes >= range.openMin && minutes < range.closeMin
+  if (!range.overnight)
+    return minutes >= range.openMin && minutes < range.closeMin
   // Crosses midnight: open from openMin to 23:59, then 00:00 to closeMin.
   return minutes >= range.openMin || minutes < range.closeMin
 }
@@ -247,7 +249,10 @@ function dayLabel(key: DayKey): string {
  * Uses the same Intl-with-explicit-timeZone approach as computeToday in
  * lib/agent/stages.ts — this is venue-local, never server time.
  */
-function venueLocalNow(timezone: string, now: Date): { dayIndex: number; minutes: number } | null {
+function venueLocalNow(
+  timezone: string,
+  now: Date,
+): { dayIndex: number; minutes: number } | null {
   try {
     const parts = new Intl.DateTimeFormat('en-US', {
       timeZone: timezone,
@@ -257,10 +262,13 @@ function venueLocalNow(timezone: string, now: Date): { dayIndex: number; minutes
       hour12: false,
     }).formatToParts(now)
 
-    const weekday = parts.find((p) => p.type === 'weekday')?.value?.toLowerCase()
+    const weekday = parts
+      .find((p) => p.type === 'weekday')
+      ?.value?.toLowerCase()
     const hourPart = parts.find((p) => p.type === 'hour')?.value
     const minutePart = parts.find((p) => p.type === 'minute')?.value
-    if (!weekday || hourPart === undefined || minutePart === undefined) return null
+    if (!weekday || hourPart === undefined || minutePart === undefined)
+      return null
 
     const dayIndex = DAY_KEYS.indexOf(weekday as DayKey)
     if (dayIndex === -1) return null
@@ -297,7 +305,8 @@ function findNextOpening(
     // Today only counts if the opening is still ahead of us.
     if (offset === 0 && range.openMin <= fromMinutes) continue
 
-    const label = offset === 0 ? 'today' : offset === 1 ? 'tomorrow' : dayLabel(key)
+    const label =
+      offset === 0 ? 'today' : offset === 1 ? 'tomorrow' : dayLabel(key)
     return { day: label, time: formatMinutes(range.openMin) }
   }
   return null
@@ -348,7 +357,10 @@ export function resolveOpenState(
     return { state: 'open', closesAt: formatMinutes(yesterday.range.closeMin) }
   }
 
-  return { state: 'closed', opensAt: findNextOpening(hours, local.dayIndex, local.minutes) }
+  return {
+    state: 'closed',
+    opensAt: findNextOpening(hours, local.dayIndex, local.minutes),
+  }
 }
 
 /**

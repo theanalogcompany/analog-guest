@@ -34,7 +34,10 @@ interface Script {
 }
 
 let script: Script = {}
-const claims: Array<{ patch: Record<string, unknown>; filters: Record<string, unknown> }> = []
+const claims: Array<{
+  patch: Record<string, unknown>
+  filters: Record<string, unknown>
+}> = []
 /** Drafts this fake has recorded a WON claim for, i.e. whose marker is set. */
 const warned = new Set<string>()
 const scanFilters: Record<string, unknown> = {}
@@ -67,18 +70,29 @@ vi.mock('@/lib/db/admin', () => ({
             },
             async maybeSingle() {
               anchorLookups += 1
-              if (script.anchorError) return { data: null, error: { message: script.anchorError } }
+              if (script.anchorError)
+                return { data: null, error: { message: script.anchorError } }
               const key = `${filters.venue_id}:${filters.guest_id}`
               if ((script.anchorErrorFor ?? []).includes(key)) {
-                return { data: null, error: { message: `anchor boom for ${key}` } }
+                return {
+                  data: null,
+                  error: { message: `anchor boom for ${key}` },
+                }
               }
               const at = script.anchors?.[key] ?? null
-              return { data: at === null ? null : { provider_sent_at: at }, error: null }
+              return {
+                data: at === null ? null : { provider_sent_at: at },
+                error: null,
+              }
             },
             then(resolve: (r: unknown) => unknown) {
               // The scan itself is awaited directly, with no maybeSingle.
               Object.assign(scanFilters, filters)
-              if (script.scanError) return resolve({ data: null, error: { message: script.scanError } })
+              if (script.scanError)
+                return resolve({
+                  data: null,
+                  error: { message: script.scanError },
+                })
               // The marker is MODELLED, not hand-waved: a draft this fake has
               // already recorded a successful claim for is excluded, exactly as
               // `.is('window_warning_pushed_at', null)` excludes it in Postgres.
@@ -115,11 +129,16 @@ vi.mock('@/lib/db/admin', () => ({
             },
             async select() {
               claims.push({ patch, filters })
-              if (script.claimError) return { data: null, error: { message: script.claimError } }
-              if ((script.casLost ?? []).includes(filters.id as string)) return { data: [], error: null }
+              if (script.claimError)
+                return { data: null, error: { message: script.claimError } }
+              if ((script.casLost ?? []).includes(filters.id as string))
+                return { data: [], error: null }
               // The CAS's own predicate, modelled: a draft already marked
               // cannot be claimed again.
-              if (filters.window_warning_pushed_at === 'IS NULL' && warned.has(filters.id as string)) {
+              if (
+                filters.window_warning_pushed_at === 'IS NULL' &&
+                warned.has(filters.id as string)
+              ) {
                 return { data: [], error: null }
               }
               warned.add(filters.id as string)
@@ -145,11 +164,19 @@ const NOW = new Date('2026-09-23T12:00:00.000Z')
 
 /** An anchor leaving exactly `remainingMs` of Meta's window at NOW. */
 function anchorLeaving(remainingMs: number): string {
-  return new Date(NOW.getTime() + remainingMs - INSTAGRAM_WINDOW_MS).toISOString()
+  return new Date(
+    NOW.getTime() + remainingMs - INSTAGRAM_WINDOW_MS,
+  ).toISOString()
 }
 
 function draft(id: string, over: Partial<DraftRow> = {}): DraftRow {
-  return { id, venue_id: VENUE, guest_id: GUEST, guest: { first_name: 'Ana' }, ...over }
+  return {
+    id,
+    venue_id: VENUE,
+    guest_id: GUEST,
+    guest: { first_name: 'Ana' },
+    ...over,
+  }
 }
 
 beforeEach(() => {
@@ -168,10 +195,20 @@ describe('processInstagramWindowWarnings', () => {
       anchors: { [`${VENUE}:${GUEST}`]: anchorLeaving(42 * 60_000) },
     }
     const summary = await processInstagramWindowWarnings(NOW)
-    expect(summary).toMatchObject({ scanned: 1, due: 1, claimed: 1, pushed: 1 })
+    expect(summary).toMatchObject({
+      scanned: 1,
+      due: 1,
+      claimed: 1,
+      pushed: 1,
+    })
     expect(pushMock).toHaveBeenCalledTimes(1)
     expect(pushMock).toHaveBeenCalledWith(
-      expect.objectContaining({ draftId: 'd1', venueId: VENUE, guestId: GUEST, guestFirstName: 'Ana' }),
+      expect.objectContaining({
+        draftId: 'd1',
+        venueId: VENUE,
+        guestId: GUEST,
+        guestFirstName: 'Ana',
+      }),
     )
   })
 
@@ -190,7 +227,9 @@ describe('processInstagramWindowWarnings', () => {
     // test hand-writing an empty array, which is what it used to do and which
     // passed with both the scan filter and the CAS predicate deleted.
     pushMock.mockClear()
-    const second = await processInstagramWindowWarnings(new Date(NOW.getTime() + 60_000))
+    const second = await processInstagramWindowWarnings(
+      new Date(NOW.getTime() + 60_000),
+    )
     expect(second).toMatchObject({ scanned: 0, pushed: 0 })
     expect(pushMock).not.toHaveBeenCalled()
   })
@@ -217,7 +256,9 @@ describe('processInstagramWindowWarnings', () => {
       review_state: 'pending',
       window_warning_pushed_at: 'IS NULL',
     })
-    expect(claims[0]!.patch).toEqual({ window_warning_pushed_at: NOW.toISOString() })
+    expect(claims[0]!.patch).toEqual({
+      window_warning_pushed_at: NOW.toISOString(),
+    })
   })
 
   it('does not push when the CAS loses to a concurrent tick', async () => {
@@ -227,7 +268,12 @@ describe('processInstagramWindowWarnings', () => {
       casLost: ['d1'],
     }
     const summary = await processInstagramWindowWarnings(NOW)
-    expect(summary).toMatchObject({ due: 1, claimed: 0, casLost: 1, pushed: 0 })
+    expect(summary).toMatchObject({
+      due: 1,
+      claimed: 0,
+      casLost: 1,
+      pushed: 0,
+    })
     expect(pushMock).not.toHaveBeenCalled()
   })
 
@@ -246,14 +292,24 @@ describe('processInstagramWindowWarnings', () => {
       preWarned: ['d1'],
     }
     const summary = await processInstagramWindowWarnings(NOW)
-    expect(summary).toMatchObject({ scanned: 1, due: 1, claimed: 0, casLost: 1, pushed: 0 })
+    expect(summary).toMatchObject({
+      scanned: 1,
+      due: 1,
+      claimed: 0,
+      casLost: 1,
+      pushed: 0,
+    })
     expect(pushMock).not.toHaveBeenCalled()
   })
 
   it('does not push above the threshold', async () => {
     script = {
       drafts: [draft('d1')],
-      anchors: { [`${VENUE}:${GUEST}`]: anchorLeaving(INSTAGRAM_WINDOW_WARNING_MS + 60_000) },
+      anchors: {
+        [`${VENUE}:${GUEST}`]: anchorLeaving(
+          INSTAGRAM_WINDOW_WARNING_MS + 60_000,
+        ),
+      },
     }
     const summary = await processInstagramWindowWarnings(NOW)
     expect(summary).toMatchObject({ notYet: 1, due: 0, pushed: 0 })
@@ -263,7 +319,9 @@ describe('processInstagramWindowWarnings', () => {
   it('pushes exactly AT the threshold', async () => {
     script = {
       drafts: [draft('d1')],
-      anchors: { [`${VENUE}:${GUEST}`]: anchorLeaving(INSTAGRAM_WINDOW_WARNING_MS) },
+      anchors: {
+        [`${VENUE}:${GUEST}`]: anchorLeaving(INSTAGRAM_WINDOW_WARNING_MS),
+      },
     }
     expect((await processInstagramWindowWarnings(NOW)).pushed).toBe(1)
   })
@@ -281,7 +339,10 @@ describe('processInstagramWindowWarnings', () => {
   })
 
   it('does not push when no guest action carries Meta clock', async () => {
-    script = { drafts: [draft('d1')], anchors: { [`${VENUE}:${GUEST}`]: null } }
+    script = {
+      drafts: [draft('d1')],
+      anchors: { [`${VENUE}:${GUEST}`]: null },
+    }
     const summary = await processInstagramWindowWarnings(NOW)
     expect(summary).toMatchObject({ windowUnknown: 1, pushed: 0 })
     expect(pushMock).not.toHaveBeenCalled()
@@ -311,7 +372,9 @@ describe('processInstagramWindowWarnings', () => {
     const summary = await processInstagramWindowWarnings(NOW)
     expect(summary).toMatchObject({ scanned: 2, errored: 1, pushed: 1 })
     expect(pushMock).toHaveBeenCalledTimes(1)
-    expect(pushMock).toHaveBeenCalledWith(expect.objectContaining({ draftId: 'd2' }))
+    expect(pushMock).toHaveBeenCalledWith(
+      expect.objectContaining({ draftId: 'd2' }),
+    )
   })
 
   it('reports a failed scan rather than throwing', async () => {
@@ -338,7 +401,11 @@ describe('processInstagramWindowWarnings', () => {
     // the push, the wire and the card all agree about "time left".
     script = {
       drafts: [draft('d1')],
-      anchors: { [`${VENUE}:${GUEST}`]: anchorLeaving(INSTAGRAM_WINDOW_WARNING_MS + 1000) },
+      anchors: {
+        [`${VENUE}:${GUEST}`]: anchorLeaving(
+          INSTAGRAM_WINDOW_WARNING_MS + 1000,
+        ),
+      },
     }
     expect((await processInstagramWindowWarnings(NOW)).pushed).toBe(0)
   })

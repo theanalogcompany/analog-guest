@@ -50,8 +50,34 @@ jobs:
           # in April 2026.
           node-version-file: .nvmrc
           cache: npm
+      # Next.js incremental build cache. Runs before npm ci so hashFiles
+      # never walks node_modules. A lockfile change invalidates fully; a
+      # source-only change restores the nearest cache via restore-keys and
+      # rebuilds incrementally.
+      - uses: actions/cache@v4
+        with:
+          path: .next/cache
+          key: nextjs-${{ runner.os }}-${{ hashFiles('package-lock.json') }}-${{ hashFiles('**/*.ts', '**/*.tsx') }}
+          restore-keys: |
+            nextjs-${{ runner.os }}-${{ hashFiles('package-lock.json') }}-
       - run: npm ci
       - run: npx tsc --noEmit
       - run: npm run lint
-      - run: npx vitest run
+      - run: npx prettier --check .
+      # Duplication gate: .jscpd.json holds the threshold. Baseline at gating
+      # time was 5.12% duplicated lines (tests excluded); the gate exists to
+      # catch growth, not to force a cleanup sprint.
+      - run: npx jscpd
+      # The junit reporter records per-test timings; the artifact makes slow
+      # tests and suite-duration drift inspectable per run without gating
+      # anything. --retry=1 is CI-only: a test that fails once then passes is
+      # reported as flaky in the run output and the junit artifact - that is
+      # a bug report against the test, not something to ignore. Local runs
+      # stay retry-free so flakes surface loudly at the desk.
+      - run: npx vitest run --retry=1 --reporter=default --reporter=junit --outputFile=vitest-junit.xml
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: vitest-junit
+          path: vitest-junit.xml
       - run: npm run build

@@ -29,6 +29,7 @@
 // header so the path can be exercised locally.
 
 import { processDueScanGreetings } from '@/lib/agent/instagram-scan-greeting'
+import { logger } from '@/lib/observability/logger'
 
 function isAuthorized(request: Request): boolean {
   if (process.env.NODE_ENV !== 'production') return true
@@ -43,6 +44,6 @@ export async function GET(request: Request): Promise<Response> {
   }
 
   const summary = await processDueScanGreetings(new Date())
-  console.log('[cron instagram-scan-greetings] tick complete', summary)
+  logger.info('[cron instagram-scan-greetings] tick complete', { summary })
   return Response.json({ ok: true, ...summary })
 }

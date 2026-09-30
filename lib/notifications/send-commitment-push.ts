@@ -47,7 +47,12 @@ import {
   capturePushSent,
   capturePushTokenInvalid,
 } from '@/lib/analytics/posthog'
-import { loadPushRecipients, countOperatorBadge, clearOperatorPushToken } from './recipients'
+import { logger } from '@/lib/observability/logger'
+import {
+  loadPushRecipients,
+  countOperatorBadge,
+  clearOperatorPushToken,
+} from './recipients'
 import type {
   ArrivalSignal,
   CommitmentType,
@@ -77,7 +82,10 @@ const MIN_DESCRIPTION_CHARS = 8
  * the operator query layer, which has no business loading on the push path.
  */
 function sanitizeDescription(raw: string, max: number): string {
-  const flattened = raw.replace(/[\u2014\u2013]/g, ' ').replace(/\s+/g, ' ').trim()
+  const flattened = raw
+    .replace(/[\u2014\u2013]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
   if (flattened.length <= max) return flattened
   const cut = flattened.slice(0, max)
   const lastSpace = cut.lastIndexOf(' ')
@@ -166,12 +174,14 @@ export function buildCommitmentPushBody(
   // the counter, and the description only distinguishes two commitments of the
   // same type for the same guest.
   const room = MAX_PUSH_BODY_CHARS - withoutDescription.length - ' for '.length
-  const shown = room >= MIN_DESCRIPTION_CHARS ? sanitizeDescription(description, room) : ''
+  const shown =
+    room >= MIN_DESCRIPTION_CHARS ? sanitizeDescription(description, room) : ''
   if (shown.length > 0) {
     return `${namePart} arriving ${context}, ${typeLabel} for ${shown}${codeFragment}`
   }
 
-  if (withoutDescription.length <= MAX_PUSH_BODY_CHARS) return withoutDescription
+  if (withoutDescription.length <= MAX_PUSH_BODY_CHARS)
+    return withoutDescription
   // Still over with no description at all: trim the name, as before TAC-532.
   if (trimmed) {
     const overhead = ` arriving ${context}, ${typeLabel}${codeFragment}`.length
@@ -185,10 +195,14 @@ export function buildCommitmentPushBody(
 // arrived. Thin local aliases keep this file's call sites and its log lines
 // exactly as they were; the prefixes are passed in for that reason.
 const loadRecipients = (venueId: string) =>
-  loadPushRecipients(venueId, { logPrefix: '[apns] commitment loadRecipients' })
+  loadPushRecipients(venueId, {
+    logPrefix: '[apns] commitment loadRecipients',
+  })
 const countBadgeForOperator = countOperatorBadge
 const nullOperatorToken = (operatorId: string) =>
-  clearOperatorPushToken(operatorId, { logPrefix: '[apns] commitment nullOperatorToken failed' })
+  clearOperatorPushToken(operatorId, {
+    logPrefix: '[apns] commitment nullOperatorToken failed',
+  })
 
 /**
  * Top-level commitment-arrival push orchestrator. Never throws.
@@ -211,16 +225,19 @@ export async function sendCommitmentArrivalPush(
     type: input.type,
     arrivalSignal: input.arrivalSignal,
   }
-  console.log('[apns] sendCommitmentArrivalPush called', baseFields)
+  logger.info('[apns] sendCommitmentArrivalPush called', baseFields)
 
   const recipients = await loadRecipients(input.venueId)
   if (recipients.length === 0) {
-    console.log('[apns] commitment skipped: no operators with apns token for venue', {
-      ...baseFields,
-    })
+    logger.info(
+      '[apns] commitment skipped: no operators with apns token for venue',
+      {
+        ...baseFields,
+      },
+    )
     return
   }
-  console.log('[apns] commitment fanout begin', {
+  logger.info('[apns] commitment fanout begin', {
     ...baseFields,
     recipientCount: recipients.length,
     recipientIds: recipients.map((r) => r.id),
@@ -258,7 +275,7 @@ export async function sendCommitmentArrivalPush(
     })
 
     if (!result.ok) {
-      console.error('[apns] commitment send failed (transport)', {
+      logger.error('[apns] commitment send failed (transport)', {
         ...baseFields,
         operatorId: recipient.id,
         error: result.error,
@@ -300,9 +317,9 @@ export async function sendCommitmentArrivalPush(
       tokenInvalid,
     }
     if (status === 200) {
-      console.log('[apns] commitment apns response', responseFields)
+      logger.info('[apns] commitment apns response', responseFields)
     } else {
-      console.warn('[apns] commitment apns response', responseFields)
+      logger.warn('[apns] commitment apns response', responseFields)
     }
 
     if (tokenInvalid) {

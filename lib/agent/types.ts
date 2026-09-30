@@ -2,6 +2,7 @@ import type { SlotDropReason } from './pending-slots'
 import type {
   FollowupReason,
   MessageCategory,
+  ModelCallUsage,
   PendingQuestion,
   RecentMessage,
 } from '@/lib/ai'
@@ -156,6 +157,12 @@ export interface FollowupTrigger {
     // one that routes its send through dispatchReply rather than
     // scheduleAndSend.
     | 'instagram_scan_arrival'
+    // TAC-560: a new guest's first conversation went quiet after a counter scan,
+    // and the venue is closing it warmly. The SECOND reason allowed on an
+    // Instagram conversation (handle-followup.ts refuses every other), and the
+    // second that routes its send through dispatchReply rather than
+    // scheduleAndSend.
+    | 'warm_close'
   // TAC-123: engine-aggregated secondary reasons for this run. The primary
   // already lives on `reason` above; this array carries the OTHER reasons that
   // also applied on this guest's tick, already mapped to the AI-side
@@ -196,6 +203,20 @@ export interface FollowupTrigger {
     scanMessageId: string | null
     hadPriorConversation: boolean
   }
+  /**
+   * TAC-560: set only when `reason === 'warm_close'`. Typed channel rather than
+   * metadata, for the reason perkMechanic, isOperatorDecline and
+   * instagramScanArrival are: it drives routing, so the schema is structural.
+   *
+   * `answersMessageId` is OUR last outbound row, the one the guest went quiet
+   * after. It is written to reply_to_message_id and handed to the Instagram
+   * reply check, because a reply naming no inbound is read as answering
+   * everything before it, which would silence the agent's own reply to whatever
+   * the guest says next.
+   */
+  warmClose?: {
+    answersMessageId: string
+  }
   triggeredAt: Date
   metadata?: Record<string, unknown>
 }
@@ -232,6 +253,16 @@ export interface Classification {
   // TAC-397: independent of category — see lib/ai/types.ts's
   // ClassifyMessageResult.correctsPendingReply for the full contract.
   correctsPendingReply: boolean
+  // Model id and token usage for the classify call, carried so the orchestrator
+  // can price the `classify` Langfuse generation. Passed through unmodified from
+  // ClassifyMessageResult — unlike `category`, these describe the call that was
+  // made and must NOT be rewritten by the confidence reroute.
+  //
+  // Optional because a provider need not report every field, and because absent
+  // is honestly different from zero. See lib/observability/langfuse.ts's
+  // AgentUsage for why the key names are not free choice.
+  modelId?: string
+  usage?: ModelCallUsage
 }
 
 export interface RuntimeContext {
@@ -246,7 +277,16 @@ export interface RuntimeContext {
    * buildAiRuntime; see the AI-side field for why both axes are carried rather
    * than one derived from the other.
    */
-  scanArrival: { hadPriorConversation: boolean; hasRecordedVisit: boolean } | null
+  scanArrival: {
+    hadPriorConversation: boolean
+    hasRecordedVisit: boolean
+  } | null
+  /**
+   * TAC-560: true only on the pause-triggered warm-close turn. Picks the
+   * `## Closing this conversation` block AND replaces the category instructions,
+   * so it reaches composePrompt rather than only the serializer.
+   */
+  warmClose: boolean
   // TAC-495: the conversation's channel. Set once by build-runtime-context.ts
   // via resolveConversationChannel, from the guest's identifiers, the inbound
   // message's channel and (TAC-469) the guest's last inbound channel. It picks
@@ -327,7 +367,12 @@ export type AgentResult =
   // (enumeration order); primaryTrigger is the priority-selected one that
   // also lands on messages.review_reason and shows up first in the
   // operator queue UI.
-  | { status: 'queued'; outboundMessageId: string; triggers: string[]; primaryTrigger: string }
+  | {
+      status: 'queued'
+      outboundMessageId: string
+      triggers: string[]
+      primaryTrigger: string
+    }
   | { status: 'refused'; reason: string; attemptScores?: number[] }
   | { status: 'skipped_duplicate' }
   // A card in this draft's pending slot won, so the draft was discarded:

@@ -11,7 +11,9 @@ const TZ = 'America/Los_Angeles'
 
 // Helpers. Quick stand-up of a "no signals on file" guest + log so each test
 // can vary the one field it's exercising.
-function emptyGuest(overrides: Partial<FollowupGuestSnapshot> = {}): FollowupGuestSnapshot {
+function emptyGuest(
+  overrides: Partial<FollowupGuestSnapshot> = {},
+): FollowupGuestSnapshot {
   return {
     optedOutAt: null,
     lastInboundAt: null,
@@ -19,7 +21,9 @@ function emptyGuest(overrides: Partial<FollowupGuestSnapshot> = {}): FollowupGue
     ...overrides,
   }
 }
-function emptyLog(overrides: Partial<FollowupLogSnapshot> = {}): FollowupLogSnapshot {
+function emptyLog(
+  overrides: Partial<FollowupLogSnapshot> = {},
+): FollowupLogSnapshot {
   return { weeklyCount: 0, lastByReason: {}, ...overrides }
 }
 function rulesWith(overrides: Partial<FollowupRules>): FollowupRules {
@@ -90,7 +94,8 @@ describe('canSendFollowup', () => {
 
   it('proceeds when last_inbound_at is exactly at the window boundary', () => {
     // Strict-less-than comparison: elapsed == windowMs is NOT inside.
-    const windowMs = FOLLOWUP_RULES_DEFAULT.recent_conversation_hours * 60 * 60 * 1000
+    const windowMs =
+      FOLLOWUP_RULES_DEFAULT.recent_conversation_hours * 60 * 60 * 1000
     expect(
       canSendFollowup({
         reasons: ['post_visit_day_7'],
@@ -168,7 +173,7 @@ describe('canSendFollowup', () => {
     ).toEqual({ ok: true, allowedReasons: ['perk_unlock'] })
   })
 
-  it('drops cold_lapsed from allowedReasons when it\'s inside cold_dedup_days (mixed run)', () => {
+  it("drops cold_lapsed from allowedReasons when it's inside cold_dedup_days (mixed run)", () => {
     // The bug-was-here case: a regular finally visits after 30+ days,
     // post_visit_day_7 AND cold_lapsed both detect. The old code with
     // `every(onDedup)` would proceed with the cold reason intact and
@@ -218,7 +223,8 @@ describe('canSendFollowup', () => {
           lastByReason: {
             cold_lapsed: new Date(
               // Exactly cold_dedup_days ago — outside the strict-less-than window.
-              NOW.getTime() - FOLLOWUP_RULES_DEFAULT.cold_dedup_days * 24 * 60 * 60 * 1000,
+              NOW.getTime() -
+                FOLLOWUP_RULES_DEFAULT.cold_dedup_days * 24 * 60 * 60 * 1000,
             ),
           },
         }),
@@ -284,32 +290,48 @@ describe('canSendFollowup', () => {
 describe('isQuietHour', () => {
   // Default 21:00..08:00 PT (midnight-crossing window).
   it('is true at 21:00 (start boundary, inclusive)', () => {
-    expect(isQuietHour(new Date('2026-06-04T04:00:00Z'), TZ, '21:00', '08:00')).toBe(true)
+    expect(
+      isQuietHour(new Date('2026-06-04T04:00:00Z'), TZ, '21:00', '08:00'),
+    ).toBe(true)
   })
 
   it('is false at 20:59 (one minute before start)', () => {
-    expect(isQuietHour(new Date('2026-06-04T03:59:00Z'), TZ, '21:00', '08:00')).toBe(false)
+    expect(
+      isQuietHour(new Date('2026-06-04T03:59:00Z'), TZ, '21:00', '08:00'),
+    ).toBe(false)
   })
 
   it('is true at 00:30 (midnight crossing case)', () => {
-    expect(isQuietHour(new Date('2026-06-04T07:30:00Z'), TZ, '21:00', '08:00')).toBe(true)
+    expect(
+      isQuietHour(new Date('2026-06-04T07:30:00Z'), TZ, '21:00', '08:00'),
+    ).toBe(true)
   })
 
   it('is true at 07:59 (one minute before end)', () => {
-    expect(isQuietHour(new Date('2026-06-04T14:59:00Z'), TZ, '21:00', '08:00')).toBe(true)
+    expect(
+      isQuietHour(new Date('2026-06-04T14:59:00Z'), TZ, '21:00', '08:00'),
+    ).toBe(true)
   })
 
   it('is false at 08:00 (end boundary, exclusive)', () => {
-    expect(isQuietHour(new Date('2026-06-04T15:00:00Z'), TZ, '21:00', '08:00')).toBe(false)
+    expect(
+      isQuietHour(new Date('2026-06-04T15:00:00Z'), TZ, '21:00', '08:00'),
+    ).toBe(false)
   })
 
   it('is false at 10:00 (the default cron hour — main no-op case)', () => {
-    expect(isQuietHour(new Date('2026-06-04T17:00:00Z'), TZ, '21:00', '08:00')).toBe(false)
+    expect(
+      isQuietHour(new Date('2026-06-04T17:00:00Z'), TZ, '21:00', '08:00'),
+    ).toBe(false)
   })
 
   it('handles a same-day window (02:00..04:00) correctly', () => {
-    expect(isQuietHour(new Date('2026-06-04T09:30:00Z'), TZ, '02:00', '04:00')).toBe(true)
-    expect(isQuietHour(new Date('2026-06-04T11:00:00Z'), TZ, '02:00', '04:00')).toBe(false)
+    expect(
+      isQuietHour(new Date('2026-06-04T09:30:00Z'), TZ, '02:00', '04:00'),
+    ).toBe(true)
+    expect(
+      isQuietHour(new Date('2026-06-04T11:00:00Z'), TZ, '02:00', '04:00'),
+    ).toBe(false)
   })
 
   it('returns false for an invalid timezone (fail-OPEN)', () => {

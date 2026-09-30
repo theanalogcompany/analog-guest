@@ -16,11 +16,21 @@ export interface GuardrailCounts {
 }
 
 /** Pure: which of the four counts changed, and by how much. Empty = clean run. */
-export function diffGuardrailState(before: GuardrailCounts, after: GuardrailCounts): string[] {
+export function diffGuardrailState(
+  before: GuardrailCounts,
+  after: GuardrailCounts,
+): string[] {
   const deltas: string[] = []
-  for (const key of (['messages', 'guestCommitments', 'guestStates', 'engagementEvents'] as const)) {
+  for (const key of [
+    'messages',
+    'guestCommitments',
+    'guestStates',
+    'engagementEvents',
+  ] as const) {
     if (before[key] !== after[key]) {
-      deltas.push(`${key}: ${before[key]} -> ${after[key]} (delta ${after[key] - before[key]})`)
+      deltas.push(
+        `${key}: ${before[key]} -> ${after[key]} (delta ${after[key] - before[key]})`,
+      )
     }
   }
   return deltas

@@ -112,7 +112,10 @@ function makeRow(overrides: Record<string, unknown> = {}) {
 
 beforeEach(() => {
   verifyMock.mockReset()
-  verifyMock.mockResolvedValue({ operatorId: OP_ID, venueScope: grantedVenues([VENUE_A]) })
+  verifyMock.mockResolvedValue({
+    operatorId: OP_ID,
+    venueScope: grantedVenues([VENUE_A]),
+  })
   handleDeclineMock.mockReset()
   markCancelledMock.mockReset()
   markCancelledMock.mockResolvedValue({
@@ -124,7 +127,10 @@ beforeEach(() => {
   loadMock.mockReset()
   loadMock.mockResolvedValue({ data: makeRow(), error: null })
   draftBodyMock.mockReset()
-  draftBodyMock.mockResolvedValue({ data: { body: DECLINE_BODY }, error: null })
+  draftBodyMock.mockResolvedValue({
+    data: { body: DECLINE_BODY },
+    error: null,
+  })
 })
 
 afterEach(() => {
@@ -162,8 +168,11 @@ describe('POST /api/operator/commitments/[id]/draft-decline', () => {
       expect(handleDeclineMock).not.toHaveBeenCalled()
     })
 
-    it("returns 404 not_found when allowedVenueIds is empty (short-circuit)", async () => {
-      verifyMock.mockResolvedValueOnce({ operatorId: OP_ID, venueScope: grantedVenues([]) })
+    it('returns 404 not_found when allowedVenueIds is empty (short-circuit)', async () => {
+      verifyMock.mockResolvedValueOnce({
+        operatorId: OP_ID,
+        venueScope: grantedVenues([]),
+      })
       const res = await POST(makeRequest(), params())
       expect(res.status).toBe(404)
       expect(await res.json()).toEqual({ error: 'not_found' })
@@ -173,32 +182,38 @@ describe('POST /api/operator/commitments/[id]/draft-decline', () => {
   })
 
   describe('409', () => {
-    it.each([
-      'open',
-      'cancelled',
-      'acknowledged',
-      'expired',
-      'redeemed',
-    ])("returns {error: 'invalid_state'} when commitment status is %s", async (status) => {
-      loadMock.mockResolvedValueOnce({ data: makeRow({ status }), error: null })
-      const res = await POST(makeRequest(), params())
-      expect(res.status).toBe(409)
-      expect(await res.json()).toEqual({ error: 'invalid_state' })
-      expect(handleDeclineMock).not.toHaveBeenCalled()
-    })
+    it.each(['open', 'cancelled', 'acknowledged', 'expired', 'redeemed'])(
+      "returns {error: 'invalid_state'} when commitment status is %s",
+      async (status) => {
+        loadMock.mockResolvedValueOnce({
+          data: makeRow({ status }),
+          error: null,
+        })
+        const res = await POST(makeRequest(), params())
+        expect(res.status).toBe(409)
+        expect(await res.json()).toEqual({ error: 'invalid_state' })
+        expect(handleDeclineMock).not.toHaveBeenCalled()
+      },
+    )
   })
 
   describe('500', () => {
     it("returns {error: 'internal_error'} when commitment load errors", async () => {
-      loadMock.mockResolvedValueOnce({ data: null, error: { message: 'connection lost' } })
+      loadMock.mockResolvedValueOnce({
+        data: null,
+        error: { message: 'connection lost' },
+      })
       const res = await POST(makeRequest(), params())
       expect(res.status).toBe(500)
       expect(await res.json()).toEqual({ error: 'internal_error' })
       expect(handleDeclineMock).not.toHaveBeenCalled()
     })
 
-    it("returns 500 when commitment has empty description (defensive guard)", async () => {
-      loadMock.mockResolvedValueOnce({ data: makeRow({ description: '' }), error: null })
+    it('returns 500 when commitment has empty description (defensive guard)', async () => {
+      loadMock.mockResolvedValueOnce({
+        data: makeRow({ description: '' }),
+        error: null,
+      })
       const res = await POST(makeRequest(), params())
       expect(res.status).toBe(500)
       expect(await res.json()).toEqual({ error: 'internal_error' })
@@ -234,8 +249,11 @@ describe('POST /api/operator/commitments/[id]/draft-decline', () => {
       expect(await res.json()).toEqual({ error: 'internal_error' })
     })
 
-    it("returns 502 on an unexpected pipeline status (defensive)", async () => {
-      handleDeclineMock.mockResolvedValueOnce({ status: 'sent', outboundMessageId: MESSAGE_ID })
+    it('returns 502 on an unexpected pipeline status (defensive)', async () => {
+      handleDeclineMock.mockResolvedValueOnce({
+        status: 'sent',
+        outboundMessageId: MESSAGE_ID,
+      })
       const res = await POST(makeRequest(), params())
       expect(res.status).toBe(502)
       expect(await res.json()).toEqual({ error: 'internal_error' })
@@ -271,13 +289,16 @@ describe('POST /api/operator/commitments/[id]/draft-decline', () => {
       })
     })
 
-    it("returns 200 {messageId, body} per Contract on the happy path", async () => {
+    it('returns 200 {messageId, body} per Contract on the happy path', async () => {
       const res = await POST(makeRequest(), params())
       expect(res.status).toBe(200)
       // toEqual, not toMatchObject: the Contract's field SET is the claim, and
       // a partial match would pass with `body` silently missing — which is the
       // exact shape of the defect this field exists to fix.
-      expect(await res.json()).toEqual({ messageId: MESSAGE_ID, body: DECLINE_BODY })
+      expect(await res.json()).toEqual({
+        messageId: MESSAGE_ID,
+        body: DECLINE_BODY,
+      })
     })
 
     it('reads the body off the persisted row, not the generation', async () => {
@@ -300,7 +321,10 @@ describe('POST /api/operator/commitments/[id]/draft-decline', () => {
       // The draft is already persisted and the commitment is about to be
       // cancelled. A 5xx here would strand the operator: they cannot reach a
       // draft that exists, and a retry hits 409 on the cancelled commitment.
-      draftBodyMock.mockResolvedValueOnce({ data: null, error: { message: 'boom' } })
+      draftBodyMock.mockResolvedValueOnce({
+        data: null,
+        error: { message: 'boom' },
+      })
       const res = await POST(makeRequest(), params())
       expect(res.status).toBe(200)
       expect(await res.json()).toEqual({ messageId: MESSAGE_ID, body: '' })
@@ -313,7 +337,7 @@ describe('POST /api/operator/commitments/[id]/draft-decline', () => {
       expect(await res.json()).toEqual({ messageId: MESSAGE_ID, body: '' })
     })
 
-    it("invokes handleOperatorDecline AFTER load + before markCancelled", async () => {
+    it('invokes handleOperatorDecline AFTER load + before markCancelled', async () => {
       const callOrder: string[] = []
       handleDeclineMock.mockImplementationOnce(async () => {
         callOrder.push('handleOperatorDecline')
@@ -326,14 +350,17 @@ describe('POST /api/operator/commitments/[id]/draft-decline', () => {
       })
       markCancelledMock.mockImplementationOnce(async () => {
         callOrder.push('markCancelled')
-        return { ok: true, data: { transitioned: true, row: makeRow({ status: 'cancelled' }) } }
+        return {
+          ok: true,
+          data: { transitioned: true, row: makeRow({ status: 'cancelled' }) },
+        }
       })
       const res = await POST(makeRequest(), params())
       expect(res.status).toBe(200)
       expect(callOrder).toEqual(['handleOperatorDecline', 'markCancelled'])
     })
 
-    it("threads commitment description into handleOperatorDecline", async () => {
+    it('threads commitment description into handleOperatorDecline', async () => {
       loadMock.mockResolvedValueOnce({
         data: makeRow({ description: 'oat milk olive cake' }),
         error: null,
@@ -352,14 +379,17 @@ describe('POST /api/operator/commitments/[id]/draft-decline', () => {
       expect(callArg.commitmentId).toBe(COMMITMENT_ID)
     })
 
-    it("returns 200 when markCancelled CAS lost (transitioned=false) — race accepted", async () => {
+    it('returns 200 when markCancelled CAS lost (transitioned=false) — race accepted', async () => {
       markCancelledMock.mockResolvedValueOnce({
         ok: true,
         data: { transitioned: false, row: null },
       })
       const res = await POST(makeRequest(), params())
       expect(res.status).toBe(200)
-      expect(await res.json()).toEqual({ messageId: MESSAGE_ID, body: DECLINE_BODY })
+      expect(await res.json()).toEqual({
+        messageId: MESSAGE_ID,
+        body: DECLINE_BODY,
+      })
       // PostHog event records the race-loss for observability
       expect(capturePostHogMock).toHaveBeenCalledOnce()
       const props = capturePostHogMock.mock.calls[0][0] as {
@@ -368,7 +398,7 @@ describe('POST /api/operator/commitments/[id]/draft-decline', () => {
       expect(props.commitmentCancellationRaceLost).toBe(true)
     })
 
-    it("returns 200 when markCancelled errored (DB write failure) — recovery-secondary, draft persisted", async () => {
+    it('returns 200 when markCancelled errored (DB write failure) — recovery-secondary, draft persisted', async () => {
       markCancelledMock.mockResolvedValueOnce({
         ok: false,
         error: 'connection lost',
@@ -376,14 +406,17 @@ describe('POST /api/operator/commitments/[id]/draft-decline', () => {
       })
       const res = await POST(makeRequest(), params())
       expect(res.status).toBe(200)
-      expect(await res.json()).toEqual({ messageId: MESSAGE_ID, body: DECLINE_BODY })
+      expect(await res.json()).toEqual({
+        messageId: MESSAGE_ID,
+        body: DECLINE_BODY,
+      })
       const props = capturePostHogMock.mock.calls[0][0] as {
         commitmentCancellationRaceLost: boolean
       }
       expect(props.commitmentCancellationRaceLost).toBe(true)
     })
 
-    it("fires PostHog event exactly once with full metadata", async () => {
+    it('fires PostHog event exactly once with full metadata', async () => {
       await POST(makeRequest(), params())
       expect(capturePostHogMock).toHaveBeenCalledOnce()
       const props = capturePostHogMock.mock.calls[0][0] as {

@@ -5,7 +5,10 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 // testability". Must precede the imports below.
 vi.mock('voyageai', () => ({ VoyageAIClient: class {} }))
 
-import { FALLBACK_HOLDING_BODY, handleHoldingMessage } from './handle-holding-message'
+import {
+  FALLBACK_HOLDING_BODY,
+  handleHoldingMessage,
+} from './handle-holding-message'
 
 // The subject here is the FAILURE LADDER (TAC-308 decision #7): generate,
 // retry once, then send a plain line rather than leave the guest in silence.
@@ -37,7 +40,9 @@ const verifyProsePromiseStageMock = vi.fn()
 // TAC-513: default CLEAN, not undefined. The './stages' factory below is an
 // explicit allow-list, so a stage missing from it arrives `undefined` and
 // throws inside the allSettled argument list before the gate is reached.
-const verifyCancellationClaimStageMock = vi.fn().mockResolvedValue({ resolution: { status: 'none' }, claim: 'clean' })
+const verifyCancellationClaimStageMock = vi
+  .fn()
+  .mockResolvedValue({ resolution: { status: 'none' }, claim: 'clean' })
 const scheduleAndSendMock = vi.fn()
 const fireRedAlertMock = vi.fn().mockResolvedValue(undefined)
 const capturePostHogEventMock = vi.fn().mockResolvedValue(undefined)
@@ -62,14 +67,17 @@ vi.mock('@/lib/db/admin', () => ({
 // conditional and the call happens.
 vi.mock('./stages', () => ({
   generateStage: (...a: unknown[]) => generateStageMock(...a),
-  applyApprovalPolicyStage: (...a: unknown[]) => applyApprovalPolicyStageMock(...a),
+  applyApprovalPolicyStage: (...a: unknown[]) =>
+    applyApprovalPolicyStageMock(...a),
   verifyGroundingStage: (...a: unknown[]) => verifyGroundingStageMock(...a),
   // TAC-401: this factory is an explicit ALLOW-LIST. A stage missing here
   // arrives `undefined` at the call site, which in an allSettled array is a
   // TypeError swallowed into a rejected settlement — the check would read as
   // permanently degraded and every test here would stay green.
-  verifyProsePromiseStage: (...a: unknown[]) => verifyProsePromiseStageMock(...a),
-  verifyCancellationClaimStage: (...a: unknown[]) => verifyCancellationClaimStageMock(...a),
+  verifyProsePromiseStage: (...a: unknown[]) =>
+    verifyProsePromiseStageMock(...a),
+  verifyCancellationClaimStage: (...a: unknown[]) =>
+    verifyCancellationClaimStageMock(...a),
   retrieveCorpusStage: vi.fn(async () => []),
   retrieveKnowledgeStage: () => retrieveKnowledgeStageMock(),
   shouldRetrieveKnowledge: () => true,
@@ -103,7 +111,11 @@ vi.mock('@/lib/observability', () => ({
 function makeCtx() {
   return {
     agentRunId: 'run-1',
-    venue: { id: 'venue-1', timezone: 'America/Los_Angeles', holdAllOutbound: false },
+    venue: {
+      id: 'venue-1',
+      timezone: 'America/Los_Angeles',
+      holdAllOutbound: false,
+    },
     guest: { id: 'guest-1', firstName: 'Sam' },
     currentMessage: null,
     followupTrigger: { reason: 'manual', triggeredAt: new Date() },
@@ -125,7 +137,7 @@ function makeCtx() {
   }
 }
 
-function goodGeneration(body = "still tracking that down for you") {
+function goodGeneration(body = 'still tracking that down for you') {
   return {
     status: 'success',
     result: {
@@ -147,7 +159,7 @@ function goodGeneration(body = "still tracking that down for you") {
       promptVersion: 'v1.25.0',
       dashViolationPersisted: false,
       selfTalkViolationPersisted: false,
-    emojiDirectiveViolated: false,
+      emojiDirectiveViolated: false,
     },
   }
 }
@@ -174,8 +186,14 @@ beforeEach(() => {
   verifyGroundingStageMock.mockResolvedValue({ status: 'skipped' })
   // TAC-401: 'skipped' by default, matching its sibling above.
   verifyProsePromiseStageMock.mockResolvedValue({ status: 'skipped' })
-  verifyCancellationClaimStageMock.mockResolvedValue({ resolution: { status: 'none' }, claim: 'clean' })
-  optedOutMaybeSingleMock.mockResolvedValue({ data: { opted_out_at: null }, error: null })
+  verifyCancellationClaimStageMock.mockResolvedValue({
+    resolution: { status: 'none' },
+    claim: 'clean',
+  })
+  optedOutMaybeSingleMock.mockResolvedValue({
+    data: { opted_out_at: null },
+    error: null,
+  })
 })
 
 describe('handleHoldingMessage (TAC-308)', () => {
@@ -186,7 +204,11 @@ describe('handleHoldingMessage (TAC-308)', () => {
       pendingQuestion: QUESTION,
       questionMessageId: QUESTION_MESSAGE_ID,
     })
-    expect(r).toEqual({ status: 'sent', outboundMessageId: 'out-1', usedFallback: false })
+    expect(r).toEqual({
+      status: 'sent',
+      outboundMessageId: 'out-1',
+      usedFallback: false,
+    })
     expect(generateStageMock).toHaveBeenCalledTimes(1)
     expect(scheduleAndSendMock).toHaveBeenCalledTimes(1)
   })
@@ -217,10 +239,12 @@ describe('handleHoldingMessage (TAC-308)', () => {
   // pin the value rather than just "falsy".
   it('passes an empty array, not null, so the no-knowledge framing still renders', async () => {
     let seenKnowledgeCorpus: unknown
-    generateStageMock.mockImplementationOnce(async (ctx: { knowledgeCorpus: unknown }) => {
-      seenKnowledgeCorpus = structuredClone(ctx.knowledgeCorpus)
-      return goodGeneration()
-    })
+    generateStageMock.mockImplementationOnce(
+      async (ctx: { knowledgeCorpus: unknown }) => {
+        seenKnowledgeCorpus = structuredClone(ctx.knowledgeCorpus)
+        return goodGeneration()
+      },
+    )
     await handleHoldingMessage({
       venueId: 'venue-1',
       guestId: 'guest-1',
@@ -245,7 +269,9 @@ describe('handleHoldingMessage (TAC-308)', () => {
       pendingQuestion: QUESTION,
       questionMessageId: QUESTION_MESSAGE_ID,
     })
-    const ctxUsed = generateStageMock.mock.calls[0]?.[0] as { pendingQuestion: unknown }
+    const ctxUsed = generateStageMock.mock.calls[0]?.[0] as {
+      pendingQuestion: unknown
+    }
     expect(ctxUsed.pendingQuestion).toEqual({
       question: QUESTION.question,
       askedAt: QUESTION.askedAt,
@@ -260,12 +286,18 @@ describe('handleHoldingMessage (TAC-308)', () => {
       pendingQuestion: QUESTION,
       questionMessageId: QUESTION_MESSAGE_ID,
     })
-    expect(scheduleAndSendMock.mock.calls[0]?.[2]).toMatchObject({ skipHumanFeelDelay: true })
+    expect(scheduleAndSendMock.mock.calls[0]?.[2]).toMatchObject({
+      skipHumanFeelDelay: true,
+    })
   })
 
   it('retries generation once when the first attempt is refused', async () => {
     generateStageMock
-      .mockResolvedValueOnce({ status: 'refused', attemptScores: [0.2], finalScore: 0.2 })
+      .mockResolvedValueOnce({
+        status: 'refused',
+        attemptScores: [0.2],
+        finalScore: 0.2,
+      })
       .mockResolvedValueOnce(goodGeneration())
     const r = await handleHoldingMessage({
       venueId: 'venue-1',
@@ -322,7 +354,9 @@ describe('handleHoldingMessage (TAC-308)', () => {
     })
     expect(generateStageMock).toHaveBeenCalledTimes(2)
     expect(r).toMatchObject({ status: 'sent', usedFallback: true })
-    const sentGeneration = scheduleAndSendMock.mock.calls[0]?.[1] as { body: string }
+    const sentGeneration = scheduleAndSendMock.mock.calls[0]?.[1] as {
+      body: string
+    }
     expect(sentGeneration.body).toBe(FALLBACK_HOLDING_BODY)
   })
 
@@ -357,7 +391,9 @@ describe('handleHoldingMessage (TAC-308)', () => {
       pendingQuestion: QUESTION,
       questionMessageId: QUESTION_MESSAGE_ID,
     })
-    const sentGeneration = scheduleAndSendMock.mock.calls[0]?.[1] as { voiceFidelity: number }
+    const sentGeneration = scheduleAndSendMock.mock.calls[0]?.[1] as {
+      voiceFidelity: number
+    }
     expect(sentGeneration.voiceFidelity).toBe(0)
   })
 
@@ -492,7 +528,9 @@ describe('handleHoldingMessage — grounding backstop (TAC-376)', () => {
     expect(generateStageMock).toHaveBeenCalledTimes(2)
     expect(verifyGroundingStageMock).toHaveBeenCalledTimes(2)
     expect(r).toMatchObject({ status: 'sent', usedFallback: true })
-    const sentGeneration = scheduleAndSendMock.mock.calls[0]?.[1] as { body: string }
+    const sentGeneration = scheduleAndSendMock.mock.calls[0]?.[1] as {
+      body: string
+    }
     expect(sentGeneration.body).toBe(FALLBACK_HOLDING_BODY)
   })
 
@@ -532,7 +570,9 @@ describe('handleHoldingMessage — grounding backstop (TAC-376)', () => {
     expect(generateStageMock).toHaveBeenCalledTimes(2)
     expect(verifyGroundingStageMock).toHaveBeenCalledTimes(2)
     expect(r).toMatchObject({ status: 'sent', usedFallback: true })
-    const sentGeneration = scheduleAndSendMock.mock.calls[0]?.[1] as { body: string }
+    const sentGeneration = scheduleAndSendMock.mock.calls[0]?.[1] as {
+      body: string
+    }
     expect(sentGeneration.body).toBe(FALLBACK_HOLDING_BODY)
   })
 
@@ -573,7 +613,10 @@ describe('handleHoldingMessage — suppression + persistence (TAC-308 review)', 
   // Fails CLOSED: an unreadable opt-out state suppresses. A few minutes more
   // silence beats messaging someone who left.
   it('suppresses when the opt-out check itself errors', async () => {
-    optedOutMaybeSingleMock.mockResolvedValue({ data: null, error: { message: 'db down' } })
+    optedOutMaybeSingleMock.mockResolvedValue({
+      data: null,
+      error: { message: 'db down' },
+    })
     const r = await handleHoldingMessage({
       venueId: 'venue-1',
       guestId: 'guest-1',
@@ -589,7 +632,11 @@ describe('handleHoldingMessage — suppression + persistence (TAC-308 review)', 
   it('suppresses for a venue that holds all outbound', async () => {
     buildRuntimeContextMock.mockResolvedValue({
       ...makeCtx(),
-      venue: { id: 'venue-1', timezone: 'America/Los_Angeles', holdAllOutbound: true },
+      venue: {
+        id: 'venue-1',
+        timezone: 'America/Los_Angeles',
+        holdAllOutbound: true,
+      },
     })
     const r = await handleHoldingMessage({
       venueId: 'venue-1',
@@ -635,7 +682,10 @@ describe('handleHoldingMessage — suppression + persistence (TAC-308 review)', 
         id: 'venue-1',
         timezone: 'America/Los_Angeles',
         holdAllOutbound: false,
-        approvalPolicy: { default: 'auto_send', perCategory: { manual: 'operator_approval' } },
+        approvalPolicy: {
+          default: 'auto_send',
+          perCategory: { manual: 'operator_approval' },
+        },
       },
     })
     const r = await handleHoldingMessage({
@@ -654,7 +704,10 @@ describe('handleHoldingMessage — suppression + persistence (TAC-308 review)', 
         id: 'venue-1',
         timezone: 'America/Los_Angeles',
         holdAllOutbound: false,
-        approvalPolicy: { default: 'auto_send', perCategory: { comp_complaint: 'operator_approval' } },
+        approvalPolicy: {
+          default: 'auto_send',
+          perCategory: { comp_complaint: 'operator_approval' },
+        },
       },
     })
     const r = await handleHoldingMessage({
@@ -694,7 +747,10 @@ describe('handleHoldingMessage — Instagram (TAC-469)', () => {
     })
 
   beforeEach(() => {
-    buildRuntimeContextMock.mockResolvedValue({ ...makeCtx(), conversationChannel: 'instagram' })
+    buildRuntimeContextMock.mockResolvedValue({
+      ...makeCtx(),
+      conversationChannel: 'instagram',
+    })
   })
 
   it('sends through the Instagram arm, checking whether the question already has a reply, and writes no card', async () => {
@@ -706,7 +762,11 @@ describe('handleHoldingMessage — Instagram (TAC-469)', () => {
       bubbleCount: 1,
       undelivered: null,
     })
-    expect(await run()).toEqual({ status: 'sent', outboundMessageId: 'ig-1', usedFallback: false })
+    expect(await run()).toEqual({
+      status: 'sent',
+      outboundMessageId: 'ig-1',
+      usedFallback: false,
+    })
     expect(scheduleAndSendMock).not.toHaveBeenCalled()
     expect(dispatchInstagramReplyMock).toHaveBeenCalledWith(
       expect.anything(),
@@ -722,12 +782,25 @@ describe('handleHoldingMessage — Instagram (TAC-469)', () => {
   })
 
   it('is suppressed, not failed, when staff already answered the question in the app', async () => {
-    dispatchInstagramReplyMock.mockResolvedValue({ kind: 'superseded', byMessageId: 'echo-1' })
-    expect(await run()).toEqual({ status: 'suppressed', reason: 'answered_by_hand' })
+    dispatchInstagramReplyMock.mockResolvedValue({
+      kind: 'superseded',
+      byMessageId: 'echo-1',
+    })
+    expect(await run()).toEqual({
+      status: 'suppressed',
+      reason: 'answered_by_hand',
+    })
   })
 
   it('fails when the holding message could not go out (the card is already there)', async () => {
-    dispatchInstagramReplyMock.mockResolvedValue({ kind: 'not_sent', reason: 'window_closed_by_gate' })
-    expect(await run()).toEqual({ status: 'failed', stage: 'send', error: 'window_closed_by_gate' })
+    dispatchInstagramReplyMock.mockResolvedValue({
+      kind: 'not_sent',
+      reason: 'window_closed_by_gate',
+    })
+    expect(await run()).toEqual({
+      status: 'failed',
+      stage: 'send',
+      error: 'window_closed_by_gate',
+    })
   })
 })

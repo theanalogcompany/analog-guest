@@ -35,11 +35,20 @@ vi.mock('@/lib/rag', () => ({
   loadVoicePack: vi.fn(),
 }))
 vi.mock('@/lib/observability', () => ({
-  noopAgentTrace: { id: '', captureContent: false, span: () => ({}), update: () => {}, flushAsync: async () => {} },
+  noopAgentTrace: {
+    id: '',
+    captureContent: false,
+    span: () => ({}),
+    update: () => {},
+    flushAsync: async () => {},
+  },
 }))
 
 import { buildRuntimeContext } from '@/lib/agent/build-runtime-context'
-import { buildAiRuntime, retrieveKnowledgeWithContextStage } from '@/lib/agent/stages'
+import {
+  buildAiRuntime,
+  retrieveKnowledgeWithContextStage,
+} from '@/lib/agent/stages'
 import {
   classifyMessage,
   generateMessage,
@@ -56,7 +65,11 @@ import { regenerateWithCritique } from './regenerate-with-critique'
 // exercise the catch path.
 const NO_UNGROUNDED_CLAIM = {
   ok: true as const,
-  data: { hasUngroundedClaim: false, ungroundedClaims: [], promptVersion: 'v1.0.0' },
+  data: {
+    hasUngroundedClaim: false,
+    ungroundedClaims: [],
+    promptVersion: 'v1.0.0',
+  },
 }
 
 const VENUE_ID = '11111111-1111-4111-8111-111111111111'
@@ -80,7 +93,10 @@ function chunk(id: string, similarity: number) {
 /** The knowledge chunks the generator was actually handed. */
 function knowledgeHandedToGenerator() {
   const call = vi.mocked(generateMessage).mock.calls.at(-1)
-  return (call?.[0] as { knowledgeChunks?: { id: string }[] } | undefined)?.knowledgeChunks ?? []
+  return (
+    (call?.[0] as { knowledgeChunks?: { id: string }[] } | undefined)
+      ?.knowledgeChunks ?? []
+  )
 }
 const INBOUND_ID = '33333333-3333-4333-8333-333333333333'
 const GUEST_ID = '44444444-4444-4444-8444-444444444444'
@@ -168,7 +184,11 @@ const baseCtx = {
   guest: { id: GUEST_ID },
   conversationChannel: 'text' as const,
   recentMessages: [
-    { direction: 'inbound' as const, body: 'hi', createdAt: new Date('2026-05-08T09:55:00Z') },
+    {
+      direction: 'inbound' as const,
+      body: 'hi',
+      createdAt: new Date('2026-05-08T09:55:00Z'),
+    },
   ],
   recognition: { state: 'returning' as const },
   recentVisits: [],
@@ -177,7 +197,13 @@ const baseCtx = {
   corpus: null,
   knowledgeCorpus: null,
   classification: null,
-  trace: { id: '', captureContent: false, span: () => ({}), update: () => {}, flushAsync: async () => {} },
+  trace: {
+    id: '',
+    captureContent: false,
+    span: () => ({}),
+    update: () => {},
+    flushAsync: async () => {},
+  },
 }
 
 beforeEach(() => {
@@ -277,7 +303,9 @@ describe('regenerateWithCritique — error paths up front', () => {
 describe('regenerateWithCritique — crisis-safety refusal (TAC-348)', () => {
   beforeEach(() => {
     vi.mocked(createAdminClient).mockReturnValue(
-      makeAdminMock(newDbState()) as unknown as ReturnType<typeof createAdminClient>,
+      makeAdminMock(newDbState()) as unknown as ReturnType<
+        typeof createAdminClient
+      >,
     )
     vi.mocked(buildRuntimeContext).mockResolvedValue(
       baseCtx as unknown as Awaited<ReturnType<typeof buildRuntimeContext>>,
@@ -290,7 +318,7 @@ describe('regenerateWithCritique — crisis-safety refusal (TAC-348)', () => {
         reasoning: 'r',
         crisisSafety: true,
         correctsPendingReply: false,
-        promptVersion: 'v1.70.0',
+        promptVersion: 'v1.75.0',
       },
     })
   })
@@ -322,7 +350,9 @@ describe('regenerateWithCritique — crisis-safety refusal (TAC-348)', () => {
 describe('regenerateWithCritique — happy path', () => {
   beforeEach(() => {
     vi.mocked(createAdminClient).mockReturnValue(
-      makeAdminMock(newDbState()) as unknown as ReturnType<typeof createAdminClient>,
+      makeAdminMock(newDbState()) as unknown as ReturnType<
+        typeof createAdminClient
+      >,
     )
     vi.mocked(buildRuntimeContext).mockResolvedValue(
       baseCtx as unknown as Awaited<ReturnType<typeof buildRuntimeContext>>,
@@ -377,12 +407,15 @@ describe('regenerateWithCritique — happy path', () => {
         unverifiedUrls: [],
         requiresOperatorApproval: false,
         approvalReason: '',
-    complaintIntent: 'none' as const,
-    knowledgeGap: false,
+        complaintIntent: 'none' as const,
+        knowledgeGap: false,
         contextUpdate: {},
         commitment: {},
         arrivalCapture: {},
         cancelsCommitmentId: '',
+        intentionQuestion: '',
+        closedTheConversation: false,
+        intentionQuestionDuplicateStripped: false,
         attempts: 1,
         attemptScores: [0.85],
         attemptHistory: [],
@@ -392,7 +425,8 @@ describe('regenerateWithCritique — happy path', () => {
         // line could be DELETED with all 20 tests still passing — proved by
         // mutation during code review. An empty string is indistinguishable
         // from a missing field at the assertion boundary.
-        userPrompt: '## Right now\n- Status: OPEN right now, closes at 3:00 PM.',
+        userPrompt:
+          '## Right now\n- Status: OPEN right now, closes at 3:00 PM.',
         promptVersion: 'v1.8.0',
         cacheReadTokens: 0,
         cacheWriteTokens: 0,
@@ -415,7 +449,8 @@ describe('regenerateWithCritique — happy path', () => {
     })
     expect(vi.mocked(verifyGrounding)).toHaveBeenCalledWith(
       expect.objectContaining({
-        runtimeContext: '## Right now\n- Status: OPEN right now, closes at 3:00 PM.',
+        runtimeContext:
+          '## Right now\n- Status: OPEN right now, closes at 3:00 PM.',
       }),
     )
   })
@@ -471,7 +506,11 @@ describe('regenerateWithCritique — happy path', () => {
         }),
       ) as unknown as ReturnType<typeof createAdminClient>,
     )
-    await regenerateWithCritique({ venueId: VENUE_ID, originalMessageId: OUTBOUND_ID, critique: 'x' })
+    await regenerateWithCritique({
+      venueId: VENUE_ID,
+      originalMessageId: OUTBOUND_ID,
+      critique: 'x',
+    })
     const call = vi.mocked(buildRuntimeContext).mock.calls[0][0]
     expect(call.currentMessage?.channel).toBe('instagram')
   })
@@ -481,8 +520,14 @@ describe('regenerateWithCritique — happy path', () => {
       ...baseCtx,
       conversationChannel: 'instagram',
     } as unknown as Awaited<ReturnType<typeof buildRuntimeContext>>)
-    await regenerateWithCritique({ venueId: VENUE_ID, originalMessageId: OUTBOUND_ID, critique: 'x' })
-    expect(generateMessage).toHaveBeenCalledWith(expect.objectContaining({ channel: 'instagram' }))
+    await regenerateWithCritique({
+      venueId: VENUE_ID,
+      originalMessageId: OUTBOUND_ID,
+      critique: 'x',
+    })
+    expect(generateMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ channel: 'instagram' }),
+    )
   })
 
   // The admin mock ignores select()'s argument, so only the source shows the
@@ -491,9 +536,16 @@ describe('regenerateWithCritique — happy path', () => {
   // handle-inbound's loadInbound, and a regen of a scan turn that arms nothing
   // answers a different question than the generation it is supposed to replay.
   it('selects the channel and referral columns when loading the triggering inbound', async () => {
-    const src = await readFile(new URL('./regenerate-with-critique.ts', import.meta.url), 'utf-8')
+    const src = await readFile(
+      new URL('./regenerate-with-critique.ts', import.meta.url),
+      'utf-8',
+    )
     expect(src).toContain(
-      ".select('id, body, created_at, provider_message_id, direction, channel, referral_source')",
+      [
+        '.select(',
+        "      'id, body, created_at, provider_message_id, direction, channel, referral_source',",
+        '    )',
+      ].join('\n'),
     )
     expect(src).toContain('referralSource: load.data.inbound.referral_source,')
   })
@@ -518,7 +570,9 @@ describe('regenerateWithCritique — happy path', () => {
     })
     expect(generateMessage).toHaveBeenCalled()
     const genCall = vi.mocked(generateMessage).mock.calls[0][0]
-    expect(genCall.runtime.critiqueToIncorporate).toBe('too eager — drop the exclamation')
+    expect(genCall.runtime.critiqueToIncorporate).toBe(
+      'too eager — drop the exclamation',
+    )
   })
 
   it('forwards recentMessages and guestState to classifyMessage (TAC-240)', async () => {
@@ -632,7 +686,11 @@ describe('regenerateWithCritique — happy path', () => {
     } as unknown as Awaited<ReturnType<typeof buildRuntimeContext>>)
     vi.mocked(verifyMechanicOffer).mockResolvedValue({
       ok: true,
-      data: { offersGatedMechanic: true, mechanicId: 'mech-1', promptVersion: 'v1.0.0' },
+      data: {
+        offersGatedMechanic: true,
+        mechanicId: 'mech-1',
+        promptVersion: 'v1.0.0',
+      },
     })
 
     const r = await regenerateWithCritique({
@@ -654,7 +712,11 @@ describe('regenerateWithCritique — happy path', () => {
     } as unknown as Awaited<ReturnType<typeof buildRuntimeContext>>)
     vi.mocked(verifyMechanicOffer).mockResolvedValue({
       ok: true,
-      data: { offersGatedMechanic: false, mechanicId: 'none', promptVersion: 'v1.0.0' },
+      data: {
+        offersGatedMechanic: false,
+        mechanicId: 'none',
+        promptVersion: 'v1.0.0',
+      },
     })
 
     const r = await regenerateWithCritique({
@@ -719,6 +781,9 @@ describe('regenerateWithCritique — happy path', () => {
         commitment: {},
         arrivalCapture: {},
         cancelsCommitmentId: '',
+        intentionQuestion: '',
+        closedTheConversation: false,
+        intentionQuestionDuplicateStripped: false,
         attempts: 1,
         attemptScores: [0.85],
         attemptHistory: [],
@@ -772,14 +837,15 @@ describe('regenerateWithCritique — happy path', () => {
 // 'lets EACH arm take its own tag-preference fallback'. What this file still
 // owns is that regen DELEGATES, asserted at the bottom of the file.
 
-
-// Reversed from 'corpus thinness' when decision 0007 made voice a static
+// Reversed from 'corpus thinness' when decision 0008 made voice a static
 // pack: there is no similarity left to be thin, so the closed failure modes
 // are a pack that will not load and a venue with no corpus at all.
 describe('regenerateWithCritique — voice pack failures', () => {
   beforeEach(() => {
     vi.mocked(createAdminClient).mockReturnValue(
-      makeAdminMock(newDbState()) as unknown as ReturnType<typeof createAdminClient>,
+      makeAdminMock(newDbState()) as unknown as ReturnType<
+        typeof createAdminClient
+      >,
     )
     vi.mocked(buildRuntimeContext).mockResolvedValue(
       baseCtx as unknown as Awaited<ReturnType<typeof buildRuntimeContext>>,
@@ -853,7 +919,9 @@ describe('regenerateWithCritique — voice pack failures', () => {
 describe('regenerateWithCritique — knowledge retrieval delegates to stages.ts (TAC-366, TAC-547)', () => {
   beforeEach(() => {
     vi.mocked(createAdminClient).mockReturnValue(
-      makeAdminMock(newDbState()) as unknown as ReturnType<typeof createAdminClient>,
+      makeAdminMock(newDbState()) as unknown as ReturnType<
+        typeof createAdminClient
+      >,
     )
     vi.mocked(buildRuntimeContext).mockResolvedValue(
       baseCtx as unknown as Awaited<ReturnType<typeof buildRuntimeContext>>,
@@ -882,7 +950,9 @@ describe('regenerateWithCritique — knowledge retrieval delegates to stages.ts 
         },
       ],
     })
-    vi.mocked(buildAiRuntime).mockReturnValue({} as ReturnType<typeof buildAiRuntime>)
+    vi.mocked(buildAiRuntime).mockReturnValue(
+      {} as ReturnType<typeof buildAiRuntime>,
+    )
     vi.mocked(generateMessage).mockResolvedValue({
       ok: true,
       data: {
@@ -898,6 +968,9 @@ describe('regenerateWithCritique — knowledge retrieval delegates to stages.ts 
         commitment: {},
         arrivalCapture: {},
         cancelsCommitmentId: '',
+        intentionQuestion: '',
+        closedTheConversation: false,
+        intentionQuestionDuplicateStripped: false,
         userPrompt: 'p',
         systemPrompt: 's',
         dashViolationPersisted: false,
@@ -917,7 +990,8 @@ describe('regenerateWithCritique — knowledge retrieval delegates to stages.ts 
     })
 
     expect(retrieveKnowledgeWithContextStage).toHaveBeenCalledTimes(1)
-    const [, category, query] = vi.mocked(retrieveKnowledgeWithContextStage).mock.calls[0]
+    const [, category, query] = vi.mocked(retrieveKnowledgeWithContextStage)
+      .mock.calls[0]
     expect(category).toBe('new_question')
     expect(query).toBe(INBOUND_BODY)
   })
@@ -956,8 +1030,13 @@ describe('regenerateWithCritique — knowledge retrieval delegates to stages.ts 
     // removed and TAC-547 deleted, so the guarantee is asserted at the
     // source. Same technique as handle-operator-decline.test.ts's
     // persist-not-send import check.
-    const src = await readFile(new URL('./regenerate-with-critique.ts', import.meta.url), 'utf8')
-    const withoutComments = src.replace(/\/\/.*$/gm, '').replace(/\/\*[\s\S]*?\*\//g, '')
+    const src = await readFile(
+      new URL('./regenerate-with-critique.ts', import.meta.url),
+      'utf8',
+    )
+    const withoutComments = src
+      .replace(/\/\/.*$/gm, '')
+      .replace(/\/\*[\s\S]*?\*\//g, '')
 
     expect(withoutComments).toMatch(
       /import\s*{[^}]*\bretrieveKnowledgeWithContextStage\b[^}]*}\s*from\s*'@\/lib\/agent\/stages'/,

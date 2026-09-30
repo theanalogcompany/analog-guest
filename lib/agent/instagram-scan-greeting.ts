@@ -34,6 +34,7 @@
 import { randomUUID } from 'node:crypto'
 
 import { createAdminClient } from '@/lib/db/admin'
+import { logger } from '@/lib/observability/logger'
 import { VenueHoursSchema, type VenueInfo } from '@/lib/schemas'
 import { isVenueProcessingHalted } from '@/lib/venues/status'
 import { captureInstagramScanGreeting } from '@/lib/analytics/posthog'
@@ -118,8 +119,16 @@ async function loadVenueClock(
   venueId: string,
 ): Promise<VenueClock> {
   const [venue, config] = await Promise.all([
-    supabase.from('venues').select('timezone, status').eq('id', venueId).maybeSingle(),
-    supabase.from('venue_configs').select('venue_info').eq('venue_id', venueId).maybeSingle(),
+    supabase
+      .from('venues')
+      .select('timezone, status')
+      .eq('id', venueId)
+      .maybeSingle(),
+    supabase
+      .from('venue_configs')
+      .select('venue_info')
+      .eq('venue_id', venueId)
+      .maybeSingle(),
   ])
 
   const timezone =
@@ -129,8 +138,14 @@ async function loadVenueClock(
 
   let hours: VenueInfo['hours'] | null = null
   const rawInfo = config.data?.venue_info
-  if (rawInfo != null && typeof rawInfo === 'object' && !Array.isArray(rawInfo)) {
-    const parsed = VenueHoursSchema.safeParse((rawInfo as Record<string, unknown>).hours ?? {})
+  if (
+    rawInfo != null &&
+    typeof rawInfo === 'object' &&
+    !Array.isArray(rawInfo)
+  ) {
+    const parsed = VenueHoursSchema.safeParse(
+      (rawInfo as Record<string, unknown>).hours ?? {},
+    )
     hours = parsed.success ? parsed.data : null
   }
 
@@ -166,27 +181,36 @@ async function guestWroteSince(
     .limit(1)
     .maybeSingle()
   if (error) {
-    console.warn('[scan-greeting] inbound-since read failed; suppressing this greeting', {
-      scanArrivalId: row.id,
-      error: error.message,
-    })
+    logger.warn(
+      '[scan-greeting] inbound-since read failed; suppressing this greeting',
+      {
+        scanArrivalId: row.id,
+        error: error.message,
+      },
+    )
     return true
   }
   return data !== null
 }
 
 /** Fails CLOSED, for the reason handle-holding-message.ts gives: nobody sends to someone who left. */
-async function isOptedOut(supabase: AdminSupabaseClient, guestId: string): Promise<boolean> {
+async function isOptedOut(
+  supabase: AdminSupabaseClient,
+  guestId: string,
+): Promise<boolean> {
   const { data, error } = await supabase
     .from('guests')
     .select('opted_out_at')
     .eq('id', guestId)
     .maybeSingle()
   if (error) {
-    console.warn('[scan-greeting] opt-out read failed; suppressing this greeting', {
-      guestId,
-      error: error.message,
-    })
+    logger.warn(
+      '[scan-greeting] opt-out read failed; suppressing this greeting',
+      {
+        guestId,
+        error: error.message,
+      },
+    )
     return true
   }
   return data?.opted_out_at != null
@@ -254,7 +278,9 @@ export async function processDueScanGreetings(
 
   const due = await loadDueScanArrivals(supabase)
   if (!due.ok) {
-    console.error('[scan-greeting] could not read pending scans', { error: due.error })
+    logger.error('[scan-greeting] could not read pending scans', {
+      error: due.error,
+    })
     result.errored += 1
     return result
   }
@@ -297,7 +323,10 @@ export async function processDueScanGreetings(
       // rather than by each caller remembering it.
       if (
         clock.timezone !== null &&
-        isVenueClosed({ venueInfo: { hours: clock.hours ?? {} }, timezone: clock.timezone }, now)
+        isVenueClosed(
+          { venueInfo: { hours: clock.hours ?? {} }, timezone: clock.timezone },
+          now,
+        )
       ) {
         await suppress(supabase, row, 'venue_closed', now)
         bump('venue_closed')
@@ -307,7 +336,10 @@ export async function processDueScanGreetings(
       // The venue-local day the claim is keyed on. An unreadable timezone
       // falls back to UTC rather than refusing: the guard would otherwise be
       // switched off entirely for that venue, and a UTC day is still one day.
-      const localDate = (clock.timezone !== null ? venueLocalDate(now, clock.timezone) : null) ??
+      const localDate =
+        (clock.timezone !== null
+          ? venueLocalDate(now, clock.timezone)
+          : null) ??
         venueLocalDate(now, 'UTC') ??
         now.toISOString().slice(0, 10)
 
@@ -322,7 +354,10 @@ export async function processDueScanGreetings(
         continue
       }
       if (claim.status === 'failed') {
-        console.error('[scan-greeting] claim failed', { scanArrivalId: row.id, error: claim.error })
+        logger.error('[scan-greeting] claim failed', {
+          scanArrivalId: row.id,
+          error: claim.error,
+        })
         result.errored += 1
         continue
       }
@@ -355,12 +390,16 @@ export async function processDueScanGreetings(
       result.greeted += 1
     } catch (e) {
       result.errored += 1
-      console.error('[scan-greeting] row threw', {
+      logger.error('[scan-greeting] row threw', {
         scanArrivalId: row.id,
         error: e instanceof Error ? e.message : String(e),
       })
-      await resolveScanArrival(supabase, row.id, 'errored', now).catch(() => undefined)
-      await recordLedger(row, ledgerEntryForUnexpected(e), null).catch(() => undefined)
+      await resolveScanArrival(supabase, row.id, 'errored', now).catch(
+        () => undefined,
+      )
+      await recordLedger(row, ledgerEntryForUnexpected(e), null).catch(
+        () => undefined,
+      )
     }
   }
 

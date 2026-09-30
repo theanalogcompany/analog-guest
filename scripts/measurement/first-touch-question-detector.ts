@@ -67,7 +67,6 @@ const ORDER_PATTERNS: readonly RegExp[] = [
   /\bwhat did you end up with\b/,
 ]
 
-
 // TAC-519. Deliberately narrow: an explicit apology or an admission that
 // something went wrong, not any mention of a problem. The block's restraint is
 // about the message the venue is SENDING carrying bad news, so it is matched

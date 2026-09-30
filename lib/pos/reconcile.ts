@@ -10,6 +10,7 @@
 // DB.
 
 import { createAdminClient } from '@/lib/db/admin'
+import { logger } from '@/lib/observability/logger'
 import type { RAGResult } from '@/lib/rag/types'
 
 type AdminClient = ReturnType<typeof createAdminClient>
@@ -35,7 +36,10 @@ export async function reconcileTransactionByFingerprint(opts: {
   const supabase = opts.supabase ?? createAdminClient()
 
   if (!opts.cardFingerprint) {
-    return { ok: true, data: { status: 'unmatched', reason: 'no_fingerprint' } }
+    return {
+      ok: true,
+      data: { status: 'unmatched', reason: 'no_fingerprint' },
+    }
   }
 
   const { data: mapping, error: lookupError } = await supabase
@@ -46,7 +50,11 @@ export async function reconcileTransactionByFingerprint(opts: {
     .maybeSingle()
 
   if (lookupError) {
-    return { ok: false, error: lookupError.message, errorCode: 'fingerprint_lookup_failed' }
+    return {
+      ok: false,
+      error: lookupError.message,
+      errorCode: 'fingerprint_lookup_failed',
+    }
   }
   if (!mapping) {
     return { ok: true, data: { status: 'unmatched', reason: 'no_mapping' } }
@@ -66,7 +74,11 @@ export async function reconcileTransactionByFingerprint(opts: {
     .eq('id', opts.transactionId)
 
   if (txnError) {
-    return { ok: false, error: txnError.message, errorCode: 'transaction_update_failed' }
+    return {
+      ok: false,
+      error: txnError.message,
+      errorCode: 'transaction_update_failed',
+    }
   }
 
   // Advance last_visit_at only when this visit is newer (re-delivered or
@@ -90,13 +102,16 @@ export async function reconcileTransactionByFingerprint(opts: {
   if (guestError) {
     // The match itself succeeded; a failed last_visit_at bump is non-fatal
     // (recognition recomputes from transactions regardless). Log, don't fail.
-    console.warn('pos reconcile: last_visit_at update failed', {
+    logger.warn('pos reconcile: last_visit_at update failed', {
       guestId,
       error: guestError.message,
     })
   }
 
-  return { ok: true, data: { status: 'matched', guestId, method: 'card_fingerprint' } }
+  return {
+    ok: true,
+    data: { status: 'matched', guestId, method: 'card_fingerprint' },
+  }
 }
 
 /**
@@ -122,7 +137,11 @@ export async function linkFingerprintToGuest(opts: {
     { onConflict: 'venue_id,card_fingerprint' },
   )
   if (error) {
-    return { ok: false, error: error.message, errorCode: 'fingerprint_link_failed' }
+    return {
+      ok: false,
+      error: error.message,
+      errorCode: 'fingerprint_link_failed',
+    }
   }
   return { ok: true, data: { linked: true } }
 }

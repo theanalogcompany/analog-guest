@@ -5,7 +5,11 @@
 // after the guest has already received the message — turning a successful send
 // into a 500 on the operator's approve. Same reasoning as record.ts's own
 // by-path import one hop away; the hazard does not stop at the first hop.
-import { parseRenderedIntentions, type RenderedIntention } from '@/lib/schemas/rendered-intentions'
+import {
+  parseRenderedIntentions,
+  type RenderedIntention,
+} from '@/lib/schemas/rendered-intentions'
+import { logger } from '@/lib/observability/logger'
 import { INTENTION_DEFINITION_BY_KEY, resolveIntentionKey } from './definitions'
 import type { OpenIntention } from './derive'
 
@@ -28,7 +32,10 @@ import type { OpenIntention } from './derive'
 export function buildRenderedIntentionsPayload(
   open: readonly OpenIntention[],
 ): RenderedIntention[] {
-  return open.map((o) => ({ key: o.key, eligibleAt: o.eligibleAt.toISOString() }))
+  return open.map((o) => ({
+    key: o.key,
+    eligibleAt: o.eligibleAt.toISOString(),
+  }))
 }
 
 /**
@@ -51,19 +58,21 @@ export function buildRenderedIntentionsPayload(
  * open and may be asked again. That is the direction TAC-385 §4 chose: annoying
  * beats invisible.
  */
-export function parseRenderedIntentionsForRecording(value: unknown): OpenIntention[] {
+export function parseRenderedIntentionsForRecording(
+  value: unknown,
+): OpenIntention[] {
   const open: OpenIntention[] = []
   for (const entry of parseRenderedIntentions(value)) {
     const key = resolveIntentionKey(entry.key)
     if (key === null) {
-      console.warn(
+      logger.warn(
         `[rendered-intentions] dropping "${entry.key}": no live intention definition. Not recording it as asked.`,
       )
       continue
     }
     const eligibleAt = new Date(entry.eligibleAt)
     if (!Number.isFinite(eligibleAt.getTime())) {
-      console.warn(
+      logger.warn(
         `[rendered-intentions] dropping "${entry.key}": unparseable eligibleAt "${entry.eligibleAt}".`,
       )
       continue

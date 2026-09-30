@@ -173,10 +173,16 @@ export function resolveEmojiDirective(
 // inner classes cannot match, and the pattern has no mandatory trailing
 // element to force backtracking. Measured linear (a 2000-link ZWJ chain and
 // 100KB of non-emoji text both under a millisecond).
-const EMOJI_BASE = '(?:\\p{Emoji_Presentation}|\\p{Extended_Pictographic}\\uFE0F)'
+const EMOJI_BASE =
+  '(?:\\p{Emoji_Presentation}|\\p{Extended_Pictographic}\\uFE0F)'
 const EMOJI_MODIFIERS = '(?:\\uFE0F|\\u20E3|[\\u{1F3FB}-\\u{1F3FF}])*'
 const EMOJI_CLUSTER =
-  EMOJI_BASE + EMOJI_MODIFIERS + '(?:\\u200D' + EMOJI_BASE + EMOJI_MODIFIERS + ')*'
+  EMOJI_BASE +
+  EMOJI_MODIFIERS +
+  '(?:\\u200D' +
+  EMOJI_BASE +
+  EMOJI_MODIFIERS +
+  ')*'
 const FLAG_SEQUENCE = '[\\u{1F1E6}-\\u{1F1FF}]{2}'
 
 // Global flag, and only ever consumed through String.prototype.match below.

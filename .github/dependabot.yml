@@ -1,0 +1,18 @@
+# Weekly dependency-update PRs. cooldown holds each update back until the
+# release is at least 7 days old, so a compromised or broken release has a
+# window to be yanked before a bump PR ever opens here.
+version: 2
+updates:
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    cooldown:
+      default-days: 7
+    open-pull-requests-limit: 5
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    cooldown:
+      default-days: 7

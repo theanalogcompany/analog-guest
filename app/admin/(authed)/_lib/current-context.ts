@@ -24,7 +24,8 @@ export async function addCurrentContextEntry(input: {
   const supabase = createAdminClient()
 
   const loaded = await loadVenueInfo(supabase, input.venueId)
-  if (!loaded.ok) return { ok: false, error: loaded.error, errorCode: 'db_error' }
+  if (!loaded.ok)
+    return { ok: false, error: loaded.error, errorCode: 'db_error' }
 
   const newEntry: VenueContextNote = {
     id: randomUUID(),
@@ -52,7 +53,11 @@ export async function addCurrentContextEntry(input: {
     .update({ venue_info: toJson(validated.data) })
     .eq('venue_id', input.venueId)
   if (writeErr) {
-    return { ok: false, error: `write failed: ${writeErr.message}`, errorCode: 'db_error' }
+    return {
+      ok: false,
+      error: `write failed: ${writeErr.message}`,
+      errorCode: 'db_error',
+    }
   }
 
   return { ok: true, entry: newEntry }
@@ -60,7 +65,11 @@ export async function addCurrentContextEntry(input: {
 
 export type DropCurrentContextResult =
   | { ok: true }
-  | { ok: false; error: string; errorCode: 'db_error' | 'not_found' | 'invalid_after_merge' }
+  | {
+      ok: false
+      error: string
+      errorCode: 'db_error' | 'not_found' | 'invalid_after_merge'
+    }
 
 export async function dropCurrentContextEntry(input: {
   venueId: string
@@ -69,19 +78,30 @@ export async function dropCurrentContextEntry(input: {
   const supabase = createAdminClient()
 
   const loaded = await loadVenueInfo(supabase, input.venueId)
-  if (!loaded.ok) return { ok: false, error: loaded.error, errorCode: 'db_error' }
+  if (!loaded.ok)
+    return { ok: false, error: loaded.error, errorCode: 'db_error' }
 
   if (!loaded.venueInfo.currentContext.some((e) => e.id === input.entryId)) {
-    return { ok: false, error: `entry not found: ${input.entryId}`, errorCode: 'not_found' }
+    return {
+      ok: false,
+      error: `entry not found: ${input.entryId}`,
+      errorCode: 'not_found',
+    }
   }
 
   const merged = {
     ...loaded.venueInfo,
-    currentContext: loaded.venueInfo.currentContext.filter((e) => e.id !== input.entryId),
+    currentContext: loaded.venueInfo.currentContext.filter(
+      (e) => e.id !== input.entryId,
+    ),
   }
   const validated = VenueInfoSchema.safeParse(merged)
   if (!validated.success) {
-    return { ok: false, error: `venue_info invalid after merge: ${validated.error.message}`, errorCode: 'db_error' }
+    return {
+      ok: false,
+      error: `venue_info invalid after merge: ${validated.error.message}`,
+      errorCode: 'db_error',
+    }
   }
 
   const { error: writeErr } = await supabase
@@ -89,7 +109,11 @@ export async function dropCurrentContextEntry(input: {
     .update({ venue_info: toJson(validated.data) })
     .eq('venue_id', input.venueId)
   if (writeErr) {
-    return { ok: false, error: `write failed: ${writeErr.message}`, errorCode: 'db_error' }
+    return {
+      ok: false,
+      error: `write failed: ${writeErr.message}`,
+      errorCode: 'db_error',
+    }
   }
 
   return { ok: true }
@@ -97,7 +121,11 @@ export async function dropCurrentContextEntry(input: {
 
 export type PromoteCurrentContextResult =
   | { ok: true; knowledgeCorpusId: string }
-  | { ok: false; error: string; errorCode: 'db_error' | 'not_found' | 'embed_failed' }
+  | {
+      ok: false
+      error: string
+      errorCode: 'db_error' | 'not_found' | 'embed_failed'
+    }
 
 /**
  * Convert an expired/malformed currentContext entry into a permanent
@@ -116,11 +144,18 @@ export async function promoteCurrentContextEntry(input: {
   const supabase = createAdminClient()
 
   const loaded = await loadVenueInfo(supabase, input.venueId)
-  if (!loaded.ok) return { ok: false, error: loaded.error, errorCode: 'db_error' }
+  if (!loaded.ok)
+    return { ok: false, error: loaded.error, errorCode: 'db_error' }
 
-  const entry = loaded.venueInfo.currentContext.find((e) => e.id === input.entryId)
+  const entry = loaded.venueInfo.currentContext.find(
+    (e) => e.id === input.entryId,
+  )
   if (!entry) {
-    return { ok: false, error: `entry not found: ${input.entryId}`, errorCode: 'not_found' }
+    return {
+      ok: false,
+      error: `entry not found: ${input.entryId}`,
+      errorCode: 'not_found',
+    }
   }
 
   const { data: inserted, error: insertErr } = await supabase
@@ -136,16 +171,29 @@ export async function promoteCurrentContextEntry(input: {
     .select('id')
     .single()
   if (insertErr || !inserted) {
-    return { ok: false, error: `insert failed: ${insertErr?.message ?? 'no row'}`, errorCode: 'db_error' }
+    return {
+      ok: false,
+      error: `insert failed: ${insertErr?.message ?? 'no row'}`,
+      errorCode: 'db_error',
+    }
   }
 
   const embedResult = await ingestKnowledgeCorpusEntry(inserted.id)
   if (!embedResult.ok) {
-    const { error: cleanupErr } = await supabase.from('knowledge_corpus').delete().eq('id', inserted.id)
+    const { error: cleanupErr } = await supabase
+      .from('knowledge_corpus')
+      .delete()
+      .eq('id', inserted.id)
     if (cleanupErr) {
       console.error(
         '[current-context] promote: cleanup-after-embed-failure failed; row stranded',
-        { venueId: input.venueId, entryId: input.entryId, knowledgeCorpusId: inserted.id, embedError: embedResult.error, cleanupError: cleanupErr.message },
+        {
+          venueId: input.venueId,
+          entryId: input.entryId,
+          knowledgeCorpusId: inserted.id,
+          embedError: embedResult.error,
+          cleanupError: cleanupErr.message,
+        },
       )
     }
     return {
@@ -167,13 +215,20 @@ export async function promoteCurrentContextEntry(input: {
   if (!reloaded.ok) {
     console.error(
       '[current-context] promote: venue_info re-read failed after promotion; entry left in queue, knowledge row already live',
-      { venueId: input.venueId, entryId: input.entryId, knowledgeCorpusId: inserted.id, error: reloaded.error },
+      {
+        venueId: input.venueId,
+        entryId: input.entryId,
+        knowledgeCorpusId: inserted.id,
+        error: reloaded.error,
+      },
     )
     return { ok: false, error: reloaded.error, errorCode: 'db_error' }
   }
   const merged = {
     ...reloaded.venueInfo,
-    currentContext: reloaded.venueInfo.currentContext.filter((e) => e.id !== input.entryId),
+    currentContext: reloaded.venueInfo.currentContext.filter(
+      (e) => e.id !== input.entryId,
+    ),
   }
   const validated = VenueInfoSchema.safeParse(merged)
   if (!validated.success) {
@@ -182,9 +237,18 @@ export async function promoteCurrentContextEntry(input: {
     // note), not a loss — same accepted failure direction as split/merge.
     console.error(
       '[current-context] promote: venue_info invalid after removing promoted entry; entry left in queue, knowledge row already live',
-      { venueId: input.venueId, entryId: input.entryId, knowledgeCorpusId: inserted.id, error: validated.error.message },
+      {
+        venueId: input.venueId,
+        entryId: input.entryId,
+        knowledgeCorpusId: inserted.id,
+        error: validated.error.message,
+      },
     )
-    return { ok: false, error: `venue_info invalid after merge: ${validated.error.message}`, errorCode: 'db_error' }
+    return {
+      ok: false,
+      error: `venue_info invalid after merge: ${validated.error.message}`,
+      errorCode: 'db_error',
+    }
   }
 
   const { error: writeErr } = await supabase
@@ -194,9 +258,18 @@ export async function promoteCurrentContextEntry(input: {
   if (writeErr) {
     console.error(
       '[current-context] promote: venue_info write failed after promotion; entry left in queue, knowledge row already live',
-      { venueId: input.venueId, entryId: input.entryId, knowledgeCorpusId: inserted.id, error: writeErr.message },
+      {
+        venueId: input.venueId,
+        entryId: input.entryId,
+        knowledgeCorpusId: inserted.id,
+        error: writeErr.message,
+      },
     )
-    return { ok: false, error: `venue_info write failed: ${writeErr.message}`, errorCode: 'db_error' }
+    return {
+      ok: false,
+      error: `venue_info write failed: ${writeErr.message}`,
+      errorCode: 'db_error',
+    }
   }
 
   return { ok: true, knowledgeCorpusId: inserted.id }

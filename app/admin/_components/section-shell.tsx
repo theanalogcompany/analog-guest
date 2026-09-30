@@ -1,5 +1,11 @@
 import type { ReactNode } from 'react'
-import { Card, CardAction, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import {
+  Card,
+  CardAction,
+  CardContent,
+  CardHeader,
+  CardTitle,
+} from '@/components/ui/card'
 
 // Shared card chrome for Command Center sections. Originally the venue page's
 // own wrapper (TAC-343 Stage A); promoted here in TAC-381 because the
@@ -28,7 +34,9 @@ export function SectionShell({
   return (
     <Card className="block gap-0 rounded-[2px] border-stone-light/60 bg-paper py-0 shadow-none">
       <CardHeader className="border-b border-stone-light/60 py-4">
-        <CardTitle className="font-fraunces text-lg text-ink">{title}</CardTitle>
+        <CardTitle className="font-fraunces text-lg text-ink">
+          {title}
+        </CardTitle>
         {subtitle && <p className="text-xs text-ink-faint">{subtitle}</p>}
         {headerAction && <CardAction>{headerAction}</CardAction>}
       </CardHeader>

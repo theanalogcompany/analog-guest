@@ -84,7 +84,10 @@ describe('venueFilterIds', () => {
   })
 
   it('returns the ids for a grant list', () => {
-    expect(venueFilterIds(grantedVenues([VENUE_A, VENUE_B]))).toEqual([VENUE_A, VENUE_B])
+    expect(venueFilterIds(grantedVenues([VENUE_A, VENUE_B]))).toEqual([
+      VENUE_A,
+      VENUE_B,
+    ])
   })
 
   // A caller that skips venueScopeDeniesAll gets an empty filter, which
@@ -103,7 +106,10 @@ describe('adminVenueScope — the cookie path translation', () => {
   })
 
   it('restricts an admin who does have grants', () => {
-    expect(adminVenueScope([VENUE_A])).toEqual({ kind: 'venues', ids: [VENUE_A] })
+    expect(adminVenueScope([VENUE_A])).toEqual({
+      kind: 'venues',
+      ids: [VENUE_A],
+    })
   })
 
   // The two constructors are handed the SAME input and must disagree. This is
@@ -176,7 +182,8 @@ function sourceFiles(dir: string, out: string[] = []): string[] {
     return out
   }
   for (const entry of entries) {
-    if (entry === 'node_modules' || entry === '.next' || entry === 'sandbox') continue
+    if (entry === 'node_modules' || entry === '.next' || entry === 'sandbox')
+      continue
     const full = join(dir, entry)
     if (statSync(full).isDirectory()) {
       sourceFiles(full, out)

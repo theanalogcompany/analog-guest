@@ -23,7 +23,8 @@ vi.mock('@/lib/auth/verify-jwt', () => ({
 const pendingMock = vi.fn()
 const headsUpMock = vi.fn()
 vi.mock('@/lib/operator', async () => {
-  const actual = await vi.importActual<typeof import('@/lib/operator')>('@/lib/operator')
+  const actual =
+    await vi.importActual<typeof import('@/lib/operator')>('@/lib/operator')
   return {
     ...actual,
     listPendingQueue: (...args: unknown[]) => pendingMock(...args),
@@ -36,7 +37,10 @@ import { grantedVenues } from '@/lib/auth/venue-scope'
 
 const VENUE_A = '00000000-0000-0000-0000-00000000000a'
 
-async function queue(): Promise<{ status: number; body: Record<string, unknown> }> {
+async function queue(): Promise<{
+  status: number
+  body: Record<string, unknown>
+}> {
   const res = await GET(
     new Request('https://example.test/api/operator/queue', {
       method: 'GET',
@@ -44,19 +48,28 @@ async function queue(): Promise<{ status: number; body: Record<string, unknown> 
     }),
     { params: Promise.resolve({}) },
   )
-  return { status: res.status, body: (await res.json()) as Record<string, unknown> }
+  return {
+    status: res.status,
+    body: (await res.json()) as Record<string, unknown>,
+  }
 }
 
 beforeEach(() => {
   vi.clearAllMocks()
-  verifyMock.mockResolvedValue({ operatorId: 'op-1', venueScope: grantedVenues([VENUE_A]) })
+  verifyMock.mockResolvedValue({
+    operatorId: 'op-1',
+    venueScope: grantedVenues([VENUE_A]),
+  })
   pendingMock.mockResolvedValue({ ok: true, drafts: [] })
   headsUpMock.mockResolvedValue({ ok: true, commitments: [] })
 })
 
 describe('GET /api/operator/queue — venue scope (TAC-530)', () => {
   it('passes the operator’s allowlist to BOTH lookups unchanged, including when empty', async () => {
-    verifyMock.mockResolvedValue({ operatorId: 'op-1', venueScope: grantedVenues([]) })
+    verifyMock.mockResolvedValue({
+      operatorId: 'op-1',
+      venueScope: grantedVenues([]),
+    })
     await queue()
     expect(pendingMock).toHaveBeenCalledWith(grantedVenues([]))
     expect(headsUpMock).toHaveBeenCalledWith(grantedVenues([]))
@@ -69,8 +82,14 @@ describe('GET /api/operator/queue — venue scope (TAC-530)', () => {
   })
 
   it('answers a grantless operator with two empty lists, not an error', async () => {
-    verifyMock.mockResolvedValue({ operatorId: 'op-1', venueScope: grantedVenues([]) })
-    expect(await queue()).toEqual({ status: 200, body: { drafts: [], commitments: [] } })
+    verifyMock.mockResolvedValue({
+      operatorId: 'op-1',
+      venueScope: grantedVenues([]),
+    })
+    expect(await queue()).toEqual({
+      status: 200,
+      body: { drafts: [], commitments: [] },
+    })
   })
 
   it('answers 500 when the draft lookup fails', async () => {

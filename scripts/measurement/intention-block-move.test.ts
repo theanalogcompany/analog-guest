@@ -21,7 +21,12 @@ const INTENTIONS_BLOCK = [
   'If nothing fits, let it wait.',
 ].join('\n')
 
-const TAIL = ['Guest name: Sam', 'The guest just sent: "hey"', '', GENERATE_LINE].join('\n')
+const TAIL = [
+  'Guest name: Sam',
+  'The guest just sent: "hey"',
+  '',
+  GENERATE_LINE,
+].join('\n')
 
 function promptOf(blocks: readonly string[]): string {
   return `${blocks.join('\n\n')}\n\n${TAIL}`
@@ -29,7 +34,9 @@ function promptOf(blocks: readonly string[]): string {
 
 describe('splitPromptBlocks', () => {
   it('keeps a block with internal blank lines whole', () => {
-    const parts = splitPromptBlocks(promptOf(['## Right now\nit is 9am', INTENTIONS_BLOCK]))
+    const parts = splitPromptBlocks(
+      promptOf(['## Right now\nit is 9am', INTENTIONS_BLOCK]),
+    )
     expect(parts).toHaveLength(2)
     expect(parts[1]).toContain('If nothing fits, let it wait.')
     // The tail rides on the final element, which has no heading to split on.
@@ -56,7 +63,9 @@ describe('moveIntentionBlockLate', () => {
     expect(r.prompt.indexOf('## Recent conversation')).toBeLessThan(
       r.prompt.indexOf(INTENTIONS_HEADER),
     )
-    expect(r.prompt.indexOf(INTENTIONS_HEADER)).toBeLessThan(r.prompt.indexOf(EMOJI_HEADER))
+    expect(r.prompt.indexOf(INTENTIONS_HEADER)).toBeLessThan(
+      r.prompt.indexOf(EMOJI_HEADER),
+    )
   })
 
   it('moves the block before the tail when no emoji directive rendered', () => {
@@ -71,12 +80,18 @@ describe('moveIntentionBlockLate', () => {
     expect(r.prompt.indexOf('## Recent conversation')).toBeLessThan(
       r.prompt.indexOf(INTENTIONS_HEADER),
     )
-    expect(r.prompt.indexOf(INTENTIONS_HEADER)).toBeLessThan(r.prompt.indexOf('Guest name: Sam'))
+    expect(r.prompt.indexOf(INTENTIONS_HEADER)).toBeLessThan(
+      r.prompt.indexOf('Guest name: Sam'),
+    )
     expect(r.prompt.endsWith(GENERATE_LINE)).toBe(true)
   })
 
   it('preserves every byte of the block, including its internal blank lines', () => {
-    const prompt = promptOf(['## Right now\nit is 9am', INTENTIONS_BLOCK, `${EMOJI_HEADER}\nnone`])
+    const prompt = promptOf([
+      '## Right now\nit is 9am',
+      INTENTIONS_BLOCK,
+      `${EMOJI_HEADER}\nnone`,
+    ])
     const r = moveIntentionBlockLate(prompt)
     expect(r.ok).toBe(true)
     if (!r.ok) return
@@ -84,12 +99,18 @@ describe('moveIntentionBlockLate', () => {
   })
 
   it('changes nothing but order: the moved prompt is a permutation of the same blocks', () => {
-    const blocks = ['## Right now\nit is 9am', INTENTIONS_BLOCK, `${EMOJI_HEADER}\nnone`]
+    const blocks = [
+      '## Right now\nit is 9am',
+      INTENTIONS_BLOCK,
+      `${EMOJI_HEADER}\nnone`,
+    ]
     const r = moveIntentionBlockLate(promptOf(blocks))
     expect(r.ok).toBe(true)
     if (!r.ok) return
     // Same multiset of blocks, same tail, different order.
-    expect(splitPromptBlocks(r.prompt).sort()).toEqual(splitPromptBlocks(promptOf(blocks)).sort())
+    expect(splitPromptBlocks(r.prompt).sort()).toEqual(
+      splitPromptBlocks(promptOf(blocks)).sort(),
+    )
   })
 
   it('refuses when the block is absent', () => {
@@ -101,7 +122,9 @@ describe('moveIntentionBlockLate', () => {
   })
 
   it('refuses when the header appears twice', () => {
-    const r = moveIntentionBlockLate(promptOf([INTENTIONS_BLOCK, INTENTIONS_BLOCK]))
+    const r = moveIntentionBlockLate(
+      promptOf([INTENTIONS_BLOCK, INTENTIONS_BLOCK]),
+    )
     expect(r.ok).toBe(false)
     if (r.ok) return
     expect(r.reason).toContain('whole line 2 times')
@@ -119,7 +142,9 @@ describe('moveIntentionBlockLate', () => {
       '',
       `${INTENTIONS_HEADER} was what they typed`,
     ].join('\n')
-    const r = moveIntentionBlockLate(promptOf(['## Right now\nit is 9am', forged]))
+    const r = moveIntentionBlockLate(
+      promptOf(['## Right now\nit is 9am', forged]),
+    )
     expect(r.ok).toBe(false)
     if (r.ok) return
     // Not a whole-line match, so the real block is the only whole-line hit...
@@ -130,8 +155,14 @@ describe('moveIntentionBlockLate', () => {
   it('refuses when the only whole-line header sits mid-block', () => {
     // A multi-line guest body whose second line is exactly the header, with no
     // blank line before it, so no split boundary is created.
-    const forged = ['## Recent conversation', '[2h ago] guest: hey', INTENTIONS_HEADER].join('\n')
-    const r = moveIntentionBlockLate(promptOf(['## Right now\nit is 9am', forged]))
+    const forged = [
+      '## Recent conversation',
+      '[2h ago] guest: hey',
+      INTENTIONS_HEADER,
+    ].join('\n')
+    const r = moveIntentionBlockLate(
+      promptOf(['## Right now\nit is 9am', forged]),
+    )
     expect(r.ok).toBe(false)
     if (r.ok) return
     expect(r.reason).toContain('not at a block boundary')
@@ -151,7 +182,9 @@ describe('moveIntentionBlockLate', () => {
       '',
       'Lines marked NOT SENT never reached the guest.',
     ].join('\n')
-    const r = moveIntentionBlockLate(promptOf(['## Right now\nit is 9am', INTENTIONS_BLOCK, recentWithNote]))
+    const r = moveIntentionBlockLate(
+      promptOf(['## Right now\nit is 9am', INTENTIONS_BLOCK, recentWithNote]),
+    )
     expect(r.ok).toBe(true)
     if (!r.ok) return
     // The note must still sit with its own block, not be orphaned onto the
@@ -177,17 +210,23 @@ describe('moveIntentionBlockLate', () => {
       '',
       'another note',
     ].join('\n')
-    const r = moveIntentionBlockLate(promptOf(['## Right now\nit is 9am', INTENTIONS_BLOCK, chatty]))
+    const r = moveIntentionBlockLate(
+      promptOf(['## Right now\nit is 9am', INTENTIONS_BLOCK, chatty]),
+    )
     expect(r.ok).toBe(true)
     if (!r.ok) return
     expect(r.prompt).toContain(chatty)
     expect(r.prompt).toContain(INTENTIONS_BLOCK)
-    expect(r.prompt.indexOf('another note')).toBeLessThan(r.prompt.indexOf(INTENTIONS_HEADER))
+    expect(r.prompt.indexOf('another note')).toBeLessThan(
+      r.prompt.indexOf(INTENTIONS_HEADER),
+    )
     expect(r.prompt.endsWith(GENERATE_LINE)).toBe(true)
   })
 
   it('refuses a prompt with no generate line', () => {
-    const r = moveIntentionBlockLate(`## Right now\nit is 9am\n\n${INTENTIONS_BLOCK}`)
+    const r = moveIntentionBlockLate(
+      `## Right now\nit is 9am\n\n${INTENTIONS_BLOCK}`,
+    )
     expect(r.ok).toBe(false)
     if (r.ok) return
     expect(r.reason).toContain('Generate the message now.')

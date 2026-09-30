@@ -10,7 +10,10 @@
 // the happy path passes with either defect restored.
 
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type { ActiveCommitment, GuestCommitmentRow } from '@/lib/schemas/guest-commitment'
+import type {
+  ActiveCommitment,
+  GuestCommitmentRow,
+} from '@/lib/schemas/guest-commitment'
 import type { VenueInfo } from '@/lib/schemas'
 
 vi.mock('@/lib/guests/commitments', () => ({
@@ -18,7 +21,10 @@ vi.mock('@/lib/guests/commitments', () => ({
   scheduleArrival: vi.fn(),
 }))
 
-import { scheduleArrival, transitionToPendingAck } from '@/lib/guests/commitments'
+import {
+  scheduleArrival,
+  transitionToPendingAck,
+} from '@/lib/guests/commitments'
 import { dispatchArrivalCapture } from './dispatch-arrival-capture'
 
 const VENUE_ID = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc'
@@ -43,7 +49,9 @@ const HOURS: VenueInfo['hours'] = {
 const DURING_SERVICE = new Date('2026-09-22T17:00:00Z')
 const AFTER_CLOSE = new Date('2026-09-22T08:00:00Z')
 
-function venue(overrides: Partial<{ hours: VenueInfo['hours']; timezone: string }> = {}) {
+function venue(
+  overrides: Partial<{ hours: VenueInfo['hours']; timezone: string }> = {},
+) {
   return {
     id: VENUE_ID,
     venueInfo: { hours: overrides.hours ?? HOURS } as VenueInfo,
@@ -51,7 +59,9 @@ function venue(overrides: Partial<{ hours: VenueInfo['hours']; timezone: string 
   }
 }
 
-function commitment(overrides: Partial<ActiveCommitment> = {}): ActiveCommitment {
+function commitment(
+  overrides: Partial<ActiveCommitment> = {},
+): ActiveCommitment {
   return {
     id: COMP_A,
     type: 'comp',
@@ -65,7 +75,10 @@ function commitment(overrides: Partial<ActiveCommitment> = {}): ActiveCommitment
   }
 }
 
-function row(id: string, overrides: Partial<GuestCommitmentRow> = {}): GuestCommitmentRow {
+function row(
+  id: string,
+  overrides: Partial<GuestCommitmentRow> = {},
+): GuestCommitmentRow {
   return {
     id,
     venue_id: VENUE_ID,
@@ -94,9 +107,11 @@ function won(id: string) {
 }
 const LOST = { ok: true as const, data: { transitioned: false, row: null } }
 
-function call(overrides: Parameters<typeof dispatchArrivalCapture>[0] extends infer T
-  ? Partial<T>
-  : never = {}) {
+function call(
+  overrides: Parameters<typeof dispatchArrivalCapture>[0] extends infer T
+    ? Partial<T>
+    : never = {},
+) {
   return dispatchArrivalCapture({
     arrivalCapture: { signal: 'imminent', referencesCommitmentId: COMP_A },
     venue: venue(),
@@ -217,7 +232,11 @@ describe('every open obligation is swept, not just the one the model named', () 
       arrivalCapture: { signal: 'imminent', referencesCommitmentId: COMP_A },
       activeCommitments: [
         commitment({ id: COMP_A, code: '5Q22' }),
-        commitment({ id: COMP_B, code: 'ADH8', description: 'gulab jamun cake' }),
+        commitment({
+          id: COMP_B,
+          code: 'ADH8',
+          description: 'gulab jamun cake',
+        }),
       ],
     })
 
@@ -225,10 +244,11 @@ describe('every open obligation is swept, not just the one the model named', () 
     if (r.kind !== 'imminent_won') return
     expect(r.commitmentRows.map((x) => x.id)).toEqual([COMP_A, COMP_B])
     expect(transitionToPendingAck).toHaveBeenCalledTimes(2)
-    expect(vi.mocked(transitionToPendingAck).mock.calls.map((c) => c[0].commitmentId)).toEqual([
-      COMP_A,
-      COMP_B,
-    ])
+    expect(
+      vi
+        .mocked(transitionToPendingAck)
+        .mock.calls.map((c) => c[0].commitmentId),
+    ).toEqual([COMP_A, COMP_B])
   })
 
   it('sweeps an obligation the model did NOT name, even when it named another', async () => {
@@ -240,7 +260,9 @@ describe('every open obligation is swept, not just the one the model named', () 
       activeCommitments: [commitment({ id: COMP_B })],
     })
     expect(r.kind).toBe('imminent_won')
-    expect(vi.mocked(transitionToPendingAck).mock.calls[0][0].commitmentId).toBe(COMP_B)
+    expect(
+      vi.mocked(transitionToPendingAck).mock.calls[0][0].commitmentId,
+    ).toBe(COMP_B)
   })
 
   it('gives every swept row the SAME arrival time, and it is `now`', async () => {
@@ -253,19 +275,33 @@ describe('every open obligation is swept, not just the one the model named', () 
     // stamping every row with the epoch passed it — and `expected_arrival` is
     // what the morning-of cron fires on and what the push body renders. "An
     // arrival stamped for 1am" is half the incident this ticket is about.
-    vi.mocked(transitionToPendingAck).mockResolvedValueOnce(won(COMP_A)).mockResolvedValueOnce(won(COMP_B))
+    vi.mocked(transitionToPendingAck)
+      .mockResolvedValueOnce(won(COMP_A))
+      .mockResolvedValueOnce(won(COMP_B))
     await call({
-      activeCommitments: [commitment({ id: COMP_A }), commitment({ id: COMP_B })],
+      activeCommitments: [
+        commitment({ id: COMP_A }),
+        commitment({ id: COMP_B }),
+      ],
     })
     const calls = vi.mocked(transitionToPendingAck).mock.calls
-    expect(calls[0][0].expectedArrival.toISOString()).toBe(DURING_SERVICE.toISOString())
-    expect(calls[1][0].expectedArrival.toISOString()).toBe(DURING_SERVICE.toISOString())
+    expect(calls[0][0].expectedArrival.toISOString()).toBe(
+      DURING_SERVICE.toISOString(),
+    )
+    expect(calls[1][0].expectedArrival.toISOString()).toBe(
+      DURING_SERVICE.toISOString(),
+    )
   })
 
   it('scopes EVERY write to this venue and guest, not just the first', async () => {
-    vi.mocked(transitionToPendingAck).mockResolvedValueOnce(won(COMP_A)).mockResolvedValueOnce(won(COMP_B))
+    vi.mocked(transitionToPendingAck)
+      .mockResolvedValueOnce(won(COMP_A))
+      .mockResolvedValueOnce(won(COMP_B))
     await call({
-      activeCommitments: [commitment({ id: COMP_A }), commitment({ id: COMP_B })],
+      activeCommitments: [
+        commitment({ id: COMP_A }),
+        commitment({ id: COMP_B }),
+      ],
     })
     for (const c of vi.mocked(transitionToPendingAck).mock.calls) {
       expect(c[0]).toMatchObject({ venueId: VENUE_ID, guestId: GUEST_ID })
@@ -275,14 +311,19 @@ describe('every open obligation is swept, not just the one the model named', () 
   it('sweeps every open obligation on a SCHEDULED signal too', async () => {
     // Ruling 5 is not scoped to `imminent`. A mutant slicing the scheduled
     // target list to one passed every other test in this file.
-    vi.mocked(scheduleArrival).mockResolvedValueOnce(won(COMP_A)).mockResolvedValueOnce(won(COMP_B))
+    vi.mocked(scheduleArrival)
+      .mockResolvedValueOnce(won(COMP_A))
+      .mockResolvedValueOnce(won(COMP_B))
     const r = await call({
       arrivalCapture: {
         signal: 'scheduled',
         expectedArrival: '2026-09-23T15:00:00Z',
         referencesCommitmentId: COMP_A,
       },
-      activeCommitments: [commitment({ id: COMP_A }), commitment({ id: COMP_B })],
+      activeCommitments: [
+        commitment({ id: COMP_A }),
+        commitment({ id: COMP_B }),
+      ],
     })
     expect(scheduleArrival).toHaveBeenCalledTimes(2)
     expect(r.kind).toBe('scheduled_recorded')
@@ -302,16 +343,18 @@ describe('the arrival time written to each row', () => {
         referencesCommitmentId: COMP_A,
       },
     })
-    expect(vi.mocked(scheduleArrival).mock.calls[0][0].expectedArrival.toISOString()).toBe(
-      new Date('2026-09-23T15:00:00Z').toISOString(),
-    )
+    expect(
+      vi.mocked(scheduleArrival).mock.calls[0][0].expectedArrival.toISOString(),
+    ).toBe(new Date('2026-09-23T15:00:00Z').toISOString())
   })
 
   it('uses `now` on an imminent signal that carried no time', async () => {
     vi.mocked(transitionToPendingAck).mockResolvedValue(won(COMP_A))
     await call()
     expect(
-      vi.mocked(transitionToPendingAck).mock.calls[0][0].expectedArrival.toISOString(),
+      vi
+        .mocked(transitionToPendingAck)
+        .mock.calls[0][0].expectedArrival.toISOString(),
     ).toBe(DURING_SERVICE.toISOString())
   })
 
@@ -325,7 +368,9 @@ describe('the arrival time written to each row', () => {
       },
     })
     expect(
-      vi.mocked(transitionToPendingAck).mock.calls[0][0].expectedArrival.toISOString(),
+      vi
+        .mocked(transitionToPendingAck)
+        .mock.calls[0][0].expectedArrival.toISOString(),
     ).toBe(new Date('2026-09-22T17:20:00Z').toISOString())
   })
 
@@ -341,7 +386,9 @@ describe('the arrival time written to each row', () => {
       },
     })
     expect(
-      vi.mocked(transitionToPendingAck).mock.calls[0][0].expectedArrival.toISOString(),
+      vi
+        .mocked(transitionToPendingAck)
+        .mock.calls[0][0].expectedArrival.toISOString(),
     ).toBe(DURING_SERVICE.toISOString())
   })
 })
@@ -349,8 +396,13 @@ describe('the arrival time written to each row', () => {
 describe('ruling 4(a): recommendations are not obligations', () => {
   it('never touches a recommendation, even when the model named it', async () => {
     const r = await call({
-      arrivalCapture: { signal: 'imminent', referencesCommitmentId: RECOMMENDATION },
-      activeCommitments: [commitment({ id: RECOMMENDATION, type: 'recommendation', code: null })],
+      arrivalCapture: {
+        signal: 'imminent',
+        referencesCommitmentId: RECOMMENDATION,
+      },
+      activeCommitments: [
+        commitment({ id: RECOMMENDATION, type: 'recommendation', code: null }),
+      ],
     })
     expect(r).toEqual({ kind: 'no_open_obligations' })
     expect(transitionToPendingAck).not.toHaveBeenCalled()
@@ -366,11 +418,15 @@ describe('ruling 4(a): recommendations are not obligations', () => {
     })
     expect(r.kind).toBe('imminent_won')
     expect(transitionToPendingAck).toHaveBeenCalledTimes(1)
-    expect(vi.mocked(transitionToPendingAck).mock.calls[0][0].commitmentId).toBe(COMP_A)
+    expect(
+      vi.mocked(transitionToPendingAck).mock.calls[0][0].commitmentId,
+    ).toBe(COMP_A)
   })
 
   it('holds and discounts ARE obligations and are swept', async () => {
-    vi.mocked(transitionToPendingAck).mockResolvedValueOnce(won(COMP_A)).mockResolvedValueOnce(won(COMP_B))
+    vi.mocked(transitionToPendingAck)
+      .mockResolvedValueOnce(won(COMP_A))
+      .mockResolvedValueOnce(won(COMP_B))
     await call({
       activeCommitments: [
         commitment({ id: COMP_A, type: 'hold' }),
@@ -394,11 +450,18 @@ describe('partial and total failure accounting', () => {
     // One row erroring must not drop the other: a guest owed two things still
     // has one surfaced, and the failure is counted rather than swallowed.
     vi.mocked(transitionToPendingAck)
-      .mockResolvedValueOnce({ ok: false as const, error: 'connection lost', errorCode: 'db_write_failed' })
+      .mockResolvedValueOnce({
+        ok: false as const,
+        error: 'connection lost',
+        errorCode: 'db_write_failed',
+      })
       .mockResolvedValueOnce(won(COMP_B))
 
     const r = await call({
-      activeCommitments: [commitment({ id: COMP_A }), commitment({ id: COMP_B })],
+      activeCommitments: [
+        commitment({ id: COMP_A }),
+        commitment({ id: COMP_B }),
+      ],
     })
 
     expect(r.kind).toBe('imminent_won')
@@ -427,9 +490,16 @@ describe('partial and total failure accounting', () => {
   it('prefers the error over a clean loss when both happened', async () => {
     vi.mocked(transitionToPendingAck)
       .mockResolvedValueOnce(LOST)
-      .mockResolvedValueOnce({ ok: false as const, error: 'boom', errorCode: 'db_write_threw' })
+      .mockResolvedValueOnce({
+        ok: false as const,
+        error: 'boom',
+        errorCode: 'db_write_threw',
+      })
     const r = await call({
-      activeCommitments: [commitment({ id: COMP_A }), commitment({ id: COMP_B })],
+      activeCommitments: [
+        commitment({ id: COMP_A }),
+        commitment({ id: COMP_B }),
+      ],
     })
     expect(r.kind).toBe('failed')
   })

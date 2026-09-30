@@ -38,7 +38,12 @@ const TOKEN = 'IGAAtesttoken-value'
 function stubDeps(over: Partial<TypingIndicatorDeps> = {}) {
   const loadTarget = vi.fn(async () => ({
     ok: true as const,
-    target: { accountId: ACCOUNT_ID, recipientId: IGSID, token: TOKEN, tokenSource: 'env' as const },
+    target: {
+      accountId: ACCOUNT_ID,
+      recipientId: IGSID,
+      token: TOKEN,
+      tokenSource: 'env' as const,
+    },
   }))
   const sendAction = vi.fn(async () => ({ ok: true as const }))
   return { deps: { loadTarget, sendAction, ...over }, loadTarget, sendAction }
@@ -85,38 +90,50 @@ describe('branch by channel, do not converge', () => {
   it.each([
     ['on', 'typing_on'],
     ['off', 'typing_off'],
-  ] as const)('maps %s to %s on an Instagram conversation', async (signal, action) => {
-    const { deps, loadTarget, sendAction } = stubDeps()
-    const result = await signalTyping(
-      { venueId: VENUE_ID, guestId: GUEST_ID, channel: 'instagram' },
-      signal,
-      deps,
-    )
+  ] as const)(
+    'maps %s to %s on an Instagram conversation',
+    async (signal, action) => {
+      const { deps, loadTarget, sendAction } = stubDeps()
+      const result = await signalTyping(
+        { venueId: VENUE_ID, guestId: GUEST_ID, channel: 'instagram' },
+        signal,
+        deps,
+      )
 
-    expect(result).toEqual({ status: 'sent' })
-    // WHICH venue and guest, per token-stub.ts's own warning: a stub that
-    // ignored its arguments would let the call site pass the wrong id.
-    expect(loadTarget).toHaveBeenCalledWith({ venueId: VENUE_ID, guestId: GUEST_ID })
-    expect(sendAction).toHaveBeenCalledWith({
-      accountId: ACCOUNT_ID,
-      recipientId: IGSID,
-      token: TOKEN,
-      action,
-    })
-  })
+      expect(result).toEqual({ status: 'sent' })
+      // WHICH venue and guest, per token-stub.ts's own warning: a stub that
+      // ignored its arguments would let the call site pass the wrong id.
+      expect(loadTarget).toHaveBeenCalledWith({
+        venueId: VENUE_ID,
+        guestId: GUEST_ID,
+      })
+      expect(sendAction).toHaveBeenCalledWith({
+        accountId: ACCOUNT_ID,
+        recipientId: IGSID,
+        token: TOKEN,
+        action,
+      })
+    },
+  )
 })
 
 describe('fails open', () => {
   it('returns a value when there is no send target, and sends nothing', async () => {
     const { deps, sendAction } = stubDeps({
-      loadTarget: vi.fn(async () => ({ ok: false as const, problem: 'token_missing' as const })),
+      loadTarget: vi.fn(async () => ({
+        ok: false as const,
+        problem: 'token_missing' as const,
+      })),
     })
     const result = await signalTyping(
       { venueId: VENUE_ID, guestId: GUEST_ID, channel: 'instagram' },
       'on',
       deps,
     )
-    expect(result).toEqual({ status: 'no_send_target', problem: 'token_missing' })
+    expect(result).toEqual({
+      status: 'no_send_target',
+      problem: 'token_missing',
+    })
     expect(sendAction).not.toHaveBeenCalled()
   })
 
@@ -171,7 +188,11 @@ describe('fails open', () => {
           failure: null as never,
         })),
       })
-      await signalTyping({ venueId: VENUE_ID, guestId: GUEST_ID, channel: 'instagram' }, 'on', deps)
+      await signalTyping(
+        { venueId: VENUE_ID, guestId: GUEST_ID, channel: 'instagram' },
+        'on',
+        deps,
+      )
       // formatWithOptions, NOT JSON.stringify. TAC-458 records that
       // stringify renders an Error, a Headers and a URLSearchParams as `{}`
       // while console prints them in full — so a leak test using it passed
@@ -200,23 +221,26 @@ describe('the default wiring', () => {
   it.each([
     ['on', 'typing_on'],
     ['off', 'typing_off'],
-  ] as const)('routes %s through the real transport as %s', async (signal, action) => {
-    const { deps } = stubDeps()
+  ] as const)(
+    'routes %s through the real transport as %s',
+    async (signal, action) => {
+      const { deps } = stubDeps()
 
-    // Only loadTarget is injected: sendAction comes from defaultDeps.
-    const result = await signalTyping(
-      { venueId: VENUE_ID, guestId: GUEST_ID, channel: 'instagram' },
-      signal,
-      { loadTarget: deps.loadTarget },
-    )
+      // Only loadTarget is injected: sendAction comes from defaultDeps.
+      const result = await signalTyping(
+        { venueId: VENUE_ID, guestId: GUEST_ID, channel: 'instagram' },
+        signal,
+        { loadTarget: deps.loadTarget },
+      )
 
-    expect(result).toEqual({ status: 'sent' })
-    expect(sendInstagramSenderAction).toHaveBeenCalledWith({
-      accountId: ACCOUNT_ID,
-      recipientId: IGSID,
-      token: TOKEN,
-      action,
-      fetchImpl: expect.any(Function),
-    })
-  })
+      expect(result).toEqual({ status: 'sent' })
+      expect(sendInstagramSenderAction).toHaveBeenCalledWith({
+        accountId: ACCOUNT_ID,
+        recipientId: IGSID,
+        token: TOKEN,
+        action,
+        fetchImpl: expect.any(Function),
+      })
+    },
+  )
 })

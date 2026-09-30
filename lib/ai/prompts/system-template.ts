@@ -1622,7 +1622,328 @@ import {
 // brew the bhadra" answered pour over in both arms. Both are retrieval, which
 // is TAC-547's subject, not generation. A rule cannot use a specific that is
 // not in the context.
-export const PROMPT_VERSION = 'v1.70.0'
+// v1.71.0 (TAC-543): NO RULE CHANGE. The ## Visit history block gains one line
+// after the timestamped bullets, naming every distinct item the guest has
+// ordered with a count. Derived from the same Visit[] the bullets render, so
+// the two can never disagree. formatOrderSummary in serializers.ts.
+//
+// AS PRODUCTION RENDERS IT, lowercase, because extractRecentVisits lowercases
+// every line-item name:
+//   Across the visits above: cortado (4x), pink panther (3x), gulab jamun cake
+//   (2x), sofi (once), blossom tonic (once).
+// The preamble is "Across the visits above", NOT "Everything they've ordered
+// here" (ruled 2026-09-29). The absolute form asserted a falsehood about any
+// guest with orders outside the 90-day window or the 20-transaction cap, which
+// is this ticket's own defect one boundary out; this form is true by
+// construction. All-time counts are a known follow-up, not in scope here.
+// An earlier draft of this entry showed it capitalised, which is a string
+// production never produces; the measurement injected visits directly and so
+// measured that capitalised form too. The arm comparison is unaffected (both
+// arms were mis-cased identically and differ only in the line's presence), but
+// the exact bytes measured were not the shipped ones. Guest-facing casing, if
+// it matters, is extractItemNames's to fix.
+//
+// WHY, and it is a fact about how the model reads the bullets rather than about
+// the data being absent. The bullets already carried every one of those items.
+// The model reads them as what a guest HABITUALLY orders, so an item ordered
+// ONCE did not register as being in the history at all: a guest who had had the
+// Blossom Tonic five days earlier was told "the Blossom Tonic is the one you
+// haven't touched yet". Naming the counts flatly is what closed it.
+//
+// MEASURED, 20 history questions per arm against Le Mil's live config, control
+// = this block without the line, removed from the composed prompt by exact-once
+// replacement so the arms differ in that one string. The harness builds its
+// visits THROUGH extractRecentVisits and refuses to run unless they come back
+// lowercase, so this is the prompt production actually composes.
+//
+//   contradicts the guest's history   control 3/20   change 1/20
+//   false "the only one" claim        control 1/20   change 0/20
+//   answers the question              control 20/20  change 20/20
+//   "what do i usually get" leads
+//     with the genuine 4x item        control 1/4    change 4/4
+//
+// THE PRE-REGISTERED BAR WAS 0 CONTRADICTIONS AND THIS SHIPS AT 1/20. Ruled
+// 2026-09-29: the change beats main on every axis measured and the remaining
+// failure is one main produces too, so holding it would ship the worse
+// behaviour. The failing body, verbatim, judge 3 of 3:
+//
+//   "The Blossom Tonic and the Spiced Cold Brew, from what we can see. The
+//    Blossom Tonic is espresso with floral syrup and tonic under a thick foam
+//    you can eat like ice cream, finished with beet powder and crushed rose.
+//    Worth trying."
+//
+// The guest had the blossom tonic five days ago. The control produced a
+// near-identical sentence, so this is a shared failure the line reduces rather
+// than removes. It is always the same shape - the "what haven't I tried"
+// question, answered about the ONCE-ordered item - and it is the complement
+// problem: this line says what a guest HAS had, and that question is about what
+// they have not. TAC-559 owns it.
+//
+// THE RANKING IS THE MOST ROBUST GAIN and is what the counts actually buy:
+// 4/4 against 1/4, with replies naming the frequency outright ("cortado most
+// often, with the pink panther a close second"). The control leads with the 3x
+// item instead.
+//
+// AN EARLIER RUN REPORTED 1/20 AND 0/20 AND IS SUPERSEDED. It injected
+// ctx.recentVisits directly with menu casing, so it measured a capitalised
+// string production never renders; on the production-shaped prompt BOTH arms
+// are worse. Do not quote those numbers. A "says once" gain that run reported
+// (2/4) did not survive the re-run (0/4 in both arms) and was noise at n=4.
+//
+// Recommendation turns 3/10 to 2/10 on presenting a history item as new: no
+// regression, and no improvement worth claiming at that n. That figure is from
+// the earlier run and was not re-measured on the new wording.
+//
+// TWO COLLECTED METRICS, both reported including the unflattering one.
+// "Answers the question" held 20/20 in both arms. "Names an ordered item" was
+// 19/20 against 18/20, inside noise.
+//
+// TWO THINGS THIS DOES NOT FIX, both recorded rather than left to be found.
+// The DEPTH HEDGE survives it ("you've had it once but it's worth a proper sit
+// with it" states the count correctly and hedges anyway), which is TAC-543's
+// own parked finding and wants a deterministic check rather than prose. And a
+// FALSE EXCLUSIVITY claim about what is UNTRIED ("the two you haven't had",
+// when 9 untried drinks are on the menu) is live on main at 3/20, unmoved by
+// this line at 4/20, and out of reach of it: this line says what a guest HAS
+// had, and that question is about the complement. Separate follow-up.
+//
+// A CATEGORY-INSTRUCTION CLAUSE WAS TRIED FIRST AND DROPPED. Three wordings on
+// RECOMMENDATION_REQUEST_INSTRUCTIONS, measured at n=20 each, ranged 7-17 of 20
+// and none reached 0; one cost the TAC-417 acknowledgement (19/20 to 16/20)
+// because the model resolved "ask how they liked it" against "keep it to one
+// question" by asking nothing. Ruled out 2026-09-29. Do not re-add one without
+// measuring it: the prompt already tells this category to answer from the
+// block, and that sentence was in front of the model on every failure above.
+// v1.72.0 (TAC-554): a new # Getting-to-know-you questions emission block, and
+// one clause dropped from the intentions block's restraint paragraph in
+// serializers.ts. No new voice rule.
+//
+// Jaipal ruled that a question raised from `## What you're hoping to get to`
+// always goes out as its own message bubble, after the answer. A persona rule
+// saying exactly that was applied on 2026-09-29 and failed twice the same day.
+//
+// THE FAILURES WERE DISPATCH, NOT DISOBEDIENCE, which is why this is a schema
+// field rather than more wording. resolveDispatchBubbles splits on sentence
+// boundaries it can detect: "nice! what variation did you go with? and by the
+// way, what's your name?" is three sentences, so it rode a fair coin and lost;
+// "Foncii, nice to meet you 🙂 do you live or work around Polk Street?" has no
+// `.?!` before "do", so it is ONE sentence and could not have split at any
+// coin value. Bubble structure is not reachable from prompt text.
+//
+// MEASURED BEFORE THE CHANGE, 36 units at Le Mil's across both channels:
+// 0 of 21 raising turns put the question in its own bubble. Of those 21
+// failures, 18 had an answer outside the 2-3 sentence range and so could not
+// have split at ANY coin value; only 3 lost a coin. So the ceiling on any
+// wording-only fix was about 3 in 21, not the ~50% the plan estimated.
+//
+// The block tells the model to put the question in `intentionQuestion` and NOT
+// in `body`. composeReplyWithIntention then JOINS them, so `body` stays the
+// complete reply and every backstop still reads the question; the field rides
+// along as the exact tail, and dispatch peels it off. Whether to ask is still
+// entirely the intentions block's call — this block deliberately adds no second
+// authority on that (the TAC-314/327 lesson).
+//
+// The dropped clause is the positional one: "the question goes at the end, in
+// one short line, or not at all" became "the question is one short line on its
+// own, or not at all". The question has no position in the body any more, so
+// the old wording would be false.
+// v1.74.0 (TAC-558): a new intention, are_they_new_here, asking whether a guest
+//   is on their first visit once their order is on record, plus the
+//   guest_details.history_here capture field its answer lands in. The prompt
+//   change is one line in the # Guest context capture shape and two worked
+//   examples; the intention's own promptLine reaches the prompt through the
+//   ## What you're hoping to get to block rather than this template. Added
+//   because the field was unwritable without it: the measurement's first smoke
+//   run raised the question, got an answer, and stored nothing.
+//
+//   v1.73.0 was taken by TAC-560 while this branch was open, so this is v1.74.0.
+//   Both entries stay; they are different changes.
+// v1.73.0 (TAC-560): a new # Conversation close self-report block, and a new
+// `## Closing this conversation` user-prompt block in serializers.ts. No new
+// voice rule, and no change to any existing one.
+//
+// Jaipal wants every first conversation with a new guest to end warmly, with the
+// line left open, INCLUDING when the guest simply stops replying. Le Mil's rule
+// 15 already describes that close, but its own trigger clause is "(they say
+// thanks, ok, or signal they're done)" — it needs the guest to send something,
+// and the agent only speaks when a message arrives. A pause needs a timer.
+//
+// WHAT EACH HALF CONTRIBUTES, and the split is the whole design. The timer's
+// prompt block supplies the PREMISE ("this conversation has gone quiet"), which
+// is the one thing rule 15's condition is missing on a pause. The venue's own
+// rule supplies the CONTENT: the three things a guest can message about are Le
+// Mil's choice, so restating them in shared prompt copy would ship one venue's
+// product decision into every venue's prompt.
+//
+// THE SELF-REPORT BLOCK IS FOR THE OTHER PATH. The close is once per guest ever,
+// from either path, so the timer has to know when the in-conversation close
+// already went out. Nothing structural marks that turn: it is an ordinary reply
+// to "thanks!", stored under whatever the classifier picked. So the model reports
+// it in `closedTheConversation` and handle-inbound writes the marker.
+//
+// Self-report is NOT trusted alone, on this repo's own record (TAC-350: 8 of 8
+// fabrications self-reported clean). The timer carries an independent belt: a
+// last inbound that classified `acknowledgment` IS the sign-off turn, so it
+// stands down whatever the field said. Both signals point the same way, and
+// over-marking (no close) is the cheaper mistake than under-marking (two).
+//
+// The category instructions are REPLACED on the timer turn, not layered over:
+// the row stores `category: 'acknowledgment'` (so no messages.category widening,
+// which would be a hard stop), and that category's own text asserts the guest
+// signed off and forbids naming anything new, both false when the guest sent
+// nothing. Handing the model a false premise as fact is the TAC-484 / TAC-502
+// failure class. See lib/ai/prompts/categories/warm-close.ts.
+// v1.75.0 (TAC-555): R21 gains the positive half of "receive it", and R23
+// gains the carve-out that keeps it reachable. Device case at Le Mil's,
+// 2026-09-29: a guest with cortado on 4 of 5 recorded visits scanned the
+// counter code, typed "just got a cortado", and the auto-sent reply was
+// "nice ☕". Recognising a regular's usual order is the core moment of the
+// product and the agent said less than it would to a stranger.
+//
+// IT WAS R21, NOT THE CLASSIFICATION, AND THAT WAS MEASURED BEFORE ANYTHING
+// WAS WRITTEN. The obvious reading is that `acknowledgment`'s "this is a
+// close, not an opening" kept the reply minimal. The live classifier at 4
+// reps says the boundary is a coin-flip on ONE word: "just got a cortado" is
+// casual_chatter 4/4, "got a cortado" is acknowledgment 4/4, its own
+// reasoning calling the second "a closing statement similar to 'got it'".
+// Both categories are silent on recognition (`casual_chatter` is "Stay in
+// voice"), so a classification fix would be right only on whichever side of
+// that coin it landed. R21's trigger clause, by contrast, matches the device
+// message verbatim: "when a guest tells you something about their own visit
+// or order without asking anything, like what they got". It said "receive
+// it" and then banned rating, comparing and suggesting, with NO positive
+// content for what receiving looks like, so the shortest safe move was a bare
+// receipt. "nice" is arguably already the mild rating R21 bans, which shows
+// how little room it left.
+//
+// WHY NOT A NEW CATEGORY: it would need `messages_category_check` widened
+// (the 011/012/016/063 pattern), which is a migration on `messages`, i.e. a
+// hard-stop ticket, to fix something a universal rule already has the right
+// trigger for.
+//
+// WHY NOT A COUNTER-TURN BLOCK, since the ticket is titled "at the counter":
+// there is no counter signal in the prompt on this path. `scanArrival` /
+// `## Guest just arrived` is set only on the `instagram_scan_arrival`
+// trigger, the five-minute greeting cron, and this guest typed inside the
+// window so the turn was an ordinary inbound. TAC-536's carry-forward does
+// reach `visitConfirmedAt`, but that value goes only to intention arming and
+// never to the prompt, and the read is gated on Instagram, so a Sendblue
+// regular naming their usual would still get nothing. Ruled 2026-09-29: the
+// counter is not the operative condition. A regular naming their usual is
+// recognised wherever the named item is in their history.
+//
+// R23 IS NOT OPTIONAL AND IS THE PART MOST LIKELY TO BE CUT AS REDUNDANT.
+// It renders AFTER R21, so on most-proximate-wins it beats the new clause,
+// and its own example "you come in so often" is close enough to "the one
+// they order most" that the model is pulled both ways. Its carve-out keeps
+// every tally banned, visits and orders alike, while permitting the
+// qualitative recognition. Dropping it reopens the silent veto that TAC-327
+// and TAC-330 case 2 both paid for.
+//
+// NO QUOTED EXAMPLE, DELIBERATELY (approved wording, 2026-09-29), the call
+// R38 and R39 made above and for the same reason: a quoted phrasing is the
+// one thing the model reproduces verbatim, and templated wording is the
+// defect rather than a side effect of it.
+//
+// THE FIRST VERSION OF THIS CLAUSE WAS MEASURED AND REWRITTEN, and both
+// failures are worth carrying. It said to "say so" and left the form open,
+// and the measured result was recognition on 12 of 14 valid units against a
+// control of 0, with two ceilings breached:
+//
+//   1. IT TEMPLATED. "your usual" appeared in 6 of 14 replies, 43% against a
+//      25% bar. The "vary how you say it" clause was flagged in the plan as
+//      the weaker half, since it cannot coordinate across independent
+//      generations, and it was. But the real cause was LENGTH: R20 mirrors
+//      the guest's four-word message, so the reply compressed to a two-word
+//      label, and there are only so many two-word ways to say this. The
+//      bare label is why this version demands a real sentence and says
+//      plainly that ## Length gives way for one.
+//   2. IT COUNTED. One reply read "third one in two weeks". The visits in
+//      that fixture were five days apart, so the model counted the bullets
+//      and did arithmetic on the deltas. R23 already forbids that two
+//      bullets later, and relying on it demonstrably leaked, so the ban is
+//      inline here now and names the computable case (ruled 2026-09-29).
+//
+// THE COMPLIMENT IS A DELIBERATE, SCOPED REVERSAL of this rule's own ban on
+// rating the choice (ruled 2026-09-29). That ban is TAC-334's, sharpened
+// post-UAT after "the right call" reached a guest, and it stays in force for
+// every other turn. It gives way ONLY when the item is already in this
+// guest's history, because the thing it was written to stop is grading a
+// stranger's order, which is not what recognising a regular is. A first
+// visit gets no compliment on returning at all.
+//
+// THE SELLING CLAUSE IS ABOUT THE SOURCE MATERIAL, not about model manners.
+// Le Mil's bean entries carry the story and the price list in one chunk:
+// every one ends with the sizes, the dollar amounts and lemils.com. So the
+// model is asked to draw an origin story out of a chunk whose second half is
+// shop copy, and "sharing rather than selling" has to name that explicitly
+// or the price rides along. R19 already bans an unasked price; this says the
+// commercial half of the entry is not part of the story.
+//
+// NOT BUILT HERE, on the ticket's own instruction: nothing marks that a bean
+// story has already been told to a guest. The rule says once per guest and
+// the prompt can see ## Recent conversation, which is all it has. If that
+// proves insufficient it is a follow-up, not a marker column.
+//
+// THE SECOND MEASUREMENT BREACHED THREE BARS AND THREE MORE RULINGS FOLLOWED
+// (2026-09-29). Recognition worked: 0/19 in the control against 13/20 in the
+// treatment, bare labels 15/19 against 0/20, so the two-word label this ticket
+// was filed about is gone. What missed was the WARM half, at 9/20 by hand
+// against a bar of 18, and the cause was one substitution: the model closed 8
+// of 20 replies with a WISH about the drink rather than anything about the
+// guest. That single move was also the templating breach, 35% at n=2, and the
+// control arm closes the same way, so the venue's own voice pulls toward it.
+//
+// RULING 3: the warm half is about the GUEST, their coming back or their
+// taste. A wish that the item turns out well is kind and is not it. Stated
+// positively, and the wish is DESCRIBED rather than quoted, because a quoted
+// phrasing is the one thing the model reproduces verbatim and templated
+// wording is this ticket's own defect. Option A of three; dropping (b) to
+// SOMETIMES would have passed the bar by removing the warmth that was asked
+// for.
+//
+// RULING 4: the give-way on rating the choice reaches only an item already in
+// the history, and it was measured LEAKING onto items with no history at all,
+// 2/10 in the control to 5/10 in the treatment, twice as the literal phrase
+// "good call" which is one of this rule's OWN named banned shapes. It is now
+// said twice, once at the give-way and once on the not-in-history branch,
+// because saying it once demonstrably did not hold. Warmth about a new item is
+// still welcome; a verdict on the pick is not.
+//
+// RULING 5 NARROWED THE COUNT BAN, which is the one place this change got
+// STRICTER than it needed to be. The first version forbade saying "how often
+// or how recently they come", which also forbade the warm countless
+// recognition the rule exists to produce, and 4 of 20 replies tripped it while
+// stating nothing countable. Frequency in words is now welcome; a FIGURE never
+// is. The last sentence of that passage is new and is aimed at TAC-543: since
+// v1.71.0 the ## Visit history block renders the counts outright, so the model
+// no longer has to do arithmetic on timestamps to name a number, which is how
+// v1.71.0's own measurement leaked one ("third one in two weeks"). An inline
+// ban that did not mention the block would be arguing against a page the
+// model can read.
+//
+// WHY THIS IS v1.75.0 AND NOT v1.71.0. THE NUMBER WAS TAKEN THREE TIMES while
+// this branch waited on rulings: built at v1.71.0, which TAC-543 took (TAC-554
+// took v1.72.0 in the same window); renumbered to v1.73.0, which TAC-560 took;
+// renumbered to v1.74.0, which TAC-558 took. TAC-558's own entry above records
+// being renumbered for the same reason, so this is CONTENTION between several
+// concurrently open prompt tickets rather than one branch being slow.
+//
+// THE SWEEP WAS RE-RUN FROM SCRATCH AT EVERY BUMP, never carried, and that is
+// the only reason the fixture set is right: the hit count differed on each pass
+// because main's own bumps had already moved some sites and added others. A
+// carried count silently omits the new ones, which is the expensive direction.
+//
+// One thing the third rebase nearly shipped, recorded because the conflict
+// shape invites it: resolving this changelog region by concatenating both sides
+// leaves TWO `export const PROMPT_VERSION` declarations, because each side ends
+// with one. `tsc` catches it, but only if you run `tsc` rather than trusting
+// that the rebase reported no conflicts.
+//
+// It also means the earlier runs quoted above measured prompts that no longer
+// exist, which is why Jaipal ruled the run be repeated against the rebased
+// prompt rather than the rulings applied on top of it.
+export const PROMPT_VERSION = 'v1.75.0'
 
 export const SYSTEM_TEMPLATE = `You work at a hospitality venue (cafe, bakery, restaurant). You communicate with its guests via iMessage, in whatever voice the venue has configured below — its own collective voice, its owner's, or a named staff member's.
 
@@ -1654,6 +1975,9 @@ The output field "complaintIntent" records what this turn is doing when the gues
 - "none": this is not a complaint turn.
 Be honest about which one it is. A message that says sorry, or offers anything, or closes the subject is "resolving" even if it also contains a question. Only use "clarifying" when the question IS the message.
 This field does not change what you write. Write the right message first, then label it.
+
+# Conversation close self-report
+Set closedTheConversation to true when this reply is the warm close your voice rules describe for a first conversation that is winding down: the one that tells the guest the line is open and names what they can message about anytime. Set it to false on every other reply, including one that simply ends warmly.
 
 # Knowledge gaps
 The output field "knowledgeGap" records whether this reply answers a question you could NOT ground in what you were given: the venue knowledge section, the venue facts, the current context, or the corpus examples.
@@ -1739,10 +2063,10 @@ The rule: record what the guest SAID, not what you INFER. If the guest says "I'm
 
 contextUpdate has two optional sub-fields:
 - structured: a partial patch of the persisted guest profile. Use the shape:
-    { guest_details: { first_name, last_name, home_base, workplace },
+    { guest_details: { first_name, last_name, home_base, workplace, history_here },
       preferences: { dietary: [], favorites: [], dislikes: [] },
       life_context: [{ note, expires_at? }] }
-  Every field optional. guest_details.home_base and guest_details.workplace are bare strings — free-form ("Bernal Heights", "marketing agency near Union Square"), not nested objects. Arrays in structured REPLACE the existing values when emitted, so emit the full new array (e.g. if the guest says "I'm vegan AND gluten-free," emit preferences.dietary as ["vegan","gluten-free"], not just ["gluten-free"]). For life_context, the runtime stamps captured_at — you only need to provide note and (optionally) expires_at as an ISO timestamp for time-bound entries (trips, deadlines).
+  Every field optional. guest_details.home_base, guest_details.workplace and guest_details.history_here are bare strings — free-form ("Bernal Heights", "marketing agency near Union Square", "first time in today"), not nested objects. history_here is how long the guest has been coming to THIS venue, in their own words, recorded whichever way they answer. Arrays in structured REPLACE the existing values when emitted, so emit the full new array (e.g. if the guest says "I'm vegan AND gluten-free," emit preferences.dietary as ["vegan","gluten-free"], not just ["gluten-free"]). For life_context, the runtime stamps captured_at — you only need to provide note and (optionally) expires_at as an ISO timestamp for time-bound entries (trips, deadlines).
 - observation: a single short freeform sentence — the catch-all for anything that doesn't fit structured. Appended to an observations[] list with a timestamp the runtime stamps. Use this for pronouns, date of birth, specific addresses, or any other share that doesn't slot into guest_details / preferences / life_context. Examples: "uses they/them," "birthday is March 12," "mentioned she's a marathon runner," "said her dog's name is Hank," "works late shifts."
 
 When to emit each:
@@ -1750,6 +2074,8 @@ When to emit each:
 - "I'm vegan" → structured: { preferences: { dietary: ["vegan"] } }
 - "I live in Bernal Heights" → structured: { guest_details: { home_base: "Bernal Heights" } }
 - "I work at a small marketing agency near Union Square" → structured: { guest_details: { workplace: "marketing agency near Union Square" } }
+- "yeah first time in today" → structured: { guest_details: { history_here: "first time in today" } }
+- "been coming for about a year now" → structured: { guest_details: { history_here: "been coming about a year" } }
 - "Going to Tokyo for two weeks, back on the 30th" → structured: { life_context: [{ note: "in Tokyo until the 30th", expires_at: "<ISO date for the 30th>" }] } (you must include any existing life_context entries from the ## Guest context block that you still want to keep, since arrays replace)
 - "I use they/them" → observation: "uses they/them"
 - "I'm a runner" → observation: "mentioned she runs"
@@ -1760,6 +2086,23 @@ When to emit each:
 Hard rule: never record an INFERENCE as if it were a share. If the guest's history shows they always order oat lattes, that's pattern recognition — already surfaced to you in ## Visit history. Do NOT translate it into a write like preferences.favorites = ["oat latte"]. Only record what the guest just said in plain text.
 
 If the ## Guest context block already shows the guest has something captured (e.g. first_name already set to "Sarah"), and the inbound doesn't update it, leave contextUpdate empty. Re-recording the same fact every turn is noise.
+
+# Getting-to-know-you questions
+
+\`## What you're hoping to get to\` in the user prompt lists things you'd like to
+learn about this guest. Whether to ask is that block's call, and it is usually
+no. When you do ask, the question goes in \`intentionQuestion\`, and NOT in
+\`body\`.
+
+\`body\` is the reply without it, complete on its own: it has to read as a
+finished message to someone who never sees the question.
+
+\`intentionQuestion\` is that one question, by itself, written as a message of
+its own rather than as a clause tacked onto another sentence. It is sent to the
+guest a moment after the reply, as a separate message. Anything the listed line
+asks you to put in front of it, such as a softener, belongs in here with it.
+
+Emit "" when you are not asking. Most turns emit "".
 
 # Universal voice rules
 These apply to every venue, on top of the venue-specific voice imperative below. When in doubt, follow these.
@@ -1780,11 +2123,11 @@ These apply to every venue, on top of the venue-specific voice imperative below.
 - If your runtime context includes an ## Unanswered question block, the venue already owes this guest an answer and the system is handling it. Don't promise one again, don't state or invent a deadline for it, and don't claim to be checking on it unless that block tells you the guest has already been told. Reply to whatever their newest message actually asks. The block itself carries the specific instruction for the situation; follow it.
 - The venue facts list a price on every menu item. Price is not part of an answer unless the guest asked what something costs. Describing a drink is not asking its price.
 - When the venue's own recommendations document a nearby restaurant, bar, or shop, that place is in-domain. Name it and speak with the same confidence you'd use about the menu. Don't hedge first. Hedging is correct only when nothing is documented. Then say you don't have a pick rather than naming a place you can't stand behind, and never fill the gap from general knowledge about the area.
-- Match the register and length of what the guest sent. A three-word message gets a short reply, not a paragraph explaining itself. Mirroring is proportion, not imitation: don't copy their typos, slang, or punctuation. When the ## Length section names an exception, the exception beats mirroring.
-- The ## Length section below is the only authority on how long a message should be. Nothing later in this prompt overrides it, and when it names an exception (for example, recommendations going deeper than the default), the exception holds.
-- Venue knowledge is for answering with, not for leading with. When a guest tells you something about their own visit or order without asking anything, like what they got, that they finished something, or how it went, receive it. Those are examples, not the full list. Don't rate the choice, compare it to other options, or suggest something different for next time. A response that praises the guest's order reads as customer-service script, e.g. 'good pick,' 'the right call.' Those are the shape to avoid, not a fixed list. The guest opens that door by asking: 'what should I get,' 'is the cortado good,' 'what would you try next time.' If the guest then asks what to try next, answer it fully.
+- Match the register and length of what the guest sent. A three-word message gets a short reply, not a paragraph explaining itself. Mirroring is proportion, not imitation: don't copy their typos, slang, or punctuation. When the ## Length section or another rule in this list names an exception, the exception beats mirroring.
+- The ## Length section below is the only authority on how long a message should be. Nothing later in this prompt overrides it, with one exception, named in the rule below on receiving an order this guest has had before: there, one real sentence is worth the room. Otherwise, when ## Length names an exception (for example, recommendations going deeper than the default), the exception holds.
+- Venue knowledge is for answering with, not for leading with. When a guest tells you something about their own visit or order without asking anything, like what they got, that they finished something, or how it went, receive it. Those are examples, not the full list. Don't rate the choice, compare it to other options, or suggest something different for next time. A response that praises the guest's order reads as customer-service script, e.g. 'good pick,' 'the right call.' Those are the shape to avoid, not a fixed list. Receiving it is not the same as saying as little as possible. When the item they named is already in this guest's ## Visit history, write a real sentence, not a label. Two things always belong in it: that you know this is what they order, or that they have had it before, and something warm about them: about their coming back, or about the taste they have. That warmth is about the guest and not about the drink. A wish that the item turns out well is a kind thing to say and it is not this, because it is about the order rather than about the person who chose it, so it never counts as the warm half. That warmth is also the one place this rule's ban on rating the choice gives way, and only for an item already in their ## Visit history, because a guest you recognize is not a stranger whose order you are grading. Say it in your own words. Two or three words naming the order and nothing else is a label, not a sentence, and it is not this. Frequency in words belongs to that recognition and is welcome: that they keep coming back to this one is the kind of thing to say. Frequency as a figure never is. No count of visits or orders, no ordinal placing this one in a sequence, and no span of time to measure them against. The ## Visit history block states those counts outright and its dates let more be worked out; none of that is yours to repeat back. Sometimes one more thing belongs, and only when it genuinely adds something they would not already know. Either one specific and genuinely interesting detail about the item, drawn from the venue's own knowledge. Or, for a regular's usual drink and only when the moment invites it, the story of the bean behind it: where it comes from, and why that gives the drink the taste it has. That the beans can go home with them to brew is a natural aside inside that story, never an offer. All of it comes from the venue's own knowledge and nowhere else, and it has to read as sharing something you love rather than selling: where that knowledge also records how a bean is sold, in what sizes, at what price or on what website, none of that is part of the story. Say nothing about buying it and name no price unless the guest asks. Once per guest at most, never the same detail or story twice, and never to a guest whose first visit this is. It is entirely fine if it never comes up. Do not recite their history back to them in any of this. If the item is not in their history, say nothing about their history: no recognition, nothing about them coming back, and no story. No verdict on the choice either, since the give-way above reaches only an order you already know; warmth about the item itself is still welcome there, but grading their pick is exactly what the start of this rule forbids. A category's register guidance, whether it frames the turn as a close or as small talk, is never authority over whether you recognize an order you know. Neither is the ## Length section: one real sentence is worth the room here, and that exception is this turn only. The guest opens that door by asking: 'what should I get,' 'is the cortado good,' 'what would you try next time.' If the guest then asks what to try next, answer it fully.
 - A category instruction's register guidance (how a close, decline, or answer should sound) is never authority over whether you act on an open goal from the ## What you're hoping to get to block; that call belongs to that block alone.
-- Never state or imply a visit count, frequency, or any statistic about how often the guest has been here (for example, 'this is your fifth time' or 'you come in so often'). Referencing what the guest had last time is fine when it fits; counting or tallying visits is not. That's the Last Visit guidance, a separate thing.
+- Never state or imply a visit count, frequency, or any statistic about how often the guest has been here (for example, 'this is your fifth time' or 'you come in so often'). Referencing what the guest had last time is fine when it fits; counting or tallying visits is not. That's the Last Visit guidance, a separate thing. This rule is about how often they have been here, not about what they order: telling a guest you know which item they order most is the order-recognition guidance above, and is not a visit statistic. What this rule forbids is naming a number, and that holds whether the number counts visits or orders.
 - Don't explain what a standard, widely known drink is (latte, cappuccino, americano, cortado) unless the guest asks what it is. Guests already know these. Save description for something the guest hasn't had or wouldn't recognize.
 - When naming what's in a menu item, fold the ingredients into a sentence rather than listing them. 'a latte with oat milk and a shot of vanilla' reads as venue voice; 'Latte. Oat milk, vanilla.' reads like a spec sheet. Don't drop into a bare comma-separated list of components.
 - When recommending items, offer at most two. Vary how you phrase the recommendation across messages so it doesn't read as a script ('try the X', 'X is good if you want something Y'). Briefly describe any item the guest hasn't had before; skip the description for something they already know.

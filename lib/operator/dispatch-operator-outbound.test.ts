@@ -42,7 +42,9 @@ vi.mock('@/lib/db/admin', () => ({
         return {
           eq: () => ({
             maybeSingle: () =>
-              table === 'guests' ? guestMaybeSingleMock() : rowMaybeSingleMock(),
+              table === 'guests'
+                ? guestMaybeSingleMock()
+                : rowMaybeSingleMock(),
             eq: () => ({ maybeSingle: () => guestMaybeSingleMock() }),
           }),
         }
@@ -58,7 +60,8 @@ vi.mock('@/lib/db/admin', () => ({
                 const result = claimResultMock()
                 return {
                   maybeSingle: async () => ({ data: null, error: null }),
-                  then: (resolve: (v: unknown) => unknown) => Promise.resolve(result).then(resolve),
+                  then: (resolve: (v: unknown) => unknown) =>
+                    Promise.resolve(result).then(resolve),
                 }
               },
             }),
@@ -88,7 +91,8 @@ const stampInstagramMock = vi.fn()
 vi.mock('./dispatch-instagram-outbound', () => ({
   prepareInstagramOperatorSend: (...a: unknown[]) => prepareInstagramMock(...a),
   sendInstagramOperatorText: (...a: unknown[]) => sendInstagramMock(...a),
-  settleFailedInstagramOperatorSend: (...a: unknown[]) => settleFailedMock(...a),
+  settleFailedInstagramOperatorSend: (...a: unknown[]) =>
+    settleFailedMock(...a),
   stampInstagramOperatorSend: (...a: unknown[]) => stampInstagramMock(...a),
 }))
 // TAC-513: partial mock. PendingCommitmentSchema keeps its always-fails stub,
@@ -307,25 +311,47 @@ describe('dispatchOperatorOutbound: an Instagram card (TAC-469)', () => {
     return { ...r, data: { ...r.data, channel: 'instagram' } }
   }
   const approve = () =>
-    dispatchOperatorOutbound({ messageId: MESSAGE_ID, operatorId: 'op-1', venueScope: grantedVenues([VENUE_ID]), action: 'approve' })
+    dispatchOperatorOutbound({
+      messageId: MESSAGE_ID,
+      operatorId: 'op-1',
+      venueScope: grantedVenues([VENUE_ID]),
+      action: 'approve',
+    })
 
   beforeEach(() => {
-    claimResultMock.mockReturnValue({ data: [{ id: MESSAGE_ID, review_state: 'approved' }], error: null })
-    guestMaybeSingleMock.mockResolvedValue({ data: { phone_number: null, opted_out_at: null }, error: null })
+    claimResultMock.mockReturnValue({
+      data: [{ id: MESSAGE_ID, review_state: 'approved' }],
+      error: null,
+    })
+    guestMaybeSingleMock.mockResolvedValue({
+      data: { phone_number: null, opted_out_at: null },
+      error: null,
+    })
     prepareInstagramMock.mockResolvedValue({ ok: true, target: TARGET })
     sendInstagramMock.mockResolvedValue({ ok: true, mid: 'mid-1' })
     stampInstagramMock.mockResolvedValue({ ok: true, folded: false })
-    settleFailedMock.mockResolvedValue('Instagram refused this send (window_closed). The card is back in the queue.')
+    settleFailedMock.mockResolvedValue(
+      'Instagram refused this send (window_closed). The card is back in the queue.',
+    )
   })
 
   it('sends over Instagram, never Sendblue, and returns the mid', async () => {
     rowMaybeSingleMock.mockResolvedValue(instagramRow())
     const r = await approve()
-    expect(r).toMatchObject({ ok: true, outcome: 'sent', providerMessageId: 'mid-1' })
+    expect(r).toMatchObject({
+      ok: true,
+      outcome: 'sent',
+      providerMessageId: 'mid-1',
+    })
     expect(sendInstagramMock).toHaveBeenCalledWith(TARGET, 'Open until 3')
     expect(stampInstagramMock).toHaveBeenCalledWith(
       expect.anything(),
-      expect.objectContaining({ messageId: MESSAGE_ID, venueId: VENUE_ID, guestId: GUEST_ID, mid: 'mid-1' }),
+      expect.objectContaining({
+        messageId: MESSAGE_ID,
+        venueId: VENUE_ID,
+        guestId: GUEST_ID,
+        mid: 'mid-1',
+      }),
     )
     expect(sendMessageMock).not.toHaveBeenCalled()
   })
@@ -337,9 +363,17 @@ describe('dispatchOperatorOutbound: an Instagram card (TAC-469)', () => {
 
   it('refuses a card outside the 24-hour window BEFORE the flip, so it stays queued', async () => {
     rowMaybeSingleMock.mockResolvedValue(instagramRow())
-    prepareInstagramMock.mockResolvedValue({ ok: false, errorCode: 'instagram_window_closed', error: 'closed' })
+    prepareInstagramMock.mockResolvedValue({
+      ok: false,
+      errorCode: 'instagram_window_closed',
+      error: 'closed',
+    })
     const r = await approve()
-    expect(r).toEqual({ ok: false, errorCode: 'instagram_window_closed', error: 'closed' })
+    expect(r).toEqual({
+      ok: false,
+      errorCode: 'instagram_window_closed',
+      error: 'closed',
+    })
     expect(updateSpy).not.toHaveBeenCalled()
     expect(sendInstagramMock).not.toHaveBeenCalled()
   })
@@ -353,18 +387,26 @@ describe('dispatchOperatorOutbound: an Instagram card (TAC-469)', () => {
       action: 'edit',
       editedBody: '  Open until 4 today  ',
     })
-    expect(prepareInstagramMock).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ body: 'Open until 4 today' }))
+    expect(prepareInstagramMock).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ body: 'Open until 4 today' }),
+    )
     expect(sendInstagramMock).toHaveBeenCalledWith(TARGET, 'Open until 4 today')
   })
 
   it('hands a failed send to the Instagram arm to settle (put back or not), with what was flipped', async () => {
     rowMaybeSingleMock.mockResolvedValue(instagramRow())
-    sendInstagramMock.mockResolvedValue({ ok: false, kind: 'window_closed', failure: null })
+    sendInstagramMock.mockResolvedValue({
+      ok: false,
+      kind: 'window_closed',
+      failure: null,
+    })
     const r = await approve()
     expect(r).toEqual({
       ok: false,
       errorCode: 'instagram_send_failed',
-      error: 'Instagram refused this send (window_closed). The card is back in the queue.',
+      error:
+        'Instagram refused this send (window_closed). The card is back in the queue.',
     })
     expect(settleFailedMock).toHaveBeenCalledWith(expect.anything(), {
       messageId: MESSAGE_ID,
@@ -376,7 +418,10 @@ describe('dispatchOperatorOutbound: an Instagram card (TAC-469)', () => {
 
   it('refuses a card with an unknown channel before the flip: nothing routes on it', async () => {
     const r0 = row('Open until 3')
-    rowMaybeSingleMock.mockResolvedValue({ ...r0, data: { ...r0.data, channel: 'carrier-pigeon' } })
+    rowMaybeSingleMock.mockResolvedValue({
+      ...r0,
+      data: { ...r0.data, channel: 'carrier-pigeon' },
+    })
     const r = await approve()
     expect(r).toMatchObject({ ok: false, errorCode: 'channel_unresolved' })
     expect(updateSpy).not.toHaveBeenCalled()
@@ -387,7 +432,10 @@ describe('dispatchOperatorOutbound: an Instagram card (TAC-469)', () => {
   // Instagram test used a phoneless guest and the text test a phoned one. A
   // guest with BOTH identifiers is exactly what TAC-469's channel rule is for.
   it("routes on the card's channel, not on whether the guest has a phone", async () => {
-    guestMaybeSingleMock.mockResolvedValue({ data: { phone_number: '+15555550123', opted_out_at: null }, error: null })
+    guestMaybeSingleMock.mockResolvedValue({
+      data: { phone_number: '+15555550123', opted_out_at: null },
+      error: null,
+    })
     rowMaybeSingleMock.mockResolvedValue(instagramRow())
     expect((await approve()).ok).toBe(true)
     expect(sendInstagramMock).toHaveBeenCalled()
@@ -396,7 +444,11 @@ describe('dispatchOperatorOutbound: an Instagram card (TAC-469)', () => {
 
   it('sends a text card to a guest who also has an Instagram ID over Sendblue', async () => {
     guestMaybeSingleMock.mockResolvedValue({
-      data: { phone_number: '+15555550123', instagram_scoped_id: '1000000000000001', opted_out_at: null },
+      data: {
+        phone_number: '+15555550123',
+        instagram_scoped_id: '1000000000000001',
+        opted_out_at: null,
+      },
       error: null,
     })
     rowMaybeSingleMock.mockResolvedValue(row('Open until 3'))
@@ -406,7 +458,10 @@ describe('dispatchOperatorOutbound: an Instagram card (TAC-469)', () => {
   })
 
   it('a text card never touches the Instagram arm', async () => {
-    guestMaybeSingleMock.mockResolvedValue({ data: { phone_number: '+15555550123', opted_out_at: null }, error: null })
+    guestMaybeSingleMock.mockResolvedValue({
+      data: { phone_number: '+15555550123', opted_out_at: null },
+      error: null,
+    })
     rowMaybeSingleMock.mockResolvedValue(row('Open until 3'))
     await approve()
     expect(prepareInstagramMock).not.toHaveBeenCalled()

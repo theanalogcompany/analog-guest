@@ -6,7 +6,10 @@ vi.mock('@/lib/db/admin', () => ({
 
 import { createAdminClient } from '@/lib/db/admin'
 import { INTENTION_KEYS } from '@/lib/agent/intentions/definitions'
-import { loadIntentionPrompts, RECORDED_PROMPTS_LIMIT } from './load-intention-prompts'
+import {
+  loadIntentionPrompts,
+  RECORDED_PROMPTS_LIMIT,
+} from './load-intention-prompts'
 import { adminVenueScope } from '@/lib/auth/venue-scope'
 
 const VENUE_ID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
@@ -16,7 +19,10 @@ interface QueryCall {
   args: unknown[]
 }
 
-function mockQuery(result: { data: unknown; error: { message: string } | null }) {
+function mockQuery(result: {
+  data: unknown
+  error: { message: string } | null
+}) {
   const calls: QueryCall[] = []
   const builder: Record<string, unknown> = {}
   for (const method of ['select', 'order', 'limit', 'in', 'not']) {
@@ -26,12 +32,13 @@ function mockQuery(result: { data: unknown; error: { message: string } | null })
     })
   }
   // The supabase query builder is thenable; awaiting it resolves the query.
-  builder.then = (resolve: (v: unknown) => unknown) => Promise.resolve(result).then(resolve)
+  builder.then = (resolve: (v: unknown) => unknown) =>
+    Promise.resolve(result).then(resolve)
 
   const from = vi.fn(() => builder)
-  vi.mocked(createAdminClient).mockReturnValue({ from } as unknown as ReturnType<
-    typeof createAdminClient
-  >)
+  vi.mocked(createAdminClient).mockReturnValue({
+    from,
+  } as unknown as ReturnType<typeof createAdminClient>)
   return { calls, from }
 }
 
@@ -41,7 +48,11 @@ const dbRow = (overrides: Record<string, unknown> = {}) => ({
   prompted_at: '2026-09-13T10:00:00.000Z',
   message_id: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd',
   prompt_source: 'classified',
-  guest: { first_name: 'Liam', last_name: 'Chen', phone_number: '+15555550142' },
+  guest: {
+    first_name: 'Liam',
+    last_name: 'Chen',
+    phone_number: '+15555550142',
+  },
   venue: { name: "Le Mil's Coffee" },
   ...overrides,
 })
@@ -77,12 +88,23 @@ describe('loadIntentionPrompts', () => {
   // exists fleet-wide, so most filters return nothing.
   it('returns an empty list when the guest has no recorded prompts', async () => {
     mockQuery({ data: [], error: null })
-    await expect(loadIntentionPrompts(adminVenueScope([]))).resolves.toEqual({ rows: [], hasMore: false })
+    await expect(loadIntentionPrompts(adminVenueScope([]))).resolves.toEqual({
+      rows: [],
+      hasMore: false,
+    })
   })
 
   it('falls back to the phone number when the guest has no name', async () => {
     mockQuery({
-      data: [dbRow({ guest: { first_name: null, last_name: null, phone_number: '+15555550142' } })],
+      data: [
+        dbRow({
+          guest: {
+            first_name: null,
+            last_name: null,
+            phone_number: '+15555550142',
+          },
+        }),
+      ],
       error: null,
     })
 
@@ -93,7 +115,16 @@ describe('loadIntentionPrompts', () => {
   // TAC-479: an Instagram guest with no name shows their handle, once fetched.
   it('shows the Instagram handle for a guest with no name and no phone', async () => {
     mockQuery({
-      data: [dbRow({ guest: { first_name: null, last_name: null, phone_number: null, instagram_username: 'maya.oakland' } })],
+      data: [
+        dbRow({
+          guest: {
+            first_name: null,
+            last_name: null,
+            phone_number: null,
+            instagram_username: 'maya.oakland',
+          },
+        }),
+      ],
       error: null,
     })
 
@@ -165,7 +196,9 @@ describe('loadIntentionPrompts', () => {
 
     expect(from).toHaveBeenCalledWith('guest_intention_prompts')
     const select = calls.find((c) => c.method === 'select')?.args[0] as string
-    expect(select).toContain('guest:guests!inner(first_name, last_name, phone_number, instagram_username)')
+    expect(select).toContain(
+      'guest:guests!inner(first_name, last_name, phone_number, instagram_username)',
+    )
     expect(select).toContain('venue:venues!inner(name)')
     expect(select).toContain('prompt_source')
     expect(calls.find((c) => c.method === 'order')?.args).toEqual([
@@ -174,7 +207,9 @@ describe('loadIntentionPrompts', () => {
     ])
     // limit + 1 is load-bearing, not an off-by-one: the extra row is what
     // distinguishes exactly-at-cap from over-cap. See the hasMore tests.
-    expect(calls.find((c) => c.method === 'limit')?.args).toEqual([RECORDED_PROMPTS_LIMIT + 1])
+    expect(calls.find((c) => c.method === 'limit')?.args).toEqual([
+      RECORDED_PROMPTS_LIMIT + 1,
+    ])
   })
 
   // TAC-380 trap 5. Since migration 040 the table also holds ELIGIBILITY rows
@@ -206,8 +241,9 @@ describe('loadIntentionPrompts', () => {
   })
 
   it('reports hasMore true and drops the probe row when one row is over the cap', async () => {
-    const overflowing = Array.from({ length: RECORDED_PROMPTS_LIMIT + 1 }, (_, i) =>
-      dbRow({ id: `row-${i}` }),
+    const overflowing = Array.from(
+      { length: RECORDED_PROMPTS_LIMIT + 1 },
+      (_, i) => dbRow({ id: `row-${i}` }),
     )
     mockQuery({ data: overflowing, error: null })
 
@@ -222,7 +258,10 @@ describe('loadIntentionPrompts', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
     mockQuery({ data: null, error: { message: 'connection reset' } })
 
-    await expect(loadIntentionPrompts(adminVenueScope([]))).resolves.toEqual({ rows: [], hasMore: false })
+    await expect(loadIntentionPrompts(adminVenueScope([]))).resolves.toEqual({
+      rows: [],
+      hasMore: false,
+    })
     expect(warn).toHaveBeenCalled()
     warn.mockRestore()
   })

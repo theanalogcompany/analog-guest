@@ -1,10 +1,23 @@
 import { describe, expect, it } from 'vitest'
 
-import { classifySpeakerIdentity, sentencesOf } from './speaker-identity-language'
+import {
+  classifySpeakerIdentity,
+  sentencesOf,
+} from './speaker-identity-language'
 
 // Le Mil's real roster, which is what the harness passes.
 const OPTS = {
-  personNames: ['Himanshu', 'Milana', 'Asia', 'Christopher', 'Spade', 'Alisha', 'Morgan', 'Parker', 'Trinity'],
+  personNames: [
+    'Himanshu',
+    'Milana',
+    'Asia',
+    'Christopher',
+    'Spade',
+    'Alisha',
+    'Morgan',
+    'Parker',
+    'Trinity',
+  ],
   venueNames: ["Le Mil's", 'Le Mils'],
 } as const
 
@@ -70,7 +83,9 @@ describe('namedSelfIntro — the ticket', () => {
 describe('bareNameAsk — defect 2', () => {
   // THE DEFECT, verbatim from the same thread.
   it('catches the live defect body', () => {
-    const v = verdict('ha, yeah that foam is basically a topping. what\'s your name?')
+    const v = verdict(
+      "ha, yeah that foam is basically a topping. what's your name?",
+    )
     expect(v.asksName).toBe(true)
     expect(v.bareNameAsk).toBe(true)
   })
@@ -78,7 +93,7 @@ describe('bareNameAsk — defect 2', () => {
   it.each([
     "by the way, what's your name?",
     "nice. what's your name, by the way?",
-    "oh and what should we call you?",
+    'oh and what should we call you?',
     "so we know it's you next time, what's your name?",
     "while you're here, what should we call you?",
   ])('does not call a softened ask bare: %j', (body) => {
@@ -90,7 +105,9 @@ describe('bareNameAsk — defect 2', () => {
   // The softener routinely lands in the sentence BEFORE the question, which is
   // why bareness is judged on the whole reply rather than the question alone.
   it('sees a softener in an earlier sentence', () => {
-    const v = verdict("that foam is basically a topping. oh and, what's your name?")
+    const v = verdict(
+      "that foam is basically a topping. oh and, what's your name?",
+    )
     expect(v.bareNameAsk).toBe(false)
   })
 
@@ -104,7 +121,7 @@ describe('bareNameAsk — defect 2', () => {
   })
 
   it('does not see a name ask where there is none', () => {
-    const v = verdict("good pick. what did you think of the foam?")
+    const v = verdict('good pick. what did you think of the foam?')
     expect(v.asksName).toBe(false)
     expect(v.bareNameAsk).toBe(false)
   })
@@ -121,7 +138,7 @@ describe('whatToCallYouReason — R37, as corrected 2026-09-26', () => {
   it.each([
     'just so we know what to call you',
     'so we know what to call you 😊',
-    "nothing formal, we just like to know what to call you",
+    'nothing formal, we just like to know what to call you',
     'so we have something to call you',
     'just so we know what you go by',
   ])('catches %j', (body) => {
@@ -142,7 +159,9 @@ describe('whatToCallYouReason — R37, as corrected 2026-09-26', () => {
   })
 
   it('counts the two independently when a reply gives both', () => {
-    const v = verdict('so we know what to call you, and so we remember you next time')
+    const v = verdict(
+      'so we know what to call you, and so we remember you next time',
+    )
     expect(v.whatToCallYouReason).toBe(true)
     expect(v.overPromisesRecognition).toBe(true)
   })
@@ -171,12 +190,14 @@ describe('whatToCallYouReason — R37, as corrected 2026-09-26', () => {
 
 describe('questionCount — the ceiling input', () => {
   it('counts one', () => {
-    expect(verdict("hey! what did you get?").questionCount).toBe(1)
+    expect(verdict('hey! what did you get?').questionCount).toBe(1)
   })
 
   // TAC-519's own interrogation ceiling, verbatim from its run log.
   it('counts two in the interrogation shape', () => {
-    expect(verdict('Did you just come by today? What did you grab?').questionCount).toBe(2)
+    expect(
+      verdict('Did you just come by today? What did you grab?').questionCount,
+    ).toBe(2)
   })
 
   it('counts none in a statement', () => {

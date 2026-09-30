@@ -69,7 +69,11 @@ async function sendblueRequest<T>(path: string, body: unknown): Promise<T> {
     })
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e)
-    throw new SendblueAPIError(0, null, `Sendblue network error calling ${path}: ${message}`)
+    throw new SendblueAPIError(
+      0,
+      null,
+      `Sendblue network error calling ${path}: ${message}`,
+    )
   }
 
   const text = await response.text()

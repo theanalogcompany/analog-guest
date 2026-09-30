@@ -36,7 +36,20 @@
  * which treats exactly one trailing slash as insignificant on BOTH sides of
  * the comparison.
  */
-const TRAILING_NOISE = new Set(['.', ',', '!', '?', ';', ':', ')', ']', '}', '>', '"', "'"])
+const TRAILING_NOISE = new Set([
+  '.',
+  ',',
+  '!',
+  '?',
+  ';',
+  ':',
+  ')',
+  ']',
+  '}',
+  '>',
+  '"',
+  "'",
+])
 
 /**
  * One URL-shaped token.
@@ -197,7 +210,10 @@ export function extractUrls(body: string): string[] {
  * Returns the offending links verbatim (pre-canonicalization) so regen
  * feedback and the PostHog event can quote what the model actually wrote.
  */
-export function findUnverifiedUrls(body: string, allowedUrls: readonly string[]): string[] {
+export function findUnverifiedUrls(
+  body: string,
+  allowedUrls: readonly string[],
+): string[] {
   const allowed = new Set(allowedUrls.map((u) => canonicalizeUrl(u.trim())))
   return extractUrls(body).filter((url) => !allowed.has(canonicalizeUrl(url)))
 }

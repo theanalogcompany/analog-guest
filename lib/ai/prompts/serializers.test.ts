@@ -12,10 +12,15 @@ import {
   type VenueInfo,
   VenueInfoSchema,
 } from '../../schemas'
-import type { KnowledgeCorpusChunk, RecentMessage, RuntimeContext } from '../types'
+import type {
+  KnowledgeCorpusChunk,
+  RecentMessage,
+  RuntimeContext,
+} from '../types'
 import {
   FIRST_TOUCH_SIGNAL_LINE,
   firstTouchOpenerFor,
+  formatOrderSummary,
   knowledgeChunksToProse,
   personaToProse,
   runtimeToProse,
@@ -50,7 +55,12 @@ function makeVenueInfo(overrides: Partial<VenueInfo> = {}): VenueInfo {
   // VenueInfoSchema.parse fills defaults (contact:{}, hours:{}, menu:{...},
   // staff:[], currentContext:[]). Only `address` is required.
   return VenueInfoSchema.parse({
-    address: { line1: '1 Test St', city: 'Test', region: 'CA', postalCode: '94000' },
+    address: {
+      line1: '1 Test St',
+      city: 'Test',
+      region: 'CA',
+      postalCode: '94000',
+    },
     ...overrides,
   })
 }
@@ -101,7 +111,9 @@ describe('venueInfoToProse — menu items', () => {
     // priceNote replaces price when price is undefined.
     expect(out).toContain('- The Rachel — by request')
     // On-menu section comes before off-menu section.
-    expect(out.indexOf('On-menu:')).toBeLessThan(out.indexOf('Off-menu (by request):'))
+    expect(out.indexOf('On-menu:')).toBeLessThan(
+      out.indexOf('Off-menu (by request):'),
+    )
   })
 
   it('renders modifiers conditionally', () => {
@@ -110,7 +122,11 @@ describe('venueInfoToProse — menu items', () => {
         highlights: [],
         items: [
           item({ name: 'Espresso', modifiers: [] }),
-          item({ name: 'Cappuccino', price: 2.25, modifiers: ['oat milk', 'almond milk'] }),
+          item({
+            name: 'Cappuccino',
+            price: 2.25,
+            modifiers: ['oat milk', 'almond milk'],
+          }),
         ],
       },
     })
@@ -118,7 +134,9 @@ describe('venueInfoToProse — menu items', () => {
     // Empty modifiers — line ends after price (then newline or section break).
     expect(out).toMatch(/- Espresso — \$2\.00(?!\s*— modifiers)/)
     // Non-empty modifiers — joined with comma+space.
-    expect(out).toContain('- Cappuccino — $2.25 — modifiers: oat milk, almond milk')
+    expect(out).toContain(
+      '- Cappuccino — $2.25 — modifiers: oat milk, almond milk',
+    )
   })
 
   it('omits the entire structured menu section when items is empty', () => {
@@ -153,7 +171,9 @@ describe('venueInfoToProse — hours notes multiline fix', () => {
     })
     const out = venueInfoToProse(info)
     // Header + nested sub-bullets.
-    expect(out).toContain('  - Notes:\n    - Annual closures: Christmas Day, July 4\n    - Notes: Gunther off Tuesdays — Maya covers')
+    expect(out).toContain(
+      '  - Notes:\n    - Annual closures: Christmas Day, July 4\n    - Notes: Gunther off Tuesdays — Maya covers',
+    )
     // The bug we're fixing: the second line should NOT escape the indentation
     // (used to render as `Notes: Gunther...` at column 0).
     expect(out).not.toMatch(/^Notes: Gunther/m)
@@ -221,7 +241,9 @@ describe('runtimeToProse — today block', () => {
   it('puts the calendar directly under the date, above the venue time', () => {
     const out = runtimeToProse({ today }, 'reply', NOW)
     expect(out.indexOf('- Calendar:')).toBeGreaterThan(out.indexOf('- Date:'))
-    expect(out.indexOf('- Calendar:')).toBeLessThan(out.indexOf('- Time at venue:'))
+    expect(out.indexOf('- Calendar:')).toBeLessThan(
+      out.indexOf('- Time at venue:'),
+    )
   })
 
   it('renders today block before the inbound-message line', () => {
@@ -246,7 +268,12 @@ describe('runtimeToProse — today block', () => {
   describe('open/closed status line', () => {
     it('states OPEN and the closing time when the venue is open', () => {
       const out = runtimeToProse(
-        { today: { ...today, openState: { state: 'open', closesAt: '3:00 PM' } } },
+        {
+          today: {
+            ...today,
+            openState: { state: 'open', closesAt: '3:00 PM' },
+          },
+        },
         'reply',
         NOW,
       )
@@ -258,7 +285,10 @@ describe('runtimeToProse — today block', () => {
         {
           today: {
             ...today,
-            openState: { state: 'closed', opensAt: { day: 'tomorrow', time: '7:00 AM' } },
+            openState: {
+              state: 'closed',
+              opensAt: { day: 'tomorrow', time: '7:00 AM' },
+            },
           },
         },
         'reply',
@@ -313,14 +343,21 @@ describe('runtimeToProse — today block', () => {
     it('keeps the status line inside the Right now block, after the clock', () => {
       const out = runtimeToProse(
         {
-          today: { ...today, openState: { state: 'open', closesAt: '3:00 PM' } },
+          today: {
+            ...today,
+            openState: { state: 'open', closesAt: '3:00 PM' },
+          },
           inboundMessage: 'omw can you have my usual ready?',
         },
         'reply',
         NOW,
       )
-      expect(out.indexOf('- Time at venue:')).toBeLessThan(out.indexOf('- Status:'))
-      expect(out.indexOf('- Status:')).toBeLessThan(out.indexOf('The guest just sent:'))
+      expect(out.indexOf('- Time at venue:')).toBeLessThan(
+        out.indexOf('- Status:'),
+      )
+      expect(out.indexOf('- Status:')).toBeLessThan(
+        out.indexOf('The guest just sent:'),
+      )
     })
   })
 })
@@ -330,9 +367,21 @@ describe('runtimeToProse — recent conversation block', () => {
     const out = runtimeToProse(
       {
         recentMessages: [
-          recent({ direction: 'inbound', body: 'hi', createdAt: new Date(NOW.getTime() - 2 * 60 * 60 * 1000) }),
-          recent({ direction: 'outbound', body: 'hey.', createdAt: new Date(NOW.getTime() - 2 * 60 * 60 * 1000 + 60_000) }),
-          recent({ direction: 'inbound', body: 'do you have oat milk?', createdAt: new Date(NOW.getTime() - 5 * 60 * 1000) }),
+          recent({
+            direction: 'inbound',
+            body: 'hi',
+            createdAt: new Date(NOW.getTime() - 2 * 60 * 60 * 1000),
+          }),
+          recent({
+            direction: 'outbound',
+            body: 'hey.',
+            createdAt: new Date(NOW.getTime() - 2 * 60 * 60 * 1000 + 60_000),
+          }),
+          recent({
+            direction: 'inbound',
+            body: 'do you have oat milk?',
+            createdAt: new Date(NOW.getTime() - 5 * 60 * 1000),
+          }),
         ],
       },
       'reply',
@@ -349,12 +398,30 @@ describe('runtimeToProse — recent conversation block', () => {
       {
         recentMessages: [
           recent({ body: 'now', createdAt: new Date(NOW.getTime() - 30_000) }), // 30s
-          recent({ body: 'oneMin', createdAt: new Date(NOW.getTime() - 60_000) }), // 1 min
-          recent({ body: 'manyMin', createdAt: new Date(NOW.getTime() - 30 * 60_000) }), // 30 min
-          recent({ body: 'oneHr', createdAt: new Date(NOW.getTime() - 60 * 60_000) }), // 1 h
-          recent({ body: 'manyHr', createdAt: new Date(NOW.getTime() - 5 * 60 * 60_000) }), // 5 h
-          recent({ body: 'yesterday', createdAt: new Date(NOW.getTime() - 30 * 60 * 60_000) }), // 30 h
-          recent({ body: 'multiDay', createdAt: new Date(NOW.getTime() - 5 * 24 * 60 * 60_000) }), // 5 d
+          recent({
+            body: 'oneMin',
+            createdAt: new Date(NOW.getTime() - 60_000),
+          }), // 1 min
+          recent({
+            body: 'manyMin',
+            createdAt: new Date(NOW.getTime() - 30 * 60_000),
+          }), // 30 min
+          recent({
+            body: 'oneHr',
+            createdAt: new Date(NOW.getTime() - 60 * 60_000),
+          }), // 1 h
+          recent({
+            body: 'manyHr',
+            createdAt: new Date(NOW.getTime() - 5 * 60 * 60_000),
+          }), // 5 h
+          recent({
+            body: 'yesterday',
+            createdAt: new Date(NOW.getTime() - 30 * 60 * 60_000),
+          }), // 30 h
+          recent({
+            body: 'multiDay',
+            createdAt: new Date(NOW.getTime() - 5 * 24 * 60 * 60_000),
+          }), // 5 d
         ],
       },
       'reply',
@@ -385,8 +452,14 @@ describe('runtimeToProse — recent conversation block', () => {
     const out = runtimeToProse(
       {
         recentMessages: [
-          recent({ body: 'line1\nline2\n  line3', createdAt: new Date(NOW.getTime() - 60_000) }),
-          recent({ body: longBody, createdAt: new Date(NOW.getTime() - 120_000) }),
+          recent({
+            body: 'line1\nline2\n  line3',
+            createdAt: new Date(NOW.getTime() - 60_000),
+          }),
+          recent({
+            body: longBody,
+            createdAt: new Date(NOW.getTime() - 120_000),
+          }),
         ],
       },
       'reply',
@@ -401,12 +474,16 @@ describe('runtimeToProse — recent conversation block', () => {
     const out = runtimeToProse(
       {
         today,
-        recentMessages: [recent({ body: 'hi', createdAt: new Date(NOW.getTime() - 60_000) })],
+        recentMessages: [
+          recent({ body: 'hi', createdAt: new Date(NOW.getTime() - 60_000) }),
+        ],
       },
       'reply',
       NOW,
     )
-    expect(out.indexOf('## Right now')).toBeLessThan(out.indexOf('## Recent conversation'))
+    expect(out.indexOf('## Right now')).toBeLessThan(
+      out.indexOf('## Recent conversation'),
+    )
   })
 })
 
@@ -414,21 +491,39 @@ describe('runtimeToProse — unsent history (TAC-394)', () => {
   const minutesAgo = (n: number) => new Date(NOW.getTime() - n * 60_000)
   const DRAFT =
     "Really sorry to hear that. Come back in and the next one's on us. Give me a heads up when you're heading over"
-  const NOTE = 'Lines marked NOT SENT or NEVER SENT never reached the guest. They have not read them.'
+  const NOTE =
+    'Lines marked NOT SENT or NEVER SENT never reached the guest. They have not read them.'
 
   // The 2026-09-14 sequence, as the regenerating model saw it at 16:31.
-  const incident = (draftDelivery: RecentMessage['delivery']): RecentMessage[] => [
-    recent({ direction: 'inbound', body: 'the cortado i got this morning was cold and bad', createdAt: minutesAgo(5) }),
-    recent({ direction: 'outbound', body: DRAFT, createdAt: minutesAgo(4), delivery: draftDelivery }),
+  const incident = (
+    draftDelivery: RecentMessage['delivery'],
+  ): RecentMessage[] => [
+    recent({
+      direction: 'inbound',
+      body: 'the cortado i got this morning was cold and bad',
+      createdAt: minutesAgo(5),
+    }),
+    recent({
+      direction: 'outbound',
+      body: DRAFT,
+      createdAt: minutesAgo(4),
+      delivery: draftDelivery,
+    }),
   ]
   const render = (messages: RecentMessage[]) =>
     runtimeToProse(
-      { inboundMessage: 'what time do you open on sundaus', recentMessages: messages },
+      {
+        inboundMessage: 'what time do you open on sundaus',
+        recentMessages: messages,
+      },
       'new_question',
       NOW,
     )
   const historyBlock = (out: string) =>
-    out.slice(out.indexOf('## Recent conversation'), out.indexOf('\n\nThe guest just sent:'))
+    out.slice(
+      out.indexOf('## Recent conversation'),
+      out.indexOf('\n\nThe guest just sent:'),
+    )
 
   it('renders history with nothing unsent exactly as before', () => {
     const out = render(incident('delivered'))
@@ -454,41 +549,69 @@ describe('runtimeToProse — unsent history (TAC-394)', () => {
     ['skipped_by_operator', 'NOT SENT: the venue decided not to send it'],
     // TAC-473. Its own marker rather than never_sent's, which would tell the
     // model a send FAILED when staff simply answered in the Instagram app.
-    ['answered_outside_app', 'NOT SENT: the venue answered this in the Instagram app instead'],
+    [
+      'answered_outside_app',
+      'NOT SENT: the venue answered this in the Instagram app instead',
+    ],
     ['never_sent', 'NEVER SENT: it failed to send'],
-  ] as const)('marks a %s line "%s" and adds only the note', (delivery, marker) => {
-    expect(historyBlock(render(incident(delivery)))).toBe(
-      '## Recent conversation\n' +
-        '[guest, 5 minutes ago] the cortado i got this morning was cold and bad\n' +
-        `[venue, 4 minutes ago, ${marker}] ${DRAFT}\n\n` +
-        NOTE,
-    )
-  })
+  ] as const)(
+    'marks a %s line "%s" and adds only the note',
+    (delivery, marker) => {
+      expect(historyBlock(render(incident(delivery)))).toBe(
+        '## Recent conversation\n' +
+          '[guest, 5 minutes ago] the cortado i got this morning was cold and bad\n' +
+          `[venue, 4 minutes ago, ${marker}] ${DRAFT}\n\n` +
+          NOTE,
+      )
+    },
+  )
 
   // v1.50.0 first exempted pending lines from the cap, because the removed
   // instruction asked the model to carry a pending offer forward. With nothing
   // asking that, an exemption has no reason to exist.
-  it.each(['delivered', 'awaiting_review', 'skipped_by_operator', 'answered_outside_app', 'never_sent'] as const)(
-    'truncates a %s line at 200 characters',
-    (delivery) => {
-      const long = 'a'.repeat(250)
-      const out = render([recent({ direction: 'outbound', body: long, createdAt: minutesAgo(4), delivery })])
-      expect(out).toContain(`${'a'.repeat(200)}…`)
-      expect(out).not.toContain('a'.repeat(201))
-    },
-  )
+  it.each([
+    'delivered',
+    'awaiting_review',
+    'skipped_by_operator',
+    'answered_outside_app',
+    'never_sent',
+  ] as const)('truncates a %s line at 200 characters', (delivery) => {
+    const long = 'a'.repeat(250)
+    const out = render([
+      recent({
+        direction: 'outbound',
+        body: long,
+        createdAt: minutesAgo(4),
+        delivery,
+      }),
+    ])
+    expect(out).toContain(`${'a'.repeat(200)}…`)
+    expect(out).not.toContain('a'.repeat(201))
+  })
 
   it('states the note once however many lines are unsent', () => {
     const out = render([
-      recent({ direction: 'outbound', body: 'a failed send', createdAt: minutesAgo(120), delivery: 'never_sent' }),
-      recent({ direction: 'outbound', body: 'an older skipped draft', createdAt: minutesAgo(90), delivery: 'skipped_by_operator' }),
+      recent({
+        direction: 'outbound',
+        body: 'a failed send',
+        createdAt: minutesAgo(120),
+        delivery: 'never_sent',
+      }),
+      recent({
+        direction: 'outbound',
+        body: 'an older skipped draft',
+        createdAt: minutesAgo(90),
+        delivery: 'skipped_by_operator',
+      }),
       ...incident('awaiting_review'),
     ])
     expect(out.split('never reached the guest').length - 1).toBe(1)
   })
 })
 
-const mechanic = (overrides: Partial<EligibleMechanic> = {}): EligibleMechanic => ({
+const mechanic = (
+  overrides: Partial<EligibleMechanic> = {},
+): EligibleMechanic => ({
   id: 'm-1',
   type: 'perk',
   name: 'The Joey',
@@ -509,7 +632,9 @@ describe('runtimeToProse — eligibility block (THE-170)', () => {
     // replacements explicitly. "Do not offer perks" alone did not bind on
     // 2026-08-07 — the model classified a remake as "not a perk, just good
     // hospitality" and offered it with this block rendered in its prompt.
-    expect(out).toContain('Do not offer comps, remakes, replacements, or discounts either.')
+    expect(out).toContain(
+      'Do not offer comps, remakes, replacements, or discounts either.',
+    )
   })
 
   // v1.24.0 THE CRUX. Comp-forward language is permissible ONLY on a turn
@@ -518,7 +643,11 @@ describe('runtimeToProse — eligibility block (THE-170)', () => {
   // generation, and category routing depends on nothing the model says.
   describe('empty-mechanics block is conditioned on willBeReviewed (v1.24.0)', () => {
     it('invites a proposal when a human will approve the draft first', () => {
-      const out = runtimeToProse({ mechanics: [], willBeReviewed: true }, 'reply', NOW)
+      const out = runtimeToProse(
+        { mechanics: [], willBeReviewed: true },
+        'reply',
+        NOW,
+      )
       expect(out).toContain('approves it before the guest ever sees it')
       expect(out).toContain('come back for another on us')
       // The model must know it is proposing, not authorizing.
@@ -528,9 +657,15 @@ describe('runtimeToProse — eligibility block (THE-170)', () => {
     it('keeps the v1.23.0 denial VERBATIM when nothing will review it', () => {
       // The auto-send path must not be relaxed by one word. This is what
       // stops v1.24.0 from reopening the 2026-08-07 unauthorized-comp path.
-      const out = runtimeToProse({ mechanics: [], willBeReviewed: false }, 'reply', NOW)
+      const out = runtimeToProse(
+        { mechanics: [], willBeReviewed: false },
+        'reply',
+        NOW,
+      )
       expect(out).toContain('Do not offer perks of any kind.')
-      expect(out).toContain('Do not offer comps, remakes, replacements, or discounts either.')
+      expect(out).toContain(
+        'Do not offer comps, remakes, replacements, or discounts either.',
+      )
       expect(out).not.toContain('come back for another on us')
     })
 
@@ -538,7 +673,9 @@ describe('runtimeToProse — eligibility block (THE-170)', () => {
       // Fail toward the restrictive branch: an unset flag must never be read
       // as permission to offer something.
       const out = runtimeToProse({ mechanics: [] }, 'reply', NOW)
-      expect(out).toContain('Do not offer comps, remakes, replacements, or discounts either.')
+      expect(out).toContain(
+        'Do not offer comps, remakes, replacements, or discounts either.',
+      )
     })
   })
 
@@ -566,7 +703,9 @@ describe('runtimeToProse — eligibility block (THE-170)', () => {
       NOW,
     )
     expect(out).toContain('## What this guest can access')
-    expect(out).toContain('- The Joey — free couch hold for 2 hours (regulars only)')
+    expect(out).toContain(
+      '- The Joey — free couch hold for 2 hours (regulars only)',
+    )
   })
 
   it('renders bare name when reward and qualification are null', () => {
@@ -590,7 +729,9 @@ describe('runtimeToProse — eligibility block (THE-170)', () => {
       {
         today,
         mechanics: [],
-        recentMessages: [recent({ body: 'hi', createdAt: new Date(NOW.getTime() - 60_000) })],
+        recentMessages: [
+          recent({ body: 'hi', createdAt: new Date(NOW.getTime() - 60_000) }),
+        ],
       },
       'reply',
       NOW,
@@ -604,14 +745,18 @@ describe('runtimeToProse — eligibility block (THE-170)', () => {
   })
 })
 
-describe('runtimeToProse — ## What you\'re hoping to get to block (TAC-324)', () => {
+describe("runtimeToProse — ## What you're hoping to get to block (TAC-324)", () => {
   it('omits the block entirely when openIntentions is undefined', () => {
     const out = runtimeToProse({ mechanics: [] }, 'reply', NOW)
     expect(out).not.toContain("What you're hoping to get to")
   })
 
   it('omits the block entirely when openIntentions is an empty array', () => {
-    const out = runtimeToProse({ mechanics: [], openIntentions: [] }, 'reply', NOW)
+    const out = runtimeToProse(
+      { mechanics: [], openIntentions: [] },
+      'reply',
+      NOW,
+    )
     expect(out).not.toContain("What you're hoping to get to")
   })
 
@@ -637,7 +782,10 @@ describe('runtimeToProse — ## What you\'re hoping to get to block (TAC-324)', 
   // verbatim so a future edit that trims it for brevity fails loudly.
   it('carries the non-steering paragraph verbatim', () => {
     const out = runtimeToProse(
-      { mechanics: [], openIntentions: ["You haven't heard what this guest ordered yet."] },
+      {
+        mechanics: [],
+        openIntentions: ["You haven't heard what this guest ordered yet."],
+      },
       'reply',
       NOW,
     )
@@ -650,12 +798,19 @@ describe('runtimeToProse — ## What you\'re hoping to get to block (TAC-324)', 
   // the one sentence that tells the model the order means something.
   it('tells the model to take the first-listed intention when more than one fits (TAC-380)', () => {
     const out = runtimeToProse(
-      { mechanics: [], openIntentions: ['alpha intention line', 'beta intention line'] },
+      {
+        mechanics: [],
+        openIntentions: ['alpha intention line', 'beta intention line'],
+      },
       'reply',
       NOW,
     )
-    expect(out).toContain('If more than one would fit, take the one listed first, and only that one.')
-    expect(out.indexOf('alpha intention line')).toBeLessThan(out.indexOf('beta intention line'))
+    expect(out).toContain(
+      'If more than one would fit, take the one listed first, and only that one.',
+    )
+    expect(out.indexOf('alpha intention line')).toBeLessThan(
+      out.indexOf('beta intention line'),
+    )
   })
 
   // TAC-330: the "answering Sana's own question" exception, appended after
@@ -664,11 +819,15 @@ describe('runtimeToProse — ## What you\'re hoping to get to block (TAC-324)', 
   // arc: Sana's opener asks about newness, the guest answers, and the
   // original symmetric wording gave the model no way to treat that reply
   // differently from the guest raising a brand-new topic of their own.
-  describe('answering-Sana\'s-own-question exception (TAC-330)', () => {
+  describe("answering-Sana's-own-question exception (TAC-330)", () => {
     const openIntentions = ["You haven't heard what this guest ordered yet."]
 
-    it('distinguishes a reply to Sana\'s own question from the guest\'s own topic', () => {
-      const out = runtimeToProse({ mechanics: [], openIntentions }, 'reply', NOW)
+    it("distinguishes a reply to Sana's own question from the guest's own topic", () => {
+      const out = runtimeToProse(
+        { mechanics: [], openIntentions },
+        'reply',
+        NOW,
+      )
       // TAC-436 condensed this to a bullet. The condition is unchanged: what
       // Sana asked about, not merely that she asked.
       expect(out).toContain(
@@ -685,14 +844,26 @@ describe('runtimeToProse — ## What you\'re hoping to get to block (TAC-324)', 
     // the narrowing language is present — actual model behavior on the
     // parking-shaped case is a UAT gate (ticket §9), not a unit test.
     it('scopes the exception to what Sana asked, not merely that she asked something', () => {
-      const out = runtimeToProse({ mechanics: [], openIntentions }, 'reply', NOW)
+      const out = runtimeToProse(
+        { mechanics: [], openIntentions },
+        'reply',
+        NOW,
+      )
       expect(out).toContain('something about themselves')
-      expect(out).not.toContain('your last message was a question and this is their reply')
+      expect(out).not.toContain(
+        'your last message was a question and this is their reply',
+      )
     })
 
     it('asserts the exception is consumed on the very next reply regardless of content', () => {
-      const out = runtimeToProse({ mechanics: [], openIntentions }, 'reply', NOW)
-      expect(out).toContain('covers this one reply only, whatever they say back.')
+      const out = runtimeToProse(
+        { mechanics: [], openIntentions },
+        'reply',
+        NOW,
+      )
+      expect(out).toContain(
+        'covers this one reply only, whatever they say back.',
+      )
       // And it never becomes something to return to.
       expect(out).toContain('never\nraise one twice.')
     })
@@ -701,15 +872,31 @@ describe('runtimeToProse — ## What you\'re hoping to get to block (TAC-324)', 
     // exception: whatever the guest raised is still the reply's job, and the
     // ask rides on the end of it or not at all.
     it('asserts an ask never changes what the reply is about', () => {
-      const out = runtimeToProse({ mechanics: [], openIntentions }, 'reply', NOW)
-      expect(out).toContain('Asking never changes what the reply is about. Whatever they raised is')
-      expect(out).toContain('still the job, and the question goes at the end, in one short line, or\nnot at all.')
+      const out = runtimeToProse(
+        { mechanics: [], openIntentions },
+        'reply',
+        NOW,
+      )
+      expect(out).toContain(
+        'Asking never changes what the reply is about. Whatever they raised is',
+      )
+      // TAC-554: pinned as ONE contiguous literal, not fragments. A sentence
+      // can be reversed while every asserted fragment survives, which is the
+      // TAC-409/TAC-502 lesson, and this clause is exactly the kind a future
+      // reader would "tidy" back into a positional claim.
+      expect(out).toContain(
+        'still the job, and the question is one short line on its own, or not at\nall.',
+      )
     })
 
     // Plan-review: "license" is spec vocabulary describing the mechanism,
     // not language that belongs in Sana's own prompt.
     it('does not use "license" — reads as guidance, not a specification', () => {
-      const out = runtimeToProse({ mechanics: [], openIntentions }, 'reply', NOW)
+      const out = runtimeToProse(
+        { mechanics: [], openIntentions },
+        'reply',
+        NOW,
+      )
       expect(out.toLowerCase()).not.toContain('license')
     })
   })
@@ -729,7 +916,12 @@ describe('runtimeToProse — ## What you\'re hoping to get to block (TAC-324)', 
       {
         mechanics: [],
         openIntentions: ["You haven't told them to save your number."],
-        recentVisits: [{ visitedAt: new Date(NOW.getTime() - 86_400_000), items: ['cortado'] }],
+        recentVisits: [
+          {
+            visitedAt: new Date(NOW.getTime() - 86_400_000),
+            items: ['cortado'],
+          },
+        ],
         recentMessages: [
           {
             direction: 'inbound',
@@ -790,9 +982,9 @@ describe('runtimeToProse — ## What you\'re hoping to get to block (TAC-324)', 
         .map((l) => l.trim())
       expect(headings).toContain("## What you're hoping to get to")
       // Last of the content blocks: only the emoji directive may follow it.
-      expect(headings.slice(headings.indexOf("## What you're hoping to get to") + 1)).toEqual([
-        '## Emoji for this message',
-      ])
+      expect(
+        headings.slice(headings.indexOf("## What you're hoping to get to") + 1),
+      ).toEqual(['## Emoji for this message'])
     },
   )
 
@@ -817,8 +1009,15 @@ describe('runtimeToProse — ## What you\'re hoping to get to block (TAC-324)', 
         today,
         mechanics: [],
         openIntentions: ["You haven't told them to save your number."],
-        recentVisits: [{ visitedAt: new Date(NOW.getTime() - 86_400_000), items: ['cortado'] }],
-        guestContext: { observations: [{ note: 'likes oat', captured_at: NOW.toISOString() }] },
+        recentVisits: [
+          {
+            visitedAt: new Date(NOW.getTime() - 86_400_000),
+            items: ['cortado'],
+          },
+        ],
+        guestContext: {
+          observations: [{ note: 'likes oat', captured_at: NOW.toISOString() }],
+        },
         activeCommitments: [
           {
             id: 'c1',
@@ -873,7 +1072,12 @@ describe('runtimeToProse — ## What you\'re hoping to get to block (TAC-324)', 
         mechanics: [],
         operatorInstruction: 'tell her about the new Panama lot',
         followup: { reasons: ['cold_lapsed'], daysSinceLastVisit: 30 },
-        recentVisits: [{ visitedAt: new Date(NOW.getTime() - 86_400_000), items: ['cortado'] }],
+        recentVisits: [
+          {
+            visitedAt: new Date(NOW.getTime() - 86_400_000),
+            items: ['cortado'],
+          },
+        ],
         emojiDirective: 'none',
       },
       'follow_up',
@@ -903,7 +1107,12 @@ describe('runtimeToProse — ## What you\'re hoping to get to block (TAC-324)', 
         today,
         mechanics: [],
         scanArrival: { hadPriorConversation: true, hasRecordedVisit: false },
-        recentVisits: [{ visitedAt: new Date(NOW.getTime() - 86_400_000), items: ['cortado'] }],
+        recentVisits: [
+          {
+            visitedAt: new Date(NOW.getTime() - 86_400_000),
+            items: ['cortado'],
+          },
+        ],
         emojiDirective: 'none',
       },
       'guest_arrived',
@@ -923,25 +1132,139 @@ describe('runtimeToProse — ## What you\'re hoping to get to block (TAC-324)', 
   })
 })
 
+// TAC-560: the pause-triggered warm close.
+describe('runtimeToProse — ## Closing this conversation (TAC-560)', () => {
+  const render = (over: Record<string, unknown> = {}): string =>
+    runtimeToProse(
+      { mechanics: [], warmClose: true, ...over },
+      'acknowledgment',
+      NOW,
+    )
+
+  /** Just this block, so a later block's wording cannot satisfy or trip a check. */
+  const block = (out: string): string => {
+    const start = out.indexOf('## Closing this conversation')
+    expect(start).toBeGreaterThanOrEqual(0)
+    const rest = out.slice(start)
+    const next = rest.indexOf('\n## ')
+    return next === -1 ? rest : rest.slice(0, next)
+  }
+
+  it('omits the block on every other turn', () => {
+    expect(
+      runtimeToProse({ mechanics: [] }, 'acknowledgment', NOW),
+    ).not.toContain('## Closing this conversation')
+    expect(
+      runtimeToProse({ mechanics: [], warmClose: false }, 'reply', NOW),
+    ).not.toContain('## Closing this conversation')
+  })
+
+  // THE PREMISE IS THE WHOLE REASON THE BLOCK EXISTS. Le Mil's rule 15 fires on
+  // "(they say thanks, ok, or signal they're done)", which is FALSE on a pause,
+  // so without this the rule's own condition is unmet and the model can read it
+  // as not applying. Pinned as one contiguous clause, not fragments: the TAC-409
+  // lesson is that a sentence can be reversed while every asserted fragment
+  // survives.
+  it('states that the conversation has gone quiet, and that nothing is owed', () => {
+    expect(render()).toContain(
+      "This is the guest's first conversation with the venue, and it has gone quiet. They have not replied for a while, and nothing here is waiting on an answer from them.",
+    )
+  })
+
+  // It must NOT name the three topics. They are Le Mil's choice, carried in that
+  // venue's own voice rules; restating them here would ship one venue's product
+  // decision into every venue's prompt.
+  it("points at the venue's own voice rules rather than naming any topic", () => {
+    const out = render()
+    expect(out).toContain(
+      'Send the warm close your voice rules describe for a first conversation that is winding down: let them know the line is open, and name the things they can message about anytime, in your own words.',
+    )
+    for (const leaked of ['beans', 'specials', 'events', 'menu', 'coffee']) {
+      expect(block(out), leaked).not.toContain(leaked)
+    }
+  })
+
+  it('asks for one message and no question', () => {
+    // One message is in rule 15 and in this ticket's criteria; dispatch enforces
+    // it separately with NEVER_SPLIT_RNG. No question keeps the close from
+    // reopening the conversation it is closing.
+    expect(render()).toContain(
+      'One short message. Do not ask a question, do not open a new topic, and do not mention the pause or that they stopped replying.',
+    )
+  })
+
+  it('models no em dash', () => {
+    // R3 bans them in output and the prompt should not model one.
+    expect(block(render())).not.toContain('\u2014')
+    expect(block(render())).not.toContain('\u2013')
+  })
+
+  it('pins the full block order on a warm-close turn', () => {
+    // The POSITION is a choice, not a measurement, exactly as TAC-536's is. This
+    // exists so moving it is deliberate.
+    const out = runtimeToProse(
+      {
+        today,
+        mechanics: [],
+        warmClose: true,
+        recentVisits: [
+          {
+            visitedAt: new Date(NOW.getTime() - 86_400_000),
+            items: ['cortado'],
+          },
+        ],
+        emojiDirective: 'none',
+      },
+      'acknowledgment',
+      NOW,
+    )
+    const order = out
+      .split('\n')
+      .filter((l) => l.startsWith('## '))
+      .map((l) => l.trim())
+    expect(order).toEqual([
+      '## Right now',
+      '## Closing this conversation',
+      '## What this guest can access',
+      '## Visit history',
+      '## Emoji for this message',
+    ])
+  })
+})
+
 // TAC-536: the two axes a scan greeting may state, and the one line whose
 // wording the 2026-09-25 ruling corrected.
 describe('runtimeToProse — ## Guest just arrived (TAC-536)', () => {
-  const render = (hadPriorConversation: boolean, hasRecordedVisit: boolean): string =>
+  const render = (
+    hadPriorConversation: boolean,
+    hasRecordedVisit: boolean,
+  ): string =>
     runtimeToProse(
-      { mechanics: [], scanArrival: { hadPriorConversation, hasRecordedVisit } },
+      {
+        mechanics: [],
+        scanArrival: { hadPriorConversation, hasRecordedVisit },
+      },
       'guest_arrived',
       NOW,
     )
 
   it('omits the block entirely on every other turn', () => {
-    expect(runtimeToProse({ mechanics: [] }, 'reply', NOW)).not.toContain('## Guest just arrived')
-    expect(runtimeToProse({ mechanics: [], scanArrival: null }, 'guest_arrived', NOW)).not.toContain(
+    expect(runtimeToProse({ mechanics: [] }, 'reply', NOW)).not.toContain(
       '## Guest just arrived',
     )
+    expect(
+      runtimeToProse(
+        { mechanics: [], scanArrival: null },
+        'guest_arrived',
+        NOW,
+      ),
+    ).not.toContain('## Guest just arrived')
   })
 
   it('states that the venue has talked with this guest', () => {
-    expect(render(true, false)).toContain('You have talked with this guest before.')
+    expect(render(true, false)).toContain(
+      'You have talked with this guest before.',
+    )
   })
 
   // THE CORRECTION THAT MATTERS, ruled 2026-09-25. A standalone referral only
@@ -980,15 +1303,28 @@ describe('runtimeToProse — ## Guest just arrived (TAC-536)', () => {
     [true, false],
     [false, true],
     [false, false],
-  ])('renders both axes for hadPriorConversation=%s hasRecordedVisit=%s', (talked, visited) => {
-    const out = render(talked, visited)
-    expect(out).toContain(talked ? 'You have talked with this guest before.' : 'on record')
-    expect(out).toContain(visited ? 'so you can speak to them' : 'There is no recorded visit')
-  })
+  ])(
+    'renders both axes for hadPriorConversation=%s hasRecordedVisit=%s',
+    (talked, visited) => {
+      const out = render(talked, visited)
+      expect(out).toContain(
+        talked ? 'You have talked with this guest before.' : 'on record',
+      )
+      expect(out).toContain(
+        visited ? 'so you can speak to them' : 'There is no recorded visit',
+      )
+    },
+  )
 
   it('carries no em dash', () => {
-    for (const [a, b] of [[true, true], [true, false], [false, true], [false, false]] as const) {
-      const block = render(a, b).split('## Guest just arrived')[1]?.split('\n\n')[0] ?? ''
+    for (const [a, b] of [
+      [true, true],
+      [true, false],
+      [false, true],
+      [false, false],
+    ] as const) {
+      const block =
+        render(a, b).split('## Guest just arrived')[1]?.split('\n\n')[0] ?? ''
       expect(block).not.toMatch(/[—–]/)
     }
   })
@@ -1011,8 +1347,12 @@ describe("runtimeToProse — ## What you're hoping to get to first-touch opener 
       NOW,
     )
     const headerIdx = out.indexOf("## What you're hoping to get to")
-    const openerIdx = out.indexOf('sent right after they scanned the sign at your pickup counter')
-    const intentionLineIdx = out.indexOf("You haven't heard what this guest ordered yet.")
+    const openerIdx = out.indexOf(
+      'sent right after they scanned the sign at your pickup counter',
+    )
+    const intentionLineIdx = out.indexOf(
+      "You haven't heard what this guest ordered yet.",
+    )
     expect(headerIdx).toBeGreaterThanOrEqual(0)
     expect(openerIdx).toBeGreaterThan(headerIdx)
     expect(intentionLineIdx).toBeGreaterThan(openerIdx)
@@ -1119,22 +1459,43 @@ describe("runtimeToProse — ## What you're hoping to get to first-touch opener 
       'reply',
       NOW,
     )
-    const withFlagUndefined = runtimeToProse({ mechanics: [], openIntentions }, 'reply', NOW)
+    const withFlagUndefined = runtimeToProse(
+      { mechanics: [], openIntentions },
+      'reply',
+      NOW,
+    )
     expect(withFlagFalse).toBe(withFlagUndefined)
     for (const channel of CHANNELS_AND_UNKNOWN) {
       expectNoOpener(
-        runtimeToProse({ mechanics: [], openIntentions, firstTouchAfterQrScan: false }, 'reply', NOW, channel),
+        runtimeToProse(
+          { mechanics: [], openIntentions, firstTouchAfterQrScan: false },
+          'reply',
+          NOW,
+          channel,
+        ),
       )
       // Positive control: the same inputs with the flag on do render it.
       expect(
-        runtimeToProse({ mechanics: [], openIntentions, firstTouchAfterQrScan: true }, 'reply', NOW, channel),
+        runtimeToProse(
+          { mechanics: [], openIntentions, firstTouchAfterQrScan: true },
+          'reply',
+          NOW,
+          channel,
+        ),
       ).toContain(firstTouchOpenerFor(channel))
     }
   })
 
   it('omits the opener when firstTouchAfterQrScan is undefined', () => {
     for (const channel of CHANNELS_AND_UNKNOWN) {
-      expectNoOpener(runtimeToProse({ mechanics: [], openIntentions }, 'reply', NOW, channel))
+      expectNoOpener(
+        runtimeToProse(
+          { mechanics: [], openIntentions },
+          'reply',
+          NOW,
+          channel,
+        ),
+      )
     }
   })
 
@@ -1154,7 +1515,12 @@ describe("runtimeToProse — ## What you're hoping to get to first-touch opener 
       expectNoOpener(out)
       // Positive control: with an open intention the same turn renders it.
       expect(
-        runtimeToProse({ mechanics: [], openIntentions, firstTouchAfterQrScan: true }, 'reply', NOW, channel),
+        runtimeToProse(
+          { mechanics: [], openIntentions, firstTouchAfterQrScan: true },
+          'reply',
+          NOW,
+          channel,
+        ),
       ).toContain(firstTouchOpenerFor(channel))
     }
   })
@@ -1194,18 +1560,32 @@ describe("runtimeToProse — ## What you're hoping to get to openings (TAC-436)"
   // reverts the whole ticket, silently, with every other test here still green.
   it('no longer tells the model to let these wait whenever the guest asked something', () => {
     const out = render()
-    expect(out).not.toContain('asks about something else, answer that and let these wait')
-    expect(out).not.toContain('Only raise one if the conversation opens a natural door')
+    expect(out).not.toContain(
+      'asks about something else, answer that and let these wait',
+    )
+    expect(out).not.toContain(
+      'Only raise one if the conversation opens a natural door',
+    )
   })
 
   // Ruling 1c: named positively, not defined by negation.
   it('names each of the four openings', () => {
     const out = render()
-    expect(out).toContain('A natural opening is ordinary and small. Any of these is one:')
-    expect(out).toContain("- You've answered what they asked and the reply feels finished.")
-    expect(out).toContain("- They've said something about themselves, however small,")
-    expect(out).toContain("- There's nothing they need from you in the message.")
-    expect(out).toContain('- Your own last message asked them something about themselves')
+    expect(out).toContain(
+      'A natural opening is ordinary and small. Any of these is one:',
+    )
+    expect(out).toContain(
+      "- You've answered what they asked and the reply feels finished.",
+    )
+    expect(out).toContain(
+      "- They've said something about themselves, however small,",
+    )
+    expect(out).toContain(
+      "- There's nothing they need from you in the message.",
+    )
+    expect(out).toContain(
+      '- Your own last message asked them something about themselves',
+    )
   })
 
   // Ruling 1b: answer, then ask one small thing. The worked example is the part
@@ -1253,7 +1633,9 @@ describe("runtimeToProse — ## What you're hoping to get to openings (TAC-436)"
     expect(out).toContain('take the one listed first, and only that one')
     expect(out).toContain('Never steer the conversation toward one of these')
     expect(out).toContain('never\nraise one twice')
-    expect(out).toContain('If nothing fits, let it wait. There will be other conversations.')
+    expect(out).toContain(
+      'If nothing fits, let it wait. There will be other conversations.',
+    )
   })
 })
 
@@ -1269,10 +1651,16 @@ describe("runtimeToProse — ## What you're hoping to get to comp_complaint supp
   ]
 
   it('omits the block entirely for comp_complaint', () => {
-    const out = runtimeToProse({ mechanics: [], openIntentions }, 'comp_complaint', NOW)
+    const out = runtimeToProse(
+      { mechanics: [], openIntentions },
+      'comp_complaint',
+      NOW,
+    )
     expect(out).not.toContain("What you're hoping to get to")
     expect(out).not.toContain("You don't know this guest's name yet.")
-    expect(out).not.toContain("You don't know whether this guest lives or works nearby.")
+    expect(out).not.toContain(
+      "You don't know whether this guest lives or works nearby.",
+    )
   })
 
   // The sharper case, mirroring the opt_out pair: a fresh scan whose first
@@ -1289,7 +1677,12 @@ describe("runtimeToProse — ## What you're hoping to get to comp_complaint supp
       expectNoOpener(out)
       // Positive control: the same first touch on a reply turn renders it.
       expect(
-        runtimeToProse({ mechanics: [], openIntentions, firstTouchAfterQrScan: true }, 'reply', NOW, channel),
+        runtimeToProse(
+          { mechanics: [], openIntentions, firstTouchAfterQrScan: true },
+          'reply',
+          NOW,
+          channel,
+        ),
       ).toContain(firstTouchOpenerFor(channel))
     }
   })
@@ -1307,7 +1700,11 @@ describe("runtimeToProse — ## What you're hoping to get to opt_out suppression
   ]
 
   it('omits the block entirely for opt_out', () => {
-    const out = runtimeToProse({ mechanics: [], openIntentions }, 'opt_out', NOW)
+    const out = runtimeToProse(
+      { mechanics: [], openIntentions },
+      'opt_out',
+      NOW,
+    )
     expect(out).not.toContain("What you're hoping to get to")
     expect(out).not.toContain("You haven't heard what this guest ordered yet.")
     expect(out).not.toContain("You haven't told them to save your number.")
@@ -1367,19 +1764,29 @@ describe('runtimeToProse — R1 carve-out signal line (TAC-324)', () => {
   it('omits the line when firstTouchAfterQrScan is false', () => {
     for (const channel of CHANNELS_AND_UNKNOWN) {
       expect(
-        runtimeToProse({ inboundMessage: 'hi', firstTouchAfterQrScan: false }, 'welcome', NOW, channel),
+        runtimeToProse(
+          { inboundMessage: 'hi', firstTouchAfterQrScan: false },
+          'welcome',
+          NOW,
+          channel,
+        ),
       ).not.toContain(FIRST_TOUCH_SIGNAL_LINE)
       expect(
-        runtimeToProse({ inboundMessage: 'hi', firstTouchAfterQrScan: true }, 'welcome', NOW, channel),
+        runtimeToProse(
+          { inboundMessage: 'hi', firstTouchAfterQrScan: true },
+          'welcome',
+          NOW,
+          channel,
+        ),
       ).toContain(FIRST_TOUCH_SIGNAL_LINE)
     }
   })
 
   it('omits the line when firstTouchAfterQrScan is undefined', () => {
     for (const channel of CHANNELS_AND_UNKNOWN) {
-      expect(runtimeToProse({ inboundMessage: 'hi' }, 'welcome', NOW, channel)).not.toContain(
-        FIRST_TOUCH_SIGNAL_LINE,
-      )
+      expect(
+        runtimeToProse({ inboundMessage: 'hi' }, 'welcome', NOW, channel),
+      ).not.toContain(FIRST_TOUCH_SIGNAL_LINE)
     }
   })
 
@@ -1389,8 +1796,15 @@ describe('runtimeToProse — R1 carve-out signal line (TAC-324)', () => {
   it('renders the same line on every channel', () => {
     for (const channel of CHANNELS_AND_UNKNOWN) {
       expect(
-        runtimeToProse({ inboundMessage: 'hi', firstTouchAfterQrScan: true }, 'welcome', NOW, channel),
-      ).toContain("\nThis is the guest's first message, sent after they scanned your venue's QR sign.\n")
+        runtimeToProse(
+          { inboundMessage: 'hi', firstTouchAfterQrScan: true },
+          'welcome',
+          NOW,
+          channel,
+        ),
+      ).toContain(
+        "\nThis is the guest's first message, sent after they scanned your venue's QR sign.\n",
+      )
     }
   })
 })
@@ -1433,7 +1847,9 @@ describe('firstTouchOpenerFor — channel variants (TAC-495)', () => {
   })
 
   it('the Instagram opener claims no phone number and no texting', () => {
-    expect(firstTouchOpenerFor('instagram')).not.toMatch(/\bnumber\b|\btext(ed|ing)?\b/i)
+    expect(firstTouchOpenerFor('instagram')).not.toMatch(
+      /\bnumber\b|\btext(ed|ing)?\b/i,
+    )
   })
 
   it('every presence phrase is identical on both channels', () => {
@@ -1454,10 +1870,16 @@ describe('firstTouchOpenerFor — channel variants (TAC-495)', () => {
       openIntentions: ["You haven't heard what this guest ordered yet."],
       firstTouchAfterQrScan: true,
     }
-    expect(runtimeToProse(runtime, 'reply', NOW, 'text')).toContain(`\n${SMS_OPENER}\n`)
-    expect(runtimeToProse(runtime, 'reply', NOW, 'instagram')).toContain(`\n${INSTAGRAM_OPENER}\n`)
+    expect(runtimeToProse(runtime, 'reply', NOW, 'text')).toContain(
+      `\n${SMS_OPENER}\n`,
+    )
+    expect(runtimeToProse(runtime, 'reply', NOW, 'instagram')).toContain(
+      `\n${INSTAGRAM_OPENER}\n`,
+    )
     // The default is the unknown channel, never the SMS copy.
-    expect(runtimeToProse(runtime, 'reply', NOW)).toContain(`\n${INSTAGRAM_OPENER}\n`)
+    expect(runtimeToProse(runtime, 'reply', NOW)).toContain(
+      `\n${INSTAGRAM_OPENER}\n`,
+    )
   })
 
   // runtimeToProse defaults its channel, which is only safe while composePrompt,
@@ -1475,19 +1897,32 @@ describe('firstTouchOpenerFor — channel variants (TAC-495)', () => {
         if (statSync(full).isDirectory()) walk(full)
         else if (/\.tsx?$/.test(entry) && !/\.test\.tsx?$/.test(entry)) {
           const text = readFileSync(full, 'utf8')
-          if (/\bruntimeToProse\(/.test(text)) callers.push(relative(REPO_ROOT, full))
+          if (/\bruntimeToProse\(/.test(text))
+            callers.push(relative(REPO_ROOT, full))
           // Bounded by the import braces: this codebase has no semicolons to stop on.
-          if (/import\s+(?:type\s+)?\{[^}]*\bruntimeToProse\b[^}]*\}\s*from/.test(text)) {
+          if (
+            /import\s+(?:type\s+)?\{[^}]*\bruntimeToProse\b[^}]*\}\s*from/.test(
+              text,
+            )
+          ) {
             importers.push(relative(REPO_ROOT, full))
           }
         }
       }
     }
     for (const dir of ['lib', 'app', 'scripts']) walk(join(REPO_ROOT, dir))
-    expect(callers.sort()).toEqual(['lib/ai/compose-prompt.ts', 'lib/ai/prompts/serializers.ts'])
+    expect(callers.sort()).toEqual([
+      'lib/ai/compose-prompt.ts',
+      'lib/ai/prompts/serializers.ts',
+    ])
     expect(importers).toEqual(['lib/ai/compose-prompt.ts'])
-    const composeSrc = readFileSync(join(REPO_ROOT, 'lib/ai/compose-prompt.ts'), 'utf8')
-    expect(composeSrc).toContain('runtimeToProse(runtime, category, undefined, input.channel)')
+    const composeSrc = readFileSync(
+      join(REPO_ROOT, 'lib/ai/compose-prompt.ts'),
+      'utf8',
+    )
+    expect(composeSrc).toContain(
+      'runtimeToProse(runtime, category, undefined, input.channel)',
+    )
   })
 })
 
@@ -1603,7 +2038,12 @@ describe('runtimeToProse — guest relationship line (TAC-234)', () => {
   })
 
   it('renders all four state values', () => {
-    for (const state of ['new', 'returning', 'regular', 'raving_fan'] as const) {
+    for (const state of [
+      'new',
+      'returning',
+      'regular',
+      'raving_fan',
+    ] as const) {
       const out = runtimeToProse(
         { inboundMessage: 'hi', recognition: { state } },
         'reply',
@@ -1653,6 +2093,180 @@ describe('runtimeToProse — guest relationship line (TAC-234)', () => {
     expect(out).toContain('Guest relationship: regular')
     expect(out).toContain('Perk: The Joey')
     expect(out).not.toContain('The guest just sent:')
+  })
+})
+
+// TAC-543: the order summary line inside ## Visit history. The timestamped
+// bullets carry the same facts and two wordings of a category-instruction
+// clause could not make the model use them — it read the block as what a guest
+// HABITUALLY orders, so an item ordered once did not register as being in
+// their history.
+//
+// MEASURED, and be careful which number this is. On 20 HISTORY questions per
+// arm the line took wrong has/hasn't claims 1/20 to 0/20 - a one-unit delta,
+// so read it as "did not reproduce" rather than as a rate. On 10 RECOMMENDATION
+// turns it went 3/10 to 2/10, which is no regression and no improvement worth
+// claiming at that n.
+//
+// An earlier version of this header read "16/20 ... 7/20 once the counts were
+// named". Those are the PARKED measurement's numbers and 7/20 is NOT a
+// summary-alone figure: that arm carried a category-instruction clause as well,
+// which the harness's own docstring warns about. The clause is dropped and
+// nothing here measures it.
+//
+// FIXTURES ARE LOWERCASE BECAUSE PRODUCTION IS. extractRecentVisits lowercases
+// every item name, so "Cortado" is a shape this function never sees from the
+// agent path - every pre-existing Visit fixture in this file is lowercase too.
+// The one mixed-case test below is about the exported contract, and says so.
+describe('formatOrderSummary — the order summary line (TAC-543)', () => {
+  const t = (n: number) => new Date(NOW.getTime() - n * 24 * 60 * 60 * 1000)
+
+  it('DEDUPES an item ordered on several visits into one entry with a count', () => {
+    const line = formatOrderSummary([
+      { items: ['cortado', 'pink panther'], visitedAt: t(1) },
+      { items: ['cortado'], visitedAt: t(2) },
+      { items: ['cortado', 'pink panther'], visitedAt: t(3) },
+    ])
+    // One entry per distinct item, never one per visit.
+    expect(line).toBe(
+      'Across the visits above: cortado (3\u00d7), pink panther (2\u00d7).',
+    )
+    expect(line.match(/cortado/g)).toHaveLength(1)
+  })
+
+  it('writes "once" for a single order and "Nx" above one', () => {
+    // The distinction is the whole point: a once-ordered item is exactly what
+    // the model was treating as never-ordered.
+    const line = formatOrderSummary([
+      { items: ['cortado', 'sofi'], visitedAt: t(1) },
+      { items: ['cortado'], visitedAt: t(2) },
+    ])
+    expect(line).toContain('cortado (2\u00d7)')
+    expect(line).toContain('sofi (once)')
+    expect(line).not.toContain('(1\u00d7)')
+  })
+
+  it('orders by count descending, then by first appearance', () => {
+    const line = formatOrderSummary([
+      { items: ['A', 'B', 'C'], visitedAt: t(1) },
+      { items: ['B', 'C'], visitedAt: t(2) },
+      { items: ['C'], visitedAt: t(3) },
+    ])
+    expect(line).toBe(
+      'Across the visits above: C (3\u00d7), B (2\u00d7), A (once).',
+    )
+  })
+
+  it('is DERIVED from the visits it is given, naming every item and nothing else', () => {
+    // The guarantee that matters: the summary and the bullets cannot disagree
+    // about what the guest has had, because they read the same array.
+    // SEVEN distinct items, deliberately. A three-item fixture cannot detect
+    // TRUNCATION: a .slice(0, 3) "prompt bloat" tidy survived all 293 tests
+    // when this fixture had three, and it would cut the once-ordered items
+    // first, because they sort LAST under the count-descending order. Those are
+    // the exact items this line exists to surface. Any cap below seven now
+    // fails, and the length assertion below is what does it.
+    const visits = [
+      { items: ['cortado', 'gulab jamun cake', 'pour over'], visitedAt: t(1) },
+      { items: ['sofi', 'cortado', 'mango lassi'], visitedAt: t(2) },
+      { items: ['blossom tonic', 'pink panther'], visitedAt: t(3) },
+    ]
+    const line = formatOrderSummary(visits)
+    const named = visits.flatMap((v) => v.items)
+    for (const item of named) expect(line).toContain(item)
+    const distinct = [...new Set(named)]
+    expect(distinct).toHaveLength(7)
+    // Nothing invented and nothing DROPPED: the set named is exactly the set
+    // given, and the count is asserted so a truncation cannot pass by naming a
+    // subset that happens to satisfy every toContain above.
+    const mentioned = line
+      .replace('Across the visits above: ', '')
+      .split(/,\s*/)
+      .map((part) => part.replace(/\s*\((once|\d+\u00d7)\)\.?$/, ''))
+    expect(mentioned).toHaveLength(distinct.length)
+    expect(mentioned.sort()).toEqual(distinct.sort())
+  })
+
+  it('dedupes case-insensitively and changes no casing of its own', () => {
+    // THE EXPORTED CONTRACT, not a claim about production. The agent path
+    // always hands this function lowercase names (extractRecentVisits
+    // lowercases), so on that path this test's input is unreachable - it is
+    // here because the function is exported and the measurement harnesses pass
+    // menu-cased names straight in.
+    //
+    // MIXED CASE ON PURPOSE. With one casing the lowercase dedupe key is
+    // indistinguishable from a case-sensitive one, and a case-sensitive key
+    // survived the whole suite when every fixture agreed on casing. This is
+    // the only input that separates them.
+    const line = formatOrderSummary([
+      { items: ['SoFi'], visitedAt: t(1) },
+      { items: ['sofi'], visitedAt: t(2) },
+    ])
+    // Two spellings, ONE entry, counted twice.
+    expect(line).toBe('Across the visits above: SoFi (2\u00d7).')
+    // And the first-seen spelling is echoed back untouched, neither
+    // capitalised nor lowercased by this function.
+    expect(
+      formatOrderSummary([{ items: ['SoFi'], visitedAt: t(1) }]),
+    ).toContain('SoFi')
+    expect(
+      formatOrderSummary([{ items: ['sofi'], visitedAt: t(1) }]),
+    ).toContain('sofi')
+  })
+
+  it('returns an empty string for no visits, and skips blank item names', () => {
+    expect(formatOrderSummary([])).toBe('')
+    expect(formatOrderSummary([{ items: [], visitedAt: t(1) }])).toBe('')
+    expect(
+      formatOrderSummary([{ items: ['  ', 'cortado'], visitedAt: t(1) }]),
+    ).toBe('Across the visits above: cortado (once).')
+  })
+})
+
+describe('runtimeToProse — the order summary renders ONLY with the block (TAC-543)', () => {
+  const t = (n: number) => new Date(NOW.getTime() - n * 24 * 60 * 60 * 1000)
+
+  it('renders after the last timestamped visit, never replacing them', () => {
+    const out = runtimeToProse(
+      {
+        recentVisits: [
+          { items: ['cortado', 'sofi'], visitedAt: t(1) },
+          { items: ['cortado'], visitedAt: t(2) },
+        ],
+      },
+      'reply',
+      NOW,
+    )
+    // The bullets SURVIVE. The summary is an addition, not a replacement.
+    expect(out).toContain('- [yesterday] cortado, sofi')
+    expect(out).toContain('- [2 days ago] cortado')
+    expect(out).toContain(
+      'Across the visits above: cortado (2\u00d7), sofi (once).',
+    )
+    // And it sits AFTER the bullets.
+    expect(out.indexOf('- [2 days ago] cortado')).toBeLessThan(
+      out.indexOf('Across the visits above:'),
+    )
+  })
+
+  it('never renders without the block: no visits means neither', () => {
+    const out = runtimeToProse({ recentVisits: [] }, 'reply', NOW)
+    expect(out).not.toContain('## Visit history')
+    expect(out).not.toContain('Across the visits above')
+  })
+
+  it('never renders on a category that suppresses the block', () => {
+    // welcome and opt_out skip ## Visit history, so the summary must go with it
+    // rather than leaking out on its own.
+    for (const category of ['welcome', 'opt_out'] as const) {
+      const out = runtimeToProse(
+        { recentVisits: [{ items: ['cortado'], visitedAt: t(1) }] },
+        category,
+        NOW,
+      )
+      expect(out).not.toContain('## Visit history')
+      expect(out).not.toContain('Across the visits above')
+    }
   })
 })
 
@@ -1775,9 +2389,10 @@ describe('runtimeToProse — ## Visit history block (TAC-234)', () => {
         cat,
         NOW,
       )
-      expect(out, `category ${cat} should render Visit history block`).toContain(
-        '## Visit history',
-      )
+      expect(
+        out,
+        `category ${cat} should render Visit history block`,
+      ).toContain('## Visit history')
     }
   })
 
@@ -1787,7 +2402,9 @@ describe('runtimeToProse — ## Visit history block (TAC-234)', () => {
         today,
         mechanics: [],
         recentVisits: [{ items: ['cappuccino'], visitedAt: visitedAt3 }],
-        recentMessages: [recent({ body: 'hi', createdAt: new Date(NOW.getTime() - 60_000) })],
+        recentMessages: [
+          recent({ body: 'hi', createdAt: new Date(NOW.getTime() - 60_000) }),
+        ],
       },
       'reply',
       NOW,
@@ -1805,7 +2422,7 @@ describe('runtimeToProse — ## Visit history block (TAC-234)', () => {
 // (above mechanics + visit history + recent conversation) when the operator's
 // note flowed through buildAiRuntime.
 describe('runtimeToProse — ## Operator instruction block', () => {
-  it('renders the block with the operator\'s note verbatim', () => {
+  it("renders the block with the operator's note verbatim", () => {
     const out = runtimeToProse(
       { operatorInstruction: 'remind them about open mic this saturday' },
       'manual',
@@ -1815,7 +2432,9 @@ describe('runtimeToProse — ## Operator instruction block', () => {
     expect(out).toContain(
       'The operator wants you to follow up with this guest about: remind them about open mic this saturday',
     )
-    expect(out).toContain('Draft a message that addresses this directly, in the venue\'s voice.')
+    expect(out).toContain(
+      "Draft a message that addresses this directly, in the venue's voice.",
+    )
   })
 
   it('omits the block when operatorInstruction is undefined', () => {
@@ -1836,7 +2455,9 @@ describe('runtimeToProse — ## Operator instruction block', () => {
         operatorInstruction: 'follow up on their recent visit',
         mechanics: [],
         recentVisits: [{ items: ['cappuccino'], visitedAt }],
-        recentMessages: [recent({ body: 'hey', createdAt: new Date(NOW.getTime() - 60_000) })],
+        recentMessages: [
+          recent({ body: 'hey', createdAt: new Date(NOW.getTime() - 60_000) }),
+        ],
       },
       'manual',
       NOW,
@@ -1865,7 +2486,9 @@ describe('runtimeToProse — ## Operator instruction block', () => {
 })
 
 describe('knowledgeChunksToProse (TAC-242)', () => {
-  const makeChunk = (overrides: Partial<KnowledgeCorpusChunk> = {}): KnowledgeCorpusChunk => ({
+  const makeChunk = (
+    overrides: Partial<KnowledgeCorpusChunk> = {},
+  ): KnowledgeCorpusChunk => ({
     id: 'k1',
     text: 'Our flagship blend is two Ethiopian coffees roasted by a friend.',
     sourceType: 'voicenote_transcript',
@@ -1925,12 +2548,17 @@ describe('knowledgeChunksToProse (TAC-242)', () => {
     const out = knowledgeChunksToProse([makeChunk()])
     expect(out).toContain('[primary: sourcing]')
     expect(out).toContain('[secondary: ethiopia, roaster]')
-    expect(out).toContain('> Our flagship blend is two Ethiopian coffees roasted by a friend.')
+    expect(out).toContain(
+      '> Our flagship blend is two Ethiopian coffees roasted by a friend.',
+    )
   })
 
   it('renders multiple primary tags comma-separated', () => {
     const out = knowledgeChunksToProse([
-      makeChunk({ primaryTags: ['menu', 'staff_phoebe'], secondaryTags: ['seasonal'] }),
+      makeChunk({
+        primaryTags: ['menu', 'staff_phoebe'],
+        secondaryTags: ['seasonal'],
+      }),
     ])
     expect(out).toContain('[primary: menu, staff_phoebe]')
     expect(out).toContain('[secondary: seasonal]')
@@ -1948,17 +2576,33 @@ describe('knowledgeChunksToProse (TAC-242)', () => {
     // Defensive: schema-valid chunks should always have at least one primary
     // tag, but the runtime helper shouldn't break on an empty array.
     const out = knowledgeChunksToProse([
-      makeChunk({ primaryTags: [], secondaryTags: [], sourceType: 'manual_entry' }),
+      makeChunk({
+        primaryTags: [],
+        secondaryTags: [],
+        sourceType: 'manual_entry',
+      }),
     ])
     expect(out).toContain('[primary: manual_entry]')
   })
 
   it('separates multiple chunks with a blank line', () => {
     const out = knowledgeChunksToProse([
-      makeChunk({ id: 'k1', primaryTags: ['sourcing'], secondaryTags: [], text: 'fact one' }),
-      makeChunk({ id: 'k2', primaryTags: ['staff_rayan'], secondaryTags: [], text: 'fact two' }),
+      makeChunk({
+        id: 'k1',
+        primaryTags: ['sourcing'],
+        secondaryTags: [],
+        text: 'fact one',
+      }),
+      makeChunk({
+        id: 'k2',
+        primaryTags: ['staff_rayan'],
+        secondaryTags: [],
+        text: 'fact two',
+      }),
     ])
-    expect(out).toMatch(/\[primary: sourcing\]\n> fact one\n\n\[primary: staff_rayan\]\n> fact two/)
+    expect(out).toMatch(
+      /\[primary: sourcing\]\n> fact one\n\n\[primary: staff_rayan\]\n> fact two/,
+    )
   })
 
   it('quotes multi-line chunks line by line', () => {
@@ -2010,9 +2654,13 @@ describe('personaToProse — voice anti-patterns', () => {
 
   it('renders the same block from legacy string entries normalized at parse time', () => {
     const persona = makePersona({
-      voiceAntiPatterns: ['no marketing flourishes'] as unknown as BrandPersona['voiceAntiPatterns'],
+      voiceAntiPatterns: [
+        'no marketing flourishes',
+      ] as unknown as BrandPersona['voiceAntiPatterns'],
     })
-    expect(personaToProse(persona, 'text')).toContain('- no marketing flourishes')
+    expect(personaToProse(persona, 'text')).toContain(
+      '- no marketing flourishes',
+    )
   })
 
   it('omits the block entirely when voiceAntiPatterns is empty', () => {
@@ -2039,9 +2687,14 @@ describe('personaToProse — speaker framing (TAC-338)', () => {
   }
 
   it('named_person: states staff identity as first person, not "on the venue\'s behalf"', () => {
-    const persona = makePersona({ speakerFraming: 'named_person', speakerName: 'Sana' })
+    const persona = makePersona({
+      speakerFraming: 'named_person',
+      speakerName: 'Sana',
+    })
     const out = personaToProse(persona, 'text')
-    expect(out).toContain('You are Sana, staff at the venue, texting as yourself.')
+    expect(out).toContain(
+      'You are Sana, staff at the venue, texting as yourself.',
+    )
     expect(out).toContain('You ARE that person')
     expect(out).not.toMatch(/on the venue's behalf/)
   })
@@ -2050,7 +2703,10 @@ describe('personaToProse — speaker framing (TAC-338)', () => {
   // previously told the model to sign every message, which at least one
   // venue needed a manual anti-pattern rule to undo.
   it('named_person: does not instruct signing messages', () => {
-    const persona = makePersona({ speakerFraming: 'named_person', speakerName: 'Sana' })
+    const persona = makePersona({
+      speakerFraming: 'named_person',
+      speakerName: 'Sana',
+    })
     const out = personaToProse(persona, 'text')
     expect(out).not.toContain('Sign messages')
     expect(out).toContain('Do not sign messages with your name.')
@@ -2061,7 +2717,10 @@ describe('personaToProse — speaker framing (TAC-338)', () => {
     // 'named_person' (BrandPersonaSchema's .refine), so this exercises the
     // serializer's own defensive fallback directly rather than going through
     // a persona shape the schema would reject.
-    const persona = makePersona({ speakerFraming: 'named_person', speakerName: 'Sana' })
+    const persona = makePersona({
+      speakerFraming: 'named_person',
+      speakerName: 'Sana',
+    })
     const out = personaToProse({ ...persona, speakerName: undefined }, 'text')
     expect(out).toContain('You are [name missing], staff at the venue')
   })
@@ -2162,11 +2821,50 @@ describe('runtimeToProse — ## Guest context block (TAC-296)', () => {
     expect(out).toContain('Home base: Bernal Heights, SF')
   })
 
+  // TAC-558. The write half is GuestContextPatchSchema; this is the read half,
+  // and it is what makes storing the answer worth anything: a later turn sees
+  // what the guest said about their own history.
+  it("renders the guest's account of their history at the venue", () => {
+    const out = runtimeToProse(
+      {
+        today,
+        guestContext: {
+          guest_details: {
+            first_name: 'Sarah',
+            history_here: 'been coming since they opened',
+          },
+        },
+      },
+      'reply',
+    )
+    expect(out).toContain('## Guest context')
+    expect(out).toContain('History here: been coming since they opened')
+  })
+
+  // It is the only renderable field here, so the block must still appear. A
+  // fixture carrying a name alongside would pass with the new field ignored
+  // entirely, which is the fixture-cannot-reach-the-code shape.
+  it('renders the block for a guest whose only detail is their history here', () => {
+    const out = runtimeToProse(
+      {
+        today,
+        guestContext: {
+          guest_details: { history_here: 'first time in today' },
+        },
+      },
+      'reply',
+    )
+    expect(out).toContain('## Guest context')
+    expect(out).toContain('History here: first time in today')
+  })
+
   it('renders preferences as bulleted lines', () => {
     const out = runtimeToProse(
       {
         today,
-        guestContext: { preferences: { dietary: ['vegan'], favorites: ['oat latte'] } },
+        guestContext: {
+          preferences: { dietary: ['vegan'], favorites: ['oat latte'] },
+        },
       },
       'reply',
     )
@@ -2180,7 +2878,11 @@ describe('runtimeToProse — ## Guest context block (TAC-296)', () => {
         today,
         guestContext: {
           life_context: [
-            { note: 'in Tokyo until the 30th', captured_at: '2026-04-15T10:00:00Z', expires_at: '2026-05-30T00:00:00Z' },
+            {
+              note: 'in Tokyo until the 30th',
+              captured_at: '2026-04-15T10:00:00Z',
+              expires_at: '2026-05-30T00:00:00Z',
+            },
           ],
         },
       },
@@ -2198,7 +2900,10 @@ describe('runtimeToProse — ## Guest context block (TAC-296)', () => {
         guestContext: {
           observations: [
             { note: 'mentioned she runs', captured_at: '2026-04-20T08:00:00Z' },
-            { note: 'has a dog named Hank', captured_at: '2026-04-22T08:00:00Z' },
+            {
+              note: 'has a dog named Hank',
+              captured_at: '2026-04-22T08:00:00Z',
+            },
           ],
         },
       },
@@ -2213,10 +2918,20 @@ describe('runtimeToProse — ## Guest context block (TAC-296)', () => {
     const out = runtimeToProse(
       {
         today,
-        recentVisits: [{ items: ['cappuccino'], visitedAt: new Date('2026-05-01T10:00:00Z') }],
+        recentVisits: [
+          {
+            items: ['cappuccino'],
+            visitedAt: new Date('2026-05-01T10:00:00Z'),
+          },
+        ],
         guestContext: { guest_details: { first_name: 'Sarah' } },
         recentMessages: [
-          { direction: 'inbound', body: 'hi', createdAt: new Date('2026-05-07T10:00:00Z'), delivery: 'delivered' },
+          {
+            direction: 'inbound',
+            body: 'hi',
+            createdAt: new Date('2026-05-07T10:00:00Z'),
+            delivery: 'delivered',
+          },
         ],
       },
       'reply',
@@ -2238,7 +2953,9 @@ describe('runtimeToProse — ## Guest context block (TAC-296)', () => {
       },
       'reply',
     )
-    expect(out).toContain('Things the guest has shared across past conversations')
+    expect(out).toContain(
+      'Things the guest has shared across past conversations',
+    )
     expect(out).toContain('do not introduce facts the guest hasn')
   })
 
@@ -2257,7 +2974,8 @@ describe('runtimeToProse — ## Guest context block (TAC-296)', () => {
   it('truncates observations to 5 floor when the rendered block would exceed the char budget', () => {
     // 15 observations of ~200 chars each ≈ 3000 chars total, well over the
     // 2000-char (~500-token) budget. The fallback should trim to the last 5.
-    const longNote = 'mentioned she runs marathons and competes in trail-running events held in northern california during the spring season every year'
+    const longNote =
+      'mentioned she runs marathons and competes in trail-running events held in northern california during the spring season every year'
     const observations = Array.from({ length: 15 }, (_, i) => ({
       note: `${longNote} (entry ${i})`,
       captured_at: `2026-04-${String(i + 1).padStart(2, '0')}T00:00:00Z`,
@@ -2281,7 +2999,8 @@ describe('runtimeToProse — ## Guest context block (TAC-296)', () => {
     // Pre-truncated observations (5, already at floor) + many long life_context
     // entries. The serializer should drop oldest life_context entries from the
     // front until under budget.
-    const longNote = 'mentioned she runs marathons and competes in trail-running events held in northern california during the spring season every year'
+    const longNote =
+      'mentioned she runs marathons and competes in trail-running events held in northern california during the spring season every year'
     const observations = Array.from({ length: 5 }, (_, i) => ({
       note: `${longNote} (obs ${i})`,
       captured_at: `2026-04-${String(i + 10).padStart(2, '0')}T00:00:00Z`,
@@ -2305,7 +3024,9 @@ describe('runtimeToProse — ## Guest context block (TAC-296)', () => {
 })
 
 describe('runtimeToProse — ## Active commitments block (TAC-297)', () => {
-  function commitment(overrides: Partial<ActiveCommitment> = {}): ActiveCommitment {
+  function commitment(
+    overrides: Partial<ActiveCommitment> = {},
+  ): ActiveCommitment {
     return {
       id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
       type: 'comp',
@@ -2348,7 +3069,11 @@ describe('runtimeToProse — ## Active commitments block (TAC-297)', () => {
     const out = runtimeToProse(
       {
         activeCommitments: [
-          commitment({ type: 'recommendation', description: 'the duck', code: null }),
+          commitment({
+            type: 'recommendation',
+            description: 'the duck',
+            code: null,
+          }),
         ],
       },
       'reply',
@@ -2367,8 +3092,12 @@ describe('runtimeToProse — ## Active commitments block (TAC-297)', () => {
       'reply',
       NOW,
     )
-    expect(out).toContain('copy that value verbatim into arrivalCapture.referencesCommitmentId')
-    expect(out).toContain('never read it aloud, never include it in your reply to the guest')
+    expect(out).toContain(
+      'copy that value verbatim into arrivalCapture.referencesCommitmentId',
+    )
+    expect(out).toContain(
+      'never read it aloud, never include it in your reply to the guest',
+    )
   })
 
   it('surfaces status=pending_ack so the model knows arrival was already signaled', () => {
@@ -2392,13 +3121,16 @@ describe('runtimeToProse — ## Active commitments block (TAC-297)', () => {
   // the other ~thousand turns a day read.
 
   const ARRIVAL_ASK_SENTENCES = [
-    "include the arrival ask in the same breath",
-    "you MAY weave the ask in naturally",
+    'include the arrival ask in the same breath',
+    'you MAY weave the ask in naturally',
   ]
 
   it('drops the arrival-ask sentences on a decline turn', () => {
     const out = runtimeToProse(
-      { activeCommitments: [commitment({ status: 'pending_ack' })], isOperatorDecline: true },
+      {
+        activeCommitments: [commitment({ status: 'pending_ack' })],
+        isOperatorDecline: true,
+      },
       'manual',
       NOW,
     )
@@ -2426,7 +3158,10 @@ describe('runtimeToProse — ## Active commitments block (TAC-297)', () => {
 
   it('renders the decline intro exactly, and nothing else', () => {
     const out = runtimeToProse(
-      { activeCommitments: [commitment({ status: 'pending_ack' })], isOperatorDecline: true },
+      {
+        activeCommitments: [commitment({ status: 'pending_ack' })],
+        isOperatorDecline: true,
+      },
       'manual',
       NOW,
     )
@@ -2447,11 +3182,15 @@ describe('runtimeToProse — ## Active commitments block (TAC-297)', () => {
     // Transcribed from v1.56.0, not read back out of the source. The ordinary
     // branch is what the other ~thousand turns a day see; "byte for byte
     // unchanged" is a claim, and this is what makes it one that can fail.
-    const out = runtimeToProse({ activeCommitments: [commitment()] }, 'reply', NOW)
+    const out = runtimeToProse(
+      { activeCommitments: [commitment()] },
+      'reply',
+      NOW,
+    )
     expect(introLineOf(out)).toBe(
       'Open promises this venue has made to this guest. ' +
         "If you're offering something new (comp / hold), include the arrival ask in the same breath ('give me a heads up when you're heading over'). " +
-        "If a commitment is still open without an arrival signal, you MAY weave the ask in naturally \u2014 but never force it, never pester. " +
+        'If a commitment is still open without an arrival signal, you MAY weave the ask in naturally \u2014 but never force it, never pester. ' +
         "Don't repeat the ask if status is already 'pending_ack' (the guest has already signaled). " +
         'Each line carries an internal `id:` \u2014 copy that value verbatim into arrivalCapture.referencesCommitmentId when the guest signals arrival, and into cancelsCommitmentId when your reply takes that promise back. ' +
         'The id is system-internal: never read it aloud, never include it in your reply to the guest.',
@@ -2459,7 +3198,11 @@ describe('runtimeToProse — ## Active commitments block (TAC-297)', () => {
   })
 
   it('never shows the decline intro on an ordinary turn', () => {
-    const out = runtimeToProse({ activeCommitments: [commitment()] }, 'reply', NOW)
+    const out = runtimeToProse(
+      { activeCommitments: [commitment()] },
+      'reply',
+      NOW,
+    )
     expect(out).not.toContain('The promise this message is declining')
     expect(out).not.toContain('This message cancels the promise')
     expect(out).toContain('Open promises this venue has made to this guest.')
@@ -2468,7 +3211,11 @@ describe('runtimeToProse — ## Active commitments block (TAC-297)', () => {
   it('does not claim to be declining anything when the flag is absent on a manual turn', () => {
     // The ordinary Command Center Follow Up button (THE-232) also renders
     // category 'manual'. The category must not be what switches the intro.
-    const out = runtimeToProse({ activeCommitments: [commitment()] }, 'manual', NOW)
+    const out = runtimeToProse(
+      { activeCommitments: [commitment()] },
+      'manual',
+      NOW,
+    )
     expect(out).not.toContain('The promise this message is declining')
     expect(out).toContain('Open promises this venue has made to this guest.')
   })
@@ -2477,7 +3224,10 @@ describe('runtimeToProse — ## Active commitments block (TAC-297)', () => {
     // The id segment still renders on this branch, so the only thing between a
     // rendered uuid and a guest reading one aloud has to render with it.
     const out = runtimeToProse(
-      { activeCommitments: [commitment({ status: 'pending_ack' })], isOperatorDecline: true },
+      {
+        activeCommitments: [commitment({ status: 'pending_ack' })],
+        isOperatorDecline: true,
+      },
       'manual',
       NOW,
     )
@@ -2496,7 +3246,11 @@ describe('runtimeToProse — ## Active commitments block (TAC-297)', () => {
       'manual',
       NOW,
     )
-    const ordinaryOut = runtimeToProse({ activeCommitments: [row] }, 'manual', NOW)
+    const ordinaryOut = runtimeToProse(
+      { activeCommitments: [row] },
+      'manual',
+      NOW,
+    )
     const lineOf = (out: string) =>
       out.split('\n').find((l) => l.startsWith('- [comp] oat latte'))
     expect(lineOf(declineOut)).toBeDefined()
@@ -2522,7 +3276,10 @@ describe('runtimeToProse — ## Active commitments block (TAC-297)', () => {
     // output, so an echoed dash costs a regen attempt. The retained id sentence
     // has one and is excluded by name, not by loosening the check.
     const out = runtimeToProse(
-      { activeCommitments: [commitment({ status: 'pending_ack' })], isOperatorDecline: true },
+      {
+        activeCommitments: [commitment({ status: 'pending_ack' })],
+        isOperatorDecline: true,
+      },
       'manual',
       NOW,
     )
@@ -2544,7 +3301,8 @@ describe('runtimeToProse — ## Active commitments block (TAC-297)', () => {
           {
             direction: 'inbound' as const,
             body: 'hello',
-            createdAt: new Date('2026-04-29T11:30:00Z'), delivery: 'delivered',
+            createdAt: new Date('2026-04-29T11:30:00Z'),
+            delivery: 'delivered',
           },
         ],
       },
@@ -2573,7 +3331,10 @@ describe('runtimeToProse — ## Follow-up context block (TAC-244)', () => {
         followup: {
           reasons: ['post_visit_day_7'],
           daysSinceLastVisit: 7,
-          anchorVisit: { visitedAt: visitedAt7, items: ['espresso', 'croissant'] },
+          anchorVisit: {
+            visitedAt: visitedAt7,
+            items: ['espresso', 'croissant'],
+          },
         },
       },
       'follow_up',
@@ -2604,7 +3365,9 @@ describe('runtimeToProse — ## Follow-up context block (TAC-244)', () => {
       'follow_up',
       NOW,
     )
-    expect(out).toContain('Reasons: post-visit day 7, cold lapsed (re-engagement)')
+    expect(out).toContain(
+      'Reasons: post-visit day 7, cold lapsed (re-engagement)',
+    )
     expect(out).toContain(
       "Multiple reasons apply. Write the single text a thoughtful owner would actually send — touch what's genuinely worth mentioning, lead with one and fold in the other, drop one if it doesn't fit.",
     )
@@ -2730,7 +3493,10 @@ describe('runtimeToProse — ## Follow-up context block (TAC-244)', () => {
         followup: {
           reasons: ['post_visit_day_7'],
           daysSinceLastVisit: 7,
-          anchorVisit: { visitedAt: visitedAt7, items: ['espresso', 'croissant'] },
+          anchorVisit: {
+            visitedAt: visitedAt7,
+            items: ['espresso', 'croissant'],
+          },
         },
       },
       'follow_up',
@@ -2798,7 +3564,7 @@ describe('runtimeToProse — ## Unanswered question (TAC-308)', () => {
       NOW_308,
     )
     expect(out).toContain(
-      "Nothing has been sent to them about it, and nothing will be sent automatically.",
+      'Nothing has been sent to them about it, and nothing will be sent automatically.',
     )
     expect(out).toContain(
       "Don't tell them it's being looked into, don't give a time, and don't attempt the answer yourself.",
@@ -2837,7 +3603,11 @@ describe('runtimeToProse — ## Unanswered question (TAC-308)', () => {
   it('writing_holding: asks for the holding note and bans a deadline or an answer', () => {
     const out = runtimeToProse(
       {
-        pendingQuestion: { question: 'q', askedAt: ASKED, mode: 'writing_holding' },
+        pendingQuestion: {
+          question: 'q',
+          askedAt: ASKED,
+          mode: 'writing_holding',
+        },
       },
       'manual',
       NOW_308,
@@ -2854,7 +3624,11 @@ describe('runtimeToProse — ## Unanswered question (TAC-308)', () => {
       {
         pendingQuestion: { question: 'q', askedAt: ASKED, mode: 'outstanding' },
         recentMessages: [
-          { direction: 'inbound', body: 'hello', createdAt: ASKED } as RecentMessage,
+          {
+            direction: 'inbound',
+            body: 'hello',
+            createdAt: ASKED,
+          } as RecentMessage,
         ],
       },
       'reply',
@@ -2912,7 +3686,9 @@ describe('personaToProse — multi-line persona entries keep their structure (TA
       'text',
     )
     expect(out).toContain('- For questions outside the venue domain')
-    expect(out).toContain('  Nearby places are a separate case. Name them with confidence.')
+    expect(out).toContain(
+      '  Nearby places are a separate case. Name them with confidence.',
+    )
     expect(out).toContain('  When nothing is documented, the hedge is correct.')
   })
 
@@ -2971,7 +3747,9 @@ describe('personaToProse — multi-line persona entries keep their structure (TA
       makePersona({
         signaturePhrases: ['see you soon'],
         bannedTopics: ['politics'],
-        voiceAntiPatterns: [{ text: 'no marketing flourishes', source: 'manual' }],
+        voiceAntiPatterns: [
+          { text: 'no marketing flourishes', source: 'manual' },
+        ],
         voiceTouchstones: ['dry, warm, unhurried'],
       }),
       'text',
@@ -3027,13 +3805,20 @@ describe("venueInfoToProse — what this venue does and doesn't offer", () => {
       services: { holds: false, alsoOffers: [], alsoDoesNotOffer: [] },
     })
     expect(out).toContain('- Holding or setting items aside: NOT available')
-    for (const absent of ['Ordering ahead', 'Reservations', 'Delivery', 'Catering']) {
+    for (const absent of [
+      'Ordering ahead',
+      'Reservations',
+      'Delivery',
+      'Catering',
+    ]) {
       expect(out).not.toContain(absent)
     }
   })
 
   it('omits the whole section when services is absent', () => {
-    expect(venueInfoToProse(base)).not.toContain("## What this venue does and doesn't offer")
+    expect(venueInfoToProse(base)).not.toContain(
+      "## What this venue does and doesn't offer",
+    )
   })
 
   it('omits the whole section when every field is unstated', () => {
@@ -3058,7 +3843,7 @@ describe("venueInfoToProse — what this venue does and doesn't offer", () => {
 
   // Deliberately weaker than formatMechanicEligibility's completeness claim —
   // that list is generated from a full table, this one is hand-curated.
-  it('states a don\'t-invent default without claiming the list is exhaustive', () => {
+  it("states a don't-invent default without claiming the list is exhaustive", () => {
     const out = venueInfoToProse({
       ...base,
       services: { holds: false, alsoOffers: [], alsoDoesNotOffer: [] },
@@ -3106,13 +3891,15 @@ describe('emoji cadence — persona standing statement (TAC-362)', () => {
   // assertions exist to make a well-meaning reword of a working path fail
   // loudly rather than silently change two venues.
   it('never keeps its exact prohibition, unchanged', () => {
-    expect(personaToProse(makePersona({ emojiPolicy: 'never' }), 'text')).toContain(
-      '## Emojis\nnever — Do not use emoji.',
-    )
+    expect(
+      personaToProse(makePersona({ emojiPolicy: 'never' }), 'text'),
+    ).toContain('## Emojis\nnever — Do not use emoji.')
   })
 
   it('sparingly keeps its exact wording, unchanged', () => {
-    expect(personaToProse(makePersona({ emojiPolicy: 'sparingly' }), 'text')).toContain(
+    expect(
+      personaToProse(makePersona({ emojiPolicy: 'sparingly' }), 'text'),
+    ).toContain(
       '## Emojis\nsparingly — You may use one emoji occasionally — only when it genuinely fits the tone. Default to none.',
     )
   })
@@ -3137,9 +3924,9 @@ describe('emoji cadence — persona standing statement (TAC-362)', () => {
   // field isn't set. So the sentence has to carry its own default rather than
   // pointing at an instruction that may not be there.
   it('frequent states a default for when no per-message block renders', () => {
-    expect(personaToProse(makePersona({ emojiPolicy: 'frequent' }), 'text')).toContain(
-      'if no such instruction appears, do not use one',
-    )
+    expect(
+      personaToProse(makePersona({ emojiPolicy: 'frequent' }), 'text'),
+    ).toContain('if no such instruction appears, do not use one')
   })
 })
 
@@ -3157,14 +3944,16 @@ describe('emoji cadence — per-message block (TAC-362)', () => {
   it("renders permission, not a mandate, for 'allowed'", () => {
     const out = runtimeToProse({ emojiDirective: 'allowed' }, 'reply', NOW)
     expect(out).toContain('## Emoji for this message')
-    expect(out).toContain('An emoji is welcome in this message if one genuinely fits.')
+    expect(out).toContain(
+      'An emoji is welcome in this message if one genuinely fits.',
+    )
     expect(out).toContain('At most one')
   })
 
   it('renders no block at all when the directive is absent', () => {
-    expect(runtimeToProse({ inboundMessage: 'hi' }, 'reply', NOW)).not.toContain(
-      '## Emoji for this message',
-    )
+    expect(
+      runtimeToProse({ inboundMessage: 'hi' }, 'reply', NOW),
+    ).not.toContain('## Emoji for this message')
   })
 
   // Position is the point: most-proximate-wins is the failure class behind
@@ -3178,7 +3967,12 @@ describe('emoji cadence — per-message block (TAC-362)', () => {
         inboundMessage: 'what time do you close?',
         guestName: 'Sam',
         recentMessages: [
-          { direction: 'inbound', body: 'hey', createdAt: new Date(NOW.getTime() - 60_000), delivery: 'delivered' },
+          {
+            direction: 'inbound',
+            body: 'hey',
+            createdAt: new Date(NOW.getTime() - 60_000),
+            delivery: 'delivered',
+          },
         ],
       },
       'reply',
@@ -3199,17 +3993,17 @@ describe('emoji cadence — per-message block (TAC-362)', () => {
   // have fired on ~75% of opt-outs.
   it('never renders on an opt_out turn, on either branch', () => {
     for (const directive of ['none', 'allowed'] as const) {
-      expect(runtimeToProse({ emojiDirective: directive }, 'opt_out', NOW)).not.toContain(
-        '## Emoji for this message',
-      )
+      expect(
+        runtimeToProse({ emojiDirective: directive }, 'opt_out', NOW),
+      ).not.toContain('## Emoji for this message')
     }
   })
 
   it('never renders on a comp_complaint turn, on either branch', () => {
     for (const directive of ['none', 'allowed'] as const) {
-      expect(runtimeToProse({ emojiDirective: directive }, 'comp_complaint', NOW)).not.toContain(
-        '## Emoji for this message',
-      )
+      expect(
+        runtimeToProse({ emojiDirective: directive }, 'comp_complaint', NOW),
+      ).not.toContain('## Emoji for this message')
     }
   })
 
@@ -3244,10 +4038,16 @@ describe('emoji cadence — per-message block (TAC-362)', () => {
   // suppressed everywhere would pass both assertions above and remove the
   // whole feature.
   it('still renders on the ordinary categories', () => {
-    for (const category of ['reply', 'new_question', 'recommendation_request', 'casual_chatter', 'follow_up'] as const) {
-      expect(runtimeToProse({ emojiDirective: 'allowed' }, category, NOW)).toContain(
-        '## Emoji for this message',
-      )
+    for (const category of [
+      'reply',
+      'new_question',
+      'recommendation_request',
+      'casual_chatter',
+      'follow_up',
+    ] as const) {
+      expect(
+        runtimeToProse({ emojiDirective: 'allowed' }, category, NOW),
+      ).toContain('## Emoji for this message')
     }
   })
 
@@ -3280,17 +4080,25 @@ describe('emoji cadence — per-message block (TAC-362)', () => {
 describe('intention suppression: render side and record side agree (TAC-436)', () => {
   const openIntentions = ["You don't know this guest's name yet."]
   const asOpen = [
-    { key: 'learn_name' as const, promptLine: openIntentions[0], eligibleAt: NOW },
+    {
+      key: 'learn_name' as const,
+      promptLine: openIntentions[0],
+      eligibleAt: NOW,
+    },
   ]
 
   it.each(MESSAGE_CATEGORIES)('agrees for %s', (category) => {
-    const rendersBlock = runtimeToProse({ mechanics: [], openIntentions }, category, NOW).includes(
-      "## What you're hoping to get to",
-    )
-    const offersToRecorder = renderableIntentions(asOpen, category, false).length > 0
-    expect(offersToRecorder, `${category}: render=${rendersBlock} record=${offersToRecorder}`).toBe(
-      rendersBlock,
-    )
+    const rendersBlock = runtimeToProse(
+      { mechanics: [], openIntentions },
+      category,
+      NOW,
+    ).includes("## What you're hoping to get to")
+    const offersToRecorder =
+      renderableIntentions(asOpen, category, false).length > 0
+    expect(
+      offersToRecorder,
+      `${category}: render=${rendersBlock} record=${offersToRecorder}`,
+    ).toBe(rendersBlock)
   })
 
   // The pending-question case is renderableIntentions' alone (the serializer
@@ -3315,7 +4123,10 @@ describe('personaToProse — named-speaker line per channel (TAC-495)', () => {
     })
   }
 
-  const named = makePersona({ speakerFraming: 'named_person', speakerName: 'Sana' })
+  const named = makePersona({
+    speakerFraming: 'named_person',
+    speakerName: 'Sana',
+  })
 
   it('the SMS line is unchanged and the Instagram line says messaging', () => {
     expect(personaToProse(named, 'text')).toContain(
@@ -3336,16 +4147,31 @@ describe('personaToProse — named-speaker line per channel (TAC-495)', () => {
   it('differs between channels only in the named-speaker verb and the casual formality phrase', () => {
     for (const speakerFraming of ['venue', 'named_person', 'owner'] as const) {
       for (const formality of ['casual', 'warm', 'formal'] as const) {
-        const persona = makePersona({ speakerFraming, formality, speakerName: 'Sana' })
+        const persona = makePersona({
+          speakerFraming,
+          formality,
+          speakerName: 'Sana',
+        })
         expect(
           personaToProse(persona, 'instagram')
             .replace('messaging as yourself', 'texting as yourself')
-            .replace('write the way you would message a friend.', 'write the way you would text a friend.'),
+            .replace(
+              'write the way you would message a friend.',
+              'write the way you would text a friend.',
+            ),
         ).toBe(personaToProse(persona, 'text'))
       }
     }
-    expect(personaToProse(makePersona({ speakerFraming: 'venue', formality: 'warm' }), 'instagram')).toBe(
-      personaToProse(makePersona({ speakerFraming: 'venue', formality: 'warm' }), 'text'),
+    expect(
+      personaToProse(
+        makePersona({ speakerFraming: 'venue', formality: 'warm' }),
+        'instagram',
+      ),
+    ).toBe(
+      personaToProse(
+        makePersona({ speakerFraming: 'venue', formality: 'warm' }),
+        'text',
+      ),
     )
   })
 
@@ -3360,15 +4186,24 @@ describe('personaToProse — named-speaker line per channel (TAC-495)', () => {
     expect(personaToProse(casual, 'instagram')).toContain(
       '## Formality\ncasual — Use contractions; lowercase starts are fine; write the way you would message a friend.',
     )
-    expect(personaToProse(casual, null)).toBe(personaToProse(casual, 'instagram'))
+    expect(personaToProse(casual, null)).toBe(
+      personaToProse(casual, 'instagram'),
+    )
   })
 
   // The name is filled in after the substitution; a function replacement
   // keeps a name that looks like a replacement pattern exactly as typed.
   it('inserts the speaker name literally', () => {
-    const odd = makePersona({ speakerFraming: 'named_person', speakerName: "A$&B$'" })
-    expect(personaToProse(odd, 'instagram')).toContain("You are A$&B$', staff at the venue, messaging as yourself.")
-    expect(personaToProse({ ...named, speakerName: undefined }, 'text')).toContain(
+    const odd = makePersona({
+      speakerFraming: 'named_person',
+      speakerName: "A$&B$'",
+    })
+    expect(personaToProse(odd, 'instagram')).toContain(
+      "You are A$&B$', staff at the venue, messaging as yourself.",
+    )
+    expect(
+      personaToProse({ ...named, speakerName: undefined }, 'text'),
+    ).toContain(
       'You are [name missing], staff at the venue, texting as yourself.',
     )
   })
@@ -3376,7 +4211,10 @@ describe('personaToProse — named-speaker line per channel (TAC-495)', () => {
 
 describe('venueInfoToProse — ## Links (TAC-509)', () => {
   const A = { label: 'Budan beans', url: 'https://lemils.com/products/budan' }
-  const B = { label: 'Shipping policy', url: 'https://lemils.com/policies/shipping-policy' }
+  const B = {
+    label: 'Shipping policy',
+    url: 'https://lemils.com/policies/shipping-policy',
+  }
 
   it('renders the empty state when the venue has no links key', () => {
     const out = venueInfoToProse(makeVenueInfo())
@@ -3395,7 +4233,9 @@ describe('venueInfoToProse — ## Links (TAC-509)', () => {
     // says "on lemils.com". Without this sentence the empty state would
     // suppress phrasing the venue actually uses.
     const out = venueInfoToProse(makeVenueInfo())
-    expect(out).toContain('Naming the site the way the venue knowledge already does is fine.')
+    expect(out).toContain(
+      'Naming the site the way the venue knowledge already does is fine.',
+    )
   })
 
   it('lists each link with its label and states the list is exhaustive', () => {
@@ -3417,7 +4257,9 @@ describe('venueInfoToProse — ## Links (TAC-509)', () => {
     // every fragment survives, which is the trap TAC-409's prompt-content
     // tests were rewritten to close.
     const out = venueInfoToProse(makeVenueInfo({ links: [A] }))
-    expect(out).toContain('character for character, including the https:// at the start')
+    expect(out).toContain(
+      'character for character, including the https:// at the start',
+    )
   })
 
   it('does not put the scheme instruction in the empty state, which has nothing to copy', () => {
@@ -3427,11 +4269,15 @@ describe('venueInfoToProse — ## Links (TAC-509)', () => {
 
   it('renders only the usable entries, and falls to the empty state if none are', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
-    const mixed = venueInfoToProse(makeVenueInfo({ links: [A, { label: 'Broken' }] }))
+    const mixed = venueInfoToProse(
+      makeVenueInfo({ links: [A, { label: 'Broken' }] }),
+    )
     expect(mixed).toContain(`- ${A.label}: ${A.url}`)
     expect(mixed).not.toContain('Broken')
 
-    const allBad = venueInfoToProse(makeVenueInfo({ links: ['nope', { url: 'x' }] }))
+    const allBad = venueInfoToProse(
+      makeVenueInfo({ links: ['nope', { url: 'x' }] }),
+    )
     expect(allBad).toContain('There are no links you may share.')
     warn.mockRestore()
   })
@@ -3439,7 +4285,9 @@ describe('venueInfoToProse — ## Links (TAC-509)', () => {
   it('always renders the section, whatever else the venue has', () => {
     // Every venue's prompt gains this block, which is why PROMPT_VERSION moved.
     expect(venueInfoToProse(makeVenueInfo())).toContain('## Links')
-    expect(venueInfoToProse(makeVenueInfo({ links: [A] }))).toContain('## Links')
+    expect(venueInfoToProse(makeVenueInfo({ links: [A] }))).toContain(
+      '## Links',
+    )
   })
 })
 
@@ -3459,19 +4307,31 @@ describe('formatActiveCommitments — the id also carries a cancellation (TAC-51
   }
 
   it('names cancelsCommitmentId as a second use of the same id', () => {
-    const out = runtimeToProse({ activeCommitments: [commitment] }, 'reply', NOW)
+    const out = runtimeToProse(
+      { activeCommitments: [commitment] },
+      'reply',
+      NOW,
+    )
     expect(out).toContain(
       'copy that value verbatim into arrivalCapture.referencesCommitmentId when the guest signals arrival, and into cancelsCommitmentId when your reply takes that promise back',
     )
   })
 
   it('still renders the id itself, which is the value both fields copy', () => {
-    const out = runtimeToProse({ activeCommitments: [commitment] }, 'reply', NOW)
+    const out = runtimeToProse(
+      { activeCommitments: [commitment] },
+      'reply',
+      NOW,
+    )
     expect(out).toContain(`id: ${commitment.id}`)
   })
 
   it('keeps the never-read-it-aloud rule attached to both uses', () => {
-    const out = runtimeToProse({ activeCommitments: [commitment] }, 'reply', NOW)
+    const out = runtimeToProse(
+      { activeCommitments: [commitment] },
+      'reply',
+      NOW,
+    )
     expect(out).toContain(
       'The id is system-internal: never read it aloud, never include it in your reply to the guest.',
     )

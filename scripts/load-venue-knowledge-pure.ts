@@ -41,7 +41,13 @@ export const ProposalSchema = z
   .object({
     row_id: z.string().min(1),
     action: z.enum(['new', 'replace']),
-    replaces_id: z.string().regex(REPLACES_ID_RE, 'must be a uuid or a hex id prefix of at least 8 chars').nullable(),
+    replaces_id: z
+      .string()
+      .regex(
+        REPLACES_ID_RE,
+        'must be a uuid or a hex id prefix of at least 8 chars',
+      )
+      .nullable(),
     dedup_status: z.string(),
     contains_url: z.boolean(),
     primary_tags: z.array(z.string()).min(1),
@@ -52,14 +58,23 @@ export const ProposalSchema = z
   })
   .superRefine((p, ctx) => {
     if (p.action === 'replace' && p.replaces_id === null) {
-      ctx.addIssue({ code: z.ZodIssueCode.custom, message: `${p.row_id}: action=replace needs replaces_id` })
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: `${p.row_id}: action=replace needs replaces_id`,
+      })
     }
     if (p.action === 'new' && p.replaces_id !== null) {
-      ctx.addIssue({ code: z.ZodIssueCode.custom, message: `${p.row_id}: action=new must have replaces_id null` })
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: `${p.row_id}: action=new must have replaces_id null`,
+      })
     }
     for (const tag of p.primary_tags) {
       if (isCanonicalPrimaryTag(tag) === null) {
-        ctx.addIssue({ code: z.ZodIssueCode.custom, message: `${p.row_id}: non-canonical primary tag "${tag}"` })
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `${p.row_id}: non-canonical primary tag "${tag}"`,
+        })
       }
     }
   })
@@ -118,7 +133,9 @@ export function parseArgs(argv: readonly string[]): Args {
   }
 
   if (venueSlug.length === 0) {
-    throw new Error('--venue <slug> is required (there is no default: this writes to a real venue)')
+    throw new Error(
+      '--venue <slug> is required (there is no default: this writes to a real venue)',
+    )
   }
   return { venueSlug, apply, inputPath, outputPath, baselinePath }
 }
@@ -136,24 +153,30 @@ export function parseEmbedding(raw: unknown, label: string): number[] {
     if (raw.length === 0) throw new Error(`${label}: empty embedding array`)
     return raw.map((n) => {
       const v = typeof n === 'number' ? n : Number(n)
-      if (!Number.isFinite(v)) throw new Error(`${label}: non-finite value in embedding`)
+      if (!Number.isFinite(v))
+        throw new Error(`${label}: non-finite value in embedding`)
       return v
     })
   }
   if (typeof raw === 'string') {
     const trimmed = raw.trim()
     if (!trimmed.startsWith('[') || !trimmed.endsWith(']')) {
-      throw new Error(`${label}: embedding string is not a bracketed vector literal`)
+      throw new Error(
+        `${label}: embedding string is not a bracketed vector literal`,
+      )
     }
     const inner = trimmed.slice(1, -1).trim()
     if (inner.length === 0) throw new Error(`${label}: empty embedding literal`)
     return inner.split(',').map((part) => {
       const v = Number(part)
-      if (!Number.isFinite(v)) throw new Error(`${label}: non-finite value in embedding literal`)
+      if (!Number.isFinite(v))
+        throw new Error(`${label}: non-finite value in embedding literal`)
       return v
     })
   }
-  throw new Error(`${label}: embedding is ${raw === null ? 'null' : typeof raw}, expected string or array`)
+  throw new Error(
+    `${label}: embedding is ${raw === null ? 'null' : typeof raw}, expected string or array`,
+  )
 }
 
 /**
@@ -161,8 +184,12 @@ export function parseEmbedding(raw: unknown, label: string): number[] {
  * normalized, but assuming it would make every score silently wrong if that
  * ever changed, and the division is free at this scale.
  */
-export function cosineSimilarity(a: readonly number[], b: readonly number[]): number {
-  if (a.length !== b.length) throw new Error(`cosine: dimension mismatch ${a.length} vs ${b.length}`)
+export function cosineSimilarity(
+  a: readonly number[],
+  b: readonly number[],
+): number {
+  if (a.length !== b.length)
+    throw new Error(`cosine: dimension mismatch ${a.length} vs ${b.length}`)
   if (a.length === 0) throw new Error('cosine: empty vectors')
   let dot = 0
   let na = 0
@@ -185,9 +212,13 @@ export function cosineSimilarity(a: readonly number[], b: readonly number[]): nu
  * (Every Le Mil's row is single-chunk today, so this only matters for a
  * longer future entry.)
  */
-export function entrySimilarity(a: readonly number[][], b: readonly number[][]): number {
+export function entrySimilarity(
+  a: readonly number[][],
+  b: readonly number[][],
+): number {
   let best = -1
-  for (const ca of a) for (const cb of b) best = Math.max(best, cosineSimilarity(ca, cb))
+  for (const ca of a)
+    for (const cb of b) best = Math.max(best, cosineSimilarity(ca, cb))
   if (best === -1) throw new Error('entrySimilarity: an entry had no chunks')
   return best
 }
@@ -215,7 +246,10 @@ export function percentile(sortedAsc: readonly number[], p: number): number {
   return sortedAsc[lo]! + (sortedAsc[hi]! - sortedAsc[lo]!) * (idx - lo)
 }
 
-export function summarizeDistribution(scores: readonly number[], bucket = 0.05): Distribution {
+export function summarizeDistribution(
+  scores: readonly number[],
+  bucket = 0.05,
+): Distribution {
   if (scores.length === 0) throw new Error('summarizeDistribution: empty input')
   const sorted = [...scores].sort((x, y) => x - y)
   const buckets = new Map<number, number>()
@@ -268,13 +302,51 @@ export const NUMERIC_KEYS = [
 // over-reporting a proper noun costs a glance, dropping a real one (a store
 // name, a variety, a place) costs the finding.
 const PROPER_NOUN_STOPWORDS = new Set([
-  'the', 'a', 'an', 'and', 'but', 'for', 'it', 'its', 'this', 'that', 'these', 'those',
-  'every', 'all', 'both', 'each', 'other', 'good', 'made', 'sold', 'very', 'before',
-  'after', 'when', 'where', 'what', 'who', 'how', 'why', 'let', 'mix', 'put', 'set',
-  'pour', 'legend', 'says', 'online', 'wholesale', 'roasted', 'whole', 'non',
+  'the',
+  'a',
+  'an',
+  'and',
+  'but',
+  'for',
+  'it',
+  'its',
+  'this',
+  'that',
+  'these',
+  'those',
+  'every',
+  'all',
+  'both',
+  'each',
+  'other',
+  'good',
+  'made',
+  'sold',
+  'very',
+  'before',
+  'after',
+  'when',
+  'where',
+  'what',
+  'who',
+  'how',
+  'why',
+  'let',
+  'mix',
+  'put',
+  'set',
+  'pour',
+  'legend',
+  'says',
+  'online',
+  'wholesale',
+  'roasted',
+  'whole',
+  'non',
 ])
 
-const UNIT = 'oz|lbs?|ml|l|g|kg|mm|cm|km|m|tbsp|tsp|cups?|minutes?|mins?|hours?|hrs?|days?|business days|°f|°c|am|pm'
+const UNIT =
+  'oz|lbs?|ml|l|g|kg|mm|cm|km|m|tbsp|tsp|cups?|minutes?|mins?|hours?|hrs?|days?|business days|°f|°c|am|pm'
 
 function collect(text: string, re: RegExp, out: string[]): string {
   return text.replace(re, (m) => {
@@ -315,11 +387,22 @@ export function extractSpecifics(text: string): Specifics {
   )
   // Ranges and ratios before measures and bare numbers: "10-15 minutes",
   // "80/20", "3 x 10 oz", "500-1,000 m" must not decompose into halves.
-  t = collect(t, new RegExp(String.raw`\b\d[\d,]*(?:\.\d+)?\s*(?:-|–|to)\s*\d[\d,]*(?:\.\d+)?\s*(?:${UNIT})?\b`, 'gi'), ranges)
+  t = collect(
+    t,
+    new RegExp(
+      String.raw`\b\d[\d,]*(?:\.\d+)?\s*(?:-|–|to)\s*\d[\d,]*(?:\.\d+)?\s*(?:${UNIT})?\b`,
+      'gi',
+    ),
+    ranges,
+  )
   t = collect(t, /\b\d+\s*\/\s*\d+\b/g, ranges)
   t = collect(t, /\b\d+\s*x\s*\d[\d,]*(?:\.\d+)?\s*(?:oz|lb|lbs)?\b/gi, ranges)
   t = collect(t, /\b(?:1[5-9]|20)\d{2}\b/g, years)
-  t = collect(t, new RegExp(String.raw`\b\d[\d,]*(?:\.\d+)?\s*(?:${UNIT})\b`, 'gi'), measures)
+  t = collect(
+    t,
+    new RegExp(String.raw`\b\d[\d,]*(?:\.\d+)?\s*(?:${UNIT})\b`, 'gi'),
+    measures,
+  )
   collect(t, /\b\d[\d,]*(?:\.\d+)?\b/g, numbers)
 
   const properNouns = [
@@ -360,7 +443,10 @@ export interface SpecificsDiff {
   numericDivergence: boolean
 }
 
-export function diffSpecifics(left: Specifics, right: Specifics): SpecificsDiff {
+export function diffSpecifics(
+  left: Specifics,
+  right: Specifics,
+): SpecificsDiff {
   const onlyLeft: Partial<Record<keyof Specifics, string[]>> = {}
   const onlyRight: Partial<Record<keyof Specifics, string[]>> = {}
   const keys = Object.keys(left) as Array<keyof Specifics>
@@ -378,7 +464,8 @@ export function diffSpecifics(left: Specifics, right: Specifics): SpecificsDiff 
   const numericRight = new Set(NUMERIC_KEYS.flatMap((k) => right[k]))
   const shared = [...numericLeft].filter((x) => numericRight.has(x))
   const differ =
-    numericLeft.size !== numericRight.size || [...numericLeft].some((x) => !numericRight.has(x))
+    numericLeft.size !== numericRight.size ||
+    [...numericLeft].some((x) => !numericRight.has(x))
 
   return {
     onlyLeft,
@@ -390,7 +477,8 @@ export function diffSpecifics(left: Specifics, right: Specifics): SpecificsDiff 
 
 // ── verdicts ────────────────────────────────────────────────────────────────
 
-export type SuggestedVerdict = 'NEW' | 'BORDERLINE' | 'CONFLICT_CANDIDATE' | 'REPLACES'
+export type SuggestedVerdict =
+  'NEW' | 'BORDERLINE' | 'CONFLICT_CANDIDATE' | 'REPLACES'
 
 /**
  * A SUGGESTION, never a decision. Three properties are deliberate:
@@ -409,7 +497,8 @@ export function suggestVerdict(
 ): SuggestedVerdict {
   if (action === 'replace') return 'REPLACES'
   if (topScore === null || topScore < band) return 'NEW'
-  if (diff !== null && diff.numericDivergence && diff.sharedNumericCount > 0) return 'CONFLICT_CANDIDATE'
+  if (diff !== null && diff.numericDivergence && diff.sharedNumericCount > 0)
+    return 'CONFLICT_CANDIDATE'
   return 'BORDERLINE'
 }
 
@@ -440,7 +529,15 @@ export interface SplitSafetyFinding {
  */
 export function checkSplitSafety(
   entries: ReadonlyArray<{ rowId: string; content: string }>,
-  split: (body: string, rng: () => number) => string[] = resolveDispatchBubbles,
+  // TAC-554 widened resolveDispatchBubbles with a required third parameter,
+  // the getting-to-know-you question. This report has no intention turn in it,
+  // so callers pass '' below — stated rather than defaulted so a future caller
+  // here has to decide.
+  split: (
+    body: string,
+    rng: () => number,
+    intentionTail: string,
+  ) => string[] = resolveDispatchBubbles,
 ): SplitSafetyFinding[] {
   const findings: SplitSafetyFinding[] = []
   const domain = /\b(?:[a-z0-9-]+\.)+(?:com|org|net|co|io|uk)\b/gi
@@ -448,7 +545,7 @@ export function checkSplitSafety(
   for (const e of entries) {
     const tokens = e.content.match(domain) ?? []
     if (tokens.length === 0) continue
-    const bubbles = split(e.content, () => 0)
+    const bubbles = split(e.content, () => 0, '')
     for (const token of tokens) {
       // A domain is intact if some single bubble still contains it whole.
       if (!bubbles.some((b) => b.includes(token))) {
@@ -484,8 +581,10 @@ export function resolveReplacesId(
   if (exact.length === 1) return { ok: true, id: exact[0]!, viaPrefix: false }
 
   const matches = venueScopedIds.filter((id) => id.startsWith(value))
-  if (matches.length === 1) return { ok: true, id: matches[0]!, viaPrefix: true }
-  if (matches.length === 0) return { ok: false, reason: 'no_match', matches: [] }
+  if (matches.length === 1)
+    return { ok: true, id: matches[0]!, viaPrefix: true }
+  if (matches.length === 0)
+    return { ok: false, reason: 'no_match', matches: [] }
   return { ok: false, reason: 'ambiguous', matches: [...matches].sort() }
 }
 
@@ -601,7 +700,8 @@ export function diffAgainstBaseline(
     }
   }
   for (const b of before) {
-    if (!nowById.has(b.rowId)) changes.push({ rowId: b.rowId, kind: 'removed', before: b })
+    if (!nowById.has(b.rowId))
+      changes.push({ rowId: b.rowId, kind: 'removed', before: b })
   }
   return changes.sort((x, y) => x.rowId.localeCompare(y.rowId))
 }

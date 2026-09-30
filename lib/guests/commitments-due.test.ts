@@ -14,19 +14,19 @@ vi.mock('@/lib/db/admin', () => ({
   createAdminClient: vi.fn(),
 }))
 
-
 // Stub the push module — the processor tests assert which rows trigger the
 // CAS + push fanout; the actual APNs call isn't under test here.
-const sendCommitmentArrivalPushMock = vi.fn<
-  (input: unknown) => Promise<void>
->()
+const sendCommitmentArrivalPushMock = vi.fn<(input: unknown) => Promise<void>>()
 vi.mock('@/lib/notifications/send-commitment-push', () => ({
   sendCommitmentArrivalPush: (input: unknown) =>
     sendCommitmentArrivalPushMock(input),
 }))
 
 import { createAdminClient } from '@/lib/db/admin'
-import { FALLBACK_MORNING_HOUR_LOCAL, processDueCommitments } from './commitments-due'
+import {
+  FALLBACK_MORNING_HOUR_LOCAL,
+  processDueCommitments,
+} from './commitments-due'
 
 // 14:00 UTC = 07:00 America/Los_Angeles (PDT, UTC-7 in late May) — morning
 // hour for an LA venue. Same instant is 10:00 America/New_York and 23:00
@@ -124,7 +124,10 @@ function newState(overrides: Partial<DBState> = {}): DBState {
     venueConfigs: [
       { venue_id: VENUE_LA, venue_info: hoursOpeningAt('7:00 AM – 3:00 PM') },
       { venue_id: VENUE_NYC, venue_info: hoursOpeningAt('7:00 AM – 3:00 PM') },
-      { venue_id: VENUE_TOKYO, venue_info: hoursOpeningAt('7:00 AM – 3:00 PM') },
+      {
+        venue_id: VENUE_TOKYO,
+        venue_info: hoursOpeningAt('7:00 AM – 3:00 PM'),
+      },
     ],
     guests: [{ id: GUEST_ID, first_name: 'Jaipal' }],
     ...overrides,
@@ -283,7 +286,9 @@ describe('processDueCommitments — morning-hour-per-venue gate', () => {
     const row = makeDueRow('cmt-nyc', { venue_id: VENUE_NYC })
     const state = newState({
       dueRows: [row],
-      updateReturnByRowId: new Map([['cmt-nyc', [{ ...row, status: 'pending_ack' }]]]),
+      updateReturnByRowId: new Map([
+        ['cmt-nyc', [{ ...row, status: 'pending_ack' }]],
+      ]),
     })
     vi.mocked(createAdminClient).mockReturnValue(
       makeMockClient(state) as unknown as ReturnType<typeof createAdminClient>,
@@ -469,7 +474,9 @@ describe('processDueCommitments — CAS-rowcount-gates push', () => {
     const transitionedRow2 = { ...row2, status: 'pending_ack' }
     const state = newState({
       dueRows: [row1, row2],
-      updateErrorByRowId: new Map([['cmt-err', { message: 'connection lost' }]]),
+      updateErrorByRowId: new Map([
+        ['cmt-err', { message: 'connection lost' }],
+      ]),
       updateReturnByRowId: new Map([['cmt-ok', [transitionedRow2]]]),
     })
     vi.mocked(createAdminClient).mockReturnValue(
@@ -532,10 +539,15 @@ describe('opening time decides when the arrival push fires (TAC-428)', () => {
     return makeDueRow(id, overrides)
   }
 
-  function stateWithHours(row: ReturnType<typeof makeDueRow>, range: string | null) {
+  function stateWithHours(
+    row: ReturnType<typeof makeDueRow>,
+    range: string | null,
+  ) {
     const base = newState({
       dueRows: [row],
-      updateReturnByRowId: new Map([[row.id, [{ ...row, status: 'pending_ack' }]]]),
+      updateReturnByRowId: new Map([
+        [row.id, [{ ...row, status: 'pending_ack' }]],
+      ]),
     })
     return {
       ...base,
@@ -625,14 +637,17 @@ describe('opening time decides when the arrival push fires (TAC-428)', () => {
   it.each([
     ['a bare Closed', 'Closed'],
     ["the venue-spec parser's own Closed – Closed row", 'Closed – Closed'],
-  ])('pushes NOTHING when the venue states it is closed today: %s', async (_label, range) => {
-    const r = await run(stateWithHours(laRow('cmt-closed'), range))
-    expect(r.venueClosedToday).toBe(1)
-    expect(r.openingTimeUnreadable).toBe(0)
-    expect(r.transitioned).toBe(0)
-    expect(r.pushed).toBe(0)
-    expect(sendCommitmentArrivalPushMock).not.toHaveBeenCalled()
-  })
+  ])(
+    'pushes NOTHING when the venue states it is closed today: %s',
+    async (_label, range) => {
+      const r = await run(stateWithHours(laRow('cmt-closed'), range))
+      expect(r.venueClosedToday).toBe(1)
+      expect(r.openingTimeUnreadable).toBe(0)
+      expect(r.transitioned).toBe(0)
+      expect(r.pushed).toBe(0)
+      expect(sendCommitmentArrivalPushMock).not.toHaveBeenCalled()
+    },
+  )
 
   // The two outcomes must stay distinguishable in the summary. Collapsing them
   // is precisely the change that was ruled against, and a caller reading only
@@ -640,7 +655,9 @@ describe('opening time decides when the arrival push fires (TAC-428)', () => {
   // nobody filled in.
   it('counts a closed venue and an unreadable one under different outcomes', async () => {
     const closed = await run(stateWithHours(laRow('cmt-c'), 'Closed'))
-    const unreadable = await run(stateWithHours(laRow('cmt-u'), 'ask at the counter'))
+    const unreadable = await run(
+      stateWithHours(laRow('cmt-u'), 'ask at the counter'),
+    )
     expect(closed.venueClosedToday).toBe(1)
     expect(closed.openingTimeUnreadable).toBe(0)
     expect(unreadable.venueClosedToday).toBe(0)
@@ -655,7 +672,10 @@ describe('opening time decides when the arrival push fires (TAC-428)', () => {
   })
 
   it('still refuses before the FALLBACK hour when hours are unreadable', async () => {
-    const state = stateWithHours(laRow('cmt-fallback-early'), 'ask at the counter')
+    const state = stateWithHours(
+      laRow('cmt-fallback-early'),
+      'ask at the counter',
+    )
     vi.mocked(createAdminClient).mockReturnValue(
       makeMockClient(state) as unknown as ReturnType<typeof createAdminClient>,
     )
@@ -679,18 +699,27 @@ describe('an arrival push never fires after the arrival (TAC-428)', () => {
 
   it('refuses when the arrival was earlier today, at or after opening', async () => {
     // Arrival 16:00 UTC = 09:00 PDT; the tick is 18:00 UTC = 11:00 PDT.
-    const row = makeDueRow('cmt-gone', { expected_arrival: '2026-05-29T16:00:00Z' })
-    const r = await run(newState({ dueRows: [row] }), new Date('2026-05-29T18:00:00Z'))
+    const row = makeDueRow('cmt-gone', {
+      expected_arrival: '2026-05-29T16:00:00Z',
+    })
+    const r = await run(
+      newState({ dueRows: [row] }),
+      new Date('2026-05-29T18:00:00Z'),
+    )
     expect(r.arrivalPassed).toBe(1)
     expect(r.transitioned).toBe(0)
     expect(sendCommitmentArrivalPushMock).not.toHaveBeenCalled()
   })
 
   it('still fires while the arrival is ahead of the tick', async () => {
-    const row = makeDueRow('cmt-ahead', { expected_arrival: '2026-05-29T20:00:00Z' })
+    const row = makeDueRow('cmt-ahead', {
+      expected_arrival: '2026-05-29T20:00:00Z',
+    })
     const state = newState({
       dueRows: [row],
-      updateReturnByRowId: new Map([['cmt-ahead', [{ ...row, status: 'pending_ack' }]]]),
+      updateReturnByRowId: new Map([
+        ['cmt-ahead', [{ ...row, status: 'pending_ack' }]],
+      ]),
     })
     const r = await run(state, new Date('2026-05-29T18:00:00Z'))
     expect(r.transitioned).toBe(1)
@@ -705,10 +734,14 @@ describe('an arrival push never fires after the arrival (TAC-428)', () => {
   it('ANNOUNCES an arrival earlier than opening, at opening, rather than calling it past', async () => {
     // Arrival 13:00 UTC = 06:00 PDT, an hour before the 07:00 opening.
     // The tick is 07:00 PDT, which is already after the arrival instant.
-    const row = makeDueRow('cmt-preopen', { expected_arrival: '2026-05-29T13:00:00Z' })
+    const row = makeDueRow('cmt-preopen', {
+      expected_arrival: '2026-05-29T13:00:00Z',
+    })
     const state = newState({
       dueRows: [row],
-      updateReturnByRowId: new Map([['cmt-preopen', [{ ...row, status: 'pending_ack' }]]]),
+      updateReturnByRowId: new Map([
+        ['cmt-preopen', [{ ...row, status: 'pending_ack' }]],
+      ]),
     })
     const r = await run(state, NOW)
     expect(r.transitioned).toBe(1)
@@ -733,7 +766,11 @@ describe('an arrival push never fires after the arrival (TAC-428)', () => {
 // through, or a case the reviewer reproduced against a Le Mil's-shaped venue.
 // ---------------------------------------------------------------------------
 describe('TAC-428 review: gaps the first pass left', () => {
-  function laState(row: ReturnType<typeof makeDueRow>, range: string, transitions = true) {
+  function laState(
+    row: ReturnType<typeof makeDueRow>,
+    range: string,
+    transitions = true,
+  ) {
     const base = newState({
       dueRows: [row],
       updateReturnByRowId: transitions
@@ -861,7 +898,6 @@ describe('TAC-428 review: gaps the first pass left', () => {
     expect(r.openingTimeUnreadable).toBe(0)
   })
 })
-
 
 // TAC-529. Pausing a venue has to stop the arrival heads-up too, or it is a
 // switch that does not do what its name says.

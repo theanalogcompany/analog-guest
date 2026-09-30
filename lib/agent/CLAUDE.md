@@ -66,12 +66,10 @@ off-topic) and fall inside `ctx.conversationWindowMs` - hoisted onto `RuntimeCon
 than re-derived, because TAC-380 ruling 1 made that the one definition of "the same
 conversation".
 
-**Voice is a static per-venue pack, not a retrieval** (decision 0007).
+**Voice is a static per-venue pack, not a retrieval** (decision 0008).
 `retrieveCorpusStage` loads the same pack for every message via `lib/rag/voice-pack.ts` -
-no query, no embedding, no similarity.
-It still fails CLOSED on inbound: an empty pack or a load failure throws, because voice
-failure breaks the thing we sell.
-Followups proceed with whatever loaded.
+no query, no embedding, no similarity. Fails CLOSED on inbound (empty pack or load
+failure throws); followups proceed with whatever loaded.
 
 `lib/voices/regenerate-with-critique.ts` now **calls this stage** rather than reimplementing
 retrieval, which deletes a duplication that had already drifted once. Its contextual arm works
@@ -222,8 +220,20 @@ so a halted venue never accumulates recognition state or takes a claim.
 
 ## Intentions
 
-`intentions/`. Seven keys in `definitions.ts`, priority-ordered, arming on
-`visit_confirmed` / `open_recommendation` / `recorded_order` / `first_contact`.
+`intentions/`. Eight keys in `definitions.ts`, priority-ordered, arming on
+`visit_confirmed` / `first_recorded_order` / `open_recommendation` / `recorded_order` /
+`first_contact`.
+
+`first_recorded_order` and `recorded_order` are one word apart and opposite:
+`recorded_order` takes the NEWEST order and HOLDS it until the order has left the
+conversation it happened in ("did you try it?" a minute later is absurd), while
+`first_recorded_order` takes the EARLIEST and holds nothing, because the question it arms
+(`are_they_new_here`) is about the guest rather than the order and the counter session is
+the only moment it fits.
+
+`are_they_new_here` and `understand_order` can never be open on one turn: the first arms
+only once a transaction exists, and a transaction satisfies the second. That is why its
+priority is 15 rather than 5 - a test asserting it wins that race could never fail.
 
 Two predicates must move together: `shouldRenderOpenIntentions` (render side) and
 `renderableIntentions` (record side). Suppressing on one only means the post-send
@@ -233,6 +243,31 @@ never saw. A cross-module test iterates every category for exactly this.
 `understand_order` must not arm off `guests.last_visit_at` - every writer of that column
 runs downstream of a transaction, and a transaction satisfies the intention. There is a
 source-level guard matching both the snake_case column and the camelCase field.
+
+### A raised question is always its own last message (TAC-554)
+
+The model emits it in `intentionQuestion`, separately from the reply.
+`composeReplyWithIntention` (`lib/ai/generate-message.ts`) then JOINS the two, so
+`generation.body` is still the complete reply and every backstop that reads the body still
+reads the question. The field rides along as the exact TAIL of the body - true by
+construction, because we did the joining - and `resolveDispatchBubbles(body, rng, tail)`
+peels it off as the final bubble.
+
+`intentionTailFor(question, renderedCount)` is the ONE gate, called by both dispatch arms.
+A question only bubbles when the intentions block actually rendered, which is
+`renderableIntentions` above. Two copies of that decision is the drift this directory
+already pays for.
+
+**`''` is byte-identical to the pre-TAC-554 path**, asserted as an equivalence rather than
+by restating expected bubbles. The answer's own cap drops to `MAX_BUBBLES_PER_RESPONSE - 1`
+so the total still honours the cap.
+
+**`fitBubblesToInstagramCap` takes the tail too, and must.** Its repack throws the bubble
+structure away and re-packs the whole reply greedily, which merges the question back into
+the message in front of it - and only when a bubble is over 1000 bytes, so it is the kind of
+conditional regression nothing notices.
+
+Prompt wording cannot reach any of this: see `docs/decisions/0007-intention-question-is-its-own-bubble.md`.
 
 ## Other rules that bite
 

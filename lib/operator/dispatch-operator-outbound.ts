@@ -34,9 +34,16 @@ import {
   captureIntentionPromptRecordingFailed,
 } from '@/lib/analytics/posthog'
 import { createAdminClient } from '@/lib/db/admin'
-import { cancelCommitmentForGuest, createCommitmentFromPending } from '@/lib/guests/commitments'
+import {
+  cancelCommitmentForGuest,
+  createCommitmentFromPending,
+} from '@/lib/guests/commitments'
 import { sendMessage } from '@/lib/messaging/send'
-import { PendingCancellationSchema, PendingCommitmentSchema } from '@/lib/schemas'
+import { logger } from '@/lib/observability/logger'
+import {
+  PendingCancellationSchema,
+  PendingCommitmentSchema,
+} from '@/lib/schemas'
 import { parseMessageChannel } from '@/lib/schemas/message-channel'
 import {
   prepareInstagramOperatorSend,
@@ -128,9 +135,7 @@ export interface DispatchFailure {
 }
 
 export type DispatchOperatorOutboundResult =
-  | DispatchSuccessSent
-  | DispatchSuccessAlreadyActed
-  | DispatchFailure
+  DispatchSuccessSent | DispatchSuccessAlreadyActed | DispatchFailure
 
 export async function dispatchOperatorOutbound(
   input: DispatchOperatorOutboundInput,
@@ -266,7 +271,8 @@ export async function dispatchOperatorOutbound(
   // The text that matters is what would actually be dispatched: the operator's
   // edit when they supplied one, otherwise the stored draft body. Trimmed, to
   // match the send-layer check — a lone space is not an answer.
-  const bodyToDispatch = input.action === 'edit' ? (input.editedBody ?? '') : row.body
+  const bodyToDispatch =
+    input.action === 'edit' ? (input.editedBody ?? '') : row.body
   if (bodyToDispatch.trim() === '') {
     return {
       ok: false,
@@ -281,7 +287,9 @@ export async function dispatchOperatorOutbound(
   // ---- 3c. TAC-469: an Instagram card's checks, BEFORE the flip, so a
   // refused card stays in the queue: the byte cap (sent verbatim, never split),
   // the account and token, and the 24-hour window.
-  let instagramTarget: Awaited<ReturnType<typeof prepareInstagramOperatorSend>> | null = null
+  let instagramTarget: Awaited<
+    ReturnType<typeof prepareInstagramOperatorSend>
+  > | null = null
   if (channel === 'instagram') {
     instagramTarget = await prepareInstagramOperatorSend(supabase, {
       venueId: row.venue_id,
@@ -290,7 +298,11 @@ export async function dispatchOperatorOutbound(
       now: new Date(),
     })
     if (!instagramTarget.ok) {
-      return { ok: false, errorCode: instagramTarget.errorCode, error: instagramTarget.error }
+      return {
+        ok: false,
+        errorCode: instagramTarget.errorCode,
+        error: instagramTarget.error,
+      }
     }
   }
 
@@ -351,7 +363,10 @@ export async function dispatchOperatorOutbound(
   // either transport.
   let providerMessageId: string
   if (instagramTarget !== null && instagramTarget.ok) {
-    const sent = await sendInstagramOperatorText(instagramTarget.target, sendBody)
+    const sent = await sendInstagramOperatorText(
+      instagramTarget.target,
+      sendBody,
+    )
     if (!sent.ok) {
       // Meta definitely refused: nothing reached the guest, so the card goes
       // back in the queue (rule 4). An unknown outcome stays out, as on
@@ -434,9 +449,11 @@ export async function dispatchOperatorOutbound(
   // worse than the operator-side gap of a missing heads-up card. Reconciliation
   // ticket if pilot surfaces this failure mode.
   if (row.pending_commitment !== null) {
-    const parsedPending = PendingCommitmentSchema.safeParse(row.pending_commitment)
+    const parsedPending = PendingCommitmentSchema.safeParse(
+      row.pending_commitment,
+    )
     if (!parsedPending.success) {
-      console.warn(
+      logger.warn(
         `[operator] dispatch-operator-outbound: malformed pending_commitment on message=${row.id}: ${parsedPending.error.message}. Skipping commitment materialization.`,
       )
     } else {
@@ -448,7 +465,7 @@ export async function dispatchOperatorOutbound(
         now: new Date(),
       })
       if (!commitmentResult.ok) {
-        console.warn(
+        logger.warn(
           `[operator] dispatch-operator-outbound: commitment materialization failed for message=${row.id}: ${commitmentResult.error}. Message already sent.`,
         )
       }
@@ -478,9 +495,11 @@ export async function dispatchOperatorOutbound(
   // malformed. CLAUDE.md records the same trap on isKnowledgeGapCard's
   // pending_until check.
   if (row.pending_cancellation != null) {
-    const parsedCancellation = PendingCancellationSchema.safeParse(row.pending_cancellation)
+    const parsedCancellation = PendingCancellationSchema.safeParse(
+      row.pending_cancellation,
+    )
     if (!parsedCancellation.success) {
-      console.warn(
+      logger.warn(
         `[operator] dispatch-operator-outbound: malformed pending_cancellation on message=${row.id}: ${parsedCancellation.error.message}. Skipping cancellation.`,
       )
     } else {
@@ -491,7 +510,7 @@ export async function dispatchOperatorOutbound(
         now: new Date(),
       })
       if (!cancelResult.ok) {
-        console.warn(
+        logger.warn(
           `[operator] dispatch-operator-outbound: cancellation failed for message=${row.id}, commitment=${parsedCancellation.data.commitmentId}: ${cancelResult.error}. Message already sent.`,
         )
       } else {
@@ -542,20 +561,30 @@ export async function dispatchOperatorOutbound(
   // synchronous work left before the return. Anything that threw here would
   // reject dispatchOperatorOutbound and 500 the operator's approve on a send
   // that already succeeded.
-  let renderedIntentions: ReturnType<typeof parseRenderedIntentionsForRecording> = []
+  let renderedIntentions: ReturnType<
+    typeof parseRenderedIntentionsForRecording
+  > = []
   try {
-    renderedIntentions = parseRenderedIntentionsForRecording(row.rendered_intentions)
+    renderedIntentions = parseRenderedIntentionsForRecording(
+      row.rendered_intentions,
+    )
   } catch (e) {
-    console.error('[operator] rendered_intentions parse threw; recording nothing', {
-      messageId: row.id,
-      error: e instanceof Error ? e.message : String(e),
-    })
+    logger.error(
+      '[operator] rendered_intentions parse threw; recording nothing',
+      {
+        messageId: row.id,
+        error: e instanceof Error ? e.message : String(e),
+      },
+    )
   }
   if (renderedIntentions.length > 0) {
     const venueId = row.venue_id
     const guestId = row.guest_id
     const messageId = row.id
-    const via = input.action === 'edit' ? ('operator_edit' as const) : ('operator_approve' as const)
+    const via =
+      input.action === 'edit'
+        ? ('operator_edit' as const)
+        : ('operator_approve' as const)
     waitUntil(
       recordIntentionPrompts({
         venueId,
@@ -567,7 +596,7 @@ export async function dispatchOperatorOutbound(
       })
         .then(async (outcome) => {
           if (outcome.kind === 'recorded') {
-            console.log('[operator] dispatch intention prompts recorded', {
+            logger.info('[operator] dispatch intention prompts recorded', {
               messageId,
               action: input.action,
               raisedKeys: outcome.raisedKeys,
@@ -593,9 +622,14 @@ export async function dispatchOperatorOutbound(
             // verdict. On the edit path the offered set came from the model's
             // draft, which the operator may have rewritten — so a pessimistic
             // closure here can be wrong in a way the auto-send path is not.
-            console.warn(
+            logger.warn(
               '[operator] intention classifier failed twice; rendered intentions closed',
-              { messageId, action: input.action, closedKeys: outcome.closedKeys, error: outcome.classifierError },
+              {
+                messageId,
+                action: input.action,
+                closedKeys: outcome.closedKeys,
+                error: outcome.classifierError,
+              },
             )
             await captureIntentionPromptRecordingFailed({
               agentRunId: null,
@@ -608,7 +642,7 @@ export async function dispatchOperatorOutbound(
               error: outcome.classifierError,
             })
           } else if (outcome.kind === 'write_failed') {
-            console.warn('[operator] intention prompt write failed', {
+            logger.warn('[operator] intention prompt write failed', {
               messageId,
               action: input.action,
               keys: outcome.keys,
@@ -629,7 +663,7 @@ export async function dispatchOperatorOutbound(
           }
         })
         .catch((e) => {
-          console.error('[operator] recordIntentionPrompts threw unexpectedly', {
+          logger.error('[operator] recordIntentionPrompts threw unexpectedly', {
             messageId,
             error: e instanceof Error ? e.message : String(e),
           })

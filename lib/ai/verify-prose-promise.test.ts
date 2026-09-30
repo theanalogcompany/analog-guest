@@ -106,7 +106,10 @@ describe('verifyProsePromise', () => {
       },
     })
 
-    const result = await verifyProsePromise({ replyBody: "we're open at 7 tomorrow", guestInboundBody: null })
+    const result = await verifyProsePromise({
+      replyBody: "we're open at 7 tomorrow",
+      guestInboundBody: null,
+    })
 
     expect(result.ok).toBe(true)
     if (!result.ok) return
@@ -132,7 +135,10 @@ describe('verifyProsePromise', () => {
       },
     })
 
-    const result = await verifyProsePromise({ replyBody: "we'll sort you out next time", guestInboundBody: null })
+    const result = await verifyProsePromise({
+      replyBody: "we'll sort you out next time",
+      guestInboundBody: null,
+    })
 
     expect(result.ok).toBe(true)
     if (!result.ok) return
@@ -151,7 +157,10 @@ describe('verifyProsePromise', () => {
       },
     })
 
-    const result = await verifyProsePromise({ replyBody: "we'll make it right", guestInboundBody: null })
+    const result = await verifyProsePromise({
+      replyBody: "we'll make it right",
+      guestInboundBody: null,
+    })
 
     expect(result.ok).toBe(true)
     if (!result.ok) return
@@ -170,7 +179,10 @@ describe('verifyProsePromise', () => {
       },
     })
 
-    const result = await verifyProsePromise({ replyBody: "I'll set one aside", guestInboundBody: null })
+    const result = await verifyProsePromise({
+      replyBody: "I'll set one aside",
+      guestInboundBody: null,
+    })
 
     expect(result.ok).toBe(true)
     if (!result.ok) return
@@ -194,10 +206,14 @@ describe('verifyProsePromise', () => {
 
     await verifyProsePromise({ replyBody: 'hi', guestInboundBody: null })
 
-    const call = generateObjectMock.mock.calls[0]?.[0] as { schema: { shape: object } }
+    const call = generateObjectMock.mock.calls[0]?.[0] as {
+      schema: { shape: object }
+    }
     const keys = Object.keys(call.schema.shape)
     expect(keys[0]).toBe('reasoning')
-    expect(keys.indexOf('reasoning')).toBeLessThan(keys.indexOf('promisesSomething'))
+    expect(keys.indexOf('reasoning')).toBeLessThan(
+      keys.indexOf('promisesSomething'),
+    )
   })
 
   // TAC-527. This test was written to force exactly the edit this ticket
@@ -214,9 +230,15 @@ describe('verifyProsePromise', () => {
       },
     })
 
-    await verifyProsePromise({ replyBody: "next one's on us", guestInboundBody: null })
+    await verifyProsePromise({
+      replyBody: "next one's on us",
+      guestInboundBody: null,
+    })
 
-    const call = generateObjectMock.mock.calls[0]?.[0] as { prompt: string; system: string }
+    const call = generateObjectMock.mock.calls[0]?.[0] as {
+      prompt: string
+      system: string
+    }
     // BYTE-IDENTICAL to v1.0.0's prompt. This is the assertion behind the
     // claim that proactive turns are unchanged and that TAC-401's 220-fixture
     // replay stays comparable: both pass null, and null must render nothing.
@@ -254,23 +276,26 @@ describe('verifyProsePromise', () => {
   // A blank inbound is not a guest message. Without this, a whitespace-only
   // body would render an empty quoted line and ask the model to resolve "too"
   // against nothing.
-  it.each(['', '   ', '\n'])('renders no guest line for a blank inbound (%j)', async (blank) => {
-    generateObjectMock.mockResolvedValue({
-      object: {
-        reasoning: 'r',
-        promisesSomething: false,
-        commitmentType: 'none',
-        commitmentDescription: '',
-      },
-    })
+  it.each(['', '   ', '\n'])(
+    'renders no guest line for a blank inbound (%j)',
+    async (blank) => {
+      generateObjectMock.mockResolvedValue({
+        object: {
+          reasoning: 'r',
+          promisesSomething: false,
+          commitmentType: 'none',
+          commitmentDescription: '',
+        },
+      })
 
-    await verifyProsePromise({ replyBody: 'hi', guestInboundBody: blank })
+      await verifyProsePromise({ replyBody: 'hi', guestInboundBody: blank })
 
-    const call = generateObjectMock.mock.calls[0]?.[0] as { prompt: string }
-    expect(call.prompt).toBe(
-      'Assistant\'s reply, about to be sent: "hi"\n\nDoes this reply commit the venue to giving this guest something of value?',
-    )
-  })
+      const call = generateObjectMock.mock.calls[0]?.[0] as { prompt: string }
+      expect(call.prompt).toBe(
+        'Assistant\'s reply, about to be sent: "hi"\n\nDoes this reply commit the venue to giving this guest something of value?',
+      )
+    },
+  )
 
   // TAC-527: the input widened by exactly ONE string and no more. TAC-415
   // measured this check at 27/60 on one persona and 4/220 at Le Mil's, so
@@ -290,7 +315,10 @@ describe('verifyProsePromise', () => {
       guestInboundBody: 'my cortado was cold',
     })
 
-    const call = generateObjectMock.mock.calls[0]?.[0] as { prompt: string; system: string }
+    const call = generateObjectMock.mock.calls[0]?.[0] as {
+      prompt: string
+      system: string
+    }
     // The prompt is pinned whole above, so this asserts the one thing that
     // assertion cannot: that no prompt SECTION shape reaches either string.
     expect(call.prompt).not.toContain('## ')
@@ -299,7 +327,9 @@ describe('verifyProsePromise', () => {
   })
 
   describe('the approved rule (TAC-527)', () => {
-    async function systemPrompt(guestInboundBody: string | null): Promise<string> {
+    async function systemPrompt(
+      guestInboundBody: string | null,
+    ): Promise<string> {
       generateObjectMock.mockResolvedValue({
         object: {
           reasoning: 'r',
@@ -309,7 +339,8 @@ describe('verifyProsePromise', () => {
         },
       })
       await verifyProsePromise({ replyBody: 'hi', guestInboundBody })
-      return (generateObjectMock.mock.calls[0]?.[0] as { system: string }).system
+      return (generateObjectMock.mock.calls[0]?.[0] as { system: string })
+        .system
     }
 
     // v1.0.0's system prompt, transcribed from lib/ai/verify-prose-promise.ts at
@@ -375,7 +406,9 @@ When promisesSomething is false, set commitmentType to "none" and commitmentDesc
       expect(prompt).toContain(
         '- An apology that gives nothing. "We\'ll do better next time", "that one\'s on us to get right", "sorry that happened". "On us" in an apology about responsibility is not "on us" as in free.\n',
       )
-      expect(prompt).not.toContain('But when the guest\'s message names a specific thing')
+      expect(prompt).not.toContain(
+        "But when the guest's message names a specific thing",
+      )
       expect(prompt).not.toContain('You may also be shown')
       // The sentence the base prompt ends that paragraph with, immediately
       // followed by the next one, so an inserted paragraph fails here too.
@@ -417,7 +450,9 @@ When promisesSomething is false, set commitmentType to "none" and commitmentDesc
 
     await verifyProsePromise({ replyBody: 'hi', guestInboundBody: null })
 
-    const call = generateObjectMock.mock.calls[0]?.[0] as { maxOutputTokens: number }
+    const call = generateObjectMock.mock.calls[0]?.[0] as {
+      maxOutputTokens: number
+    }
     // 1000, not verify-mechanic-offer's 300: unbounded `reasoning` is
     // declared first and this call also emits a description, so the tail sits
     // further from the start than either sibling's. Walking it back toward
@@ -429,7 +464,10 @@ When promisesSomething is false, set commitmentType to "none" and commitmentDesc
   it('reports truncation under its own errorCode', async () => {
     generateObjectMock.mockRejectedValue(truncationError())
 
-    const result = await verifyProsePromise({ replyBody: "we'll make it right", guestInboundBody: null })
+    const result = await verifyProsePromise({
+      replyBody: "we'll make it right",
+      guestInboundBody: null,
+    })
 
     expect(result.ok).toBe(false)
     if (result.ok) return
@@ -442,7 +480,10 @@ When promisesSomething is false, set commitmentType to "none" and commitmentDesc
   it('does NOT report truncation when the parse failed but finishReason is stop', async () => {
     generateObjectMock.mockRejectedValue(parseErrorThatStopped())
 
-    const result = await verifyProsePromise({ replyBody: "we'll make it right", guestInboundBody: null })
+    const result = await verifyProsePromise({
+      replyBody: "we'll make it right",
+      guestInboundBody: null,
+    })
 
     expect(result.ok).toBe(false)
     if (result.ok) return
@@ -452,7 +493,10 @@ When promisesSomething is false, set commitmentType to "none" and commitmentDesc
   it('reports an ordinary transport failure under the generic errorCode', async () => {
     generateObjectMock.mockRejectedValue(new Error('fetch failed'))
 
-    const result = await verifyProsePromise({ replyBody: "we'll make it right", guestInboundBody: null })
+    const result = await verifyProsePromise({
+      replyBody: "we'll make it right",
+      guestInboundBody: null,
+    })
 
     expect(result.ok).toBe(false)
     if (result.ok) return
@@ -461,7 +505,10 @@ When promisesSomething is false, set commitmentType to "none" and commitmentDesc
   })
 
   it('refuses an empty body without calling the model', async () => {
-    const result = await verifyProsePromise({ replyBody: '   ', guestInboundBody: null })
+    const result = await verifyProsePromise({
+      replyBody: '   ',
+      guestInboundBody: null,
+    })
 
     expect(result.ok).toBe(false)
     if (result.ok) return

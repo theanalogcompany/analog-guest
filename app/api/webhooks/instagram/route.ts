@@ -125,9 +125,12 @@ export async function GET(request: Request): Promise<Response> {
     // Square's missing var is a COMPUTE input, where failing loud is right.
     // This one is a COMPARISON gate, where failing closed is right. Meta
     // cannot tell the two apart anyway; the difference lives only in this log.
-    console.error('instagram webhook: META_VERIFY_TOKEN not set; refusing verification', {
-      event: 'instagram_verify_misconfigured',
-    })
+    console.error(
+      'instagram webhook: META_VERIFY_TOKEN not set; refusing verification',
+      {
+        event: 'instagram_verify_misconfigured',
+      },
+    )
     return new Response(null, { status: 403 })
   }
 
@@ -174,9 +177,12 @@ export async function POST(request: Request): Promise<Response> {
     // this check is here to say so loudly, not only to say no.
     const appSecret = process.env.INSTAGRAM_APP_SECRET
     if (!appSecret) {
-      console.error('instagram webhook: INSTAGRAM_APP_SECRET not set; refusing every delivery', {
-        event: 'instagram_signature_misconfigured',
-      })
+      console.error(
+        'instagram webhook: INSTAGRAM_APP_SECRET not set; refusing every delivery',
+        {
+          event: 'instagram_signature_misconfigured',
+        },
+      )
       return new Response(null, { status: 403 })
     }
 
@@ -188,12 +194,18 @@ export async function POST(request: Request): Promise<Response> {
     // logs a reason, never a digest. The user-agent is the one request value
     // here, capped: a hint to whether a refusal was Meta's, since a probe can
     // send Meta's user-agent too.
-    const signature = verifyInstagramSignature(rawBody, request.headers, appSecret)
+    const signature = verifyInstagramSignature(
+      rawBody,
+      request.headers,
+      appSecret,
+    )
     if (!signature.ok) {
       console.warn('instagram webhook: signature rejected', {
         event: 'instagram_signature_rejected',
         reason: signature.reason,
-        userAgent: request.headers.get('user-agent')?.slice(0, MAX_USER_AGENT_LOGGED) ?? null,
+        userAgent:
+          request.headers.get('user-agent')?.slice(0, MAX_USER_AGENT_LOGGED) ??
+          null,
       })
       return new Response(null, { status: 403 })
     }
@@ -248,7 +260,10 @@ export async function POST(request: Request): Promise<Response> {
         // loop: a Graph call must not sit inside Meta's delivery deadline,
         // and a failure here must not cost the 200. It never throws.
         waitUntil(
-          markInboundSeen(supabase, { venueId: handoff.venueId, guestId: handoff.guestId }),
+          markInboundSeen(supabase, {
+            venueId: handoff.venueId,
+            guestId: handoff.guestId,
+          }),
         )
         waitUntil(runInboundAgent(handoff.messageId))
       } else if (handoff.kind === 'schedule_arrival') {
@@ -268,13 +283,16 @@ export async function POST(request: Request): Promise<Response> {
             hadPriorConversation: handoff.hadPriorConversation,
           }).then((scheduled) => {
             if (scheduled.ok) return
-            console.error('instagram webhook: scan greeting could not be scheduled', {
-              event: 'instagram_scan_arrival_not_scheduled',
-              venueId: handoff.venueId,
-              guestId: handoff.guestId,
-              messageId: handoff.messageId,
-              error: scheduled.error,
-            })
+            console.error(
+              'instagram webhook: scan greeting could not be scheduled',
+              {
+                event: 'instagram_scan_arrival_not_scheduled',
+                venueId: handoff.venueId,
+                guestId: handoff.guestId,
+                messageId: handoff.messageId,
+                error: scheduled.error,
+              },
+            )
           }),
         )
       } else if (handoff.kind === 'record') {
@@ -301,15 +319,18 @@ export async function POST(request: Request): Promise<Response> {
         // referralSource but has no discriminator for this condition, and the
         // Instagram convention is a warn with its own `event:` key
         // (refresh-profile.ts). No body, no scoped ID.
-        console.warn('instagram: inbound looks like a scan with nothing to prove it', {
-          event: 'instagram_scan_unattributed',
-          reason: unattributed,
-          venueId: outcome.venueId,
-          guestId: outcome.guestId,
-          messageId: outcome.messageId,
-          referralSource: outcome.referralSource,
-          guestCreated: outcome.guestCreated,
-        })
+        console.warn(
+          'instagram: inbound looks like a scan with nothing to prove it',
+          {
+            event: 'instagram_scan_unattributed',
+            reason: unattributed,
+            venueId: outcome.venueId,
+            guestId: outcome.guestId,
+            messageId: outcome.messageId,
+            referralSource: outcome.referralSource,
+            guestCreated: outcome.guestCreated,
+          },
+        )
         waitUntil(
           captureInstagramScanUnattributed({
             venueId: outcome.venueId,
@@ -330,16 +351,24 @@ export async function POST(request: Request): Promise<Response> {
       const resolutionTarget = externalResolutionTargetFor(outcome)
       if (resolutionTarget !== null) {
         waitUntil(
-          resolveCardAnsweredExternally(supabase, resolutionTarget, new Date()).then((result) =>
+          resolveCardAnsweredExternally(
+            supabase,
+            resolutionTarget,
+            new Date(),
+          ).then((result) =>
             captureInstagramCardResolvedExternally({
               venueId: resolutionTarget.venueId,
               guestId: resolutionTarget.guestId,
               echoMessageId: resolutionTarget.echoMessageId,
               cardId:
-                result.status === 'resolved' || result.status === 'lost_race' ? result.cardId : null,
+                result.status === 'resolved' || result.status === 'lost_race'
+                  ? result.cardId
+                  : null,
               outcome: result.status,
               hadPendingCommitment:
-                result.status === 'resolved' ? result.hadPendingCommitment : null,
+                result.status === 'resolved'
+                  ? result.hadPendingCommitment
+                  : null,
               error: result.status === 'failed' ? result.error : null,
             }),
           ),

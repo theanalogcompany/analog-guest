@@ -35,7 +35,11 @@ function scenario(overrides: Partial<ScenarioSheetRow> = {}): ScenarioSheetRow {
   }
 }
 
-function graded(overrides: Partial<GradedScenario> & { scenarioOverrides?: Partial<ScenarioSheetRow> } = {}): GradedScenario {
+function graded(
+  overrides: Partial<GradedScenario> & {
+    scenarioOverrides?: Partial<ScenarioSheetRow>
+  } = {},
+): GradedScenario {
   const { scenarioOverrides, ...rest } = overrides
   return {
     scenario: scenario(scenarioOverrides),
@@ -83,39 +87,87 @@ function graded(overrides: Partial<GradedScenario> & { scenarioOverrides?: Parti
 
 describe('pass predicates', () => {
   it('knowledgePassed is null for not_applicable', () => {
-    const g = graded({ llmGrade: { ...graded().llmGrade, knowledgeVerdict: 'not_applicable' } })
+    const g = graded({
+      llmGrade: { ...graded().llmGrade, knowledgeVerdict: 'not_applicable' },
+    })
     expect(knowledgePassed(g)).toBeNull()
   })
 
   it('knowledgePassed is true for correct and correctly_declined', () => {
-    expect(knowledgePassed(graded({ llmGrade: { ...graded().llmGrade, knowledgeVerdict: 'correct' } }))).toBe(true)
-    expect(knowledgePassed(graded({ llmGrade: { ...graded().llmGrade, knowledgeVerdict: 'correctly_declined' } }))).toBe(true)
+    expect(
+      knowledgePassed(
+        graded({
+          llmGrade: { ...graded().llmGrade, knowledgeVerdict: 'correct' },
+        }),
+      ),
+    ).toBe(true)
+    expect(
+      knowledgePassed(
+        graded({
+          llmGrade: {
+            ...graded().llmGrade,
+            knowledgeVerdict: 'correctly_declined',
+          },
+        }),
+      ),
+    ).toBe(true)
   })
 
   it('knowledgePassed is false for wrong/invented/incomplete/should_have_declined', () => {
-    for (const v of ['wrong', 'invented', 'incomplete', 'should_have_declined'] as const) {
-      expect(knowledgePassed(graded({ llmGrade: { ...graded().llmGrade, knowledgeVerdict: v } }))).toBe(false)
+    for (const v of [
+      'wrong',
+      'invented',
+      'incomplete',
+      'should_have_declined',
+    ] as const) {
+      expect(
+        knowledgePassed(
+          graded({ llmGrade: { ...graded().llmGrade, knowledgeVerdict: v } }),
+        ),
+      ).toBe(false)
     }
   })
 
   it('voicePassed requires both deterministic and LLM voice to pass', () => {
     expect(voicePassed(graded())).toBe(true)
     expect(
-      voicePassed(graded({ deterministicVoice: { pass: false, findings: [{ check: 'dash', detail: 'x' }] } })),
+      voicePassed(
+        graded({
+          deterministicVoice: {
+            pass: false,
+            findings: [{ check: 'dash', detail: 'x' }],
+          },
+        }),
+      ),
     ).toBe(false)
-    expect(voicePassed(graded({ llmGrade: { ...graded().llmGrade, voiceVerdict: 'fail' } }))).toBe(false)
+    expect(
+      voicePassed(
+        graded({ llmGrade: { ...graded().llmGrade, voiceVerdict: 'fail' } }),
+      ),
+    ).toBe(false)
   })
 
   it('routingPassed is null for not_applicable', () => {
     expect(
-      routingPassed(graded({ routing: { verdict: 'not_applicable', expectedRoute: 'unknown', actualRoute: null } })),
+      routingPassed(
+        graded({
+          routing: {
+            verdict: 'not_applicable',
+            expectedRoute: 'unknown',
+            actualRoute: null,
+          },
+        }),
+      ),
     ).toBeNull()
   })
 })
 
 describe('computeTopicPassRates', () => {
   it('computes a 100% pass rate for an all-passing topic', () => {
-    const rates = computeTopicPassRates([graded(), graded({ scenarioOverrides: { sample_id: 'id-2' } })])
+    const rates = computeTopicPassRates([
+      graded(),
+      graded({ scenarioOverrides: { sample_id: 'id-2' } }),
+    ])
     expect(rates).toHaveLength(1)
     expect(rates[0].topic).toBe('menu_drinks')
     expect(rates[0].total).toBe(2)
@@ -125,7 +177,9 @@ describe('computeTopicPassRates', () => {
   })
 
   it('splits by topic and computes independent rates', () => {
-    const passing = graded({ scenarioOverrides: { topic: 'a', sample_id: 'a1' } })
+    const passing = graded({
+      scenarioOverrides: { topic: 'a', sample_id: 'a1' },
+    })
     const failing = graded({
       scenarioOverrides: { topic: 'b', sample_id: 'b1' },
       llmGrade: { ...graded().llmGrade, knowledgeVerdict: 'wrong' },
@@ -138,7 +192,9 @@ describe('computeTopicPassRates', () => {
   })
 
   it('reports null knowledgePassRate when every scenario in the topic is not_applicable', () => {
-    const g = graded({ llmGrade: { ...graded().llmGrade, knowledgeVerdict: 'not_applicable' } })
+    const g = graded({
+      llmGrade: { ...graded().llmGrade, knowledgeVerdict: 'not_applicable' },
+    })
     const rates = computeTopicPassRates([g])
     expect(rates[0].knowledgePassRate).toBeNull()
   })
@@ -152,10 +208,18 @@ describe('buildReviewList', () => {
   it('ranks an unapproved mechanic commitment above everything, including an expected_behavior fail', () => {
     const behaviorFail = graded({
       scenarioOverrides: { sample_id: 'safety-1' },
-      llmGrade: { ...graded().llmGrade, expectedBehaviorVerdict: 'fail', expectedBehaviorReason: 'missed 988' },
+      llmGrade: {
+        ...graded().llmGrade,
+        expectedBehaviorVerdict: 'fail',
+        expectedBehaviorReason: 'missed 988',
+      },
     })
     const unapproved = graded({
-      scenarioOverrides: { sample_id: 'mechanic-1', scenario_source: 'mechanic', expected_route: 'queue' },
+      scenarioOverrides: {
+        sample_id: 'mechanic-1',
+        scenario_source: 'mechanic',
+        expected_route: 'queue',
+      },
       result: { ...graded().result, route: 'send' },
       routing: { verdict: 'fail', expectedRoute: 'queue', actualRoute: 'send' },
     })
@@ -166,7 +230,11 @@ describe('buildReviewList', () => {
 
   it('does not double-count an unapproved commitment as a plain routing_fail too', () => {
     const unapproved = graded({
-      scenarioOverrides: { sample_id: 'mechanic-1', scenario_source: 'mechanic', expected_route: 'queue' },
+      scenarioOverrides: {
+        sample_id: 'mechanic-1',
+        scenario_source: 'mechanic',
+        expected_route: 'queue',
+      },
       result: { ...graded().result, route: 'send' },
       routing: { verdict: 'fail', expectedRoute: 'queue', actualRoute: 'send' },
     })
@@ -176,9 +244,17 @@ describe('buildReviewList', () => {
 
   it('a mechanic scenario that correctly queued is not flagged as an unapproved commitment', () => {
     const correct = graded({
-      scenarioOverrides: { sample_id: 'mechanic-1', scenario_source: 'mechanic', expected_route: 'queue' },
+      scenarioOverrides: {
+        sample_id: 'mechanic-1',
+        scenario_source: 'mechanic',
+        expected_route: 'queue',
+      },
       result: { ...graded().result, route: 'queue' },
-      routing: { verdict: 'pass', expectedRoute: 'queue', actualRoute: 'queue' },
+      routing: {
+        verdict: 'pass',
+        expectedRoute: 'queue',
+        actualRoute: 'queue',
+      },
     })
     expect(buildReviewList([correct])).toEqual([])
   })
@@ -190,7 +266,11 @@ describe('buildReviewList', () => {
     })
     const behaviorFail = graded({
       scenarioOverrides: { sample_id: 'safety-1' },
-      llmGrade: { ...graded().llmGrade, expectedBehaviorVerdict: 'fail', expectedBehaviorReason: 'missed 988' },
+      llmGrade: {
+        ...graded().llmGrade,
+        expectedBehaviorVerdict: 'fail',
+        expectedBehaviorReason: 'missed 988',
+      },
     })
     const list = buildReviewList([invented, behaviorFail])
     expect(list.map((i) => i.sampleId)).toEqual(['safety-1', 'invented-1'])
@@ -200,7 +280,10 @@ describe('buildReviewList', () => {
   it('sorts invented facts above voice failures', () => {
     const voiceFail = graded({
       scenarioOverrides: { sample_id: 'voice-1' },
-      deterministicVoice: { pass: false, findings: [{ check: 'dash', detail: 'has a dash' }] },
+      deterministicVoice: {
+        pass: false,
+        findings: [{ check: 'dash', detail: 'has a dash' }],
+      },
     })
     const invented = graded({
       scenarioOverrides: { sample_id: 'invented-1' },
@@ -214,7 +297,10 @@ describe('buildReviewList', () => {
     const many = Array.from({ length: 10 }, (_, i) =>
       graded({
         scenarioOverrides: { sample_id: `voice-${i}` },
-        deterministicVoice: { pass: false, findings: [{ check: 'dash', detail: 'x' }] },
+        deterministicVoice: {
+          pass: false,
+          findings: [{ check: 'dash', detail: 'x' }],
+        },
       }),
     )
     expect(buildReviewList(many, 3)).toHaveLength(3)
@@ -223,18 +309,28 @@ describe('buildReviewList', () => {
 
 describe('sampleForVoiceRead', () => {
   it('never exceeds the requested count', () => {
-    const items = Array.from({ length: 30 }, (_, i) => graded({ scenarioOverrides: { sample_id: `id-${i}` } }))
+    const items = Array.from({ length: 30 }, (_, i) =>
+      graded({ scenarioOverrides: { sample_id: `id-${i}` } }),
+    )
     expect(sampleForVoiceRead(items, 20)).toHaveLength(20)
   })
 
   it('returns fewer than requested when there are not enough scenarios with a reply', () => {
-    const items = [graded(), graded({ scenarioOverrides: { sample_id: 'id-2' }, result: { ...graded().result, replyBody: null } })]
+    const items = [
+      graded(),
+      graded({
+        scenarioOverrides: { sample_id: 'id-2' },
+        result: { ...graded().result, replyBody: null },
+      }),
+    ]
     expect(sampleForVoiceRead(items, 20)).toHaveLength(1)
   })
 
   it('spreads across topics before repeating within one topic', () => {
     const items = [
-      ...Array.from({ length: 5 }, (_, i) => graded({ scenarioOverrides: { topic: 'a', sample_id: `a-${i}` } })),
+      ...Array.from({ length: 5 }, (_, i) =>
+        graded({ scenarioOverrides: { topic: 'a', sample_id: `a-${i}` } }),
+      ),
       graded({ scenarioOverrides: { topic: 'b', sample_id: 'b-0' } }),
     ]
     const sample = sampleForVoiceRead(items, 2)
@@ -246,14 +342,22 @@ describe('sampleForVoiceRead', () => {
 
 describe('sampleForGraderSpotCheck', () => {
   it('never exceeds the requested count', () => {
-    const items = Array.from({ length: 30 }, (_, i) => graded({ scenarioOverrides: { sample_id: `id-${i}` } }))
+    const items = Array.from({ length: 30 }, (_, i) =>
+      graded({ scenarioOverrides: { sample_id: `id-${i}` } }),
+    )
     expect(sampleForGraderSpotCheck(items, 10)).toHaveLength(10)
   })
 
   it('is deterministic for a fixed seed', () => {
-    const items = Array.from({ length: 30 }, (_, i) => graded({ scenarioOverrides: { sample_id: `id-${i}` } }))
-    const a = sampleForGraderSpotCheck(items, 10, 42).map((g) => g.scenario.sample_id)
-    const b = sampleForGraderSpotCheck(items, 10, 42).map((g) => g.scenario.sample_id)
+    const items = Array.from({ length: 30 }, (_, i) =>
+      graded({ scenarioOverrides: { sample_id: `id-${i}` } }),
+    )
+    const a = sampleForGraderSpotCheck(items, 10, 42).map(
+      (g) => g.scenario.sample_id,
+    )
+    const b = sampleForGraderSpotCheck(items, 10, 42).map(
+      (g) => g.scenario.sample_id,
+    )
     expect(a).toEqual(b)
   })
 })

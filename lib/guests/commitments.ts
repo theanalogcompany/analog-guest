@@ -4,6 +4,7 @@ import {
   captureCommitmentEscalated,
 } from '@/lib/analytics/posthog'
 import { createAdminClient } from '@/lib/db/admin'
+import { logger } from '@/lib/observability/logger'
 import type { RAGResult } from '@/lib/rag/types'
 import {
   type ArrivalSignal,
@@ -16,7 +17,11 @@ import {
 import { VenueHoursSchema } from '@/lib/schemas/venue-info'
 import type { VenueInfo } from '@/lib/schemas/venue-info'
 import { OBLIGATION_TYPES, deriveExpiresAt } from './commitment-expiry'
-import { venueFilterIds, venueScopeDeniesAll, type VenueScope } from '@/lib/auth/venue-scope'
+import {
+  venueFilterIds,
+  venueScopeDeniesAll,
+  type VenueScope,
+} from '@/lib/auth/venue-scope'
 
 // TAC-297. Mirrors the shape of lib/guests/context.ts: RAGResult-typed, never
 // throws, fail-CLOSED on DB errors, fail-OPEN on malformed payloads. All
@@ -113,7 +118,7 @@ async function findOpenCommitmentByDedupKey(
       // GuestCommitmentRowSchema closes enums on type/status/arrival_signal/
       // created_by, so a migration widening any of them without updating the
       // schema would silently switch dedup off across the fleet.
-      console.warn(
+      logger.warn(
         `[commitments] dedup read skipped an unparseable open row for venue=${venueId} guest=${guestId}: ${parsed.error.message}`,
       )
       continue
@@ -136,7 +141,11 @@ async function findOpenCommitmentByDedupKey(
  * `recommendation` is the only ungated type, which is what makes the upgrade
  * below one-directional.
  */
-const GATED_TYPES: ReadonlySet<CommitmentType> = new Set(['comp', 'hold', 'discount'])
+const GATED_TYPES: ReadonlySet<CommitmentType> = new Set([
+  'comp',
+  'hold',
+  'discount',
+])
 
 /**
  * TAC-318 code review. The dedup key deliberately excludes `type`, which
@@ -191,7 +200,10 @@ const GATED_TYPES: ReadonlySet<CommitmentType> = new Set(['comp', 'hold', 'disco
  * reintroduce this field on a tidy-up; if the upgrade needs an expiry, it
  * comes from TAC-341's helper called from TAC-341's own wiring.
  */
-function shouldUpgrade(existing: CommitmentType, incoming: CommitmentType): boolean {
+function shouldUpgrade(
+  existing: CommitmentType,
+  incoming: CommitmentType,
+): boolean {
   return existing === 'recommendation' && GATED_TYPES.has(incoming)
 }
 
@@ -282,7 +294,11 @@ async function loadVenueClock(
 ): Promise<{ timezone: string | null; hours: VenueInfo['hours'] | null }> {
   try {
     const [venue, config] = await Promise.all([
-      supabase.from('venues').select('timezone').eq('id', venueId).maybeSingle(),
+      supabase
+        .from('venues')
+        .select('timezone')
+        .eq('id', venueId)
+        .maybeSingle(),
       supabase
         .from('venue_configs')
         .select('venue_info')
@@ -303,7 +319,11 @@ async function loadVenueClock(
     // the fixture a reader would naturally write, and it was right.
     let hours: VenueInfo['hours'] | null = null
     const rawInfo = config.data?.venue_info
-    if (rawInfo != null && typeof rawInfo === 'object' && !Array.isArray(rawInfo)) {
+    if (
+      rawInfo != null &&
+      typeof rawInfo === 'object' &&
+      !Array.isArray(rawInfo)
+    ) {
       const parsed = VenueHoursSchema.safeParse(
         (rawInfo as Record<string, unknown>).hours ?? {},
       )
@@ -311,13 +331,13 @@ async function loadVenueClock(
     }
 
     if (timezone === null || hours === null) {
-      console.warn(
+      logger.warn(
         `[commitments] hold horizon: venue clock incomplete for venue=${venueId} (timezone=${timezone === null ? 'missing' : 'ok'}, hours=${hours === null ? 'missing' : 'ok'}). Falling back to end-of-day and escalating.`,
       )
     }
     return { timezone, hours }
   } catch (e) {
-    console.warn(
+    logger.warn(
       `[commitments] hold horizon: venue clock load threw for venue=${venueId}: ${e instanceof Error ? e.message : String(e)}. Falling back to end-of-day and escalating.`,
     )
     return { timezone: null, hours: null }
@@ -369,7 +389,12 @@ async function resolveToExisting(
   // ticket. Key it off the EXISTING row's created_at — the promise is as old
   // as it always was.
   const horizon = upgrade
-    ? await horizonFor(supabase, ctx.venueId, pending.type, new Date(existing.created_at))
+    ? await horizonFor(
+        supabase,
+        ctx.venueId,
+        pending.type,
+        new Date(existing.created_at),
+      )
     : null
   const row = await touchOpenCommitment(
     supabase,
@@ -384,7 +409,7 @@ async function resolveToExisting(
         }
       : null,
   )
-  console.warn(
+  logger.warn(
     upgrade
       ? `[commitments] dedup: upgraded open commitment=${existing.id} from ${existing.type} to ${pending.type} for venue=${ctx.venueId} guest=${ctx.guestId} (via=${ctx.via}, source=${ctx.sourceMessageId})`
       : `[commitments] dedup: reusing open ${existing.type} commitment=${existing.id} for venue=${ctx.venueId} guest=${ctx.guestId} rather than minting a duplicate (incoming=${pending.type}, via=${ctx.via}, source=${ctx.sourceMessageId})`,
@@ -406,7 +431,11 @@ async function resolveToExisting(
   // make the cron skip the row forever and then report hadEscalated: true on
   // expiry. Caught in code review; the insert path had this and the upgrade
   // path did not.
-  if (horizon !== null && horizon.escalateImmediately && existing.escalated_at === null) {
+  if (
+    horizon !== null &&
+    horizon.escalateImmediately &&
+    existing.escalated_at === null
+  ) {
     void captureCommitmentEscalated({
       venueId: ctx.venueId,
       guestId: ctx.guestId,
@@ -505,7 +534,7 @@ export async function createCommitmentFromPending(opts: {
       }
     }
     if (!existing.ok) {
-      console.warn(
+      logger.warn(
         `[commitments] dedup check failed for venue=${venueId} guest=${guestId}: ${existing.error}. Proceeding to insert; the unique index is the backstop.`,
       )
       void captureCommitmentDedupCheckFailed({
@@ -521,7 +550,12 @@ export async function createCommitmentFromPending(opts: {
     // the field (zero hits in lib/ai/prompts), so it has always arrived null,
     // and an agent-populated expiry would be one more claim needing
     // verification. Derived here, at the single derivation site.
-    const horizon = await horizonFor(supabase, venueId, pendingCommitment.type, now)
+    const horizon = await horizonFor(
+      supabase,
+      venueId,
+      pendingCommitment.type,
+      now,
+    )
 
     const { data, error } = await supabase
       .from('guest_commitments')
@@ -617,7 +651,10 @@ export async function createCommitmentFromPending(opts: {
  * Terminal states (acknowledged, redeemed, expired, cancelled) are absent
  * deliberately. See cancelCommitmentForGuest for why.
  */
-const CANCELLABLE_STATUSES = ['open', 'pending_ack'] as const satisfies readonly CommitmentStatus[]
+const CANCELLABLE_STATUSES = [
+  'open',
+  'pending_ack',
+] as const satisfies readonly CommitmentStatus[]
 
 export type TransitionResult = {
   transitioned: boolean
@@ -663,7 +700,14 @@ export async function transitionToPendingAck(opts: {
   arrivalSignal: ArrivalSignal
   now: Date
 }): Promise<RAGResult<TransitionResult>> {
-  const { commitmentId, venueId, guestId, expectedArrival, arrivalSignal, now } = opts
+  const {
+    commitmentId,
+    venueId,
+    guestId,
+    expectedArrival,
+    arrivalSignal,
+    now,
+  } = opts
   try {
     const supabase = createAdminClient()
     const { data, error } = await supabase
@@ -722,7 +766,14 @@ export async function scheduleArrival(opts: {
   arrivalSignal: ArrivalSignal
   now: Date
 }): Promise<RAGResult<TransitionResult>> {
-  const { commitmentId, venueId, guestId, expectedArrival, arrivalSignal, now } = opts
+  const {
+    commitmentId,
+    venueId,
+    guestId,
+    expectedArrival,
+    arrivalSignal,
+    now,
+  } = opts
   try {
     const supabase = createAdminClient()
     const { data, error } = await supabase
@@ -787,7 +838,11 @@ export async function markAcknowledged(opts: {
   if (venueIds === null) {
     // TAC-530: fleet-wide scope comes only from the analog-admin cookie path
     // and never reaches this operator-API helper. Refuse rather than widen.
-    return { ok: false, error: 'fleet-wide venue scope is not supported here', errorCode: 'unsupported_venue_scope' }
+    return {
+      ok: false,
+      error: 'fleet-wide venue scope is not supported here',
+      errorCode: 'unsupported_venue_scope',
+    }
   }
   try {
     const supabase = createAdminClient()
@@ -871,7 +926,11 @@ export async function markCancelled(opts: {
   const venueIds = venueFilterIds(venueScope)
   if (venueIds === null) {
     // TAC-530: see markAcknowledged.
-    return { ok: false, error: 'fleet-wide venue scope is not supported here', errorCode: 'unsupported_venue_scope' }
+    return {
+      ok: false,
+      error: 'fleet-wide venue scope is not supported here',
+      errorCode: 'unsupported_venue_scope',
+    }
   }
   try {
     const supabase = createAdminClient()
@@ -1077,7 +1136,10 @@ export async function findEarliestAcknowledgedArrival(opts: {
     // An unparseable timestamp is "no confirmed visit", never Invalid Date: the
     // derivation would carry NaN into an expiry comparison and silently never
     // expire.
-    return { ok: true, data: Number.isFinite(parsed.getTime()) ? parsed : null }
+    return {
+      ok: true,
+      data: Number.isFinite(parsed.getTime()) ? parsed : null,
+    }
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e)
     return { ok: false, error: msg, errorCode: 'db_read_threw' }
@@ -1183,7 +1245,7 @@ export async function findOpenObligations(): Promise<
       // the type/status enums, so a future migration widening either without
       // updating the schema would switch this scan off with nothing to show
       // for it — the same failure TAC-318's dedup read guards against.
-      console.warn(
+      logger.warn(
         `[commitments] lifecycle scan: skipping unparseable row: ${parsed.error.message}`,
       )
     }
@@ -1216,7 +1278,10 @@ export async function markEscalated(opts: {
     const supabase = createAdminClient()
     const { data, error } = await supabase
       .from('guest_commitments')
-      .update({ escalated_at: now.toISOString(), updated_at: now.toISOString() })
+      .update({
+        escalated_at: now.toISOString(),
+        updated_at: now.toISOString(),
+      })
       .eq('id', commitmentId)
       .eq('status', 'open')
       .is('escalated_at', null)

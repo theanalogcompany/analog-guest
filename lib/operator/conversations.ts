@@ -4,7 +4,10 @@
 // analog-operator's docs/superpowers/specs/2026-09-05-conversations-tab-design.md.
 
 import { createAdminClient } from '@/lib/db/admin'
-import { parseMessageChannel, type MessageChannel } from '@/lib/schemas/message-channel'
+import {
+  parseMessageChannel,
+  type MessageChannel,
+} from '@/lib/schemas/message-channel'
 import {
   conversationGuestChannel,
   instagramUsername,
@@ -12,7 +15,11 @@ import {
 } from './instagram-fields'
 import { normalizeRecognitionState } from './recognition-state'
 import type { GuestRecognitionState } from './recognition-state'
-import { venueFilterIds, venueScopeDeniesAll, type VenueScope } from '@/lib/auth/venue-scope'
+import {
+  venueFilterIds,
+  venueScopeDeniesAll,
+  type VenueScope,
+} from '@/lib/auth/venue-scope'
 
 export type { GuestRecognitionState } from './recognition-state'
 
@@ -50,7 +57,9 @@ export type ListOperatorConversationsResult =
   | { ok: false; error: string }
 
 function composeName(first: string | null, last: string | null): string | null {
-  const parts = [first, last].filter((p): p is string => !!p && p.trim().length > 0)
+  const parts = [first, last].filter(
+    (p): p is string => !!p && p.trim().length > 0,
+  )
   return parts.length > 0 ? parts.join(' ') : null
 }
 
@@ -111,7 +120,10 @@ export async function listOperatorConversations(
 
   const conversations: ConversationSummary[] = []
   for (const row of (data ?? []) as RawConversationRow[]) {
-    if (row.last_message_direction !== 'inbound' && row.last_message_direction !== 'outbound') {
+    if (
+      row.last_message_direction !== 'inbound' &&
+      row.last_message_direction !== 'outbound'
+    ) {
       continue
     }
     conversations.push({
@@ -139,7 +151,8 @@ export async function listOperatorConversations(
       // number. Same reasoning conversation-channel.ts documents.
       guestChannel: conversationGuestChannel(
         {
-          hasPhone: typeof row.guest_phone === 'string' && row.guest_phone.length > 0,
+          hasPhone:
+            typeof row.guest_phone === 'string' && row.guest_phone.length > 0,
           hasInstagramId: row.guest_has_instagram_id === true,
           lastInboundChannel: parseMessageChannel(row.last_inbound_channel),
         },

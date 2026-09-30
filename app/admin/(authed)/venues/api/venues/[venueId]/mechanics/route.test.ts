@@ -61,12 +61,18 @@ describe('POST /admin/venues/api/venues/[venueId]/mechanics', () => {
   })
 
   it('200 + mechanicId on happy path', async () => {
-    vi.mocked(addMechanic).mockResolvedValue({ ok: true, mechanicId: MECHANIC_ID })
+    vi.mocked(addMechanic).mockResolvedValue({
+      ok: true,
+      mechanicId: MECHANIC_ID,
+    })
     const res = await POST(buildRequest(validMechanic), buildParams(VENUE_ID))
     expect(res.status).toBe(200)
     const json = await res.json()
     expect(json).toMatchObject({ success: true, mechanicId: MECHANIC_ID })
-    expect(addMechanic).toHaveBeenCalledWith({ venueId: VENUE_ID, mechanic: validMechanic })
+    expect(addMechanic).toHaveBeenCalledWith({
+      venueId: VENUE_ID,
+      mechanic: validMechanic,
+    })
   })
 
   it('400 when a required field is missing', () => {
@@ -79,7 +85,11 @@ describe('POST /admin/venues/api/venues/[venueId]/mechanics', () => {
 
   it('400 on a redemption pairing violation (renewable with a null window)', async () => {
     const res = await POST(
-      buildRequest({ ...validMechanic, redemptionPolicy: 'renewable', redemptionWindowDays: null }),
+      buildRequest({
+        ...validMechanic,
+        redemptionPolicy: 'renewable',
+        redemptionWindowDays: null,
+      }),
       buildParams(VENUE_ID),
     )
     expect(res.status).toBe(400)
@@ -99,7 +109,10 @@ describe('POST /admin/venues/api/venues/[venueId]/mechanics', () => {
   it('passes through 403 from auth helper', async () => {
     vi.mocked(requireVenueAdmin).mockResolvedValue({
       ok: false,
-      response: NextResponse.json({ error: 'venue not allowed' }, { status: 403 }),
+      response: NextResponse.json(
+        { error: 'venue not allowed' },
+        { status: 403 },
+      ),
     })
     const res = await POST(buildRequest(validMechanic), buildParams(VENUE_ID))
     expect(res.status).toBe(403)

@@ -3,18 +3,24 @@ import { classifyBhadraReply, meetsBar } from './knowledge-context-language'
 
 describe('classifyBhadraReply (TAC-547)', () => {
   it('passes a correct Bhadra answer', () => {
-    const v = classifyBhadraReply('Bhadra is best as espresso or in a moka pot, with milk.')
+    const v = classifyBhadraReply(
+      'Bhadra is best as espresso or in a moka pot, with milk.',
+    )
     expect(meetsBar(v)).toBe(true)
   })
 
   it('fails the device draft verbatim', () => {
-    const v = classifyBhadraReply('Same as the pour over: 21, 22g at a 1:15 ratio, three pours.')
+    const v = classifyBhadraReply(
+      'Same as the pour over: 21, 22g at a 1:15 ratio, three pours.',
+    )
     expect(v.namesPourOver).toBe(true)
     expect(meetsBar(v)).toBe(false)
   })
 
   it('fails a reply carrying the recipe NUMBERS even without the words', () => {
-    const v = classifyBhadraReply('Go 21-22g at a 1:15 ratio and finish under three minutes.')
+    const v = classifyBhadraReply(
+      'Go 21-22g at a 1:15 ratio and finish under three minutes.',
+    )
     expect(v.namesPourOverRecipeNumbers).toBe(true)
     expect(meetsBar(v)).toBe(false)
   })
@@ -32,7 +38,9 @@ describe('classifyBhadraReply (TAC-547)', () => {
   })
 
   it('counts a cortado or latte as milk, since both are milk drinks', () => {
-    expect(classifyBhadraReply('espresso, great as a cortado').namesMilk).toBe(true)
+    expect(classifyBhadraReply('espresso, great as a cortado').namesMilk).toBe(
+      true,
+    )
   })
 
   // KNOWN LIMITATION, pinned rather than tuned away. The 2026-09-28 run

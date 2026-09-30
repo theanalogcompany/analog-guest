@@ -8,7 +8,10 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
 import { queryRecorder } from '@/lib/messaging/instagram/testing/query-recorder'
 
-import { INSTAGRAM_EXPIRING_WINDOW_MS, loadVenueConnectionState } from './venue-connection'
+import {
+  INSTAGRAM_EXPIRING_WINDOW_MS,
+  loadVenueConnectionState,
+} from './venue-connection'
 
 const PREV_KEY = process.env.INSTAGRAM_TOKEN_ENC_KEY
 beforeAll(() => {
@@ -47,7 +50,7 @@ function load(row: unknown, accountId: string | null = '17841479626987104') {
 describe('INSTAGRAM_EXPIRING_WINDOW_MS', () => {
   // The Contract's literal threshold. Pinned because TAC-517 renders a
   // different state on either side of it.
-  it('is 7 days, the Contract\'s threshold, not the 10-day refresh window', () => {
+  it("is 7 days, the Contract's threshold, not the 10-day refresh window", () => {
     expect(INSTAGRAM_EXPIRING_WINDOW_MS).toBe(7 * DAY)
   })
 })
@@ -73,10 +76,16 @@ describe('loadVenueConnectionState', () => {
     const result = await load(null)
     expect(result).toEqual({
       ok: true,
-      state: { instagram: { status: 'disconnected', username: null, expiresAt: null } },
+      state: {
+        instagram: { status: 'disconnected', username: null, expiresAt: null },
+      },
     })
     if (!result.ok) return
-    expect(Object.keys(result.state.instagram).sort()).toEqual(['expiresAt', 'status', 'username'])
+    expect(Object.keys(result.state.instagram).sort()).toEqual([
+      'expiresAt',
+      'status',
+      'username',
+    ])
   })
 
   it.each([
@@ -86,30 +95,52 @@ describe('loadVenueConnectionState', () => {
     ['1 day out', DAY, 'expiring'],
   ])('reports a token %s as %s', async (_label, remaining, status) => {
     const result = await load(
-      credential({ token_expires_at: new Date(NOW.getTime() + remaining).toISOString() }),
+      credential({
+        token_expires_at: new Date(NOW.getTime() + remaining).toISOString(),
+      }),
     )
-    expect(result).toMatchObject({ ok: true, state: { instagram: { status } } })
+    expect(result).toMatchObject({
+      ok: true,
+      state: { instagram: { status } },
+    })
   })
 
   // Not a fourth status: the Contract has three, and the operator's action is
   // the same as for expiring.
   it('reports an already-expired token as expiring rather than inventing a status', async () => {
     const result = await load(
-      credential({ token_expires_at: new Date(NOW.getTime() - DAY).toISOString() }),
+      credential({
+        token_expires_at: new Date(NOW.getTime() - DAY).toISOString(),
+      }),
     )
-    expect(result).toMatchObject({ ok: true, state: { instagram: { status: 'expiring' } } })
+    expect(result).toMatchObject({
+      ok: true,
+      state: { instagram: { status: 'expiring' } },
+    })
   })
 
   it.each([
-    ['deauthorized', { deauthorized_at: new Date(NOW.getTime() - DAY).toISOString() }],
+    [
+      'deauthorized',
+      { deauthorized_at: new Date(NOW.getTime() - DAY).toISOString() },
+    ],
     ['inactive', { is_active: false }],
-  ])('reports a %s venue as disconnected, with nulls', async (_label, overrides) => {
-    const result = await load(credential(overrides))
-    expect(result).toEqual({
-      ok: true,
-      state: { instagram: { status: 'disconnected', username: null, expiresAt: null } },
-    })
-  })
+  ])(
+    'reports a %s venue as disconnected, with nulls',
+    async (_label, overrides) => {
+      const result = await load(credential(overrides))
+      expect(result).toEqual({
+        ok: true,
+        state: {
+          instagram: {
+            status: 'disconnected',
+            username: null,
+            expiresAt: null,
+          },
+        },
+      })
+    },
+  )
 
   it('carries a missing handle through as null without changing the status', async () => {
     const result = await load(credential({ instagram_username: null }))
@@ -130,7 +161,9 @@ describe('loadVenueConnectionState', () => {
     const result = await load(credential(), null)
     expect(result).toEqual({
       ok: true,
-      state: { instagram: { status: 'disconnected', username: null, expiresAt: null } },
+      state: {
+        instagram: { status: 'disconnected', username: null, expiresAt: null },
+      },
     })
   })
 
@@ -166,7 +199,9 @@ describe('loadVenueConnectionState', () => {
   // The token is in the row this reads. It must never reach a payload the
   // operator app receives.
   it('never carries the stored ciphertext into the state', async () => {
-    const result = await load(credential({ access_token_enc: 'iv.tag.SECRETCIPHERTEXT' }))
+    const result = await load(
+      credential({ access_token_enc: 'iv.tag.SECRETCIPHERTEXT' }),
+    )
     expect(JSON.stringify(result)).not.toContain('SECRETCIPHERTEXT')
   })
 })

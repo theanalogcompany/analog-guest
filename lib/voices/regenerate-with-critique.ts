@@ -45,10 +45,14 @@ import {
   type VoiceCorpusChunk as AiVoiceCorpusChunk,
 } from '@/lib/ai'
 import { buildRuntimeContext } from '@/lib/agent/build-runtime-context'
-import { buildAiRuntime, retrieveKnowledgeWithContextStage } from '@/lib/agent/stages'
+import {
+  buildAiRuntime,
+  retrieveKnowledgeWithContextStage,
+} from '@/lib/agent/stages'
 import type { EmojiDirective } from '@/lib/ai/emoji-cadence'
 import { createAdminClient } from '@/lib/db/admin'
 import { noopAgentTrace } from '@/lib/observability'
+import { logger } from '@/lib/observability/logger'
 import { parseMessageChannel } from '@/lib/schemas/message-channel'
 import { loadVoicePack } from '@/lib/rag'
 
@@ -180,16 +184,22 @@ interface OriginalOutboundLoad {
 async function loadOriginalOutbound(
   outboundMessageId: string,
   venueId: string,
-): Promise<{ ok: true; data: OriginalOutboundLoad } | {
-  ok: false
-  errorCode: 'message_not_found' | 'not_an_outbound_reply' | 'inbound_not_found'
-  error: string
-}> {
+): Promise<
+  | { ok: true; data: OriginalOutboundLoad }
+  | {
+      ok: false
+      errorCode:
+        'message_not_found' | 'not_an_outbound_reply' | 'inbound_not_found'
+      error: string
+    }
+> {
   const supabase = createAdminClient()
 
   const { data: outbound, error: outErr } = await supabase
     .from('messages')
-    .select('id, venue_id, guest_id, direction, reply_to_message_id, created_at')
+    .select(
+      'id, venue_id, guest_id, direction, reply_to_message_id, created_at',
+    )
     .eq('id', outboundMessageId)
     .eq('venue_id', venueId)
     .maybeSingle()
@@ -225,7 +235,9 @@ async function loadOriginalOutbound(
 
   const { data: inbound, error: inErr } = await supabase
     .from('messages')
-    .select('id, body, created_at, provider_message_id, direction, channel, referral_source')
+    .select(
+      'id, body, created_at, provider_message_id, direction, channel, referral_source',
+    )
     .eq('id', outbound.reply_to_message_id)
     .maybeSingle()
   if (inErr || !inbound) {
@@ -268,7 +280,10 @@ export async function regenerateWithCritique(
   input: RegenerateWithCritiqueInput,
 ): Promise<RegenerateWithCritiqueOutcome> {
   // 1. Load original outbound + its triggering inbound
-  const load = await loadOriginalOutbound(input.originalMessageId, input.venueId)
+  const load = await loadOriginalOutbound(
+    input.originalMessageId,
+    input.venueId,
+  )
   if (!load.ok) return load
 
   // 2. Rebuild runtime context. History is pinned to <inbound.created_at —
@@ -337,7 +352,7 @@ export async function regenerateWithCritique(
     }
   }
 
-  // 4. Load the static voice pack (decision 0007) — the same pack the live
+  // 4. Load the static voice pack (decision 0008) — the same pack the live
   // turn used, because it is the same pack every turn uses. Mirrors
   // retrieveCorpusStage's inbound direction: fail closed on a DB error or an
   // empty pack, because a regeneration with no venue voice behind it is not
@@ -481,7 +496,7 @@ export async function regenerateWithCritique(
       hasUngroundedClaim = verify.data.hasUngroundedClaim
       ungroundedClaims = verify.data.ungroundedClaims
     } else {
-      console.warn(
+      logger.warn(
         `[voices/regen] grounding backstop degraded for venue=${input.venueId}: ${verify.error}`,
       )
     }
@@ -515,7 +530,7 @@ export async function regenerateWithCritique(
         offeredMechanicId = mechanicCheck.data.mechanicId
       }
     } else {
-      console.warn(
+      logger.warn(
         `[voices/regen] mechanic-offer backstop degraded for venue=${input.venueId}: ${mechanicCheck.error}`,
       )
     }
@@ -550,7 +565,7 @@ export async function regenerateWithCritique(
       promisedCommitmentType = promiseCheck.data.commitmentType
       promisedCommitmentDescription = promiseCheck.data.commitmentDescription
     } else {
-      console.warn(
+      logger.warn(
         `[voices/regen] prose-promise check degraded for venue=${input.venueId}: ${promiseCheck.error}`,
       )
     }

@@ -1,4 +1,4 @@
-# 0007 - Voice is a static per-venue pack, not a similarity retrieval
+# 0008 - Voice is a static per-venue pack, not a similarity retrieval
 
 **Date:** 2026-09-29
 **Status:** accepted

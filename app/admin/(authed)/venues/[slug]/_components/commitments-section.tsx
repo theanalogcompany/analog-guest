@@ -1,6 +1,12 @@
-import { EmptySectionNote, SectionShell } from '@/app/admin/_components/section-shell'
+import {
+  EmptySectionNote,
+  SectionShell,
+} from '@/app/admin/_components/section-shell'
 import { HairlineRow, StatusDot } from '@/lib/ui'
-import type { VenueCommitmentRow, VenueCommitments } from '../../../_lib/load-venue-commitments'
+import type {
+  VenueCommitmentRow,
+  VenueCommitments,
+} from '../../../_lib/load-venue-commitments'
 import { CLOSED_COMMITMENTS_LIMIT } from '../../../_lib/load-venue-commitments'
 import {
   classifyKind,
@@ -23,7 +29,9 @@ function TypeTag({ row }: { row: VenueCommitmentRow }) {
     ? 'bg-clay-soft/60 text-clay-deep font-medium'
     : 'bg-stone-light/40 text-ink-soft'
   return (
-    <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs ${tone}`}>
+    <span
+      className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs ${tone}`}
+    >
       {row.type}
     </span>
   )
@@ -55,7 +63,9 @@ function CommitmentRowView({
         <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
           <TypeTag row={row} />
           <span className="text-sm text-ink">{row.description}</span>
-          {row.code && <code className="text-xs text-ink-soft">{row.code}</code>}
+          {row.code && (
+            <code className="text-xs text-ink-soft">{row.code}</code>
+          )}
         </span>
         <span className="flex flex-wrap items-baseline gap-x-2 gap-y-1 text-xs text-ink-faint">
           <span>{row.guestLabel}</span>
@@ -74,7 +84,8 @@ function CommitmentRowView({
             left for the reader to infer from two blank cells. */}
         {isUntimed(row) && (
           <span className="text-xs text-ink-faint italic">
-            No arrival signal — cannot reach the arrival cron or the operator heads-up queue.
+            No arrival signal — cannot reach the arrival cron or the operator
+            heads-up queue.
           </span>
         )}
       </div>
@@ -116,8 +127,8 @@ export function CommitmentsSection({
         <div className="flex flex-col">
           {commitments.openDegraded && (
             <p className="mb-2 flex items-center gap-2 text-xs text-ink-soft">
-              <StatusDot tone="neutral" label="degraded" />
-              A read failed. This list under-reports — treat it as a floor, not a total.
+              <StatusDot tone="neutral" label="degraded" />A read failed. This
+              list under-reports — treat it as a floor, not a total.
             </p>
           )}
           {open.map((row, i) => (

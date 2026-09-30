@@ -63,7 +63,10 @@ export async function exchangeSquareOAuthCode(opts: {
   try {
     const res = await fetch(`${OAUTH_BASE[opts.env]}/oauth2/token`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Square-Version': '2025-01-23' },
+      headers: {
+        'Content-Type': 'application/json',
+        'Square-Version': '2025-01-23',
+      },
       body: JSON.stringify({
         client_id: opts.applicationId,
         client_secret: opts.applicationSecret,
@@ -78,18 +81,28 @@ export async function exchangeSquareOAuthCode(opts: {
         body && typeof body === 'object' && 'message' in body
           ? String((body as { message: unknown }).message)
           : `status ${res.status}`
-      return { ok: false, error: `Square OAuth exchange failed: ${detail}`, errorCode: 'oauth_exchange_failed' }
+      return {
+        ok: false,
+        error: `Square OAuth exchange failed: ${detail}`,
+        errorCode: 'oauth_exchange_failed',
+      }
     }
     const b = (body ?? {}) as Record<string, unknown>
-    const accessToken = typeof b.access_token === 'string' ? b.access_token : null
+    const accessToken =
+      typeof b.access_token === 'string' ? b.access_token : null
     if (!accessToken) {
-      return { ok: false, error: 'Square OAuth response missing access_token', errorCode: 'oauth_no_token' }
+      return {
+        ok: false,
+        error: 'Square OAuth response missing access_token',
+        errorCode: 'oauth_no_token',
+      }
     }
     return {
       ok: true,
       data: {
         accessToken,
-        refreshToken: typeof b.refresh_token === 'string' ? b.refresh_token : null,
+        refreshToken:
+          typeof b.refresh_token === 'string' ? b.refresh_token : null,
         merchantId: typeof b.merchant_id === 'string' ? b.merchant_id : null,
         expiresAt: typeof b.expires_at === 'string' ? b.expires_at : null,
       },

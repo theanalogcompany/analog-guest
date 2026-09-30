@@ -38,8 +38,7 @@ function escapeForRegex(literal: string): string {
 }
 
 export type MoveResult =
-  | { ok: true; prompt: string }
-  | { ok: false; reason: string }
+  { ok: true; prompt: string } | { ok: false; reason: string }
 
 /**
  * Split a composed user prompt into its blocks, keeping each block whole.
@@ -79,7 +78,10 @@ export function moveIntentionBlockLate(userPrompt: string): MoveResult {
     }
   }
   if (!userPrompt.includes(GENERATE_LINE)) {
-    return { ok: false, reason: `prompt does not contain ${JSON.stringify(GENERATE_LINE)}` }
+    return {
+      ok: false,
+      reason: `prompt does not contain ${JSON.stringify(GENERATE_LINE)}`,
+    }
   }
 
   const parts = splitPromptBlocks(userPrompt)
@@ -93,7 +95,8 @@ export function moveIntentionBlockLate(userPrompt: string): MoveResult {
     // it, does not create a split). Refuse: moving it would cut a block in half.
     return {
       ok: false,
-      reason: 'intentions header is not at a block boundary (a rendered body probably contains it)',
+      reason:
+        'intentions header is not at a block boundary (a rendered body probably contains it)',
     }
   }
 
@@ -137,16 +140,25 @@ export function moveIntentionBlockLate(userPrompt: string): MoveResult {
   // That one was caught by the test written for the first. Both are why this is
   // derived from the known structure rather than from a heuristic.
   if (rest.length === 0) {
-    return { ok: false, reason: 'the intentions block was the only block in the prompt' }
+    return {
+      ok: false,
+      reason: 'the intentions block was the only block in the prompt',
+    }
   }
   const last = rest[rest.length - 1]
   if (!last.includes(GENERATE_LINE)) {
-    return { ok: false, reason: 'the final element does not carry the generate line' }
+    return {
+      ok: false,
+      reason: 'the final element does not carry the generate line',
+    }
   }
   const tailBlank = last.lastIndexOf('\n\n')
   const cut = tailBlank === -1 ? -1 : last.lastIndexOf('\n\n', tailBlank - 1)
   if (cut === -1) {
-    return { ok: false, reason: 'the final element carries no block/tail boundary' }
+    return {
+      ok: false,
+      reason: 'the final element carries no block/tail boundary',
+    }
   }
   const finalBlock = last.slice(0, cut)
   const tail = last.slice(cut + 2)

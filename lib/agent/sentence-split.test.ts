@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from 'vitest'
 import {
   SPLIT_PROBABILITY,
+  hasRenderableContent,
+  intentionTailFor,
   resolveDispatchBubbles,
   splitIntoSentences,
   stripTerminalPeriod,
@@ -17,12 +19,16 @@ const neverSplit = () => 0.99 // rng above SPLIT_PROBABILITY → single block
 
 describe('splitIntoSentences', () => {
   it('returns a single-sentence body whole', () => {
-    expect(splitIntoSentences('Open until 4 tonight')).toEqual(['Open until 4 tonight'])
+    expect(splitIntoSentences('Open until 4 tonight')).toEqual([
+      'Open until 4 tonight',
+    ])
   })
 
   it('splits on period + whitespace + capital', () => {
     expect(
-      splitIntoSentences('Espresso with a small dollop of foam on top. Similar ratio to a flat white.'),
+      splitIntoSentences(
+        'Espresso with a small dollop of foam on top. Similar ratio to a flat white.',
+      ),
     ).toEqual([
       'Espresso with a small dollop of foam on top.',
       'Similar ratio to a flat white.',
@@ -30,11 +36,9 @@ describe('splitIntoSentences', () => {
   })
 
   it('splits on ? and ! boundaries', () => {
-    expect(splitIntoSentences('Want it iced? We can do that! Just say when.')).toEqual([
-      'Want it iced?',
-      'We can do that!',
-      'Just say when.',
-    ])
+    expect(
+      splitIntoSentences('Want it iced? We can do that! Just say when.'),
+    ).toEqual(['Want it iced?', 'We can do that!', 'Just say when.'])
   })
 
   it('splits when the next sentence opens with a digit', () => {
@@ -65,10 +69,9 @@ describe('splitIntoSentences', () => {
   })
 
   it('splits AFTER a price without harming the internal decimal', () => {
-    expect(splitIntoSentences('The mocha is $7.95. It comes iced too.')).toEqual([
-      'The mocha is $7.95.',
-      'It comes iced too.',
-    ])
+    expect(
+      splitIntoSentences('The mocha is $7.95. It comes iced too.'),
+    ).toEqual(['The mocha is $7.95.', 'It comes iced too.'])
   })
 
   it('does not split inside ratios or times', () => {
@@ -99,10 +102,9 @@ describe('splitIntoSentences', () => {
   })
 
   it('still splits a real boundary elsewhere in a body that contains an ellipsis', () => {
-    expect(splitIntoSentences('Honestly... Maybe the cortado. Ask for it iced.')).toEqual([
-      'Honestly... Maybe the cortado.',
-      'Ask for it iced.',
-    ])
+    expect(
+      splitIntoSentences('Honestly... Maybe the cortado. Ask for it iced.'),
+    ).toEqual(['Honestly... Maybe the cortado.', 'Ask for it iced.'])
   })
 
   it('treats an emoji as a sentence opener', () => {
@@ -131,7 +133,9 @@ describe('stripTerminalPeriod', () => {
   })
 
   it('keeps a terminal ellipsis', () => {
-    expect(stripTerminalPeriod('Maybe the cortado...')).toBe('Maybe the cortado...')
+    expect(stripTerminalPeriod('Maybe the cortado...')).toBe(
+      'Maybe the cortado...',
+    )
   })
 
   it('never touches internal punctuation', () => {
@@ -148,7 +152,7 @@ describe('stripTerminalPeriod', () => {
 describe('resolveDispatchBubbles — the flip', () => {
   it('sends a one-sentence body as-is without consulting the rng', () => {
     const rng = vi.fn(() => 0)
-    expect(resolveDispatchBubbles('Open until 4 tonight.', rng)).toEqual([
+    expect(resolveDispatchBubbles('Open until 4 tonight.', rng, '')).toEqual([
       'Open until 4 tonight.',
     ])
     expect(rng).not.toHaveBeenCalled()
@@ -156,24 +160,32 @@ describe('resolveDispatchBubbles — the flip', () => {
 
   it('splits a two-sentence body when the flip says split', () => {
     expect(
-      resolveDispatchBubbles('Espresso with foam on top. Stronger than a cortado.', alwaysSplit),
+      resolveDispatchBubbles(
+        'Espresso with foam on top. Stronger than a cortado.',
+        alwaysSplit,
+        '',
+      ),
     ).toEqual(['Espresso with foam on top', 'Stronger than a cortado'])
   })
 
   it('keeps a two-sentence body whole when the flip says no', () => {
     expect(
-      resolveDispatchBubbles('Espresso with foam on top. Stronger than a cortado.', neverSplit),
+      resolveDispatchBubbles(
+        'Espresso with foam on top. Stronger than a cortado.',
+        neverSplit,
+        '',
+      ),
     ).toEqual(['Espresso with foam on top. Stronger than a cortado.'])
   })
 
   it('is all-or-nothing at three sentences', () => {
     const body = 'First one here. Second one here. Third one here.'
-    expect(resolveDispatchBubbles(body, alwaysSplit)).toEqual([
+    expect(resolveDispatchBubbles(body, alwaysSplit, '')).toEqual([
       'First one here',
       'Second one here',
       'Third one here',
     ])
-    expect(resolveDispatchBubbles(body, neverSplit)).toEqual([body])
+    expect(resolveDispatchBubbles(body, neverSplit, '')).toEqual([body])
   })
 
   // TAC-319 ruling #1: 4+ sentences never flip. The cap would force partial
@@ -181,37 +193,40 @@ describe('resolveDispatchBubbles — the flip', () => {
   it('sends a 4+ sentence body as ONE block without consulting the rng', () => {
     const rng = vi.fn(() => 0)
     const body = 'One here. Two here. Three here. Four here.'
-    expect(resolveDispatchBubbles(body, rng)).toEqual([body])
+    expect(resolveDispatchBubbles(body, rng, '')).toEqual([body])
     expect(rng).not.toHaveBeenCalled()
   })
 
   it('consults the rng exactly once per flippable body', () => {
     const rng = vi.fn(() => 0)
-    resolveDispatchBubbles('First one. Second one. Third one.', rng)
+    resolveDispatchBubbles('First one. Second one. Third one.', rng, '')
     expect(rng).toHaveBeenCalledTimes(1)
   })
 
   it('strips terminal periods on the split branch but keeps ? and !', () => {
-    expect(resolveDispatchBubbles('Want it iced? We hold it until 6.', alwaysSplit)).toEqual([
-      'Want it iced?',
-      'We hold it until 6',
-    ])
+    expect(
+      resolveDispatchBubbles(
+        'Want it iced? We hold it until 6.',
+        alwaysSplit,
+        '',
+      ),
+    ).toEqual(['Want it iced?', 'We hold it until 6'])
   })
 
   it('leaves the single-block branch punctuation untouched', () => {
     const body = 'Want it iced? We hold it until 6.'
-    expect(resolveDispatchBubbles(body, neverSplit)).toEqual([body])
+    expect(resolveDispatchBubbles(body, neverSplit, '')).toEqual([body])
   })
 
   // ── stray delimiter markers are noise now ─────────────────────────────
 
   it('strips stray [[BREAK]] markers before splitting, on both branches', () => {
     const body = `First one here.${BUBBLE_DELIMITER}Second one here.`
-    expect(resolveDispatchBubbles(body, alwaysSplit)).toEqual([
+    expect(resolveDispatchBubbles(body, alwaysSplit, '')).toEqual([
       'First one here',
       'Second one here',
     ])
-    expect(resolveDispatchBubbles(body, neverSplit)).toEqual([
+    expect(resolveDispatchBubbles(body, neverSplit, '')).toEqual([
       'First one here. Second one here.',
     ])
   })
@@ -219,31 +234,268 @@ describe('resolveDispatchBubbles — the flip', () => {
   it('never lets a delimiter or near-miss reach the output', () => {
     const body = `see the menu [[BREAK] here${BUBBLE_DELIMITER}thanks`
     for (const rng of [alwaysSplit, neverSplit]) {
-      for (const bubble of resolveDispatchBubbles(body, rng)) {
+      for (const bubble of resolveDispatchBubbles(body, rng, '')) {
         expect(bubble.toUpperCase()).not.toContain('BREAK')
       }
     }
   })
 
   it('returns [] for empty, whitespace-only, or delimiter-only bodies', () => {
-    expect(resolveDispatchBubbles('', alwaysSplit)).toEqual([])
-    expect(resolveDispatchBubbles('   \n  ', alwaysSplit)).toEqual([])
-    expect(resolveDispatchBubbles(BUBBLE_DELIMITER, alwaysSplit)).toEqual([])
+    expect(resolveDispatchBubbles('', alwaysSplit, '')).toEqual([])
+    expect(resolveDispatchBubbles('   \n  ', alwaysSplit, '')).toEqual([])
+    expect(resolveDispatchBubbles(BUBBLE_DELIMITER, alwaysSplit, '')).toEqual(
+      [],
+    )
   })
 
   it('flips exactly at the SPLIT_PROBABILITY threshold boundary', () => {
     const body = 'First one here. Second one here.'
     // rng() < SPLIT_PROBABILITY splits; exactly at the threshold does not.
-    expect(resolveDispatchBubbles(body, () => SPLIT_PROBABILITY - 0.0001)).toHaveLength(2)
-    expect(resolveDispatchBubbles(body, () => SPLIT_PROBABILITY)).toHaveLength(1)
+    expect(
+      resolveDispatchBubbles(body, () => SPLIT_PROBABILITY - 0.0001, ''),
+    ).toHaveLength(2)
+    expect(
+      resolveDispatchBubbles(body, () => SPLIT_PROBABILITY, ''),
+    ).toHaveLength(1)
   })
 
   it('caps the flippable range at MAX_BUBBLES_PER_RESPONSE', () => {
     // Guard against the cap and the flip range drifting apart: exactly at the
     // cap still flips, one past it does not.
-    const atCap = Array.from({ length: MAX_BUBBLES_PER_RESPONSE }, (_, i) => `Sentence ${i + 1} here.`).join(' ')
-    const pastCap = Array.from({ length: MAX_BUBBLES_PER_RESPONSE + 1 }, (_, i) => `Sentence ${i + 1} here.`).join(' ')
-    expect(resolveDispatchBubbles(atCap, alwaysSplit)).toHaveLength(MAX_BUBBLES_PER_RESPONSE)
-    expect(resolveDispatchBubbles(pastCap, alwaysSplit)).toHaveLength(1)
+    const atCap = Array.from(
+      { length: MAX_BUBBLES_PER_RESPONSE },
+      (_, i) => `Sentence ${i + 1} here.`,
+    ).join(' ')
+    const pastCap = Array.from(
+      { length: MAX_BUBBLES_PER_RESPONSE + 1 },
+      (_, i) => `Sentence ${i + 1} here.`,
+    ).join(' ')
+    expect(resolveDispatchBubbles(atCap, alwaysSplit, '')).toHaveLength(
+      MAX_BUBBLES_PER_RESPONSE,
+    )
+    expect(resolveDispatchBubbles(pastCap, alwaysSplit, '')).toHaveLength(1)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// TAC-554: the getting-to-know-you question is always its own last message.
+//
+// Jaipal ruled it; a persona rule saying so failed twice on device. The two
+// failures are reproduced below as the first two tests, because they are the
+// reason this is code rather than wording: one rode the coin and lost, and the
+// other had no detectable sentence boundary and could not have split at all.
+// ---------------------------------------------------------------------------
+
+describe('hasRenderableContent', () => {
+  it('accepts a letter or a digit', () => {
+    expect(hasRenderableContent('hi')).toBe(true)
+    expect(hasRenderableContent('7')).toBe(true)
+    expect(hasRenderableContent('¿cómo?')).toBe(true)
+  })
+
+  // The reachable case: replaceDashes refuses a substitution that would empty a
+  // non-empty string, so an intentionQuestion of only an em dash survives as
+  // "—" and would otherwise become a bubble containing a dash.
+  it('rejects punctuation, whitespace or an emoji alone', () => {
+    expect(hasRenderableContent('')).toBe(false)
+    expect(hasRenderableContent('   ')).toBe(false)
+    expect(hasRenderableContent('—')).toBe(false)
+    expect(hasRenderableContent('?!')).toBe(false)
+    expect(hasRenderableContent('🙂')).toBe(false)
+  })
+})
+
+describe('intentionTailFor — the gate', () => {
+  it('passes the question through when the intentions block rendered', () => {
+    expect(intentionTailFor("what's your name?", 1)).toBe("what's your name?")
+    expect(intentionTailFor("what's your name?", 3)).toBe("what's your name?")
+  })
+
+  // The belt to the model's braces. renderableIntentions already excludes
+  // opt_out, comp_complaint and pending-question turns, so a question emitted
+  // on one of those turns must never become its own bubble.
+  it('drops the question when nothing rendered', () => {
+    expect(intentionTailFor("what's your name?", 0)).toBe('')
+  })
+})
+
+describe('resolveDispatchBubbles — the intention tail', () => {
+  // FAILURE 1 FROM THE TICKET, on the code that shipped it. Three sentences
+  // puts this in the flippable range, so it rode a fair coin and lost.
+  it("the ticket's first failure: three sentences that lost the coin stay one message", () => {
+    const body =
+      "nice! what variation did you go with? and by the way, what's your name?"
+    expect(resolveDispatchBubbles(body, neverSplit, '')).toEqual([body])
+  })
+
+  // FAILURE 2 FROM THE TICKET. There is no `.?!` before "do", so
+  // splitIntoSentences finds ONE sentence and no coin value could have split
+  // it. This is the test that shows wording could never have carried the rule.
+  it("the ticket's second failure: one detectable sentence could not split at ANY coin value", () => {
+    const body =
+      'Foncii, nice to meet you 🙂 do you live or work around Polk Street?'
+    expect(splitIntoSentences(body)).toHaveLength(1)
+    expect(resolveDispatchBubbles(body, alwaysSplit, '')).toEqual([body])
+    expect(resolveDispatchBubbles(body, neverSplit, '')).toEqual([body])
+  })
+
+  // The same second failure, now with the question arriving as its own string.
+  // No sentence boundary is needed, because there is no sentence to cut.
+  it('separates the question with no detectable boundary in front of it', () => {
+    const tail = 'do you live or work around Polk Street?'
+    const body = `Foncii, nice to meet you 🙂 ${tail}`
+    expect(resolveDispatchBubbles(body, neverSplit, tail)).toEqual([
+      'Foncii, nice to meet you 🙂',
+      tail,
+    ])
+  })
+
+  it('puts the question last and alone whichever way the coin lands', () => {
+    const tail = "by the way, what's your name?"
+    const body = `Open until 3 on Sundays. Same on Saturdays. ${tail}`
+    for (const rng of [alwaysSplit, neverSplit]) {
+      const bubbles = resolveDispatchBubbles(body, rng, tail)
+      expect(bubbles[bubbles.length - 1]).toBe(tail)
+      expect(bubbles.slice(0, -1).join(' ')).not.toContain(tail)
+    }
+  })
+
+  // THE STRUCTURAL IDENTITY. The last bubble is the tail character for
+  // character, because generation composed the body by joining them.
+  it('makes the last bubble the tail exactly', () => {
+    const tail = 'where are you coming from?'
+    const bubbles = resolveDispatchBubbles(
+      `Open until 3. ${tail}`,
+      alwaysSplit,
+      tail,
+    )
+    expect(bubbles[bubbles.length - 1]).toBe(tail)
+  })
+
+  it('never produces an empty or contentless bubble, whatever the inputs', () => {
+    const cases: [string, string][] = [
+      ['Open until 3. what is your name?', 'what is your name?'],
+      ['   Open until 3.    what is your name?   ', 'what is your name?'],
+      ['what is your name?', 'what is your name?'],
+      ['Open until 3. —', '—'],
+      ['Open until 3.', '   '],
+      ['Open until 3. One. Two. what is your name?', 'what is your name?'],
+    ]
+    for (const [body, tail] of cases) {
+      for (const rng of [alwaysSplit, neverSplit]) {
+        const bubbles = resolveDispatchBubbles(body, rng, tail)
+        expect(bubbles.length).toBeGreaterThan(0)
+        for (const b of bubbles) {
+          expect(b.trim()).not.toBe('')
+          expect(hasRenderableContent(b)).toBe(true)
+        }
+      }
+    }
+  })
+
+  it('honours the bubble cap with the question included', () => {
+    const tail = 'what is your name?'
+    // Two answer sentences plus the question is the maximum shape.
+    const body = `One sentence here. Two sentences here. ${tail}`
+    expect(resolveDispatchBubbles(body, alwaysSplit, tail)).toEqual([
+      'One sentence here',
+      'Two sentences here',
+      tail,
+    ])
+    // Three answer sentences would make four messages, so the answer stays
+    // whole and the total is two. Four bubbles is what MAX_BUBBLES_PER_RESPONSE
+    // exists to prevent, and the question does not get to break it.
+    const longer = `One here. Two here. Three here. ${tail}`
+    const bubbles = resolveDispatchBubbles(longer, alwaysSplit, tail)
+    expect(bubbles).toEqual(['One here. Two here. Three here', tail])
+    expect(bubbles.length).toBeLessThanOrEqual(MAX_BUBBLES_PER_RESPONSE)
+  })
+
+  it('sends the question alone when the answer is empty', () => {
+    const tail = 'what is your name?'
+    expect(resolveDispatchBubbles(tail, alwaysSplit, tail)).toEqual([tail])
+    expect(resolveDispatchBubbles(`   ${tail}`, neverSplit, tail)).toEqual([
+      tail,
+    ])
+  })
+
+  it('drops a contentless question rather than bubbling it', () => {
+    // An em dash survives replaceDashes' refusal, so this shape is reachable.
+    expect(resolveDispatchBubbles('Open until 3. —', neverSplit, '—')).toEqual([
+      'Open until 3. —',
+    ])
+    expect(resolveDispatchBubbles('Open until 3.', neverSplit, '  ')).toEqual([
+      'Open until 3.',
+    ])
+  })
+
+  // THE BELT. The composition guarantees the tail is a suffix; if it ever is
+  // not, send one correct message rather than slice at a meaningless offset.
+  it('falls back to the old path when the tail is not a suffix of the body', () => {
+    const bubbles = resolveDispatchBubbles(
+      'Open until 3 tonight.',
+      neverSplit,
+      'what is your name?',
+    )
+    expect(bubbles).toEqual(['Open until 3 tonight.'])
+  })
+
+  it('returns [] for an empty body whatever the tail says', () => {
+    expect(
+      resolveDispatchBubbles('', alwaysSplit, 'what is your name?'),
+    ).toEqual([])
+    expect(
+      resolveDispatchBubbles('   ', alwaysSplit, 'what is your name?'),
+    ).toEqual([])
+  })
+
+  // An answer that becomes its own message should not end in a period, which
+  // is TAC-319's own rule for a piece that dispatches as a bubble.
+  it("strips the answer's terminal period once it is a message of its own", () => {
+    const tail = 'what is your name?'
+    expect(
+      resolveDispatchBubbles(`Open until 3 tonight. ${tail}`, neverSplit, tail),
+    ).toEqual(['Open until 3 tonight', tail])
+  })
+
+  // THE NO-CHANGE GUARANTEE, and it is asserted as an EQUIVALENCE rather than
+  // by restating expected bubbles: an empty tail must produce exactly what the
+  // pre-TAC-554 two-argument call produced. Both paths run splitToBubbles with
+  // the same text, the same rng and the original cap, so this holds by
+  // construction — and this test is what would catch it stopping to.
+  it('is unchanged from the old behaviour when no question is asked', () => {
+    const bodies = [
+      'Open until 4 tonight.',
+      'Espresso with foam on top. Stronger than a cortado.',
+      'One. Two. Three.',
+      'One. Two. Three. Four.',
+      `Open until 3.${BUBBLE_DELIMITER}Come by.`,
+      '',
+    ]
+    for (const body of bodies) {
+      for (const flip of [0, 0.49, SPLIT_PROBABILITY, 0.99]) {
+        const withEmptyTail = resolveDispatchBubbles(body, () => flip, '')
+        // Reconstruct the old rule independently rather than calling the new
+        // function a second way, so this compares against a statement of the
+        // old behaviour and not against itself.
+        const sentences = splitIntoSentences(
+          body.replace(BUBBLE_DELIMITER, ' ').replace(/\s+/g, ' ').trim(),
+        )
+        const cleaned = body
+          .replace(BUBBLE_DELIMITER, ' ')
+          .replace(/\s+/g, ' ')
+          .trim()
+        const expected =
+          cleaned === ''
+            ? []
+            : sentences.length < 2 ||
+                sentences.length > MAX_BUBBLES_PER_RESPONSE
+              ? [cleaned]
+              : flip < SPLIT_PROBABILITY
+                ? sentences.map(stripTerminalPeriod)
+                : [cleaned]
+        expect(withEmptyTail).toEqual(expected)
+      }
+    }
   })
 })

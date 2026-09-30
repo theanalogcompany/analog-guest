@@ -35,22 +35,32 @@ const applyApprovalPolicyStageMock = vi.fn()
 // TAC-350: independent grounding backstop. Defaults to "nothing to flag" for
 // every test in this file that doesn't care about it — `clearAllMocks()`
 // (used below) clears call history but not this default implementation.
-const verifyGroundingStageMock = vi.fn().mockResolvedValue({ status: 'skipped' })
+const verifyGroundingStageMock = vi
+  .fn()
+  .mockResolvedValue({ status: 'skipped' })
 // TAC-401: defaults to 'skipped' like its sibling, so every pre-existing test
 // in this file behaves exactly as it did before the check existed.
-const verifyProsePromiseStageMock = vi.fn().mockResolvedValue({ status: 'skipped' })
+const verifyProsePromiseStageMock = vi
+  .fn()
+  .mockResolvedValue({ status: 'skipped' })
 // TAC-363: defaults to 'skipped', which is what the real stage returns on
 // every turn at an OPEN venue — the fixtures' venue has no hours, so the
 // real stage would skip too.
-const verifyClosedVenueArrivalStageMock = vi.fn().mockResolvedValue({ status: 'skipped' })
+const verifyClosedVenueArrivalStageMock = vi
+  .fn()
+  .mockResolvedValue({ status: 'skipped' })
 // TAC-513: default CLEAN, not undefined. The './stages' factory below is an
 // explicit allow-list, so a stage missing from it arrives `undefined` and
 // throws inside the allSettled argument list before the gate is reached.
-const verifyCancellationClaimStageMock = vi.fn().mockResolvedValue({ resolution: { status: 'none' }, claim: 'clean' })
+const verifyCancellationClaimStageMock = vi
+  .fn()
+  .mockResolvedValue({ resolution: { status: 'none' }, claim: 'clean' })
 // TAC-355: independent mechanic-offer backstop. Defaults to "skipped" for
 // every test in this file that doesn't care about it, mirroring
 // verifyGroundingStageMock's default-null posture above.
-const verifyMechanicOfferStageMock = vi.fn().mockResolvedValue({ status: 'skipped' })
+const verifyMechanicOfferStageMock = vi
+  .fn()
+  .mockResolvedValue({ status: 'skipped' })
 const loadPendingRowsBySlotMock = vi.fn()
 const persistOrRegenQueuedDraftMock = vi.fn()
 const scheduleAndSendMock = vi.fn()
@@ -95,7 +105,9 @@ vi.mock('@/lib/db/admin', () => ({
             return existingReplyMaybeSingleMock()
           },
           eq: () => ({
-            limit: () => ({ maybeSingle: () => existingReplyMaybeSingleMock() }),
+            limit: () => ({
+              maybeSingle: () => existingReplyMaybeSingleMock(),
+            }),
           }),
           limit: () => ({ maybeSingle: () => existingReplyMaybeSingleMock() }),
         }),
@@ -145,21 +157,26 @@ vi.mock('./stages', async () => {
     // itself when this landed.
     mayAutoSendAfterClassification: actual.mayAutoSendAfterClassification,
     generateStage: (...a: unknown[]) => generateStageMock(...a),
-    applyApprovalPolicyStage: (...a: unknown[]) => applyApprovalPolicyStageMock(...a),
+    applyApprovalPolicyStage: (...a: unknown[]) =>
+      applyApprovalPolicyStageMock(...a),
     verifyGroundingStage: (...a: unknown[]) => verifyGroundingStageMock(...a),
-    verifyMechanicOfferStage: (...a: unknown[]) => verifyMechanicOfferStageMock(...a),
+    verifyMechanicOfferStage: (...a: unknown[]) =>
+      verifyMechanicOfferStageMock(...a),
     // TAC-401: this factory is an explicit ALLOW-LIST. A stage missing here
     // arrives `undefined` at the call site, and inside an allSettled array
     // that is a TypeError swallowed into a rejected settlement — the check
     // would read as permanently degraded with every test here still green.
-    verifyProsePromiseStage: (...a: unknown[]) => verifyProsePromiseStageMock(...a),
+    verifyProsePromiseStage: (...a: unknown[]) =>
+      verifyProsePromiseStageMock(...a),
     verifyClosedVenueArrivalStage: (...a: unknown[]) =>
       verifyClosedVenueArrivalStageMock(...a),
-    verifyCancellationClaimStage: (...a: unknown[]) => verifyCancellationClaimStageMock(...a),
+    verifyCancellationClaimStage: (...a: unknown[]) =>
+      verifyCancellationClaimStageMock(...a),
   }
 })
 vi.mock('./schedule-and-send', () => ({
-  persistOrRegenQueuedDraft: (...a: unknown[]) => persistOrRegenQueuedDraftMock(...a),
+  persistOrRegenQueuedDraft: (...a: unknown[]) =>
+    persistOrRegenQueuedDraftMock(...a),
   scheduleAndSend: (...a: unknown[]) => scheduleAndSendMock(...a),
 }))
 // TAC-469: the Instagram arm, mocked so this file pins the ORCHESTRATOR's
@@ -174,7 +191,8 @@ vi.mock('./dispatch-instagram-reply', () => ({
 // read is mocked; decideSlotAction and the identity helpers are forwarded REAL,
 // so a test here cannot pass on a mock's opinion of which slot a card is in.
 vi.mock('./pending-slots', async () => {
-  const actual = await vi.importActual<typeof import('./pending-slots')>('./pending-slots')
+  const actual =
+    await vi.importActual<typeof import('./pending-slots')>('./pending-slots')
   return {
     ...actual,
     loadPendingRowsBySlot: (...a: unknown[]) => loadPendingRowsBySlotMock(...a),
@@ -189,53 +207,71 @@ vi.mock('./alerts', () => ({
 // NAMED, not a bare vi.fn(): what this file has to prove is that the
 // orchestrator hands it the real AgentResult, and a fixed stub cannot show
 // that. See the 'records the turn's outcome' block at the end of this file.
-const recordInboundTurnOutcomeMock = vi.fn<(...args: unknown[]) => Promise<void>>()
+const recordInboundTurnOutcomeMock =
+  vi.fn<(...args: unknown[]) => Promise<void>>()
 vi.mock('./record-inbound-turn-outcome', () => ({
-  recordInboundTurnOutcome: (...a: unknown[]) => recordInboundTurnOutcomeMock(...a),
+  recordInboundTurnOutcome: (...a: unknown[]) =>
+    recordInboundTurnOutcomeMock(...a),
 }))
 // TAC-363: a named handle, because the push fan-out below is the delivery
 // mechanism for "every open obligation is surfaced" and a fixed 'noop' cannot
 // reach it. Reverting the loop to a single row passed every test in this file
 // while dispatch-arrival-capture.test.ts still proved both rows came back.
-const dispatchArrivalCaptureMock = vi.fn<(...args: unknown[]) => Promise<unknown>>()
+const dispatchArrivalCaptureMock =
+  vi.fn<(...args: unknown[]) => Promise<unknown>>()
 vi.mock('./dispatch-arrival-capture', () => ({
   dispatchArrivalCapture: (...a: unknown[]) => dispatchArrivalCaptureMock(...a),
 }))
 // TAC-323: fire-and-forget side effect, mocked wholesale — its own unit
 // coverage lives in extract-reported-order.test.ts.
 vi.mock('./extract-reported-order', async () => {
-  const actual = await vi.importActual<typeof import('./extract-reported-order')>(
-    './extract-reported-order',
-  )
+  const actual = await vi.importActual<
+    typeof import('./extract-reported-order')
+  >('./extract-reported-order')
   return {
     // TAC-332: stages.ts's real computeFirstTouchAfterQrScan (forwarded,
     // not mocked, in the ./stages mock below) imports this constant — it's
     // now reachable from a code path this file doesn't mock away, so the
     // mock needs to provide it. A plain re-exported value, not a mock.
     REPORTED_ORDER_WINDOW_DAYS: actual.REPORTED_ORDER_WINDOW_DAYS,
-    extractReportedOrder: vi.fn(async () => ({ kind: 'no_menu_item_mentioned' })),
+    extractReportedOrder: vi.fn(async () => ({
+      kind: 'no_menu_item_mentioned',
+    })),
   }
 })
 const recordIntentionPromptsMock = vi.fn()
+// TAC-560
+const markWarmCloseSentMock = vi.fn()
+const captureWarmCloseSentMock = vi.fn()
 const recordIntentionEligibilityMock = vi.fn()
 // TAC-324: same posture as extractReportedOrder above — fire-and-forget side
 // effect, mocked wholesale; its own unit coverage lives in
 // lib/agent/intentions/record.test.ts. This file only needs to prove the
 // call site: gated on ctx.openIntentions, fired with the right shape, never
 // lets a rejection propagate.
+vi.mock('./warm-close-store', () => ({
+  markWarmCloseSent: (...a: unknown[]) => markWarmCloseSentMock(...a),
+}))
 vi.mock('./intentions/record', () => ({
   recordIntentionPrompts: (...a: unknown[]) => recordIntentionPromptsMock(...a),
-  recordIntentionEligibility: (...a: unknown[]) => recordIntentionEligibilityMock(...a),
+  recordIntentionEligibility: (...a: unknown[]) =>
+    recordIntentionEligibilityMock(...a),
 }))
 vi.mock('@/lib/guests/context', () => ({
   isEmptyContextUpdate: () => true,
   updateGuestContext: vi.fn(),
 }))
 vi.mock('@/lib/analytics/posthog', () => ({
-  AGENT_LATENCY_HIGH_THRESHOLD_MS: 10_000,
+  // Deliberately a LOWER bar than production (inbound 35s / followup 20s) so the
+  // emit branch is reachable without advancing the clock 35s. NOT production
+  // semantics: the real per-kind thresholds are pinned in
+  // lib/analytics/posthog.test.ts.
+  isAgentLatencyHigh: (_kind: unknown, ms: number) => ms > 10_000,
   captureAgentLatencyHigh: vi.fn(),
   captureDraftQueued: (...a: unknown[]) => captureDraftQueuedMock(...a),
-  captureCrisisSafetyReplySent: (...a: unknown[]) => captureCrisisSafetyReplySentMock(...a),
+  captureWarmCloseSent: (...a: unknown[]) => captureWarmCloseSentMock(...a),
+  captureCrisisSafetyReplySent: (...a: unknown[]) =>
+    captureCrisisSafetyReplySentMock(...a),
   captureDraftRegenerated: vi.fn(),
   captureDraftDropped: (...a: unknown[]) => captureDraftDroppedMock(...a),
   captureIntentionPromptRecordingFailed: (...a: unknown[]) =>
@@ -243,7 +279,8 @@ vi.mock('@/lib/analytics/posthog', () => ({
   // TAC-436: this factory is an ALLOW-LIST. Omitted here, the new export
   // arrives `undefined` and throws inside the waitUntil .then(), which nothing
   // in this file would surface.
-  captureIntentionPromptRaised: (...a: unknown[]) => captureIntentionPromptRaisedMock(...a),
+  captureIntentionPromptRaised: (...a: unknown[]) =>
+    captureIntentionPromptRaisedMock(...a),
   // Also consumed by the real ./stages, loaded via importActual below.
   captureClassificationLowConfidence: vi.fn(),
   captureDashViolationPersisted: vi.fn(),
@@ -263,9 +300,11 @@ vi.mock('@/lib/notifications/send', () => ({
 // `.catch()` on the result, so a bare vi.fn() throws a TypeError after the
 // first push and the fan-out silently stops at one — which is exactly the
 // defect these tests exist to catch, arriving through the mock instead.
-const sendCommitmentArrivalPushMock = vi.fn<(...args: unknown[]) => Promise<unknown>>()
+const sendCommitmentArrivalPushMock =
+  vi.fn<(...args: unknown[]) => Promise<unknown>>()
 vi.mock('@/lib/notifications/send-commitment-push', () => ({
-  sendCommitmentArrivalPush: (...a: unknown[]) => sendCommitmentArrivalPushMock(...a),
+  sendCommitmentArrivalPush: (...a: unknown[]) =>
+    sendCommitmentArrivalPushMock(...a),
 }))
 // TAC-526: the settle is a REAL wall-clock wait once the flag is on and the
 // constant is nonzero — 8s originally, 3s after TAC-540, 0 today — and every
@@ -282,10 +321,14 @@ vi.mock('@/lib/notifications/send-commitment-push', () => ({
 // load-bearing: it is why flipping the flag does not change a single
 // expectation in this file.
 vi.mock('./coalesce-turn', async () => {
-  const actual = await vi.importActual<typeof import('./coalesce-turn')>('./coalesce-turn')
+  const actual =
+    await vi.importActual<typeof import('./coalesce-turn')>('./coalesce-turn')
   return {
     ...actual,
-    defaultCoalesceDeps: () => ({ ...actual.defaultCoalesceDeps(), sleep: async () => {} }),
+    defaultCoalesceDeps: () => ({
+      ...actual.defaultCoalesceDeps(),
+      sleep: async () => {},
+    }),
   }
 })
 vi.mock('@vercel/functions', () => ({ waitUntil: (p: unknown) => p }))
@@ -308,30 +351,48 @@ const traceControl = vi.hoisted(() => ({ flushThrows: false }))
  * millisecond are indistinguishable by clock, and what is being asserted is
  * ORDER.
  */
-const spanLog = vi.hoisted(() => ({ events: [] as Array<{ name: string; phase: 'open' | 'close' }> }))
-vi.mock('@/lib/observability', () => ({
-  startAgentTrace: () => ({
-    id: '',
-    captureContent: false,
-    span: (name: string) => {
-      spanLog.events.push({ name, phase: 'open' })
-      return {
-        span: () => ({ end: () => undefined }),
-        end: () => {
-          spanLog.events.push({ name, phase: 'close' })
-        },
-        update: () => undefined,
-      }
-    },
-    update: () => undefined,
-    // TAC-523: `await trace.flushAsync()` sits in runInboundTurn's `finally`,
-    // which is the only way the orchestrator can throw past its own top-level
-    // catch — and therefore the only way to reach the wrapper's catch.
-    flushAsync: async () => {
-      if (traceControl.flushThrows) throw new Error('flush failed')
-    },
-  }),
+const spanLog = vi.hoisted(() => ({
+  events: [] as Array<{ name: string; phase: 'open' | 'close' }>,
 }))
+vi.mock('@/lib/observability', () => {
+  // `span` and `generation` must log IDENTICALLY. In production they differ only
+  // in the recorded observation type, never in position in the tree, so a fake
+  // where only one of them logs would silently drop a stage from spanLog — and
+  // the stage-ordering assertions below would then be asserting over a pipeline
+  // missing `classify`, and still pass.
+  const open = (name: string) => {
+    spanLog.events.push({ name, phase: 'open' })
+    return {
+      span: () => ({ end: () => undefined }),
+      generation: () => ({ end: () => undefined }),
+      end: () => {
+        spanLog.events.push({ name, phase: 'close' })
+      },
+      update: () => undefined,
+    }
+  }
+  return {
+    // Present only because the orchestrator calls it. NOTHING in this file asserts
+    // on the result, so this must NOT reimplement the mapping: an earlier version
+    // did, and that copy still carried the input/cached double-billing the real
+    // function was fixed for - a mock drifting from production while looking like
+    // coverage. The mapping is covered in langfuse.test.ts, with mutants.
+    toAgentUsage: () => ({}),
+    startAgentTrace: () => ({
+      id: '',
+      captureContent: false,
+      span: open,
+      generation: open,
+      update: () => undefined,
+      // TAC-523: `await trace.flushAsync()` sits in runInboundTurn's `finally`,
+      // which is the only way the orchestrator can throw past its own top-level
+      // catch — and therefore the only way to reach the wrapper's catch.
+      flushAsync: async () => {
+        if (traceControl.flushThrows) throw new Error('flush failed')
+      },
+    }),
+  }
+})
 vi.mock('./trace-content', () => ({
   buildCorpusContent: () => ({}),
   buildGenerateAttemptContent: () => ({}),
@@ -393,7 +454,12 @@ function makeCtx(overrides: Record<string, unknown> = {}) {
     // history; the shared fixture keeps an EMPTY history because several
     // tests here depend on it for firstTouchAfterQrScan.
     conversationWindowMs: 48 * 60 * 60 * 1000,
-    recognition: { score: 0.5, state: 'regular', signals: {}, computedAt: new Date() },
+    recognition: {
+      score: 0.5,
+      state: 'regular',
+      signals: {},
+      computedAt: new Date(),
+    },
     mechanics: [],
     recentVisits: [],
     activeCommitments: [],
@@ -434,9 +500,15 @@ beforeEach(() => {
     error: null,
   })
   existingReplyMaybeSingleMock.mockResolvedValue({ data: null, error: null })
-  guestMaybeSingleMock.mockResolvedValue({ data: { opted_out_at: null }, error: null })
+  guestMaybeSingleMock.mockResolvedValue({
+    data: { opted_out_at: null },
+    error: null,
+  })
   // An ordinary live venue. Every test that needs another status says so.
-  venueStatusMaybeSingleMock.mockResolvedValue({ data: { status: 'active' }, error: null })
+  venueStatusMaybeSingleMock.mockResolvedValue({
+    data: { status: 'active' },
+    error: null,
+  })
   buildRuntimeContextMock.mockResolvedValue(makeCtx())
   classifyStageMock.mockResolvedValue({
     category: 'new_question',
@@ -459,7 +531,10 @@ beforeEach(() => {
       secondaryTags: [],
     },
   ])
-  loadPendingRowsBySlotMock.mockResolvedValue({ obligation: null, conversation: [] })
+  loadPendingRowsBySlotMock.mockResolvedValue({
+    obligation: null,
+    conversation: [],
+  })
   persistOrRegenQueuedDraftMock.mockResolvedValue({
     outboundMessageId: 'card-1',
     action: 'inserted',
@@ -467,7 +542,9 @@ beforeEach(() => {
   })
   sendDraftFlaggedPushMock.mockResolvedValue(undefined)
   recordIntentionPromptsMock.mockResolvedValue({ kind: 'no_open_intentions' })
-  recordIntentionEligibilityMock.mockResolvedValue({ kind: 'nothing_to_record' })
+  recordIntentionEligibilityMock.mockResolvedValue({
+    kind: 'nothing_to_record',
+  })
   captureIntentionPromptRecordingFailedMock.mockResolvedValue(undefined)
   captureIntentionPromptRaisedMock.mockResolvedValue(undefined)
 })
@@ -533,7 +610,8 @@ describe('handleInbound — generation-failure fallback (TAC-309)', () => {
   it('persists the card blank, with a clock, under review_reason=generation_failed', async () => {
     generateStageMock.mockResolvedValue(GEN_FAILED)
     await handleInbound(INBOUND_ID)
-    const [, , trigger, existingId, opts] = persistOrRegenQueuedDraftMock.mock.calls[0]
+    const [, , trigger, existingId, opts] =
+      persistOrRegenQueuedDraftMock.mock.calls[0]
     expect(trigger).toBe(GENERATION_FAILED_REVIEW_REASON)
     expect(trigger).not.toBe(APPROVAL_TRIGGERS.KNOWLEDGE_GAP)
     expect(existingId).toBeNull()
@@ -551,7 +629,8 @@ describe('handleInbound — generation-failure fallback (TAC-309)', () => {
   // pending_until, the next turn that queues for any reason would UPDATE this
   // row in place and the guest's outstanding question would be gone.
   it('is still recognized as a gap card by the real predicate', async () => {
-    const { isKnowledgeGapCard } = await vi.importActual<typeof import('./stages')>('./stages')
+    const { isKnowledgeGapCard } =
+      await vi.importActual<typeof import('./stages')>('./stages')
     expect(
       isKnowledgeGapCard({
         review_reason: GENERATION_FAILED_REVIEW_REASON,
@@ -621,14 +700,16 @@ describe('handleInbound — failure-card policy (TAC-309)', () => {
     // conversation-slot card: the slot the blank crash card would take.
     loadPendingRowsBySlotMock.mockResolvedValue({
       obligation: null,
-      conversation: [{
-        id: 'comp-draft',
-        body: "the next one's on us",
-        pending_until: null,
-        review_reason: APPROVAL_TRIGGERS.COMP_REGEX_BACKSTOP,
-        pending_commitment: null,
-        created_at: '2026-09-14T16:00:00.000Z',
-      }],
+      conversation: [
+        {
+          id: 'comp-draft',
+          body: "the next one's on us",
+          pending_until: null,
+          review_reason: APPROVAL_TRIGGERS.COMP_REGEX_BACKSTOP,
+          pending_commitment: null,
+          created_at: '2026-09-14T16:00:00.000Z',
+        },
+      ],
     })
     const r = await handleInbound(INBOUND_ID)
     expect(persistOrRegenQueuedDraftMock).not.toHaveBeenCalled()
@@ -640,14 +721,16 @@ describe('handleInbound — failure-card policy (TAC-309)', () => {
   it('updates an existing gap card in place without re-arming its clock', async () => {
     loadPendingRowsBySlotMock.mockResolvedValue({
       obligation: null,
-      conversation: [{
-        id: 'gap-card',
-        body: '',
-        pending_until: new Date(Date.now() + 60_000).toISOString(),
-        review_reason: APPROVAL_TRIGGERS.KNOWLEDGE_GAP,
-        pending_commitment: null,
-        created_at: '2026-09-14T16:00:00.000Z',
-      }],
+      conversation: [
+        {
+          id: 'gap-card',
+          body: '',
+          pending_until: new Date(Date.now() + 60_000).toISOString(),
+          review_reason: APPROVAL_TRIGGERS.KNOWLEDGE_GAP,
+          pending_commitment: null,
+          created_at: '2026-09-14T16:00:00.000Z',
+        },
+      ],
     })
     await handleInbound(INBOUND_ID)
     const [, , , existingId, opts] = persistOrRegenQueuedDraftMock.mock.calls[0]
@@ -684,7 +767,10 @@ describe('handleInbound — failure-card policy (TAC-309)', () => {
     // An ordinary comp card is not a gap card, so the crash card still arms its clock.
     expect(opts.pendingUntil).toBeInstanceOf(Date)
     expect(captureDraftQueuedMock).toHaveBeenCalledWith(
-      expect.objectContaining({ slot: 'conversation', otherSlotOccupied: true }),
+      expect.objectContaining({
+        slot: 'conversation',
+        otherSlotOccupied: true,
+      }),
     )
   })
 
@@ -765,7 +851,11 @@ describe('handleInbound — failure-card policy (TAC-309)', () => {
 })
 
 describe('handleInbound: a draft with nowhere to go (TAC-394)', () => {
-  const KEPT = { type: 'comp', description: 'a free cortado on your next visit', code: '7K2P' }
+  const KEPT = {
+    type: 'comp',
+    description: 'a free cortado on your next visit',
+    code: '7K2P',
+  }
   const DROPPED = { type: 'comp', description: 'a free croissant', code: null }
   const QUEUE_INTO_OBLIGATION = {
     action: 'queue',
@@ -780,7 +870,10 @@ describe('handleInbound: a draft with nowhere to go (TAC-394)', () => {
   }
 
   beforeEach(() => {
-    generateStageMock.mockResolvedValue({ status: 'success', result: successResult() })
+    generateStageMock.mockResolvedValue({
+      status: 'success',
+      result: successResult(),
+    })
   })
 
   // The ruling asked for the alert to name both offers and the guest, because
@@ -915,12 +1008,15 @@ function successResult() {
     // string. `resolveCancellation` reads both as "cancels nothing", so the
     // omission is invisible until a test means to exercise a real id.
     cancelsCommitmentId: '',
+    // TAC-560: REQUIRED on GenerateMessageResult for the same reason. `false` is
+    // the ordinary turn; a test that means to exercise the close overrides it.
+    closedTheConversation: false,
     attempts: 1,
     attemptScores: [0.9],
     attemptHistory: [],
     systemPrompt: '',
     userPrompt: '',
-    promptVersion: 'v1.70.0',
+    promptVersion: 'v1.75.0',
     dashViolationPersisted: false,
     selfTalkViolationPersisted: false,
     emojiDirectiveViolated: false,
@@ -929,7 +1025,10 @@ function successResult() {
 
 describe('handleInbound — intention recording call sites (TAC-324, TAC-380)', () => {
   function setUpSentPath() {
-    generateStageMock.mockResolvedValue({ status: 'success', result: successResult() })
+    generateStageMock.mockResolvedValue({
+      status: 'success',
+      result: successResult(),
+    })
     applyApprovalPolicyStageMock.mockResolvedValue({ action: 'send' })
     scheduleAndSendMock.mockResolvedValue({
       outboundMessageId: 'sent-1',
@@ -994,7 +1093,9 @@ describe('handleInbound — intention recording call sites (TAC-324, TAC-380)', 
       reasoning: 'stop',
       crisisSafety: false,
     })
-    buildRuntimeContextMock.mockResolvedValue(makeCtx({ openIntentions: [UNDERSTAND] }))
+    buildRuntimeContextMock.mockResolvedValue(
+      makeCtx({ openIntentions: [UNDERSTAND] }),
+    )
     await handleInbound(INBOUND_ID)
     expect(scheduleAndSendMock).toHaveBeenCalled()
     expect(recordIntentionPromptsMock).not.toHaveBeenCalled()
@@ -1005,7 +1106,11 @@ describe('handleInbound — intention recording call sites (TAC-324, TAC-380)', 
     buildRuntimeContextMock.mockResolvedValue(
       makeCtx({
         openIntentions: [UNDERSTAND],
-        pendingQuestion: { question: 'is rayan working', askedAt: new Date(), mode: 'outstanding' },
+        pendingQuestion: {
+          question: 'is rayan working',
+          askedAt: new Date(),
+          mode: 'outstanding',
+        },
       }),
     )
     await handleInbound(INBOUND_ID)
@@ -1027,7 +1132,11 @@ describe('handleInbound — intention recording call sites (TAC-324, TAC-380)', 
   it('records on the true opener turn, like every other turn (TAC-423)', async () => {
     setUpSentPath()
     buildRuntimeContextMock.mockResolvedValue(
-      makeCtx({ openIntentions: [UNDERSTAND], guest: qrScanGuest, recentMessages: [] }),
+      makeCtx({
+        openIntentions: [UNDERSTAND],
+        guest: qrScanGuest,
+        recentMessages: [],
+      }),
     )
     const r = await handleInbound(INBOUND_ID)
     expect(r).toMatchObject({ status: 'sent' })
@@ -1049,7 +1158,11 @@ describe('handleInbound — intention recording call sites (TAC-324, TAC-380)', 
         openIntentions: [UNDERSTAND],
         guest: qrScanGuest,
         recentMessages: [
-          { direction: 'outbound', body: 'Hey, first time in?', createdAt: new Date() },
+          {
+            direction: 'outbound',
+            body: 'Hey, first time in?',
+            createdAt: new Date(),
+          },
         ],
       }),
     )
@@ -1059,13 +1172,18 @@ describe('handleInbound — intention recording call sites (TAC-324, TAC-380)', 
   })
 
   it('never calls recordIntentionPrompts on a queued (not sent) draft', async () => {
-    generateStageMock.mockResolvedValue({ status: 'success', result: successResult() })
+    generateStageMock.mockResolvedValue({
+      status: 'success',
+      result: successResult(),
+    })
     applyApprovalPolicyStageMock.mockResolvedValue({
       action: 'queue',
       triggers: [APPROVAL_TRIGGERS.MODEL_FLAGGED],
       primaryTrigger: APPROVAL_TRIGGERS.MODEL_FLAGGED,
     })
-    buildRuntimeContextMock.mockResolvedValue(makeCtx({ openIntentions: [LEARN_NAME] }))
+    buildRuntimeContextMock.mockResolvedValue(
+      makeCtx({ openIntentions: [LEARN_NAME] }),
+    )
     const r = await handleInbound(INBOUND_ID)
     expect(r).toMatchObject({ status: 'queued' })
     expect(recordIntentionPromptsMock).not.toHaveBeenCalled()
@@ -1076,7 +1194,9 @@ describe('handleInbound — intention recording call sites (TAC-324, TAC-380)', 
   it('does not let a recordIntentionPrompts rejection propagate or change the result', async () => {
     setUpSentPath()
     recordIntentionPromptsMock.mockRejectedValue(new Error('anthropic timeout'))
-    buildRuntimeContextMock.mockResolvedValue(makeCtx({ openIntentions: [UNDERSTAND] }))
+    buildRuntimeContextMock.mockResolvedValue(
+      makeCtx({ openIntentions: [UNDERSTAND] }),
+    )
     const r = await handleInbound(INBOUND_ID)
     expect(r).toMatchObject({ status: 'sent', outboundMessageId: 'sent-1' })
   })
@@ -1090,7 +1210,9 @@ describe('handleInbound — intention recording call sites (TAC-324, TAC-380)', 
       closedKeys: ['understand_order'],
       classifierError: 'anthropic timeout',
     })
-    buildRuntimeContextMock.mockResolvedValue(makeCtx({ openIntentions: [UNDERSTAND] }))
+    buildRuntimeContextMock.mockResolvedValue(
+      makeCtx({ openIntentions: [UNDERSTAND] }),
+    )
     await handleInbound(INBOUND_ID)
     await vi.waitFor(() =>
       expect(captureIntentionPromptRecordingFailedMock).toHaveBeenCalledWith({
@@ -1117,7 +1239,9 @@ describe('handleInbound — intention recording call sites (TAC-324, TAC-380)', 
       source: 'classified',
       error: 'db down',
     })
-    buildRuntimeContextMock.mockResolvedValue(makeCtx({ openIntentions: [LEARN_NAME] }))
+    buildRuntimeContextMock.mockResolvedValue(
+      makeCtx({ openIntentions: [LEARN_NAME] }),
+    )
     await handleInbound(INBOUND_ID)
     await vi.waitFor(() =>
       expect(captureIntentionPromptRecordingFailedMock).toHaveBeenCalledWith({
@@ -1147,9 +1271,13 @@ describe('handleInbound — intention recording call sites (TAC-324, TAC-380)', 
       raisedKeys: ['learn_name'],
       classifierAttempts: 1,
     })
-    buildRuntimeContextMock.mockResolvedValue(makeCtx({ openIntentions: [UNDERSTAND, LEARN_NAME] }))
+    buildRuntimeContextMock.mockResolvedValue(
+      makeCtx({ openIntentions: [UNDERSTAND, LEARN_NAME] }),
+    )
     await handleInbound(INBOUND_ID)
-    await vi.waitFor(() => expect(captureIntentionPromptRaisedMock).toHaveBeenCalled())
+    await vi.waitFor(() =>
+      expect(captureIntentionPromptRaisedMock).toHaveBeenCalled(),
+    )
 
     expect(captureIntentionPromptRaisedMock.mock.calls[0][0]).toMatchObject({
       via: 'auto_send',
@@ -1161,7 +1289,9 @@ describe('handleInbound — intention recording call sites (TAC-324, TAC-380)', 
       classifierAttempts: 1,
       sentBody: successResult().body,
     })
-    expect(captureIntentionPromptRaisedMock.mock.calls[0][0].agentRunId).toEqual(expect.any(String))
+    expect(
+      captureIntentionPromptRaisedMock.mock.calls[0][0].agentRunId,
+    ).toEqual(expect.any(String))
   })
 
   // THE NEGATIVE THAT MATTERS. Most sends raise nothing; firing there would
@@ -1169,9 +1299,13 @@ describe('handleInbound — intention recording call sites (TAC-324, TAC-380)', 
   it('does NOT fire the raise event when the send raised nothing', async () => {
     setUpSentPath()
     recordIntentionPromptsMock.mockResolvedValue({ kind: 'nothing_raised' })
-    buildRuntimeContextMock.mockResolvedValue(makeCtx({ openIntentions: [LEARN_NAME] }))
+    buildRuntimeContextMock.mockResolvedValue(
+      makeCtx({ openIntentions: [LEARN_NAME] }),
+    )
     await handleInbound(INBOUND_ID)
-    await vi.waitFor(() => expect(recordIntentionPromptsMock).toHaveBeenCalled())
+    await vi.waitFor(() =>
+      expect(recordIntentionPromptsMock).toHaveBeenCalled(),
+    )
     await new Promise((resolve) => setTimeout(resolve, 0))
 
     expect(captureIntentionPromptRaisedMock).not.toHaveBeenCalled()
@@ -1184,9 +1318,13 @@ describe('handleInbound — intention recording call sites (TAC-324, TAC-380)', 
       raisedKeys: ['learn_name'],
       classifierAttempts: 1,
     })
-    buildRuntimeContextMock.mockResolvedValue(makeCtx({ openIntentions: [LEARN_NAME] }))
+    buildRuntimeContextMock.mockResolvedValue(
+      makeCtx({ openIntentions: [LEARN_NAME] }),
+    )
     await handleInbound(INBOUND_ID)
-    await vi.waitFor(() => expect(recordIntentionPromptsMock).toHaveBeenCalled())
+    await vi.waitFor(() =>
+      expect(recordIntentionPromptsMock).toHaveBeenCalled(),
+    )
     await new Promise((resolve) => setTimeout(resolve, 0))
     expect(captureIntentionPromptRecordingFailedMock).not.toHaveBeenCalled()
   })
@@ -1194,8 +1332,16 @@ describe('handleInbound — intention recording call sites (TAC-324, TAC-380)', 
   it('persists intentions newly eligible or re-armed this turn', async () => {
     setUpSentPath()
     const newlyEligible = [
-      { key: 'learn_name' as const, eligibleAt: new Date('2026-09-14T11:00:00.000Z'), rearm: false },
-      { key: 'got_the_recommendation' as const, eligibleAt: new Date('2026-09-14T10:00:00.000Z'), rearm: true },
+      {
+        key: 'learn_name' as const,
+        eligibleAt: new Date('2026-09-14T11:00:00.000Z'),
+        rearm: false,
+      },
+      {
+        key: 'got_the_recommendation' as const,
+        eligibleAt: new Date('2026-09-14T10:00:00.000Z'),
+        rearm: true,
+      },
     ]
     buildRuntimeContextMock.mockResolvedValue(
       makeCtx({ intentionDerivation: { newlyEligible, brakeEngaged: false } }),
@@ -1229,7 +1375,13 @@ describe('handleInbound — intention recording call sites (TAC-324, TAC-380)', 
     buildRuntimeContextMock.mockResolvedValue(
       makeCtx({
         intentionDerivation: {
-          newlyEligible: [{ key: 'learn_name', eligibleAt: new Date('2026-09-14T11:00:00.000Z'), rearm: false }],
+          newlyEligible: [
+            {
+              key: 'learn_name',
+              eligibleAt: new Date('2026-09-14T11:00:00.000Z'),
+              rearm: false,
+            },
+          ],
           brakeEngaged: false,
         },
       }),
@@ -1246,11 +1398,20 @@ describe('handleInbound — intention recording call sites (TAC-324, TAC-380)', 
       reasoning: 'mock',
       crisisSafety: true,
     })
-    scheduleAndSendMock.mockResolvedValue({ outboundMessageId: 'crisis-1', providerMessageId: 'p' })
+    scheduleAndSendMock.mockResolvedValue({
+      outboundMessageId: 'crisis-1',
+      providerMessageId: 'p',
+    })
     buildRuntimeContextMock.mockResolvedValue(
       makeCtx({
         intentionDerivation: {
-          newlyEligible: [{ key: 'learn_name', eligibleAt: new Date('2026-09-14T11:00:00.000Z'), rearm: false }],
+          newlyEligible: [
+            {
+              key: 'learn_name',
+              eligibleAt: new Date('2026-09-14T11:00:00.000Z'),
+              rearm: false,
+            },
+          ],
           brakeEngaged: false,
         },
       }),
@@ -1338,7 +1499,9 @@ describe('handleInbound — crisis-safety short circuit (TAC-348)', () => {
       reasoning: 'mock',
       crisisSafety: true,
     })
-    retrieveCorpusStageMock.mockRejectedValueOnce(new Error('voice pack load failed'))
+    retrieveCorpusStageMock.mockRejectedValueOnce(
+      new Error('voice pack load failed'),
+    )
     scheduleAndSendMock.mockResolvedValue({
       outboundMessageId: 'crisis-4',
       providerMessageId: 'p',
@@ -1358,7 +1521,10 @@ describe('handleInbound — crisis-safety short circuit (TAC-348)', () => {
       reasoning: 'mock',
       crisisSafety: true,
     })
-    scheduleAndSendMock.mockResolvedValue({ outboundMessageId: 'crisis-2', providerMessageId: 'p' })
+    scheduleAndSendMock.mockResolvedValue({
+      outboundMessageId: 'crisis-2',
+      providerMessageId: 'p',
+    })
     await handleInbound(INBOUND_ID)
     expect(scheduleAndSendMock).toHaveBeenCalledTimes(1)
     const [, result, options] = scheduleAndSendMock.mock.calls[0] as [
@@ -1368,7 +1534,10 @@ describe('handleInbound — crisis-safety short circuit (TAC-348)', () => {
     ]
     expect(result.body).toContain('911')
     expect(result.body).toContain('988')
-    expect(options).toMatchObject({ skipHumanFeelDelay: true, reviewReason: 'crisis_safety_reply' })
+    expect(options).toMatchObject({
+      skipHumanFeelDelay: true,
+      reviewReason: 'crisis_safety_reply',
+    })
   })
 
   it('fires captureCrisisSafetyReplySent on a successful send', async () => {
@@ -1378,7 +1547,10 @@ describe('handleInbound — crisis-safety short circuit (TAC-348)', () => {
       reasoning: 'mock',
       crisisSafety: true,
     })
-    scheduleAndSendMock.mockResolvedValue({ outboundMessageId: 'crisis-3', providerMessageId: 'p' })
+    scheduleAndSendMock.mockResolvedValue({
+      outboundMessageId: 'crisis-3',
+      providerMessageId: 'p',
+    })
     await handleInbound(INBOUND_ID)
     expect(captureCrisisSafetyReplySentMock).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -1392,9 +1564,15 @@ describe('handleInbound — crisis-safety short circuit (TAC-348)', () => {
 
   it('does not fire when crisisSafety is false — normal pipeline runs unchanged', async () => {
     // Default beforeEach classifyStageMock already sets crisisSafety: false.
-    generateStageMock.mockResolvedValue({ status: 'success', result: successResult() })
+    generateStageMock.mockResolvedValue({
+      status: 'success',
+      result: successResult(),
+    })
     applyApprovalPolicyStageMock.mockResolvedValue({ action: 'send' })
-    scheduleAndSendMock.mockResolvedValue({ outboundMessageId: 'normal-1', providerMessageId: 'p' })
+    scheduleAndSendMock.mockResolvedValue({
+      outboundMessageId: 'normal-1',
+      providerMessageId: 'p',
+    })
     const r = await handleInbound(INBOUND_ID)
     expect(r).toMatchObject({ status: 'sent', outboundMessageId: 'normal-1' })
     expect(generateStageMock).toHaveBeenCalledTimes(1)
@@ -1428,7 +1606,7 @@ describe('handleInbound — crisis-safety short circuit (TAC-348)', () => {
 // actually selected. Without the second, dropping `channel` from the select
 // would pass every test here while every real inbound arrived as unknown.
 describe('handleInbound — the inbound message carries its channel (TAC-495)', () => {
-  it('hands the row\'s channel to buildRuntimeContext on the current message', async () => {
+  it("hands the row's channel to buildRuntimeContext on the current message", async () => {
     inboundSingleMock.mockResolvedValue({
       data: {
         id: INBOUND_ID,
@@ -1482,8 +1660,11 @@ describe('handleInbound — the inbound message carries its channel (TAC-495)', 
 
   it('selects the channel column when loading the inbound row', () => {
     const src = readFileSync(join(__dirname, 'handle-inbound.ts'), 'utf-8')
-    const load = src.slice(src.indexOf('async function loadInbound('), src.indexOf('async function findExistingReply('))
-    expect(load).toMatch(/\.select\('[^']*\bchannel\b[^']*'\)/)
+    const load = src.slice(
+      src.indexOf('async function loadInbound('),
+      src.indexOf('async function findExistingReply('),
+    )
+    expect(load).toMatch(/\.select\(\s*'[^']*\bchannel\b[^']*',?\s*\)/)
     expect(load).toContain('channel: parseMessageChannel(data.channel),')
   })
 })
@@ -1520,7 +1701,9 @@ describe('handleInbound — the inbound message carries its referral (TAC-518)',
 
     expect(buildRuntimeContextMock).toHaveBeenCalledWith(
       expect.objectContaining({
-        currentMessage: expect.objectContaining({ referralSource: 'SHORTLINK' }),
+        currentMessage: expect.objectContaining({
+          referralSource: 'SHORTLINK',
+        }),
       }),
     )
   })
@@ -1556,8 +1739,11 @@ describe('handleInbound — the inbound message carries its referral (TAC-518)',
 
   it('selects the referral_source column when loading the inbound row', () => {
     const src = readFileSync(join(__dirname, 'handle-inbound.ts'), 'utf-8')
-    const load = src.slice(src.indexOf('async function loadInbound('), src.indexOf('async function findExistingReply('))
-    expect(load).toMatch(/\.select\('[^']*\breferral_source\b[^']*'\)/)
+    const load = src.slice(
+      src.indexOf('async function loadInbound('),
+      src.indexOf('async function findExistingReply('),
+    )
+    expect(load).toMatch(/\.select\(\s*'[^']*\breferral_source\b[^']*',?\s*\)/)
     expect(load).toContain('referralSource: data.referral_source,')
   })
 })
@@ -1569,16 +1755,24 @@ describe('handleInbound — the inbound message carries its referral (TAC-518)',
 // assertion that would have caught the `() => false` stub this file carried.
 describe('handleInbound — knowledge retrieval (TAC-367)', () => {
   it('retrieves knowledge and threads the chunks onto the context', async () => {
-    generateStageMock.mockResolvedValue({ status: 'success', result: successResult() })
+    generateStageMock.mockResolvedValue({
+      status: 'success',
+      result: successResult(),
+    })
     applyApprovalPolicyStageMock.mockResolvedValue({ action: 'send' })
-    scheduleAndSendMock.mockResolvedValue({ outboundMessageId: 'sent-k', providerMessageId: 'p' })
+    scheduleAndSendMock.mockResolvedValue({
+      outboundMessageId: 'sent-k',
+      providerMessageId: 'p',
+    })
 
     await handleInbound(INBOUND_ID)
 
     // TAC-547: the property is unchanged (inbound retrieves); the stage it
     // goes through is the two-arm one now.
     expect(retrieveKnowledgeWithContextStageMock).toHaveBeenCalledTimes(1)
-    const ctx = generateStageMock.mock.calls[0][0] as { knowledgeCorpus: unknown[] }
+    const ctx = generateStageMock.mock.calls[0][0] as {
+      knowledgeCorpus: unknown[]
+    }
     expect(ctx.knowledgeCorpus).toHaveLength(1)
   })
 
@@ -1592,15 +1786,23 @@ describe('handleInbound — knowledge retrieval (TAC-367)', () => {
   // recorded argument is a live reference and would describe the end state
   // (the TAC-389 trap).
   it('hands the stage a context carrying the conversation, not an emptied one', async () => {
-    let handed: { recentMessages: unknown[]; conversationWindowMs: number } | null = null
-    retrieveKnowledgeWithContextStageMock.mockImplementationOnce(async (c: unknown) => {
-      const ctx = c as { recentMessages: unknown[]; conversationWindowMs: number }
-      handed = {
-        recentMessages: [...ctx.recentMessages],
-        conversationWindowMs: ctx.conversationWindowMs,
-      }
-      return []
-    })
+    let handed: {
+      recentMessages: unknown[]
+      conversationWindowMs: number
+    } | null = null
+    retrieveKnowledgeWithContextStageMock.mockImplementationOnce(
+      async (c: unknown) => {
+        const ctx = c as {
+          recentMessages: unknown[]
+          conversationWindowMs: number
+        }
+        handed = {
+          recentMessages: [...ctx.recentMessages],
+          conversationWindowMs: ctx.conversationWindowMs,
+        }
+        return []
+      },
+    )
     buildRuntimeContextMock.mockResolvedValue(
       makeCtx({
         recentMessages: [
@@ -1613,9 +1815,15 @@ describe('handleInbound — knowledge retrieval (TAC-367)', () => {
         ],
       }),
     )
-    generateStageMock.mockResolvedValue({ status: 'success', result: successResult() })
+    generateStageMock.mockResolvedValue({
+      status: 'success',
+      result: successResult(),
+    })
     applyApprovalPolicyStageMock.mockResolvedValue({ action: 'send' })
-    scheduleAndSendMock.mockResolvedValue({ outboundMessageId: 'sent-w', providerMessageId: 'p' })
+    scheduleAndSendMock.mockResolvedValue({
+      outboundMessageId: 'sent-w',
+      providerMessageId: 'p',
+    })
 
     await handleInbound(INBOUND_ID)
 
@@ -1634,7 +1842,10 @@ describe('handleInbound — knowledge retrieval (TAC-367)', () => {
 // 1751 tests. tsc forces a value there, never the right one.
 describe('handleInbound — the queued draft push carries the guest turn (TAC-532)', () => {
   it('passes the guest question and category from the context, not null', async () => {
-    generateStageMock.mockResolvedValue({ status: 'success', result: successResult() })
+    generateStageMock.mockResolvedValue({
+      status: 'success',
+      result: successResult(),
+    })
     applyApprovalPolicyStageMock.mockResolvedValue({
       action: 'queue',
       triggers: [APPROVAL_TRIGGERS.KNOWLEDGE_GAP],
@@ -1678,19 +1889,35 @@ describe('handleInbound — the queued draft push carries the guest turn (TAC-53
 // it.
 describe('handleInbound — deferred post-generation checks (decision 0003 rewrite)', () => {
   it('passes the neutral deferred values to the gate', async () => {
-    generateStageMock.mockResolvedValue({ status: 'success', result: successResult() })
+    generateStageMock.mockResolvedValue({
+      status: 'success',
+      result: successResult(),
+    })
     applyApprovalPolicyStageMock.mockResolvedValue({ action: 'send' })
-    scheduleAndSendMock.mockResolvedValue({ outboundMessageId: 'sent-d1', providerMessageId: 'p' })
+    scheduleAndSendMock.mockResolvedValue({
+      outboundMessageId: 'sent-d1',
+      providerMessageId: 'p',
+    })
 
     await handleInbound(INBOUND_ID)
 
     expect(applyApprovalPolicyStageMock).toHaveBeenCalledTimes(1)
-    const [, , grounding, mechanicOffer, prosePromise, cancellation, closedVenue] =
-      applyApprovalPolicyStageMock.mock.calls[0]
+    const [
+      ,
+      ,
+      grounding,
+      mechanicOffer,
+      prosePromise,
+      cancellation,
+      closedVenue,
+    ] = applyApprovalPolicyStageMock.mock.calls[0]
     expect(grounding).toBeNull()
     expect(mechanicOffer).toEqual({ status: 'skipped' })
     expect(prosePromise).toEqual({ status: 'skipped' })
-    expect(cancellation).toEqual({ resolution: { status: 'none' }, claim: 'skipped' })
+    expect(cancellation).toEqual({
+      resolution: { status: 'none' },
+      claim: 'skipped',
+    })
     expect(closedVenue).toEqual({ status: 'skipped' })
   })
 
@@ -1698,7 +1925,10 @@ describe('handleInbound — deferred post-generation checks (decision 0003 rewri
   // gate mock, so a regression that moves any check back before the gate
   // fails here even though all five have been called by the end of the turn.
   it('calls no verify stage before the gate decides, and all five after the send', async () => {
-    generateStageMock.mockResolvedValue({ status: 'success', result: successResult() })
+    generateStageMock.mockResolvedValue({
+      status: 'success',
+      result: successResult(),
+    })
     let callsAtGateTime = -1
     applyApprovalPolicyStageMock.mockImplementation(async () => {
       callsAtGateTime =
@@ -1709,7 +1939,10 @@ describe('handleInbound — deferred post-generation checks (decision 0003 rewri
         verifyClosedVenueArrivalStageMock.mock.calls.length
       return { action: 'send' }
     })
-    scheduleAndSendMock.mockResolvedValue({ outboundMessageId: 'sent-d2', providerMessageId: 'p' })
+    scheduleAndSendMock.mockResolvedValue({
+      outboundMessageId: 'sent-d2',
+      providerMessageId: 'p',
+    })
 
     await handleInbound(INBOUND_ID)
 
@@ -1722,9 +1955,15 @@ describe('handleInbound — deferred post-generation checks (decision 0003 rewri
   })
 
   it("runs every post-send check with disposition 'sent'", async () => {
-    generateStageMock.mockResolvedValue({ status: 'success', result: successResult() })
+    generateStageMock.mockResolvedValue({
+      status: 'success',
+      result: successResult(),
+    })
     applyApprovalPolicyStageMock.mockResolvedValue({ action: 'send' })
-    scheduleAndSendMock.mockResolvedValue({ outboundMessageId: 'sent-d3', providerMessageId: 'p' })
+    scheduleAndSendMock.mockResolvedValue({
+      outboundMessageId: 'sent-d3',
+      providerMessageId: 'p',
+    })
 
     await handleInbound(INBOUND_ID)
 
@@ -1743,7 +1982,10 @@ describe('handleInbound — deferred post-generation checks (decision 0003 rewri
   // A queued draft is already in front of an operator; drop/silence sent
   // nothing. Running the checks there would alert on text no guest ever saw.
   it('runs no checks when the gate queues', async () => {
-    generateStageMock.mockResolvedValue({ status: 'success', result: successResult() })
+    generateStageMock.mockResolvedValue({
+      status: 'success',
+      result: successResult(),
+    })
     applyApprovalPolicyStageMock.mockResolvedValue({
       action: 'queue',
       triggers: [APPROVAL_TRIGGERS.FIDELITY_BELOW_AUTO_SEND_FLOOR],
@@ -1782,7 +2024,10 @@ describe('handleInbound — deferred post-generation checks (decision 0003 rewri
       code: 'A1B2',
       expiresAt: null,
     }
-    generateStageMock.mockResolvedValue({ status: 'success', result: successResult() })
+    generateStageMock.mockResolvedValue({
+      status: 'success',
+      result: successResult(),
+    })
     applyApprovalPolicyStageMock.mockResolvedValue({
       action: 'queue',
       triggers: ['prose_promise_backstop'],
@@ -1812,10 +2057,18 @@ describe('handleInbound — deferred post-generation checks (decision 0003 rewri
   // gate input left to degrade. The invariant that replaces it is that a
   // post-send throw cannot touch the already-sent reply's outcome.
   it('reports the turn sent even when a post-send check throws', async () => {
-    generateStageMock.mockResolvedValue({ status: 'success', result: successResult() })
-    verifyGroundingStageMock.mockRejectedValueOnce(new Error('unexpected throw'))
+    generateStageMock.mockResolvedValue({
+      status: 'success',
+      result: successResult(),
+    })
+    verifyGroundingStageMock.mockRejectedValueOnce(
+      new Error('unexpected throw'),
+    )
     applyApprovalPolicyStageMock.mockResolvedValue({ action: 'send' })
-    scheduleAndSendMock.mockResolvedValue({ outboundMessageId: 'sent-d4', providerMessageId: 'p' })
+    scheduleAndSendMock.mockResolvedValue({
+      outboundMessageId: 'sent-d4',
+      providerMessageId: 'p',
+    })
 
     const result = await handleInbound(INBOUND_ID)
 
@@ -1849,7 +2102,10 @@ describe('handleInbound — rendered intentions on the queue path (TAC-385)', ()
   }
 
   function setUpSend() {
-    generateStageMock.mockResolvedValue({ status: 'success', result: successResult() })
+    generateStageMock.mockResolvedValue({
+      status: 'success',
+      result: successResult(),
+    })
     applyApprovalPolicyStageMock.mockResolvedValue({ action: 'send' })
     scheduleAndSendMock.mockResolvedValue({
       outboundMessageId: 'sent-1',
@@ -1858,7 +2114,10 @@ describe('handleInbound — rendered intentions on the queue path (TAC-385)', ()
   }
 
   function setUpQueue() {
-    generateStageMock.mockResolvedValue({ status: 'success', result: successResult() })
+    generateStageMock.mockResolvedValue({
+      status: 'success',
+      result: successResult(),
+    })
     applyApprovalPolicyStageMock.mockResolvedValue({
       action: 'queue',
       triggers: ['model_flagged'],
@@ -1889,7 +2148,9 @@ describe('handleInbound — rendered intentions on the queue path (TAC-385)', ()
 
   it('passes the rendered set to the queue persist', async () => {
     setUpQueue()
-    buildRuntimeContextMock.mockResolvedValue(makeCtx({ openIntentions: [UNDERSTAND] }))
+    buildRuntimeContextMock.mockResolvedValue(
+      makeCtx({ openIntentions: [UNDERSTAND] }),
+    )
 
     const r = await handleInbound(INBOUND_ID)
 
@@ -1911,7 +2172,9 @@ describe('handleInbound — rendered intentions on the queue path (TAC-385)', ()
       reasoning: 'stop',
       crisisSafety: false,
     })
-    buildRuntimeContextMock.mockResolvedValue(makeCtx({ openIntentions: [UNDERSTAND] }))
+    buildRuntimeContextMock.mockResolvedValue(
+      makeCtx({ openIntentions: [UNDERSTAND] }),
+    )
 
     await handleInbound(INBOUND_ID)
 
@@ -1975,7 +2238,10 @@ describe('handleInbound — Instagram replies (TAC-469)', () => {
     })
 
   function setUpSendDecision() {
-    generateStageMock.mockResolvedValue({ status: 'success', result: successResult() })
+    generateStageMock.mockResolvedValue({
+      status: 'success',
+      result: successResult(),
+    })
     applyApprovalPolicyStageMock.mockResolvedValue({ action: 'send' })
     buildRuntimeContextMock.mockResolvedValue(instagramCtx())
   }
@@ -1997,14 +2263,23 @@ describe('handleInbound — Instagram replies (TAC-469)', () => {
     expect(dispatchInstagramReplyMock).toHaveBeenCalledWith(
       expect.anything(),
       expect.anything(),
-      expect.objectContaining({ replyCheck: { inboundMessageId: INBOUND_ID }, onUndelivered: 'card' }),
+      expect.objectContaining({
+        replyCheck: { inboundMessageId: INBOUND_ID },
+        onUndelivered: 'card',
+      }),
     )
   })
 
-  it("a text conversation never reaches the Instagram arm", async () => {
-    generateStageMock.mockResolvedValue({ status: 'success', result: successResult() })
+  it('a text conversation never reaches the Instagram arm', async () => {
+    generateStageMock.mockResolvedValue({
+      status: 'success',
+      result: successResult(),
+    })
     applyApprovalPolicyStageMock.mockResolvedValue({ action: 'send' })
-    scheduleAndSendMock.mockResolvedValue({ outboundMessageId: 'sent-1', providerMessageId: 'p' })
+    scheduleAndSendMock.mockResolvedValue({
+      outboundMessageId: 'sent-1',
+      providerMessageId: 'p',
+    })
     const r = await handleInbound(INBOUND_ID)
     expect(r).toMatchObject({ status: 'sent', outboundMessageId: 'sent-1' })
     expect(dispatchInstagramReplyMock).not.toHaveBeenCalled()
@@ -2012,7 +2287,11 @@ describe('handleInbound — Instagram replies (TAC-469)', () => {
 
   it('a reply that became a card queues the run and pushes the operator (rule 4)', async () => {
     setUpSendDecision()
-    dispatchInstagramReplyMock.mockResolvedValue({ kind: 'carded', reason: 'window_closed_by_gate', cardId: 'card-7' })
+    dispatchInstagramReplyMock.mockResolvedValue({
+      kind: 'carded',
+      reason: 'window_closed_by_gate',
+      cardId: 'card-7',
+    })
     const r = await handleInbound(INBOUND_ID)
     expect(r).toEqual({
       status: 'queued',
@@ -2046,7 +2325,10 @@ describe('handleInbound — Instagram replies (TAC-469)', () => {
     const r = await handleInbound(INBOUND_ID)
     expect(r).toEqual({ status: 'sent', outboundMessageId: 'ig-row-1' })
     expect(sendDraftFlaggedPushMock).toHaveBeenCalledWith(
-      expect.objectContaining({ draftId: 'card-8', guestQuestion: 'do you have oat milk?' }),
+      expect.objectContaining({
+        draftId: 'card-8',
+        guestQuestion: 'do you have oat milk?',
+      }),
     )
   })
 
@@ -2065,7 +2347,11 @@ describe('handleInbound — Instagram replies (TAC-469)', () => {
         },
       ],
     })
-    recordIntentionPromptsMock.mockResolvedValue({ kind: 'recorded', raisedKeys: [], classifierAttempts: 1 })
+    recordIntentionPromptsMock.mockResolvedValue({
+      kind: 'recorded',
+      raisedKeys: [],
+      classifierAttempts: 1,
+    })
     dispatchInstagramReplyMock.mockResolvedValue({
       kind: 'sent',
       outboundMessageId: 'ig-row-1',
@@ -2076,13 +2362,20 @@ describe('handleInbound — Instagram replies (TAC-469)', () => {
       undelivered: { reason: 'rate_limited', cardId: 'card-8' },
     })
     await handleInbound(INBOUND_ID)
-    expect(recordIntentionPromptsMock).toHaveBeenCalledWith(expect.objectContaining({ sentBody: 'first half' }))
-    expect(captureIntentionPromptRaisedMock).toHaveBeenCalledWith(expect.objectContaining({ sentBody: 'first half' }))
+    expect(recordIntentionPromptsMock).toHaveBeenCalledWith(
+      expect.objectContaining({ sentBody: 'first half' }),
+    )
+    expect(captureIntentionPromptRaisedMock).toHaveBeenCalledWith(
+      expect.objectContaining({ sentBody: 'first half' }),
+    )
   })
 
   it('a message staff already answered in the app sends nothing, pushes nothing, records nothing (rule 3)', async () => {
     setUpSendDecision()
-    dispatchInstagramReplyMock.mockResolvedValue({ kind: 'superseded', byMessageId: 'echo-1' })
+    dispatchInstagramReplyMock.mockResolvedValue({
+      kind: 'superseded',
+      byMessageId: 'echo-1',
+    })
     const r = await handleInbound(INBOUND_ID)
     expect(r).toEqual({ status: 'superseded', byMessageId: 'echo-1' })
     expect(sendDraftFlaggedPushMock).not.toHaveBeenCalled()
@@ -2091,14 +2384,29 @@ describe('handleInbound — Instagram replies (TAC-469)', () => {
 
   it('a reply that neither sent nor carded fails the run', async () => {
     setUpSendDecision()
-    dispatchInstagramReplyMock.mockResolvedValue({ kind: 'not_sent', reason: 'window_closed_by_gate' })
-    expect(await handleInbound(INBOUND_ID)).toEqual({ status: 'failed', stage: 'send', error: 'window_closed_by_gate' })
+    dispatchInstagramReplyMock.mockResolvedValue({
+      kind: 'not_sent',
+      reason: 'window_closed_by_gate',
+    })
+    expect(await handleInbound(INBOUND_ID)).toEqual({
+      status: 'failed',
+      stage: 'send',
+      error: 'window_closed_by_gate',
+    })
   })
 
   it('a reply that went out but saved no row fails at persist', async () => {
     setUpSendDecision()
-    dispatchInstagramReplyMock.mockResolvedValue({ kind: 'sent_unrecorded', providerMessageId: 'mid-1', reason: 'persist_failed' })
-    expect(await handleInbound(INBOUND_ID)).toEqual({ status: 'failed', stage: 'persist', error: 'persist_failed' })
+    dispatchInstagramReplyMock.mockResolvedValue({
+      kind: 'sent_unrecorded',
+      providerMessageId: 'mid-1',
+      reason: 'persist_failed',
+    })
+    expect(await handleInbound(INBOUND_ID)).toEqual({
+      status: 'failed',
+      stage: 'persist',
+      error: 'persist_failed',
+    })
   })
 
   // The fixed crisis body is two sentences, so on Instagram it can dispatch as
@@ -2107,7 +2415,12 @@ describe('handleInbound — Instagram replies (TAC-469)', () => {
   // worst.
   it('pushes for the card when only part of the crisis-safety reply went out', async () => {
     buildRuntimeContextMock.mockResolvedValue(instagramCtx())
-    classifyStageMock.mockResolvedValue({ category: 'unknown', classifierConfidence: 0.9, reasoning: 'r', crisisSafety: true })
+    classifyStageMock.mockResolvedValue({
+      category: 'unknown',
+      classifierConfidence: 0.9,
+      reasoning: 'r',
+      crisisSafety: true,
+    })
     dispatchInstagramReplyMock.mockResolvedValue({
       kind: 'sent',
       outboundMessageId: 'crisis-ig',
@@ -2124,13 +2437,22 @@ describe('handleInbound — Instagram replies (TAC-469)', () => {
     // sees only category ('unknown' above, not comp_complaint) and the guest's
     // self-harm message is quoted onto every operator's lock screen.
     expect(sendDraftFlaggedPushMock).toHaveBeenCalledWith(
-      expect.objectContaining({ draftId: 'card-crisis', guestIsCrisis: true, guestCategory: 'unknown' }),
+      expect.objectContaining({
+        draftId: 'card-crisis',
+        guestIsCrisis: true,
+        guestCategory: 'unknown',
+      }),
     )
   })
 
   it('exempts the crisis-safety reply from the reply check (ruled 2026-09-19)', async () => {
     buildRuntimeContextMock.mockResolvedValue(instagramCtx())
-    classifyStageMock.mockResolvedValue({ category: 'unknown', classifierConfidence: 0.9, reasoning: 'r', crisisSafety: true })
+    classifyStageMock.mockResolvedValue({
+      category: 'unknown',
+      classifierConfidence: 0.9,
+      reasoning: 'r',
+      crisisSafety: true,
+    })
     dispatchInstagramReplyMock.mockResolvedValue({
       kind: 'sent',
       outboundMessageId: 'crisis-ig',
@@ -2150,14 +2472,18 @@ describe('handleInbound — Instagram replies (TAC-469)', () => {
   })
 
   it('stops a run with an unresolved channel before classifying: nothing routes on null', async () => {
-    buildRuntimeContextMock.mockResolvedValue(makeCtx({ conversationChannel: null }))
+    buildRuntimeContextMock.mockResolvedValue(
+      makeCtx({ conversationChannel: null }),
+    )
     const r = await handleInbound(INBOUND_ID)
     expect(r).toMatchObject({ status: 'failed', stage: 'context_build' })
     expect(classifyStageMock).not.toHaveBeenCalled()
     expect(generateStageMock).not.toHaveBeenCalled()
     expect(scheduleAndSendMock).not.toHaveBeenCalled()
     expect(dispatchInstagramReplyMock).not.toHaveBeenCalled()
-    expect(fireRedAlertMock).toHaveBeenCalledWith(expect.objectContaining({ stage: 'context_build' }))
+    expect(fireRedAlertMock).toHaveBeenCalledWith(
+      expect.objectContaining({ stage: 'context_build' }),
+    )
   })
 })
 
@@ -2189,9 +2515,15 @@ describe('handleInbound — cancellation carrier (TAC-513)', () => {
   // post-send batch entirely. Since the decision 0003 rewrite the call this
   // pins happens AFTER dispatch (runPostSendChecks), not before the gate.
   it('calls verifyCancellationClaimStage once per sent inbound', async () => {
-    generateStageMock.mockResolvedValue({ status: 'success', result: successResult() })
+    generateStageMock.mockResolvedValue({
+      status: 'success',
+      result: successResult(),
+    })
     applyApprovalPolicyStageMock.mockResolvedValue({ action: 'send' })
-    scheduleAndSendMock.mockResolvedValue({ outboundMessageId: 'sent-c1', providerMessageId: 'p' })
+    scheduleAndSendMock.mockResolvedValue({
+      outboundMessageId: 'sent-c1',
+      providerMessageId: 'p',
+    })
 
     await handleInbound(INBOUND_ID)
 
@@ -2241,7 +2573,9 @@ describe('handleInbound — cancellation carrier (TAC-513)', () => {
   // stage unexpectedly throws": there is no throw to recover from, because
   // the orchestrator now computes the resolution itself.
   it('passes a RESOLVED pure resolution to the gate when the reply cancels a live commitment', async () => {
-    buildRuntimeContextMock.mockResolvedValue(makeCtx({ activeCommitments: [TONIC] }))
+    buildRuntimeContextMock.mockResolvedValue(
+      makeCtx({ activeCommitments: [TONIC] }),
+    )
     generateStageMock.mockResolvedValue({
       status: 'success',
       result: { ...successResult(), cancelsCommitmentId: TONIC.id },
@@ -2263,9 +2597,14 @@ describe('handleInbound — cancellation carrier (TAC-513)', () => {
 
     await handleInbound(INBOUND_ID)
 
-    const [, , , , , cancellationArg] = applyApprovalPolicyStageMock.mock.calls[0]
+    const [, , , , , cancellationArg] =
+      applyApprovalPolicyStageMock.mock.calls[0]
     expect(cancellationArg).toEqual({
-      resolution: { status: 'resolved', cancellation: { commitmentId: TONIC.id }, commitment: TONIC },
+      resolution: {
+        status: 'resolved',
+        cancellation: { commitmentId: TONIC.id },
+        commitment: TONIC,
+      },
       claim: 'skipped',
     })
   })
@@ -2275,14 +2614,24 @@ describe('handleInbound — cancellation carrier (TAC-513)', () => {
   // hold a reply that says nothing about a cancellation. Reverses
   // "recomputes NONE on a throw when the reply cancels nothing".
   it('passes a NONE pure resolution to the gate on an ordinary reply', async () => {
-    generateStageMock.mockResolvedValue({ status: 'success', result: successResult() })
+    generateStageMock.mockResolvedValue({
+      status: 'success',
+      result: successResult(),
+    })
     applyApprovalPolicyStageMock.mockResolvedValue({ action: 'send' })
-    scheduleAndSendMock.mockResolvedValue({ outboundMessageId: 'sent-c3', providerMessageId: 'p' })
+    scheduleAndSendMock.mockResolvedValue({
+      outboundMessageId: 'sent-c3',
+      providerMessageId: 'p',
+    })
 
     await handleInbound(INBOUND_ID)
 
-    const [, , , , , cancellationArg] = applyApprovalPolicyStageMock.mock.calls[0]
-    expect(cancellationArg).toEqual({ resolution: { status: 'none' }, claim: 'skipped' })
+    const [, , , , , cancellationArg] =
+      applyApprovalPolicyStageMock.mock.calls[0]
+    expect(cancellationArg).toEqual({
+      resolution: { status: 'none' },
+      claim: 'skipped',
+    })
   })
 })
 
@@ -2317,11 +2666,17 @@ describe('handleInbound — arrival push fan-out (TAC-363)', () => {
   it('pushes once per transitioned obligation, not once per arrival', async () => {
     dispatchArrivalCaptureMock.mockResolvedValue({
       kind: 'imminent_won',
-      commitmentRows: [commitmentRow(COMMITMENT_A, '5Q22'), commitmentRow(COMMITMENT_B, 'ADH8')],
+      commitmentRows: [
+        commitmentRow(COMMITMENT_A, '5Q22'),
+        commitmentRow(COMMITMENT_B, 'ADH8'),
+      ],
       failedCount: 0,
     })
 
-    generateStageMock.mockResolvedValue({ status: 'success', result: successResult() })
+    generateStageMock.mockResolvedValue({
+      status: 'success',
+      result: successResult(),
+    })
 
     await handleInbound(INBOUND_ID)
 
@@ -2336,16 +2691,26 @@ describe('handleInbound — arrival push fan-out (TAC-363)', () => {
   it('pushes nothing when the venue was closed and nothing was recorded', async () => {
     // Ruling 1(a) end to end: no row comes back, so no operator is woken at
     // 1am for an arrival that cannot happen.
-    generateStageMock.mockResolvedValue({ status: 'success', result: successResult() })
-    dispatchArrivalCaptureMock.mockResolvedValue({ kind: 'closed_venue_skipped' })
+    generateStageMock.mockResolvedValue({
+      status: 'success',
+      result: successResult(),
+    })
+    dispatchArrivalCaptureMock.mockResolvedValue({
+      kind: 'closed_venue_skipped',
+    })
     await handleInbound(INBOUND_ID)
     expect(sendCommitmentArrivalPushMock).not.toHaveBeenCalled()
   })
 
   it('pushes nothing when the guest owes nothing an arrival can attach to', async () => {
     // Ruling 4(a): the only thing open was a recommendation.
-    generateStageMock.mockResolvedValue({ status: 'success', result: successResult() })
-    dispatchArrivalCaptureMock.mockResolvedValue({ kind: 'no_open_obligations' })
+    generateStageMock.mockResolvedValue({
+      status: 'success',
+      result: successResult(),
+    })
+    dispatchArrivalCaptureMock.mockResolvedValue({
+      kind: 'no_open_obligations',
+    })
     await handleInbound(INBOUND_ID)
     expect(sendCommitmentArrivalPushMock).not.toHaveBeenCalled()
   })
@@ -2368,8 +2733,14 @@ describe('handleInbound — records the turn outcome (TAC-523)', () => {
 
   it('hands over the SENT result, with the outbound row id', async () => {
     applyApprovalPolicyStageMock.mockResolvedValue({ action: 'send' })
-    generateStageMock.mockResolvedValue({ status: 'success', result: successResult() })
-    scheduleAndSendMock.mockResolvedValue({ outboundMessageId: 'out-1', providerMessageId: 'p1' })
+    generateStageMock.mockResolvedValue({
+      status: 'success',
+      result: successResult(),
+    })
+    scheduleAndSendMock.mockResolvedValue({
+      outboundMessageId: 'out-1',
+      providerMessageId: 'p1',
+    })
 
     const r = await handleInbound(INBOUND_ID)
 
@@ -2382,7 +2753,7 @@ describe('handleInbound — records the turn outcome (TAC-523)', () => {
     expect(lastRecordedCall().agentRunId).toEqual(expect.any(String))
   })
 
-  it('records the RUN\'s agentRunId, not a fresh one', async () => {
+  it("records the RUN's agentRunId, not a fresh one", async () => {
     // The ledger's whole value on a failure is correlating a row with the
     // PostHog event and the Langfuse trace for the same run. `expect.any(String)`
     // would pass against a freshly minted uuid, so this pins it against the id
@@ -2418,13 +2789,19 @@ describe('handleInbound — records the turn outcome (TAC-523)', () => {
     const r = await handleInbound(INBOUND_ID)
 
     expect(r).toMatchObject({ status: 'failed', stage: 'corpus' })
-    expect(lastRecordedCall().result).toMatchObject({ status: 'failed', stage: 'corpus' })
+    expect(lastRecordedCall().result).toMatchObject({
+      status: 'failed',
+      stage: 'corpus',
+    })
   })
 
   it('hands over a QUEUED result, so a card is in the ledger too', async () => {
     // The complete-ledger decision: successes are recorded, or a failure count
     // has no denominator.
-    generateStageMock.mockResolvedValue({ status: 'success', result: successResult() })
+    generateStageMock.mockResolvedValue({
+      status: 'success',
+      result: successResult(),
+    })
     applyApprovalPolicyStageMock.mockResolvedValue({
       action: 'queue',
       triggers: ['model_flagged'],
@@ -2444,7 +2821,10 @@ describe('handleInbound — records the turn outcome (TAC-523)', () => {
   it('records a duplicate turn, which is the one outcome that must not count as a turn', async () => {
     // Recorded so the redelivery is visible, and excluded from a strict turn
     // count by `outcome <> 'skipped_duplicate'` — see migration 055's header.
-    existingReplyMaybeSingleMock.mockResolvedValue({ data: { id: 'already' }, error: null })
+    existingReplyMaybeSingleMock.mockResolvedValue({
+      data: { id: 'already' },
+      error: null,
+    })
 
     const r = await handleInbound(INBOUND_ID)
 
@@ -2454,8 +2834,14 @@ describe('handleInbound — records the turn outcome (TAC-523)', () => {
 
   it('records exactly once per turn', async () => {
     applyApprovalPolicyStageMock.mockResolvedValue({ action: 'send' })
-    generateStageMock.mockResolvedValue({ status: 'success', result: successResult() })
-    scheduleAndSendMock.mockResolvedValue({ outboundMessageId: 'out-1', providerMessageId: 'p1' })
+    generateStageMock.mockResolvedValue({
+      status: 'success',
+      result: successResult(),
+    })
+    scheduleAndSendMock.mockResolvedValue({
+      outboundMessageId: 'out-1',
+      providerMessageId: 'p1',
+    })
 
     await handleInbound(INBOUND_ID)
 
@@ -2472,14 +2858,23 @@ describe('handleInbound — records the turn outcome (TAC-523)', () => {
     // previously did not exist" the ticket forbids.
     traceControl.flushThrows = true
     applyApprovalPolicyStageMock.mockResolvedValue({ action: 'send' })
-    generateStageMock.mockResolvedValue({ status: 'success', result: successResult() })
-    scheduleAndSendMock.mockResolvedValue({ outboundMessageId: 'out-1', providerMessageId: 'p1' })
+    generateStageMock.mockResolvedValue({
+      status: 'success',
+      result: successResult(),
+    })
+    scheduleAndSendMock.mockResolvedValue({
+      outboundMessageId: 'out-1',
+      providerMessageId: 'p1',
+    })
 
     await expect(handleInbound(INBOUND_ID)).rejects.toThrow('flush failed')
 
     // Recorded, with no AgentResult, because the run produced none.
     expect(recordInboundTurnOutcomeMock).toHaveBeenCalledTimes(1)
-    expect(lastRecordedCall()).toMatchObject({ inboundMessageId: INBOUND_ID, result: null })
+    expect(lastRecordedCall()).toMatchObject({
+      inboundMessageId: INBOUND_ID,
+      result: null,
+    })
   })
 
   it('a recorder that THROWS does not change what the guest got', async () => {
@@ -2489,9 +2884,17 @@ describe('handleInbound — records the turn outcome (TAC-523)', () => {
     // This is the mutant that catches a refactor merging the two.
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
     applyApprovalPolicyStageMock.mockResolvedValue({ action: 'send' })
-    generateStageMock.mockResolvedValue({ status: 'success', result: successResult() })
-    scheduleAndSendMock.mockResolvedValue({ outboundMessageId: 'out-1', providerMessageId: 'p1' })
-    recordInboundTurnOutcomeMock.mockRejectedValue(new Error('ledger table is gone'))
+    generateStageMock.mockResolvedValue({
+      status: 'success',
+      result: successResult(),
+    })
+    scheduleAndSendMock.mockResolvedValue({
+      outboundMessageId: 'out-1',
+      providerMessageId: 'p1',
+    })
+    recordInboundTurnOutcomeMock.mockRejectedValue(
+      new Error('ledger table is gone'),
+    )
 
     const r = await handleInbound(INBOUND_ID)
 
@@ -2511,26 +2914,35 @@ describe('handleInbound — records the turn outcome (TAC-523)', () => {
 // accumulating recognition state. A `status === 'venue_halted'` assertion
 // alone would pass for a gate in the wrong place.
 describe('handleInbound — paused and archived venues (TAC-529)', () => {
-  it.each(['paused', 'archived'])('does not reply at a %s venue', async (status) => {
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
-    venueStatusMaybeSingleMock.mockResolvedValue({ data: { status }, error: null })
+  it.each(['paused', 'archived'])(
+    'does not reply at a %s venue',
+    async (status) => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+      venueStatusMaybeSingleMock.mockResolvedValue({
+        data: { status },
+        error: null,
+      })
 
-    const r = await handleInbound(INBOUND_ID)
+      const r = await handleInbound(INBOUND_ID)
 
-    expect(r).toEqual({ status: 'venue_halted', venueStatus: status })
-    // Before context build, so nothing was classified, retrieved, generated
-    // or written — including guest_states.
-    expect(buildRuntimeContextMock).not.toHaveBeenCalled()
-    expect(generateStageMock).not.toHaveBeenCalled()
-    expect(scheduleAndSendMock).not.toHaveBeenCalled()
-    warn.mockRestore()
-  })
+      expect(r).toEqual({ status: 'venue_halted', venueStatus: status })
+      // Before context build, so nothing was classified, retrieved, generated
+      // or written — including guest_states.
+      expect(buildRuntimeContextMock).not.toHaveBeenCalled()
+      expect(generateStageMock).not.toHaveBeenCalled()
+      expect(scheduleAndSendMock).not.toHaveBeenCalled()
+      warn.mockRestore()
+    },
+  )
 
   // The silence has to be countable, or it is indistinguishable from a
   // swallowed reply — which is the whole reason TAC-523's ledger exists.
   it('records the turn so the silence is countable', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
-    venueStatusMaybeSingleMock.mockResolvedValue({ data: { status: 'paused' }, error: null })
+    venueStatusMaybeSingleMock.mockResolvedValue({
+      data: { status: 'paused' },
+      error: null,
+    })
 
     await handleInbound(INBOUND_ID)
 
@@ -2563,7 +2975,10 @@ describe('handleInbound — paused and archived venues (TAC-529)', () => {
   // invariant: these spies are the only way to see that a step did not run.
   it('takes no conversation claim and does not settle, at a halted venue', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
-    venueStatusMaybeSingleMock.mockResolvedValue({ data: { status: 'paused' }, error: null })
+    venueStatusMaybeSingleMock.mockResolvedValue({
+      data: { status: 'paused' },
+      error: null,
+    })
     const insertClaim = vi.fn()
     const readClaim = vi.fn()
     const sleep = vi.fn()
@@ -2580,7 +2995,10 @@ describe('handleInbound — paused and archived venues (TAC-529)', () => {
       sleep,
     } as unknown as CoalesceDeps
 
-    const r = await handleInbound(INBOUND_ID, { coalescing: true, coalesceDeps: deps })
+    const r = await handleInbound(INBOUND_ID, {
+      coalescing: true,
+      coalesceDeps: deps,
+    })
 
     expect(r).toEqual({ status: 'venue_halted', venueStatus: 'paused' })
     expect(insertClaim).not.toHaveBeenCalled()
@@ -2593,10 +3011,19 @@ describe('handleInbound — paused and archived venues (TAC-529)', () => {
   // The live-data test. Le Mil's is 'pending' in production and replies to
   // guests today; an allow-list on 'active' would have stopped it.
   it('DOES reply at a pending venue, because the live venue is pending', async () => {
-    venueStatusMaybeSingleMock.mockResolvedValue({ data: { status: 'pending' }, error: null })
+    venueStatusMaybeSingleMock.mockResolvedValue({
+      data: { status: 'pending' },
+      error: null,
+    })
     applyApprovalPolicyStageMock.mockResolvedValue({ action: 'send' })
-    generateStageMock.mockResolvedValue({ status: 'success', result: successResult() })
-    scheduleAndSendMock.mockResolvedValue({ outboundMessageId: 'out-1', providerMessageId: 'p1' })
+    generateStageMock.mockResolvedValue({
+      status: 'success',
+      result: successResult(),
+    })
+    scheduleAndSendMock.mockResolvedValue({
+      outboundMessageId: 'out-1',
+      providerMessageId: 'p1',
+    })
 
     const r = await handleInbound(INBOUND_ID)
 
@@ -2605,10 +3032,19 @@ describe('handleInbound — paused and archived venues (TAC-529)', () => {
   })
 
   it('replies at an active venue', async () => {
-    venueStatusMaybeSingleMock.mockResolvedValue({ data: { status: 'active' }, error: null })
+    venueStatusMaybeSingleMock.mockResolvedValue({
+      data: { status: 'active' },
+      error: null,
+    })
     applyApprovalPolicyStageMock.mockResolvedValue({ action: 'send' })
-    generateStageMock.mockResolvedValue({ status: 'success', result: successResult() })
-    scheduleAndSendMock.mockResolvedValue({ outboundMessageId: 'out-1', providerMessageId: 'p1' })
+    generateStageMock.mockResolvedValue({
+      status: 'success',
+      result: successResult(),
+    })
+    scheduleAndSendMock.mockResolvedValue({
+      outboundMessageId: 'out-1',
+      providerMessageId: 'p1',
+    })
 
     const r = await handleInbound(INBOUND_ID)
 
@@ -2617,10 +3053,19 @@ describe('handleInbound — paused and archived venues (TAC-529)', () => {
 
   it('replies when the status is one it cannot read', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
-    venueStatusMaybeSingleMock.mockResolvedValue({ data: { status: 'suspended' }, error: null })
+    venueStatusMaybeSingleMock.mockResolvedValue({
+      data: { status: 'suspended' },
+      error: null,
+    })
     applyApprovalPolicyStageMock.mockResolvedValue({ action: 'send' })
-    generateStageMock.mockResolvedValue({ status: 'success', result: successResult() })
-    scheduleAndSendMock.mockResolvedValue({ outboundMessageId: 'out-1', providerMessageId: 'p1' })
+    generateStageMock.mockResolvedValue({
+      status: 'success',
+      result: successResult(),
+    })
+    scheduleAndSendMock.mockResolvedValue({
+      outboundMessageId: 'out-1',
+      providerMessageId: 'p1',
+    })
 
     const r = await handleInbound(INBOUND_ID)
 
@@ -2639,8 +3084,14 @@ describe('handleInbound — paused and archived venues (TAC-529)', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
     venueStatusMaybeSingleMock.mockRejectedValue(new Error('socket hang up'))
     applyApprovalPolicyStageMock.mockResolvedValue({ action: 'send' })
-    generateStageMock.mockResolvedValue({ status: 'success', result: successResult() })
-    scheduleAndSendMock.mockResolvedValue({ outboundMessageId: 'out-1', providerMessageId: 'p1' })
+    generateStageMock.mockResolvedValue({
+      status: 'success',
+      result: successResult(),
+    })
+    scheduleAndSendMock.mockResolvedValue({
+      outboundMessageId: 'out-1',
+      providerMessageId: 'p1',
+    })
     const r = await handleInbound(INBOUND_ID)
     expect(r).toEqual({ status: 'sent', outboundMessageId: 'out-1' })
     warn.mockRestore()
@@ -2653,8 +3104,14 @@ describe('handleInbound — paused and archived venues (TAC-529)', () => {
       error: { message: 'connection reset' },
     })
     applyApprovalPolicyStageMock.mockResolvedValue({ action: 'send' })
-    generateStageMock.mockResolvedValue({ status: 'success', result: successResult() })
-    scheduleAndSendMock.mockResolvedValue({ outboundMessageId: 'out-1', providerMessageId: 'p1' })
+    generateStageMock.mockResolvedValue({
+      status: 'success',
+      result: successResult(),
+    })
+    scheduleAndSendMock.mockResolvedValue({
+      outboundMessageId: 'out-1',
+      providerMessageId: 'p1',
+    })
 
     const r = await handleInbound(INBOUND_ID)
 
@@ -2752,7 +3209,10 @@ describe('TAC-540 — typing dots on the auto-send path', () => {
    */
   it('turns the dots on after classification AND again after generation', async () => {
     applyApprovalPolicyStageMock.mockResolvedValue({ action: 'send' })
-    generateStageMock.mockResolvedValue({ status: 'success', result: successResult() })
+    generateStageMock.mockResolvedValue({
+      status: 'success',
+      result: successResult(),
+    })
     instagramSendSucceeds()
 
     const r = await handleInbound(INBOUND_ID)
@@ -2797,7 +3257,10 @@ describe('TAC-540 — typing dots on the auto-send path', () => {
    * dots for a reply that is now sitting on an operator's screen.
    */
   it('turns the dots off when the draft is held for approval, and sends nothing', async () => {
-    generateStageMock.mockResolvedValue({ status: 'success', result: successResult() })
+    generateStageMock.mockResolvedValue({
+      status: 'success',
+      result: successResult(),
+    })
     applyApprovalPolicyStageMock.mockResolvedValue({
       action: 'queue',
       triggers: ['model_flagged'],
@@ -2832,7 +3295,10 @@ describe('TAC-540 — typing dots on the auto-send path', () => {
    */
   it('does NOT turn the dots off after a reply actually went out', async () => {
     applyApprovalPolicyStageMock.mockResolvedValue({ action: 'send' })
-    generateStageMock.mockResolvedValue({ status: 'success', result: successResult() })
+    generateStageMock.mockResolvedValue({
+      status: 'success',
+      result: successResult(),
+    })
     instagramSendSucceeds()
 
     await handleInbound(INBOUND_ID)
@@ -2864,19 +3330,26 @@ describe('TAC-540 — typing dots on the auto-send path', () => {
       'failed in generation, with no card',
       () => {
         generateStageMock.mockResolvedValue({ status: 'failed', error: 'boom' })
-        loadPendingRowsBySlotMock.mockRejectedValue(new Error('no card for you'))
+        loadPendingRowsBySlotMock.mockRejectedValue(
+          new Error('no card for you'),
+        )
       },
     ],
     [
       'failed in the corpus stage',
       () => {
-        retrieveCorpusStageMock.mockRejectedValue(new Error('voice pack load failed'))
+        retrieveCorpusStageMock.mockRejectedValue(
+          new Error('voice pack load failed'),
+        )
       },
     ],
     [
       'dropped, because a pending card holds the slot',
       () => {
-        generateStageMock.mockResolvedValue({ status: 'success', result: successResult() })
+        generateStageMock.mockResolvedValue({
+          status: 'success',
+          result: successResult(),
+        })
         applyApprovalPolicyStageMock.mockResolvedValue({
           action: 'drop',
           reason: 'obligation_slot_taken',
@@ -2890,7 +3363,10 @@ describe('TAC-540 — typing dots on the auto-send path', () => {
     [
       'silenced, because nothing needed answering',
       () => {
-        generateStageMock.mockResolvedValue({ status: 'success', result: successResult() })
+        generateStageMock.mockResolvedValue({
+          status: 'success',
+          result: successResult(),
+        })
         applyApprovalPolicyStageMock.mockResolvedValue({ action: 'silence' })
       },
     ],
@@ -2910,9 +3386,15 @@ describe('TAC-540 — typing dots on the auto-send path', () => {
     [
       'superseded, because staff already answered in the Instagram app',
       () => {
-        generateStageMock.mockResolvedValue({ status: 'success', result: successResult() })
+        generateStageMock.mockResolvedValue({
+          status: 'success',
+          result: successResult(),
+        })
         applyApprovalPolicyStageMock.mockResolvedValue({ action: 'send' })
-        dispatchInstagramReplyMock.mockResolvedValue({ kind: 'superseded', byMessageId: 'staff-1' })
+        dispatchInstagramReplyMock.mockResolvedValue({
+          kind: 'superseded',
+          byMessageId: 'staff-1',
+        })
       },
     ],
   ])('turns the dots off when the turn ends %s', async (_name, arrange) => {
@@ -2973,11 +3455,17 @@ describe('TAC-540 — the prediction that decides whether dots appear at all', (
       typingCtx({
         venue: {
           ...typingCtx().venue,
-          approvalPolicy: { default: 'auto_send', perCategory: { new_question: 'operator_approval' } },
+          approvalPolicy: {
+            default: 'auto_send',
+            perCategory: { new_question: 'operator_approval' },
+          },
         },
       }),
     )
-    generateStageMock.mockResolvedValue({ status: 'success', result: successResult() })
+    generateStageMock.mockResolvedValue({
+      status: 'success',
+      result: successResult(),
+    })
     applyApprovalPolicyStageMock.mockResolvedValue({
       action: 'queue',
       triggers: ['category_requires_approval'],
@@ -3005,7 +3493,10 @@ describe('TAC-540 — the prediction that decides whether dots appear at all', (
     buildRuntimeContextMock.mockResolvedValue(
       typingCtx({ venue: { ...base.venue, holdAllOutbound: true } }),
     )
-    generateStageMock.mockResolvedValue({ status: 'success', result: successResult() })
+    generateStageMock.mockResolvedValue({
+      status: 'success',
+      result: successResult(),
+    })
     applyApprovalPolicyStageMock.mockResolvedValue({
       action: 'queue',
       triggers: ['hold_all_outbound'],
@@ -3023,40 +3514,18 @@ describe('TAC-540 — the prediction that decides whether dots appear at all', (
     expect(signalTypingMock).not.toHaveBeenCalled()
   })
 
-  /**
-   * The ticket's own closed-venue clause. `isVenueClosed` is a POSITIVE
-   * verdict only, so a venue whose hours nobody filled in still gets dots —
-   * which is why the fixture states real hours and a time outside them
-   * rather than leaving `hours` empty.
-   */
-  it('shows no dots while the venue is positively closed', async () => {
-    const base = typingCtx()
-    buildRuntimeContextMock.mockResolvedValue(
-      typingCtx({
-        venue: {
-          ...base.venue,
-          timezone: 'America/Los_Angeles',
-          venueInfo: { hours: { monday: '7:00 AM – 3:00 PM' } },
-        },
-        // A Monday, 21:00 in Los Angeles: six hours after close.
-        recognition: { ...base.recognition, computedAt: new Date('2026-09-22T04:00:00.000Z') },
-      }),
-    )
-    applyApprovalPolicyStageMock.mockResolvedValue({ action: 'send' })
-    generateStageMock.mockResolvedValue({ status: 'success', result: successResult() })
-    instagramSendSucceeds()
-
-    await handleInbound(INBOUND_ID)
-
-    expect(signalTypingMock).not.toHaveBeenCalled()
-  })
-
   /** AC 4, from the orchestrator's side. */
   it('a text conversation never reaches the typing switch at all', async () => {
     buildRuntimeContextMock.mockResolvedValue(makeCtx())
     applyApprovalPolicyStageMock.mockResolvedValue({ action: 'send' })
-    generateStageMock.mockResolvedValue({ status: 'success', result: successResult() })
-    scheduleAndSendMock.mockResolvedValue({ outboundMessageId: 'out-1', providerMessageId: 'p1' })
+    generateStageMock.mockResolvedValue({
+      status: 'success',
+      result: successResult(),
+    })
+    scheduleAndSendMock.mockResolvedValue({
+      outboundMessageId: 'out-1',
+      providerMessageId: 'p1',
+    })
 
     const r = await handleInbound(INBOUND_ID)
 
@@ -3068,11 +3537,109 @@ describe('TAC-540 — the prediction that decides whether dots appear at all', (
   })
 })
 
+/**
+ * TAC-565. The dots after hours too.
+ *
+ * `mayAutoSendAfterClassification` is forwarded REAL by this file's `./stages`
+ * factory, so these two run the production predicate over a genuinely closed
+ * venue rather than a stub's opinion of one. The fixture states real hours and
+ * a real time six hours after close: `isVenueClosed` is a POSITIVE verdict, so
+ * an empty-hours venue resolves to `unknown`, reads as open, and would let a
+ * restored closed-venue clause pass unnoticed.
+ *
+ * MUTANT (run before this was reported): putting
+ * `!isVenueClosed(ctx.venue, ctx.recognition.computedAt)` back as the
+ * predicate's return kills both — the first on ['on','on'] vs [], the second
+ * on `flushTyping` never seeing an 'off'.
+ */
+describe('TAC-565 — the dots go on after hours too', () => {
+  /** See the drain in the TAC-540 describe: same reason, same shape. */
+  afterEach(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 10))
+  })
+
+  function closedVenueCtx() {
+    const base = typingCtx()
+    return typingCtx({
+      venue: {
+        ...base.venue,
+        timezone: 'America/Los_Angeles',
+        venueInfo: { hours: { monday: '7:00 AM – 3:00 PM' } },
+      },
+      // A Monday, 21:00 in Los Angeles: six hours after close.
+      recognition: {
+        ...base.recognition,
+        computedAt: new Date('2026-09-22T04:00:00.000Z'),
+      },
+    })
+  }
+
+  /**
+   * The ticket's first acceptance criterion. Both sites, like the open-venue
+   * case: after hours is where generation is least likely to be quick and
+   * Meta's 20-second timeout most likely to expire before the send.
+   */
+  it('turns the dots on for an auto-send while the venue is closed', async () => {
+    buildRuntimeContextMock.mockResolvedValue(closedVenueCtx())
+    applyApprovalPolicyStageMock.mockResolvedValue({ action: 'send' })
+    generateStageMock.mockResolvedValue({
+      status: 'success',
+      result: successResult(),
+    })
+    instagramSendSucceeds()
+
+    const r = await handleInbound(INBOUND_ID)
+
+    expect(r).toMatchObject({ status: 'sent' })
+    expect(typingSignals()).toEqual(['on', 'on'])
+    expect(signalTypingMock).toHaveBeenCalledWith(
+      { venueId: VENUE_ID, guestId: GUEST_ID, channel: 'instagram' },
+      'on',
+    )
+  })
+
+  /**
+   * The second acceptance criterion, and the one that makes the first safe to
+   * ship: a closed venue is where a draft is MOST likely to be held (trigger
+   * 17 and the closed-venue-arrival backstop can only fire while closed), so
+   * the correction has to hold here or TAC-565 trades a slow reply for a false
+   * promise. `off` is the last signal and nothing was dispatched.
+   */
+  it('turns them off again when the draft is held while closed, and sends nothing', async () => {
+    buildRuntimeContextMock.mockResolvedValue(closedVenueCtx())
+    generateStageMock.mockResolvedValue({
+      status: 'success',
+      result: successResult(),
+    })
+    applyApprovalPolicyStageMock.mockResolvedValue({
+      action: 'queue',
+      triggers: [APPROVAL_TRIGGERS.CLOSED_VENUE_ARRIVAL_EMITTED],
+      primaryTrigger: APPROVAL_TRIGGERS.CLOSED_VENUE_ARRIVAL_EMITTED,
+      existingPendingDraftId: null,
+    })
+    persistOrRegenQueuedDraftMock.mockResolvedValue({
+      outboundMessageId: 'card-1',
+      action: 'inserted',
+      priorReviewReason: null,
+    })
+
+    const r = await handleInbound(INBOUND_ID)
+    await flushTyping()
+
+    expect(r).toMatchObject({ status: 'queued' })
+    expect(typingSignals()).toEqual(['on', 'on', 'off'])
+    expect(dispatchInstagramReplyMock).not.toHaveBeenCalled()
+  })
+})
+
 describe('TAC-540 — a sender action can never change the reply', () => {
   beforeEach(() => {
     buildRuntimeContextMock.mockResolvedValue(typingCtx())
     applyApprovalPolicyStageMock.mockResolvedValue({ action: 'send' })
-    generateStageMock.mockResolvedValue({ status: 'success', result: successResult() })
+    generateStageMock.mockResolvedValue({
+      status: 'success',
+      result: successResult(),
+    })
     instagramSendSucceeds()
   })
 
@@ -3083,9 +3650,26 @@ describe('TAC-540 — a sender action can never change the reply', () => {
    * would also not throw.
    */
   it.each([
-    ['throws', () => signalTypingMock.mockRejectedValue(new Error('graph exploded'))],
-    ['returns a non-2xx', () => signalTypingMock.mockResolvedValue({ status: 'send_failed', kind: 'graph_error' })],
-    ['times out', () => signalTypingMock.mockResolvedValue({ status: 'send_failed', kind: 'timeout' })],
+    [
+      'throws',
+      () => signalTypingMock.mockRejectedValue(new Error('graph exploded')),
+    ],
+    [
+      'returns a non-2xx',
+      () =>
+        signalTypingMock.mockResolvedValue({
+          status: 'send_failed',
+          kind: 'graph_error',
+        }),
+    ],
+    [
+      'times out',
+      () =>
+        signalTypingMock.mockResolvedValue({
+          status: 'send_failed',
+          kind: 'timeout',
+        }),
+    ],
     [
       'never settles',
       () =>
@@ -3093,19 +3677,25 @@ describe('TAC-540 — a sender action can never change the reply', () => {
           // typing_off IS awaited at the exit, so a never-settling `off`
           // would hang the turn. Only `on` is left open here, which is the
           // fire-and-forget one.
-          signal === 'on' ? new Promise(() => {}) : Promise.resolve({ status: 'sent' }),
+          signal === 'on'
+            ? new Promise(() => {})
+            : Promise.resolve({ status: 'sent' }),
         ),
     ],
-  ])('a typing_on that %s changes nothing about the reply', async (_name, arrange) => {
-    arrange()
+  ])(
+    'a typing_on that %s changes nothing about the reply',
+    async (_name, arrange) => {
+      arrange()
 
-    const r = await handleInbound(INBOUND_ID)
+      const r = await handleInbound(INBOUND_ID)
 
-    expect(r).toEqual({ status: 'sent', outboundMessageId: 'ig-1' })
-    // AC 4 rides along: an Instagram turn never reaches the Sendblue arm.
-    expect(dispatchInstagramReplyMock).toHaveBeenCalledTimes(1)
-    expect(scheduleAndSendMock).not.toHaveBeenCalled()
-  }, 2000)
+      expect(r).toEqual({ status: 'sent', outboundMessageId: 'ig-1' })
+      // AC 4 rides along: an Instagram turn never reaches the Sendblue arm.
+      expect(dispatchInstagramReplyMock).toHaveBeenCalledTimes(1)
+      expect(scheduleAndSendMock).not.toHaveBeenCalled()
+    },
+    2000,
+  )
 
   /**
    * THE EXIT MUST NOT HOLD THE REPLY PATH, added in code review.
@@ -3123,7 +3713,11 @@ describe('TAC-540 — a sender action can never change the reply', () => {
    * re-awaiting the exit passed all 132 tests.
    */
   it('returns without waiting for typing_off, so the retry is not held behind it', async () => {
-    generateStageMock.mockResolvedValue({ status: 'refused', attemptScores: [0.1], finalScore: 0.1 })
+    generateStageMock.mockResolvedValue({
+      status: 'refused',
+      attemptScores: [0.1],
+      finalScore: 0.1,
+    })
     signalTypingMock.mockImplementation(async (_t: unknown, signal: string) =>
       signal === 'off' ? new Promise(() => {}) : { status: 'sent' },
     )
@@ -3149,7 +3743,10 @@ describe('TAC-540 — a sender action can never change the reply', () => {
   it('returns without waiting for typing_off when the turn throws past its own catch', async () => {
     traceControl.flushThrows = true
     applyApprovalPolicyStageMock.mockResolvedValue({ action: 'send' })
-    generateStageMock.mockResolvedValue({ status: 'success', result: successResult() })
+    generateStageMock.mockResolvedValue({
+      status: 'success',
+      result: successResult(),
+    })
     instagramSendSucceeds()
     signalTypingMock.mockImplementation(async (_t: unknown, signal: string) =>
       signal === 'off' ? new Promise(() => {}) : { status: 'sent' },
@@ -3260,11 +3857,22 @@ describe('TAC-540 — classify and voice retrieval overlap', () => {
     classifyStageMock.mockImplementation(async () => {
       enter('classify')
       await bothRunning
-      return { category: 'new_question', classifierConfidence: 0.9, reasoning: 'r', crisisSafety: false }
+      return {
+        category: 'new_question',
+        classifierConfidence: 0.9,
+        reasoning: 'r',
+        crisisSafety: false,
+      }
     })
     applyApprovalPolicyStageMock.mockResolvedValue({ action: 'send' })
-    generateStageMock.mockResolvedValue({ status: 'success', result: successResult() })
-    scheduleAndSendMock.mockResolvedValue({ outboundMessageId: 'out-1', providerMessageId: 'p1' })
+    generateStageMock.mockResolvedValue({
+      status: 'success',
+      result: successResult(),
+    })
+    scheduleAndSendMock.mockResolvedValue({
+      outboundMessageId: 'out-1',
+      providerMessageId: 'p1',
+    })
 
     const r = await handleInbound(INBOUND_ID)
 
@@ -3305,7 +3913,9 @@ describe('TAC-540 — classify and voice retrieval overlap', () => {
     const onUnhandled = (reason: unknown) => unhandled.push(reason)
     process.on('unhandledRejection', onUnhandled)
     try {
-      retrieveCorpusStageMock.mockRejectedValue(new Error('voice pack load failed'))
+      retrieveCorpusStageMock.mockRejectedValue(
+        new Error('voice pack load failed'),
+      )
       classifyStageMock.mockRejectedValue(new Error('anthropic exploded'))
 
       const r = await handleInbound(INBOUND_ID)
@@ -3322,12 +3932,16 @@ describe('TAC-540 — classify and voice retrieval overlap', () => {
 
   /** The corpus failure keeps its own stage and its own alert. */
   it('a corpus failure still fails as corpus, in its old position', async () => {
-    retrieveCorpusStageMock.mockRejectedValue(new Error('voice pack load failed'))
+    retrieveCorpusStageMock.mockRejectedValue(
+      new Error('voice pack load failed'),
+    )
 
     const r = await handleInbound(INBOUND_ID)
 
     expect(r).toMatchObject({ status: 'failed', stage: 'corpus' })
-    expect(fireRedAlertMock).toHaveBeenCalledWith(expect.objectContaining({ stage: 'corpus' }))
+    expect(fireRedAlertMock).toHaveBeenCalledWith(
+      expect.objectContaining({ stage: 'corpus' }),
+    )
     // Classification ran first and succeeded, so its alert never fired: the
     // ordering when both could fail is unchanged.
     expect(fireRedAlertMock).not.toHaveBeenCalledWith(
@@ -3366,15 +3980,23 @@ describe('TAC-540 — each verify check owns its own span window', () => {
   }
 
   beforeEach(() => {
-    generateStageMock.mockResolvedValue({ status: 'success', result: successResult() })
+    generateStageMock.mockResolvedValue({
+      status: 'success',
+      result: successResult(),
+    })
     applyApprovalPolicyStageMock.mockResolvedValue({ action: 'send' })
-    scheduleAndSendMock.mockResolvedValue({ outboundMessageId: 'out-1', providerMessageId: 'p1' })
+    scheduleAndSendMock.mockResolvedValue({
+      outboundMessageId: 'out-1',
+      providerMessageId: 'p1',
+    })
   })
 
   it('opens a span for all five checks, including the two that had none', async () => {
     await handleInbound(INBOUND_ID)
 
-    const opened = spanLog.events.filter((e) => e.phase === 'open').map((e) => e.name)
+    const opened = spanLog.events
+      .filter((e) => e.phase === 'open')
+      .map((e) => e.name)
     for (const name of CHECK_SPANS) expect(opened).toContain(name)
   })
 
@@ -3395,7 +4017,10 @@ describe('TAC-540 — each verify check owns its own span window', () => {
     const grounding = deferred('grounding', { status: 'skipped' as const })
     const mechanic = deferred('mechanic', { status: 'skipped' as const })
     const prose = deferred('prose', { status: 'skipped' as const })
-    const cancellation = deferred('cancellation', { resolution: { status: 'none' as const }, claim: 'clean' as const })
+    const cancellation = deferred('cancellation', {
+      resolution: { status: 'none' as const },
+      claim: 'clean' as const,
+    })
     const closedVenue = deferred('closedVenue', { status: 'skipped' as const })
 
     verifyGroundingStageMock.mockImplementation(grounding.run)
@@ -3437,12 +4062,16 @@ describe('TAC-540 — each verify check owns its own span window', () => {
     // resolved, closed, resolved, closed. Batched ends produce all five
     // resolutions and then all five closes.
     const log = spanLog.events
-      .filter((e) => CHECK_SPANS.includes(e.name) || e.name.startsWith('resolved:'))
+      .filter(
+        (e) => CHECK_SPANS.includes(e.name) || e.name.startsWith('resolved:'),
+      )
       .filter((e) => e.phase === 'close')
       .map((e) => e.name)
 
     const firstSpanClose = log.findIndex((n) => CHECK_SPANS.includes(n))
-    const lastResolve = log.map((n) => n.startsWith('resolved:')).lastIndexOf(true)
+    const lastResolve = log
+      .map((n) => n.startsWith('resolved:'))
+      .lastIndexOf(true)
     expect(firstSpanClose).toBeGreaterThanOrEqual(0)
     expect(firstSpanClose).toBeLessThan(lastResolve)
 
@@ -3466,7 +4095,94 @@ describe('TAC-540 — each verify check owns its own span window', () => {
     const r = await handleInbound(INBOUND_ID)
 
     expect(r).toMatchObject({ status: 'sent' })
-    const closed = spanLog.events.filter((e) => e.phase === 'close').map((e) => e.name)
+    const closed = spanLog.events
+      .filter((e) => e.phase === 'close')
+      .map((e) => e.name)
     expect(closed).toContain('verify_grounding')
+  })
+})
+
+// TAC-560: the in-conversation half of the once-per-guest-ever marker.
+describe('handleInbound — the warm close marker (TAC-560)', () => {
+  beforeEach(() => {
+    markWarmCloseSentMock.mockResolvedValue({ ok: true, data: 'marked' })
+    generateStageMock.mockResolvedValue({
+      status: 'success',
+      result: successResult(),
+    })
+  })
+
+  it('writes the marker when the model reports this reply WAS the close', async () => {
+    generateStageMock.mockResolvedValue({
+      status: 'success',
+      result: { ...successResult(), closedTheConversation: true },
+    })
+    await handleInbound(INBOUND_ID)
+    expect(markWarmCloseSentMock).toHaveBeenCalledTimes(1)
+    expect(markWarmCloseSentMock.mock.calls[0]?.[1]).toBe(GUEST_ID)
+  })
+
+  // THE MUTANT THE ACCEPTANCE CRITERION NAMES, from this side. Without the
+  // marker the pause timer finds a null column and closes the guest a second
+  // time, which is the one thing AC 1 forbids.
+  it('writes NO marker on an ordinary reply', async () => {
+    await handleInbound(INBOUND_ID)
+    expect(markWarmCloseSentMock).not.toHaveBeenCalled()
+  })
+
+  it('reports the path and the marker outcome', async () => {
+    generateStageMock.mockResolvedValue({
+      status: 'success',
+      result: { ...successResult(), closedTheConversation: true },
+    })
+    await handleInbound(INBOUND_ID)
+    expect(captureWarmCloseSentMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        via: 'in_conversation',
+        markerOutcome: 'marked',
+      }),
+    )
+  })
+
+  it('reports an existing marker rather than overwriting it', async () => {
+    // A guest the timer closed moments earlier keeps that earlier timestamp.
+    markWarmCloseSentMock.mockResolvedValue({
+      ok: true,
+      data: 'already_marked',
+    })
+    generateStageMock.mockResolvedValue({
+      status: 'success',
+      result: { ...successResult(), closedTheConversation: true },
+    })
+    await handleInbound(INBOUND_ID)
+    expect(captureWarmCloseSentMock).toHaveBeenCalledWith(
+      expect.objectContaining({ markerOutcome: 'already_marked' }),
+    )
+  })
+
+  // The guest already has the message, so a failed marker write must never turn a
+  // delivered reply into a failed request. The cost is one guest who could
+  // receive the close twice, which the timer's `acknowledgment` belt catches.
+  it('still reports sent when the marker write fails', async () => {
+    markWarmCloseSentMock.mockResolvedValue({ ok: false, error: 'boom' })
+    generateStageMock.mockResolvedValue({
+      status: 'success',
+      result: { ...successResult(), closedTheConversation: true },
+    })
+    const result = await handleInbound(INBOUND_ID)
+    expect(result.status).toBe('sent')
+    expect(captureWarmCloseSentMock).toHaveBeenCalledWith(
+      expect.objectContaining({ markerOutcome: 'write_failed' }),
+    )
+  })
+
+  it('does not fail the turn when the marker write throws', async () => {
+    markWarmCloseSentMock.mockRejectedValue(new Error('boom'))
+    generateStageMock.mockResolvedValue({
+      status: 'success',
+      result: { ...successResult(), closedTheConversation: true },
+    })
+    const result = await handleInbound(INBOUND_ID)
+    expect(result.status).toBe('sent')
   })
 })

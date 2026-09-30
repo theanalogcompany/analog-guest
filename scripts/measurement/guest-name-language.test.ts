@@ -12,7 +12,9 @@ const VENUES = ["Le Mil's", 'Le Mils', 'LeMils'] as const
 
 describe('countNameUses', () => {
   it('counts a plain address', () => {
-    expect(countNameUses('hey Jaipal, what can I get you', 'Jaipal').count).toBe(1)
+    expect(
+      countNameUses('hey Jaipal, what can I get you', 'Jaipal').count,
+    ).toBe(1)
   })
 
   it('is case-insensitive, and reports the casing the model wrote', () => {
@@ -22,7 +24,9 @@ describe('countNameUses', () => {
   })
 
   it('counts two uses in one reply separately (the bar is per conversation)', () => {
-    expect(countNameUses('Jaipal! good to hear from you Jaipal', 'Jaipal').count).toBe(2)
+    expect(
+      countNameUses('Jaipal! good to hear from you Jaipal', 'Jaipal').count,
+    ).toBe(2)
   })
 
   it('counts a possessive as a use', () => {
@@ -39,7 +43,9 @@ describe('countNameUses', () => {
   })
 
   it('matches across a line break, because a body can wrap', () => {
-    expect(countNameUses('closed today,\nJaipal. back at 7', 'Jaipal').count).toBe(1)
+    expect(
+      countNameUses('closed today,\nJaipal. back at 7', 'Jaipal').count,
+    ).toBe(1)
   })
 
   it('refuses a name it was not designed for rather than matching loosely', () => {
@@ -51,30 +57,41 @@ describe('countNameUses', () => {
   // The reverse of the primary metric, and the one that would flatter the
   // treatment arm: a reply that uses no name must never score one.
   it('scores a reply that never addresses the guest as zero', () => {
-    expect(countNameUses('closed for today. back at 7 tomorrow though', 'Jaipal').count).toBe(0)
+    expect(
+      countNameUses('closed for today. back at 7 tomorrow though', 'Jaipal')
+        .count,
+    ).toBe(0)
   })
 })
 
 describe('findThirdPersonVenue', () => {
   it('flags the venue name as a third-person subject', () => {
-    expect(findThirdPersonVenue("Le Mil's closes at 3", VENUES)).toContain('closes')
+    expect(findThirdPersonVenue("Le Mil's closes at 3", VENUES)).toContain(
+      'closes',
+    )
   })
 
   it('flags a bare third-person pronoun about the business', () => {
     expect(findThirdPersonVenue('they close at 3 today', VENUES)).not.toBeNull()
-    expect(findThirdPersonVenue('their hours are on the door', VENUES)).not.toBeNull()
+    expect(
+      findThirdPersonVenue('their hours are on the door', VENUES),
+    ).not.toBeNull()
   })
 
   // FIRST PERSON NAMING THE VENUE IS FINE, and this is the distinction the
   // detector exists for: it cannot be "does the reply contain the venue name".
   it('does not flag the venue named in a first-person sentence', () => {
-    expect(findThirdPersonVenue("we roast the Budan here at Le Mil's", VENUES)).toBeNull()
+    expect(
+      findThirdPersonVenue("we roast the Budan here at Le Mil's", VENUES),
+    ).toBeNull()
     expect(findThirdPersonVenue('we close at 3 today', VENUES)).toBeNull()
   })
 
   // "they" about other people is ordinary and correct.
   it('does not flag they/them about people', () => {
-    expect(findThirdPersonVenue('if they ask, just say I sent you', VENUES)).toBeNull()
+    expect(
+      findThirdPersonVenue('if they ask, just say I sent you', VENUES),
+    ).toBeNull()
     expect(findThirdPersonVenue('they said it was great', VENUES)).toBeNull()
   })
 })
@@ -93,7 +110,12 @@ describe('consecutiveNamePairs', () => {
   })
 
   it('counts zero when the name is used once', () => {
-    expect(consecutiveNamePairs(['hey Jaipal', 'we close at 3', 'oat and almond', 'see you then'], 'Jaipal')).toBe(0)
+    expect(
+      consecutiveNamePairs(
+        ['hey Jaipal', 'we close at 3', 'oat and almond', 'see you then'],
+        'Jaipal',
+      ),
+    ).toBe(0)
   })
 
   it('counts zero when the name is never used', () => {
@@ -104,7 +126,12 @@ describe('consecutiveNamePairs', () => {
   // and still breach the per-conversation cap. The two bars are separate on
   // purpose, and this pins that this function only answers the first.
   it('counts zero for two non-adjacent uses, which the per-conversation cap catches instead', () => {
-    expect(consecutiveNamePairs(['hey Jaipal', 'we close at 3', 'oat and almond Jaipal', 'bye'], 'Jaipal')).toBe(0)
+    expect(
+      consecutiveNamePairs(
+        ['hey Jaipal', 'we close at 3', 'oat and almond Jaipal', 'bye'],
+        'Jaipal',
+      ),
+    ).toBe(0)
   })
 })
 
@@ -135,7 +162,13 @@ describe('classifyGuestName', () => {
 // that fixed it, and the real bodies from that run are the fixtures.
 describe('looksLikeDodge', () => {
   it('never flags small talk, which asks nothing', () => {
-    expect(looksLikeDodge('small_talk', "how's it going over there", 'pretty good over here')).toBe(false)
+    expect(
+      looksLikeDodge(
+        'small_talk',
+        "how's it going over there",
+        'pretty good over here',
+      ),
+    ).toBe(false)
   })
 
   it('accepts an open menu question answered by describing the item', () => {
@@ -149,12 +182,18 @@ describe('looksLikeDodge', () => {
   })
 
   it('accepts an open menu question answered by naming items', () => {
-    expect(looksLikeDodge('menu', 'any cold drinks?', 'Pink Panther and Blossom Tonic are the two to try.')).toBe(false)
+    expect(
+      looksLikeDodge(
+        'menu',
+        'any cold drinks?',
+        'Pink Panther and Blossom Tonic are the two to try.',
+      ),
+    ).toBe(false)
   })
 
   it('flags an open menu question answered with a bare deflection', () => {
     expect(looksLikeDodge('menu', 'any cold drinks?', 'not sure')).toBe(true)
-    expect(looksLikeDodge('menu', "what's good today", "no idea!")).toBe(true)
+    expect(looksLikeDodge('menu', "what's good today", 'no idea!')).toBe(true)
   })
 
   // The last false positive the TAC-544 run produced, verbatim: a no that
@@ -170,19 +209,45 @@ describe('looksLikeDodge', () => {
   })
 
   it('still requires a yes or no on a CLOSED menu question', () => {
-    expect(looksLikeDodge('menu', 'do you have oat milk', 'yeah, oat and almond')).toBe(false)
-    expect(looksLikeDodge('menu', 'do you do decaf', "we've got a decaf pourover")).toBe(false)
-    expect(looksLikeDodge('menu', 'do you have oat milk', 'the espresso is great today')).toBe(true)
+    expect(
+      looksLikeDodge('menu', 'do you have oat milk', 'yeah, oat and almond'),
+    ).toBe(false)
+    expect(
+      looksLikeDodge('menu', 'do you do decaf', "we've got a decaf pourover"),
+    ).toBe(false)
+    expect(
+      looksLikeDodge(
+        'menu',
+        'do you have oat milk',
+        'the espresso is great today',
+      ),
+    ).toBe(true)
   })
 
   it('flags an hours question answered with no time and no day', () => {
-    expect(looksLikeDodge('hours', 'what time do you close', '3pm today')).toBe(false)
-    expect(looksLikeDodge('hours', 'you open tomorrow?', 'yeah, open 7 to 3 tomorrow')).toBe(false)
-    expect(looksLikeDodge('hours', 'what time do you close', 'come see us!')).toBe(true)
+    expect(looksLikeDodge('hours', 'what time do you close', '3pm today')).toBe(
+      false,
+    )
+    expect(
+      looksLikeDodge(
+        'hours',
+        'you open tomorrow?',
+        'yeah, open 7 to 3 tomorrow',
+      ),
+    ).toBe(false)
+    expect(
+      looksLikeDodge('hours', 'what time do you close', 'come see us!'),
+    ).toBe(true)
   })
 
   it('accepts an arrival acknowledged', () => {
     expect(looksLikeDodge('heading_over', 'omw', 'see you soon')).toBe(false)
-    expect(looksLikeDodge('heading_over', 'omw', 'the blossom tonic has jasmine in it')).toBe(true)
+    expect(
+      looksLikeDodge(
+        'heading_over',
+        'omw',
+        'the blossom tonic has jasmine in it',
+      ),
+    ).toBe(true)
   })
 })

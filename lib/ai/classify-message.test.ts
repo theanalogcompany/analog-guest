@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 // Relative imports — vitest doesn't pick up Next's `@/*` alias under our setup.
 import { classifyMessage, MAX_CLASSIFIER_INPUT_CHARS } from './classify-message'
 import { CLASSIFY_JEV_PROMPT_VERSION } from './classify-message-jev'
+import { PROMPT_VERSION } from './prompts/system-template'
 
 // Mock the AI SDK and the model client so no real Anthropic call goes out.
 const generateObjectMock = vi.fn()
@@ -47,8 +48,7 @@ describe('CLASSIFY_SYSTEM_PROMPT — category list', () => {
   async function getCapturedSystemPrompt(): Promise<string> {
     await classifyMessage({ inboundBody: 'hi' })
     const callArgs = generateObjectMock.mock.calls[0]?.[0] as
-      | { system?: string }
-      | undefined
+      { system?: string } | undefined
     expect(callArgs?.system).toBeDefined()
     return callArgs!.system as string
   }
@@ -110,7 +110,7 @@ describe('CLASSIFY_SYSTEM_PROMPT — category list', () => {
     const prompt = await getCapturedSystemPrompt()
     expect(prompt).toContain('- recommendation_request:')
     expect(prompt).toContain('recommendation')
-    expect(prompt).toContain('what\'s good here')
+    expect(prompt).toContain("what's good here")
     expect(prompt).toContain('Distinct from new_question')
   })
 
@@ -137,7 +137,9 @@ describe('CLASSIFY_SYSTEM_PROMPT — category list', () => {
     // v1.10.0: rephrased to distinguish manual (operator's eyes needed) from
     // unknown (no clear path to respond). The previous wording was conflating
     // the two.
-    expect(prompt).toContain('Use manual only when the message contains content that genuinely needs an operator\'s eyes')
+    expect(prompt).toContain(
+      "Use manual only when the message contains content that genuinely needs an operator's eyes",
+    )
   })
 
   it('includes the personal-history disambiguation clause (THE-233)', async () => {
@@ -180,14 +182,19 @@ describe('classifyMessage — schema accepts new categories', () => {
   ] as const) {
     it(`accepts category=${cat}`, async () => {
       generateObjectMock.mockResolvedValueOnce({
-        object: { category: cat, classifierConfidence: 0.9, reasoning: 'mock', crisisSafety: false },
+        object: {
+          category: cat,
+          classifierConfidence: 0.9,
+          reasoning: 'mock',
+          crisisSafety: false,
+        },
       })
       const r = await classifyMessage({ inboundBody: 'sample' })
       expect(r.ok).toBe(true)
       if (!r.ok) return
       expect(r.data.category).toBe(cat)
       expect(r.data.classifierConfidence).toBe(0.9)
-      expect(r.data.promptVersion).toBe('v1.70.0')
+      expect(r.data.promptVersion).toBe('v1.75.0')
     })
   }
 })
@@ -208,8 +215,7 @@ describe('CLASSIFY_SYSTEM_PROMPT — new inbound categories (v1.10.0)', () => {
   async function getCapturedSystemPrompt(): Promise<string> {
     await classifyMessage({ inboundBody: 'hi' })
     const callArgs = generateObjectMock.mock.calls[0]?.[0] as
-      | { system?: string }
-      | undefined
+      { system?: string } | undefined
     expect(callArgs?.system).toBeDefined()
     return callArgs!.system as string
   }
@@ -235,8 +241,10 @@ describe('CLASSIFY_SYSTEM_PROMPT — new inbound categories (v1.10.0)', () => {
 
   it('updated disambiguation distinguishes manual from unknown', async () => {
     const prompt = await getCapturedSystemPrompt()
-    expect(prompt).toContain('Use unknown only when the message genuinely doesn\'t fit')
-    expect(prompt).toContain('genuinely needs an operator\'s eyes')
+    expect(prompt).toContain(
+      "Use unknown only when the message genuinely doesn't fit",
+    )
+    expect(prompt).toContain("genuinely needs an operator's eyes")
   })
 })
 
@@ -263,8 +271,7 @@ describe('classifyMessage — basic shape', () => {
 // getCapturedSystemPrompt pattern but reads `prompt` instead of `system`.
 async function getCapturedUserPrompt(): Promise<string> {
   const callArgs = generateObjectMock.mock.calls[0]?.[0] as
-    | { prompt?: string }
-    | undefined
+    { prompt?: string } | undefined
   expect(callArgs?.prompt).toBeDefined()
   return callArgs!.prompt as string
 }
@@ -273,7 +280,12 @@ describe('classifyMessage — recent conversation rendering (v1.11.0)', () => {
   beforeEach(() => {
     generateObjectMock.mockReset()
     generateObjectMock.mockResolvedValue({
-      object: { category: 'reply', classifierConfidence: 0.9, reasoning: 'noop', crisisSafety: false },
+      object: {
+        category: 'reply',
+        classifierConfidence: 0.9,
+        reasoning: 'noop',
+        crisisSafety: false,
+      },
     })
   })
 
@@ -282,8 +294,18 @@ describe('classifyMessage — recent conversation rendering (v1.11.0)', () => {
     await classifyMessage({
       inboundBody: 'do you have oat milk?',
       recentMessages: [
-        { direction: 'inbound', body: 'hi', createdAt: new Date(now - 5 * 60_000), delivery: 'delivered' },
-        { direction: 'outbound', body: "hey, what's up", createdAt: new Date(now - 4 * 60_000), delivery: 'delivered' },
+        {
+          direction: 'inbound',
+          body: 'hi',
+          createdAt: new Date(now - 5 * 60_000),
+          delivery: 'delivered',
+        },
+        {
+          direction: 'outbound',
+          body: "hey, what's up",
+          createdAt: new Date(now - 4 * 60_000),
+          delivery: 'delivered',
+        },
       ],
     })
     const prompt = await getCapturedUserPrompt()
@@ -318,14 +340,21 @@ describe('classifyMessage — recent conversation rendering (v1.11.0)', () => {
           createdAt: new Date(now - 3 * 60_000),
           delivery: 'skipped_by_operator',
         },
-        { direction: 'outbound', body: 'failed one', createdAt: new Date(now - 2 * 60_000), delivery: 'never_sent' },
+        {
+          direction: 'outbound',
+          body: 'failed one',
+          createdAt: new Date(now - 2 * 60_000),
+          delivery: 'never_sent',
+        },
       ],
     })
     const prompt = await getCapturedUserPrompt()
     // Exact. Prompt parts are joined with a blank line and this block has none
     // inside, so header to next blank line is the whole block, and anything
     // appended after the note fails this however it is worded.
-    const start = prompt.indexOf('Recent conversation (most recent at the bottom):')
+    const start = prompt.indexOf(
+      'Recent conversation (most recent at the bottom):',
+    )
     expect(start).toBeGreaterThan(-1)
     const end = prompt.indexOf('\n\n', start)
     expect(prompt.slice(start, end === -1 ? undefined : end)).toBe(
@@ -358,7 +387,12 @@ describe('classifyMessage — guest state rendering (v1.11.0)', () => {
   beforeEach(() => {
     generateObjectMock.mockReset()
     generateObjectMock.mockResolvedValue({
-      object: { category: 'reply', classifierConfidence: 0.9, reasoning: 'noop', crisisSafety: false },
+      object: {
+        category: 'reply',
+        classifierConfidence: 0.9,
+        reasoning: 'noop',
+        crisisSafety: false,
+      },
     })
   })
 
@@ -379,15 +413,19 @@ describe('classifyMessage — temperature (v1.11.0)', () => {
   beforeEach(() => {
     generateObjectMock.mockReset()
     generateObjectMock.mockResolvedValue({
-      object: { category: 'reply', classifierConfidence: 0.9, reasoning: 'noop', crisisSafety: false },
+      object: {
+        category: 'reply',
+        classifierConfidence: 0.9,
+        reasoning: 'noop',
+        crisisSafety: false,
+      },
     })
   })
 
   it('passes temperature=0.2 to generateObject', async () => {
     await classifyMessage({ inboundBody: 'hi' })
     const callArgs = generateObjectMock.mock.calls[0]?.[0] as
-      | { temperature?: number }
-      | undefined
+      { temperature?: number } | undefined
     expect(callArgs?.temperature).toBe(0.2)
   })
 })
@@ -396,7 +434,12 @@ describe('classifyMessage — inbound truncation (v1.11.0)', () => {
   beforeEach(() => {
     generateObjectMock.mockReset()
     generateObjectMock.mockResolvedValue({
-      object: { category: 'reply', classifierConfidence: 0.9, reasoning: 'noop', crisisSafety: false },
+      object: {
+        category: 'reply',
+        classifierConfidence: 0.9,
+        reasoning: 'noop',
+        crisisSafety: false,
+      },
     })
   })
 
@@ -440,17 +483,23 @@ describe('CLASSIFY_SYSTEM_PROMPT — outbound exclusion reinforcement (v1.11.0)'
   beforeEach(() => {
     generateObjectMock.mockReset()
     generateObjectMock.mockResolvedValue({
-      object: { category: 'reply', classifierConfidence: 0.9, reasoning: 'noop', crisisSafety: false },
+      object: {
+        category: 'reply',
+        classifierConfidence: 0.9,
+        reasoning: 'noop',
+        crisisSafety: false,
+      },
     })
   })
 
   it('explicitly notes welcome / follow_up / perk_unlock / event_invite are absent', async () => {
     await classifyMessage({ inboundBody: 'hi' })
     const callArgs = generateObjectMock.mock.calls[0]?.[0] as
-      | { system?: string }
-      | undefined
+      { system?: string } | undefined
     const prompt = callArgs?.system as string
-    expect(prompt).toContain('welcome, follow_up, perk_unlock, and event_invite')
+    expect(prompt).toContain(
+      'welcome, follow_up, perk_unlock, and event_invite',
+    )
     expect(prompt).toContain('venue-initiated outbound triggers')
     expect(prompt).toContain('Never select them when classifying an inbound')
   })
@@ -464,13 +513,19 @@ describe('CLASSIFY_SYSTEM_PROMPT — crisisSafety instruction (TAC-348)', () => 
   beforeEach(() => {
     generateObjectMock.mockReset()
     generateObjectMock.mockResolvedValue({
-      object: { category: 'reply', classifierConfidence: 0.9, reasoning: 'noop', crisisSafety: false },
+      object: {
+        category: 'reply',
+        classifierConfidence: 0.9,
+        reasoning: 'noop',
+        crisisSafety: false,
+      },
     })
   })
 
   it('describes self-harm/suicidal ideation as a trigger', async () => {
     await classifyMessage({ inboundBody: 'hi' })
-    const callArgs = generateObjectMock.mock.calls[0]?.[0] as { system?: string } | undefined
+    const callArgs = generateObjectMock.mock.calls[0]?.[0] as
+      { system?: string } | undefined
     const prompt = callArgs?.system as string
     expect(prompt).toContain('crisisSafety')
     expect(prompt).toContain('Self-harm or suicidal ideation')
@@ -478,14 +533,16 @@ describe('CLASSIFY_SYSTEM_PROMPT — crisisSafety instruction (TAC-348)', () => 
 
   it('describes an immediate medical emergency as a trigger', async () => {
     await classifyMessage({ inboundBody: 'hi' })
-    const callArgs = generateObjectMock.mock.calls[0]?.[0] as { system?: string } | undefined
+    const callArgs = generateObjectMock.mock.calls[0]?.[0] as
+      { system?: string } | undefined
     const prompt = callArgs?.system as string
     expect(prompt).toContain('immediate medical emergency or physical danger')
   })
 
   it('guards against hyperbole false positives with named examples', async () => {
     await classifyMessage({ inboundBody: 'hi' })
-    const callArgs = generateObjectMock.mock.calls[0]?.[0] as { system?: string } | undefined
+    const callArgs = generateObjectMock.mock.calls[0]?.[0] as
+      { system?: string } | undefined
     const prompt = callArgs?.system as string
     expect(prompt).toContain('this coffee is to die for')
     expect(prompt).toContain('dying to try this place')
@@ -493,7 +550,8 @@ describe('CLASSIFY_SYSTEM_PROMPT — crisisSafety instruction (TAC-348)', () => 
 
   it('states the field is independent of category', async () => {
     await classifyMessage({ inboundBody: 'hi' })
-    const callArgs = generateObjectMock.mock.calls[0]?.[0] as { system?: string } | undefined
+    const callArgs = generateObjectMock.mock.calls[0]?.[0] as
+      { system?: string } | undefined
     const prompt = callArgs?.system as string
     expect(prompt).toContain('Separately from category, set crisisSafety')
     expect(prompt).toContain('regardless of what category you picked')
@@ -501,7 +559,8 @@ describe('CLASSIFY_SYSTEM_PROMPT — crisisSafety instruction (TAC-348)', () => 
 
   it('biases ambiguous cases toward true (false negatives are the worse failure)', async () => {
     await classifyMessage({ inboundBody: 'hi' })
-    const callArgs = generateObjectMock.mock.calls[0]?.[0] as { system?: string } | undefined
+    const callArgs = generateObjectMock.mock.calls[0]?.[0] as
+      { system?: string } | undefined
     const prompt = callArgs?.system as string
     expect(prompt).toContain('prefer true')
   })
@@ -516,7 +575,12 @@ describe('classifyMessage — crisis-check bypass of the classifier length cap (
   beforeEach(() => {
     generateObjectMock.mockReset()
     generateObjectMock.mockResolvedValue({
-      object: { category: 'reply', classifierConfidence: 0.9, reasoning: 'noop', crisisSafety: false },
+      object: {
+        category: 'reply',
+        classifierConfidence: 0.9,
+        reasoning: 'noop',
+        crisisSafety: false,
+      },
     })
   })
 
@@ -564,7 +628,9 @@ describe('classifyMessage — crisisSafety round-trip (TAC-348)', () => {
         crisisSafety: true,
       },
     })
-    const r = await classifyMessage({ inboundBody: "I don't see the point of anything anymore" })
+    const r = await classifyMessage({
+      inboundBody: "I don't see the point of anything anymore",
+    })
     expect(r.ok).toBe(true)
     if (!r.ok) return
     expect(r.data.crisisSafety).toBe(true)
@@ -595,7 +661,12 @@ describe('classifyMessage — persona section keeps the SMS copy (TAC-495)', () 
   beforeEach(() => {
     generateObjectMock.mockReset()
     generateObjectMock.mockResolvedValue({
-      object: { category: 'reply', classifierConfidence: 0.9, reasoning: 'noop', crisisSafety: false },
+      object: {
+        category: 'reply',
+        classifierConfidence: 0.9,
+        reasoning: 'noop',
+        crisisSafety: false,
+      },
     })
   })
 
@@ -613,7 +684,9 @@ describe('classifyMessage — persona section keeps the SMS copy (TAC-495)', () 
       }),
     })
     const prompt = await getCapturedUserPrompt()
-    expect(prompt).toContain('You are Sana, staff at the venue, texting as yourself.')
+    expect(prompt).toContain(
+      'You are Sana, staff at the venue, texting as yourself.',
+    )
     expect(prompt).not.toContain('messaging as yourself')
   })
 })
@@ -644,7 +717,8 @@ describe('CLASSIFY_SYSTEM_PROMPT — correctsPendingReply instruction (TAC-397)'
 
   async function promptFor(body = 'hi'): Promise<string> {
     await classifyMessage({ inboundBody: body })
-    const callArgs = generateObjectMock.mock.calls[0]?.[0] as { system?: string } | undefined
+    const callArgs = generateObjectMock.mock.calls[0]?.[0] as
+      { system?: string } | undefined
     return callArgs?.system as string
   }
 
@@ -720,21 +794,26 @@ describe('classifyMessage — correctsPendingReply pass-through (TAC-397)', () =
   // The field is only useful if it survives the hop out of lib/ai. Both
   // directions, because a mapping hardcoded to `false` would satisfy a
   // one-sided test and silently disable every correction.
-  it.each([true, false])('returns the model’s value unchanged (%s)', async (value) => {
-    generateObjectMock.mockResolvedValue({
-      object: {
-        category: 'reply',
-        classifierConfidence: 0.9,
-        reasoning: 'noop',
-        crisisSafety: false,
-        correctsPendingReply: value,
-      },
-    })
-    const r = await classifyMessage({ inboundBody: 'actually make that oat milk' })
-    expect(r.ok).toBe(true)
-    if (!r.ok) return
-    expect(r.data.correctsPendingReply).toBe(value)
-  })
+  it.each([true, false])(
+    'returns the model’s value unchanged (%s)',
+    async (value) => {
+      generateObjectMock.mockResolvedValue({
+        object: {
+          category: 'reply',
+          classifierConfidence: 0.9,
+          reasoning: 'noop',
+          crisisSafety: false,
+          correctsPendingReply: value,
+        },
+      })
+      const r = await classifyMessage({
+        inboundBody: 'actually make that oat milk',
+      })
+      expect(r.ok).toBe(true)
+      if (!r.ok) return
+      expect(r.data.correctsPendingReply).toBe(value)
+    },
+  )
 })
 
 // ---------------------------------------------------------------------------
@@ -812,7 +891,10 @@ describe('classifyMessage — jev gate', () => {
       // The Haiku-shaped result, not the Jev one.
       expect(r.data.category).toBe('reply')
       expect(r.data.reasoning).toBe('haiku-mock')
-      expect(r.data.promptVersion).toBe('v1.70.0')
+      // Derived, not pinned: the Haiku fallback stamps the live template
+      // version, and a literal here strands on every PROMPT_VERSION bump
+      // (.claude/rules/prompt-versioning.md).
+      expect(r.data.promptVersion).toBe(PROMPT_VERSION)
       // The silent degrade carries its event and errorCode (errors-as-values rule).
       expect(warnSpy).toHaveBeenCalledWith(
         'classify-message: jev failed, falling back to haiku',
@@ -866,7 +948,10 @@ describe('classifyMessage — jev gate', () => {
     expect(r.ok).toBe(true)
     expect(captured.body).toBeDefined()
     const parsed = JSON.parse(captured.body!) as {
-      state: { inbound_message: string; inbound_message_full_for_crisis_check?: string }
+      state: {
+        inbound_message: string
+        inbound_message_full_for_crisis_check?: string
+      }
     }
     // Identical inputs across both arms: the category-facing text is the
     // truncated view, byte-for-byte what the Haiku prompt embeds.

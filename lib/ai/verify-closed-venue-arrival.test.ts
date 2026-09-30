@@ -91,14 +91,17 @@ describe('verifyClosedVenueArrival', () => {
     expect(r.ok).toBe(true)
     if (r.ok) {
       expect(r.data.confirmsArrival).toBe(true)
-      expect(r.data.promptVersion).toBe(VERIFY_CLOSED_VENUE_ARRIVAL_PROMPT_VERSION)
+      expect(r.data.promptVersion).toBe(
+        VERIFY_CLOSED_VENUE_ARRIVAL_PROMPT_VERSION,
+      )
     }
   })
 
   it('reports a clean reply', async () => {
     generateObjectMock.mockResolvedValue({
       object: {
-        reasoning: 'The reply says the venue is closed and names the opening time.',
+        reasoning:
+          'The reply says the venue is closed and names the opening time.',
         confirmsArrival: false,
       },
     })
@@ -122,7 +125,8 @@ describe('verifyClosedVenueArrival', () => {
     generateObjectMock.mockRejectedValue(truncationError())
     const r = await verifyClosedVenueArrival({ replyBody: 'See you soon!' })
     expect(r.ok).toBe(false)
-    if (!r.ok) expect(r.errorCode).toBe(VERIFY_CLOSED_VENUE_ARRIVAL_TRUNCATED_ERROR_CODE)
+    if (!r.ok)
+      expect(r.errorCode).toBe(VERIFY_CLOSED_VENUE_ARRIVAL_TRUNCATED_ERROR_CODE)
   })
 
   it('does NOT report a parse failure that stopped normally as truncation', async () => {
@@ -166,7 +170,10 @@ describe('verifyClosedVenueArrival', () => {
       object: { reasoning: 'r', confirmsArrival: false },
     })
     await verifyClosedVenueArrival({ replyBody: 'omw see you in five' })
-    const call = generateObjectMock.mock.calls[0][0] as { system: string; prompt: string }
+    const call = generateObjectMock.mock.calls[0][0] as {
+      system: string
+      prompt: string
+    }
     expect(call.prompt).toContain('omw see you in five')
     expect(call.system).not.toContain('omw see you in five')
   })
@@ -186,7 +193,10 @@ describe('the schema puts reasoning before the verdict', () => {
     const call = generateObjectMock.mock.calls[0][0] as {
       schema: { shape: Record<string, unknown> }
     }
-    expect(Object.keys(call.schema.shape)).toEqual(['reasoning', 'confirmsArrival'])
+    expect(Object.keys(call.schema.shape)).toEqual([
+      'reasoning',
+      'confirmsArrival',
+    ])
   })
 })
 
@@ -213,7 +223,7 @@ describe('prompt content', () => {
     // The 2026-09-21 live reply. Flagging it would hold the RIGHT answer and
     // turn a working prose layer into a queue of correct drafts.
     expect(await systemPrompt()).toContain(
-      "A reply that says the venue is closed, or names when it opens, and directs the guest to that.",
+      'A reply that says the venue is closed, or names when it opens, and directs the guest to that.',
     )
   })
 

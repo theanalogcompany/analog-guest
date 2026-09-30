@@ -46,9 +46,12 @@ export function VoicesClient({ data }: VoicesClientProps) {
   // Find the inbound that triggered the selected outbound (via
   // reply_to_message_id) so the playground can render the in/out pair.
   const flaggedPair = useMemo(() => {
-    if (!selectedMessage || selectedMessage.direction !== 'outbound') return null
+    if (!selectedMessage || selectedMessage.direction !== 'outbound')
+      return null
     if (!selectedMessage.replyToMessageId) return null
-    const inbound = messages.find((m) => m.id === selectedMessage.replyToMessageId)
+    const inbound = messages.find(
+      (m) => m.id === selectedMessage.replyToMessageId,
+    )
     if (!inbound) return null
     return { inbound, outbound: selectedMessage }
   }, [selectedMessage, messages])

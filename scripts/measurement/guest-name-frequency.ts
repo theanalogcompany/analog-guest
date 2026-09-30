@@ -211,7 +211,9 @@ async function main(): Promise<void> {
     .single()
   const info = (cfg?.venue_info ?? {}) as { staff?: string[] }
   const personNames = [
-    ...(info.staff ?? []).map((line) => (line.split(/[—–-]/)[0] ?? '').trim().split(/\s+/)[0] ?? ''),
+    ...(info.staff ?? []).map(
+      (line) => (line.split(/[—–-]/)[0] ?? '').trim().split(/\s+/)[0] ?? '',
+    ),
     'Himanshu',
     'Milana',
   ].filter((n) => n.length > 2)
@@ -227,7 +229,10 @@ async function main(): Promise<void> {
     .eq('venue_id', venue.id)
     .not('first_name', 'is', null)
   const named = (candidates ?? []).filter(
-    (g) => !String(g.first_name ?? '').toLowerCase().startsWith('synthetic'),
+    (g) =>
+      !String(g.first_name ?? '')
+        .toLowerCase()
+        .startsWith('synthetic'),
   )
   let guest: (typeof named)[number] | null = null
   let guestMessageCount = 0
@@ -241,9 +246,12 @@ async function main(): Promise<void> {
       guest = g
     }
   }
-  if (!guest) throw new Error('no non-synthetic guest with a first_name at this venue')
+  if (!guest)
+    throw new Error('no non-synthetic guest with a first_name at this venue')
   const firstName = String(guest.first_name)
-  const channel: 'text' | 'instagram' = guest.phone_number ? 'text' : 'instagram'
+  const channel: 'text' | 'instagram' = guest.phone_number
+    ? 'text'
+    : 'instagram'
 
   const { count: statesBefore } = await db
     .from('guest_states')
@@ -261,18 +269,29 @@ async function main(): Promise<void> {
       guestMessageCount,
       ruleUnderTest: R38,
       conversations: repsArg,
-      runHourLocal: startedAt.toLocaleString('en-US', { timeZone: venue.timezone ?? 'UTC' }),
+      runHourLocal: startedAt.toLocaleString('en-US', {
+        timeZone: venue.timezone ?? 'UTC',
+      }),
       statesBefore,
     },
   })
 
-  console.log(`[tac544] venue ${venueSlug} | guest "${firstName}" (${channel}, ${guestMessageCount} messages)`)
-  console.log(`[tac544] prompt ${PROMPT_VERSION} | run started ${startedAt.toISOString()}`)
-  console.log(`[tac544] venue-local hour: ${startedAt.toLocaleString('en-US', { timeZone: venue.timezone ?? 'UTC' })}`)
+  console.log(
+    `[tac544] venue ${venueSlug} | guest "${firstName}" (${channel}, ${guestMessageCount} messages)`,
+  )
+  console.log(
+    `[tac544] prompt ${PROMPT_VERSION} | run started ${startedAt.toISOString()}`,
+  )
+  console.log(
+    `[tac544] venue-local hour: ${startedAt.toLocaleString('en-US', { timeZone: venue.timezone ?? 'UTC' })}`,
+  )
   console.log(`[tac544] guest_states rows before: ${statesBefore}`)
   console.log(`[tac544] run log: ${log.path}\n`)
 
-  const trace = startAgentTrace({ name: 'tac544-measure', agentRunId: randomUUID() })
+  const trace = startAgentTrace({
+    name: 'tac544-measure',
+    agentRunId: randomUUID(),
+  })
 
   const now = new Date()
   // ONE context build for the whole run. Cloned per conversation below, so
@@ -366,15 +385,21 @@ async function main(): Promise<void> {
             category = classification.category
             ctx.corpus = await retrieveCorpusStage(ctx)
             ctx.knowledgeCorpus = shouldRetrieveKnowledge(ctx)
-              ? await retrieveKnowledgeStage(ctx, classification.category, turn.body)
+              ? await retrieveKnowledgeStage(
+                  ctx,
+                  classification.category,
+                  turn.body,
+                )
               : []
 
-            const ragChunks: AiVoiceCorpusChunk[] = (ctx.corpus ?? []).map((c) => ({
-              id: c.id,
-              text: c.text,
-              sourceType: c.sourceType as AiVoiceCorpusChunk['sourceType'],
-              relevanceScore: c.similarity,
-            }))
+            const ragChunks: AiVoiceCorpusChunk[] = (ctx.corpus ?? []).map(
+              (c) => ({
+                id: c.id,
+                text: c.text,
+                sourceType: c.sourceType as AiVoiceCorpusChunk['sourceType'],
+                relevanceScore: c.similarity,
+              }),
+            )
             const knowledgeChunks: AiKnowledgeCorpusChunk[] | undefined =
               ctx.knowledgeCorpus === null
                 ? undefined
@@ -449,7 +474,9 @@ async function main(): Promise<void> {
             ? null
             : classifyGuestName(reply, { firstName, venueNames })
         const identity =
-          reply === null ? null : classifySpeakerIdentity(reply, { personNames, venueNames })
+          reply === null
+            ? null
+            : classifySpeakerIdentity(reply, { personNames, venueNames })
 
         const record: TurnRecord = {
           conversationId: conv.id,
@@ -465,7 +492,10 @@ async function main(): Promise<void> {
           namedSelfIntroMatch: identity?.namedSelfIntroMatch ?? null,
           thirdPersonVenue: verdict?.thirdPersonVenue ?? false,
           thirdPersonVenueMatch: verdict?.thirdPersonVenueMatch ?? null,
-          dodgeCandidate: reply === null ? false : looksLikeDodge(turn.shape, turn.body, reply),
+          dodgeCandidate:
+            reply === null
+              ? false
+              : looksLikeDodge(turn.shape, turn.body, reply),
           calls,
           error,
         }
@@ -479,7 +509,12 @@ async function main(): Promise<void> {
 
         // The reply enters the history the next turn is generated against.
         ctx.recentMessages.push(
-          { direction: 'inbound', body: turn.body, createdAt: receivedAt, delivery: 'delivered' },
+          {
+            direction: 'inbound',
+            body: turn.body,
+            createdAt: receivedAt,
+            delivery: 'delivered',
+          },
           {
             direction: 'outbound',
             body: reply,
@@ -488,11 +523,16 @@ async function main(): Promise<void> {
           },
         )
       }
-      const armRecords = records.filter((r) => r.conversationId === conv.id && r.arm === arm)
+      const armRecords = records.filter(
+        (r) => r.conversationId === conv.id && r.arm === arm,
+      )
       const uses = armRecords.reduce((n, r) => n + r.nameUses, 0)
       console.log(
         `  ${conv.id} ${arm.padEnd(9)} turns=${armRecords.length} nameUses=${uses} ` +
-          `pairs=${consecutiveNamePairs(armRecords.map((r) => r.reply ?? ''), firstName)}`,
+          `pairs=${consecutiveNamePairs(
+            armRecords.map((r) => r.reply ?? ''),
+            firstName,
+          )}`,
       )
     }
   }
@@ -527,10 +567,14 @@ function report(
   const line = '='.repeat(74)
   console.log(`\n${line}\nTAC-544 — guest name frequency\n${line}`)
   console.log(`run started      ${meta.startedAt.toISOString()}`)
-  console.log(`venue-local      ${meta.startedAt.toLocaleString('en-US', { timeZone: meta.timezone })}`)
+  console.log(
+    `venue-local      ${meta.startedAt.toLocaleString('en-US', { timeZone: meta.timezone })}`,
+  )
   console.log(`prompt version   ${PROMPT_VERSION}`)
   console.log(`guest first name ${firstName}`)
-  console.log(`history tail     ${meta.tailNameUses} name use(s) in the loaded outbound tail`)
+  console.log(
+    `history tail     ${meta.tailNameUses} name use(s) in the loaded outbound tail`,
+  )
   console.log(`run log          ${meta.logPath}`)
 
   // A conversation counts only when BOTH arms produced all four replies. A
@@ -539,19 +583,31 @@ function report(
   const complete = new Set<string>()
   for (const conv of conversations) {
     const ok = ARMS.every((arm) => {
-      const rs = records.filter((r) => r.conversationId === conv.id && r.arm === arm)
-      return rs.length === conv.turns.length && rs.every((r) => r.reply !== null)
+      const rs = records.filter(
+        (r) => r.conversationId === conv.id && r.arm === arm,
+      )
+      return (
+        rs.length === conv.turns.length && rs.every((r) => r.reply !== null)
+      )
     })
     if (ok) complete.add(conv.id)
   }
-  const dropped = conversations.filter((c) => !complete.has(c.id)).map((c) => c.id)
-  console.log(`conversations    ${complete.size} paired and complete of ${conversations.length}`)
+  const dropped = conversations
+    .filter((c) => !complete.has(c.id))
+    .map((c) => c.id)
+  console.log(
+    `conversations    ${complete.size} paired and complete of ${conversations.length}`,
+  )
   if (dropped.length > 0) {
-    console.log(`  EXCLUDED (a call failed in one or both arms): ${dropped.join(', ')}`)
+    console.log(
+      `  EXCLUDED (a call failed in one or both arms): ${dropped.join(', ')}`,
+    )
   }
 
   for (const arm of ARMS) {
-    const rs = records.filter((r) => complete.has(r.conversationId) && r.arm === arm)
+    const rs = records.filter(
+      (r) => complete.has(r.conversationId) && r.arm === arm,
+    )
     const byConv = new Map<string, TurnRecord[]>()
     for (const r of rs) {
       const list = byConv.get(r.conversationId) ?? []
@@ -575,21 +631,39 @@ function report(
 
     console.log(`\n${'-'.repeat(74)}\nARM: ${arm}\n${'-'.repeat(74)}`)
     console.log(`replies                      ${rs.length}`)
-    console.log(`replies using the name       ${repliesWithName} (${((100 * repliesWithName) / Math.max(1, rs.length)).toFixed(1)}%)`)
+    console.log(
+      `replies using the name       ${repliesWithName} (${((100 * repliesWithName) / Math.max(1, rs.length)).toFixed(1)}%)`,
+    )
     console.log('name uses per conversation   distribution:')
     for (const uses of [...dist.keys()].sort((a, b) => a - b)) {
-      console.log(`    ${uses} use(s): ${'#'.repeat(dist.get(uses) ?? 0)} ${dist.get(uses)} conversation(s)`)
+      console.log(
+        `    ${uses} use(s): ${'#'.repeat(dist.get(uses) ?? 0)} ${dist.get(uses)} conversation(s)`,
+      )
     }
-    console.log(`conversations w/ 2 consecutive named replies  ${perConv.filter((c) => c.pairs > 0).length}`)
-    console.log(`conversations with >1 name use               ${perConv.filter((c) => c.uses > 1).length}`)
-    console.log(`named self-introductions                    ${rs.filter((r) => r.namedSelfIntro).length}`)
-    console.log(`third-person venue references               ${rs.filter((r) => r.thirdPersonVenue).length}`)
-    console.log(`dodge candidates (read these)               ${rs.filter((r) => r.dodgeCandidate).length}`)
+    console.log(
+      `conversations w/ 2 consecutive named replies  ${perConv.filter((c) => c.pairs > 0).length}`,
+    )
+    console.log(
+      `conversations with >1 name use               ${perConv.filter((c) => c.uses > 1).length}`,
+    )
+    console.log(
+      `named self-introductions                    ${rs.filter((r) => r.namedSelfIntro).length}`,
+    )
+    console.log(
+      `third-person venue references               ${rs.filter((r) => r.thirdPersonVenue).length}`,
+    )
+    console.log(
+      `dodge candidates (read these)               ${rs.filter((r) => r.dodgeCandidate).length}`,
+    )
 
     const cats = new Map<string, number>()
-    for (const r of rs) cats.set(r.category ?? 'null', (cats.get(r.category ?? 'null') ?? 0) + 1)
+    for (const r of rs)
+      cats.set(r.category ?? 'null', (cats.get(r.category ?? 'null') ?? 0) + 1)
     console.log(
-      `categories                   ${[...cats.entries()].sort((a, b) => b[1] - a[1]).map(([c, n]) => `${c}=${n}`).join(' ')}`,
+      `categories                   ${[...cats.entries()]
+        .sort((a, b) => b[1] - a[1])
+        .map(([c, n]) => `${c}=${n}`)
+        .join(' ')}`,
     )
 
     if (arm === 'treatment') {
@@ -598,10 +672,18 @@ function report(
       const b2 = perConv.filter((c) => c.uses > 1).length
       const b3 = rs.filter((r) => r.namedSelfIntro).length
       const b4 = rs.filter((r) => r.thirdPersonVenue).length
-      console.log(`  ${b1 === 0 ? 'PASS' : 'FAIL'}  0 conversations with the name in two consecutive replies  (got ${b1})`)
-      console.log(`  ${b2 === 0 ? 'PASS' : 'FAIL'}  at most 1 name use per conversation                       (got ${b2} over)`)
-      console.log(`  ${b3 === 0 ? 'PASS' : 'FAIL'}  0 named self-introductions                               (got ${b3})`)
-      console.log(`  ${b4 === 0 ? 'PASS' : 'FAIL'}  0 third-person venue references                          (got ${b4})`)
+      console.log(
+        `  ${b1 === 0 ? 'PASS' : 'FAIL'}  0 conversations with the name in two consecutive replies  (got ${b1})`,
+      )
+      console.log(
+        `  ${b2 === 0 ? 'PASS' : 'FAIL'}  at most 1 name use per conversation                       (got ${b2} over)`,
+      )
+      console.log(
+        `  ${b3 === 0 ? 'PASS' : 'FAIL'}  0 named self-introductions                               (got ${b3})`,
+      )
+      console.log(
+        `  ${b4 === 0 ? 'PASS' : 'FAIL'}  0 third-person venue references                          (got ${b4})`,
+      )
     }
 
     // VERBATIM BODIES FOR EVERY BREACH, which the ticket asks for by name.
@@ -609,24 +691,34 @@ function report(
     if (breaches.length > 0) {
       console.log(`\n  BREACHES in ${arm}, verbatim:`)
       for (const c of breaches) {
-        console.log(`  --- ${c.id} (uses=${c.uses}, consecutive pairs=${c.pairs}) ---`)
+        console.log(
+          `  --- ${c.id} (uses=${c.uses}, consecutive pairs=${c.pairs}) ---`,
+        )
         for (const t of [...c.turns].sort((a, b) => a.turn - b.turn)) {
           console.log(`    t${t.turn} [${t.shape}] guest: ${t.guestBody}`)
-          console.log(`         agent (${t.nameUses} name use): ${JSON.stringify(t.reply)}`)
+          console.log(
+            `         agent (${t.nameUses} name use): ${JSON.stringify(t.reply)}`,
+          )
         }
       }
     }
 
-    const others = rs.filter((r) => r.namedSelfIntro || r.thirdPersonVenue || r.dodgeCandidate)
+    const others = rs.filter(
+      (r) => r.namedSelfIntro || r.thirdPersonVenue || r.dodgeCandidate,
+    )
     if (others.length > 0) {
-      console.log(`\n  SELF-INTRO / THIRD-PERSON / DODGE CANDIDATES in ${arm}, verbatim:`)
+      console.log(
+        `\n  SELF-INTRO / THIRD-PERSON / DODGE CANDIDATES in ${arm}, verbatim:`,
+      )
       for (const r of others) {
         const flags = [
           r.namedSelfIntro ? `selfIntro(${r.namedSelfIntroMatch})` : null,
           r.thirdPersonVenue ? `thirdPerson(${r.thirdPersonVenueMatch})` : null,
           r.dodgeCandidate ? 'dodgeCandidate' : null,
         ].filter(Boolean)
-        console.log(`    ${r.conversationId} t${r.turn} [${r.shape}] ${flags.join(' ')}`)
+        console.log(
+          `    ${r.conversationId} t${r.turn} [${r.shape}] ${flags.join(' ')}`,
+        )
         console.log(`         guest: ${r.guestBody}`)
         console.log(`         agent: ${JSON.stringify(r.reply)}`)
       }
@@ -634,7 +726,9 @@ function report(
   }
 
   console.log(`\n${line}`)
-  console.log(`guest_states rows: before ${meta.statesBefore}, after ${meta.statesAfter}`)
+  console.log(
+    `guest_states rows: before ${meta.statesBefore}, after ${meta.statesAfter}`,
+  )
   if (meta.statesBefore !== meta.statesAfter) {
     console.log(
       `  NOTE: the count moved. buildRuntimeContext runs computeGuestState, which persists a row\n` +

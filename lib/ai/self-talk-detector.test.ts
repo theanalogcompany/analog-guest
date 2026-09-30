@@ -70,7 +70,9 @@ describe('matchSelfTalk — accepted over-inclusion', () => {
   // one harmless regen attempt, never a queue or a block, while narrowing
   // the pattern risks missing the real failure case it exists to catch.
   it('fires on ordinary guest-facing "actually, wait" phrasing too', () => {
-    const r = matchSelfTalk('actually, wait until after 3pm for the patio to open')
+    const r = matchSelfTalk(
+      'actually, wait until after 3pm for the patio to open',
+    )
     expect(r.matched).toBe(true)
   })
 })

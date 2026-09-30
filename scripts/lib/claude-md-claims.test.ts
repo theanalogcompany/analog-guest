@@ -31,7 +31,10 @@ const STAGES = 'lib/agent/stages.ts'
 const SYSTEM_TEMPLATE = 'lib/ai/prompts/system-template.ts'
 
 function tracked(): string[] {
-  const out = execFileSync('git', ['ls-files', '-z'], { cwd: ROOT, encoding: 'utf8' })
+  const out = execFileSync('git', ['ls-files', '-z'], {
+    cwd: ROOT,
+    encoding: 'utf8',
+  })
   return out.split('\0').filter(Boolean)
 }
 
@@ -43,7 +46,10 @@ const allTracked = tracked()
  * .claude/rules/ file on reading a path its frontmatter matches.
  */
 const instructionFiles = allTracked.filter(
-  (p) => p === 'CLAUDE.md' || p.endsWith('/CLAUDE.md') || /^\.claude\/rules\/.+\.md$/.test(p),
+  (p) =>
+    p === 'CLAUDE.md' ||
+    p.endsWith('/CLAUDE.md') ||
+    /^\.claude\/rules\/.+\.md$/.test(p),
 )
 
 /**
@@ -59,7 +65,9 @@ const instructionFiles = allTracked.filter(
  */
 const claimFiles = [
   ...instructionFiles,
-  ...allTracked.filter((p) => p === 'README.md' || /^docs\/decisions\/.+\.md$/.test(p)),
+  ...allTracked.filter(
+    (p) => p === 'README.md' || /^docs\/decisions\/.+\.md$/.test(p),
+  ),
 ]
 
 /**
@@ -80,10 +88,14 @@ const claimFiles = [
  */
 const citableFiles = [
   ...claimFiles,
-  ...allTracked.filter((p) => /^\.claude\/(process\.md|commands\/.+\.md|agents\/.+\.md)$/.test(p)),
+  ...allTracked.filter((p) =>
+    /^\.claude\/(process\.md|commands\/.+\.md|agents\/.+\.md)$/.test(p),
+  ),
 ]
 
-const sourceFiles = allTracked.filter((p) => /^(lib|app|scripts)\/.+\.tsx?$/.test(p))
+const sourceFiles = allTracked.filter((p) =>
+  /^(lib|app|scripts)\/.+\.tsx?$/.test(p),
+)
 
 interface Line {
   path: string
@@ -120,8 +132,14 @@ function mentions(text: string, name: string): boolean {
 const stagesSrc = read(STAGES)
 
 function liveNumber(name: string): number {
-  const m = new RegExp(`^export const ${name} = (-?\\d+(?:\\.\\d+)?)\\s*(?://.*)?$`, 'm').exec(stagesSrc)
-  if (!m) throw new Error(`${STAGES} no longer declares ${name} as a plain numeric literal`)
+  const m = new RegExp(
+    `^export const ${name} = (-?\\d+(?:\\.\\d+)?)\\s*(?://.*)?$`,
+    'm',
+  ).exec(stagesSrc)
+  if (!m)
+    throw new Error(
+      `${STAGES} no longer declares ${name} as a plain numeric literal`,
+    )
   return Number(m[1])
 }
 
@@ -135,19 +153,30 @@ const FLOORS = [
   'KNOWLEDGE_RELEVANCE_FLOOR',
 ] as const
 
-const liveFloors = new Map<string, number>(FLOORS.map((name) => [name, liveNumber(name)]))
+const liveFloors = new Map<string, number>(
+  FLOORS.map((name) => [name, liveNumber(name)]),
+)
 
 function livePromptVersion(): string {
-  const m = /^export const PROMPT_VERSION = '(v\d+\.\d+\.\d+)'$/m.exec(read(SYSTEM_TEMPLATE))
-  if (!m) throw new Error(`${SYSTEM_TEMPLATE} no longer declares PROMPT_VERSION as a version literal`)
+  const m = /^export const PROMPT_VERSION = '(v\d+\.\d+\.\d+)'$/m.exec(
+    read(SYSTEM_TEMPLATE),
+  )
+  if (!m)
+    throw new Error(
+      `${SYSTEM_TEMPLATE} no longer declares PROMPT_VERSION as a version literal`,
+    )
   return m[1]
 }
 
 function liveTriggerCount(): number {
   const open = stagesSrc.indexOf('export const APPROVAL_TRIGGERS = {')
-  if (open < 0) throw new Error(`${STAGES} no longer declares APPROVAL_TRIGGERS`)
+  if (open < 0)
+    throw new Error(`${STAGES} no longer declares APPROVAL_TRIGGERS`)
   const close = stagesSrc.indexOf('\n} as const', open)
-  if (close < 0) throw new Error(`APPROVAL_TRIGGERS in ${STAGES} is no longer closed by "} as const"`)
+  if (close < 0)
+    throw new Error(
+      `APPROVAL_TRIGGERS in ${STAGES} is no longer closed by "} as const"`,
+    )
   const body = stagesSrc.slice(open, close)
   return (body.match(/^ {2}[A-Z][A-Z0-9_]*: '/gm) ?? []).length
 }
@@ -195,7 +224,7 @@ describe('documents quote the live floors', () => {
 
   it('finds floor rows to check', () => {
     // Both tables are currently found: root CLAUDE.md's and lib/agent/CLAUDE.md's.
-    // Was >= 8 when the two voice-retrieval floors existed (decision 0007
+    // Was >= 8 when the two voice-retrieval floors existed (decision 0008
     // removed them); three floors x two tables is the current shape.
     expect(checked.length).toBeGreaterThanOrEqual(6)
     expect(new Set(checked.map((c) => c.path)).size).toBeGreaterThanOrEqual(2)
@@ -209,8 +238,13 @@ describe('documents quote the live floors', () => {
 
   it('quotes the value in lib/agent/stages.ts', () => {
     const stale = checked
-      .filter((c) => !numbersOn(c.text).includes(liveFloors.get(c.name) as number))
-      .map((c) => `${c.path}:${c.line} quotes ${c.name} but not ${liveFloors.get(c.name)}`)
+      .filter(
+        (c) => !numbersOn(c.text).includes(liveFloors.get(c.name) as number),
+      )
+      .map(
+        (c) =>
+          `${c.path}:${c.line} quotes ${c.name} but not ${liveFloors.get(c.name)}`,
+      )
     expect(
       stale,
       `${STAGES} owns these values. Update the instruction files, or the floor, but not one alone.`,
@@ -232,7 +266,8 @@ describe('documents quote the live PROMPT_VERSION', () => {
   })
 
   it('names the version in lib/ai/prompts/system-template.ts', () => {
-    const versionsOn = (text: string): string[] => text.match(/v\d+\.\d+\.\d+/g) ?? []
+    const versionsOn = (text: string): string[] =>
+      text.match(/v\d+\.\d+\.\d+/g) ?? []
     const stale = checked
       .filter((l) => !versionsOn(l.text).includes(live))
       .map((l) => `${l.path}:${l.line} quotes a version other than ${live}`)
@@ -263,14 +298,23 @@ describe('cited section names exist', () => {
   // the check reads it too: a literal example is indistinguishable from a live
   // citation. Filename first, then the section in double quotes, optionally
   // separated by a comma, arrow or section sign.
-  const CITATION = /([A-Za-z0-9_./-]+\.md)(?:'s)?\s*(?:[,→§]\s*)?"([^"]{3,80})"/g
+  const CITATION =
+    /([A-Za-z0-9_./-]+\.md)(?:'s)?\s*(?:[,→§]\s*)?"([^"]{3,80})"/g
   // The workflow files invert it: quoted section name, the word `in`, filename.
   const REVERSED = /"([^"]{3,80})" in `?([A-Za-z0-9_./-]+\.md)/g
 
   const scanned = [...linesOf(citableFiles), ...linesOf(sourceFiles)]
   const cited = scanned.flatMap((l) => [
-    ...[...l.text.matchAll(CITATION)].map((m) => ({ ...l, file: m[1], section: m[2] })),
-    ...[...l.text.matchAll(REVERSED)].map((m) => ({ ...l, file: m[2], section: m[1] })),
+    ...[...l.text.matchAll(CITATION)].map((m) => ({
+      ...l,
+      file: m[1],
+      section: m[2],
+    })),
+    ...[...l.text.matchAll(REVERSED)].map((m) => ({
+      ...l,
+      file: m[2],
+      section: m[1],
+    })),
   ])
 
   it('finds citations to check', () => {
@@ -285,11 +329,16 @@ describe('cited section names exist', () => {
         // one it means depends on where the reader is standing - which is an
         // argument for path-qualifying a new one.
         const targets =
-          c.file === 'CLAUDE.md' ? instructionFiles : citableFiles.filter((p) => p === c.file)
+          c.file === 'CLAUDE.md'
+            ? instructionFiles
+            : citableFiles.filter((p) => p === c.file)
         if (targets.length === 0) return true
         return !targets.some((p) => read(p).includes(c.section))
       })
-      .map((c) => `${c.path}:${c.line} cites ${c.file} "${c.section}", which is not in it`)
+      .map(
+        (c) =>
+          `${c.path}:${c.line} cites ${c.file} "${c.section}", which is not in it`,
+      )
     expect(
       dangling,
       'a renamed heading leaves every pointer at the old name silently wrong',
@@ -312,7 +361,10 @@ describe('the documentation-routing note has one spelling', () => {
 
   it('is spelled identically by the producer and both readers', () => {
     const disagreeing = PARTIES.filter((p) => !read(p).includes(NOTE))
-    expect(disagreeing, `these no longer agree on the PR-body note "${NOTE}"`).toEqual([])
+    expect(
+      disagreeing,
+      `these no longer agree on the PR-body note "${NOTE}"`,
+    ).toEqual([])
   })
 })
 
@@ -334,7 +386,13 @@ describe('written approval-trigger counts match APPROVAL_TRIGGERS', () => {
   it('matches the number of keys', () => {
     const stale = checked
       .filter((c) => c.written !== live)
-      .map((c) => `${c.path}:${c.line} says ${c.written} approval triggers, APPROVAL_TRIGGERS has ${live}`)
-    expect(stale, 'adding a trigger is a sweep: the count is written in prose in more than one place').toEqual([])
+      .map(
+        (c) =>
+          `${c.path}:${c.line} says ${c.written} approval triggers, APPROVAL_TRIGGERS has ${live}`,
+      )
+    expect(
+      stale,
+      'adding a trigger is a sweep: the count is written in prose in more than one place',
+    ).toEqual([])
   })
 })

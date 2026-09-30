@@ -32,16 +32,13 @@
 import { randomUUID } from 'node:crypto'
 
 import {
-  AGENT_LATENCY_HIGH_THRESHOLD_MS,
+  isAgentLatencyHigh,
   captureAgentLatencyHigh,
   captureDraftDropped,
   captureDraftQueued,
   captureDraftRegenerated,
 } from '@/lib/analytics/posthog'
-import {
-  isEmptyContextUpdate,
-  updateGuestContext,
-} from '@/lib/guests/context'
+import { isEmptyContextUpdate, updateGuestContext } from '@/lib/guests/context'
 import { startAgentTrace } from '@/lib/observability'
 import { fireRedAlert } from './alerts'
 import { buildRuntimeContext } from './build-runtime-context'
@@ -58,10 +55,7 @@ import {
   type SlotDropReason,
 } from './pending-slots'
 import { persistOrRegenQueuedDraft } from './schedule-and-send'
-import {
-  generateStage,
-  retrieveCorpusStage,
-} from './stages'
+import { generateStage, retrieveCorpusStage } from './stages'
 import {
   buildCorpusContent,
   buildGenerateAttemptContent,
@@ -215,14 +209,16 @@ export async function handleOperatorDecline(input: {
       reasoning: `Operator-initiated decline of commitment ${input.commitmentId}`,
       // TAC-348: operator-initiated, not a guest message — never applicable.
       crisisSafety: false,
-    // TAC-397: no guest inbound on this path — see handle-followup.ts.
+      // TAC-397: no guest inbound on this path — see handle-followup.ts.
       correctsPendingReply: false,
     }
 
     // Voice corpus — fail-CLOSED. A decline still needs to be in the venue's
     // voice; an unrooted apology is exactly the kind of generic-sounding
     // message we're trying to avoid shipping.
-    const retrieveSpan = trace.span('retrieve', { surface: 'operator_decline' })
+    const retrieveSpan = trace.span('retrieve', {
+      surface: 'operator_decline',
+    })
     try {
       ctx.corpus = await retrieveCorpusStage(ctx)
       retrieveSpan.end({
@@ -233,7 +229,9 @@ export async function handleOperatorDecline(input: {
               ? Math.max(...ctx.corpus.map((c) => c.similarity))
               : 0,
         },
-        content: trace.captureContent ? buildCorpusContent(ctx.corpus) : undefined,
+        content: trace.captureContent
+          ? buildCorpusContent(ctx.corpus)
+          : undefined,
       })
     } catch (e) {
       const errMsg = e instanceof Error ? e.message : String(e)
@@ -311,13 +309,18 @@ export async function handleOperatorDecline(input: {
     }
     if (gen.status === 'refused') {
       gen.attemptScores.forEach((score, i) => {
-        const attemptSpan = generateSpan.span(`generate.attempt_${i + 1}`, { attempt: i + 1 })
+        const attemptSpan = generateSpan.span(`generate.attempt_${i + 1}`, {
+          attempt: i + 1,
+        })
         attemptSpan.end({ output: { voiceFidelity: score } })
       })
       generateSpan.end({
         level: 'WARNING',
         statusMessage: 'fidelity_loop_exhausted',
-        output: { attemptScores: gen.attemptScores, finalScore: gen.finalScore },
+        output: {
+          attemptScores: gen.attemptScores,
+          finalScore: gen.finalScore,
+        },
       })
       await fireRedAlert({
         agentRunId,
@@ -328,10 +331,16 @@ export async function handleOperatorDecline(input: {
         errorMessage: 'fidelity_loop_exhausted',
         extra: { attemptScores: gen.attemptScores, finalScore: gen.finalScore },
       })
-      return { status: 'refused', reason: 'low_fidelity', attemptScores: gen.attemptScores }
+      return {
+        status: 'refused',
+        reason: 'low_fidelity',
+        attemptScores: gen.attemptScores,
+      }
     }
     gen.result.attemptScores.forEach((score, i) => {
-      const attemptSpan = generateSpan.span(`generate.attempt_${i + 1}`, { attempt: i + 1 })
+      const attemptSpan = generateSpan.span(`generate.attempt_${i + 1}`, {
+        attempt: i + 1,
+      })
       const attempt = gen.result.attemptHistory[i]
       attemptSpan.end({
         output: { voiceFidelity: score },
@@ -346,7 +355,9 @@ export async function handleOperatorDecline(input: {
         promptVersion: gen.result.promptVersion,
         bodyLength: gen.result.body.length,
       },
-      content: trace.captureContent ? buildGenerateContent(gen.result) : undefined,
+      content: trace.captureContent
+        ? buildGenerateContent(gen.result)
+        : undefined,
     })
     generatedBody = gen.result.body
 
@@ -362,11 +373,14 @@ export async function handleOperatorDecline(input: {
         now: ctx.recognition.computedAt,
       })
       if (!writeResult.ok) {
-        console.warn('[agent] operator decline context write failed (continuing)', {
-          agentRunId,
-          guestId: ctx.guest.id,
-          error: writeResult.error,
-        })
+        console.warn(
+          '[agent] operator decline context write failed (continuing)',
+          {
+            agentRunId,
+            guestId: ctx.guest.id,
+            error: writeResult.error,
+          },
+        )
       }
     }
     const arrival = await dispatchArrivalCapture({
@@ -408,8 +422,12 @@ export async function handleOperatorDecline(input: {
     })
     try {
       const pendingRows =
-        (await loadPendingRowsBySlot(ctx.venue.id, ctx.guest.id)) ?? EMPTY_PENDING_ROWS
-      const draftCommitment = draftCommitmentIdentity(gen.result.commitment, false)
+        (await loadPendingRowsBySlot(ctx.venue.id, ctx.guest.id)) ??
+        EMPTY_PENDING_ROWS
+      const draftCommitment = draftCommitmentIdentity(
+        gen.result.commitment,
+        false,
+      )
       const slotDecision = decideSlotAction({
         rows: pendingRows,
         draftCommitment,
@@ -434,11 +452,14 @@ export async function handleOperatorDecline(input: {
             protectedDraftId: drop.protectedDraftId,
           },
         })
-        console.warn('[agent] operator decline draft dropped: a pending card holds its slot', {
-          agentRunId,
-          reason: drop.reason,
-          protectedDraftId: drop.protectedDraftId,
-        })
+        console.warn(
+          '[agent] operator decline draft dropped: a pending card holds its slot',
+          {
+            agentRunId,
+            reason: drop.reason,
+            protectedDraftId: drop.protectedDraftId,
+          },
+        )
         await captureDraftDropped({
           agentRunId,
           venueId: liveCtx.venue.id,
@@ -473,7 +494,8 @@ export async function handleOperatorDecline(input: {
           reason: slotDecision.reason,
           protectedDraftId: slotDecision.protectedDraftId,
           protectedCommitment: commitmentIdentityOf(
-            occupantOfSlot(pendingRows, slotDecision.slot)?.pending_commitment ?? null,
+            occupantOfSlot(pendingRows, slotDecision.slot)
+              ?.pending_commitment ?? null,
           ),
           droppedCommitment: draftCommitment,
         })
@@ -495,7 +517,11 @@ export async function handleOperatorDecline(input: {
         // nobody finds until a card has no id.
         return { status: 'silenced' }
       }
-      const { outboundMessageId, action: persistAction, priorReviewReason } = persistResult
+      const {
+        outboundMessageId,
+        action: persistAction,
+        priorReviewReason,
+      } = persistResult
       queueSpan.end({
         output: {
           outboundMessageId,
@@ -573,11 +599,16 @@ export async function handleOperatorDecline(input: {
       }
     } catch (e) {
       const errMsg = e instanceof Error ? e.message : String(e)
-      queueSpan.end({ level: 'ERROR', statusMessage: errMsg, output: { stage: 'persist' } })
+      queueSpan.end({
+        level: 'ERROR',
+        statusMessage: errMsg,
+        output: { stage: 'persist' },
+      })
       return { status: 'failed', stage: 'persist', error: errMsg }
     }
   } catch (unexpected) {
-    const errMsg = unexpected instanceof Error ? unexpected.message : String(unexpected)
+    const errMsg =
+      unexpected instanceof Error ? unexpected.message : String(unexpected)
     const errStack = unexpected instanceof Error ? unexpected.stack : undefined
     trace.update({ output: { status: 'failed', error: errMsg } })
     await fireRedAlert({
@@ -592,7 +623,7 @@ export async function handleOperatorDecline(input: {
     return { status: 'failed', stage: 'context_build', error: errMsg }
   } finally {
     const totalElapsedMs = Date.now() - start
-    if (totalElapsedMs > AGENT_LATENCY_HIGH_THRESHOLD_MS) {
+    if (isAgentLatencyHigh('followup', totalElapsedMs)) {
       await captureAgentLatencyHigh({
         agentRunId,
         venueId: ctx?.venue.id ?? input.venueId,

@@ -60,7 +60,7 @@ const HISTORY: Fixture[] = [
     body: "Really sorry about yesterday. A refund isn't something I can do over text, but tell me what happened and I'll make it right.",
     commitsResource: true,
     floorQueues: true,
-    note: "matches on \"I'll make it right\", NOT on the \"I can\" inside the refusal — see negation tests",
+    note: 'matches on "I\'ll make it right", NOT on the "I can" inside the refusal — see negation tests',
   },
   {
     date: '2026-07-03',
@@ -138,10 +138,15 @@ describe('matchForwardCommitment — against the full production history', () =>
 
   // The latency property: complaint threads must not stall on questions.
   it('lets every pure-question turn through', () => {
-    const questions = HISTORY.filter((f) => f.body.includes('?') && !f.commitsResource)
+    const questions = HISTORY.filter(
+      (f) => f.body.includes('?') && !f.commitsResource,
+    )
     expect(questions.length).toBeGreaterThanOrEqual(3)
     for (const q of questions) {
-      expect(matchForwardCommitment(q.body).matched, `should pass: ${q.body}`).toBe(false)
+      expect(
+        matchForwardCommitment(q.body).matched,
+        `should pass: ${q.body}`,
+      ).toBe(false)
     }
   })
 })
@@ -196,7 +201,9 @@ describe('matchForwardCommitment — genuine commitments must match', () => {
   }
 
   it('reports which pattern fired, for the operator queue and PostHog', () => {
-    const r = matchForwardCommitment("Come by and I'll have another made for you")
+    const r = matchForwardCommitment(
+      "Come by and I'll have another made for you",
+    )
     expect(r.matched).toBe(true)
     if (r.matched) expect(r.pattern).toContain('ll')
   })

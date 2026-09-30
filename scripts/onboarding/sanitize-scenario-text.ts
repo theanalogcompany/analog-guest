@@ -42,7 +42,11 @@ export function containsLongDash(text: string): boolean {
  * instruction alone didn't hold.
  */
 export function sanitizeScenarios<
-  T extends { inbound_message: string; scenario: string; expected_facts: string[] },
+  T extends {
+    inbound_message: string
+    scenario: string
+    expected_facts: string[]
+  },
 >(scenarios: T[]): { scenarios: T[]; dashHitCount: number } {
   let dashHitCount = 0
   const sanitized = scenarios.map((s) => {

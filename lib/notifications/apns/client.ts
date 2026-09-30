@@ -14,7 +14,11 @@
 // Mock seam: tests mock 'node:http2' via vi.mock at module level. The
 // jwt module is mocked separately so client tests don't need real keys.
 
-import { connect, constants as http2Constants, type SecureClientSessionOptions } from 'node:http2'
+import {
+  connect,
+  constants as http2Constants,
+  type SecureClientSessionOptions,
+} from 'node:http2'
 
 import { checkApnsEnv, TRANSPORT_APNS_VARS } from './env'
 import { getApnsJwt } from './jwt'
@@ -47,15 +51,24 @@ export type ApnsClientResult =
   | { ok: true; response: ApnsResponse }
   | {
       ok: false
-      error: 'jwt_failed' | 'connection_failed' | 'request_failed' | 'timeout' | 'env_missing'
+      error:
+        | 'jwt_failed'
+        | 'connection_failed'
+        | 'request_failed'
+        | 'timeout'
+        | 'env_missing'
       detail: string
     }
 
-function selectHost(): { host: string; ok: true } | { ok: false; detail: string } {
+function selectHost():
+  { host: string; ok: true } | { ok: false; detail: string } {
   const env = process.env.APNS_ENV
   if (env === 'production') return { ok: true, host: PROD_HOST }
   if (env === 'sandbox') return { ok: true, host: SANDBOX_HOST }
-  return { ok: false, detail: `APNS_ENV must be 'production' or 'sandbox'; got ${env ?? 'unset'}` }
+  return {
+    ok: false,
+    detail: `APNS_ENV must be 'production' or 'sandbox'; got ${env ?? 'unset'}`,
+  }
 }
 
 /**
@@ -77,7 +90,11 @@ export async function sendApnsRequest(
   // ./env.ts for why validation is first-call and not module-load.
   const envCheck = checkApnsEnv(process.env, TRANSPORT_APNS_VARS)
   if (!envCheck.ok) {
-    return { ok: false, error: 'env_missing', detail: envCheck.problems.join('; ') }
+    return {
+      ok: false,
+      error: 'env_missing',
+      detail: envCheck.problems.join('; '),
+    }
   }
 
   const bundleId = process.env.APNS_BUNDLE_ID
@@ -92,7 +109,11 @@ export async function sendApnsRequest(
 
   const jwt = await getApnsJwt()
   if (!jwt.ok) {
-    return { ok: false, error: 'jwt_failed', detail: `${jwt.error}: ${jwt.detail}` }
+    return {
+      ok: false,
+      error: 'jwt_failed',
+      detail: `${jwt.error}: ${jwt.detail}`,
+    }
   }
 
   return new Promise<ApnsClientResult>((resolve) => {
@@ -152,7 +173,11 @@ export async function sendApnsRequest(
 
     const timeout = setTimeout(() => {
       stream.close()
-      settle({ ok: false, error: 'timeout', detail: `no response in ${REQUEST_TIMEOUT_MS}ms` })
+      settle({
+        ok: false,
+        error: 'timeout',
+        detail: `no response in ${REQUEST_TIMEOUT_MS}ms`,
+      })
     }, REQUEST_TIMEOUT_MS)
 
     let status = 0
@@ -183,7 +208,9 @@ export async function sendApnsRequest(
       let reason: string | null = null
       if (status !== 200 && bodyChunks.length > 0) {
         try {
-          const parsed: unknown = JSON.parse(Buffer.concat(bodyChunks).toString('utf8'))
+          const parsed: unknown = JSON.parse(
+            Buffer.concat(bodyChunks).toString('utf8'),
+          )
           if (
             parsed !== null &&
             typeof parsed === 'object' &&

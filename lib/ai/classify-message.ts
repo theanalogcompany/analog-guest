@@ -15,7 +15,12 @@ import {
   UNSENT_HISTORY_NOTE,
   venueInfoToProse,
 } from './prompts/serializers'
-import type { AIResult, ClassifyMessageInput, ClassifyMessageResult, RecentMessage } from './types'
+import type {
+  AIResult,
+  ClassifyMessageInput,
+  ClassifyMessageResult,
+  RecentMessage,
+} from './types'
 
 // Cap inbound length sent to the classifier. Generation still gets the full body.
 // Exported so the tunables manifest (TAC-183) can surface the cap to operators.
@@ -113,16 +118,22 @@ Return your classification with a confidence score (DECIMAL between 0.0 and 1.0,
 //
 // TAC-394: unsent lines carry the same marker the generator's block uses, and
 // the same one-sentence note.
-function formatClassifierRecentConversation(messages: readonly RecentMessage[]): string {
+function formatClassifierRecentConversation(
+  messages: readonly RecentMessage[],
+): string {
   const now = new Date()
   const lines = messages.map((m) => {
     const speaker = m.direction === 'inbound' ? 'guest' : 'venue'
     const delta = formatTimeDelta(m.createdAt, now)
     const marker = historyDeliveryMarker(m.delivery)
-    return marker === null ? `[${speaker}, ${delta}] ${m.body}` : `[${speaker}, ${delta}, ${marker}] ${m.body}`
+    return marker === null
+      ? `[${speaker}, ${delta}] ${m.body}`
+      : `[${speaker}, ${delta}, ${marker}] ${m.body}`
   })
   const block = `Recent conversation (most recent at the bottom):\n${lines.join('\n')}`
-  return messages.some((m) => m.delivery !== 'delivered') ? `${block}\n${UNSENT_HISTORY_NOTE}` : block
+  return messages.some((m) => m.delivery !== 'delivered')
+    ? `${block}\n${UNSENT_HISTORY_NOTE}`
+    : block
 }
 
 /**
@@ -145,7 +156,8 @@ interface ClassifierBlocks {
 function buildClassifierBlocks(input: ClassifyMessageInput): ClassifierBlocks {
   const inboundForClassifier =
     input.inboundBody.length > MAX_CLASSIFIER_INPUT_CHARS
-      ? input.inboundBody.slice(0, MAX_CLASSIFIER_INPUT_CHARS) + ' [...truncated]'
+      ? input.inboundBody.slice(0, MAX_CLASSIFIER_INPUT_CHARS) +
+        ' [...truncated]'
       : input.inboundBody
 
   const contextSections: string[] = []
@@ -165,7 +177,8 @@ function buildClassifierBlocks(input: ClassifyMessageInput): ClassifierBlocks {
   const crisisCheckBody =
     input.inboundBody.length > MAX_CLASSIFIER_INPUT_CHARS
       ? input.inboundBody.length > MAX_CRISIS_CHECK_INPUT_CHARS
-        ? input.inboundBody.slice(0, MAX_CRISIS_CHECK_INPUT_CHARS) + ' [...truncated]'
+        ? input.inboundBody.slice(0, MAX_CRISIS_CHECK_INPUT_CHARS) +
+          ' [...truncated]'
         : input.inboundBody
       : null
 
@@ -187,9 +200,13 @@ export async function classifyMessageJevArm(
     return { ok: false, error: 'invalid_input' }
   }
   const blocks = buildClassifierBlocks(input)
-  const state: JevClassifyState = { inbound_message: blocks.inboundForClassifier }
-  if (blocks.contextSections.length > 0) state.venue_context = blocks.contextSections.join('\n\n')
-  if (blocks.recentBlock !== null) state.recent_conversation = blocks.recentBlock
+  const state: JevClassifyState = {
+    inbound_message: blocks.inboundForClassifier,
+  }
+  if (blocks.contextSections.length > 0)
+    state.venue_context = blocks.contextSections.join('\n\n')
+  if (blocks.recentBlock !== null)
+    state.recent_conversation = blocks.recentBlock
   if (input.guestState) state.guest_relationship = input.guestState
   if (blocks.crisisCheckBody !== null) {
     state.inbound_message_full_for_crisis_check = blocks.crisisCheckBody
@@ -221,12 +238,18 @@ export async function classifyMessage(
     })
   }
 
-  const { inboundForClassifier, contextSections, recentBlock, crisisCheckBody } =
-    buildClassifierBlocks(input)
+  const {
+    inboundForClassifier,
+    contextSections,
+    recentBlock,
+    crisisCheckBody,
+  } = buildClassifierBlocks(input)
 
   const userPromptParts: string[] = []
   if (contextSections.length > 0) {
-    userPromptParts.push(`Context about the venue:\n\n${contextSections.join('\n\n')}`)
+    userPromptParts.push(
+      `Context about the venue:\n\n${contextSections.join('\n\n')}`,
+    )
   }
   if (recentBlock !== null) {
     userPromptParts.push(recentBlock)
@@ -244,7 +267,7 @@ export async function classifyMessage(
   const userPrompt = userPromptParts.join('\n\n')
 
   try {
-    const { object } = await generateObject({
+    const { object, usage, response } = await generateObject({
       model: getClassificationModel(),
       system: CLASSIFY_SYSTEM_PROMPT,
       prompt: userPrompt,
@@ -264,6 +287,21 @@ export async function classifyMessage(
         promptVersion: PROMPT_VERSION,
         crisisSafety: object.crisisSafety,
         correctsPendingReply: object.correctsPendingReply,
+        // Returned so the orchestrator can price this call on the Langfuse
+        // `classify` generation. Read from the SDK result rather than from the
+        // model factory, because `response.modelId` is what the provider
+        // actually served — a factory default can drift from it silently.
+        modelId: response?.modelId,
+        // Passed through WHOLE, including inputTokenDetails: toAgentUsage needs
+        // the breakdown to separate uncached input from the two cache buckets,
+        // and picking fields apart here is how that gets silently dropped.
+        usage: {
+          inputTokens: usage?.inputTokens,
+          outputTokens: usage?.outputTokens,
+          totalTokens: usage?.totalTokens,
+          cachedInputTokens: usage?.cachedInputTokens,
+          inputTokenDetails: usage?.inputTokenDetails,
+        },
       },
     }
   } catch (e) {

@@ -474,6 +474,7 @@ export type Database = {
           status: string
           updated_at: string
           venue_id: string
+          warm_close_sent_at: string | null
         }
         Insert: {
           context?: Json
@@ -503,6 +504,7 @@ export type Database = {
           status?: string
           updated_at?: string
           venue_id: string
+          warm_close_sent_at?: string | null
         }
         Update: {
           context?: Json
@@ -532,6 +534,7 @@ export type Database = {
           status?: string
           updated_at?: string
           venue_id?: string
+          warm_close_sent_at?: string | null
         }
         Relationships: [
           {

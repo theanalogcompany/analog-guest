@@ -82,6 +82,13 @@ describe('GeneratedMessageSchema optional-field budget (TAC-300)', () => {
     // properties absent from `required`. If this number moves, someone added
     // an OPTIONAL field and spent one of the two remaining slots; that should
     // be a deliberate decision, not a silent drift toward the 24 cap.
-    expect(count, 'optional-field count changed — see the note above').toBe(20)
+    //
+    // 20 to 21 on TAC-558 (approved 2026-09-29), spent on
+    // `contextUpdate.structured.guest_details.history_here`: the guest's own
+    // account of how long they have been coming, which closes are_they_new_here
+    // and renders back into ## Guest context. ONE SLOT OF HEADROOM LEFT under
+    // the 22 budget. The next optional field is the one that has to reshape
+    // something rather than append.
+    expect(count, 'optional-field count changed — see the note above').toBe(21)
   })
 })

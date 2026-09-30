@@ -21,7 +21,11 @@ interface TracePanelProps {
   langfuseTraceId: string | null
 }
 
-export function TracePanel({ trace, loading, langfuseTraceId }: TracePanelProps) {
+export function TracePanel({
+  trace,
+  loading,
+  langfuseTraceId,
+}: TracePanelProps) {
   if (loading) {
     return (
       <PanelChrome>
@@ -43,8 +47,8 @@ export function TracePanel({ trace, loading, langfuseTraceId }: TracePanelProps)
     return (
       <PanelChrome>
         <div className="text-sm text-ink-soft">
-          Trace ID set on this message but Langfuse returned no trace. Could be a
-          fetch failure, or the trace hasn&apos;t flushed yet.
+          Trace ID set on this message but Langfuse returned no trace. Could be
+          a fetch failure, or the trace hasn&apos;t flushed yet.
         </div>
       </PanelChrome>
     )
@@ -62,11 +66,16 @@ export function TracePanel({ trace, loading, langfuseTraceId }: TracePanelProps)
   // any future stage that isn't yet in the dispatcher.
   const allStages: TraceStage[] = [
     ...stagesForDrilldown,
-    ...other.map((obs) => ({ name: obs.name ?? '(unnamed)', observation: obs })),
+    ...other.map((obs) => ({
+      name: obs.name ?? '(unnamed)',
+      observation: obs,
+    })),
   ]
   const recognition = extractRecognition(trace)
   const subtitle = `${stages.length} stage${stages.length === 1 ? '' : 's'} · ${formatLatency(trace.latency)}`
-  const langfuseUrl = trace.htmlPath ? `${LANGFUSE_BASE_URL}${trace.htmlPath}` : null
+  const langfuseUrl = trace.htmlPath
+    ? `${LANGFUSE_BASE_URL}${trace.htmlPath}`
+    : null
 
   return (
     <PanelChrome>
@@ -102,8 +111,12 @@ function PanelChrome({ children }: { children: React.ReactNode }) {
   )
 }
 
-function formatLatency(seconds: number | undefined): string {
-  if (seconds === undefined || Number.isNaN(seconds)) return '—'
+// `null` joined `undefined` here with the Langfuse v5 read API, which types
+// trace latency as `number | null | undefined`. Both mean the same thing to
+// this panel — no duration recorded — and both render the em dash.
+function formatLatency(seconds: number | null | undefined): string {
+  if (seconds === undefined || seconds === null || Number.isNaN(seconds))
+    return '—'
   if (seconds < 1) return `${Math.round(seconds * 1000)}ms`
   return `${seconds.toFixed(2)}s`
 }
@@ -118,10 +131,16 @@ function stripRecognitionSignals(stages: TraceStage[]): TraceStage[] {
   return stages.map((stage) => {
     if (stage.name !== 'context_build') return stage
     const output = stage.observation.output
-    if (typeof output !== 'object' || output === null || Array.isArray(output)) return stage
+    if (typeof output !== 'object' || output === null || Array.isArray(output))
+      return stage
     const outputRecord = output as Record<string, unknown>
     const content = outputRecord.content
-    if (typeof content !== 'object' || content === null || Array.isArray(content)) return stage
+    if (
+      typeof content !== 'object' ||
+      content === null ||
+      Array.isArray(content)
+    )
+      return stage
     const nextContent: Record<string, unknown> = {}
     for (const [k, v] of Object.entries(content as Record<string, unknown>)) {
       if (k !== 'signals') nextContent[k] = v

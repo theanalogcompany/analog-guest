@@ -15,9 +15,7 @@ import { useState } from 'react'
 
 export function DetailBlock({ children }: { children: React.ReactNode }) {
   return (
-    <div
-      className="border-l-2 border-clay bg-white/45 rounded-r px-[13px] py-[9px] my-1 ml-[14px] flex flex-col gap-2"
-    >
+    <div className="border-l-2 border-clay bg-white/45 rounded-r px-[13px] py-[9px] my-1 ml-[14px] flex flex-col gap-2">
       {children}
     </div>
   )
@@ -60,7 +58,11 @@ export function KvRow({ label, value, truncate = false }: KvRowProps) {
         {truncate ? (
           <span
             className="block truncate"
-            title={typeof value === 'string' || typeof value === 'number' ? String(value) : undefined}
+            title={
+              typeof value === 'string' || typeof value === 'number'
+                ? String(value)
+                : undefined
+            }
           >
             {value}
           </span>
@@ -82,7 +84,11 @@ interface SubSectionProps {
   children: React.ReactNode
 }
 
-export function SubSection({ title, defaultOpen = true, children }: SubSectionProps) {
+export function SubSection({
+  title,
+  defaultOpen = true,
+  children,
+}: SubSectionProps) {
   const [open, setOpen] = useState(defaultOpen)
   // Color set inline on the button (not via Tailwind classes) so it survives
   // any layout-level cascade and the inner spans inherit via currentColor.
@@ -166,7 +172,8 @@ export function LongText({ text, previewChars = 200 }: LongTextProps) {
 // components stay declarative.
 
 export function readRecord(value: unknown): Record<string, unknown> | null {
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) return null
+  if (typeof value !== 'object' || value === null || Array.isArray(value))
+    return null
   return value as Record<string, unknown>
 }
 

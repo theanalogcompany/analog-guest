@@ -5,9 +5,13 @@
 // encrypted credential. This is a public URL (Square calls it) — security
 // rests on the signed state + the one-time code.
 
+import { logger } from '@/lib/observability/logger'
 import { createSquareClient, resolveSquareEnv } from '@/lib/pos/square/client'
 import { upsertSquareCredential } from '@/lib/pos/credentials-store'
-import { exchangeSquareOAuthCode, SQUARE_OAUTH_SCOPES } from '@/lib/pos/square/oauth'
+import {
+  exchangeSquareOAuthCode,
+  SQUARE_OAUTH_SCOPES,
+} from '@/lib/pos/square/oauth'
 import { verifyOAuthState } from '@/lib/pos/square/oauth-state'
 
 export async function GET(request: Request): Promise<Response> {
@@ -17,21 +21,27 @@ export async function GET(request: Request): Promise<Response> {
 
   // Owner declined or Square returned an error.
   if (!code || !state) {
-    return new Response('Square connection cancelled or missing parameters.', { status: 400 })
+    return new Response('Square connection cancelled or missing parameters.', {
+      status: 400,
+    })
   }
 
   const applicationId = process.env.SQUARE_APPLICATION_ID
   const applicationSecret = process.env.SQUARE_OAUTH_SECRET
   const stateSecret = process.env.POS_TOKEN_ENC_KEY
   if (!applicationId || !applicationSecret || !stateSecret) {
-    console.error('square callback: SQUARE_APPLICATION_ID / SQUARE_OAUTH_SECRET / POS_TOKEN_ENC_KEY not set')
+    logger.error(
+      'square callback: SQUARE_APPLICATION_ID / SQUARE_OAUTH_SECRET / POS_TOKEN_ENC_KEY not set',
+    )
     return new Response('Server misconfigured', { status: 500 })
   }
 
   const venueId = verifyOAuthState(state, stateSecret)
   if (!venueId) {
-    console.warn('square callback: invalid state')
-    return new Response('Invalid or expired connection request.', { status: 401 })
+    logger.warn('square callback: invalid state')
+    return new Response('Invalid or expired connection request.', {
+      status: 401,
+    })
   }
 
   const env = resolveSquareEnv(process.env.SQUARE_ENV)
@@ -43,8 +53,14 @@ export async function GET(request: Request): Promise<Response> {
     redirectUrl: process.env.SQUARE_OAUTH_REDIRECT_URL,
   })
   if (!tokens.ok) {
-    console.error('square callback: token exchange failed', { venueId, error: tokens.error })
-    return new Response('Could not complete Square connection. Please try again.', { status: 502 })
+    logger.error('square callback: token exchange failed', {
+      venueId,
+      error: tokens.error,
+    })
+    return new Response(
+      'Could not complete Square connection. Please try again.',
+      { status: 502 },
+    )
   }
 
   // Resolve the merchant's first location so payment webhooks (which carry a
@@ -55,10 +71,13 @@ export async function GET(request: Request): Promise<Response> {
     const locations = await client.locations.list()
     locationId = locations.locations?.[0]?.id ?? null
   } catch (e) {
-    console.warn('square callback: location fetch failed (storing without location)', {
-      venueId,
-      error: e instanceof Error ? e.message : String(e),
-    })
+    logger.warn(
+      'square callback: location fetch failed (storing without location)',
+      {
+        venueId,
+        error: e instanceof Error ? e.message : String(e),
+      },
+    )
   }
 
   const stored = await upsertSquareCredential({
@@ -71,11 +90,20 @@ export async function GET(request: Request): Promise<Response> {
     scopes: SQUARE_OAUTH_SCOPES,
   })
   if (!stored.ok) {
-    console.error('square callback: credential store failed', { venueId, error: stored.error })
-    return new Response('Connected to Square but could not save the link. Please contact support.', {
-      status: 500,
+    logger.error('square callback: credential store failed', {
+      venueId,
+      error: stored.error,
     })
+    return new Response(
+      'Connected to Square but could not save the link. Please contact support.',
+      {
+        status: 500,
+      },
+    )
   }
 
-  return new Response('Square connected successfully. You can close this window.', { status: 200 })
+  return new Response(
+    'Square connected successfully. You can close this window.',
+    { status: 200 },
+  )
 }

@@ -46,7 +46,9 @@ interface AdminMockState {
   updateError: { message: string } | null
 }
 
-function newAdminState(overrides: Partial<AdminMockState> = {}): AdminMockState {
+function newAdminState(
+  overrides: Partial<AdminMockState> = {},
+): AdminMockState {
   return {
     message: { id: MESSAGE_ID, venue_id: VENUE_ID, direction: 'outbound' },
     messageLookupError: null,
@@ -108,7 +110,9 @@ beforeEach(() => {
 describe('PUT /admin/conversations/api/review/[messageId] — auth', () => {
   it('returns 401 when no session', async () => {
     vi.mocked(createServerClient).mockResolvedValue(
-      makeSessionMock(null) as unknown as Awaited<ReturnType<typeof createServerClient>>,
+      makeSessionMock(null) as unknown as Awaited<
+        ReturnType<typeof createServerClient>
+      >,
     )
 
     const res = await PUT(buildRequest({}), buildParams(MESSAGE_ID))
@@ -265,10 +269,14 @@ describe('PUT /admin/conversations/api/review/[messageId] — success paths', ()
 
     expect(res.status).toBe(200)
     const corpusOrder = vi.mocked(upsertCorpusEdit).mock.invocationCallOrder[0]
-    const ruleOrder = vi.mocked(dedupeAndAppendAntiPatterns).mock.invocationCallOrder[0]
+    const ruleOrder = vi.mocked(dedupeAndAppendAntiPatterns).mock
+      .invocationCallOrder[0]
     expect(corpusOrder).toBeLessThan(ruleOrder)
     expect(state.updateCalls).toHaveLength(1)
-    const stampedJson = state.updateCalls[0].payload.response_review as Record<string, unknown>
+    const stampedJson = state.updateCalls[0].payload.response_review as Record<
+      string,
+      unknown
+    >
     expect(stampedJson.editedMessage).toBe('try a refund of the cortado.')
     expect(stampedJson.rule).toBe("rule: don't apologize twice")
     expect(stampedJson.reviewedBy).toBe(OPERATOR_ID)
@@ -354,7 +362,8 @@ describe('PUT /admin/conversations/api/review/[messageId] — success paths', ()
       buildRequest({
         editedMessage: 'should not be ingested',
         rule: 'rule: should not be appended',
-        expectedFailure: 'classifier confidence below threshold; reviewing as accepted miss',
+        expectedFailure:
+          'classifier confidence below threshold; reviewing as accepted miss',
       }),
       buildParams(MESSAGE_ID),
     )
@@ -363,7 +372,10 @@ describe('PUT /admin/conversations/api/review/[messageId] — success paths', ()
     expect(upsertCorpusEdit).not.toHaveBeenCalled()
     expect(dedupeAndAppendAntiPatterns).not.toHaveBeenCalled()
     expect(state.updateCalls).toHaveLength(1)
-    const stamped = state.updateCalls[0].payload.response_review as Record<string, unknown>
+    const stamped = state.updateCalls[0].payload.response_review as Record<
+      string,
+      unknown
+    >
     expect(stamped.expectedFailure).toBe(
       'classifier confidence below threshold; reviewing as accepted miss',
     )
@@ -433,7 +445,9 @@ describe('PUT /admin/conversations/api/review/[messageId] — failure paths', ()
     vi.mocked(createAdminClient).mockReturnValue(
       makeAdminMock(state) as unknown as ReturnType<typeof createAdminClient>,
     )
-    vi.mocked(dedupeAndAppendAntiPatterns).mockRejectedValue(new Error('venue_configs not found'))
+    vi.mocked(dedupeAndAppendAntiPatterns).mockRejectedValue(
+      new Error('venue_configs not found'),
+    )
 
     const res = await PUT(
       buildRequest({ rule: 'rule: be terser' }),

@@ -8,6 +8,7 @@
 // are reconciled afterward.
 
 import { createAdminClient } from '@/lib/db/admin'
+import { logger } from '@/lib/observability/logger'
 
 import { reconcileTransactionByFingerprint } from './reconcile'
 import { getProvider } from './registry'
@@ -20,7 +21,10 @@ export type IngestOutcome =
   | { status: 'venue_not_connected' }
   | { status: 'error'; error: string }
 
-async function hydrateLineItems(event: TransactionEvent, venueId: string): Promise<TransactionLineItem[]> {
+async function hydrateLineItems(
+  event: TransactionEvent,
+  venueId: string,
+): Promise<TransactionLineItem[]> {
   if (event.lineItems.length > 0) return event.lineItems
   if (!event.orderExternalId) return []
   const provider = getProvider(event.provider)
@@ -29,10 +33,13 @@ async function hydrateLineItems(event: TransactionEvent, venueId: string): Promi
   if (!res.ok) {
     // Degrade gracefully: land the transaction without items rather than drop
     // it. The agent's visit-history block simply omits this visit's items.
-    console.warn('pos ingest: order hydration failed; landing transaction without items', {
-      orderExternalId: event.orderExternalId,
-      error: res.error,
-    })
+    logger.warn(
+      'pos ingest: order hydration failed; landing transaction without items',
+      {
+        orderExternalId: event.orderExternalId,
+        error: res.error,
+      },
+    )
     return []
   }
   return res.data
@@ -43,12 +50,18 @@ async function hydrateLineItems(event: TransactionEvent, venueId: string): Promi
  * external_id) constraint (migration 001) — a re-delivered payment.created or a
  * follow-on payment.updated updates the same row rather than duplicating.
  */
-export async function ingestTransaction(event: TransactionEvent): Promise<IngestOutcome> {
+export async function ingestTransaction(
+  event: TransactionEvent,
+): Promise<IngestOutcome> {
   const supabase = createAdminClient()
 
-  const venueId = await resolveVenueByLocation(supabase, event.provider, event.locationExternalId)
+  const venueId = await resolveVenueByLocation(
+    supabase,
+    event.provider,
+    event.locationExternalId,
+  )
   if (!venueId) {
-    console.warn('pos ingest: no connected venue for location; skipping', {
+    logger.warn('pos ingest: no connected venue for location; skipping', {
       provider: event.provider,
       locationExternalId: event.locationExternalId,
       externalId: event.externalId,
@@ -88,7 +101,7 @@ export async function ingestTransaction(event: TransactionEvent): Promise<Ingest
     .single()
 
   if (error || !data) {
-    console.error('pos ingest: transaction upsert failed', {
+    logger.error('pos ingest: transaction upsert failed', {
       venueId,
       externalId: event.externalId,
       error: error?.message ?? 'no row returned',
@@ -107,7 +120,7 @@ export async function ingestTransaction(event: TransactionEvent): Promise<Ingest
     supabase,
   })
   if (!reconciled.ok) {
-    console.warn('pos ingest: reconciliation failed', {
+    logger.warn('pos ingest: reconciliation failed', {
       transactionId: data.id,
       error: reconciled.error,
     })

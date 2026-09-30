@@ -55,7 +55,11 @@ export async function linkOperatorByAuthUser(
   const { data: userResult, error: userErr } =
     await supabase.auth.admin.getUserById(authUserId)
   if (userErr) {
-    return { ok: false, error: 'auth_user_not_found', details: userErr.message }
+    return {
+      ok: false,
+      error: 'auth_user_not_found',
+      details: userErr.message,
+    }
   }
   const user = userResult?.user ?? null
   if (!user) {
@@ -101,7 +105,9 @@ export async function linkOperatorByAuthUser(
   const targetColumn: 'auth_user_id_phone' | 'auth_user_id_email' = phoneE164
     ? 'auth_user_id_phone'
     : 'auth_user_id_email'
-  const matchField: 'phone_number' | 'email' = phoneE164 ? 'phone_number' : 'email'
+  const matchField: 'phone_number' | 'email' = phoneE164
+    ? 'phone_number'
+    : 'email'
   // We've already returned auth_user_has_no_identity above if both are null,
   // so the non-null assertion here is safe.
   const matchValue = (phoneE164 ?? email) as string

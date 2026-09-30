@@ -1,9 +1,14 @@
 import { describe, expect, it } from 'vitest'
-import { findMissingMechanicFields, parseMechanicTriggerType } from './mechanic-fields'
+import {
+  findMissingMechanicFields,
+  parseMechanicTriggerType,
+} from './mechanic-fields'
 
 describe('parseMechanicTriggerType', () => {
   it('reads .type off a well-formed trigger object', () => {
-    expect(parseMechanicTriggerType({ type: 'manual_invite' })).toBe('manual_invite')
+    expect(parseMechanicTriggerType({ type: 'manual_invite' })).toBe(
+      'manual_invite',
+    )
   })
 
   it('returns null for null trigger', () => {
@@ -48,13 +53,19 @@ describe('findMissingMechanicFields', () => {
       rewardDescription: null,
     })
     expect(missing).toEqual(
-      expect.arrayContaining(['description', 'qualification', 'reward_description']),
+      expect.arrayContaining([
+        'description',
+        'qualification',
+        'reward_description',
+      ]),
     )
     expect(missing).toHaveLength(3)
   })
 
   it('flags an empty-string field the same as null', () => {
-    expect(findMissingMechanicFields({ ...full(), description: '   ' })).toContain('description')
+    expect(
+      findMissingMechanicFields({ ...full(), description: '   ' }),
+    ).toContain('description')
   })
 
   it('flags a renewable mechanic with a null redemption_window_days', () => {

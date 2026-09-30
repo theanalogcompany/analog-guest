@@ -40,6 +40,7 @@ otherwise. `@path` imports are **eager** and do not help.
 | `lib/operator/CLAUDE.md` | venue scope, queue Contract fields, card copy, dispatch |
 | `lib/guests/CLAUDE.md` | commitment CAS and dedup, guest context, visit precision |
 | `lib/notifications/CLAUDE.md` | APNs env validation, `PUSH_POLICY`, payload privacy, badges |
+| `lib/observability/CLAUDE.md` | the Langfuse wrapper, the span tree, and **where the latency and prompt-cache numbers already live** - read before answering any latency question |
 | `app/admin/CLAUDE.md` | route paths, loaders, write routes, brand tokens |
 | `scripts/CLAUDE.md` | onboarding pipeline, measurement harness convention, Drive auth |
 | `.github/CLAUDE.md` | what a CI session may run, and the known gaps in that allowlist |
@@ -121,9 +122,9 @@ a new top-level directory without asking.
 
 ## Workflow
 
-**Linear-first.** All work starts from a ticket. No ticket ID means ask for one before
-planning. Cross-repo work is two tickets, one per repo, linked - never one ticket carrying both
-repo labels.
+**Tickets are optional.** A ticket is not a precondition for planning or building; work can
+start without one. When one does exist, cross-repo work is two tickets, one per repo, linked -
+never one ticket carrying both repo labels.
 
 **Plan, review, build, review, commit.** Output a written plan first (scope, file paths,
 decomposition, sequence, patterns to reuse, edge cases, what you chose *not* to do, open
@@ -153,12 +154,12 @@ distinguisher. A clarifying question is `[NEEDS-INPUT]`, numbered, plus the `Nee
 label, status unchanged, then stop. Post flat, never threaded. `.claude/process.md` is
 canonical.
 
-**Claim a ticket before writing anything else.** Post `[CLAIM]`, edit it to `released` when
-handing back. Two sessions on one ticket has happened and a human cancelling the run was all
-that stopped it. A second local session works in its own `git worktree`, pushes by explicit
-refspec (`git push origin <branch>:<branch>`), and runs `git branch --show-current`
-immediately before its first commit - two sessions in one checkout share one HEAD, and commits
-have landed on the wrong branch that way.
+**Claim a ticket you are working from.** Post `[CLAIM]`, edit it to `released` when handing
+back. Not a gate on starting work - but two sessions on one ticket has happened, and a human
+cancelling the run was all that stopped it. A second local session works in its own
+`git worktree`, pushes by explicit refspec (`git push origin <branch>:<branch>`), and runs
+`git branch --show-current` immediately before its first commit - two sessions in one checkout
+share one HEAD, and commits have landed on the wrong branch that way.
 
 **Never just acknowledge.** If asked to remember or forget something, update memory. Do not
 reply "I'll remember that" without doing it.
@@ -302,9 +303,9 @@ The live floors, all in `lib/agent/stages.ts`. A number quoted anywhere else may
 | --- | --- |
 | `SEND_FIDELITY_FLOOR` 0.4 | below this the draft is refused; nothing persists |
 | `AUTO_SEND_FIDELITY_FLOOR` 0.6 | 0.4 to 0.6 queues for an operator |
-| voice pack (`lib/rag/voice-pack.ts`) | static per venue, no similarity; empty pack fails **closed** on inbound (decision 0007) |
+| voice pack (`lib/rag/voice-pack.ts`) | static per venue, no similarity; empty pack fails **closed** on inbound (decision 0008) |
 | `KNOWLEDGE_RELEVANCE_FLOOR` 0.3 | knowledge retrieval, degrades **gracefully** |
-| `PROMPT_VERSION` v1.70.0 | bumping it is a repo-wide sweep - `.claude/rules/prompt-versioning.md` |
+| `PROMPT_VERSION` v1.75.0 | bumping it is a repo-wide sweep - `.claude/rules/prompt-versioning.md` |
 
 **23 approval triggers compose; any one queues the draft.** The five post-generation LLM
 checks run **post-send** on inbound (Slack forward on a finding, never a hold) and keep the
@@ -319,6 +320,10 @@ turn (`docs/decisions/0005-inbound-coalescing-settle-window.md`).
 
 `venues.status` gates processing as a **deny-list**, never an allow-list on `active` - the live
 pilot venue is `pending` (`docs/decisions/0002-deny-list-not-allow-list.md`).
+
+A getting-to-know-you question always goes out as its **own last message**, guaranteed at
+generation rather than asked for in prose
+(`docs/decisions/0007-intention-question-is-its-own-bubble.md`).
 
 ## Environment variables
 

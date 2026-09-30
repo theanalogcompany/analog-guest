@@ -52,13 +52,11 @@ const STATUS_PARTITION = {
 
 const ALL_STATUSES = Object.keys(STATUS_PARTITION) as CommitmentStatus[]
 
-export const NON_TERMINAL_STATUSES: readonly CommitmentStatus[] = ALL_STATUSES.filter(
-  (s) => STATUS_PARTITION[s] === 'nonTerminal',
-)
+export const NON_TERMINAL_STATUSES: readonly CommitmentStatus[] =
+  ALL_STATUSES.filter((s) => STATUS_PARTITION[s] === 'nonTerminal')
 
-export const TERMINAL_STATUSES: readonly CommitmentStatus[] = ALL_STATUSES.filter(
-  (s) => STATUS_PARTITION[s] === 'terminal',
-)
+export const TERMINAL_STATUSES: readonly CommitmentStatus[] =
+  ALL_STATUSES.filter((s) => STATUS_PARTITION[s] === 'terminal')
 
 /**
  * Cap on the secondary history list. Bounded and STATED on the page rather
@@ -139,7 +137,9 @@ function projectRow(raw: unknown): VenueCommitmentRow | null {
     )
     return null
   }
-  const guest = firstOrNull(row.guest as JoinedGuestShape | JoinedGuestShape[] | null)
+  const guest = firstOrNull(
+    row.guest as JoinedGuestShape | JoinedGuestShape[] | null,
+  )
   return {
     id: parsed.data.id,
     type: parsed.data.type,
@@ -164,7 +164,9 @@ function projectRow(raw: unknown): VenueCommitmentRow | null {
 
 export const loadVenueCommitments = cache(_loadVenueCommitments)
 
-async function _loadVenueCommitments(venueId: string): Promise<VenueCommitments> {
+async function _loadVenueCommitments(
+  venueId: string,
+): Promise<VenueCommitments> {
   const supabase = createAdminClient()
 
   // Two queries, not one filtered in JS: the open set must be complete

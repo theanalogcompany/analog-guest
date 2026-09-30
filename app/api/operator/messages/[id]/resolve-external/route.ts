@@ -41,7 +41,8 @@ import { RESOLVED_EXTERNALLY_REVIEW_STATE } from '@/lib/schemas/review-state'
 import { venueFilterIds } from '@/lib/auth/venue-scope'
 
 // Canonical UUID regex, as app/api/operator/messages/[id]/thread/route.ts.
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
 export const dynamic = 'force-dynamic'
 
@@ -159,7 +160,10 @@ export async function POST(
     messageId: row.id,
     operatorId: operator.operatorId,
     channel: row.channel,
-    timeToActionMs: Math.max(0, Date.now() - new Date(row.created_at).getTime()),
+    timeToActionMs: Math.max(
+      0,
+      Date.now() - new Date(row.created_at).getTime(),
+    ),
   })
 
   return NextResponse.json({

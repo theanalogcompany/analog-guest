@@ -294,6 +294,16 @@ export type RuntimeContext = {
     // ambiguous case resolves to silence rather than to "closed".
     openState?: OpenState
   }
+
+  /**
+   * TAC-560: true only on the pause-triggered warm-close turn.
+   *
+   * Reaches composePrompt rather than only the serializer because it does two
+   * things: it renders `## Closing this conversation`, and it REPLACES the
+   * category instructions (the row stores `acknowledgment`, whose own text
+   * asserts the guest signed off, which is false here).
+   */
+  warmClose?: boolean
   recentMessages?: RecentMessage[]
   // Mechanics this guest is currently eligible for. The serializer renders
   // a "What this guest can access" block when this is provided. An empty
@@ -512,6 +522,17 @@ export type GenerateMessageAttempt = {
   // GenerateMessageResult.cancelsCommitmentId. '' means this reply cancels
   // nothing.
   cancelsCommitmentId: string
+  // TAC-554: this attempt's getting-to-know-you question, already composed
+  // onto `body`. Kept per attempt so a trace shows what each one asked.
+  intentionQuestion: string
+  /**
+   * TAC-560: did this reply close the guest's first conversation, in the way the
+   * venue's own voice rules describe? Required, so it costs nothing against the
+   * optional-field budget. handle-inbound.ts writes guests.warm_close_sent_at
+   * post-dispatch when it is true, which is what stops the pause timer sending a
+   * second close.
+   */
+  closedTheConversation: boolean
   // TAC-297: per-attempt commitment emission. Final attempt's value becomes
   // GenerateMessageResult.commitment.
   commitment: GenerateMessageCommitment
@@ -583,6 +604,32 @@ export type GenerateMessageResult = {
   // own active commitments; nothing downstream may treat this string as a
   // commitment that exists.
   cancelsCommitmentId: string
+  // TAC-554: the getting-to-know-you question this reply asks, and the exact
+  // TAIL of `body` — composeReplyWithIntention joined them, so the identity is
+  // by construction rather than by the model reproducing a substring. '' on
+  // every turn that asks nothing, which is most turns.
+  //
+  // Dispatch peels this off and sends it as its own last message. Nothing else
+  // should read it to decide WHAT to say: `body` is still the complete reply
+  // and remains the single input to every backstop.
+  //
+  // REQUIRED, so a construction site with no generation behind it (crisis
+  // safety, the holding-message fallback, the crash card) has to SAY '' rather
+  // than omit it — the same reason cancelsCommitmentId above is required.
+  intentionQuestion: string
+  /**
+   * TAC-560: did this reply close the guest's first conversation, in the way the
+   * venue's own voice rules describe? Required, so it costs nothing against the
+   * optional-field budget. handle-inbound.ts writes guests.warm_close_sent_at
+   * post-dispatch when it is true, which is what stops the pause timer sending a
+   * second close.
+   */
+  closedTheConversation: boolean
+  // TAC-554: whether the duplicate guard stripped a repeat of the question off
+  // the end of the answer. Reported rather than silent because that guard edits
+  // guest-facing text; a guard whose firing rate nobody can produce is how
+  // comp_regex_backstop became an illusion for two months.
+  intentionQuestionDuplicateStripped: boolean
   attempts: number
   // Each attempt's voiceFidelity score, in attempt order. Length === attempts.
   // Loop exits early on the first attempt that crosses MIN_VOICE_FIDELITY, so
@@ -614,6 +661,14 @@ export type GenerateMessageResult = {
   // is expiring before the next message arrives.
   cacheReadTokens: number
   cacheWriteTokens: number
+  /** The model the provider actually served. Absent if it reported none. */
+  modelId?: string
+  /**
+   * Token usage SUMMED across every attempt in this call, for pricing the
+   * Langfuse `generate` generation. Redundant with cacheReadTokens/
+   * cacheWriteTokens above by construction and must agree with them.
+   */
+  usage?: ModelCallUsage
   // True when the final shipped body still contains an em dash (—) or en dash
   // (–) after MAX_ATTEMPTS regenerations — the dash regex check (THE-225) was
   // unable to coax a clean reply but we ship anyway rather than refuse. The
@@ -661,11 +716,49 @@ export type ClassifyMessageInput = {
   guestState?: GuestState
 }
 
+/**
+ * Token usage from a model call, as the Vercel AI SDK reports it.
+ *
+ * Mirrors the SDK's flattened `usage` shape so a call site can pass `usage`
+ * straight through without picking fields apart. `toAgentUsage()` in
+ * lib/observability converts it to Langfuse's native keys - use that, never a
+ * hand-rolled mapping, because `inputTokens` is the TOTAL including both cache
+ * buckets while Langfuse's buckets are disjoint and summed.
+ *
+ * Every field optional because a provider need not report it, and absent is
+ * honestly different from zero - do not default these to 0.
+ */
+export type ModelCallUsage = {
+  /** `noCache + cacheRead + cacheWrite`, not the uncached portion. */
+  inputTokens?: number
+  outputTokens?: number
+  totalTokens?: number
+  /** Prompt-cache read (a hit). */
+  cachedInputTokens?: number
+  /** The SDK's provider-independent input breakdown. */
+  inputTokenDetails?: {
+    noCacheTokens?: number
+    cacheWriteTokens?: number
+  }
+}
+
 export type ClassifyMessageResult = {
   category: MessageCategory
   classifierConfidence: number
   reasoning: string
   promptVersion: string
+  // Model id and token usage for this call, so the orchestrator can put them on
+  // the Langfuse `classify` generation in Langfuse's NATIVE usage fields.
+  //
+  // Why it matters: measured 2026-09-29, Langfuse reported $0.0003 of total cost
+  // across 1,448 traces, because every model call was recorded as a plain span
+  // with no model and no usage. Cost and token dashboards were empty. Usage has
+  // to travel back from the AI layer for them to work at all.
+  //
+  // Optional because a provider need not report every field; absent is honestly
+  // different from zero, so do not default these to 0.
+  modelId?: string
+  usage?: ModelCallUsage
   // TAC-348: independent of category. True when the guest's message expresses
   // self-harm/suicidal ideation or an immediate medical emergency. Consumed
   // by the orchestrator to short-circuit into a fixed, non-generated safety
@@ -681,8 +774,7 @@ export type ClassifyMessageResult = {
 }
 
 export type AIResult<T> =
-  | { ok: true; data: T }
-  | { ok: false; error: string; errorCode?: string }
+  { ok: true; data: T } | { ok: false; error: string; errorCode?: string }
 
 // TAC-323: standalone order-extraction call, deliberately decoupled from the
 // classify/generate contract (see lib/agent/extract-reported-order.ts for

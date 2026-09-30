@@ -1,7 +1,13 @@
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { allows, claudeStep, permits, permitsCommandLine, toolList } from './bash-allowlist'
+import {
+  allows,
+  claudeStep,
+  permits,
+  permitsCommandLine,
+  toolList,
+} from './bash-allowlist'
 
 // TAC-471. The build allowlist against the commands sessions run and the
 // commands the prompts teach. Nothing runs a workflow under test, so this
@@ -21,18 +27,21 @@ const SIDE = `${CHECKOUT}/.worktrees/resume`
 
 // GitHub expands ${{ github.workspace }} in claude_args before the session
 // sees them.
-const expand = (rule: string) => rule.replaceAll('${{ github.workspace }}', CHECKOUT)
+const expand = (rule: string) =>
+  rule.replaceAll('${{ github.workspace }}', CHECKOUT)
 const { args, prompt } = claudeStep(read('.github/workflows/build-ready.yml'))
 const allowed = toolList(args, '--allowedTools').map(expand)
 const disallowed = toolList(args, '--disallowedTools').map(expand)
 const can = (command: string) => permits(allowed, disallowed, command)
-const canRun = (line: string) => permitsCommandLine(allowed, disallowed, line, CHECKOUT)
+const canRun = (line: string) =>
+  permitsCommandLine(allowed, disallowed, line, CHECKOUT)
 
 // The text between two markers that must each appear exactly once.
 function between(text: string, start: string, end: string) {
   const from = text.indexOf(start)
   const to = text.indexOf(end, from + start.length)
-  if (from < 0 || to < 0 || text.indexOf(start, from + 1) >= 0) throw new Error(`"${start}" … "${end}" moved`)
+  if (from < 0 || to < 0 || text.indexOf(start, from + 1) >= 0)
+    throw new Error(`"${start}" … "${end}" moved`)
   return text.slice(from, to)
 }
 
@@ -61,26 +70,32 @@ const PLACEHOLDERS: Record<string, string> = {
 const FENCE = /```[a-z]*\n([\s\S]*?)```/g
 function commandsIn(text: string) {
   const fenced = [...text.matchAll(FENCE)].flatMap((m) => m[1].split('\n'))
-  const spans = [...text.replace(FENCE, '').matchAll(/`([^`\n]+)`/g)].map((m) => m[1])
+  const spans = [...text.replace(FENCE, '').matchAll(/`([^`\n]+)`/g)].map(
+    (m) => m[1],
+  )
   return [...fenced, ...spans]
     .map((s) => s.trim())
     .filter((s) => /^[a-z][a-z0-9._-]* \S/.test(s))
     .map((s) =>
       s.replace(/<[a-z][a-z ]*>/g, (p) => {
-        if (!(p in PLACEHOLDERS)) throw new Error(`unknown placeholder ${p} in: ${s}`)
+        if (!(p in PLACEHOLDERS))
+          throw new Error(`unknown placeholder ${p} in: ${s}`)
         return PLACEHOLDERS[p]
       }),
     )
 }
-const refusedIn = (commands: string[]) => commands.filter((command) => !canRun(command))
+const refusedIn = (commands: string[]) =>
+  commands.filter((command) => !canRun(command))
 
 describe('allows', () => {
   it('admits exactly the command a rule without :* names', () => {
     expect(allows('Bash(git checkout main)', 'git checkout main')).toBe(true)
-    expect(allows('Bash(git checkout main)', 'git checkout main -- lib')).toBe(false)
+    expect(allows('Bash(git checkout main)', 'git checkout main -- lib')).toBe(
+      false,
+    )
   })
 
-  it('admits a :* rule\'s prefix alone, or followed by a space', () => {
+  it("admits a :* rule's prefix alone, or followed by a space", () => {
     expect(allows('Bash(git switch:*)', 'git switch')).toBe(true)
     expect(allows('Bash(git switch:*)', 'git switch main')).toBe(true)
     expect(allows('Bash(git switch:*)', 'git switchx')).toBe(false)
@@ -89,8 +104,18 @@ describe('allows', () => {
   // The finding TAC-471 rests on: run 35323004309 denied the first form and
   // admitted the second under this exact rule.
   it('never admits a branch name glued to a prefix that ends in a slash', () => {
-    expect(allows('Bash(git checkout jaipal/:*)', 'git checkout jaipal/tac-325-order-capture')).toBe(false)
-    expect(allows('Bash(git checkout jaipal/:*)', 'git checkout jaipal/ tac-325-order-capture')).toBe(true)
+    expect(
+      allows(
+        'Bash(git checkout jaipal/:*)',
+        'git checkout jaipal/tac-325-order-capture',
+      ),
+    ).toBe(false)
+    expect(
+      allows(
+        'Bash(git checkout jaipal/:*)',
+        'git checkout jaipal/ tac-325-order-capture',
+      ),
+    ).toBe(true)
   })
 
   it('reads a tool that is not Bash as no match', () => {
@@ -98,15 +123,27 @@ describe('allows', () => {
   })
 
   it('throws on a wildcard it does not model', () => {
-    expect(() => allows('Bash(node *)', 'node x')).toThrow('unmodelled wildcard rule')
-    expect(() => allows('Bash(git push * --force)', 'git push origin x --force')).toThrow('unmodelled wildcard rule')
+    expect(() => allows('Bash(node *)', 'node x')).toThrow(
+      'unmodelled wildcard rule',
+    )
+    expect(() =>
+      allows('Bash(git push * --force)', 'git push origin x --force'),
+    ).toThrow('unmodelled wildcard rule')
   })
 })
 
 describe('permits', () => {
   it('lets a deny rule win over an allow rule', () => {
-    expect(permits(['Bash(git push:*)'], ['Bash(git push --force:*)'], 'git push --force')).toBe(false)
-    expect(permits(['Bash(git push:*)'], ['Bash(git push --force:*)'], 'git push')).toBe(true)
+    expect(
+      permits(
+        ['Bash(git push:*)'],
+        ['Bash(git push --force:*)'],
+        'git push --force',
+      ),
+    ).toBe(false)
+    expect(
+      permits(['Bash(git push:*)'], ['Bash(git push --force:*)'], 'git push'),
+    ).toBe(true)
   })
 
   it('refuses what no allow rule names', () => {
@@ -115,8 +152,14 @@ describe('permits', () => {
 })
 
 describe('permitsCommandLine', () => {
-  const ALLOW = ['Bash(git status:*)', 'Bash(git diff:*)', 'Bash(jq:*)', 'Bash(gh api repos/o/r/activity:*)']
-  const run = (line: string) => permitsCommandLine(ALLOW, ['Bash(git push --force:*)'], line, '/work/repo')
+  const ALLOW = [
+    'Bash(git status:*)',
+    'Bash(git diff:*)',
+    'Bash(jq:*)',
+    'Bash(gh api repos/o/r/activity:*)',
+  ]
+  const run = (line: string) =>
+    permitsCommandLine(ALLOW, ['Bash(git push --force:*)'], line, '/work/repo')
 
   it('checks every part of a compound command', () => {
     expect(run('git status && git diff')).toBe(true)
@@ -128,7 +171,11 @@ describe('permitsCommandLine', () => {
   })
 
   it('does not split on an operator inside single quotes', () => {
-    expect(run("gh api repos/o/r/activity --jq '.[] | select(.ref == \"x\") | .actor.login'")).toBe(true)
+    expect(
+      run(
+        'gh api repos/o/r/activity --jq \'.[] | select(.ref == "x") | .actor.login\'',
+      ),
+    ).toBe(true)
   })
 
   it('refuses the shell forms CI denies however they are arranged', () => {
@@ -314,37 +361,60 @@ describe('the build allowlist', () => {
 
   // Each push gap, and the pull one, has a twin in the side folder, which
   // CLAUDE.md states in one sentence rather than listing them again.
-  it.each(KNOWN_GAPS.filter((gap) => /^git (push|pull --ff-only) /.test(gap)))('KNOWN GAP: the side folder also permits the -C twin of %s', (gap) => {
-    expect(can(gap.replace(/^git /, `git -C ${SIDE} `))).toBe(true)
-  })
+  it.each(KNOWN_GAPS.filter((gap) => /^git (push|pull --ff-only) /.test(gap)))(
+    'KNOWN GAP: the side folder also permits the -C twin of %s',
+    (gap) => {
+      expect(can(gap.replace(/^git /, `git -C ${SIDE} `))).toBe(true)
+    },
+  )
 
   it('grants git in the side folder by subcommand, at the one path', () => {
     expect(allowed.filter((rule) => rule.startsWith('Bash(git -C'))).toEqual(
-      ['status', 'log', 'diff', 'show', 'add', 'commit', 'push', 'pull --ff-only'].map((c) => `Bash(git -C ${SIDE} ${c}:*)`),
+      [
+        'status',
+        'log',
+        'diff',
+        'show',
+        'add',
+        'commit',
+        'push',
+        'pull --ff-only',
+      ].map((c) => `Bash(git -C ${SIDE} ${c}:*)`),
     )
   })
 
   it('lists the same known gaps as CLAUDE.md', () => {
-    const entry = between(read('.github/CLAUDE.md'), '- **A `Bash(x:*)` rule matches `x` followed by a space', '\n- ')
-    expect(commandsIn(between(entry, 'These all pass:', 'Each discards')).sort()).toEqual([...KNOWN_GAPS].sort())
+    const entry = between(
+      read('.github/CLAUDE.md'),
+      '- **A `Bash(x:*)` rule matches `x` followed by a space',
+      '\n- ',
+    )
+    expect(
+      commandsIn(between(entry, 'These all pass:', 'Each discards')).sort(),
+    ).toEqual([...KNOWN_GAPS].sort())
   })
 
   // No allow rule admits these today, so the deny rules for them are
   // redundant until someone permits more of checkout. That is when they
   // matter, so test them against a checkout rule as wide as it can get.
-  it.each(['git checkout .', 'git checkout -- lib/utils.ts', 'git checkout -- .'])(
-    'still refuses %s if a later edit permits every checkout',
-    (command) => {
-      expect(permits([...allowed, 'Bash(git checkout:*)'], disallowed, command)).toBe(false)
-    },
-  )
+  it.each([
+    'git checkout .',
+    'git checkout -- lib/utils.ts',
+    'git checkout -- .',
+  ])('still refuses %s if a later edit permits every checkout', (command) => {
+    expect(
+      permits([...allowed, 'Bash(git checkout:*)'], disallowed, command),
+    ).toBe(false)
+  })
 
   // Redundant while gh pr is granted by subcommand, and there for the day it
   // is widened again.
   it.each(['gh pr merge 221 --squash', 'gh pr checkout 221'])(
     'still refuses %s if a later edit permits every gh pr command',
     (command) => {
-      expect(permits([...allowed, 'Bash(gh pr:*)'], disallowed, command)).toBe(false)
+      expect(permits([...allowed, 'Bash(gh pr:*)'], disallowed, command)).toBe(
+        false,
+      )
     },
   )
 
@@ -360,11 +430,15 @@ describe('the build allowlist', () => {
 
   it('no longer carries the checkout rule that never matched a branch name', () => {
     expect(allowed).not.toContain('Bash(git checkout jaipal/:*)')
-    expect(allowed.filter((rule) => rule.startsWith('Bash(git checkout'))).toEqual(['Bash(git checkout main)', 'Bash(git checkout -b:*)'])
+    expect(
+      allowed.filter((rule) => rule.startsWith('Bash(git checkout')),
+    ).toEqual(['Bash(git checkout main)', 'Bash(git checkout -b:*)'])
   })
 
   it('reads the activity endpoint and nothing else through gh api', () => {
-    expect(allowed.filter((rule) => rule.startsWith('Bash(gh api'))).toEqual(['Bash(gh api repos/theanalogcompany/analog-guest/activity:*)'])
+    expect(allowed.filter((rule) => rule.startsWith('Bash(gh api'))).toEqual([
+      'Bash(gh api repos/theanalogcompany/analog-guest/activity:*)',
+    ])
   })
 })
 
@@ -378,13 +452,22 @@ describe('what the prompts teach, the allowlist permits', () => {
   it('all of work-ticket.md', () => {
     const commands = commandsIn(read('.claude/commands/work-ticket.md'))
     // Step 14 says npm install is refused; Phase 5 says Jaipal runs the merge.
-    expect(refusedIn(commands)).toEqual(['npm install', 'gh pr merge --squash --delete-branch'])
+    expect(refusedIn(commands)).toEqual([
+      'npm install',
+      'gh pr merge --squash --delete-branch',
+    ])
     const doc = read('.claude/commands/work-ticket.md')
     expect(doc).toContain('`npm install` is refused, so say so and stop')
-    expect(doc).toContain('He runs `gh pr merge --squash --delete-branch` after reviewing the PR')
+    expect(doc).toContain(
+      'He runs `gh pr merge --squash --delete-branch` after reviewing the PR',
+    )
     // Zero would pass every assertion and prove nothing.
-    expect(commands).toContain(`git worktree add ${SIDE} jaipal/tac-325-order-capture`)
-    expect(commands).toContain('git log --oneline origin/main..origin/jaipal/tac-325-order-capture')
+    expect(commands).toContain(
+      `git worktree add ${SIDE} jaipal/tac-325-order-capture`,
+    )
+    expect(commands).toContain(
+      'git log --oneline origin/main..origin/jaipal/tac-325-order-capture',
+    )
     expect(commands).toContain(`git -C ${SIDE} status`)
     expect(commands).toContain(`npx vitest run --root ${SIDE}`)
     // The ruling: nothing relies on a cd lasting between commands.
@@ -402,22 +485,33 @@ describe('what the prompts teach, the allowlist permits', () => {
     [22, [`npx vitest run --root ${SIDE}`]],
     [25, [`git -C ${SIDE} add`, `git -C ${SIDE} commit`]],
     [26, [`git -C ${SIDE} push`]],
-  ] as const)('work-ticket.md step %i names the side-folder form for a resume', (n, forms) => {
-    const step = between(read('.claude/commands/work-ticket.md'), `\n${n}. `, `\n${n + 1}. `)
-    const commands = commandsIn(step)
-    for (const form of forms) expect(commands).toContain(form)
-  })
+  ] as const)(
+    'work-ticket.md step %i names the side-folder form for a resume',
+    (n, forms) => {
+      const step = between(
+        read('.claude/commands/work-ticket.md'),
+        `\n${n}. `,
+        `\n${n + 1}. `,
+      )
+      const commands = commandsIn(step)
+      for (const form of forms) expect(commands).toContain(form)
+    },
+  )
 
   it('work-ticket.md step 27 opens a resumed PR with --head', () => {
-    expect(between(read('.claude/commands/work-ticket.md'), '\n27. ', '\n28. ')).toContain('with `--head <branch>` on a resume')
+    expect(
+      between(read('.claude/commands/work-ticket.md'), '\n27. ', '\n28. '),
+    ).toContain('with `--head <branch>` on a resume')
   })
 
-  it('the build prompt\'s command lines', () => {
+  it("the build prompt's command lines", () => {
     // The prompt teaches commands as indented lines, not code spans. GitHub
     // expands ${{ runner.temp }} before the session sees it.
     const lines = prompt
       .split('\n')
-      .map((line) => line.trim().replaceAll('${{ runner.temp }}', '/home/runner/work/_temp'))
+      .map((line) =>
+        line.trim().replaceAll('${{ runner.temp }}', '/home/runner/work/_temp'),
+      )
       .filter((line) => /^(curl|node|git|npx|npm|gh|jq|rg) /.test(line))
     expect(lines.length).toBeGreaterThanOrEqual(6)
     expect(refusedIn(lines)).toEqual([])
@@ -425,23 +519,42 @@ describe('what the prompts teach, the allowlist permits', () => {
   })
 
   it('the build prompt no longer teaches checking the branch out to resume', () => {
-    const resuming = between(prompt, 'RESUMING.', 'ALWAYS POST BEFORE YOU EXIT.')
+    const resuming = between(
+      prompt,
+      'RESUMING.',
+      'ALWAYS POST BEFORE YOU EXIT.',
+    )
     expect(resuming).toContain('do not check it out')
     expect(resuming).not.toMatch(/check it out \(/)
     // The one place the side folder's absolute path is resolved for CI.
-    expect(expand(resuming)).toContain(`${SIDE}, by that absolute path\nand never with cd`)
+    expect(expand(resuming)).toContain(
+      `${SIDE}, by that absolute path\nand never with cd`,
+    )
   })
 
-  it.each(['.claude/agents/code-reviewer.md', '.claude/agents/qa-runner.md'])('%s, in a side folder', (path) => {
-    const section = between(read(path), '# When the handoff names a side folder', '\n# ')
-    const commands = commandsIn(section)
-    expect(commands.length).toBeGreaterThanOrEqual(1)
-    expect(commands.every((command) => command.includes(SIDE))).toBe(true)
-    expect(refusedIn(commands)).toEqual([])
-  })
+  it.each(['.claude/agents/code-reviewer.md', '.claude/agents/qa-runner.md'])(
+    '%s, in a side folder',
+    (path) => {
+      const section = between(
+        read(path),
+        '# When the handoff names a side folder',
+        '\n# ',
+      )
+      const commands = commandsIn(section)
+      expect(commands.length).toBeGreaterThanOrEqual(1)
+      expect(commands.every((command) => command.includes(SIDE))).toBe(true)
+      expect(refusedIn(commands)).toEqual([])
+    },
+  )
 
-  it('.github/CLAUDE.md\'s test baseline', () => {
-    const commands = commandsIn(between(read('.github/CLAUDE.md'), 'To get a trustworthy before/after on a branch', 'THE-164 covers'))
+  it(".github/CLAUDE.md's test baseline", () => {
+    const commands = commandsIn(
+      between(
+        read('.github/CLAUDE.md'),
+        'To get a trustworthy before/after on a branch',
+        'THE-164 covers',
+      ),
+    )
     expect(commands.slice(0, 3)).toEqual([
       'git worktree add .worktrees/baseline origin/main',
       'npx vitest run --root .worktrees/baseline',
@@ -449,20 +562,40 @@ describe('what the prompts teach, the allowlist permits', () => {
     ])
     // Named once, to say it is what the baseline used to use.
     expect(refusedIn(commands)).toEqual(['git stash'])
-    expect(read('.github/CLAUDE.md')).toContain('this used to be `git stash`, which CI refuses')
+    expect(read('.github/CLAUDE.md')).toContain(
+      'this used to be `git stash`, which CI refuses',
+    )
   })
 
-  it('.github/CLAUDE.md\'s push-actor check', () => {
-    const commands = commandsIn(between(read('.github/CLAUDE.md'), "- **A build session's `git push` used the job's own token", '\n- '))
-    expect(commands.filter((command) => command.startsWith('gh api'))).toHaveLength(1)
+  it(".github/CLAUDE.md's push-actor check", () => {
+    const commands = commandsIn(
+      between(
+        read('.github/CLAUDE.md'),
+        "- **A build session's `git push` used the job's own token",
+        '\n- ',
+      ),
+    )
+    expect(
+      commands.filter((command) => command.startsWith('gh api')),
+    ).toHaveLength(1)
     expect(refusedIn(commands)).toEqual([])
   })
 })
 
-describe('.github/CLAUDE.md\'s list of what stays refused', () => {
+describe(".github/CLAUDE.md's list of what stays refused", () => {
   it('names only refused commands', () => {
-    const entry = between(read('.github/CLAUDE.md'), '- **A `Bash(x:*)` rule matches `x` followed by a space', '\n- ')
-    const commands = commandsIn(between(entry, 'What stays refused on purpose', 'Facts about a side folder'))
+    const entry = between(
+      read('.github/CLAUDE.md'),
+      '- **A `Bash(x:*)` rule matches `x` followed by a space',
+      '\n- ',
+    )
+    const commands = commandsIn(
+      between(
+        entry,
+        'What stays refused on purpose',
+        'Facts about a side folder',
+      ),
+    )
     expect(commands).toContain('git stash')
     expect(commands).toContain('gh pr merge 221')
     expect(refusedIn(commands)).toEqual(commands)

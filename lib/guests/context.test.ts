@@ -83,7 +83,11 @@ describe('isEmptyContextUpdate', () => {
   })
 
   it('returns false when structured has at least one field', () => {
-    expect(isEmptyContextUpdate({ structured: { guest_details: { first_name: 'Sarah' } } })).toBe(false)
+    expect(
+      isEmptyContextUpdate({
+        structured: { guest_details: { first_name: 'Sarah' } },
+      }),
+    ).toBe(false)
   })
 
   it('returns false when observation is a non-empty string', () => {
@@ -99,8 +103,14 @@ describe('deepMergeContext', () => {
   })
 
   it('deep-merges guest_details fields without overwriting unmentioned ones', () => {
-    const existing: GuestContext = { guest_details: { first_name: 'Sarah', pronouns: 'she/her' } }
-    const out = deepMergeContext(existing, { guest_details: { last_name: 'Chen' } }, NOW)
+    const existing: GuestContext = {
+      guest_details: { first_name: 'Sarah', pronouns: 'she/her' },
+    }
+    const out = deepMergeContext(
+      existing,
+      { guest_details: { last_name: 'Chen' } },
+      NOW,
+    )
     expect(out.guest_details).toEqual({
       first_name: 'Sarah',
       pronouns: 'she/her',
@@ -145,7 +155,9 @@ describe('deepMergeContext', () => {
   })
 
   it('REPLACES preferences.dietary array (arrays replaced, not appended)', () => {
-    const existing: GuestContext = { preferences: { dietary: ['vegetarian'], favorites: ['oat latte'] } }
+    const existing: GuestContext = {
+      preferences: { dietary: ['vegetarian'], favorites: ['oat latte'] },
+    }
     const out = deepMergeContext(
       existing,
       { preferences: { dietary: ['vegan'] } },
@@ -157,9 +169,7 @@ describe('deepMergeContext', () => {
 
   it('REPLACES life_context array (arrays replaced, not appended)', () => {
     const existing: GuestContext = {
-      life_context: [
-        { note: 'old trip', captured_at: '2026-03-01T00:00:00Z' },
-      ],
+      life_context: [{ note: 'old trip', captured_at: '2026-03-01T00:00:00Z' }],
     }
     const out = deepMergeContext(
       existing,
@@ -174,11 +184,19 @@ describe('deepMergeContext', () => {
   it('stamps captured_at on life_context patch entries that lack it', () => {
     const out = deepMergeContext(
       {},
-      { life_context: [{ note: 'going to Tokyo', expires_at: '2026-05-15T00:00:00Z' }] },
+      {
+        life_context: [
+          { note: 'going to Tokyo', expires_at: '2026-05-15T00:00:00Z' },
+        ],
+      },
       NOW,
     )
     expect(out.life_context).toEqual([
-      { note: 'going to Tokyo', expires_at: '2026-05-15T00:00:00Z', captured_at: NOW.toISOString() },
+      {
+        note: 'going to Tokyo',
+        expires_at: '2026-05-15T00:00:00Z',
+        captured_at: NOW.toISOString(),
+      },
     ])
   })
 
@@ -203,8 +221,14 @@ describe('deepMergeContext', () => {
     const existing: GuestContext = {
       observations: [{ note: 'old', captured_at: '2026-03-01T00:00:00Z' }],
     }
-    const out = deepMergeContext(existing, { preferences: { dietary: ['vegan'] } }, NOW)
-    expect(out.observations).toEqual([{ note: 'old', captured_at: '2026-03-01T00:00:00Z' }])
+    const out = deepMergeContext(
+      existing,
+      { preferences: { dietary: ['vegan'] } },
+      NOW,
+    )
+    expect(out.observations).toEqual([
+      { note: 'old', captured_at: '2026-03-01T00:00:00Z' },
+    ])
   })
 })
 
@@ -216,7 +240,9 @@ describe('getGuestContext', () => {
       },
     })
     vi.mocked(createAdminClient).mockReturnValue(
-      makeSupabaseMock(state) as unknown as ReturnType<typeof createAdminClient>,
+      makeSupabaseMock(state) as unknown as ReturnType<
+        typeof createAdminClient
+      >,
     )
     const r = await getGuestContext(GUEST_ID)
     expect(r.ok).toBe(true)
@@ -231,7 +257,9 @@ describe('getGuestContext', () => {
       selectData: { context: { observations: [{ note: 'no timestamp' }] } },
     })
     vi.mocked(createAdminClient).mockReturnValue(
-      makeSupabaseMock(state) as unknown as ReturnType<typeof createAdminClient>,
+      makeSupabaseMock(state) as unknown as ReturnType<
+        typeof createAdminClient
+      >,
     )
     const r = await getGuestContext(GUEST_ID)
     expect(r.ok).toBe(true)
@@ -243,7 +271,9 @@ describe('getGuestContext', () => {
   it('returns guest_not_found when no row matches', async () => {
     const state = newState({ selectData: null })
     vi.mocked(createAdminClient).mockReturnValue(
-      makeSupabaseMock(state) as unknown as ReturnType<typeof createAdminClient>,
+      makeSupabaseMock(state) as unknown as ReturnType<
+        typeof createAdminClient
+      >,
     )
     const r = await getGuestContext(GUEST_ID)
     expect(r.ok).toBe(false)
@@ -253,7 +283,9 @@ describe('getGuestContext', () => {
   it('returns db_read_failed on supabase error', async () => {
     const state = newState({ selectError: { message: 'connection lost' } })
     vi.mocked(createAdminClient).mockReturnValue(
-      makeSupabaseMock(state) as unknown as ReturnType<typeof createAdminClient>,
+      makeSupabaseMock(state) as unknown as ReturnType<
+        typeof createAdminClient
+      >,
     )
     const r = await getGuestContext(GUEST_ID)
     expect(r.ok).toBe(false)
@@ -279,7 +311,11 @@ describe('getGuestContext', () => {
 describe('updateGuestContext', () => {
   it('short-circuits on empty update with no DB hit', async () => {
     // Don't mock createAdminClient — short-circuit must happen before the call
-    const r = await updateGuestContext({ guestId: GUEST_ID, update: {}, now: NOW })
+    const r = await updateGuestContext({
+      guestId: GUEST_ID,
+      update: {},
+      now: NOW,
+    })
     expect(r.ok).toBe(true)
     if (r.ok) {
       expect(r.data.hasStructured).toBe(false)
@@ -292,7 +328,9 @@ describe('updateGuestContext', () => {
   it('writes structured patch into the context column on happy path', async () => {
     const state = newState({ selectData: { context: {} } })
     vi.mocked(createAdminClient).mockReturnValue(
-      makeSupabaseMock(state) as unknown as ReturnType<typeof createAdminClient>,
+      makeSupabaseMock(state) as unknown as ReturnType<
+        typeof createAdminClient
+      >,
     )
     const r = await updateGuestContext({
       guestId: GUEST_ID,
@@ -301,7 +339,9 @@ describe('updateGuestContext', () => {
     })
     expect(r.ok).toBe(true)
     expect(state.updateCalls).toHaveLength(1)
-    expect(state.updateCalls[0].context).toEqual({ preferences: { dietary: ['vegan'] } })
+    expect(state.updateCalls[0].context).toEqual({
+      preferences: { dietary: ['vegan'] },
+    })
     expect(state.updateCalls[0].first_name).toBeUndefined()
     expect(state.updateEqCalls).toEqual([GUEST_ID])
     if (r.ok) {
@@ -314,12 +354,16 @@ describe('updateGuestContext', () => {
   it('syncs first_name and last_name columns when patched in guest_details', async () => {
     const state = newState({ selectData: { context: {} } })
     vi.mocked(createAdminClient).mockReturnValue(
-      makeSupabaseMock(state) as unknown as ReturnType<typeof createAdminClient>,
+      makeSupabaseMock(state) as unknown as ReturnType<
+        typeof createAdminClient
+      >,
     )
     const r = await updateGuestContext({
       guestId: GUEST_ID,
       update: {
-        structured: { guest_details: { first_name: 'Sarah', last_name: 'Chen' } },
+        structured: {
+          guest_details: { first_name: 'Sarah', last_name: 'Chen' },
+        },
       },
       now: NOW,
     })
@@ -327,7 +371,10 @@ describe('updateGuestContext', () => {
     expect(state.updateCalls[0].first_name).toBe('Sarah')
     expect(state.updateCalls[0].last_name).toBe('Chen')
     if (r.ok) {
-      expect(r.data.identityColumnsChanged.sort()).toEqual(['first_name', 'last_name'])
+      expect(r.data.identityColumnsChanged.sort()).toEqual([
+        'first_name',
+        'last_name',
+      ])
     }
   })
 
@@ -336,7 +383,9 @@ describe('updateGuestContext', () => {
       selectData: { context: { guest_details: { first_name: 'Sarah' } } },
     })
     vi.mocked(createAdminClient).mockReturnValue(
-      makeSupabaseMock(state) as unknown as ReturnType<typeof createAdminClient>,
+      makeSupabaseMock(state) as unknown as ReturnType<
+        typeof createAdminClient
+      >,
     )
     await updateGuestContext({
       guestId: GUEST_ID,
@@ -349,10 +398,16 @@ describe('updateGuestContext', () => {
 
   it('appends observation shortcut to observations[] with captured_at = now', async () => {
     const state = newState({
-      selectData: { context: { observations: [{ note: 'old', captured_at: '2026-03-01T00:00:00Z' }] } },
+      selectData: {
+        context: {
+          observations: [{ note: 'old', captured_at: '2026-03-01T00:00:00Z' }],
+        },
+      },
     })
     vi.mocked(createAdminClient).mockReturnValue(
-      makeSupabaseMock(state) as unknown as ReturnType<typeof createAdminClient>,
+      makeSupabaseMock(state) as unknown as ReturnType<
+        typeof createAdminClient
+      >,
     )
     const r = await updateGuestContext({
       guestId: GUEST_ID,
@@ -374,7 +429,9 @@ describe('updateGuestContext', () => {
   it('handles structured patch + observation shortcut on the same call', async () => {
     const state = newState({ selectData: { context: {} } })
     vi.mocked(createAdminClient).mockReturnValue(
-      makeSupabaseMock(state) as unknown as ReturnType<typeof createAdminClient>,
+      makeSupabaseMock(state) as unknown as ReturnType<
+        typeof createAdminClient
+      >,
     )
     const r = await updateGuestContext({
       guestId: GUEST_ID,
@@ -400,7 +457,9 @@ describe('updateGuestContext', () => {
   it('trims observation before appending and treats whitespace-only as no-op', async () => {
     const state = newState({ selectData: { context: {} } })
     vi.mocked(createAdminClient).mockReturnValue(
-      makeSupabaseMock(state) as unknown as ReturnType<typeof createAdminClient>,
+      makeSupabaseMock(state) as unknown as ReturnType<
+        typeof createAdminClient
+      >,
     )
     const r = await updateGuestContext({
       guestId: GUEST_ID,
@@ -415,7 +474,9 @@ describe('updateGuestContext', () => {
   it('bubbles up read failure without attempting a write', async () => {
     const state = newState({ selectError: { message: 'read failure' } })
     vi.mocked(createAdminClient).mockReturnValue(
-      makeSupabaseMock(state) as unknown as ReturnType<typeof createAdminClient>,
+      makeSupabaseMock(state) as unknown as ReturnType<
+        typeof createAdminClient
+      >,
     )
     const r = await updateGuestContext({
       guestId: GUEST_ID,
@@ -433,7 +494,9 @@ describe('updateGuestContext', () => {
       updateError: { message: 'unique violation' },
     })
     vi.mocked(createAdminClient).mockReturnValue(
-      makeSupabaseMock(state) as unknown as ReturnType<typeof createAdminClient>,
+      makeSupabaseMock(state) as unknown as ReturnType<
+        typeof createAdminClient
+      >,
     )
     const r = await updateGuestContext({
       guestId: GUEST_ID,

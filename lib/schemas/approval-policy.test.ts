@@ -27,7 +27,9 @@ const PRODUCTION_SEEDED_VALUE = { default: 'auto_send', perCategory: {} }
 
 describe('APPROVAL_POLICY_DEFAULT', () => {
   it('routes comp_complaint to operator approval', () => {
-    expect(APPROVAL_POLICY_DEFAULT.perCategory.comp_complaint).toBe('operator_approval')
+    expect(APPROVAL_POLICY_DEFAULT.perCategory.comp_complaint).toBe(
+      'operator_approval',
+    )
   })
 
   it('leaves the global default at auto_send', () => {
@@ -40,7 +42,9 @@ describe('parseApprovalPolicy — the production value', () => {
   // THE test. Every venue has perCategory:{} right now.
   it('keeps the code-level comp_complaint route when the stored perCategory is empty', () => {
     const policy = parseApprovalPolicy(PRODUCTION_SEEDED_VALUE)
-    expect(resolveCategoryPolicy(policy, 'comp_complaint')).toBe('operator_approval')
+    expect(resolveCategoryPolicy(policy, 'comp_complaint')).toBe(
+      'operator_approval',
+    )
   })
 
   it('still auto-sends unrouted categories under the production value', () => {
@@ -55,19 +59,24 @@ describe('parseApprovalPolicy — fail OPEN to defaults', () => {
   // loop. But note the asymmetry with followup-rules — falling back here
   // means falling back to MORE review, not less, so failing open is safe.
   it('returns defaults on null / undefined', () => {
-    expect(resolveCategoryPolicy(parseApprovalPolicy(null), 'comp_complaint')).toBe(
-      'operator_approval',
-    )
-    expect(resolveCategoryPolicy(parseApprovalPolicy(undefined), 'comp_complaint')).toBe(
-      'operator_approval',
-    )
+    expect(
+      resolveCategoryPolicy(parseApprovalPolicy(null), 'comp_complaint'),
+    ).toBe('operator_approval')
+    expect(
+      resolveCategoryPolicy(parseApprovalPolicy(undefined), 'comp_complaint'),
+    ).toBe('operator_approval')
   })
 
   it('warns and returns defaults on a malformed payload', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
     try {
-      const policy = parseApprovalPolicy({ default: 'nonsense', perCategory: 'not-an-object' })
-      expect(resolveCategoryPolicy(policy, 'comp_complaint')).toBe('operator_approval')
+      const policy = parseApprovalPolicy({
+        default: 'nonsense',
+        perCategory: 'not-an-object',
+      })
+      expect(resolveCategoryPolicy(policy, 'comp_complaint')).toBe(
+        'operator_approval',
+      )
       expect(warn).toHaveBeenCalled()
     } finally {
       warn.mockRestore()
@@ -77,9 +86,9 @@ describe('parseApprovalPolicy — fail OPEN to defaults', () => {
   it('returns defaults on a non-object', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
     try {
-      expect(resolveCategoryPolicy(parseApprovalPolicy('hello'), 'comp_complaint')).toBe(
-        'operator_approval',
-      )
+      expect(
+        resolveCategoryPolicy(parseApprovalPolicy('hello'), 'comp_complaint'),
+      ).toBe('operator_approval')
     } finally {
       warn.mockRestore()
     }
@@ -93,7 +102,9 @@ describe('parseApprovalPolicy — fail OPEN to defaults', () => {
         perCategory: { not_a_real_category: 'operator_approval' },
       })
       // The valid parts survive; the code default still governs.
-      expect(resolveCategoryPolicy(policy, 'comp_complaint')).toBe('operator_approval')
+      expect(resolveCategoryPolicy(policy, 'comp_complaint')).toBe(
+        'operator_approval',
+      )
     } finally {
       warn.mockRestore()
     }
@@ -114,13 +125,20 @@ describe('resolveCategoryPolicy — explicit per-venue override', () => {
       default: 'auto_send',
       perCategory: { mechanic_request: 'operator_approval' },
     })
-    expect(resolveCategoryPolicy(policy, 'mechanic_request')).toBe('operator_approval')
+    expect(resolveCategoryPolicy(policy, 'mechanic_request')).toBe(
+      'operator_approval',
+    )
     // ...without disturbing the code-level route.
-    expect(resolveCategoryPolicy(policy, 'comp_complaint')).toBe('operator_approval')
+    expect(resolveCategoryPolicy(policy, 'comp_complaint')).toBe(
+      'operator_approval',
+    )
   })
 
   it('honours a venue-wide default of operator_approval for unrouted categories', () => {
-    const policy = parseApprovalPolicy({ default: 'operator_approval', perCategory: {} })
+    const policy = parseApprovalPolicy({
+      default: 'operator_approval',
+      perCategory: {},
+    })
     expect(resolveCategoryPolicy(policy, 'reply')).toBe('operator_approval')
   })
 
@@ -136,8 +154,12 @@ describe('resolveCategoryPolicy — explicit per-venue override', () => {
   // inside applyApprovalPolicyStage, so throwing on a missing policy would
   // fail the entire agent run and the guest would get nothing.
   it('degrades to code defaults when the policy itself is missing', () => {
-    expect(resolveCategoryPolicy(undefined, 'comp_complaint')).toBe('operator_approval')
-    expect(resolveCategoryPolicy(null, 'comp_complaint')).toBe('operator_approval')
+    expect(resolveCategoryPolicy(undefined, 'comp_complaint')).toBe(
+      'operator_approval',
+    )
+    expect(resolveCategoryPolicy(null, 'comp_complaint')).toBe(
+      'operator_approval',
+    )
     expect(resolveCategoryPolicy(undefined, 'reply')).toBe('auto_send')
   })
 
@@ -171,7 +193,10 @@ describe('getEffectivePerCategoryPolicy (TAC-343 Stage C extraction)', () => {
   })
 
   it('degrades to the code default when the policy itself is missing', () => {
-    const expected = { ...APPROVAL_POLICY_DEFAULT.perCategory, opt_out: 'auto_send' }
+    const expected = {
+      ...APPROVAL_POLICY_DEFAULT.perCategory,
+      opt_out: 'auto_send',
+    }
     expect(getEffectivePerCategoryPolicy(undefined)).toEqual(expected)
     expect(getEffectivePerCategoryPolicy(null)).toEqual(expected)
   })
@@ -183,9 +208,12 @@ describe('getEffectivePerCategoryPolicy (TAC-343 Stage C extraction)', () => {
     })
     const merged = getEffectivePerCategoryPolicy(policy)
     for (const category of Object.keys(merged) as Array<keyof typeof merged>) {
-      expect(resolveCategoryPolicy(policy, category as Parameters<typeof resolveCategoryPolicy>[1])).toBe(
-        merged[category],
-      )
+      expect(
+        resolveCategoryPolicy(
+          policy,
+          category as Parameters<typeof resolveCategoryPolicy>[1],
+        ),
+      ).toBe(merged[category])
     }
   })
 })
@@ -209,7 +237,10 @@ describe('POLICY_EXEMPT_CATEGORIES (TAC-307)', () => {
   })
 
   it('resolves an exempt category to auto_send even under a blanket hold', () => {
-    const policy = parseApprovalPolicy({ default: 'operator_approval', perCategory: {} })
+    const policy = parseApprovalPolicy({
+      default: 'operator_approval',
+      perCategory: {},
+    })
     expect(resolveCategoryPolicy(policy, 'opt_out')).toBe('auto_send')
   })
 
@@ -252,8 +283,12 @@ describe('resolvePolicyDecision — source attribution (TAC-307)', () => {
     // off the caller's policy reported the code default as an explicit venue
     // choice, which made every degraded context absolute and silently disabled
     // the carve-out for any caller that had not populated a policy.
-    expect(resolvePolicyDecision(undefined, 'comp_complaint').source).toBe('code_default')
-    expect(resolvePolicyDecision(null, 'comp_complaint').source).toBe('code_default')
+    expect(resolvePolicyDecision(undefined, 'comp_complaint').source).toBe(
+      'code_default',
+    )
+    expect(resolvePolicyDecision(null, 'comp_complaint').source).toBe(
+      'code_default',
+    )
   })
 
   it('labels a fall-through to the venue default "policy_default"', () => {
@@ -265,7 +300,10 @@ describe('resolvePolicyDecision — source attribution (TAC-307)', () => {
   })
 
   it('labels an absent category (followup path) "policy_default"', () => {
-    const policy = parseApprovalPolicy({ default: 'operator_approval', perCategory: {} })
+    const policy = parseApprovalPolicy({
+      default: 'operator_approval',
+      perCategory: {},
+    })
     expect(resolvePolicyDecision(policy, undefined)).toEqual({
       disposition: 'operator_approval',
       source: 'policy_default',
@@ -277,7 +315,10 @@ describe('resolvePolicyDecision — source attribution (TAC-307)', () => {
     // resolve as 'code_default' under a blanket hold, keep the carve-out, and
     // auto-send past the master switch — in the one category this ticket's
     // originating incident was about.
-    const policy = parseApprovalPolicy({ default: 'operator_approval', perCategory: {} })
+    const policy = parseApprovalPolicy({
+      default: 'operator_approval',
+      perCategory: {},
+    })
     expect(resolvePolicyDecision(policy, 'comp_complaint')).toEqual({
       disposition: 'operator_approval',
       source: 'policy_default',
@@ -302,7 +343,12 @@ describe('resolvePolicyDecision — source attribution (TAC-307)', () => {
       default: 'auto_send',
       perCategory: { reply: 'operator_approval', opt_out: 'operator_approval' },
     })
-    for (const category of ['reply', 'opt_out', 'comp_complaint', 'casual_chatter'] as const) {
+    for (const category of [
+      'reply',
+      'opt_out',
+      'comp_complaint',
+      'casual_chatter',
+    ] as const) {
       expect(resolvePolicyDecision(policy, category).disposition).toBe(
         resolveCategoryPolicy(policy, category),
       )

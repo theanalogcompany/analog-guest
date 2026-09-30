@@ -54,7 +54,8 @@ export const SELF_TALK_PATTERNS: readonly RegExp[] = [
   /\bper my (?:instructions?|rules|programming|guidelines)\b/i,
 ]
 
-export type SelfTalkMatchResult = { matched: true; pattern: string } | { matched: false }
+export type SelfTalkMatchResult =
+  { matched: true; pattern: string } | { matched: false }
 
 /**
  * Scan a drafted message body against SELF_TALK_PATTERNS. On the first

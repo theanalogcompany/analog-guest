@@ -25,7 +25,8 @@ import {
 
 const handleHoldingMessageMock = vi.fn()
 vi.mock('./handle-holding-message', () => ({
-  handleHoldingMessage: (...args: unknown[]) => handleHoldingMessageMock(...args),
+  handleHoldingMessage: (...args: unknown[]) =>
+    handleHoldingMessageMock(...args),
 }))
 
 // The post-send card regen builds a full runtime context. Making it throw
@@ -57,7 +58,15 @@ vi.mock('@/lib/observability', () => ({
  */
 const db = {
   dueRows: [] as Array<Record<string, unknown>>,
-  questions: new Map<string, { id: string; body: string; created_at: string; provider_message_id: string }>(),
+  questions: new Map<
+    string,
+    {
+      id: string
+      body: string
+      created_at: string
+      provider_message_id: string
+    }
+  >(),
   /** ids whose pending_until is currently non-null (i.e. claimable). */
   claimable: new Set<string>(),
   claimedIds: [] as string[],
@@ -103,7 +112,8 @@ function makeQuery() {
   // Terminal for the claim and the question read.
   q.maybeSingle = () => {
     if (isUpdate) {
-      if (db.claimError) return Promise.resolve({ data: null, error: { message: 'boom' } })
+      if (db.claimError)
+        return Promise.resolve({ data: null, error: { message: 'boom' } })
       if (targetId && db.claimable.has(targetId)) {
         // CAS won: clear the clock so a concurrent/second run can't re-win.
         db.claimable.delete(targetId)
@@ -170,7 +180,9 @@ describe('processDueKnowledgeGaps (TAC-308)', () => {
       expect.objectContaining({
         venueId: 'venue-1',
         guestId: 'guest-card-1',
-        pendingQuestion: expect.objectContaining({ question: 'what grade is the matcha?' }),
+        pendingQuestion: expect.objectContaining({
+          question: 'what grade is the matcha?',
+        }),
         // TAC-469: the card's own question row, for the Instagram reply check.
         questionMessageId: 'inbound-1',
       }),
@@ -268,8 +280,16 @@ describe('processDueKnowledgeGaps (TAC-308)', () => {
       provider_message_id: 'p2',
     })
     handleHoldingMessageMock
-      .mockResolvedValueOnce({ status: 'failed', stage: 'send', error: 'sendblue down' })
-      .mockResolvedValueOnce({ status: 'sent', outboundMessageId: 'out-2', usedFallback: false })
+      .mockResolvedValueOnce({
+        status: 'failed',
+        stage: 'send',
+        error: 'sendblue down',
+      })
+      .mockResolvedValueOnce({
+        status: 'sent',
+        outboundMessageId: 'out-2',
+        usedFallback: false,
+      })
     const summary = await processDueKnowledgeGaps(new Date(), true)
     expect(summary.errored).toBe(1)
     expect(summary.sent).toBe(1)

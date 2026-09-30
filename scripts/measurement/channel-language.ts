@@ -51,7 +51,10 @@ interface Pattern {
 const PATTERNS: readonly Pattern[] = [
   // --- phone_claim: false on Instagram -------------------------------------
   // The transport, named outright.
-  { kind: 'phone_claim', re: /\b(?:sms|imessage|text message|text messages)\b/gi },
+  {
+    kind: 'phone_claim',
+    re: /\b(?:sms|imessage|text message|text messages)\b/gi,
+  },
   // "text" as the verb for reaching the venue, or being reached. Requires a
   // following word so "context" and "textured" cannot match (the \b before
   // already rules those out, but the object is what makes it a claim).
@@ -67,12 +70,21 @@ const PATTERNS: readonly Pattern[] = [
   // "text in", "texted in".
   { kind: 'phone_claim', re: /\btext(?:s|ed|ing)?\s+in\b/gi },
   // "shoot/send us a text", "give us a text".
-  { kind: 'phone_claim', re: /\b(?:send|shoot|drop|give)\s+(?:me|us|them)?\s*a\s+text\b/gi },
+  {
+    kind: 'phone_claim',
+    re: /\b(?:send|shoot|drop|give)\s+(?:me|us|them)?\s*a\s+text\b/gi,
+  },
   // The number itself: "this number", "our number", "save the number".
-  { kind: 'phone_claim', re: /\b(?:this|that|our|my|the)\s+(?:phone\s+)?number\b/gi },
+  {
+    kind: 'phone_claim',
+    re: /\b(?:this|that|our|my|the)\s+(?:phone\s+)?number\b/gi,
+  },
   { kind: 'phone_claim', re: /\bphone\s+number\b/gi },
   // Calling is a phone claim too: an Instagram guest has nothing to call.
-  { kind: 'phone_claim', re: /\b(?:give\s+(?:me|us|them)\s+a\s+call|call\s+(?:me|us)\b|ring\s+us\b)/gi },
+  {
+    kind: 'phone_claim',
+    re: /\b(?:give\s+(?:me|us|them)\s+a\s+call|call\s+(?:me|us)\b|ring\s+us\b)/gi,
+  },
 
   // --- instagram_idiom: true, but not the copy we wrote ---------------------
   { kind: 'instagram_idiom', re: /\bdm(?:s|ed|ing)?\b/gi },
@@ -95,7 +107,8 @@ const CONTEXT_CHARS = 40
  * that the two cases above are separated by their own commas and full stops.
  */
 const NEGATION_WINDOW = 28
-const NEGATION = /\b(?:no|not|don'?t|doesn'?t|dont|never|without|haven'?t|hasn'?t)\b/i
+const NEGATION =
+  /\b(?:no|not|don'?t|doesn'?t|dont|never|without|haven'?t|hasn'?t)\b/i
 
 function isDenied(body: string, matchIndex: number): boolean {
   const from = Math.max(0, matchIndex - NEGATION_WINDOW)
@@ -105,7 +118,8 @@ function isDenied(body: string, matchIndex: number): boolean {
   // close" the negation governs the holds, not the texting, and suppressing
   // that would hide a real claim behind an unrelated negative. Found by the
   // test written for exactly that case.
-  const clause = before.split(/[.!?]|\b(?:but|though|however|otherwise)\b/i).pop() ?? before
+  const clause =
+    before.split(/[.!?]|\b(?:but|though|however|otherwise)\b/i).pop() ?? before
   return NEGATION.test(clause)
 }
 

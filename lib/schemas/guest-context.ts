@@ -62,6 +62,21 @@ const GuestDetailsSchema = z.object({
   // either to a single string for the serializer.
   home_base: z.union([z.string(), LegacyHomeBaseSchema]).optional(),
   workplace: z.union([z.string(), LegacyWorkplaceSchema]).optional(),
+  // TAC-558: the guest's own account of their history at THIS venue, free-form
+  // ("first time in today", "been coming since they opened"). Captured when
+  // are_they_new_here is answered, and the second thing that closes it.
+  //
+  // Free-form rather than an enum, matching home_base end to end, because the
+  // texture is the value: "came once last month" and "in most mornings for a
+  // year" are both "has been before" and mean different things to the next reply.
+  //
+  // WHAT IT IS NOT: nothing structural consumes this. It renders into the prompt
+  // and informs later turns the way home_base does; it does NOT move
+  // recognition.state, so a guest who says they have been coming for years still
+  // carries `Guest relationship: new` until the signals say otherwise. Feeding a
+  // guest's own account into computeGuestState is a separate ticket (approved
+  // 2026-09-29).
+  history_here: z.string().optional(),
 })
 
 const PreferencesSchema = z.object({
@@ -126,6 +141,10 @@ const GuestDetailsPatchSchema = z.object({
   last_name: z.string().optional(),
   home_base: z.string().optional(),
   workplace: z.string().optional(),
+  // TAC-558. One slot: 20 optionals to 21, against the 22 budget in
+  // lib/ai/schema-budget.test.ts and Anthropic's 24 cap. One slot of headroom
+  // left after this.
+  history_here: z.string().optional(),
 })
 
 const LifeContextPatchEntrySchema = z.object({
@@ -155,6 +174,7 @@ export interface ParsedGuestContext {
     date_of_birth?: string
     home_base?: string
     workplace?: string
+    history_here?: string
   }
   preferences?: GuestContext['preferences']
   // Filtered: expired entries dropped, malformed expires_at logged + dropped.
@@ -207,10 +227,20 @@ function normalizeHomeBase(
     const trimmed = value.trim()
     return trimmed.length > 0 ? trimmed : undefined
   }
-  const parts = [value.neighborhood, value.city, value.zip, value.address].filter(
-    (p): p is string => typeof p === 'string' && p.trim().length > 0,
-  )
+  const parts = [
+    value.neighborhood,
+    value.city,
+    value.zip,
+    value.address,
+  ].filter((p): p is string => typeof p === 'string' && p.trim().length > 0)
   return parts.length > 0 ? parts.join(', ') : undefined
+}
+
+/** Trim a free-form string, treating blank as absent. */
+function normalizeFreeText(value: string | undefined): string | undefined {
+  if (value === undefined) return undefined
+  const trimmed = value.trim()
+  return trimmed.length > 0 ? trimmed : undefined
 }
 
 // Mirror of normalizeHomeBase for workplace. Legacy fields are employer first
@@ -260,6 +290,10 @@ export function toParsedGuestContext(
       date_of_birth: d.date_of_birth,
       home_base: normalizeHomeBase(d.home_base),
       workplace: normalizeWorkplace(d.workplace),
+      // TAC-558. Never stored as a legacy object, so it needs no normalizer -
+      // only the empty-string-to-undefined step every renderable field gets, so
+      // a blank value neither renders a bare label nor closes the intention.
+      history_here: normalizeFreeText(d.history_here),
     }
     // Drop the whole object if every renderable field is empty post-normalize.
     const anyPresent =
@@ -268,7 +302,8 @@ export function toParsedGuestContext(
       normalized.pronouns !== undefined ||
       normalized.date_of_birth !== undefined ||
       normalized.home_base !== undefined ||
-      normalized.workplace !== undefined
+      normalized.workplace !== undefined ||
+      normalized.history_here !== undefined
     normalizedGuestDetails = anyPresent ? normalized : undefined
   }
 

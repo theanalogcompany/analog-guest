@@ -45,9 +45,18 @@ export async function POST(request: Request): Promise<NextResponse> {
     secondaryTags: body.secondaryTags,
   })
   if (!result.ok) {
-    const status = result.errorCode === 'embed_failed' ? 502 : result.errorCode === 'invalid_input' ? 400 : 500
+    const status =
+      result.errorCode === 'embed_failed'
+        ? 502
+        : result.errorCode === 'invalid_input'
+          ? 400
+          : 500
     return NextResponse.json(
-      { error: 'knowledge merge failed', detail: result.error, errorCode: result.errorCode },
+      {
+        error: 'knowledge merge failed',
+        detail: result.error,
+        errorCode: result.errorCode,
+      },
       { status },
     )
   }

@@ -56,7 +56,11 @@ export function parseTicket(rawData: unknown): ParsedTicket | null {
     // guest-reported line item whose menu entry has no price — keep the
     // item so the operator still sees what was reported, with a blank price
     // cell rather than a fabricated $0.00.
-    lineItems.push({ name, quantity, unitPriceCents: readNumber(ir.unit_price_cents) })
+    lineItems.push({
+      name,
+      quantity,
+      unitPriceCents: readNumber(ir.unit_price_cents),
+    })
   }
   if (lineItems.length === 0) return null
 
@@ -86,7 +90,8 @@ export function buildItemsPreview(
     const next = item.name
     const sepLen = taken.length === 0 ? 0 : 2 // ", "
     if (taken.length >= maxNames) break
-    if (taken.length > 0 && runningChars + sepLen + next.length > maxChars) break
+    if (taken.length > 0 && runningChars + sepLen + next.length > maxChars)
+      break
     taken.push(next)
     runningChars += sepLen + next.length
   }

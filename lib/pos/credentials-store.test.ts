@@ -3,7 +3,10 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
 import type { createAdminClient } from '@/lib/db/admin'
 
-import { upsertSquareCredential, loadSquareCredential } from './credentials-store'
+import {
+  upsertSquareCredential,
+  loadSquareCredential,
+} from './credentials-store'
 import { decryptToken, encryptToken } from './crypto'
 
 type AdminClient = ReturnType<typeof createAdminClient>
@@ -16,7 +19,10 @@ afterAll(() => {
   process.env.POS_TOKEN_ENC_KEY = PREV
 })
 
-function makeClient(opts: { row?: Record<string, unknown> | null; error?: { message: string } | null }): {
+function makeClient(opts: {
+  row?: Record<string, unknown> | null
+  error?: { message: string } | null
+}): {
   client: AdminClient
   captured: { upsert?: Record<string, unknown> }
 } {
@@ -29,11 +35,18 @@ function makeClient(opts: { row?: Record<string, unknown> | null; error?: { mess
       captured.upsert = payload
       return self
     }
-    self.maybeSingle = async () => ({ data: opts.row ?? null, error: opts.error ?? null })
-    self.then = (resolve: (r: { error: unknown }) => unknown) => resolve({ error: opts.error ?? null })
+    self.maybeSingle = async () => ({
+      data: opts.row ?? null,
+      error: opts.error ?? null,
+    })
+    self.then = (resolve: (r: { error: unknown }) => unknown) =>
+      resolve({ error: opts.error ?? null })
     return self
   }
-  return { client: { from: () => chain() } as unknown as AdminClient, captured }
+  return {
+    client: { from: () => chain() } as unknown as AdminClient,
+    captured,
+  }
 }
 
 const VENUE = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc'
@@ -55,15 +68,24 @@ describe('upsertSquareCredential', () => {
     const payload = captured.upsert!
     expect(payload.access_token_enc).not.toBe('access-123')
     expect(decryptToken(payload.access_token_enc as string)).toBe('access-123')
-    expect(decryptToken(payload.refresh_token_enc as string)).toBe('refresh-456')
-    expect(payload).toMatchObject({ venue_id: VENUE, provider: 'square', location_external_id: 'L1' })
+    expect(decryptToken(payload.refresh_token_enc as string)).toBe(
+      'refresh-456',
+    )
+    expect(payload).toMatchObject({
+      venue_id: VENUE,
+      provider: 'square',
+      location_external_id: 'L1',
+    })
   })
 })
 
 describe('loadSquareCredential', () => {
   it('returns null when the venue has not connected', async () => {
     const { client } = makeClient({ row: null })
-    const res = await loadSquareCredential({ venueId: VENUE, supabase: client })
+    const res = await loadSquareCredential({
+      venueId: VENUE,
+      supabase: client,
+    })
     expect(res).toEqual({ ok: true, data: null })
   })
 
@@ -79,7 +101,10 @@ describe('loadSquareCredential', () => {
         scopes: ['PAYMENTS_READ'],
       },
     })
-    const res = await loadSquareCredential({ venueId: VENUE, supabase: client })
+    const res = await loadSquareCredential({
+      venueId: VENUE,
+      supabase: client,
+    })
     expect(res.ok).toBe(true)
     if (!res.ok || !res.data) throw new Error('expected a credential')
     expect(res.data.accessToken).toBe('access-123')
@@ -89,7 +114,14 @@ describe('loadSquareCredential', () => {
 
   it('surfaces a load error', async () => {
     const { client } = makeClient({ error: { message: 'boom' } })
-    const res = await loadSquareCredential({ venueId: VENUE, supabase: client })
-    expect(res).toEqual({ ok: false, error: 'boom', errorCode: 'credential_load_failed' })
+    const res = await loadSquareCredential({
+      venueId: VENUE,
+      supabase: client,
+    })
+    expect(res).toEqual({
+      ok: false,
+      error: 'boom',
+      errorCode: 'credential_load_failed',
+    })
   })
 })

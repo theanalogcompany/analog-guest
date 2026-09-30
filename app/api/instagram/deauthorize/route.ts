@@ -21,9 +21,7 @@
 // An UNMATCHED account is a 200 and not an error: Meta can send this for an
 // account we never finished connecting, or one already disconnected.
 
-import {
-  deauthorizeInstagramCredential,
-} from '@/lib/messaging/instagram/credentials-store'
+import { deauthorizeInstagramCredential } from '@/lib/messaging/instagram/credentials-store'
 import { parseSignedRequest } from '@/lib/messaging/instagram/signed-request'
 import { createAdminClient } from '@/lib/db/admin'
 
@@ -34,9 +32,12 @@ export async function POST(request: Request): Promise<Response> {
   if (secret === '') {
     // Every genuine delivery fails this way until the secret is set, which is
     // why it is an error rather than a warning.
-    console.error('[instagram deauthorize] INSTAGRAM_APP_SECRET is not set; refusing every delivery', {
-      event: 'instagram_deauthorize_misconfigured',
-    })
+    console.error(
+      '[instagram deauthorize] INSTAGRAM_APP_SECRET is not set; refusing every delivery',
+      {
+        event: 'instagram_deauthorize_misconfigured',
+      },
+    )
     return new Response(null, { status: 403 })
   }
 
@@ -71,10 +72,13 @@ export async function POST(request: Request): Promise<Response> {
     new Date(),
   )
   if (!result.ok) {
-    console.error('[instagram deauthorize] could not mark the venue disconnected', {
-      event: 'instagram_deauthorize_failed',
-      error: result.error,
-    })
+    console.error(
+      '[instagram deauthorize] could not mark the venue disconnected',
+      {
+        event: 'instagram_deauthorize_failed',
+        error: result.error,
+      },
+    )
     // Still 200. See the header: a non-2xx here eventually costs us the
     // callback itself, and the failure is already logged at error level.
     return Response.json({ ok: false })

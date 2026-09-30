@@ -73,8 +73,12 @@ function graph(replies: { me?: GraphReply; profile?: GraphReply } = {}) {
   return {
     fetchImpl,
     urls,
-    profileCalls: () => urls.filter((u) => !u.startsWith(`${INSTAGRAM_GRAPH_BASE_URL}/me?`)).length,
-    meCalls: () => urls.filter((u) => u.startsWith(`${INSTAGRAM_GRAPH_BASE_URL}/me?`)).length,
+    profileCalls: () =>
+      urls.filter((u) => !u.startsWith(`${INSTAGRAM_GRAPH_BASE_URL}/me?`))
+        .length,
+    meCalls: () =>
+      urls.filter((u) => u.startsWith(`${INSTAGRAM_GRAPH_BASE_URL}/me?`))
+        .length,
   }
 }
 
@@ -87,9 +91,17 @@ function graph(replies: { me?: GraphReply; profile?: GraphReply } = {}) {
  * reports source 'env' — the pre-TAC-516 world, which is exactly what a venue
  * with no credential row still gets.
  */
-function deps(fetchImpl: RefreshDeps['fetch'], env: { token?: string } = { token: TOKEN }): RefreshDeps {
-  const token = typeof env.token === 'string' && env.token !== '' ? env.token : null
-  return { fetch: fetchImpl, now: () => new Date(NOW), resolveToken: stubResolveToken(token) }
+function deps(
+  fetchImpl: RefreshDeps['fetch'],
+  env: { token?: string } = { token: TOKEN },
+): RefreshDeps {
+  const token =
+    typeof env.token === 'string' && env.token !== '' ? env.token : null
+  return {
+    fetch: fetchImpl,
+    now: () => new Date(NOW),
+    resolveToken: stubResolveToken(token),
+  }
 }
 
 // A Graph error as Meta formats it. Its message names the guest's scoped ID.
@@ -107,7 +119,15 @@ const refusal = {
 }
 const expiredToken = {
   status: 400,
-  body: { error: { message: 'Error validating access token: Session has expired', type: 'OAuthException', code: 190, error_subcode: 463, fbtrace_id: 'XyZ' } },
+  body: {
+    error: {
+      message: 'Error validating access token: Session has expired',
+      type: 'OAuthException',
+      code: 190,
+      error_subcode: 463,
+      fbtrace_id: 'XyZ',
+    },
+  },
 }
 
 let logged: unknown[][] = []
@@ -116,7 +136,15 @@ let logged: unknown[][] = []
 function loggedText(): string {
   return logged
     .map((args) =>
-      formatWithOptions({ depth: Infinity, maxArrayLength: Infinity, maxStringLength: Infinity, breakLength: Infinity }, ...args),
+      formatWithOptions(
+        {
+          depth: Infinity,
+          maxArrayLength: Infinity,
+          maxStringLength: Infinity,
+          breakLength: Infinity,
+        },
+        ...args,
+      ),
     )
     .join('\n')
 }
@@ -129,7 +157,11 @@ function entry(event: string): Record<string, unknown> | undefined {
   return undefined
 }
 
-const logLevel = { log: [] as string[], warn: [] as string[], error: [] as string[] }
+const logLevel = {
+  log: [] as string[],
+  warn: [] as string[],
+  error: [] as string[],
+}
 
 beforeEach(() => {
   logged = []
@@ -154,13 +186,43 @@ describe('isProfileRefreshDue', () => {
   it.each<[string, string | null, string | null, boolean]>([
     ['never fetched or tried: due', null, null, true],
     ['fetched 25 hours ago: due', ago(25 * HOUR), ago(25 * HOUR), true],
-    ['fetched exactly 24 hours ago: due', ago(INSTAGRAM_PROFILE_STALE_AFTER_MS), ago(INSTAGRAM_PROFILE_STALE_AFTER_MS), true],
+    [
+      'fetched exactly 24 hours ago: due',
+      ago(INSTAGRAM_PROFILE_STALE_AFTER_MS),
+      ago(INSTAGRAM_PROFILE_STALE_AFTER_MS),
+      true,
+    ],
     ['fetched 23 hours ago: not due', ago(23 * HOUR), ago(23 * HOUR), false],
-    ['never fetched, a failed try 30 minutes ago: not due', null, ago(30 * 60 * 1000), false],
-    ['never fetched, a failed try 61 minutes ago: due', null, ago(61 * 60 * 1000), true],
-    ['never fetched, a failed try exactly an hour ago: due', null, ago(INSTAGRAM_PROFILE_RETRY_AFTER_MS), true],
-    ['fetched 2 days ago, a failed try 30 minutes ago: not due', ago(48 * HOUR), ago(30 * 60 * 1000), false],
-    ['fetched 2 days ago, a failed try 2 hours ago: due', ago(48 * HOUR), ago(2 * HOUR), true],
+    [
+      'never fetched, a failed try 30 minutes ago: not due',
+      null,
+      ago(30 * 60 * 1000),
+      false,
+    ],
+    [
+      'never fetched, a failed try 61 minutes ago: due',
+      null,
+      ago(61 * 60 * 1000),
+      true,
+    ],
+    [
+      'never fetched, a failed try exactly an hour ago: due',
+      null,
+      ago(INSTAGRAM_PROFILE_RETRY_AFTER_MS),
+      true,
+    ],
+    [
+      'fetched 2 days ago, a failed try 30 minutes ago: not due',
+      ago(48 * HOUR),
+      ago(30 * 60 * 1000),
+      false,
+    ],
+    [
+      'fetched 2 days ago, a failed try 2 hours ago: due',
+      ago(48 * HOUR),
+      ago(2 * HOUR),
+      true,
+    ],
     ['an unreadable stored time: due', 'not a time', 'not a time', true],
   ])('%s', (_label, fetchedAt, attemptedAt, due) => {
     expect(isProfileRefreshDue({ fetchedAt, attemptedAt }, now)).toBe(due)
@@ -168,7 +230,9 @@ describe('isProfileRefreshDue', () => {
 })
 
 describe('profileRefreshTargetFor', () => {
-  const persisted = (kind: 'message' | 'postback' | 'echo' | 'referral'): InstagramEventOutcome => ({
+  const persisted = (
+    kind: 'message' | 'postback' | 'echo' | 'referral',
+  ): InstagramEventOutcome => ({
     status: 'persisted',
     kind,
     hadPriorConversation: kind === 'referral' ? false : null,
@@ -193,12 +257,49 @@ describe('profileRefreshTargetFor', () => {
   )
 
   it.each<[string, InstagramEventOutcome]>([
-    ['a saved echo (the venue\'s own message)', persisted('echo')],
-    ['a duplicate', { status: 'duplicate', kind: 'message', venueId: VENUE_ID, messageId: 'msg-1' }],
-    ['a read receipt', { status: 'read', venueId: VENUE_ID, guestId: GUEST_ID, messageId: 'msg-1' }],
-    ['a skipped event', { status: 'skipped', kind: 'message', reason: 'venue_not_found', venueId: null }],
-    ['a failed save', { status: 'failed', kind: 'message', stage: 'message_insert', error: 'x', code: null, venueId: 'v' }],
-    ['an unhandled event', { status: 'unhandled', reason: 'standby', fields: [] }],
+    ["a saved echo (the venue's own message)", persisted('echo')],
+    [
+      'a duplicate',
+      {
+        status: 'duplicate',
+        kind: 'message',
+        venueId: VENUE_ID,
+        messageId: 'msg-1',
+      },
+    ],
+    [
+      'a read receipt',
+      {
+        status: 'read',
+        venueId: VENUE_ID,
+        guestId: GUEST_ID,
+        messageId: 'msg-1',
+      },
+    ],
+    [
+      'a skipped event',
+      {
+        status: 'skipped',
+        kind: 'message',
+        reason: 'venue_not_found',
+        venueId: null,
+      },
+    ],
+    [
+      'a failed save',
+      {
+        status: 'failed',
+        kind: 'message',
+        stage: 'message_insert',
+        error: 'x',
+        code: null,
+        venueId: 'v',
+      },
+    ],
+    [
+      'an unhandled event',
+      { status: 'unhandled', reason: 'standby', fields: [] },
+    ],
   ])('refreshes nobody for %s', (_label, outcome) => {
     expect(profileRefreshTargetFor(outcome)).toBeNull()
   })
@@ -206,11 +307,23 @@ describe('profileRefreshTargetFor', () => {
 
 describe('refreshInstagramProfile: a successful fetch', () => {
   it('stores the handle, the name and the fetch time for a new guest, and nothing else', async () => {
-    const db = createInstagramDbFake({ venues: [VENUE], guests: [guestRow()] }, { updatable: ['guests'] })
+    const db = createInstagramDbFake(
+      { venues: [VENUE], guests: [guestRow()] },
+      { updatable: ['guests'] },
+    )
     const g = graph()
-    const outcome = await refreshInstagramProfile(db.client, TARGET, deps(g.fetchImpl))
+    const outcome = await refreshInstagramProfile(
+      db.client,
+      TARGET,
+      deps(g.fetchImpl),
+    )
 
-    expect(outcome).toEqual({ status: 'refreshed', hadProfile: false, usernameChanged: false, hasName: true })
+    expect(outcome).toEqual({
+      status: 'refreshed',
+      hadProfile: false,
+      usernameChanged: false,
+      hasName: true,
+    })
     expect(db.updates('guests')).toEqual([
       {
         patch: { instagram_profile_attempted_at: NOW },
@@ -223,14 +336,22 @@ describe('refreshInstagramProfile: a successful fetch', () => {
       {
         // Never first_name or last_name: the display name is not a name the
         // guest gave the venue (ruled 2026-09-18).
-        patch: { instagram_username: 'maya.oakland', instagram_name: 'Maya', instagram_profile_fetched_at: NOW },
+        patch: {
+          instagram_username: 'maya.oakland',
+          instagram_name: 'Maya',
+          instagram_profile_fetched_at: NOW,
+        },
         filters: [
           ['id', 'eq', GUEST_ID],
           ['venue_id', 'eq', VENUE_ID],
         ],
       },
     ])
-    expect(db.tables.guests[0]).toMatchObject({ first_name: null, last_name: null, instagram_username: 'maya.oakland' })
+    expect(db.tables.guests[0]).toMatchObject({
+      first_name: null,
+      last_name: null,
+      instagram_username: 'maya.oakland',
+    })
     expect(g.meCalls()).toBe(1)
     expect(g.profileCalls()).toBe(1)
     expect(entry('instagram_profile_refreshed')).toEqual({
@@ -244,9 +365,22 @@ describe('refreshInstagramProfile: a successful fetch', () => {
   })
 
   it('stores a guest with no display name as a null name', async () => {
-    const db = createInstagramDbFake({ venues: [VENUE], guests: [guestRow()] }, { updatable: ['guests'] })
-    await refreshInstagramProfile(db.client, TARGET, deps(graph({ profile: { status: 200, body: { username: 'maya' } } }).fetchImpl))
-    expect(db.tables.guests[0]).toMatchObject({ instagram_username: 'maya', instagram_name: null })
+    const db = createInstagramDbFake(
+      { venues: [VENUE], guests: [guestRow()] },
+      { updatable: ['guests'] },
+    )
+    await refreshInstagramProfile(
+      db.client,
+      TARGET,
+      deps(
+        graph({ profile: { status: 200, body: { username: 'maya' } } })
+          .fetchImpl,
+      ),
+    )
+    expect(db.tables.guests[0]).toMatchObject({
+      instagram_username: 'maya',
+      instagram_name: null,
+    })
   })
 })
 
@@ -258,10 +392,22 @@ describe('refreshInstagramProfile: a stale profile', () => {
       instagram_profile_fetched_at: ago(25 * HOUR),
       instagram_profile_attempted_at: ago(25 * HOUR),
     })
-    const db = createInstagramDbFake({ venues: [VENUE], guests: [stale] }, { updatable: ['guests'] })
-    const outcome = await refreshInstagramProfile(db.client, TARGET, deps(graph().fetchImpl))
+    const db = createInstagramDbFake(
+      { venues: [VENUE], guests: [stale] },
+      { updatable: ['guests'] },
+    )
+    const outcome = await refreshInstagramProfile(
+      db.client,
+      TARGET,
+      deps(graph().fetchImpl),
+    )
 
-    expect(outcome).toEqual({ status: 'refreshed', hadProfile: true, usernameChanged: true, hasName: true })
+    expect(outcome).toEqual({
+      status: 'refreshed',
+      hadProfile: true,
+      usernameChanged: true,
+      hasName: true,
+    })
     expect(db.tables.guests[0]).toMatchObject({
       instagram_username: 'maya.oakland',
       instagram_name: 'Maya',
@@ -269,7 +415,11 @@ describe('refreshInstagramProfile: a stale profile', () => {
       instagram_profile_attempted_at: NOW,
     })
     // The claim holds on the attempt time it read, so a racing refresh loses.
-    expect(db.updates('guests')[0]?.filters).toContainEqual(['instagram_profile_attempted_at', 'eq', ago(25 * HOUR)])
+    expect(db.updates('guests')[0]?.filters).toContainEqual([
+      'instagram_profile_attempted_at',
+      'eq',
+      ago(25 * HOUR),
+    ])
   })
 
   it('leaves a profile under a day old alone: no Graph call and no write', async () => {
@@ -278,9 +428,16 @@ describe('refreshInstagramProfile: a stale profile', () => {
       instagram_profile_fetched_at: ago(23 * HOUR),
       instagram_profile_attempted_at: ago(23 * HOUR),
     })
-    const db = createInstagramDbFake({ venues: [VENUE], guests: [fresh] }, { updatable: ['guests'] })
+    const db = createInstagramDbFake(
+      { venues: [VENUE], guests: [fresh] },
+      { updatable: ['guests'] },
+    )
     const g = graph()
-    const outcome = await refreshInstagramProfile(db.client, TARGET, deps(g.fetchImpl))
+    const outcome = await refreshInstagramProfile(
+      db.client,
+      TARGET,
+      deps(g.fetchImpl),
+    )
 
     expect(outcome).toEqual({ status: 'not_due' })
     expect(g.fetchImpl).not.toHaveBeenCalled()
@@ -289,16 +446,30 @@ describe('refreshInstagramProfile: a stale profile', () => {
   })
 
   it('does not retry a failed fetch within the hour, and does after it', async () => {
-    const recent = guestRow({ instagram_profile_attempted_at: ago(30 * 60 * 1000) })
-    const later = guestRow({ instagram_profile_attempted_at: ago(61 * 60 * 1000) })
+    const recent = guestRow({
+      instagram_profile_attempted_at: ago(30 * 60 * 1000),
+    })
+    const later = guestRow({
+      instagram_profile_attempted_at: ago(61 * 60 * 1000),
+    })
     const g = graph()
 
-    const db1 = createInstagramDbFake({ venues: [VENUE], guests: [recent] }, { updatable: ['guests'] })
-    expect(await refreshInstagramProfile(db1.client, TARGET, deps(g.fetchImpl))).toEqual({ status: 'not_due' })
+    const db1 = createInstagramDbFake(
+      { venues: [VENUE], guests: [recent] },
+      { updatable: ['guests'] },
+    )
+    expect(
+      await refreshInstagramProfile(db1.client, TARGET, deps(g.fetchImpl)),
+    ).toEqual({ status: 'not_due' })
     expect(g.fetchImpl).not.toHaveBeenCalled()
 
-    const db2 = createInstagramDbFake({ venues: [VENUE], guests: [later] }, { updatable: ['guests'] })
-    expect(await refreshInstagramProfile(db2.client, TARGET, deps(g.fetchImpl))).toMatchObject({ status: 'refreshed' })
+    const db2 = createInstagramDbFake(
+      { venues: [VENUE], guests: [later] },
+      { updatable: ['guests'] },
+    )
+    expect(
+      await refreshInstagramProfile(db2.client, TARGET, deps(g.fetchImpl)),
+    ).toMatchObject({ status: 'refreshed' })
   })
 })
 
@@ -312,23 +483,63 @@ describe('refreshInstagramProfile: a failed fetch leaves a usable guest', () => 
 
   it.each<[string, GraphReply]>([
     ['a privacy refusal or unknown object', refusal],
-    ['a timeout', { throws: new DOMException('The operation was aborted due to timeout', 'TimeoutError') }],
-    ['a network failure', { throws: new TypeError('fetch failed', { cause: { code: 'ECONNRESET' } }) }],
+    [
+      'a timeout',
+      {
+        throws: new DOMException(
+          'The operation was aborted due to timeout',
+          'TimeoutError',
+        ),
+      },
+    ],
+    [
+      'a network failure',
+      {
+        throws: new TypeError('fetch failed', {
+          cause: { code: 'ECONNRESET' },
+        }),
+      },
+    ],
     ['a malformed 200', { status: 200, body: { name: 'no username' } }],
-  ])('on %s: keeps the handle, records only the attempt, logs and resolves', async (_label, profile) => {
-    const db = createInstagramDbFake({ venues: [VENUE], guests: [{ ...KEPT }] }, { updatable: ['guests'] })
-    const outcome = await refreshInstagramProfile(db.client, TARGET, deps(graph({ profile }).fetchImpl))
+  ])(
+    'on %s: keeps the handle, records only the attempt, logs and resolves',
+    async (_label, profile) => {
+      const db = createInstagramDbFake(
+        { venues: [VENUE], guests: [{ ...KEPT }] },
+        { updatable: ['guests'] },
+      )
+      const outcome = await refreshInstagramProfile(
+        db.client,
+        TARGET,
+        deps(graph({ profile }).fetchImpl),
+      )
 
-    expect(outcome).toMatchObject({ status: 'fetch_failed', step: 'profile' })
-    expect(db.updates('guests').map((u) => u.patch)).toEqual([{ instagram_profile_attempted_at: NOW }])
-    expect(db.tables.guests[0]).toEqual({ ...KEPT, instagram_profile_attempted_at: NOW })
-    expect(logLevel.warn).toEqual(['instagram_profile_fetch_failed'])
-    expect(logLevel.error).toEqual([])
-  })
+      expect(outcome).toMatchObject({
+        status: 'fetch_failed',
+        step: 'profile',
+      })
+      expect(db.updates('guests').map((u) => u.patch)).toEqual([
+        { instagram_profile_attempted_at: NOW },
+      ])
+      expect(db.tables.guests[0]).toEqual({
+        ...KEPT,
+        instagram_profile_attempted_at: NOW,
+      })
+      expect(logLevel.warn).toEqual(['instagram_profile_fetch_failed'])
+      expect(logLevel.error).toEqual([])
+    },
+  )
 
-  it('logs Meta\'s codes and never Meta\'s message, which carries the scoped ID', async () => {
-    const db = createInstagramDbFake({ venues: [VENUE], guests: [guestRow()] }, { updatable: ['guests'] })
-    await refreshInstagramProfile(db.client, TARGET, deps(graph({ profile: refusal }).fetchImpl))
+  it("logs Meta's codes and never Meta's message, which carries the scoped ID", async () => {
+    const db = createInstagramDbFake(
+      { venues: [VENUE], guests: [guestRow()] },
+      { updatable: ['guests'] },
+    )
+    await refreshInstagramProfile(
+      db.client,
+      TARGET,
+      deps(graph({ profile: refusal }).fetchImpl),
+    )
 
     expect(entry('instagram_profile_fetch_failed')).toEqual({
       event: 'instagram_profile_fetch_failed',
@@ -342,11 +553,18 @@ describe('refreshInstagramProfile: a failed fetch leaves a usable guest', () => 
       graphType: 'IGApiException',
       fbtraceId: 'AbCdEf123',
     })
-    expect(db.tables.guests[0]).toMatchObject({ instagram_username: null, instagram_name: null, instagram_profile_fetched_at: null })
+    expect(db.tables.guests[0]).toMatchObject({
+      instagram_username: null,
+      instagram_name: null,
+      instagram_profile_fetched_at: null,
+    })
   })
 
   it('keeps a guest usable when the database write fails, and logs no row values', async () => {
-    const db = createInstagramDbFake({ venues: [VENUE], guests: [guestRow()] }, { updatable: ['guests'] })
+    const db = createInstagramDbFake(
+      { venues: [VENUE], guests: [guestRow()] },
+      { updatable: ['guests'] },
+    )
     const g = graph()
     // The profile arrives between the claim and the write; the database fails
     // on the write that follows it.
@@ -357,26 +575,45 @@ describe('refreshInstagramProfile: a failed fetch leaves a usable guest', () => 
           code: '23514',
           message: 'violates check constraint',
           // What PostgREST puts here: the failing row, handle and name included.
-          details: 'Failing row contains (guest-1, venue-1, maya.oakland, Maya, 2026-09-18 12:00:00+00).',
+          details:
+            'Failing row contains (guest-1, venue-1, maya.oakland, Maya, 2026-09-18 12:00:00+00).',
         })
       }
       void init
       return response
     }
-    const outcome = await refreshInstagramProfile(db.client, TARGET, deps(fetchImpl))
+    const outcome = await refreshInstagramProfile(
+      db.client,
+      TARGET,
+      deps(fetchImpl),
+    )
 
-    expect(outcome).toEqual({ status: 'store_failed', stage: 'write', error: 'violates check constraint', code: '23514' })
-    expect(db.tables.guests[0]).toMatchObject({ instagram_username: null, instagram_profile_attempted_at: NOW })
+    expect(outcome).toEqual({
+      status: 'store_failed',
+      stage: 'write',
+      error: 'violates check constraint',
+      code: '23514',
+    })
+    expect(db.tables.guests[0]).toMatchObject({
+      instagram_username: null,
+      instagram_profile_attempted_at: NOW,
+    })
     expect(logLevel.warn).toEqual(['instagram_profile_store_failed'])
-    for (const value of ['Failing row', 'maya.oakland', 'Maya']) expect(loggedText()).not.toContain(value)
+    for (const value of ['Failing row', 'maya.oakland', 'Maya'])
+      expect(loggedText()).not.toContain(value)
   })
 
   it('resolves, never rejects, when something unexpected throws', async () => {
-    const db = createInstagramDbFake({ venues: [VENUE], guests: [guestRow()] }, { updatable: ['guests'] })
+    const db = createInstagramDbFake(
+      { venues: [VENUE], guests: [guestRow()] },
+      { updatable: ['guests'] },
+    )
     vi.spyOn(db.client, 'from').mockImplementation(() => {
       throw new Error('boom')
     })
-    await expect(refreshInstagramProfile(db.client, TARGET, deps(graph().fetchImpl))).resolves.toEqual({
+    await expect(
+      refreshInstagramProfile(db.client, TARGET, deps(graph().fetchImpl)),
+    ).resolves.toEqual({
       status: 'unexpected',
       error: 'boom',
     })
@@ -386,17 +623,27 @@ describe('refreshInstagramProfile: a failed fetch leaves a usable guest', () => 
 
 describe('refreshInstagramProfile: the claim', () => {
   it('stops without a Graph profile call when another refresh claims the guest first', async () => {
-    const db = createInstagramDbFake({ venues: [VENUE], guests: [guestRow()] }, { updatable: ['guests'] })
+    const db = createInstagramDbFake(
+      { venues: [VENUE], guests: [guestRow()] },
+      { updatable: ['guests'] },
+    )
     db.beforeNextUpdate('guests', () => {
       const row = db.tables.guests[0]
       if (row) row.instagram_profile_attempted_at = ago(1000)
     })
     const g = graph()
-    const outcome = await refreshInstagramProfile(db.client, TARGET, deps(g.fetchImpl))
+    const outcome = await refreshInstagramProfile(
+      db.client,
+      TARGET,
+      deps(g.fetchImpl),
+    )
 
     expect(outcome).toEqual({ status: 'claimed_elsewhere' })
     expect(g.profileCalls()).toBe(0)
-    expect(db.tables.guests[0]).toMatchObject({ instagram_username: null, instagram_profile_attempted_at: ago(1000) })
+    expect(db.tables.guests[0]).toMatchObject({
+      instagram_username: null,
+      instagram_profile_attempted_at: ago(1000),
+    })
     expect(logged).toEqual([])
   })
 })
@@ -410,16 +657,26 @@ describe('refreshInstagramProfile: configuration failures are told apart', () =>
   it.each<[string, { token?: string }]>([
     ['unset', {}],
     ['empty', { token: '' }],
-  ])('logs an %s token and claims nothing, so the first message after it is set still fetches', async (_label, env) => {
-    const db = createInstagramDbFake({ venues: [VENUE], guests: [guestRow()] }, { updatable: ['guests'] })
-    const g = graph()
-    const outcome = await refreshInstagramProfile(db.client, TARGET, deps(g.fetchImpl, env))
+  ])(
+    'logs an %s token and claims nothing, so the first message after it is set still fetches',
+    async (_label, env) => {
+      const db = createInstagramDbFake(
+        { venues: [VENUE], guests: [guestRow()] },
+        { updatable: ['guests'] },
+      )
+      const g = graph()
+      const outcome = await refreshInstagramProfile(
+        db.client,
+        TARGET,
+        deps(g.fetchImpl, env),
+      )
 
-    expect(outcome).toEqual({ status: 'token_missing' })
-    expect(g.fetchImpl).not.toHaveBeenCalled()
-    expect(db.updates('guests')).toEqual([])
-    expect(logLevel.error).toEqual(['instagram_profile_token_missing'])
-  })
+      expect(outcome).toEqual({ status: 'token_missing' })
+      expect(g.fetchImpl).not.toHaveBeenCalled()
+      expect(db.updates('guests')).toEqual([])
+      expect(logLevel.error).toEqual(['instagram_profile_token_missing'])
+    },
+  )
 
   // TAC-516. A venue that HAS connected but whose stored credential cannot be
   // read is a fourth configuration failure, and it must not read as the third:
@@ -430,7 +687,10 @@ describe('refreshInstagramProfile: configuration failures are told apart', () =>
   // swap passed all 40 tests in this file before code review, with the
   // profile refresh silently on the shared env token for every venue.
   it('asks the resolver about the VENUE, not the guest', async () => {
-    const db = createInstagramDbFake({ venues: [VENUE], guests: [guestRow()] }, { updatable: ['guests'] })
+    const db = createInstagramDbFake(
+      { venues: [VENUE], guests: [guestRow()] },
+      { updatable: ['guests'] },
+    )
     const g = graph()
     const resolve = stubResolveToken(TOKEN)
     await refreshInstagramProfile(db.client, TARGET, {
@@ -443,17 +703,23 @@ describe('refreshInstagramProfile: configuration failures are told apart', () =>
   })
 
   it('logs an unreadable stored credential under its own event, distinct from a missing token', async () => {
-    const db = createInstagramDbFake({ venues: [VENUE], guests: [guestRow()] }, { updatable: ['guests'] })
+    const db = createInstagramDbFake(
+      { venues: [VENUE], guests: [guestRow()] },
+      { updatable: ['guests'] },
+    )
     const g = graph()
     const outcome = await refreshInstagramProfile(db.client, TARGET, {
       fetch: g.fetchImpl,
       now: () => new Date(NOW),
-      resolveToken: failResolveToken('could not decrypt the stored Instagram token: Unsupported state or unable to authenticate data'),
+      resolveToken: failResolveToken(
+        'could not decrypt the stored Instagram token: Unsupported state or unable to authenticate data',
+      ),
     })
 
     expect(outcome).toEqual({
       status: 'token_unreadable',
-      error: 'could not decrypt the stored Instagram token: Unsupported state or unable to authenticate data',
+      error:
+        'could not decrypt the stored Instagram token: Unsupported state or unable to authenticate data',
     })
     expect(g.fetchImpl).not.toHaveBeenCalled()
     expect(db.updates('guests')).toEqual([])
@@ -461,11 +727,23 @@ describe('refreshInstagramProfile: configuration failures are told apart', () =>
   })
 
   it('logs a token for another account as wrong_account, and never asks for the profile', async () => {
-    const db = createInstagramDbFake({ venues: [VENUE], guests: [guestRow()] }, { updatable: ['guests'] })
-    const g = graph({ me: { status: 200, body: { user_id: OTHER_ACCOUNT_ID } } })
-    const outcome = await refreshInstagramProfile(db.client, TARGET, deps(g.fetchImpl))
+    const db = createInstagramDbFake(
+      { venues: [VENUE], guests: [guestRow()] },
+      { updatable: ['guests'] },
+    )
+    const g = graph({
+      me: { status: 200, body: { user_id: OTHER_ACCOUNT_ID } },
+    })
+    const outcome = await refreshInstagramProfile(
+      db.client,
+      TARGET,
+      deps(g.fetchImpl),
+    )
 
-    expect(outcome).toEqual({ status: 'wrong_account', venueAccountMissing: false })
+    expect(outcome).toEqual({
+      status: 'wrong_account',
+      venueAccountMissing: false,
+    })
     expect(g.profileCalls()).toBe(0)
     expect(db.updates('guests')).toEqual([])
     expect(logLevel.error).toEqual(['instagram_profile_wrong_account'])
@@ -479,52 +757,94 @@ describe('refreshInstagramProfile: configuration failures are told apart', () =>
 
   it('treats a venue with no account mapped as the wrong account', async () => {
     const db = createInstagramDbFake(
-      { venues: [{ id: VENUE_ID, instagram_account_id: null }], guests: [guestRow()] },
+      {
+        venues: [{ id: VENUE_ID, instagram_account_id: null }],
+        guests: [guestRow()],
+      },
       { updatable: ['guests'] },
     )
-    expect(await refreshInstagramProfile(db.client, TARGET, deps(graph().fetchImpl))).toEqual({
+    expect(
+      await refreshInstagramProfile(db.client, TARGET, deps(graph().fetchImpl)),
+    ).toEqual({
       status: 'wrong_account',
       venueAccountMissing: true,
     })
   })
 
   it('logs an expired token found by the account check as token_rejected, and claims nothing', async () => {
-    const db = createInstagramDbFake({ venues: [VENUE], guests: [guestRow()] }, { updatable: ['guests'] })
+    const db = createInstagramDbFake(
+      { venues: [VENUE], guests: [guestRow()] },
+      { updatable: ['guests'] },
+    )
     const g = graph({ me: expiredToken })
-    const outcome = await refreshInstagramProfile(db.client, TARGET, deps(g.fetchImpl))
+    const outcome = await refreshInstagramProfile(
+      db.client,
+      TARGET,
+      deps(g.fetchImpl),
+    )
 
-    expect(outcome).toMatchObject({ status: 'token_rejected', step: 'token_account' })
+    expect(outcome).toMatchObject({
+      status: 'token_rejected',
+      step: 'token_account',
+    })
     expect(g.profileCalls()).toBe(0)
     expect(db.updates('guests')).toEqual([])
     expect(logLevel.error).toEqual(['instagram_profile_token_rejected'])
-    expect(entry('instagram_profile_token_rejected')).toMatchObject({ graphCode: 190, graphSubcode: 463 })
+    expect(entry('instagram_profile_token_rejected')).toMatchObject({
+      graphCode: 190,
+      graphSubcode: 463,
+    })
   })
 
   it('logs a token that expires between the two calls as token_rejected too', async () => {
-    const db = createInstagramDbFake({ venues: [VENUE], guests: [guestRow()] }, { updatable: ['guests'] })
-    const outcome = await refreshInstagramProfile(db.client, TARGET, deps(graph({ profile: expiredToken }).fetchImpl))
+    const db = createInstagramDbFake(
+      { venues: [VENUE], guests: [guestRow()] },
+      { updatable: ['guests'] },
+    )
+    const outcome = await refreshInstagramProfile(
+      db.client,
+      TARGET,
+      deps(graph({ profile: expiredToken }).fetchImpl),
+    )
 
-    expect(outcome).toMatchObject({ status: 'token_rejected', step: 'profile' })
+    expect(outcome).toMatchObject({
+      status: 'token_rejected',
+      step: 'profile',
+    })
     expect(logLevel.error).toEqual(['instagram_profile_token_rejected'])
   })
 
   it('logs a failed account check that is not a token problem as a fetch failure, not a config error', async () => {
-    const db = createInstagramDbFake({ venues: [VENUE], guests: [guestRow()] }, { updatable: ['guests'] })
+    const db = createInstagramDbFake(
+      { venues: [VENUE], guests: [guestRow()] },
+      { updatable: ['guests'] },
+    )
     const outcome = await refreshInstagramProfile(
       db.client,
       TARGET,
-      deps(graph({ me: { throws: new DOMException('timeout', 'TimeoutError') } }).fetchImpl),
+      deps(
+        graph({ me: { throws: new DOMException('timeout', 'TimeoutError') } })
+          .fetchImpl,
+      ),
     )
 
-    expect(outcome).toEqual({ status: 'fetch_failed', step: 'token_account', failure: { reason: 'timeout' } })
+    expect(outcome).toEqual({
+      status: 'fetch_failed',
+      step: 'token_account',
+      failure: { reason: 'timeout' },
+    })
     expect(logLevel.warn).toEqual(['instagram_profile_fetch_failed'])
     expect(logLevel.error).toEqual([])
   })
 })
 
 describe('refreshInstagramProfile: logs', () => {
-  it('never writes the scoped ID, the handle, the name, the token, an account ID or Meta\'s message', async () => {
-    const scenarios: Array<{ me?: GraphReply; profile?: GraphReply; env?: { token?: string } }> = [
+  it("never writes the scoped ID, the handle, the name, the token, an account ID or Meta's message", async () => {
+    const scenarios: Array<{
+      me?: GraphReply
+      profile?: GraphReply
+      env?: { token?: string }
+    }> = [
       {},
       { profile: refusal },
       { me: expiredToken },
@@ -533,15 +853,38 @@ describe('refreshInstagramProfile: logs', () => {
     ]
     for (const scenario of scenarios) {
       const db = createInstagramDbFake(
-        { venues: [VENUE], guests: [guestRow({ instagram_username: 'maya.old', instagram_name: 'Maya O', instagram_profile_fetched_at: ago(48 * HOUR) })] },
+        {
+          venues: [VENUE],
+          guests: [
+            guestRow({
+              instagram_username: 'maya.old',
+              instagram_name: 'Maya O',
+              instagram_profile_fetched_at: ago(48 * HOUR),
+            }),
+          ],
+        },
         { updatable: ['guests'] },
       )
-      await refreshInstagramProfile(db.client, TARGET, deps(graph(scenario).fetchImpl, scenario.env))
+      await refreshInstagramProfile(
+        db.client,
+        TARGET,
+        deps(graph(scenario).fetchImpl, scenario.env),
+      )
     }
 
     expect(logged.length).toBeGreaterThanOrEqual(scenarios.length)
     const text = loggedText()
-    for (const secret of [IGSID, 'maya.oakland', 'maya.old', 'Maya O', TOKEN, ACCOUNT_ID, OTHER_ACCOUNT_ID, 'Unsupported get request', 'Session has expired']) {
+    for (const secret of [
+      IGSID,
+      'maya.oakland',
+      'maya.old',
+      'Maya O',
+      TOKEN,
+      ACCOUNT_ID,
+      OTHER_ACCOUNT_ID,
+      'Unsupported get request',
+      'Session has expired',
+    ]) {
       expect(text).not.toContain(secret)
     }
   })

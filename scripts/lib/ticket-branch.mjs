@@ -30,4 +30,4 @@
  * two of the five no longer existed. The glob is still a fourth copy, in prose
  * a session reads rather than code it runs; build-workflow.test.ts pins it.
  */
-export const TICKET_BRANCH_OWNER = '[\\w.-]+';
+export const TICKET_BRANCH_OWNER = '[\\w.-]+'

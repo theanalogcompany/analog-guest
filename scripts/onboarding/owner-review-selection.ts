@@ -1,5 +1,13 @@
-import { knowledgePassed, routingPassed, type GradedScenario } from './scorecard'
-import { GUEST_STATES, type GuestState, type ScenarioSheetRow } from './scenario-schema'
+import {
+  knowledgePassed,
+  routingPassed,
+  type GradedScenario,
+} from './scorecard'
+import {
+  GUEST_STATES,
+  type GuestState,
+  type ScenarioSheetRow,
+} from './scenario-schema'
 
 /**
  * TAC-347 Stage 4. Selection logic for the `--owner-review` export: which
@@ -31,7 +39,8 @@ export const OWNER_REVIEW_NAMED_SITUATIONS = [
   'complaint',
   'perk_request',
 ] as const
-export type OwnerReviewSituation = (typeof OWNER_REVIEW_NAMED_SITUATIONS)[number] | 'other'
+export type OwnerReviewSituation =
+  (typeof OWNER_REVIEW_NAMED_SITUATIONS)[number] | 'other'
 
 /**
  * category values are generator-source labels (`venue_topic`,
@@ -43,7 +52,10 @@ export type OwnerReviewSituation = (typeof OWNER_REVIEW_NAMED_SITUATIONS)[number
  * every adversarial subcategory (not just safety_critical) is excluded, per
  * the ticket's "adversarial, safety-critical, and unanswerable" wording.
  */
-export function isExcludedFromOwnerReview(s: { category: string; scenario_source: string }): boolean {
+export function isExcludedFromOwnerReview(s: {
+  category: string
+  scenario_source: string
+}): boolean {
   if (s.scenario_source === 'adversarial') return true
   if (s.scenario_source === 'unanswerable') return true
   if (s.category === 'unanswerable') return true
@@ -51,8 +63,10 @@ export function isExcludedFromOwnerReview(s: { category: string; scenario_source
   return false
 }
 
-const RECOMMENDATION_RE = /recommend|suggest|what should i (get|order|try)|what.?s good|favorite|best (seller|drink|item|pick)/i
-const MENU_RE = /menu|price|cost|ingredient|dietary|vegan|gluten|dairy|oat milk|decaf|\bcalor|\bsize\b/i
+const RECOMMENDATION_RE =
+  /recommend|suggest|what should i (get|order|try)|what.?s good|favorite|best (seller|drink|item|pick)/i
+const MENU_RE =
+  /menu|price|cost|ingredient|dietary|vegan|gluten|dairy|oat milk|decaf|\bcalor|\bsize\b/i
 const GREETING_RE = /greet|welcome|first.?time|\bintro/i
 
 /**
@@ -69,8 +83,10 @@ export function classifyOwnerReviewSituation(s: {
   category: string
   scenario_source: string
 }): OwnerReviewSituation {
-  if (s.scenario_source === 'mechanic' || s.category === 'mechanic') return 'perk_request'
-  if (s.scenario_source === 'complaint' || s.category.startsWith('complaint_')) return 'complaint'
+  if (s.scenario_source === 'mechanic' || s.category === 'mechanic')
+    return 'perk_request'
+  if (s.scenario_source === 'complaint' || s.category.startsWith('complaint_'))
+    return 'complaint'
   const haystack = `${s.topic} ${s.category}`.toLowerCase()
   if (GREETING_RE.test(haystack)) return 'greeting'
   if (RECOMMENDATION_RE.test(haystack)) return 'recommendation'
@@ -85,7 +101,10 @@ interface OwnerReviewDescriptor {
 }
 
 /** Round-robins a bucket across GUEST_STATES so state variety survives quota truncation. */
-function interleaveByGuestState<T>(items: readonly T[], describe: (item: T) => OwnerReviewDescriptor): T[] {
+function interleaveByGuestState<T>(
+  items: readonly T[],
+  describe: (item: T) => OwnerReviewDescriptor,
+): T[] {
   const byState = new Map<GuestState, T[]>()
   for (const state of GUEST_STATES) byState.set(state, [])
   for (const item of items) byState.get(describe(item).guestState)!.push(item)
@@ -126,15 +145,29 @@ export function pickDiverseForOwnerReview<T>(
 ): T[] {
   if (cap <= 0) return []
 
-  const sorted = [...items].sort((a, b) => describe(a).sampleId.localeCompare(describe(b).sampleId))
+  const sorted = [...items].sort((a, b) =>
+    describe(a).sampleId.localeCompare(describe(b).sampleId),
+  )
 
-  const order: OwnerReviewSituation[] = [...OWNER_REVIEW_NAMED_SITUATIONS, 'other']
+  const order: OwnerReviewSituation[] = [
+    ...OWNER_REVIEW_NAMED_SITUATIONS,
+    'other',
+  ]
   const buckets = new Map<OwnerReviewSituation, T[]>()
   for (const situation of order) buckets.set(situation, [])
   for (const item of sorted) buckets.get(describe(item).situation)!.push(item)
-  for (const situation of order) buckets.set(situation, interleaveByGuestState(buckets.get(situation)!, describe))
+  for (const situation of order)
+    buckets.set(
+      situation,
+      interleaveByGuestState(buckets.get(situation)!, describe),
+    )
 
-  const perNamedQuota = Math.max(1, Math.floor((cap * NAMED_SITUATION_SHARE) / OWNER_REVIEW_NAMED_SITUATIONS.length))
+  const perNamedQuota = Math.max(
+    1,
+    Math.floor(
+      (cap * NAMED_SITUATION_SHARE) / OWNER_REVIEW_NAMED_SITUATIONS.length,
+    ),
+  )
 
   const picked: T[] = []
   const cursor = new Map<OwnerReviewSituation, number>()
@@ -176,7 +209,11 @@ export function pickDiverseForOwnerReview<T>(
 }
 
 function describeScenario(row: ScenarioSheetRow): OwnerReviewDescriptor {
-  return { sampleId: row.sample_id, situation: classifyOwnerReviewSituation(row), guestState: row.guest_state }
+  return {
+    sampleId: row.sample_id,
+    situation: classifyOwnerReviewSituation(row),
+    guestState: row.guest_state,
+  }
 }
 
 /** Pre-run selection: exclude unsafe/QA-only content, then pick a diverse, weighted candidate pool to actually run. */
@@ -208,7 +245,11 @@ function isOwnerReviewEligible(g: GradedScenario): boolean {
 }
 
 function describeGraded(g: GradedScenario): OwnerReviewDescriptor {
-  return { sampleId: g.scenario.sample_id, situation: classifyOwnerReviewSituation(g.scenario), guestState: g.scenario.guest_state }
+  return {
+    sampleId: g.scenario.sample_id,
+    situation: classifyOwnerReviewSituation(g.scenario),
+    guestState: g.scenario.guest_state,
+  }
 }
 
 /** Post-grade selection: filter to eligible survivors, then pick the final diverse, weighted export set. */

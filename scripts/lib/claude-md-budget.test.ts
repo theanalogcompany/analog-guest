@@ -44,8 +44,48 @@ const RULE_MAX_LINES = 400
  * more subsystem file, so the next substantial addition is a conversation
  * rather than a reflex. Raising it is fine; raising it without saying what grew
  * is how the old file got to 1.34 MB.
+ *
+ * 140_000 -> 150_000 on 2026-09-29. WHAT GREW: `lib/observability/CLAUDE.md`,
+ * 0 -> ~17,000 bytes, making 16 files. It is the "roughly one more subsystem
+ * file" the previous cap budgeted for, so this is the conversation landing, not
+ * a bypass. Two thirds of it is content PR #282 deleted from the root file
+ * rather than routing - the latency and prompt-cache material a planning session
+ * then re-derived from scratch and got wrong. The rest documents the Langfuse v5
+ * / OpenTelemetry wiring.
+ *
+ * Before raising it: ~2,000 bytes were cut, and four "why" explanations were
+ * pushed into source headers where the routing table says they belong. Also
+ * replaced the measured baseline tables with the queries that regenerate them -
+ * right on its own terms, since a stale p50 stops the next person looking and
+ * re-deriving is 3 API calls and 14s against an endpoint that meters ingestion
+ * rather than reads. But it did NOT reduce the byte count. Do not reach for
+ * de-staling as a size lever; it is not one.
+ *
+ * 150_000 -> 160_000, same day, SECOND raise. WHAT GREW: not this branch's file.
+ * `main` added +6,285 bytes of instruction files while this branch was open
+ * (TAC-554 across `lib/agent`, `lib/ai`, `lib/ai/prompts`, `scripts` and
+ * `prompt-versioning.md`), which exceeds the 4,688-byte overage on its own. The
+ * new `lib/observability/CLAUDE.md` was also trimmed 23,150 -> 21,830 in the same
+ * pass by compressing the `experimental_telemetry` section, whose "is the prize
+ * worth an interface inversion" argument became history once the cheaper route
+ * shipped. So both sides grew and one side gave bytes back.
+ *
+ * AND THIS IS THE PATHOLOGY THE NOTE BELOW PREDICTED, arriving on the first fire
+ * after it was written: the overage was caused by someone else's documentation,
+ * and the pressure landed on whoever was holding the branch, as an incentive to
+ * cut prose rather than to ask whether the number means anything. Reshaping the
+ * gate did not belong in a Langfuse PR, so the number moved and the reshape is
+ * still owed. Do not raise it a third time without doing it.
+ *
+ * WORTH RECONSIDERING NEXT TIME THIS FIRES. Nested files load only when Claude
+ * reads their directory, so this total is not a context cost any session pays -
+ * NESTED_MAX_BYTES is the cap that protects context, and ROOT_MAX_BYTES the one
+ * that protects every session. This one only answers "has the corpus quietly
+ * doubled", which is a conversation trigger rather than a budget. If it fires
+ * again, consider whether a per-file cap plus a file-count cap says the same
+ * thing without the pressure to shave prose to fit an aggregate nobody loads.
  */
-const COMBINED_MAX_BYTES = 140_000
+const COMBINED_MAX_BYTES = 160_000
 
 /** One 362 KB line is how 135 KB of duplicated text stayed invisible. */
 const MAX_LINE_CHARS = 2_000
@@ -73,10 +113,14 @@ const rootFile = 'CLAUDE.md'
 //
 // (Spelled out in words above because the pattern itself contains the
 // characters that end a block comment.)
-const allClaudeMd = tracked().filter((p) => p === 'CLAUDE.md' || p.endsWith('/CLAUDE.md'))
+const allClaudeMd = tracked().filter(
+  (p) => p === 'CLAUDE.md' || p.endsWith('/CLAUDE.md'),
+)
 const nestedFiles = allClaudeMd.filter((p) => p !== rootFile)
 const ruleFiles = tracked().filter((p) => /^\.claude\/rules\/.+\.md$/.test(p))
-const decisionFiles = tracked().filter((p) => /^docs\/decisions\/.+\.md$/.test(p))
+const decisionFiles = tracked().filter((p) =>
+  /^docs\/decisions\/.+\.md$/.test(p),
+)
 
 interface Sized {
   path: string
@@ -153,7 +197,9 @@ describe('instruction file budget', () => {
       .sort((a, b) => b.bytes - a.bytes)
       .map((m) => `${m.path} ${m.bytes}`)
       .join(', ')
-    expect(total, `total ${total} bytes: ${breakdown}`).toBeLessThanOrEqual(COMBINED_MAX_BYTES)
+    expect(total, `total ${total} bytes: ${breakdown}`).toBeLessThanOrEqual(
+      COMBINED_MAX_BYTES,
+    )
   })
 })
 
@@ -161,7 +207,8 @@ describe('instruction file pointers', () => {
   const rootText = read(rootFile)
 
   // Paths the root file names, as written. Matches inside backticks or bare.
-  const POINTER = /(?:docs\/decisions\/[\w.-]+\.md|\.claude\/rules\/[\w.-]+\.md|(?:[\w./-]+\/)?CLAUDE\.md)/g
+  const POINTER =
+    /(?:docs\/decisions\/[\w.-]+\.md|\.claude\/rules\/[\w.-]+\.md|(?:[\w./-]+\/)?CLAUDE\.md)/g
 
   function pointersIn(text: string): string[] {
     return [...new Set(text.match(POINTER) ?? [])]
@@ -183,7 +230,9 @@ describe('instruction file pointers', () => {
         return true
       }
     })
-    expect(dangling, `${rootFile} points at files that do not exist`).toEqual([])
+    expect(dangling, `${rootFile} points at files that do not exist`).toEqual(
+      [],
+    )
   })
 
   it('names every nested CLAUDE.md, so none is orphaned', () => {
@@ -191,7 +240,9 @@ describe('instruction file pointers', () => {
     // only once Claude is already in that directory, which is too late to tell
     // it the directory has rules.
     const named = pointersIn(rootText)
-    const orphans = nestedFiles.filter((p) => !named.includes(p) && !named.includes(`${relative('.', p)}`))
+    const orphans = nestedFiles.filter(
+      (p) => !named.includes(p) && !named.includes(`${relative('.', p)}`),
+    )
     expect(orphans, `not referenced from ${rootFile}`).toEqual([])
   })
 
@@ -200,7 +251,9 @@ describe('instruction file pointers', () => {
   // button. Agents never felt it because the loader hands them the next hop; a
   // human has only what the page links to.
   it('gives every nested CLAUDE.md a way back to the index', () => {
-    const deadEnds = nestedFiles.filter((p) => !pointersIn(read(p)).includes(rootFile))
+    const deadEnds = nestedFiles.filter(
+      (p) => !pointersIn(read(p)).includes(rootFile),
+    )
     expect(
       deadEnds,
       `these name no path back to ${rootFile}. A reader who arrives here from a code search ` +
@@ -220,7 +273,10 @@ describe('instruction file pointers', () => {
 
     // Guard the guard: with no targets found this passes against a README whose
     // every link is broken, which is the state it is meant to prevent.
-    expect(targets.length, 'README.md has no relative links to check').toBeGreaterThanOrEqual(15)
+    expect(
+      targets.length,
+      'README.md has no relative links to check',
+    ).toBeGreaterThanOrEqual(15)
 
     const dangling = [...new Set(targets)].filter((t) => {
       try {

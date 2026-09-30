@@ -6,6 +6,23 @@ import {
   parseFollowupRules,
 } from './followup-rules'
 
+// The eleven values migration 028's jsonb_build_object backfilled into every
+// existing venue_configs row. Frozen: a later default belongs beside this, not
+// inside it. See the assertion below.
+const MIGRATION_028_LITERAL = {
+  post_visit_enabled: true,
+  cold_lapsed_enabled: true,
+  perk_unlock_enabled: true,
+  absence_window_days: 21,
+  lapsed_eligible_states: ['regular', 'raving_fan'],
+  cold_dedup_days: 30,
+  weekly_cap: 1,
+  recent_conversation_hours: 48,
+  quiet_hours_start_local: '21:00',
+  quiet_hours_end_local: '08:00',
+  cron_hour_local: 10,
+} as const
+
 describe('FOLLOWUP_RULES_DEFAULT', () => {
   it('round-trips through the Zod schema unchanged', () => {
     // Source-of-truth invariant: the constant the migration backfill
@@ -18,7 +35,19 @@ describe('FOLLOWUP_RULES_DEFAULT', () => {
   it('matches the literal jsonb_build_object written by migration 028', () => {
     // This is the cross-check against db/migrations/028. Update both in
     // lockstep if any default changes.
-    expect(FOLLOWUP_RULES_DEFAULT).toEqual({
+    //
+    // TAC-560 split this in two rather than adding a key to the object above.
+    // `warm_close_pause_minutes` POSTDATES migration 028, so it is not in that
+    // backfill literal and never will be: rows written before it existed do not
+    // carry it and take the Zod default. Folding it into this assertion would
+    // have quietly redefined what the test's own name claims — that these are
+    // the values 028 wrote — and the guard's real property is that those eleven
+    // are unchanged.
+    //
+    // A key added to FOLLOWUP_RULES_DEFAULT now fails the exact-key-set
+    // assertion below until someone states which side of the 028 line it falls
+    // on, which is the decision worth forcing.
+    expect(MIGRATION_028_LITERAL).toEqual({
       post_visit_enabled: true,
       cold_lapsed_enabled: true,
       perk_unlock_enabled: true,
@@ -31,6 +60,24 @@ describe('FOLLOWUP_RULES_DEFAULT', () => {
       quiet_hours_end_local: '08:00',
       cron_hour_local: 10,
     })
+    for (const [key, value] of Object.entries(MIGRATION_028_LITERAL)) {
+      expect(
+        FOLLOWUP_RULES_DEFAULT[key as keyof typeof FOLLOWUP_RULES_DEFAULT],
+        key,
+      ).toEqual(value)
+    }
+  })
+
+  it('adds exactly the post-028 keys, and no others, by accident', () => {
+    // The exact key set, so a twelfth key cannot arrive silently. TAC-560's
+    // `warm_close_pause_minutes` is the only one so far.
+    expect(Object.keys(FOLLOWUP_RULES_DEFAULT).sort()).toEqual(
+      [
+        ...Object.keys(MIGRATION_028_LITERAL),
+        'warm_close_pause_minutes',
+      ].sort(),
+    )
+    expect(FOLLOWUP_RULES_DEFAULT.warm_close_pause_minutes).toBe(10)
   })
 })
 
@@ -120,7 +167,10 @@ describe('parseFollowupRules', () => {
     console.warn = () => {}
     try {
       expect(
-        parseFollowupRules({ ...FOLLOWUP_RULES_DEFAULT, cron_hour_local: 'noon' }),
+        parseFollowupRules({
+          ...FOLLOWUP_RULES_DEFAULT,
+          cron_hour_local: 'noon',
+        }),
       ).toEqual(FOLLOWUP_RULES_DEFAULT)
     } finally {
       console.warn = warn

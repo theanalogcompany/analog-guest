@@ -37,22 +37,32 @@ const applyApprovalPolicyStageMock = vi.fn()
 // TAC-350: independent grounding backstop. Defaults to "nothing to flag" for
 // every test in this file that doesn't care about it — `clearAllMocks()`
 // (used below) clears call history but not this default implementation.
-const verifyGroundingStageMock = vi.fn().mockResolvedValue({ status: 'skipped' })
+const verifyGroundingStageMock = vi
+  .fn()
+  .mockResolvedValue({ status: 'skipped' })
 // TAC-401: defaults to 'skipped' like its sibling, so every pre-existing test
 // in this file behaves exactly as it did before the check existed.
-const verifyProsePromiseStageMock = vi.fn().mockResolvedValue({ status: 'skipped' })
+const verifyProsePromiseStageMock = vi
+  .fn()
+  .mockResolvedValue({ status: 'skipped' })
 // TAC-363: defaults to 'skipped', which is what the real stage returns on
 // every turn at an OPEN venue — the fixtures' venue has no hours, so the
 // real stage would skip too.
-const verifyClosedVenueArrivalStageMock = vi.fn().mockResolvedValue({ status: 'skipped' })
+const verifyClosedVenueArrivalStageMock = vi
+  .fn()
+  .mockResolvedValue({ status: 'skipped' })
 // TAC-513: default CLEAN, not undefined. The './stages' factory below is an
 // explicit allow-list, so a stage missing from it arrives `undefined` and
 // throws inside the allSettled argument list before the gate is reached.
-const verifyCancellationClaimStageMock = vi.fn().mockResolvedValue({ resolution: { status: 'none' }, claim: 'clean' })
+const verifyCancellationClaimStageMock = vi
+  .fn()
+  .mockResolvedValue({ resolution: { status: 'none' }, claim: 'clean' })
 // TAC-355: independent mechanic-offer backstop. Defaults to "skipped" for
 // every test in this file that doesn't care about it, mirroring
 // verifyGroundingStageMock's default-null posture above.
-const verifyMechanicOfferStageMock = vi.fn().mockResolvedValue({ status: 'skipped' })
+const verifyMechanicOfferStageMock = vi
+  .fn()
+  .mockResolvedValue({ status: 'skipped' })
 const loadPendingRowsBySlotMock = vi.fn()
 const persistOrRegenQueuedDraftMock = vi.fn()
 const scheduleAndSendMock = vi.fn()
@@ -89,9 +99,13 @@ vi.mock('@/lib/db/admin', () => ({
         eq: (_column: string, value: string) => ({
           single: () => inboundSingleMock(value),
           maybeSingle: () =>
-            table === 'guests' ? guestMaybeSingleMock() : existingReplyMaybeSingleMock(),
+            table === 'guests'
+              ? guestMaybeSingleMock()
+              : existingReplyMaybeSingleMock(),
           eq: () => ({
-            limit: () => ({ maybeSingle: () => existingReplyMaybeSingleMock() }),
+            limit: () => ({
+              maybeSingle: () => existingReplyMaybeSingleMock(),
+            }),
           }),
           limit: () => ({ maybeSingle: () => existingReplyMaybeSingleMock() }),
         }),
@@ -141,21 +155,26 @@ vi.mock('./stages', async () => {
     // itself when this landed.
     mayAutoSendAfterClassification: actual.mayAutoSendAfterClassification,
     generateStage: (...a: unknown[]) => generateStageMock(...a),
-    applyApprovalPolicyStage: (...a: unknown[]) => applyApprovalPolicyStageMock(...a),
+    applyApprovalPolicyStage: (...a: unknown[]) =>
+      applyApprovalPolicyStageMock(...a),
     verifyGroundingStage: (...a: unknown[]) => verifyGroundingStageMock(...a),
-    verifyMechanicOfferStage: (...a: unknown[]) => verifyMechanicOfferStageMock(...a),
+    verifyMechanicOfferStage: (...a: unknown[]) =>
+      verifyMechanicOfferStageMock(...a),
     // TAC-401: this factory is an explicit ALLOW-LIST. A stage missing here
     // arrives `undefined` at the call site, and inside an allSettled array
     // that is a TypeError swallowed into a rejected settlement — the check
     // would read as permanently degraded with every test here still green.
-    verifyProsePromiseStage: (...a: unknown[]) => verifyProsePromiseStageMock(...a),
+    verifyProsePromiseStage: (...a: unknown[]) =>
+      verifyProsePromiseStageMock(...a),
     verifyClosedVenueArrivalStage: (...a: unknown[]) =>
       verifyClosedVenueArrivalStageMock(...a),
-    verifyCancellationClaimStage: (...a: unknown[]) => verifyCancellationClaimStageMock(...a),
+    verifyCancellationClaimStage: (...a: unknown[]) =>
+      verifyCancellationClaimStageMock(...a),
   }
 })
 vi.mock('./schedule-and-send', () => ({
-  persistOrRegenQueuedDraft: (...a: unknown[]) => persistOrRegenQueuedDraftMock(...a),
+  persistOrRegenQueuedDraft: (...a: unknown[]) =>
+    persistOrRegenQueuedDraftMock(...a),
   scheduleAndSend: (...a: unknown[]) => scheduleAndSendMock(...a),
 }))
 // TAC-469: the Instagram arm, mocked so this file pins the ORCHESTRATOR's
@@ -170,7 +189,8 @@ vi.mock('./dispatch-instagram-reply', () => ({
 // read is mocked; decideSlotAction and the identity helpers are forwarded REAL,
 // so a test here cannot pass on a mock's opinion of which slot a card is in.
 vi.mock('./pending-slots', async () => {
-  const actual = await vi.importActual<typeof import('./pending-slots')>('./pending-slots')
+  const actual =
+    await vi.importActual<typeof import('./pending-slots')>('./pending-slots')
   return {
     ...actual,
     loadPendingRowsBySlot: (...a: unknown[]) => loadPendingRowsBySlotMock(...a),
@@ -189,31 +209,36 @@ vi.mock('./alerts', () => ({
 // NAMED, not a bare vi.fn(): what this file has to prove is that the
 // orchestrator hands it the real AgentResult, and a fixed stub cannot show
 // that. See the 'records the turn's outcome' block at the end of this file.
-const recordInboundTurnOutcomeMock = vi.fn<(...args: unknown[]) => Promise<void>>()
+const recordInboundTurnOutcomeMock =
+  vi.fn<(...args: unknown[]) => Promise<void>>()
 vi.mock('./record-inbound-turn-outcome', () => ({
-  recordInboundTurnOutcome: (...a: unknown[]) => recordInboundTurnOutcomeMock(...a),
+  recordInboundTurnOutcome: (...a: unknown[]) =>
+    recordInboundTurnOutcomeMock(...a),
 }))
 // TAC-363: a named handle, because the push fan-out below is the delivery
 // mechanism for "every open obligation is surfaced" and a fixed 'noop' cannot
 // reach it. Reverting the loop to a single row passed every test in this file
 // while dispatch-arrival-capture.test.ts still proved both rows came back.
-const dispatchArrivalCaptureMock = vi.fn<(...args: unknown[]) => Promise<unknown>>()
+const dispatchArrivalCaptureMock =
+  vi.fn<(...args: unknown[]) => Promise<unknown>>()
 vi.mock('./dispatch-arrival-capture', () => ({
   dispatchArrivalCapture: (...a: unknown[]) => dispatchArrivalCaptureMock(...a),
 }))
 // TAC-323: fire-and-forget side effect, mocked wholesale — its own unit
 // coverage lives in extract-reported-order.test.ts.
 vi.mock('./extract-reported-order', async () => {
-  const actual = await vi.importActual<typeof import('./extract-reported-order')>(
-    './extract-reported-order',
-  )
+  const actual = await vi.importActual<
+    typeof import('./extract-reported-order')
+  >('./extract-reported-order')
   return {
     // TAC-332: stages.ts's real computeFirstTouchAfterQrScan (forwarded,
     // not mocked, in the ./stages mock below) imports this constant — it's
     // now reachable from a code path this file doesn't mock away, so the
     // mock needs to provide it. A plain re-exported value, not a mock.
     REPORTED_ORDER_WINDOW_DAYS: actual.REPORTED_ORDER_WINDOW_DAYS,
-    extractReportedOrder: vi.fn(async () => ({ kind: 'no_menu_item_mentioned' })),
+    extractReportedOrder: vi.fn(async () => ({
+      kind: 'no_menu_item_mentioned',
+    })),
   }
 })
 const recordIntentionPromptsMock = vi.fn()
@@ -225,17 +250,24 @@ const recordIntentionEligibilityMock = vi.fn()
 // lets a rejection propagate.
 vi.mock('./intentions/record', () => ({
   recordIntentionPrompts: (...a: unknown[]) => recordIntentionPromptsMock(...a),
-  recordIntentionEligibility: (...a: unknown[]) => recordIntentionEligibilityMock(...a),
+  recordIntentionEligibility: (...a: unknown[]) =>
+    recordIntentionEligibilityMock(...a),
 }))
 vi.mock('@/lib/guests/context', () => ({
   isEmptyContextUpdate: () => true,
   updateGuestContext: vi.fn(),
 }))
 vi.mock('@/lib/analytics/posthog', () => ({
-  AGENT_LATENCY_HIGH_THRESHOLD_MS: 10_000,
-  captureAgentLatencyHigh: (...a: unknown[]) => captureAgentLatencyHighMock(...a),
+  // Deliberately a LOWER bar than production (inbound 35s / followup 20s) so the
+  // emit branch is reachable without advancing the clock 35s. NOT production
+  // semantics: the real per-kind thresholds are pinned in
+  // lib/analytics/posthog.test.ts.
+  isAgentLatencyHigh: (_kind: unknown, ms: number) => ms > 10_000,
+  captureAgentLatencyHigh: (...a: unknown[]) =>
+    captureAgentLatencyHighMock(...a),
   captureDraftQueued: (...a: unknown[]) => captureDraftQueuedMock(...a),
-  captureCrisisSafetyReplySent: (...a: unknown[]) => captureCrisisSafetyReplySentMock(...a),
+  captureCrisisSafetyReplySent: (...a: unknown[]) =>
+    captureCrisisSafetyReplySentMock(...a),
   captureDraftRegenerated: vi.fn(),
   captureDraftDropped: (...a: unknown[]) => captureDraftDroppedMock(...a),
   captureIntentionPromptRecordingFailed: (...a: unknown[]) =>
@@ -243,7 +275,8 @@ vi.mock('@/lib/analytics/posthog', () => ({
   // TAC-436: this factory is an ALLOW-LIST. Omitted here, the new export
   // arrives `undefined` and throws inside the waitUntil .then(), which nothing
   // in this file would surface.
-  captureIntentionPromptRaised: (...a: unknown[]) => captureIntentionPromptRaisedMock(...a),
+  captureIntentionPromptRaised: (...a: unknown[]) =>
+    captureIntentionPromptRaisedMock(...a),
   // Also consumed by the real ./stages, loaded via importActual below.
   captureClassificationLowConfidence: vi.fn(),
   captureDashViolationPersisted: vi.fn(),
@@ -263,9 +296,11 @@ vi.mock('@/lib/notifications/send', () => ({
 // `.catch()` on the result, so a bare vi.fn() throws a TypeError after the
 // first push and the fan-out silently stops at one — which is exactly the
 // defect these tests exist to catch, arriving through the mock instead.
-const sendCommitmentArrivalPushMock = vi.fn<(...args: unknown[]) => Promise<unknown>>()
+const sendCommitmentArrivalPushMock =
+  vi.fn<(...args: unknown[]) => Promise<unknown>>()
 vi.mock('@/lib/notifications/send-commitment-push', () => ({
-  sendCommitmentArrivalPush: (...a: unknown[]) => sendCommitmentArrivalPushMock(...a),
+  sendCommitmentArrivalPush: (...a: unknown[]) =>
+    sendCommitmentArrivalPushMock(...a),
 }))
 vi.mock('@vercel/functions', () => ({ waitUntil: (p: unknown) => p }))
 // TAC-526 DIVERGES from the sibling harness here, and it is the second of two
@@ -278,27 +313,36 @@ vi.mock('@vercel/functions', () => ({ waitUntil: (p: unknown) => p }))
 // read a real unbounded loop as SURVIVED. Counting down means the retry
 // succeeds, the chain terminates, and the mutant fails an assertion instead.
 const traceControl = vi.hoisted(() => ({ flushThrowsTimes: 0 }))
-vi.mock('@/lib/observability', () => ({
-  startAgentTrace: () => ({
-    id: '',
-    captureContent: false,
-    span: () => ({
-      span: () => ({ end: () => undefined }),
-      end: () => undefined,
-      update: () => undefined,
-    }),
+vi.mock('@/lib/observability', () => {
+  // `span` and `generation` are the same shape here. They differ in production
+  // only by recorded observation type, never by tree position, so the fake must
+  // not make one of them inert — `classify` is created with `generation()`.
+  const open = () => ({
+    span: () => ({ end: () => undefined }),
+    generation: () => ({ end: () => undefined }),
+    end: () => undefined,
     update: () => undefined,
-    // TAC-523: `await trace.flushAsync()` sits in runInboundTurn's `finally`,
-    // which is the only way the orchestrator can throw past its own top-level
-    // catch — and therefore the only way to reach the wrapper's catch.
-    flushAsync: async () => {
-      if (traceControl.flushThrowsTimes > 0) {
-        traceControl.flushThrowsTimes -= 1
-        throw new Error('flush failed')
-      }
-    },
-  }),
-}))
+  })
+  return {
+    toAgentUsage: () => ({}),
+    startAgentTrace: () => ({
+      id: '',
+      captureContent: false,
+      span: open,
+      generation: open,
+      update: () => undefined,
+      // TAC-523: `await trace.flushAsync()` sits in runInboundTurn's `finally`,
+      // which is the only way the orchestrator can throw past its own top-level
+      // catch — and therefore the only way to reach the wrapper's catch.
+      flushAsync: async () => {
+        if (traceControl.flushThrowsTimes > 0) {
+          traceControl.flushThrowsTimes -= 1
+          throw new Error('flush failed')
+        }
+      },
+    }),
+  }
+})
 vi.mock('./trace-content', () => ({
   buildCorpusContent: () => ({}),
   buildGenerateAttemptContent: () => ({}),
@@ -358,7 +402,12 @@ function makeCtx(overrides: Record<string, unknown> = {}) {
     conversationChannel: 'text',
     pendingQuestion: null,
     recentMessages: [],
-    recognition: { score: 0.5, state: 'regular', signals: {}, computedAt: new Date() },
+    recognition: {
+      score: 0.5,
+      state: 'regular',
+      signals: {},
+      computedAt: new Date(),
+    },
     mechanics: [],
     recentVisits: [],
     activeCommitments: [],
@@ -393,7 +442,10 @@ beforeEach(() => {
     error: null,
   })
   existingReplyMaybeSingleMock.mockResolvedValue({ data: null, error: null })
-  guestMaybeSingleMock.mockResolvedValue({ data: { opted_out_at: null }, error: null })
+  guestMaybeSingleMock.mockResolvedValue({
+    data: { opted_out_at: null },
+    error: null,
+  })
   buildRuntimeContextMock.mockResolvedValue(makeCtx())
   classifyStageMock.mockResolvedValue({
     category: 'new_question',
@@ -416,7 +468,10 @@ beforeEach(() => {
       secondaryTags: [],
     },
   ])
-  loadPendingRowsBySlotMock.mockResolvedValue({ obligation: null, conversation: [] })
+  loadPendingRowsBySlotMock.mockResolvedValue({
+    obligation: null,
+    conversation: [],
+  })
   persistOrRegenQueuedDraftMock.mockResolvedValue({
     outboundMessageId: 'card-1',
     action: 'inserted',
@@ -424,11 +479,12 @@ beforeEach(() => {
   })
   sendDraftFlaggedPushMock.mockResolvedValue(undefined)
   recordIntentionPromptsMock.mockResolvedValue({ kind: 'no_open_intentions' })
-  recordIntentionEligibilityMock.mockResolvedValue({ kind: 'nothing_to_record' })
+  recordIntentionEligibilityMock.mockResolvedValue({
+    kind: 'nothing_to_record',
+  })
   captureIntentionPromptRecordingFailedMock.mockResolvedValue(undefined)
   captureIntentionPromptRaisedMock.mockResolvedValue(undefined)
 })
-
 
 function successResult() {
   return {
@@ -452,13 +508,12 @@ function successResult() {
     attemptHistory: [],
     systemPrompt: '',
     userPrompt: '',
-    promptVersion: 'v1.70.0',
+    promptVersion: 'v1.75.0',
     dashViolationPersisted: false,
     selfTalkViolationPersisted: false,
     emojiDirectiveViolated: false,
   }
 }
-
 
 // ---------------------------------------------------------------------------
 // TAC-526 fixtures
@@ -532,7 +587,10 @@ function makeDeps(overrides: Partial<CoalesceDeps> = {}) {
       return {
         ok: true,
         newer: pickNewer(
-          sorted.map((r) => ({ id: r.id, created_at: r.createdAt.toISOString() })),
+          sorted.map((r) => ({
+            id: r.id,
+            created_at: r.createdAt.toISOString(),
+          })),
           afterCreatedAt,
           afterId,
         ),
@@ -571,9 +629,15 @@ function statuses(results: unknown[]): string[] {
 }
 
 function sendSucceeds(): void {
-  generateStageMock.mockResolvedValue({ status: 'success', result: successResult() })
+  generateStageMock.mockResolvedValue({
+    status: 'success',
+    result: successResult(),
+  })
   applyApprovalPolicyStageMock.mockResolvedValue({ action: 'send' })
-  scheduleAndSendMock.mockResolvedValue({ outboundMessageId: 'sent-1', providerMessageId: 'p' })
+  scheduleAndSendMock.mockResolvedValue({
+    outboundMessageId: 'sent-1',
+    providerMessageId: 'p',
+  })
 }
 
 beforeEach(() => {
@@ -599,7 +663,11 @@ afterEach(async () => {
 function seedTheBurst(): void {
   seedInbox(
     { id: MSG_1, body: "nice i'll try that", createdAt: T0 },
-    { id: MSG_2, body: 'yeah been here a couple times before', createdAt: T_PLUS_7S },
+    {
+      id: MSG_2,
+      body: 'yeah been here a couple times before',
+      createdAt: T_PLUS_7S,
+    },
   )
 }
 
@@ -637,7 +705,9 @@ describe('TAC-526 — a guest burst becomes one turn', () => {
     await bothInvocations(MSG_1, MSG_2, deps)
 
     expect(buildRuntimeContextMock).toHaveBeenCalledTimes(1)
-    const ctxArg = buildRuntimeContextMock.mock.calls[0][0] as { currentMessage: { id: string } }
+    const ctxArg = buildRuntimeContextMock.mock.calls[0][0] as {
+      currentMessage: { id: string }
+    }
     expect(ctxArg.currentMessage.id).toBe(MSG_2)
   })
 
@@ -649,7 +719,9 @@ describe('TAC-526 — a guest burst becomes one turn', () => {
     seedTheBurst()
     sendSucceeds()
     buildRuntimeContextMock.mockResolvedValue(
-      makeCtx({ openIntentions: [{ key: 'learn_name', promptLine: 'ask their name' }] }),
+      makeCtx({
+        openIntentions: [{ key: 'learn_name', promptLine: 'ask their name' }],
+      }),
     )
     const { deps } = makeDeps()
 
@@ -671,7 +743,9 @@ describe('TAC-526 — a guest burst becomes one turn', () => {
     await bothInvocations(MSG_1, MSG_2, deps)
 
     const coalesced = recordInboundTurnOutcomeMock.mock.calls
-      .map((c) => c[0] as { result: { status: string; intoAgentRunId?: string } })
+      .map(
+        (c) => c[0] as { result: { status: string; intoAgentRunId?: string } },
+      )
       .filter((c) => c.result?.status === 'coalesced')
     expect(coalesced).toHaveLength(1)
     expect(coalesced[0].result.intoAgentRunId).toEqual(expect.any(String))
@@ -691,7 +765,10 @@ describe('TAC-526 — a guest burst becomes one turn', () => {
       { id: MSG_1, body: 'hey', createdAt: T0 },
       { id: MSG_3, body: 'actually one more thing', createdAt: T_PLUS_10M },
     )
-    const second = await handleInbound(MSG_3, { coalescing: true, coalesceDeps: deps })
+    const second = await handleInbound(MSG_3, {
+      coalescing: true,
+      coalesceDeps: deps,
+    })
 
     expect(second).toMatchObject({ status: 'sent' })
     expect(scheduleAndSendMock).toHaveBeenCalledTimes(2)
@@ -781,14 +858,19 @@ describe('TAC-540 — the gap the shortened settle no longer catches', () => {
       return { status: 'success', result: successResult() }
     })
 
-    const first = await handleInbound(MSG_1, { coalescing: true, coalesceDeps: deps })
+    const first = await handleInbound(MSG_1, {
+      coalescing: true,
+      coalesceDeps: deps,
+    })
     const secondResult = await second
 
     // ONE reply.
     expect(scheduleAndSendMock).toHaveBeenCalledTimes(1)
     // ...covering BOTH: it answers the newer message, and the older one is in
     // `## Recent conversation` by construction.
-    const ctxArg = buildRuntimeContextMock.mock.calls[1][0] as { currentMessage: { id: string } }
+    const ctxArg = buildRuntimeContextMock.mock.calls[1][0] as {
+      currentMessage: { id: string }
+    }
     expect(ctxArg.currentMessage.id).toBe(MSG_2)
     expect(first).toMatchObject({ status: 'sent' })
     // ...and NO second reply: the later run folded into this turn rather than
@@ -804,7 +886,9 @@ describe('TAC-540 — the gap the shortened settle no longer catches', () => {
   it('still records the intention prompt only once across that gap', async () => {
     sendSucceeds()
     buildRuntimeContextMock.mockResolvedValue(
-      makeCtx({ openIntentions: [{ key: 'learn_name', promptLine: 'ask their name' }] }),
+      makeCtx({
+        openIntentions: [{ key: 'learn_name', promptLine: 'ask their name' }],
+      }),
     )
     const { deps } = makeDeps()
     let second: Promise<unknown> | null = null
@@ -840,18 +924,27 @@ describe('TAC-526 — a message that lands while the run is generating', () => {
     generateStageMock.mockImplementationOnce(async () => {
       seedInbox(
         { id: MSG_1, body: "nice i'll try that", createdAt: T0 },
-        { id: MSG_2, body: 'yeah been here a couple times before', createdAt: T_PLUS_7S },
+        {
+          id: MSG_2,
+          body: 'yeah been here a couple times before',
+          createdAt: T_PLUS_7S,
+        },
       )
       return { status: 'success', result: successResult() }
     })
 
-    const result = await handleInbound(MSG_1, { coalescing: true, coalesceDeps: deps })
+    const result = await handleInbound(MSG_1, {
+      coalescing: true,
+      coalesceDeps: deps,
+    })
 
     expect(result).toMatchObject({ status: 'sent' })
     // Generated twice, sent once, and the send answers the newer message.
     expect(generateStageMock).toHaveBeenCalledTimes(2)
     expect(scheduleAndSendMock).toHaveBeenCalledTimes(1)
-    const ctxArg = buildRuntimeContextMock.mock.calls[1][0] as { currentMessage: { id: string } }
+    const ctxArg = buildRuntimeContextMock.mock.calls[1][0] as {
+      currentMessage: { id: string }
+    }
     expect(ctxArg.currentMessage.id).toBe(MSG_2)
   })
 
@@ -882,7 +975,10 @@ describe('TAC-526 — a message that lands while the run is generating', () => {
       return { status: 'success', result: successResult() }
     })
 
-    const result = await handleInbound(MSG_1, { coalescing: true, coalesceDeps: deps })
+    const result = await handleInbound(MSG_1, {
+      coalescing: true,
+      coalesceDeps: deps,
+    })
 
     expect(result).toMatchObject({ status: 'sent' })
     // MAX_TURN_EXTENSIONS = 2, so three generations: the original and two
@@ -915,7 +1011,11 @@ describe('TAC-526 — a message that lands while the run is generating', () => {
     scheduleAndSendMock.mockImplementation(async () => {
       seedInbox(
         { id: MSG_1, body: "nice i'll try that", createdAt: T0 },
-        { id: MSG_2, body: 'yeah been here a couple times before', createdAt: T_PLUS_7S },
+        {
+          id: MSG_2,
+          body: 'yeah been here a couple times before',
+          createdAt: T_PLUS_7S,
+        },
       )
       return { outboundMessageId: 'sent-1', providerMessageId: 'p' }
     })
@@ -948,13 +1048,20 @@ describe('TAC-526 — a message that lands while the run is generating', () => {
         seeded = true
         seedInbox(
           { id: MSG_1, body: "nice i'll try that", createdAt: T0 },
-          { id: MSG_2, body: 'yeah been here a couple times before', createdAt: T_PLUS_7S },
+          {
+            id: MSG_2,
+            body: 'yeah been here a couple times before',
+            createdAt: T_PLUS_7S,
+          },
         )
       }
       return { outboundMessageId: 'sent-1', providerMessageId: 'p' }
     })
 
-    const result = await handleInbound(MSG_1, { coalescing: true, coalesceDeps: deps })
+    const result = await handleInbound(MSG_1, {
+      coalescing: true,
+      coalesceDeps: deps,
+    })
 
     expect(result).toMatchObject({ status: 'sent' })
     // Two sends: this turn's, and the handed-off turn's answer to MSG_2. Same
@@ -1059,9 +1166,15 @@ describe('TAC-526 — the paths it must not touch', () => {
       providerMessageId: 'p',
     })
 
-    const result = await handleInbound(MSG_1, { coalescing: true, coalesceDeps: deps })
+    const result = await handleInbound(MSG_1, {
+      coalescing: true,
+      coalesceDeps: deps,
+    })
 
-    expect(result).toMatchObject({ status: 'sent', outboundMessageId: 'crisis-1' })
+    expect(result).toMatchObject({
+      status: 'sent',
+      outboundMessageId: 'crisis-1',
+    })
     // ONE dispatch: the fixed crisis body, never deferred to a newer fragment.
     expect(scheduleAndSendMock).toHaveBeenCalledTimes(1)
     // And generation never ran at all — the crisis body is a fixed string.
@@ -1092,14 +1205,19 @@ describe('TAC-526 — the paths it must not touch', () => {
       reasoning: 'crisis',
       crisisSafety: true,
     })
-    scheduleAndSendMock.mockResolvedValue({ outboundMessageId: 'crisis-1', providerMessageId: 'p' })
+    scheduleAndSendMock.mockResolvedValue({
+      outboundMessageId: 'crisis-1',
+      providerMessageId: 'p',
+    })
     const { deps } = makeDeps()
 
     const results = await bothInvocations(MSG_1, MSG_2, deps)
 
     expect(statuses(results)).toEqual(['coalesced', 'sent'])
     // The turn that replied is the one holding the crisis message.
-    const ctxArg = buildRuntimeContextMock.mock.calls[0][0] as { currentMessage: { id: string } }
+    const ctxArg = buildRuntimeContextMock.mock.calls[0][0] as {
+      currentMessage: { id: string }
+    }
     expect(ctxArg.currentMessage.id).toBe(MSG_2)
   })
 
@@ -1110,7 +1228,10 @@ describe('TAC-526 — the paths it must not touch', () => {
    * mechanisms would both be deciding what a second message does.
    */
   it('never extends when the turn queued a card, and still releases', async () => {
-    generateStageMock.mockResolvedValue({ status: 'success', result: successResult() })
+    generateStageMock.mockResolvedValue({
+      status: 'success',
+      result: successResult(),
+    })
     applyApprovalPolicyStageMock.mockResolvedValue({
       action: 'queue',
       triggers: ['model_flagged'],
@@ -1126,7 +1247,10 @@ describe('TAC-526 — the paths it must not touch', () => {
       return { status: 'success', result: successResult() }
     })
 
-    const result = await handleInbound(MSG_1, { coalescing: true, coalesceDeps: deps })
+    const result = await handleInbound(MSG_1, {
+      coalescing: true,
+      coalesceDeps: deps,
+    })
 
     expect(result).toMatchObject({ status: 'queued' })
     // One generation: the queue path returns before the extension check.
@@ -1144,7 +1268,10 @@ describe('TAC-526 — the paths it must not touch', () => {
     const { store, deps } = makeDeps()
     store.failNext('insert', 10)
 
-    const result = await handleInbound(MSG_1, { coalescing: true, coalesceDeps: deps })
+    const result = await handleInbound(MSG_1, {
+      coalescing: true,
+      coalesceDeps: deps,
+    })
 
     expect(result).toMatchObject({ status: 'sent' })
     expect(scheduleAndSendMock).toHaveBeenCalledTimes(1)
@@ -1197,16 +1324,26 @@ describe('TAC-526 — replay: Le Mils, 2026-09-23', () => {
   function seedIncident(): void {
     seedInbox(
       { id: MSG_1, body: "nice i'll try that", createdAt: INCIDENT_1 },
-      { id: MSG_2, body: 'yeah been here a couple times before', createdAt: INCIDENT_2 },
+      {
+        id: MSG_2,
+        body: 'yeah been here a couple times before',
+        createdAt: INCIDENT_2,
+      },
     )
     // The three intentions both runs rendered. `learn_name` is the one the
     // guest was asked twice.
     buildRuntimeContextMock.mockResolvedValue(
       makeCtx({
         openIntentions: [
-          { key: 'understand_order', promptLine: 'you have not heard what they ordered' },
+          {
+            key: 'understand_order',
+            promptLine: 'you have not heard what they ordered',
+          },
           { key: 'learn_name', promptLine: 'you do not know their name' },
-          { key: 'are_they_local', promptLine: 'you do not know if they are local' },
+          {
+            key: 'are_they_local',
+            promptLine: 'you do not know if they are local',
+          },
         ],
       }),
     )
@@ -1225,7 +1362,9 @@ describe('TAC-526 — replay: Le Mils, 2026-09-23', () => {
     expect(recordIntentionPromptsMock).toHaveBeenCalledTimes(1)
     // And the reply is generated against the guest's SECOND message, so
     // "been here a couple times before" is not dropped on the floor.
-    const ctxArg = buildRuntimeContextMock.mock.calls[0][0] as { currentMessage: { id: string } }
+    const ctxArg = buildRuntimeContextMock.mock.calls[0][0] as {
+      currentMessage: { id: string }
+    }
     expect(ctxArg.currentMessage.id).toBe(MSG_2)
   })
 
@@ -1270,7 +1409,9 @@ describe('TAC-526 — the settle and the latency emit', () => {
   it('does NOT settle when coalescing is off', async () => {
     sendSucceeds()
     const slept: number[] = []
-    const { deps } = makeDeps({ sleep: async (ms: number) => void slept.push(ms) })
+    const { deps } = makeDeps({
+      sleep: async (ms: number) => void slept.push(ms),
+    })
 
     await handleInbound(MSG_1, { coalescing: false, coalesceDeps: deps })
 
@@ -1286,7 +1427,9 @@ describe('TAC-526 — the settle and the latency emit', () => {
   it('does NOT re-open the turn on an extension', async () => {
     sendSucceeds()
     const slept: number[] = []
-    const { store, deps } = makeDeps({ sleep: async (ms: number) => void slept.push(ms) })
+    const { store, deps } = makeDeps({
+      sleep: async (ms: number) => void slept.push(ms),
+    })
     generateStageMock.mockImplementationOnce(async () => {
       seedInbox(
         { id: MSG_1, body: "nice i'll try that", createdAt: T0 },
@@ -1313,7 +1456,9 @@ describe('TAC-526 — the settle and the latency emit', () => {
   it('does NOT re-open the turn on an extension of an UNCLAIMED run', async () => {
     sendSucceeds()
     const slept: number[] = []
-    const { store, deps } = makeDeps({ sleep: async (ms: number) => void slept.push(ms) })
+    const { store, deps } = makeDeps({
+      sleep: async (ms: number) => void slept.push(ms),
+    })
     store.failNext('insert', 10)
     generateStageMock.mockImplementationOnce(async () => {
       seedInbox(
@@ -1351,8 +1496,8 @@ describe('TAC-526 — the settle and the latency emit', () => {
           { id: MSG_2, body: 'second', createdAt: T_PLUS_7S },
         )
       }
-      // Past AGENT_LATENCY_HIGH_THRESHOLD_MS (mocked to 10s) so the emit is
-      // reachable at all — without this the assertion is vacuous.
+      // Past the mocked latency bar (10s here, not production's 35s) so the
+      // emit is reachable at all — without this the assertion is vacuous.
       vi.setSystemTime(new Date(Date.now() + 20_000))
       return { status: 'success', result: successResult() }
     })
@@ -1395,7 +1540,10 @@ describe('TAC-526 — a close-time read that fails is never silent', () => {
       return realFind(input)
     }
 
-    const result = await handleInbound(MSG_1, { coalescing: true, coalesceDeps: deps })
+    const result = await handleInbound(MSG_1, {
+      coalescing: true,
+      coalesceDeps: deps,
+    })
 
     // The turn itself is unaffected: the guest got their reply.
     expect(result).toMatchObject({ status: 'sent' })
@@ -1437,7 +1585,10 @@ function failFirst(n: number): () => number {
     if (attempts > n) return makeCtx()
     throw new Error('context build blew up')
   })
-  scheduleAndSendMock.mockResolvedValue({ outboundMessageId: 'sent-1', providerMessageId: 'p' })
+  scheduleAndSendMock.mockResolvedValue({
+    outboundMessageId: 'sent-1',
+    providerMessageId: 'p',
+  })
   return () => attempts
 }
 
@@ -1459,7 +1610,10 @@ describe('TAC-526 — the winner failing gets exactly one more attempt', () => {
     const { deps } = makeDeps()
     const attempts = failFirst(6)
 
-    const result = await handleInbound(MSG_1, { coalescing: true, coalesceDeps: deps })
+    const result = await handleInbound(MSG_1, {
+      coalescing: true,
+      coalesceDeps: deps,
+    })
 
     expect(result).toMatchObject({ status: 'failed' })
     await vi.waitFor(() => {
@@ -1535,9 +1689,15 @@ describe('TAC-526 — the winner failing gets exactly one more attempt', () => {
       return { status: 'refused', reason: 'low_fidelity', attemptScores: [0.2] }
     })
     applyApprovalPolicyStageMock.mockResolvedValue({ action: 'send' })
-    scheduleAndSendMock.mockResolvedValue({ outboundMessageId: 'sent-1', providerMessageId: 'p' })
+    scheduleAndSendMock.mockResolvedValue({
+      outboundMessageId: 'sent-1',
+      providerMessageId: 'p',
+    })
 
-    const result = await handleInbound(MSG_1, { coalescing: true, coalesceDeps: deps })
+    const result = await handleInbound(MSG_1, {
+      coalescing: true,
+      coalesceDeps: deps,
+    })
 
     expect(result).toMatchObject({ status: 'refused' })
     await vi.waitFor(() => {
@@ -1556,7 +1716,10 @@ describe('TAC-526 — the winner failing gets exactly one more attempt', () => {
    */
   it('does NOT retry a DROPPED turn, which would only drop again', async () => {
     const { deps } = makeDeps()
-    generateStageMock.mockResolvedValue({ status: 'success', result: successResult() })
+    generateStageMock.mockResolvedValue({
+      status: 'success',
+      result: successResult(),
+    })
     applyApprovalPolicyStageMock.mockResolvedValue({
       action: 'drop',
       reason: 'obligation_slot_taken',
@@ -1564,7 +1727,10 @@ describe('TAC-526 — the winner failing gets exactly one more attempt', () => {
       triggers: [],
     })
 
-    const result = await handleInbound(MSG_1, { coalescing: true, coalesceDeps: deps })
+    const result = await handleInbound(MSG_1, {
+      coalescing: true,
+      coalesceDeps: deps,
+    })
 
     expect(result).toMatchObject({ status: 'dropped' })
     await new Promise((r) => setTimeout(r, 20))
@@ -1621,7 +1787,9 @@ describe('TAC-526 — the winner failing gets exactly one more attempt', () => {
     })
     // The second attempt is the HANDOFF, so it answers MSG_2 — not a retry of
     // MSG_1. Same count, different message, and only the id tells them apart.
-    const second = buildRuntimeContextMock.mock.calls[1][0] as { currentMessage: { id: string } }
+    const second = buildRuntimeContextMock.mock.calls[1][0] as {
+      currentMessage: { id: string }
+    }
     expect(second.currentMessage.id).toBe(MSG_2)
   })
 })

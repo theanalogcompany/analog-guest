@@ -86,7 +86,9 @@ export async function selectOrdinaryTurns(
 ): Promise<OrdinaryTurnSelection> {
   const { data: outbound, error } = await supabase
     .from('messages')
-    .select('id, guest_id, reply_to_message_id, category, rendered_intentions, created_at')
+    .select(
+      'id, guest_id, reply_to_message_id, category, rendered_intentions, created_at',
+    )
     .eq('venue_id', venueId)
     .eq('direction', 'outbound')
     .not('rendered_intentions', 'is', null)
@@ -98,7 +100,8 @@ export async function selectOrdinaryTurns(
   // so the non-empty test is applied here rather than in SQL. The `is not null`
   // filter above is what keeps the row count small enough for that to be fine.
   const withRendered = (outbound ?? []).filter(
-    (r) => Array.isArray(r.rendered_intentions) && r.rendered_intentions.length > 0,
+    (r) =>
+      Array.isArray(r.rendered_intentions) && r.rendered_intentions.length > 0,
   )
 
   const skipped: OrdinaryTurnSkip[] = []
@@ -125,7 +128,9 @@ export async function selectOrdinaryTurns(
   if (inboundIds.length > 0) {
     const { data: inbound, error: inErr } = await supabase
       .from('messages')
-      .select('id, body, provider_message_id, created_at, channel, referral_source')
+      .select(
+        'id, body, provider_message_id, created_at, channel, referral_source',
+      )
       .in('id', inboundIds)
     if (inErr) throw new Error(`inbound select failed: ${inErr.message}`)
     for (const row of inbound ?? []) inboundById.set(row.id, row)
@@ -147,7 +152,9 @@ export async function selectOrdinaryTurns(
     }
     // Reuses the production read side, so a retired key or an unparseable
     // anchor is dropped here exactly as dispatch drops it.
-    const rendered = parseRenderedIntentionsForRecording(row.rendered_intentions)
+    const rendered = parseRenderedIntentionsForRecording(
+      row.rendered_intentions,
+    )
     if (rendered.length === 0) {
       skipped.push({ outboundId: row.id, reason: 'no_live_intention_keys' })
       continue
@@ -157,7 +164,8 @@ export async function selectOrdinaryTurns(
       inboundId: inbound.id,
       inboundBody: inbound.body,
       inboundChannel: parseMessageChannel(inbound.channel),
-      inboundProviderMessageId: inbound.provider_message_id ?? `measurement-${inbound.id}`,
+      inboundProviderMessageId:
+        inbound.provider_message_id ?? `measurement-${inbound.id}`,
       inboundReceivedAt: new Date(inbound.created_at),
       inboundReferralSource: inbound.referral_source,
       guestId: row.guest_id,

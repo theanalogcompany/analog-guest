@@ -196,7 +196,8 @@ export function resolveCategoryPolicy(
  *                    per-venue; it ships fleet-wide)
  *   policy_default — fell through to `default`, stored or code-level
  */
-export type PolicyDecisionSource = 'exempt' | 'stored' | 'code_default' | 'policy_default'
+export type PolicyDecisionSource =
+  'exempt' | 'stored' | 'code_default' | 'policy_default'
 
 export interface PolicyDecision {
   disposition: ApprovalDisposition
@@ -264,7 +265,9 @@ export function resolvePolicyDecision(
   }
 
   const codeDefault = (
-    APPROVAL_POLICY_DEFAULT.perCategory as Partial<Record<MessageCategory, ApprovalDisposition>>
+    APPROVAL_POLICY_DEFAULT.perCategory as Partial<
+      Record<MessageCategory, ApprovalDisposition>
+    >
   )[category]
   if (codeDefault !== undefined) {
     return { disposition: codeDefault, source: 'code_default' }

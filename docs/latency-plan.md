@@ -12,7 +12,7 @@ Done as of this document (all on the worktree branch, not yet merged):
 - **Jev classification is ON** (`lib/ai/classify-message-jev.ts`), ~150ms against Haiku's ~2.8s, fail-open to Haiku.
 - **The five post-generation checks run post-send on inbound** (decision 0003 rewrite, `lib/agent/post-send-checks.ts`), removing the whole verifier batch from the reply path.
   Remediation is a Slack forward for upstream fixing, never a hold.
-- **Voice is a static per-venue pack** (decision 0007, `lib/rag/voice-pack.ts`), removing a Voyage embed plus an RPC per turn and the embeddings-down outage mode.
+- **Voice is a static per-venue pack** (decision 0008, `lib/rag/voice-pack.ts`), removing a Voyage embed plus an RPC per turn and the embeddings-down outage mode.
 - **Coalesce settle window is zero** (`COALESCE_SETTLE_MS`, decision 0005 run), kept as the rollback lever.
 
 Estimated floor after these: roughly 5 to 6s p50, of which generation is ~4.5 to 5s.
@@ -23,7 +23,7 @@ Generation is nearly everything left.
 1. **Generation reasoning brevity.**
    The dominant remaining lever, ~400 to 900ms per attempt.
    The generate schema emits free-form `reasoning` before the body; tightening that instruction is a `PROMPT_VERSION` bump and therefore a repo-wide sweep (`.claude/rules/prompt-versioning.md`).
-2. **Voice pack into the cacheable system prefix (phase B of decision 0007).**
+2. **Voice pack into the cacheable system prefix (phase B of decision 0008).**
    The pack is now identical every turn, so it belongs in the first system block (1h TTL, ~82% hit rate) instead of the volatile second block.
    Also a `PROMPT_VERSION` bump; deliberately kept out of the pack change itself.
 3. **Start knowledge retrieval beside classify/context-build**, ~150 to 500ms.

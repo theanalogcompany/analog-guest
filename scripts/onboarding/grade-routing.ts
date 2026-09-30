@@ -22,12 +22,20 @@ export function gradeRouting(input: {
   actualRoute: 'send' | 'queue' | 'drop' | null
 }): RoutingGrade {
   if (input.expectedRoute === 'unknown' || input.actualRoute === null) {
-    return { verdict: 'not_applicable', expectedRoute: input.expectedRoute, actualRoute: input.actualRoute }
+    return {
+      verdict: 'not_applicable',
+      expectedRoute: input.expectedRoute,
+      actualRoute: input.actualRoute,
+    }
   }
 
   // 'drop' (TAC-308 knowledge-gap-card protection) is never what
   // expected_route predicts — a real routing failure worth a look, not a
   // silent not_applicable.
   const verdict = input.actualRoute === input.expectedRoute ? 'pass' : 'fail'
-  return { verdict, expectedRoute: input.expectedRoute, actualRoute: input.actualRoute }
+  return {
+    verdict,
+    expectedRoute: input.expectedRoute,
+    actualRoute: input.actualRoute,
+  }
 }

@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { z } from 'zod'
 import { requireVenueAdmin } from '@/lib/auth'
 import { createAdminClient } from '@/lib/db/admin'
+import { logger } from '@/lib/observability/logger'
 import { toJson } from '@/lib/db/json'
 import { MESSAGE_CATEGORIES } from '@/lib/ai/types'
 import type { MessageCategory } from '@/lib/ai/types'
@@ -70,10 +71,15 @@ export async function PATCH(
     return NextResponse.json({ error: 'invalid body' }, { status: 400 })
   }
 
-  const unknownCategory = Object.keys(body.perCategory).find((k) => !KNOWN_CATEGORIES.has(k))
+  const unknownCategory = Object.keys(body.perCategory).find(
+    (k) => !KNOWN_CATEGORIES.has(k),
+  )
   if (unknownCategory !== undefined) {
     return NextResponse.json(
-      { error: 'unknown_category', detail: `${unknownCategory} is not a message category` },
+      {
+        error: 'unknown_category',
+        detail: `${unknownCategory} is not a message category`,
+      },
       { status: 400 },
     )
   }
@@ -103,13 +109,21 @@ export async function PATCH(
   const { error, count } = await supabase
     .from('venue_configs')
     .update(
-      { approval_policy: toJson({ default: body.default, perCategory: body.perCategory }) },
+      {
+        approval_policy: toJson({
+          default: body.default,
+          perCategory: body.perCategory,
+        }),
+      },
       { count: 'exact' },
     )
     .eq('venue_id', venueId)
 
   if (error) {
-    console.error('[admin] approval-policy update failed', { venueId, error: error.message })
+    logger.error('[admin] approval-policy update failed', {
+      venueId,
+      error: error.message,
+    })
     return NextResponse.json({ error: 'db_error' }, { status: 500 })
   }
   if (count === 0) {

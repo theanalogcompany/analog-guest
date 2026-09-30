@@ -104,7 +104,8 @@ export function tokenAcquiredAt(row: {
   last_refreshed_at: string | null
 }): Date {
   const connected = new Date(row.connected_at)
-  const refreshed = row.last_refreshed_at === null ? null : new Date(row.last_refreshed_at)
+  const refreshed =
+    row.last_refreshed_at === null ? null : new Date(row.last_refreshed_at)
   if (refreshed === null || Number.isNaN(refreshed.getTime())) return connected
   return refreshed.getTime() > connected.getTime() ? refreshed : connected
 }
@@ -117,14 +118,20 @@ async function recordFailure(
 ): Promise<void> {
   const { error } = await supabase
     .from('instagram_credentials')
-    .update({ last_refresh_error: message, last_refresh_error_at: now.toISOString() })
+    .update({
+      last_refresh_error: message,
+      last_refresh_error_at: now.toISOString(),
+    })
     .eq('venue_id', venueId)
   if (error) {
-    console.error('[cron instagram-token-refresh] could not record the refresh failure', {
-      event: 'instagram_token_refresh_error_unrecorded',
-      venueId,
-      error: error.message,
-    })
+    console.error(
+      '[cron instagram-token-refresh] could not record the refresh failure',
+      {
+        event: 'instagram_token_refresh_error_unrecorded',
+        venueId,
+        error: error.message,
+      },
+    )
   }
 }
 
@@ -147,14 +154,20 @@ export async function processInstagramTokenRefresh(
     errored: 0,
   }
 
-  const horizon = new Date(now.getTime() + INSTAGRAM_TOKEN_REFRESH_WINDOW_MS).toISOString()
+  const horizon = new Date(
+    now.getTime() + INSTAGRAM_TOKEN_REFRESH_WINDOW_MS,
+  ).toISOString()
   const { data, error } = await supabase
     .from('instagram_credentials')
-    .select('venue_id, access_token_enc, token_expires_at, connected_at, last_refreshed_at')
+    .select(
+      'venue_id, access_token_enc, token_expires_at, connected_at, last_refreshed_at',
+    )
     .eq('is_active', true)
     .lte('token_expires_at', horizon)
   if (error) {
-    console.error('[cron instagram-token-refresh] scan failed', { error: error.message })
+    console.error('[cron instagram-token-refresh] scan failed', {
+      error: error.message,
+    })
     return summary
   }
 
@@ -170,7 +183,12 @@ export async function processInstagramTokenRefresh(
       // needs is different from every other failure here.
       if (expiresAt.getTime() <= now.getTime()) {
         summary.expiredUnrecoverable += 1
-        await recordFailure(supabase, row.venue_id, 'token expired before it could be refreshed', now)
+        await recordFailure(
+          supabase,
+          row.venue_id,
+          'token expired before it could be refreshed',
+          now,
+        )
         await captureInstagramTokenExpiredUnrecoverable({
           venueId: row.venue_id,
           expiredAt: row.token_expires_at,
@@ -181,7 +199,10 @@ export async function processInstagramTokenRefresh(
       // Meta's 24-hour floor. Nearly unreachable behind a ten-day margin, but
       // a hand-inserted row can carry any expiry at all, and this is the one
       // case where trying would waste the attempt AND log a confusing refusal.
-      if (now.getTime() - tokenAcquiredAt(row).getTime() < INSTAGRAM_TOKEN_MIN_AGE_MS) {
+      if (
+        now.getTime() - tokenAcquiredAt(row).getTime() <
+        INSTAGRAM_TOKEN_MIN_AGE_MS
+      ) {
         summary.skippedTooYoung += 1
         continue
       }
@@ -193,11 +214,18 @@ export async function processInstagramTokenRefresh(
         summary.errored += 1
         const message = `stored token could not be decrypted: ${err instanceof Error ? err.name : 'unknown'}`
         await recordFailure(supabase, row.venue_id, message, now)
-        await captureInstagramTokenRefreshFailed({ venueId: row.venue_id, reason: message })
+        await captureInstagramTokenRefreshFailed({
+          venueId: row.venue_id,
+          reason: message,
+        })
         continue
       }
 
-      const refreshed = await refreshInstagramLongLivedToken(token, deps.fetch, now)
+      const refreshed = await refreshInstagramLongLivedToken(
+        token,
+        deps.fetch,
+        now,
+      )
       if (!refreshed.ok) {
         summary.failed += 1
         // Meta's code and reason, never its message (graph.ts's rule).
@@ -239,10 +267,13 @@ export async function processInstagramTokenRefresh(
       summary.refreshed += 1
     } catch (err) {
       summary.errored += 1
-      console.error('[cron instagram-token-refresh] unexpected error for one venue', {
-        venueId: row.venue_id,
-        error: err instanceof Error ? err.message : String(err),
-      })
+      console.error(
+        '[cron instagram-token-refresh] unexpected error for one venue',
+        {
+          venueId: row.venue_id,
+          error: err instanceof Error ? err.message : String(err),
+        },
+      )
     }
   }
 

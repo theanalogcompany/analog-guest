@@ -25,9 +25,9 @@ describe('collapseToSingleMessage', () => {
   })
 
   it('collapses whitespace and trims', () => {
-    expect(collapseToSingleMessage(`  first   ${BUBBLE_DELIMITER}\n\n second  `)).toBe(
-      'first second',
-    )
+    expect(
+      collapseToSingleMessage(`  first   ${BUBBLE_DELIMITER}\n\n second  `),
+    ).toBe('first second')
   })
 
   it.each([
@@ -45,7 +45,13 @@ describe('collapseToSingleMessage', () => {
   it('never leaves a bracket-wrapped BREAK in the output for any variant', () => {
     // The queue-path guarantee, stated as one assertion: whatever shape the
     // model emitted, an operator reading the card sees prose.
-    const variants = ['[[BREAK]]', '[BREAK]', '[[break]]', '[[ Break ]]', '[[BREAK]']
+    const variants = [
+      '[[BREAK]]',
+      '[BREAK]',
+      '[[break]]',
+      '[[ Break ]]',
+      '[[BREAK]',
+    ]
     for (const v of variants) {
       expect(collapseToSingleMessage(`a${v}b`)).toBe('a b')
     }

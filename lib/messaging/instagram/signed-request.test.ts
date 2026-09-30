@@ -14,15 +14,23 @@ const SECRET = 'app-secret-value'
 const ACCOUNT_ID = '17841479626987104'
 
 function makeSigned(payload: unknown, secret = SECRET): string {
-  const payloadB64 = Buffer.from(JSON.stringify(payload), 'utf8').toString('base64url')
-  const signature = createHmac('sha256', secret).update(payloadB64).digest('base64url')
+  const payloadB64 = Buffer.from(JSON.stringify(payload), 'utf8').toString(
+    'base64url',
+  )
+  const signature = createHmac('sha256', secret)
+    .update(payloadB64)
+    .digest('base64url')
   // Signature FIRST. Meta's order.
   return `${signature}.${payloadB64}`
 }
 
 describe('parseSignedRequest', () => {
   it('reads the account id from a genuine signed request', () => {
-    const signed = makeSigned({ user_id: ACCOUNT_ID, algorithm: 'HMAC-SHA256', issued_at: 1790000000 })
+    const signed = makeSigned({
+      user_id: ACCOUNT_ID,
+      algorithm: 'HMAC-SHA256',
+      issued_at: 1790000000,
+    })
     expect(parseSignedRequest(signed, SECRET)).toEqual({
       ok: true,
       payload: { userId: ACCOUNT_ID, issuedAt: 1790000000 },
@@ -38,7 +46,9 @@ describe('parseSignedRequest', () => {
   })
 
   it('accepts a request with no issued_at', () => {
-    expect(parseSignedRequest(makeSigned({ user_id: ACCOUNT_ID }), SECRET)).toEqual({
+    expect(
+      parseSignedRequest(makeSigned({ user_id: ACCOUNT_ID }), SECRET),
+    ).toEqual({
       ok: true,
       payload: { userId: ACCOUNT_ID, issuedAt: null },
     })
@@ -46,9 +56,14 @@ describe('parseSignedRequest', () => {
 
   // THE ORDER TRAP. A payload-first value is well-formed and signed; it just
   // is not Meta's format, and reading it as one verifies nothing.
-  it('refuses a payload-first value, which is our own state format, not Meta\'s', () => {
-    const payloadB64 = Buffer.from(JSON.stringify({ user_id: ACCOUNT_ID }), 'utf8').toString('base64url')
-    const signature = createHmac('sha256', SECRET).update(payloadB64).digest('base64url')
+  it("refuses a payload-first value, which is our own state format, not Meta's", () => {
+    const payloadB64 = Buffer.from(
+      JSON.stringify({ user_id: ACCOUNT_ID }),
+      'utf8',
+    ).toString('base64url')
+    const signature = createHmac('sha256', SECRET)
+      .update(payloadB64)
+      .digest('base64url')
     expect(parseSignedRequest(`${payloadB64}.${signature}`, SECRET)).toEqual({
       ok: false,
       reason: 'mismatch',
@@ -57,13 +72,19 @@ describe('parseSignedRequest', () => {
 
   it('refuses a signature made with a different secret', () => {
     const signed = makeSigned({ user_id: ACCOUNT_ID }, 'some-other-secret')
-    expect(parseSignedRequest(signed, SECRET)).toEqual({ ok: false, reason: 'mismatch' })
+    expect(parseSignedRequest(signed, SECRET)).toEqual({
+      ok: false,
+      reason: 'mismatch',
+    })
   })
 
   it('refuses a tampered payload', () => {
     const signed = makeSigned({ user_id: ACCOUNT_ID })
     const [signature] = signed.split('.')
-    const forged = Buffer.from(JSON.stringify({ user_id: 'someone-else' }), 'utf8').toString('base64url')
+    const forged = Buffer.from(
+      JSON.stringify({ user_id: 'someone-else' }),
+      'utf8',
+    ).toString('base64url')
     expect(parseSignedRequest(`${signature}.${forged}`, SECRET)).toEqual({
       ok: false,
       reason: 'mismatch',
@@ -75,7 +96,10 @@ describe('parseSignedRequest', () => {
   // as at the route, so removing either guard still fails closed.
   it('refuses an empty secret rather than verifying a forgery', () => {
     const forged = makeSigned({ user_id: ACCOUNT_ID }, '')
-    expect(parseSignedRequest(forged, '')).toEqual({ ok: false, reason: 'secret_unset' })
+    expect(parseSignedRequest(forged, '')).toEqual({
+      ok: false,
+      reason: 'secret_unset',
+    })
   })
 
   it.each([
@@ -85,7 +109,10 @@ describe('parseSignedRequest', () => {
     ['empty signature half', '.payload'],
     ['empty payload half', 'signature.'],
   ])('refuses a %s value as malformed', (_label, raw) => {
-    expect(parseSignedRequest(raw, SECRET)).toEqual({ ok: false, reason: 'malformed' })
+    expect(parseSignedRequest(raw, SECRET)).toEqual({
+      ok: false,
+      reason: 'malformed',
+    })
   })
 
   // Signed by Meta but not the documented shape. Distinct from `mismatch`
@@ -98,7 +125,9 @@ describe('parseSignedRequest', () => {
     ['a blank user_id', JSON.stringify({ user_id: '' })],
   ])('reports a verified but %s payload as unreadable', (_label, raw) => {
     const payloadB64 = Buffer.from(raw, 'utf8').toString('base64url')
-    const signature = createHmac('sha256', SECRET).update(payloadB64).digest('base64url')
+    const signature = createHmac('sha256', SECRET)
+      .update(payloadB64)
+      .digest('base64url')
     expect(parseSignedRequest(`${signature}.${payloadB64}`, SECRET)).toEqual({
       ok: false,
       reason: 'unreadable_payload',
