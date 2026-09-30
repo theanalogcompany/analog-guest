@@ -128,7 +128,7 @@ export const JEV_CATEGORY_CRITERIA = {
   event_question:
     'The guest is asking about the venue\'s events, when they are, or what is coming up (e.g., "when\'s the next open mic?", "what\'s happening this weekend?", "do you have anything Friday?").',
   manual:
-    'The message contains content that genuinely needs an operator\'s eyes before a real reply can be written (sensitive complaints, complex situations, custom requests that cannot be answered from documented venue facts). Not a fallback for ambiguous classification.',
+    "The message contains content that genuinely needs an operator's eyes before a real reply can be written (sensitive complaints, complex situations, custom requests that cannot be answered from documented venue facts). Not a fallback for ambiguous classification.",
   unknown:
     'The message does not fit any other category cleanly and the agent has no confident grounding to respond. Only when it genuinely fits nothing else.',
 } as const satisfies Record<ClassifierCategory, string>
@@ -153,8 +153,7 @@ const CRISIS_INSTRUCTIONS =
  * ambiguous phrasing at p(yes)=0.06 and the eval ceiling failed the run.
  */
 const CRISIS_CRITERIA = {
-  true:
-    'The message states a crisis signal, OR is genuinely ambiguous between an innocuous meaning and a self-harm or emergency reading - e.g. "I want to end it" with no clear object, a goodbye-toned message thanking people with finality, or distress language whose target is unclear. A false positive costs one unnecessary safety check-in.',
+  true: 'The message states a crisis signal, OR is genuinely ambiguous between an innocuous meaning and a self-harm or emergency reading - e.g. "I want to end it" with no clear object, a goodbye-toned message thanking people with finality, or distress language whose target is unclear. A false positive costs one unnecessary safety check-in.',
   false:
     'The message is clearly innocuous, including hyperbole and idiom that merely borrow this language ("this coffee is to die for", "dying to try this place", "I\'m dying laughing", "a matter of life and death" about something trivial). A false negative misses a guest who needs help, so only choose false when the innocuous reading is the only plausible one.',
 } as const
@@ -218,7 +217,9 @@ function serializeReasoning(
   const runnerUp = Object.entries(probabilities)
     .filter(([category]) => category !== choice)
     .sort((a, b) => b[1] - a[1])[0]
-  const runnerUpText = runnerUp ? `, runner-up ${runnerUp[0]}(${runnerUp[1].toFixed(2)})` : ''
+  const runnerUpText = runnerUp
+    ? `, runner-up ${runnerUp[0]}(${runnerUp[1].toFixed(2)})`
+    : ''
   const chosen = probabilities[choice]
   return (
     `${model}: category=${choice}(${(chosen ?? 0).toFixed(2)})${runnerUpText}; ` +
@@ -241,7 +242,11 @@ export async function classifyMessageViaJev(
   // First-call enforcement, per the credential rule. Never at module load.
   const envCheck = checkTypesafeEnv(env)
   if (!envCheck.ok) {
-    return { ok: false, error: envCheck.problems.join('; '), errorCode: 'jev_env_missing' }
+    return {
+      ok: false,
+      error: envCheck.problems.join('; '),
+      errorCode: 'jev_env_missing',
+    }
   }
 
   let response: Response
@@ -262,8 +267,15 @@ export async function classifyMessageViaJev(
             instructions: CATEGORY_INSTRUCTIONS,
             criteria: JEV_CATEGORY_CRITERIA,
           },
-          crisis: { type: 'noul', instructions: CRISIS_INSTRUCTIONS, criteria: CRISIS_CRITERIA },
-          corrects_pending: { type: 'noul', instructions: CORRECTS_PENDING_INSTRUCTIONS },
+          crisis: {
+            type: 'noul',
+            instructions: CRISIS_INSTRUCTIONS,
+            criteria: CRISIS_CRITERIA,
+          },
+          corrects_pending: {
+            type: 'noul',
+            instructions: CORRECTS_PENDING_INSTRUCTIONS,
+          },
         },
       }),
     })
@@ -271,7 +283,10 @@ export async function classifyMessageViaJev(
     // Same classification as instagram/graph.ts: the runtime raises
     // TimeoutError from AbortSignal.timeout, AbortError from manual aborts.
     const name = e instanceof Error ? e.name : ''
-    const errorCode = name === 'TimeoutError' || name === 'AbortError' ? 'jev_timeout' : 'jev_network'
+    const errorCode =
+      name === 'TimeoutError' || name === 'AbortError'
+        ? 'jev_timeout'
+        : 'jev_network'
     return {
       ok: false,
       error: `jev fetch failed: ${e instanceof Error ? e.message : String(e)}`,
@@ -280,7 +295,11 @@ export async function classifyMessageViaJev(
   }
 
   if (!response.ok) {
-    return { ok: false, error: `jev http ${response.status}`, errorCode: `jev_http_${response.status}` }
+    return {
+      ok: false,
+      error: `jev http ${response.status}`,
+      errorCode: `jev_http_${response.status}`,
+    }
   }
 
   let body: unknown
@@ -296,14 +315,26 @@ export async function classifyMessageViaJev(
 
   const parsed = SystemOneResponseSchema.safeParse(body)
   if (!parsed.success) {
-    return { ok: false, error: `jev response shape: ${parsed.error.message}`, errorCode: 'jev_bad_response' }
+    return {
+      ok: false,
+      error: `jev response shape: ${parsed.error.message}`,
+      errorCode: 'jev_bad_response',
+    }
   }
 
-  const { category, crisis, corrects_pending: correctsPending } = parsed.data.answers
+  const {
+    category,
+    crisis,
+    corrects_pending: correctsPending,
+  } = parsed.data.answers
   if (!isClassifierCategory(category.choice)) {
     // The API cannot choose an option we did not offer, so this is a contract
     // violation, not a judgment - and it must not become an `unknown` reply.
-    return { ok: false, error: `jev chose unknown category: shape violation`, errorCode: 'jev_bad_category' }
+    return {
+      ok: false,
+      error: `jev chose unknown category: shape violation`,
+      errorCode: 'jev_bad_category',
+    }
   }
 
   return {
@@ -320,7 +351,8 @@ export async function classifyMessageViaJev(
       ),
       promptVersion: CLASSIFY_JEV_PROMPT_VERSION,
       crisisSafety: crisis.noul >= JEV_CRISIS_THRESHOLD,
-      correctsPendingReply: correctsPending.noul >= JEV_CORRECTS_PENDING_THRESHOLD,
+      correctsPendingReply:
+        correctsPending.noul >= JEV_CORRECTS_PENDING_THRESHOLD,
       // TAC-386 KNOWN GAP: the Jev unit (v1.13.0) has no followUpWorthy
       // question, so a Jev-classified turn never arms an inquiry follow-up.
       // False is the cheap direction by TAC-386's own posture (a missed
