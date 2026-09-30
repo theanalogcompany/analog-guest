@@ -238,6 +238,7 @@ function correctingClassification(
     reasoning: 'test',
     crisisSafety: false,
     correctsPendingReply: true,
+    followUpWorthy: false,
   } as RuntimeContext['classification']
 }
 
@@ -537,6 +538,7 @@ describe('classifyStage — 3-tier confidence routing (v1.11.0)', () => {
         cacheWriteTokens: 0,
         crisisSafety: false,
         correctsPendingReply: false,
+        followUpWorthy: false,
       },
     })
     const out = await classifyStage(makeClassifyCtx())
@@ -569,6 +571,7 @@ describe('classifyStage — 3-tier confidence routing (v1.11.0)', () => {
         cacheWriteTokens: 0,
         crisisSafety: false,
         correctsPendingReply: false,
+        followUpWorthy: false,
       },
     })
     const out = await classifyStage(makeClassifyCtx())
@@ -592,6 +595,7 @@ describe('classifyStage — 3-tier confidence routing (v1.11.0)', () => {
         cacheWriteTokens: 0,
         crisisSafety: false,
         correctsPendingReply: false,
+        followUpWorthy: false,
       },
     })
     const out = await classifyStage(makeClassifyCtx())
@@ -611,6 +615,7 @@ describe('classifyStage — 3-tier confidence routing (v1.11.0)', () => {
         cacheWriteTokens: 0,
         crisisSafety: false,
         correctsPendingReply: false,
+        followUpWorthy: false,
       },
     })
     const recent = [
@@ -650,6 +655,7 @@ describe('classifyStage — 3-tier confidence routing (v1.11.0)', () => {
         cacheWriteTokens: 0,
         crisisSafety: true,
         correctsPendingReply: false,
+        followUpWorthy: false,
       },
     })
     const out = await classifyStage(makeClassifyCtx())
@@ -671,6 +677,7 @@ describe('classifyStage — 3-tier confidence routing (v1.11.0)', () => {
         cacheWriteTokens: 0,
         crisisSafety: false,
         correctsPendingReply: false,
+        followUpWorthy: false,
       },
     })
     const out = await classifyStage(makeClassifyCtx())
@@ -696,6 +703,7 @@ describe('classifyStage — 3-tier confidence routing (v1.11.0)', () => {
         cacheWriteTokens: 0,
         crisisSafety: false,
         correctsPendingReply: true,
+        followUpWorthy: false,
       },
     })
     const out = await classifyStage(makeClassifyCtx())
@@ -716,6 +724,7 @@ describe('classifyStage — 3-tier confidence routing (v1.11.0)', () => {
         cacheWriteTokens: 0,
         crisisSafety: false,
         correctsPendingReply: false,
+        followUpWorthy: false,
       },
     })
     const out = await classifyStage(makeClassifyCtx())
@@ -737,6 +746,7 @@ describe('classifyStage — 3-tier confidence routing (v1.11.0)', () => {
         cacheWriteTokens: 0,
         crisisSafety: false,
         correctsPendingReply: true,
+        followUpWorthy: false,
       },
     })
     const out = await classifyStage(makeClassifyCtx())
@@ -2216,6 +2226,7 @@ describe('buildAiRuntime — first-touch intentions wiring (TAC-324)', () => {
           reasoning: 'stop',
           crisisSafety: false,
           correctsPendingReply: false,
+          followUpWorthy: false,
         },
       }),
     )
@@ -2442,6 +2453,7 @@ describe('applyApprovalPolicyStage — knowledge_gap trigger (TAC-308)', () => {
         reasoning: 'question',
         crisisSafety: false,
         correctsPendingReply: false,
+        followUpWorthy: false,
       },
     })
 
@@ -2545,6 +2557,7 @@ describe('applyApprovalPolicyStage — clock requires an actual question (TAC-48
         reasoning: 'test',
         crisisSafety: false,
         correctsPendingReply: false,
+        followUpWorthy: false,
       },
     })
 
@@ -2594,6 +2607,7 @@ describe('applyApprovalPolicyStage — knowledge_gap_backstop trigger (TAC-350)'
         reasoning: 'question',
         crisisSafety: false,
         correctsPendingReply: false,
+        followUpWorthy: false,
       },
     })
 
@@ -3126,6 +3140,7 @@ describe('applyApprovalPolicyStage — invented contact detail (TAC-501)', () =>
         reasoning: 'asks for a phone number',
         crisisSafety: false,
         correctsPendingReply: false,
+        followUpWorthy: false,
       },
     })
 
@@ -4059,6 +4074,7 @@ describe('applyApprovalPolicyStage — knowledge-gap card protection (TAC-308)',
         reasoning: 'question',
         crisisSafety: false,
         correctsPendingReply: corrects,
+        followUpWorthy: false,
       },
     })
 
@@ -4316,6 +4332,7 @@ describe('applyApprovalPolicyStage — blankBody (TAC-309)', () => {
         reasoning: 'question',
         crisisSafety: false,
         correctsPendingReply: false,
+        followUpWorthy: false,
       },
     })
 
@@ -4888,6 +4905,7 @@ describe('applyApprovalPolicyStage — ungroundedClaims (TAC-364)', () => {
         reasoning: 'question',
         crisisSafety: false,
         correctsPendingReply: false,
+        followUpWorthy: false,
       },
     })
 
@@ -5194,6 +5212,7 @@ describe('applyApprovalPolicyStage — two pending slots (TAC-394)', () => {
         reasoning: 'test',
         crisisSafety: false,
         correctsPendingReply: corrects,
+        followUpWorthy: false,
       } as RuntimeContext['classification'],
     })
   }

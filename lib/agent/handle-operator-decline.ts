@@ -211,6 +211,9 @@ export async function handleOperatorDecline(input: {
       crisisSafety: false,
       // TAC-397: no guest inbound on this path — see handle-followup.ts.
       correctsPendingReply: false,
+      // TAC-386: a decline is the venue saying no, which is not help the guest
+      // then acts on.
+      followUpWorthy: false,
     }
 
     // Voice corpus — fail-CLOSED. A decline still needs to be in the venue's

@@ -438,6 +438,11 @@ export async function handleFollowup(input: {
       // be correcting a pending reply. False here keeps a followup on the
       // own-card path, which is what resolveConversationDisposition expects.
       correctsPendingReply: false,
+      // TAC-386: a follow-up's own turn never arms another follow-up. Nothing
+      // here is a guest inquiry, so there is no answer of ours to check back
+      // on, and this is the structural half of ruling 7's "one send, never
+      // repeated": even a generated follow-up cannot loop.
+      followUpWorthy: false,
     }
 
     // Retrieve corpus

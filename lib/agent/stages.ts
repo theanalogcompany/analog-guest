@@ -828,6 +828,10 @@ export async function classifyStage(
     // A correction is a fact about what the guest wrote, not about how
     // confident the category call was.
     correctsPendingReply: r.data.correctsPendingReply,
+    // TAC-386: passed through unmodified, for the same reason the two above
+    // are. Whether our answer is the kind a guest acts on is a fact about what
+    // they wrote, not about how confident the category call was.
+    followUpWorthy: r.data.followUpWorthy,
     // Passed through unmodified so the orchestrator can price the `classify`
     // generation in Langfuse. These describe the call that was made, so the
     // confidence reroute above must not touch them.

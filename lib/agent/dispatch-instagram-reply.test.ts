@@ -122,6 +122,7 @@ function makeCtx(): RuntimeContext {
       reasoning: 'r',
       crisisSafety: false,
       correctsPendingReply: false,
+      followUpWorthy: false,
     },
     trace: { id: 'trace-1' } as RuntimeContext['trace'],
   }

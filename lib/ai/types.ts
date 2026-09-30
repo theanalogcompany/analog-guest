@@ -771,6 +771,12 @@ export type ClassifyMessageResult = {
   // whenever nothing is pending — the classifier only ever sees a pending
   // draft as a NOT SENT line in the recent conversation.
   correctsPendingReply: boolean
+  // TAC-386: independent of category. True when our answer to this message
+  // would help the guest do something afterwards, so checking later that it
+  // worked out is hospitality. Read by handle-inbound.ts, which arms an
+  // `inquiry_followups` row a few venue-hours later; false is the only value
+  // that reaches anything for every other message.
+  followUpWorthy: boolean
 }
 
 export type AIResult<T> =

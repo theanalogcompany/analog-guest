@@ -535,6 +535,7 @@ async function main(): Promise<void> {
           reasoning: 'tac554 measurement: category held fixed across arms',
           crisisSafety: false,
           correctsPendingReply: false,
+          followUpWorthy: false,
         },
       }
 

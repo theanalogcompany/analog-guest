@@ -253,6 +253,9 @@ export interface Classification {
   // TAC-397: independent of category — see lib/ai/types.ts's
   // ClassifyMessageResult.correctsPendingReply for the full contract.
   correctsPendingReply: boolean
+  // TAC-386: independent of category — see lib/ai/types.ts's
+  // ClassifyMessageResult.followUpWorthy for the full contract.
+  followUpWorthy: boolean
   // Model id and token usage for the classify call, carried so the orchestrator
   // can price the `classify` Langfuse generation. Passed through unmodified from
   // ClassifyMessageResult — unlike `category`, these describe the call that was
