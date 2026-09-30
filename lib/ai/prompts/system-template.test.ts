@@ -32,8 +32,8 @@ import {
 // SYSTEM_TEMPLATE body changes.
 
 describe('PROMPT_VERSION', () => {
-  it('is v1.74.0 (a new-or-regular intention, and the field its answer lands in)', () => {
-    expect(PROMPT_VERSION).toBe('v1.74.0')
+  it('is v1.75.0 (a recognised order is received by saying so, with warmth)', () => {
+    expect(PROMPT_VERSION).toBe('v1.75.0')
   })
 })
 
@@ -1291,7 +1291,23 @@ describe('SYSTEM_TEMPLATE — R21: a recognised order is received by saying so (
   // sentence is what makes that a stated requirement rather than a hope.
   it('requires a real sentence carrying both the recognition and the warmth', () => {
     expect(SYSTEM_TEMPLATE).toContain(
-      "When the item they named is already in this guest's ## Visit history, write a real sentence, not a label. Two things always belong in it: that you know this is what they order, or that they have had it before, and something warm about them coming back and about the choice itself.",
+      "When the item they named is already in this guest's ## Visit history, write a real sentence, not a label. Two things always belong in it: that you know this is what they order, or that they have had it before, and something warm about them: about their coming back, or about the taste they have.",
+    )
+  })
+
+  // RULING 3 (2026-09-29), and this is the measured half. The first version
+  // asked for warmth "about the choice itself" and the model substituted a
+  // WELL-WISH about the drink in 8 of 20 replies, which was simultaneously
+  // the missing compliment and the 35% n=2 template. The exclusion is stated
+  // POSITIVELY (the warmth is about the guest) and the well-wish is DESCRIBED
+  // rather than quoted, because a quoted phrasing is the one thing the model
+  // reproduces verbatim and templated wording is this ticket's own defect.
+  //
+  // Pinned whole. Fragment-pinned, "it is not this" could invert to "it is
+  // this" with every other fragment surviving, which restores the defect.
+  it('rules a well-wish about the item out as the warm half', () => {
+    expect(SYSTEM_TEMPLATE).toContain(
+      'That warmth is about the guest and not about the drink. A wish that the item turns out well is a kind thing to say and it is not this, because it is about the order rather than about the person who chose it, so it never counts as the warm half.',
     )
   })
 
@@ -1307,7 +1323,20 @@ describe('SYSTEM_TEMPLATE — R21: a recognised order is received by saying so (
   // version would survive widening "and only here" to every turn.
   it('gives way on rating the choice ONLY when the item is already in their history', () => {
     expect(SYSTEM_TEMPLATE).toContain(
-      "That warmth is the one place this rule's ban on rating the choice gives way, and only here, because a guest you recognize is not a stranger whose order you are grading.",
+      "That warmth is also the one place this rule's ban on rating the choice gives way, and only for an item already in their ## Visit history, because a guest you recognize is not a stranger whose order you are grading.",
+    )
+  })
+
+  // RULING 4 (2026-09-29). "and only here" was measured LEAKING: on arm B,
+  // where the item is in no history at all, complimentsChoice went 2/10 in
+  // the control to 5/10 in the treatment, twice as the literal "good call" --
+  // one of this rule's OWN named banned shapes. Naming the block is what
+  // makes the scope checkable; the not-in-history branch below now says it
+  // again from the other side, because one statement of it demonstrably did
+  // not hold.
+  it('refuses a verdict on the choice for an item with no history', () => {
+    expect(SYSTEM_TEMPLATE).toContain(
+      'No verdict on the choice either, since the give-way above reaches only an order you already know; warmth about the item itself is still welcome there, but grading their pick is exactly what the start of this rule forbids.',
     )
   })
 
@@ -1327,7 +1356,26 @@ describe('SYSTEM_TEMPLATE — R21: a recognised order is received by saying so (
   // bullets and did arithmetic on the deltas.
   it('forbids a number inline, including when the dates make it computable', () => {
     expect(SYSTEM_TEMPLATE).toContain(
-      'Never put a number on any of it: not a count of visits or orders, not how often or how recently they come, not even when the dates in their history would let you work it out.',
+      'Frequency in words belongs to that recognition and is welcome: that they keep coming back to this one is the kind of thing to say. Frequency as a figure never is. No count of visits or orders, no ordinal placing this one in a sequence, and no span of time to measure them against.',
+    )
+  })
+
+  // RULING 5 (2026-09-29) narrowed the ban. The first version forbade "how
+  // often or how recently they come", which also forbade the warm, countless
+  // recognition the rule exists to produce; 4 of 20 replies tripped it saying
+  // nothing countable at all. Now: words yes, figures no. The two halves are
+  // pinned in ONE literal above, because splitting them would let the
+  // permission survive while the prohibition is deleted, or the reverse.
+  //
+  // THIS SENTENCE IS THE TAC-543 INTERACTION and it is new in v1.73.0. Since
+  // that ticket, ## Visit history renders the counts outright ("cortado
+  // (4x)"), so the model no longer has to do arithmetic on timestamps to name
+  // a number, which is how the v1.71.0 measurement leaked one ("third one in
+  // two weeks"). An inline ban that did not mention the block would be
+  // arguing against a page the model can read.
+  it('names the history block as the counts it must not repeat back', () => {
+    expect(SYSTEM_TEMPLATE).toContain(
+      'The ## Visit history block states those counts outright and its dates let more be worked out; none of that is yours to repeat back.',
     )
   })
 

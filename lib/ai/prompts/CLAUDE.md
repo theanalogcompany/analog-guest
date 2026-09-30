@@ -131,7 +131,7 @@ block-order test is the only thing that catches a move past it.
   "the one they order most" to pull the model both ways. Delete it and the change is
   silently vetoed. Not counter-scoped: `scanArrival` is set only on the five-minute
   greeting cron, and TAC-536's carry-forward reaches `visitConfirmedAt`, which goes to
-  intention arming and never to the prompt. Full reasoning is the v1.71.0 header in
+  intention arming and never to the prompt. Full reasoning is the v1.73.0 header in
   `system-template.ts`.
 
 ---
