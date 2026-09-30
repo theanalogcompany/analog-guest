@@ -193,7 +193,7 @@ function generation(
     attemptHistory: [],
     systemPrompt: '',
     userPrompt: '',
-    promptVersion: 'v1.74.0',
+    promptVersion: 'v1.75.0',
     cacheReadTokens: 0,
     cacheWriteTokens: 0,
     dashViolationPersisted: false,

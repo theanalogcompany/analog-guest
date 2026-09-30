@@ -1793,7 +1793,6 @@ import {
 // signed off and forbids naming anything new, both false when the guest sent
 // nothing. Handing the model a false premise as fact is the TAC-484 / TAC-502
 // failure class. See lib/ai/prompts/categories/warm-close.ts.
-export const PROMPT_VERSION = 'v1.74.0'
 // v1.75.0 (TAC-555): R21 gains the positive half of "receive it", and R23
 // gains the carve-out that keeps it reachable. Device case at Le Mil's,
 // 2026-09-29: a guest with cortado on 4 of 5 recorded visits scanned the
@@ -1923,13 +1922,28 @@ export const PROMPT_VERSION = 'v1.74.0'
 // ban that did not mention the block would be arguing against a page the
 // model can read.
 //
-// WHY THIS IS v1.73.0 AND NOT v1.71.0: it was built at v1.71.0, TAC-543 took
-// that number and TAC-554 took v1.72.0 while the ticket waited on these
-// rulings, and both merged BEFORE the run that measures this wording. So the
-// numbers quoted above come from a prompt that no longer exists, which is why
-// Jaipal ruled the whole run be repeated against the rebased prompt rather
-// than the rulings applied on top of it.
-export const PROMPT_VERSION = 'v1.73.0'
+// WHY THIS IS v1.75.0 AND NOT v1.71.0. THE NUMBER WAS TAKEN THREE TIMES while
+// this branch waited on rulings: built at v1.71.0, which TAC-543 took (TAC-554
+// took v1.72.0 in the same window); renumbered to v1.73.0, which TAC-560 took;
+// renumbered to v1.74.0, which TAC-558 took. TAC-558's own entry above records
+// being renumbered for the same reason, so this is CONTENTION between several
+// concurrently open prompt tickets rather than one branch being slow.
+//
+// THE SWEEP WAS RE-RUN FROM SCRATCH AT EVERY BUMP, never carried, and that is
+// the only reason the fixture set is right: the hit count differed on each pass
+// because main's own bumps had already moved some sites and added others. A
+// carried count silently omits the new ones, which is the expensive direction.
+//
+// One thing the third rebase nearly shipped, recorded because the conflict
+// shape invites it: resolving this changelog region by concatenating both sides
+// leaves TWO `export const PROMPT_VERSION` declarations, because each side ends
+// with one. `tsc` catches it, but only if you run `tsc` rather than trusting
+// that the rebase reported no conflicts.
+//
+// It also means the earlier runs quoted above measured prompts that no longer
+// exist, which is why Jaipal ruled the run be repeated against the rebased
+// prompt rather than the rulings applied on top of it.
+export const PROMPT_VERSION = 'v1.75.0'
 
 export const SYSTEM_TEMPLATE = `You work at a hospitality venue (cafe, bakery, restaurant). You communicate with its guests via iMessage, in whatever voice the venue has configured below — its own collective voice, its owner's, or a named staff member's.
 
