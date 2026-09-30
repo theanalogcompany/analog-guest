@@ -27,14 +27,18 @@ function parseArgs(argv) {
     else if (argv[i] === '--top') args.top = Number(argv[++i])
     else throw new Error(`unknown flag: ${argv[i]}`)
   }
-  if (!Number.isFinite(args.days) || args.days <= 0) throw new Error('--days must be positive')
-  if (!Number.isFinite(args.top) || args.top <= 0) throw new Error('--top must be positive')
+  if (!Number.isFinite(args.days) || args.days <= 0)
+    throw new Error('--days must be positive')
+  if (!Number.isFinite(args.top) || args.top <= 0)
+    throw new Error('--top must be positive')
   return args
 }
 
 function main() {
   const args = parseArgs(process.argv.slice(2))
-  const since = new Date(Date.now() - args.days * 24 * 60 * 60 * 1000).toISOString()
+  const since = new Date(
+    Date.now() - args.days * 24 * 60 * 60 * 1000,
+  ).toISOString()
 
   // One porcelain-free git call: commit hash lines delimit each commit's file
   // list, so counts are per-commit touches, not per-line mentions.
@@ -73,16 +77,24 @@ function main() {
       `   total test-file touches: ${totalTouches}`,
   )
   console.log('')
-  console.log('report-only. high churn reads as "read before adding the next test here",')
-  console.log('never as "delete" (.claude/rules/testing-discipline.md, "pays rent").')
+  console.log(
+    'report-only. high churn reads as "read before adding the next test here",',
+  )
+  console.log(
+    'never as "delete" (.claude/rules/testing-discipline.md, "pays rent").',
+  )
   console.log('')
   if (ranked.length === 0) {
     console.log('no test files touched in the window.')
     return
   }
-  const pad = Math.max(...ranked.slice(0, args.top).map(([path]) => path.length))
+  const pad = Math.max(
+    ...ranked.slice(0, args.top).map(([path]) => path.length),
+  )
   for (const [path, n] of ranked.slice(0, args.top)) {
-    console.log(`${String(n).padStart(4)}  ${path.padEnd(pad)}  ${'█'.repeat(Math.min(n, 40))}`)
+    console.log(
+      `${String(n).padStart(4)}  ${path.padEnd(pad)}  ${'█'.repeat(Math.min(n, 40))}`,
+    )
   }
 }
 

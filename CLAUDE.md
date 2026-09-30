@@ -190,7 +190,11 @@ command when the question is which variables exist.
 ### Git
 
 Branch protection on `main`; everything goes through a PR. CI must be green:
-`tsc --noEmit`, `npm run lint`, `npx vitest run`, `npm run build`.
+`tsc --noEmit`, `npm run lint`, `npx prettier --check .`, `npx jscpd` (the duplication
+gate; threshold in `.jscpd.json`, tests excluded), `npx vitest run`, `npm run build`.
+`.github/workflows/ci.yml` is the source of truth for this list - read it before claiming
+a change is verified, because this line has been stale before (prettier shipped in TAC-554
+and the list above missed it, and a branch failed CI on exactly that).
 
 Branch `<your-username>/<ticket>-short-description`, ticket id lowercase. Any single path
 segment works as the owner; `team/alex/<ticket>-x` and a bare `<ticket>-x` do not, because the
@@ -210,8 +214,11 @@ is refused outright. Branch each PR from `main` and take the conflict at merge t
 conflict is visible and recoverable, a destroyed PR object is not. Stack only when a PR
 genuinely cannot be reviewed without its parent, and budget a replacement PR.
 
-Pre-commit hook: `eslint --fix` on staged TS, `tsc --noEmit` project-wide, `vitest related`.
-Do not `--no-verify` without a reason. **In a `git worktree` the hook half-fails** on
+Pre-commit hook: lint-staged (`eslint --fix` + `prettier --write`) on staged files,
+`tsc --noEmit` project-wide, `vitest related`. Do not `--no-verify` without a reason - and
+when the hook cannot run (an environment floor, e.g. git under lint-staged's minimum), the
+manual substitute must mirror every step including lint-staged's prettier pass; skipping
+the step the hook could not reach is how a formatting failure reaches CI as news. **In a `git worktree` the hook half-fails** on
 `.git/index.lock` *after* those checks pass, and the commit still lands - check
 `git status --porcelain` and `git show --stat HEAD` rather than reading `[FAILED]` as a
 rejection.
