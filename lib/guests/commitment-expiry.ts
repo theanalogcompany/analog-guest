@@ -126,7 +126,14 @@ const MINIMUM_HOLD_WINDOW_MS = 60 * 60 * 1000
 // ReadonlyArray<keyof VenueInfo['hours']>` and widening its export surface to
 // serve one caller is the change more likely to go wrong later; the ordering
 // (Sunday-first, matching Date.getUTCDay) is locked by a test here.
-const DAY_KEYS = [
+//
+// TAC-386 EXPORTED IT, rather than making a third copy. The reasoning above
+// still stands and is the reason the export is from HERE and not from
+// venue-hours.ts: this module already owns the venue-local instant arithmetic
+// (venueLocalDate, venueLocalInstant) that a day-walking caller needs, and the
+// ordering is pinned by a test in this file, so the exported copy is the tested
+// one. lib/followups/inquiry-followup-timing.ts is the second caller.
+export const DAY_KEYS = [
   'sunday',
   'monday',
   'tuesday',

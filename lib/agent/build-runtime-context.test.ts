@@ -526,7 +526,49 @@ describe('buildRuntimeContext: conversation window (TAC-547)', () => {
     expect(call).toContain('conversationWindowMs,')
     expect(src.match(/parseFollowupRules\(/g) ?? []).toHaveLength(1)
   })
+
+  // TAC-558. Nothing runs buildRuntimeContext for real under test, and the
+  // supabase mock ignores its select() argument, so a behavioural test cannot
+  // reach this wiring - a dropped field reads as "the guest has no history on
+  // file", which is the OPEN direction for are_they_new_here and would ask a
+  // returner whether this is their first visit.
+  it('passes both TAC-558 facts into buildSatisfactionFacts', () => {
+    const callStart = src.indexOf('buildSatisfactionFacts({')
+    expect(callStart).toBeGreaterThan(-1)
+    const call = balancedCallText(src, callStart)
+    expect(call).toContain('recordedVisitCount,')
+    expect(call).toContain(
+      'venueHistory: parsedGuestContext.guest_details?.history_here,',
+    )
+  })
+
+  // THE RAW COUNT, not recentVisits.length. extractRecentVisits drops a row with
+  // unparseable raw_data, so the parsed length can read 1 for a guest with five
+  // visits - and closing are_they_new_here on the parsed count would ask them
+  // whether this is their first time. Pinned at the source because both values
+  // are plain numbers and no fixture distinguishes them.
+  it('derives recordedVisitCount from the RAW visit rows, never the parsed projection', () => {
+    expect(src).toContain(
+      'const recordedVisitCount = visitHistoryResult.data?.length ?? 0',
+    )
+    const callStart = src.indexOf('buildSatisfactionFacts({')
+    // COMMENTS STRIPPED FIRST. The source comment beside this argument names
+    // `recentVisits.length` to say why it is NOT used, so an unstripped check
+    // matches its own rationale and fails against correct code - which is what
+    // it did on the first run. A guard over source has to read code, not prose.
+    expect(stripLineComments(balancedCallText(src, callStart))).not.toContain(
+      'recentVisits.length',
+    )
+  })
 })
+
+/** Drop `//` line comments, so a source guard reads code rather than prose. */
+function stripLineComments(text: string): string {
+  return text
+    .split('\n')
+    .map((line) => line.replace(/\/\/.*$/, ''))
+    .join('\n')
+}
 
 /** The text of a `name({ ... })` call starting at `from`, to its matching brace. */
 function balancedCallText(src: string, from: number): string {
@@ -541,3 +583,77 @@ function balancedCallText(src: string, from: number): string {
   }
   throw new Error('unbalanced call text')
 }
+
+// TAC-560: the other end of the same wiring, and the same reason. A mutant
+// hardcoding `warmClose: false` here survived every test that could reach this
+// file, because buildRuntimeContext has no behavioural harness (see the header
+// above). With it hardcoded the close renders no block and reads as an ordinary
+// acknowledgment, which is the feature shipping inert.
+//
+// Source-level, like everything else in this file. It catches the flag being
+// hardcoded or read off the wrong thing; it does not prove the value is right at
+// runtime, which handle-followup.test.ts covers from the trigger side.
+describe('buildRuntimeContext: the warm-close flag (TAC-560)', () => {
+  const src = readFileSync(join(__dirname, 'build-runtime-context.ts'), 'utf-8')
+
+  it('derives warmClose from the trigger reason, never a literal', () => {
+    expect(src).toContain(
+      "warmClose: input.followupTrigger?.reason === 'warm_close',",
+    )
+    expect(src).not.toMatch(/warmClose:\s*(?:true|false)\s*,/)
+  })
+})
+
+// TAC-567: the first-conversation suppression is useless if this file never
+// resolves the flag or never hands it on. Source-level for the reason stated at
+// the top of the file - buildRuntimeContext needs a database to run - and the
+// behaviour itself is tested in intentions/derive.test.ts and warm-close.test.ts.
+// These catch the wiring those cannot see.
+describe('buildRuntimeContext: first conversation (TAC-567)', () => {
+  const src = readFileSync(join(__dirname, 'build-runtime-context.ts'), 'utf-8')
+
+  // Without the column every guest reads as null and falls to created_at. That
+  // is a sound fallback but a silent one, so the select is pinned: it is the
+  // difference between the intended anchor and the backup.
+  it('selects first_contacted_at with the guest', () => {
+    const guestQuery = src.slice(src.indexOf(".from('guests')"))
+    expect(guestQuery.slice(0, guestQuery.indexOf('.eq('))).toMatch(
+      /\bfirst_contacted_at\b/,
+    )
+  })
+
+  // ONE DEFINITION. Reimplementing the window comparison here rather than calling
+  // TAC-560's predicate is the drift this guard exists to prevent: the warm close
+  // and the intention suppression would then disagree about which turn is a first
+  // conversation, and nothing would say so.
+  it('resolves it through TAC-560 isFirstConversation, with the created_at fallback', () => {
+    expect(src).toContain("import { isFirstConversation } from './warm-close'")
+    expect(src).toContain(
+      [
+        '  const firstConversation = isFirstConversation(',
+        '    guest.firstContactedAt ?? guest.createdAt,',
+        '    computedAt,',
+        '    conversationWindowMs,',
+        '  )',
+      ].join('\n'),
+    )
+  })
+
+  // The two readers. Either one missing is a silent half-fix: without the first
+  // the five suppressed intentions still render, without the second the prompt
+  // loses the restraint that stops an invented question.
+  it('passes it to the intention derivation and carries it on the context', () => {
+    expect(src).toContain('isFirstConversation: firstConversation,')
+    expect(src).toMatch(/^ {4}firstConversation,$/m)
+  })
+
+  // Measured against the SAME window the derivation uses, not a second constant.
+  // A literal 48h here would pass every test above and quietly ignore a venue's
+  // recent_conversation_hours.
+  it('measures it against conversationWindowMs rather than its own constant', () => {
+    const call = src.slice(
+      src.indexOf('const firstConversation = isFirstConversation('),
+    )
+    expect(call.slice(0, call.indexOf(')'))).toContain('conversationWindowMs')
+  })
+})

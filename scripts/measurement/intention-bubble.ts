@@ -85,6 +85,8 @@ import {
   type CeilingBreach,
 } from './intention-bubble-score'
 import { createRunLog } from './run-log'
+// TAC-558 extracted this; see seeded-flip.ts for the distribution hazard.
+import { seededFlip } from './seeded-flip'
 
 type Arm = 'control' | 'after'
 type Channel = 'text' | 'instagram'
@@ -291,33 +293,6 @@ const SCENARIOS: readonly {
     shape: 'no_intention_control',
   },
 ]
-
-/**
- * A deterministic [0,1) from a scenario id, so the same scenario sees the same
- * coin in both arms.
- *
- * FNV-1a WITH A MURMUR3 FINALIZER, and the finalizer is not decoration. Bare
- * FNV-1a over these eighteen near-identical short strings clusters hard: the
- * first control run produced 0.52-0.58 for s01-s09 and 0.065-0.085 for
- * s10-s15, two tight bands and nothing in between, so the coin was effectively
- * constant per band rather than fair. That is an instrument that cannot
- * represent production's 50/50, which is the thing that decided the ticket's
- * first failure. Measured after the fix: 8 of 18 ids land below
- * SPLIT_PROBABILITY, spread across the range.
- */
-function seededFlip(seed: string): number {
-  let h = 0x811c9dc5
-  for (let i = 0; i < seed.length; i += 1) {
-    h ^= seed.charCodeAt(i)
-    h = Math.imul(h, 0x01000193) >>> 0
-  }
-  h ^= h >>> 16
-  h = Math.imul(h, 0x85ebca6b) >>> 0
-  h ^= h >>> 13
-  h = Math.imul(h, 0xc2b2ae35) >>> 0
-  h ^= h >>> 16
-  return (h >>> 8) / 0x1000000
-}
 
 /** Read intentionQuestion without assuming the field exists on this tree. */
 function readIntentionQuestion(data: unknown): string {
@@ -560,6 +535,7 @@ async function main(): Promise<void> {
           reasoning: 'tac554 measurement: category held fixed across arms',
           crisisSafety: false,
           correctsPendingReply: false,
+          followUpWorthy: false,
         },
       }
 

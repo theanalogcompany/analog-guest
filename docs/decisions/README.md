@@ -33,8 +33,9 @@ decision.
 | --- | --- |
 | [0001](0001-claude-md-is-an-index.md) | `CLAUDE.md` is an index; detail is nested and history is in git |
 | [0002](0002-deny-list-not-allow-list.md) | A set keyed on a closed vocabulary is a deny-list |
-| [0003](0003-post-generation-checks-fail-closed.md) | All five post-generation checks fail closed |
+| [0003](0003-post-generation-checks-fail-closed.md) | The five post-generation checks: fail closed pre-send, run post-send on inbound |
 | [0004](0004-ticket-branch-owner-is-any-username.md) | a ticket branch is `<username>/<ticket>-...`, any username |
-| [0005](0005-inbound-coalescing-settle-window.md) | A guest's burst settles for 3 s before one run claims it |
+| [0005](0005-inbound-coalescing-settle-window.md) | The settle window is zero; the claim and the extension carry coalescing |
 | [0006](0006-two-pending-slots-per-guest.md) | A guest holds two pending cards, one per slot |
 | [0007](0007-intention-question-is-its-own-bubble.md) | A getting-to-know-you question is its own last message, guaranteed in code |
+| [0008](0008-voice-is-a-static-pack.md) | Voice is a static per-venue pack, not a similarity retrieval |

@@ -18,6 +18,8 @@ import { PERSONAL_HISTORY_QUESTION_INSTRUCTIONS } from './personal-history-quest
 import { RECOMMENDATION_REQUEST_INSTRUCTIONS } from './recommendation-request'
 import { REPLY_INSTRUCTIONS } from './reply'
 import { UNKNOWN_INSTRUCTIONS } from './unknown'
+import { WARM_CLOSE_INSTRUCTIONS } from './warm-close'
+import { INQUIRY_FOLLOWUP_INSTRUCTIONS } from './inquiry-followup'
 import { WELCOME_INSTRUCTIONS } from './welcome'
 
 // THE-228 added 4 new categories. Below the round-trip table makes the
@@ -789,14 +791,35 @@ describe('the scan-greeting instruction (TAC-536)', () => {
     )
   })
 
-  it('tells a guest with no record on file who they have reached', () => {
+  // TAC-567 (2026-09-30) deleted "and say who they have reached" from this
+  // variant, in step with the opener it mirrors. The guest scanned this venue's
+  // own code, so there is nobody to introduce.
+  it('greets a guest with no record on file and asks the order, nothing more', () => {
     const text = categoryInstructionsFor('guest_arrived', 'instagram', {
       hadPriorConversation: false,
     })
     expect(text).toBe(
-      'The guest just scanned the sign at your pickup counter and has not written anything yet, so they are in the shop right now. They have just ordered and collected it. Say hello, and say who they have reached. Ask what they just got. One short line. Say only what the facts below say about past visits.',
+      'The guest just scanned the sign at your pickup counter and has not written anything yet, so they are in the shop right now. They have just ordered and collected it. Say hello. Ask what they just got. One short line. Say only what the facts below say about past visits.',
     )
   })
+
+  // THE TAC-567 CANARY, on both variants and wider than the deleted sentence, for
+  // the reason the opener's twin carries the same sweep: a reworded revival
+  // ("tell them which shop this is") would pass a literal-revert check. The
+  // returning variant's own "don't introduce yourself" is deliberately excluded
+  // from the introduce pattern by matching the imperative form only.
+  it.each([true, false])(
+    'never asks the venue to identify itself, hadPriorConversation=%s (TAC-567)',
+    (hadPriorConversation) => {
+      const text = categoryInstructionsFor('guest_arrived', 'instagram', {
+        hadPriorConversation,
+      })
+      expect(text).not.toMatch(/reached/i)
+      expect(text).not.toMatch(/say who/i)
+      expect(text).not.toMatch(/who (you|they) are/i)
+      expect(text).not.toMatch(/(^|[.,;]\s*)introduce\b/i)
+    },
+  )
 
   // THE TAC-541 CANARY. Both variants, because a future edit is as likely to
   // add the override to the returning one. "Say who they have reached" now
@@ -815,27 +838,34 @@ describe('the scan-greeting instruction (TAC-536)', () => {
     },
   )
 
-  // A wiring bug, not a reachable state. It falls to the variant that
-  // introduces itself, because an introduction nobody needed is odd and
-  // telling a stranger "you have talked before" is false.
+  // A wiring bug, not a reachable state. It falls to the NEW-guest variant,
+  // because telling a stranger "you have talked before" is the worse falsehood.
+  //
+  // TAC-567 CHANGED THE FRAGMENT THIS MATCHES ON, and the choice matters. It used
+  // to be "say who they have reached", which the ruling deleted from this variant
+  // and which never appeared in the returning one - so it distinguished them. The
+  // replacement has to keep that property or this test and the two
+  // inverted-branch tests below stop killing the mutant they exist for.
+  // "has not written anything yet" is the new-guest variant's own premise and is
+  // false of a returning guest by construction.
   it.each([null, undefined])(
     'falls back to the new-guest variant on %s',
     (missing) => {
       expect(
         categoryInstructionsFor('guest_arrived', 'instagram', missing ?? null),
-      ).toContain('say who they have reached')
+      ).toContain('has not written anything yet')
     },
   )
 
   // Inverting the branch is the mutant that matters, and these two together
   // are what kill it: each asserts the OTHER variant's distinctive clause is
   // absent, which a single positive assertion would not.
-  it('never tells a returning guest to introduce itself', () => {
+  it('never hands a returning guest the new-guest variant', () => {
     expect(
       categoryInstructionsFor('guest_arrived', 'instagram', {
         hadPriorConversation: true,
       }),
-    ).not.toContain('say who they have reached')
+    ).not.toContain('has not written anything yet')
   })
 
   it('never tells a new guest it has talked to them before', () => {
@@ -873,5 +903,183 @@ describe('the scan-greeting instruction (TAC-536)', () => {
         }),
       ).not.toMatch(/[—–]/)
     }
+  })
+})
+
+// TAC-560: the pause-triggered warm close REPLACES the category instructions.
+describe('categoryInstructionsFor — warm close (TAC-560)', () => {
+  it('replaces the acknowledgment instructions entirely', () => {
+    // NOT layered over. The row stores `category: 'acknowledgment'` so no
+    // messages.category widening is needed (that would be a hard stop), but that
+    // category's own text is FALSE on this turn: the guest sent nothing, so they
+    // are not "wrapping up the thread or signing off", and "do not turn the
+    // closer into a fresh exchange" fights naming what the guest can message
+    // about. Handing the model a false premise as fact is the TAC-484 / TAC-502
+    // failure class.
+    const out = categoryInstructionsFor(
+      'acknowledgment',
+      'instagram',
+      null,
+      true,
+    )
+    expect(out).toBe(WARM_CLOSE_INSTRUCTIONS)
+    expect(out).not.toContain('wrapping up the thread')
+    expect(out).not.toContain('do not turn the closer into a fresh exchange')
+  })
+
+  it('leaves every other turn untouched', () => {
+    // Defaults false, so no existing call site changes.
+    expect(categoryInstructionsFor('acknowledgment', 'instagram')).toBe(
+      ACKNOWLEDGMENT_INSTRUCTIONS,
+    )
+    expect(
+      categoryInstructionsFor('acknowledgment', 'instagram', null, false),
+    ).toBe(ACKNOWLEDGMENT_INSTRUCTIONS)
+  })
+
+  it('beats the guest_arrived exception when both are somehow set', () => {
+    // Not reachable in production (a scan greeting is the first thing said to a
+    // guest and a warm close the last), but the order has to be decided rather
+    // than accidental, and the close is the more specific claim about this turn.
+    expect(
+      categoryInstructionsFor(
+        'guest_arrived',
+        'instagram',
+        { hadPriorConversation: true },
+        true,
+      ),
+    ).toBe(WARM_CLOSE_INSTRUCTIONS)
+  })
+
+  it('names no channel, so it needs no channel variant', () => {
+    // The scope guard this mirrors: the copy says nothing about how the guest is
+    // reaching us, so there is nothing to swap and both channels are identical.
+    expect(categoryInstructionsFor('acknowledgment', 'text', null, true)).toBe(
+      categoryInstructionsFor('acknowledgment', 'instagram', null, true),
+    )
+    for (const claim of [
+      'text',
+      'SMS',
+      'DM',
+      'number',
+      'Instagram',
+      'iMessage',
+    ]) {
+      expect(WARM_CLOSE_INSTRUCTIONS, claim).not.toContain(claim)
+    }
+  })
+
+  it("names no topic, so the venue's own voice rules carry them", () => {
+    for (const leaked of ['beans', 'specials', 'events', 'menu', 'coffee']) {
+      expect(WARM_CLOSE_INSTRUCTIONS, leaked).not.toContain(leaked)
+    }
+  })
+
+  it('models no em dash', () => {
+    expect(WARM_CLOSE_INSTRUCTIONS).not.toContain('—')
+    expect(WARM_CLOSE_INSTRUCTIONS).not.toContain('–')
+  })
+})
+
+// TAC-386: the THIRD per-turn exception. An inquiry follow-up stores
+// `category: 'follow_up'`, so it needs no new messages.category value and
+// therefore no migration against a high-stakes table, but that category's own
+// text is written for a message days after a VISIT.
+describe('categoryInstructionsFor — inquiry follow-up (TAC-386)', () => {
+  it('replaces the follow_up instructions rather than layering over them', () => {
+    const out = categoryInstructionsFor(
+      'follow_up',
+      'instagram',
+      null,
+      false,
+      true,
+    )
+    expect(out).toBe(INQUIRY_FOLLOWUP_INSTRUCTIONS)
+    // The specific premise ruling 11 forbids. The follow_up copy is written
+    // around a visit having happened; this turn knows only what the guest asked
+    // and what we said.
+    expect(out).not.toBe(
+      categoryInstructionsFor('follow_up', 'instagram', null, false, false),
+    )
+  })
+
+  it('leaves every other turn untouched', () => {
+    // Defaults false, so no existing call site changes.
+    const plain = categoryInstructionsFor('follow_up', 'instagram')
+    expect(categoryInstructionsFor('follow_up', 'instagram', null, false)).toBe(
+      plain,
+    )
+    expect(
+      categoryInstructionsFor('follow_up', 'instagram', null, false, false),
+    ).toBe(plain)
+  })
+
+  it('loses to the warm close when both are somehow set', () => {
+    // Not reachable: each is set only on its own trigger reason, and the
+    // processors will not let two proactive sends land together anyway. But the
+    // order has to be decided rather than accidental, and the warm close is
+    // checked first because it is the more specific claim about a turn where the
+    // guest sent nothing at all.
+    expect(
+      categoryInstructionsFor('follow_up', 'instagram', null, true, true),
+    ).toBe(WARM_CLOSE_INSTRUCTIONS)
+  })
+
+  it('names no channel, so it needs no channel variant', () => {
+    expect(
+      categoryInstructionsFor('follow_up', 'text', null, false, true),
+    ).toBe(categoryInstructionsFor('follow_up', 'instagram', null, false, true))
+    for (const claim of [
+      'text',
+      'SMS',
+      'DM',
+      'number',
+      'Instagram',
+      'iMessage',
+    ]) {
+      expect(INQUIRY_FOLLOWUP_INSTRUCTIONS, claim).not.toContain(claim)
+    }
+  })
+
+  it('names no topic and no example phrase', () => {
+    // Both arrive as DATA in the serializer's block, because they differ on
+    // every send. A worked example here would ship one venue's answer into
+    // every venue's prompt, and a quoted phrase would be copied verbatim.
+    for (const leaked of [
+      'parking',
+      'beans',
+      'brew',
+      'dog',
+      'menu',
+      'coffee',
+    ]) {
+      expect(INQUIRY_FOLLOWUP_INSTRUCTIONS, leaked).not.toContain(leaked)
+    }
+  })
+
+  // Ruled 2026-09-30: an earlier draft opened "Earlier today", false on every
+  // send that rolled to the next open period, which is most of them.
+  it('makes no claim about when the question was asked', () => {
+    for (const timing of [
+      'Earlier today',
+      'earlier today',
+      'this morning',
+      'hours ago',
+      'a few hours',
+    ]) {
+      expect(INQUIRY_FOLLOWUP_INSTRUCTIONS, timing).not.toContain(timing)
+    }
+    expect(INQUIRY_FOLLOWUP_INSTRUCTIONS).toContain('recently')
+  })
+
+  it('never asserts or asks about a visit', () => {
+    for (const visit of ['came in', 'came by', 'your visit', 'stopped by']) {
+      expect(INQUIRY_FOLLOWUP_INSTRUCTIONS, visit).not.toContain(visit)
+    }
+  })
+
+  it('models no em dash', () => {
+    expect(INQUIRY_FOLLOWUP_INSTRUCTIONS).not.toContain('—')
+    expect(INQUIRY_FOLLOWUP_INSTRUCTIONS).not.toContain('–')
   })
 })

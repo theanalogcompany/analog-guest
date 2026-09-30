@@ -2,9 +2,11 @@
  * TAC-526: what would a coalescing window actually have caught?
  *
  * The ticket says of the settle window: *"Propose a number with reasoning; we
- * will measure rather than argue about it."* `COALESCE_SETTLE_MS = 8_000` is
+ * will measure rather than argue about it."* `COALESCE_SETTLE_MS = 8_000` was
  * the proposal and the reasoning is in its own docstring. THIS is what lets
- * the number be moved on evidence rather than on the argument.
+ * the number be moved on evidence rather than on the argument - and it has
+ * been, twice: to 3s (TAC-540, on argument) and then to 0 (2026-09, on this
+ * script's own 30-day run: 251 inbound, 4 folded bursts, all Instagram).
  *
  * READ-ONLY. It SELECTs from `messages` and writes nothing anywhere: no sends,
  * no claims, no ledger rows, no model calls. Safe to run against production,

@@ -44,7 +44,30 @@ inverted and still pass; a per-file test count read as 459 when the truth was 23
 
 A number nobody can contradict is not evidence, however carefully it was read.
 
+## A test pays rent or leaves
+
+Can-it-fail is the floor, not the justification. Before adding a test, name the decision it
+protects and the layer that decision lives at; write it there and nowhere else. One can-fail
+test at the owning layer beats overlapping copies at adjacent layers - every copy is read and
+re-maintained by every later session. Measured 2026-09: 69% of commits touched a test file
+(1,273 test-file touches across 232 commits), so the suite is a recurring cost, not a
+one-time write.
+
+Ceremony to delete or move on sight: a test restating what `tsc` enforces, one comparing a
+derivation against its own source, one guarding a layer that cannot decide the behaviour
+under test. And anything an agent re-edits identically every cycle - a version constant, a
+copy pin - gets centralised to derive from the source of truth instead of a scattered
+literal. `PROMPT_VERSION` fixtures are the precedent (2026-09-29): mock inputs derive the
+constant, only assertion tripwires stay literal.
+
 ## Mutation testing
+
+**Run one when a false green is expensive, not on every new test.** The passes worth their
+write-mutate-restore cycle: a fix for a defect that already shipped, or a path where a wrong
+pass costs a guest (silence, approval, crisis, a credential, a price). Most new tests guard
+wiring the type system already checks; a pass there spends a full cycle to confirm what
+`tsc` would have said. The question is never "is this test good" but "what could this test
+falsely certify".
 
 Change the code so the behaviour is wrong, run the test, confirm it fails. Then restore.
 

@@ -2,6 +2,7 @@ import type { SlotDropReason } from './pending-slots'
 import type {
   FollowupReason,
   MessageCategory,
+  ModelCallUsage,
   PendingQuestion,
   RecentMessage,
 } from '@/lib/ai'
@@ -83,6 +84,13 @@ export interface GuestContext {
   firstName: string | null
   createdAt: Date
   createdVia: string
+  // TAC-567: guests.first_contacted_at, the moment this guest's relationship
+  // with the venue began. Both inbound webhooks stamp it at guest creation,
+  // including the QR enrollment (resolveCreatedVia in the Sendblue route), so on
+  // the scan population it IS the scan. Null only for rows predating the
+  // column; build-runtime-context falls back to createdAt, which marks the same
+  // moment. Read only to resolve isFirstConversation.
+  firstContactedAt: Date | null
   // TAC-284: per-guest demo flag. When true, the agent runtime bypasses the
   // TAC-212 approval policy gate (applyApprovalPolicyStage short-circuits to
   // send) and skips the read receipt and typing indicators. (Pre-TAC-421 it
@@ -156,6 +164,18 @@ export interface FollowupTrigger {
     // one that routes its send through dispatchReply rather than
     // scheduleAndSend.
     | 'instagram_scan_arrival'
+    // TAC-560: a new guest's first conversation went quiet after a counter scan,
+    // and the venue is closing it warmly. The SECOND reason allowed on an
+    // Instagram conversation (handle-followup.ts refuses every other), and the
+    // second that routes its send through dispatchReply rather than
+    // scheduleAndSend.
+    | 'warm_close'
+    // TAC-386: the guest asked something our answer helps them DO, and we are
+    // checking a few venue-hours later that it worked out. The THIRD reason
+    // allowed on an Instagram conversation (handle-followup.ts refuses every
+    // other), and the third that routes its send through dispatchReply rather
+    // than scheduleAndSend.
+    | 'inquiry_followup'
   // TAC-123: engine-aggregated secondary reasons for this run. The primary
   // already lives on `reason` above; this array carries the OTHER reasons that
   // also applied on this guest's tick, already mapped to the AI-side
@@ -196,6 +216,43 @@ export interface FollowupTrigger {
     scanMessageId: string | null
     hadPriorConversation: boolean
   }
+  /**
+   * TAC-560: set only when `reason === 'warm_close'`. Typed channel rather than
+   * metadata, for the reason perkMechanic, isOperatorDecline and
+   * instagramScanArrival are: it drives routing, so the schema is structural.
+   *
+   * `answersMessageId` is OUR last outbound row, the one the guest went quiet
+   * after. It is written to reply_to_message_id and handed to the Instagram
+   * reply check, because a reply naming no inbound is read as answering
+   * everything before it, which would silence the agent's own reply to whatever
+   * the guest says next.
+   */
+  warmClose?: {
+    answersMessageId: string
+  }
+  /**
+   * TAC-386: set only when `reason === 'inquiry_followup'`. Typed channel rather
+   * than metadata, for the reason every field above is: it drives rendering and
+   * routing, so the schema is structural.
+   *
+   * `question` is the guest's own words, stored when the row was armed.
+   * `answer` is what WE told them, resolved at DISPATCH from the outbound that
+   * replied to the question rather than stored alongside it, so an operator who
+   * edited the card is reflected instead of a stale copy. Both render verbatim:
+   * the message has to reference the specific thing they asked and what we
+   * suggested (ruled 2026-09-30), and no paraphrase survives the round trip.
+   *
+   * `answerMessageId` is OUR answer's row, written to reply_to_message_id. It
+   * names an OUTBOUND for TAC-560's reason: a send naming nothing is read by the
+   * Instagram reply check as answering everything before it, and the honest
+   * answer to "what does this follow" is our own answer, not the guest's
+   * question, which we already replied to three hours ago.
+   */
+  inquiryFollowup?: {
+    question: string
+    answer: string
+    answerMessageId: string
+  }
   triggeredAt: Date
   metadata?: Record<string, unknown>
 }
@@ -232,6 +289,19 @@ export interface Classification {
   // TAC-397: independent of category — see lib/ai/types.ts's
   // ClassifyMessageResult.correctsPendingReply for the full contract.
   correctsPendingReply: boolean
+  // TAC-386: independent of category — see lib/ai/types.ts's
+  // ClassifyMessageResult.followUpWorthy for the full contract.
+  followUpWorthy: boolean
+  // Model id and token usage for the classify call, carried so the orchestrator
+  // can price the `classify` Langfuse generation. Passed through unmodified from
+  // ClassifyMessageResult — unlike `category`, these describe the call that was
+  // made and must NOT be rewritten by the confidence reroute.
+  //
+  // Optional because a provider need not report every field, and because absent
+  // is honestly different from zero. See lib/observability/langfuse.ts's
+  // AgentUsage for why the key names are not free choice.
+  modelId?: string
+  usage?: ModelCallUsage
 }
 
 export interface RuntimeContext {
@@ -250,6 +320,20 @@ export interface RuntimeContext {
     hadPriorConversation: boolean
     hasRecordedVisit: boolean
   } | null
+  /**
+   * TAC-560: true only on the pause-triggered warm-close turn. Picks the
+   * `## Closing this conversation` block AND replaces the category instructions,
+   * so it reaches composePrompt rather than only the serializer.
+   */
+  warmClose: boolean
+  /**
+   * TAC-386: the question and our answer, on an inquiry-follow-up turn only.
+   * Null on every other turn. Reaches composePrompt rather than only the
+   * serializer, because like the warm close it does two things: it renders
+   * `## Following up on what they asked` AND replaces the category
+   * instructions, whose own text tells the model to check in on a past visit.
+   */
+  inquiryFollowup: { question: string; answer: string } | null
   // TAC-495: the conversation's channel. Set once by build-runtime-context.ts
   // via resolveConversationChannel, from the guest's identifiers, the inbound
   // message's channel and (TAC-469) the guest's last inbound channel. It picks
@@ -266,6 +350,32 @@ export interface RuntimeContext {
    * so the two cannot drift into two definitions of the same thing.
    */
   conversationWindowMs: number
+  /**
+   * TAC-567: is the guest still inside their FIRST conversation with the venue?
+   *
+   * TAC-560's isFirstConversation (lib/agent/warm-close.ts), resolved once in
+   * build-runtime-context against the same conversationWindowMs above, and
+   * carried rather than re-derived so the intention derivation and the prompt
+   * cannot disagree about which turn is a first conversation.
+   *
+   * Two readers: deriveOpenIntentions suppresses every intention whose
+   * definition says allowedOnFirstConversation is false, and the serializer
+   * renders the first-conversation restraint into the intentions block.
+   *
+   * IT IS TRUE ON A PROACTIVE TURN TOO, AND THAT IS NOT WHAT MAKES IT SAFE. This
+   * is clock-derived and computed unconditionally, so a cron follow-up, a holding
+   * message or an operator decline inside the window all see `true`. What keeps
+   * the restraint off those turns is that buildRuntimeContext derives intentions
+   * only when `input.currentMessage` is set and leaves `openIntentions` empty
+   * otherwise, so formatOpenIntentions never runs and the restraint never
+   * renders. None of those three paths passes a currentMessage.
+   *
+   * SO THE DAY A PROACTIVE PATH DERIVES INTENTIONS, re-read this. TAC-536's scan
+   * greeting is the obvious candidate, and its own category text says "Ask what
+   * they just got" - exactly the turn a restraint saying the reply asks nothing
+   * must not reach.
+   */
+  firstConversation: boolean
   recognition: RecognitionSnapshot
   // Mechanics this guest is currently eligible for. Filtered at load time in
   // build-runtime-context.ts by guest's recognition state and redemption

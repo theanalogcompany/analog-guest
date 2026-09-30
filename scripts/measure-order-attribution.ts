@@ -28,11 +28,6 @@
  */
 import { readFileSync } from 'node:fs'
 import { extractRecentVisits } from '@/lib/agent/extract-recent-visits'
-import {
-  CORPUS_RETRIEVE_LIMIT,
-  MIN_STRONG_MATCHES,
-  STRONG_MATCH_SIMILARITY,
-} from '@/lib/agent/stages'
 import { generateMessage } from '@/lib/ai/generate-message'
 import { formatTimeDelta } from '@/lib/ai/prompts/serializers'
 import type {
@@ -45,8 +40,7 @@ import {
   verifyGrounding,
   VERIFY_GROUNDING_PROMPT_VERSION,
 } from '@/lib/ai/verify-grounding'
-import { embedText } from '@/lib/rag/embed'
-import { SIMILARITY_FLOOR } from '@/lib/rag/retrieve'
+import { selectVoicePack } from '@/lib/rag'
 import {
   BrandPersonaSchema,
   VenueInfoSchema,
@@ -360,82 +354,38 @@ function loadLeMils(): LoadedVenue {
 
 const LE_MILS = loadLeMils()
 
-function cosineSimilarity(a: readonly number[], b: readonly number[]): number {
-  let dot = 0
-  let normA = 0
-  let normB = 0
-  for (let i = 0; i < a.length; i++) {
-    dot += a[i] * b[i]
-    normA += a[i] * a[i]
-    normB += b[i] * b[i]
-  }
-  const denom = Math.sqrt(normA) * Math.sqrt(normB)
-  return denom === 0 ? 0 : dot / denom
-}
-
-// Embeddings for the corpus are identical across variants and attempts, so
-// they are embedded once and reused. Keyed by corpus row id.
-const corpusEmbeddings = new Map<string, number[]>()
-
-async function embedCorpusOnce(): Promise<void> {
-  if (corpusEmbeddings.size > 0) return
-  for (const entry of LE_MILS.corpus) {
-    const r = await embedText(entry.content, 'document')
-    if (!r.ok)
-      throw new Error(`embedText failed for corpus row ${entry.id}: ${r.error}`)
-    corpusEmbeddings.set(entry.id, r.data.embedding)
-  }
-}
-
 /**
- * Local stand-in for `retrieveCorpusStage` -> `retrieveContext`, which needs
- * the `match_voice_corpus` pgvector RPC and therefore a database this script
- * deliberately does not touch. Mirrors it where it counts: the same Voyage
- * model via the repo's own `embedText`, the same 'query'/'document' input
- * types, cosine over the whole corpus, the same `SIMILARITY_FLOOR` (0.3), the
- * same `CORPUS_RETRIEVE_LIMIT` (8), and the same inbound-body-as-query.
+ * Local stand-in for `retrieveCorpusStage` -> `loadVoicePack` (decision
+ * 0007: voice is a static per-venue pack), which reads `voice_corpus` from a
+ * database this script deliberately does not touch. It runs the SAME pure
+ * selection (`selectVoicePack`) over the export's rows, so the pack the
+ * prompt sees is built by production's own ordering and budgets.
  *
- * Divergence, stated rather than buried: production embeds `chunkText()`
- * output, which splits at 300 tokens. Every Le Mil's corpus row is one or two
- * sentences, far under that, so one chunk per row — the two agree on this
- * corpus and would not on a corpus with long entries.
+ * Divergence, stated rather than buried: the export carries only
+ * `id, source_type, content` — no `tags`, `confidence_score` or
+ * `created_at`. Defaults below mean no row is excluded as `anti_pattern`
+ * (zero exist in production) and the recency sort collapses to the id
+ * tiebreak, which is deterministic across runs, the property this harness
+ * actually needs.
  */
-async function retrieveVoiceChunks(query: string): Promise<VoiceCorpusChunk[]> {
-  await embedCorpusOnce()
-  const q = await embedText(query, 'query')
-  if (!q.ok) throw new Error(`embedText failed for query: ${q.error}`)
-
-  const scored = LE_MILS.corpus.map((entry) => {
-    const embedding = corpusEmbeddings.get(entry.id)
-    if (!embedding)
-      throw new Error(`missing embedding for corpus row ${entry.id}`)
-    return { entry, similarity: cosineSimilarity(q.data.embedding, embedding) }
-  })
-
-  const survivors = scored
-    .filter((s) => s.similarity >= SIMILARITY_FLOOR)
-    .sort((a, b) => b.similarity - a.similarity)
-    .slice(0, CORPUS_RETRIEVE_LIMIT)
-
-  // The inbound path fails CLOSED below MIN_STRONG_MATCHES — reproduce it, so
-  // a thin retrieval surfaces as a loud stop rather than a quietly
-  // voice-less prompt that still generates.
-  const strongCount = survivors.filter(
-    (s) => s.similarity >= STRONG_MATCH_SIMILARITY,
-  ).length
-  if (strongCount < MIN_STRONG_MATCHES) {
-    throw new Error(
-      `insufficient_corpus_matches (got ${strongCount} above ${STRONG_MATCH_SIMILARITY}, need ${MIN_STRONG_MATCHES})`,
-    )
-  }
-
-  // Same mapping stages.ts:730 applies: lib/rag's open `sourceType` string
-  // cast to lib/ai's closed union, cosine `similarity` -> `relevanceScore`.
-  return survivors.map((s) => ({
-    id: s.entry.id,
-    text: s.entry.content,
-    sourceType: s.entry.source_type as VoiceCorpusChunk['sourceType'],
-    relevanceScore: s.similarity,
+function buildVoicePack(): VoiceCorpusChunk[] {
+  const pack = selectVoicePack(
+    LE_MILS.corpus.map((entry) => ({
+      id: entry.id,
+      content: entry.content,
+      source_type: entry.source_type,
+      confidence_score: null,
+      tags: [],
+      created_at: LE_MILS.exportedAt,
+    })),
+  )
+  // Same mapping stages.ts applies: lib/rag's open `sourceType` string cast
+  // to lib/ai's closed union, pack `similarity` (constant 1) -> `relevanceScore`.
+  return pack.map((c) => ({
+    id: c.id,
+    text: c.text,
+    sourceType: c.sourceType as VoiceCorpusChunk['sourceType'],
+    relevanceScore: c.similarity,
   }))
 }
 
@@ -565,19 +515,16 @@ async function runVariant(
   variant: Variant,
   n: number,
 ): Promise<GenerationOutcome[]> {
-  // Retrieved once per variant, not once per attempt: the query is the
-  // variant's inbound body and the corpus is fixed, so production would
-  // return the same 8 chunks on every one of these attempts too. Printing
-  // them makes the run auditable — which voice examples the model saw is
-  // part of what a later "after" run has to match.
-  const ragChunks = await retrieveVoiceChunks(variant.currentMessage)
+  // The voice pack is static (decision 0008): identical for every variant
+  // and attempt, exactly as production now behaves. Printing it makes the
+  // run auditable — which voice examples the model saw is part of what a
+  // later "after" run has to match.
+  const ragChunks = buildVoicePack()
   console.log(
-    `  retrieved ${ragChunks.length} voice chunks (cosine, floor ${SIMILARITY_FLOOR}, limit ${CORPUS_RETRIEVE_LIMIT}):`,
+    `  voice pack: ${ragChunks.length} entries (static, selectVoicePack ordering):`,
   )
   for (const c of ragChunks) {
-    console.log(
-      `    ${(c.relevanceScore ?? 0).toFixed(4)} [${c.sourceType}] ${JSON.stringify(c.text.slice(0, 90))}`,
-    )
+    console.log(`    [${c.sourceType}] ${JSON.stringify(c.text.slice(0, 90))}`)
   }
 
   const outcomes: GenerationOutcome[] = []

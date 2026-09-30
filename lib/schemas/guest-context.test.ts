@@ -422,3 +422,65 @@ describe('isEmptyGuestContext', () => {
     ).toBe(false)
   })
 })
+
+// TAC-558: the guest's own account of their history at this venue. Free-form,
+// on guest_details, and the field that closes are_they_new_here.
+describe('history_here (TAC-558)', () => {
+  it('parses on the persisted shape', () => {
+    const parsed = GuestContextSchema.parse({
+      guest_details: { history_here: 'been coming a couple of years' },
+    })
+    expect(parsed.guest_details?.history_here).toBe(
+      'been coming a couple of years',
+    )
+  })
+
+  it('parses on the patch shape the agent emits', () => {
+    const parsed = GuestContextPatchSchema.parse({
+      guest_details: { history_here: 'first time in' },
+    })
+    expect(parsed.guest_details?.history_here).toBe('first time in')
+  })
+
+  // A row written before this field existed must stay valid and read as absent,
+  // rather than parsing to '' and closing the intention on nothing.
+  it('is absent, not empty, on a row that predates it', () => {
+    const parsed = GuestContextSchema.parse({
+      guest_details: { first_name: 'Sarah' },
+    })
+    expect(parsed.guest_details?.history_here).toBeUndefined()
+  })
+
+  it('survives toParsedGuestContext', () => {
+    const out = toParsedGuestContext(
+      { guest_details: { history_here: '  been coming for months  ' } },
+      new Date('2026-09-29T12:00:00Z'),
+    )
+    expect(out.guest_details?.history_here).toBe('been coming for months')
+  })
+
+  // BLANK IS ABSENT. A whitespace-only value would otherwise render a bare
+  // "History here:" label AND close are_they_new_here on nothing - the intention
+  // reads this through buildSatisfactionFacts, which trims for the same reason.
+  it.each(['', '   ', '\n'])(
+    'treats a blank value (%j) as absent rather than rendering a bare label',
+    (blank) => {
+      const out = toParsedGuestContext(
+        { guest_details: { history_here: blank } },
+        new Date('2026-09-29T12:00:00Z'),
+      )
+      expect(out.guest_details).toBeUndefined()
+    },
+  )
+
+  // It is a renderable field in its own right, so a guest whose ONLY detail is
+  // this must not have the whole guest_details object dropped.
+  it('keeps guest_details when it is the only field present', () => {
+    const out = toParsedGuestContext(
+      { guest_details: { history_here: 'first time today' } },
+      new Date('2026-09-29T12:00:00Z'),
+    )
+    expect(out.guest_details?.history_here).toBe('first time today')
+    expect(isEmptyGuestContext(out)).toBe(false)
+  })
+})

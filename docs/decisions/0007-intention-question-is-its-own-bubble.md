@@ -6,7 +6,14 @@
 ## Decision
 
 A question raised from the `## What you're hoping to get to` block - name, local, rhythm,
-any of the seven - **always goes out as its own message, after the answer**.
+any of the seven - **goes out as its own message, after the answer, whenever it goes out at
+all**.
+
+> **Amended by TAC-567 (2026-09-30).** This said "always goes out as its own message". That
+> is still true of every question that is SENT, which is what this decision is about, but a
+> second gate now decides whether one is sent: on a turn whose reply already asks something,
+> `composeReplyWithIntention` drops the question so the guest never gets two in one turn. See
+> the amendment note below the next paragraph.
 
 The model emits it in `intentionQuestion`, a required string on
 `GeneratedMessageSchema`, separate from the reply. `composeReplyWithIntention` then **joins
@@ -15,7 +22,16 @@ alongside as its exact tail. `resolveDispatchBubbles(body, rng, tail)` peels it 
 final bubble. `intentionTailFor(question, renderedCount)` is the one gate, and both dispatch
 arms call it.
 
-Whether to ask is untouched: that stays entirely the intentions block's call.
+Whether to ask was untouched by THIS decision: it stayed entirely the intentions block's
+call.
+
+> **Amended by TAC-567.** No longer true as an absolute. `composeReplyWithIntention` now drops
+> the question when the reply already asks one ("never two questions in one turn", ruled
+> 2026-09-30), so there are TWO gates in sequence: the intentions block decides whether to
+> raise, and the compose seam can still veto it for that turn. The veto writes nothing and
+> closes nothing, so the intention comes back open on the next turn. It is reported through
+> `intentionQuestionDroppedForBodyQuestion`, and `intentionTailFor` remains the one gate on
+> the DISPATCH side, which is what the paragraph above is about.
 
 ## Why
 
@@ -50,11 +66,14 @@ two strings makes it true by construction.
 ### Why it cannot split mid-sentence or emit an empty bubble
 
 The boundary is never found in text - it is the join between two separately generated
-strings, so the answer and the question were never one sentence. Four guards cover emptiness:
+strings, so the answer and the question were never one sentence. Five guards cover emptiness:
 `''` on a non-asking turn makes the mechanism inert; a tail that trims empty or carries no
 letter or digit is dropped (reachable - `replaceDashes` refuses a substitution that would
 empty a non-empty string, so a field of only an em dash survives as `"—"`); an empty answer
-sends the question alone; and `collapseToSingleMessage` trims both sides.
+sends the question alone; `collapseToSingleMessage` trims both sides; and (TAC-567) a reply
+that already asks a question drops the tail, which is the one condition that normalizes a
+NON-empty field to `''`. The empty-answer branch runs first, so a question-only reply is still
+sent as the question rather than as nothing.
 
 ## What breaks if reversed
 

@@ -281,6 +281,27 @@ export const GeneratedMessageSchema = z.object({
   // through v1.17.0 the id was missing from the block, the model reached for
   // the code instead, and every arrival capture no-op'd.
   cancelsCommitmentId: z.string(),
+  // TAC-560: did THIS reply close the guest's first conversation, in the way the
+  // venue's own voice rules describe (the line is open, here is what you can
+  // message us about anytime)?
+  //
+  // A BARE REQUIRED BOOLEAN, for the reason knowledgeGap is: Anthropic counts
+  // only optionals against the 24-property cap, this schema sits at exactly 20
+  // against a repo budget of 22 (lib/ai/schema-budget.test.ts), and a required
+  // field costs nothing there.
+  //
+  // WHAT IT IS FOR. The close is once per guest EVER, from either path, and the
+  // timer needs to know the in-conversation close already went out. Nothing
+  // structural marks that turn: it is an ordinary reply to "thanks!", stored
+  // under whatever the classifier picked. So the model reports it, and
+  // handle-inbound.ts writes guests.warm_close_sent_at post-dispatch.
+  //
+  // SELF-REPORT IS NOT TRUSTED ALONE, on this repo's own record (TAC-350: 8 of 8
+  // fabrications self-reported clean). The timer carries an independent belt: a
+  // last inbound that classified `acknowledgment` IS the sign-off turn, so it
+  // stands down whatever this field said. Both signals point the same way, and
+  // over-marking (no close) is the cheaper mistake than under-marking (two).
+  closedTheConversation: z.boolean(),
   // TAC-554: the getting-to-know-you question this reply is asking, alone, and
   // NOT in `body`. Empty string on every turn that is not asking one, which is
   // most turns.
@@ -377,7 +398,12 @@ export function stripTrailingDuplicate(
 export function composeReplyWithIntention(
   rawBody: string,
   rawQuestion: string,
-): { body: string; intentionQuestion: string; duplicateStripped: boolean } {
+): {
+  body: string
+  intentionQuestion: string
+  duplicateStripped: boolean
+  droppedForBodyQuestion: boolean
+} {
   const answerIn = replaceDashes(rawBody)
   const question = replaceDashes(rawQuestion)
 
@@ -386,7 +412,12 @@ export function composeReplyWithIntention(
   // reader has to think about it. This is also where replaceDashes' refusal
   // case lands: a field containing only an em dash comes back as "—".
   if (question.trim() === '' || !hasRenderableContent(question)) {
-    return { body: answerIn, intentionQuestion: '', duplicateStripped: false }
+    return {
+      body: answerIn,
+      intentionQuestion: '',
+      duplicateStripped: false,
+      droppedForBodyQuestion: false,
+    }
   }
 
   const answer = stripTrailingDuplicate(answerIn, question)
@@ -395,13 +426,61 @@ export function composeReplyWithIntention(
   // The model put the whole reply in the field, or the answer was nothing but
   // a repeat of the question. One message, which is the question.
   if (answer.trim() === '') {
-    return { body: question, intentionQuestion: question, duplicateStripped }
+    return {
+      body: question,
+      intentionQuestion: question,
+      duplicateStripped,
+      droppedForBodyQuestion: false,
+    }
+  }
+
+  // TAC-567, ruled 2026-09-30: NEVER TWO QUESTIONS IN ONE TURN. The reply keeps
+  // its own question and the intention bubble is dropped, which is the
+  // direction the ruling names ("no intention bubble is added that turn").
+  //
+  // On device a first-visit turn read "that's a good one to start with 🌸 how'd
+  // you like it?" and then, as its own bubble, "by the way, what's your name?".
+  // Two questions for a guest to answer in one turn, and the prompt cannot
+  // reliably prevent it: the same lesson as TAC-554's, one layer on. So this is
+  // structural, at the one seam where the two halves meet.
+  //
+  // THE DETECTOR IS A BARE QUESTION MARK IN THE ANSWER, not looksLikeQuestion.
+  // This reads OUR OWN outbound, where the venue's copy always punctuates
+  // ("never drop a question mark"), so recall is near-total on this population
+  // and the wider detector would only add false positives. See the recall
+  // argument recorded on weAskedAQuestion in lib/agent/warm-close.ts, which
+  // widens for the opposite reason on the opposite population.
+  //
+  // A FALSE POSITIVE COSTS ONE TURN, NOT THE INTENTION. Nothing is written here,
+  // and the post-send classifier reads the sent body, which now carries no
+  // getting-to-know-you question, so the intention is not recorded as raised and
+  // comes back open on the next turn. The failure direction is a question asked
+  // later, never a question asked twice.
+  //
+  // ONE EXCEPTION, and it is pre-existing policy rather than something this gate
+  // introduces: when classifyIntentionPrompts fails twice, recording closes
+  // everything renderableIntentions offered it, pessimistically (TAC-380 ruling
+  // 4, see record.ts). On a turn where this gate fired, the dropped question's
+  // intention is in that set and closes having never been asked. The gate does
+  // enlarge the population of turns where the block rendered and nothing was
+  // asked, so it enlarges the exposure; it does not change the rule.
+  //
+  // Downstream needs nothing: intentionQuestion is '' so intentionTailFor
+  // returns '' on both dispatch arms, exactly as on a turn that asked nothing.
+  if (answer.includes('?')) {
+    return {
+      body: answer,
+      intentionQuestion: '',
+      duplicateStripped,
+      droppedForBodyQuestion: true,
+    }
   }
 
   return {
     body: `${answer} ${question}`,
     intentionQuestion: question,
     duplicateStripped,
+    droppedForBodyQuestion: false,
   }
 }
 
@@ -483,6 +562,7 @@ export async function generateMessage(
       arrivalCapture: z.infer<typeof ArrivalCaptureEmissionSchema>
       cancelsCommitmentId: string
       intentionQuestion: string
+      closedTheConversation: boolean
     } | null = null
     const attemptScores: number[] = []
     const attemptHistory: GenerateMessageAttempt[] = []
@@ -518,10 +598,27 @@ export async function generateMessage(
     // same prefix shows up as two reads rather than being averaged away.
     let cacheReadTokens = 0
     let cacheWriteTokens = 0
+    // THE SAME SUMMING, for the buckets Langfuse prices natively. Summed rather
+    // than last-attempt because a retry is a second Sonnet call that was really
+    // paid for: 12.6% of generations run one (measured 2026-09-29) and reporting
+    // only the final attempt would hide that cost entirely.
+    //
+    // uncachedInputTokens is kept separate from cacheRead/cacheWrite because
+    // Langfuse's input buckets are DISJOINT and it sums them for cost - see
+    // AgentUsage in lib/observability/langfuse.ts. Do not add them together here.
+    let uncachedInputTokens = 0
+    let outputTokens = 0
+    // The model the provider actually served, last attempt wins. Every attempt in
+    // one call uses the same model, so last-wins and first-wins agree; reading it
+    // from the response rather than from getGenerationModel() is what makes a
+    // provider-side alias change visible instead of silently mis-attributed.
+    let servedModelId: string | undefined
     // TAC-554: whether the duplicate guard fired on the attempt that shipped.
     // Assigned per attempt alongside lastResult, so it describes the same
     // attempt the body came from rather than any earlier one.
     let duplicateStripped = false
+    // TAC-567: whether the two-question gate fired on the shipped attempt.
+    let droppedForBodyQuestion = false
     // Order-preserving and deduped, so a link flagged on attempt 1 is still
     // named on attempt 3 alongside anything new attempt 2 invented.
     const unverifiedUrlsSeen: string[] = []
@@ -535,6 +632,7 @@ export async function generateMessage(
         object: rawObject,
         usage,
         providerMetadata,
+        response,
       } = await generateObject({
         model: getGenerationModel(),
         // Two adjacent system messages, not one `system` string: the provider
@@ -596,6 +694,12 @@ export async function generateMessage(
       cacheWriteTokens +=
         (providerMetadata?.anthropic?.cacheCreationInputTokens as
           number | null | undefined) ?? 0
+      // inputTokens is the SDK's TOTAL (noCache + cacheRead + cacheWrite), so the
+      // uncached portion comes off inputTokenDetails. Subtracting here instead
+      // would double-bill every cached token once this reaches Langfuse.
+      uncachedInputTokens += usage?.inputTokenDetails?.noCacheTokens ?? 0
+      outputTokens += usage?.outputTokens ?? 0
+      servedModelId = response?.modelId ?? servedModelId
       // Dashes are substituted, never regenerated. Done HERE rather than at
       // return so every downstream read — the break condition below, the
       // attempt history, the shipped body — sees one body, and so a dash can
@@ -614,6 +718,14 @@ export async function generateMessage(
           '[ai] generateMessage: stripped a duplicated intention question from the answer',
         )
       }
+      // TAC-567: logged, not silent. The gate edits guest-facing text by
+      // removing a question the model meant to ask, and a guard nobody can count
+      // is how comp_regex_backstop came to look like it was working.
+      if (composed.droppedForBodyQuestion) {
+        console.warn(
+          '[ai] generateMessage: dropped the intention question, the reply already asked one',
+        )
+      }
       const object = {
         ...rawObject,
         body: composed.body,
@@ -621,6 +733,7 @@ export async function generateMessage(
       }
       lastResult = object
       duplicateStripped = composed.duplicateStripped
+      droppedForBodyQuestion = composed.droppedForBodyQuestion
       attemptScores.push(object.voiceFidelity)
       attemptHistory.push({
         body: object.body,
@@ -635,6 +748,7 @@ export async function generateMessage(
         arrivalCapture: object.arrivalCapture,
         cancelsCommitmentId: object.cancelsCommitmentId,
         intentionQuestion: object.intentionQuestion,
+        closedTheConversation: object.closedTheConversation,
         userPromptOverride:
           userPromptForAttempt !== userPrompt
             ? userPromptForAttempt
@@ -705,6 +819,11 @@ export async function generateMessage(
         // SAID back (TAC-296 precedent).
         arrivalCapture: lastResult.arrivalCapture,
         cancelsCommitmentId: lastResult.cancelsCommitmentId,
+        // TAC-560: did this reply close the guest's first conversation? The
+        // in-conversation half of a once-per-guest-ever marker; handle-inbound.ts
+        // writes guests.warm_close_sent_at post-dispatch when it is true, so the
+        // pause timer never sends a second close.
+        closedTheConversation: lastResult.closedTheConversation,
         // TAC-554: the exact tail of `body`. Dispatch splits there so the
         // question goes out as its own last message. '' means this turn asked
         // nothing, and dispatch then behaves exactly as it did before.
@@ -713,6 +832,10 @@ export async function generateMessage(
         // the guard is countable — it edits guest-facing text, and that was
         // approved on the condition it is reported rather than silent.
         intentionQuestionDuplicateStripped: duplicateStripped,
+        // TAC-567: whether the two-question gate dropped this turn's bubble.
+        // Carried for the same reason as the line above: it edits guest-facing
+        // text, so its firing rate has to be countable rather than inferred.
+        intentionQuestionDroppedForBodyQuestion: droppedForBodyQuestion,
         attempts,
         attemptScores,
         attemptHistory,
@@ -724,6 +847,27 @@ export async function generateMessage(
         promptVersion: PROMPT_VERSION,
         cacheReadTokens,
         cacheWriteTokens,
+        // The same three cache/input numbers again, in the shape toAgentUsage
+        // consumes, so the orchestrator can price the `generate` generation
+        // without reassembling them. cacheReadTokens/cacheWriteTokens above stay
+        // because the prompt-cache accounting in the span's output object is
+        // documented and queried; these two representations must agree, and
+        // generate-message.test.ts asserts they do.
+        modelId: servedModelId,
+        usage: {
+          inputTokens: uncachedInputTokens + cacheReadTokens + cacheWriteTokens,
+          outputTokens,
+          totalTokens:
+            uncachedInputTokens +
+            cacheReadTokens +
+            cacheWriteTokens +
+            outputTokens,
+          cachedInputTokens: cacheReadTokens,
+          inputTokenDetails: {
+            noCacheTokens: uncachedInputTokens,
+            cacheWriteTokens,
+          },
+        },
         // THE-225: recompute on the final shipped body rather than threading
         // loop state. Equivalent and lets us drop the variable.
         //

@@ -1,4 +1,5 @@
-export { retrieveContext, retrieveKnowledgeContext } from './retrieve'
+export { retrieveKnowledgeContext } from './retrieve'
+export { loadVoicePack, selectVoicePack } from './voice-pack'
 export { ingestCorpusEntry, ingestKnowledgeCorpusEntry } from './ingest'
 export { embedText } from './embed'
 
@@ -8,7 +9,6 @@ export type {
   IngestResult,
   KnowledgeCorpusChunk,
   RAGResult,
-  RetrieveContextInput,
   RetrieveKnowledgeContextInput,
   VoiceCorpusChunk,
 } from './types'

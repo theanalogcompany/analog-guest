@@ -120,6 +120,47 @@ block-order test is the only thing that catches a move past it.
   at a venue whose prompt said "not in every text".
 - **`sparingly` is empirically identical to `never`** (0 of 188 measured). Recorded, not
   fixed.
+- **Recognising a regular's usual order lives in R21 and R23, not in a category block and
+  not behind a counter signal.** A guest with cortado on 4 of 5 visits typed "just got a
+  cortado" and got "nice". The classifier is a coin flip on one word ("just got a X" is
+  `casual_chatter`, "got a X" is `acknowledgment`, 4 of 4 each), both categories are silent
+  on recognition, and a new one needs `messages_category_check` widened. R21 already had the
+  exact trigger. **R23's carve-out looks redundant and is not:** R23 renders after R21, so on
+  most-proximate-wins it beats the recognition clause, and its own "you come in so often"
+  example pulls the model the other way. Delete it and the change is silently vetoed. Not
+  counter-scoped: `scanArrival` is set only on the five-minute greeting cron, and TAC-536's
+  carry-forward reaches `visitConfirmedAt`, which goes to intention arming and never to the
+  prompt. Full reasoning is the v1.75.0 header in `system-template.ts`.
+- **SHIPPED UNDER ITS BAR, on a reading of the bodies rather than a rate** (ruled
+  2026-09-30, four runs). Recognition 0/20 and 4/20 control to 15/20 and 16/20 treatment,
+  bare labels 15/20 to 0/20: that is the deliverable. The warm half scored 9, 7, 7 against a
+  bar of 18. Recorded plainly because **no passing metric covers this rule**, so a later
+  regression here will not announce itself.
+- **THE WARMTH JUDGE UNDER-COUNTS, compositionally rather than by degree.** Jaipal read 8 of
+  20 run-4 replies as warm (freq-01, 02, 03, 08, 10, 12, 17, 19) against the judge's 7, and
+  the sets **overlap on only four**. It misses a whole shape: warmth as being glad about
+  something the guest did ("glad it's yours", "glad you're keeping it going"), which is what
+  the ruling asked for. 7/20 is a floor on a dimension it reads unreliably. **Do not
+  re-measure this dimension without fixing that** — same weakness as the item-versus-pick
+  pass that already landed, one axis over.
+- **Three prohibitions each DISPLACED a phrase instead of supplying warmth**: the bare-label
+  ban produced "your usual" at 43%, the well-wish ban produced "that one keeps ..." at 55%,
+  the widened length guide produced "coming back to" at 40%. TAC-334's and TAC-525's shape.
+  **Do not add a fourth without new evidence.**
+- **The length guide was NOT the constraint, measured not argued.** Widening Le Mil's
+  `lengthGuide` to ask for two sentences moved median replies 11 words to 15 and moved the
+  warm half not at all. Counting CLAUSES settled it: **10 of 11 misses carried two**, so the
+  model had the room and spent it on a well-wish or an item detail. **Do not count clauses
+  with `splitIntoSentences`** — TAC-319's dispatch splitter needs a capitalised opener, so at
+  a lowercase venue it returns 1 for every reply and is blind to the question. The guide was
+  ruled to stay widened.
+- **FOLLOW-UP, NOT FIXED: the count ban against that widened guide.** It was 0/20 at 11
+  median words and took one genuine breach at 15 ("three times and counting"), accepted for
+  now, so **the ban ships measured at 1/20**. The two were measured separately and interact.
+- **A persona change contaminates the control arm.** The widened guide instructs recognition
+  itself, so the control (R21 and R23 sliced out) went 0/20 to 4/20 on recognition and
+  warmth, and produced a count of its own. Runs either side of such a change are not a
+  single-variable comparison; arms within one run stay clean, both reading the same persona.
 
 ---
 

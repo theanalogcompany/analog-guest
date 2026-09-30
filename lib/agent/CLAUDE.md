@@ -27,8 +27,9 @@ id **before** `generateStage` sees it.
 
 ## Stage pipeline
 
-`context_build` -> `classify` -> `retrieve` -> `retrieve_knowledge` -> `generate` ->
-post-generation checks -> `send`.
+Inbound: `context_build` -> `classify` -> `retrieve` -> `retrieve_knowledge` ->
+`generate` -> gate -> `send` -> post-generation checks (post-send, decision 0003).
+Followups keep the checks between `generate` and the gate.
 
 `retrieveKnowledgeStage(ctx, category, query)` takes its query **explicitly**. There is no
 fallback and none may be added: a derived query is the defect that made every proactive
@@ -65,9 +66,10 @@ off-topic) and fall inside `ctx.conversationWindowMs` - hoisted onto `RuntimeCon
 than re-derived, because TAC-380 ruling 1 made that the one definition of "the same
 conversation".
 
-**Voice retrieval is deliberately unchanged.** Voice corpus is style, not fact, and
-`retrieveCorpusStage` fails CLOSED on inbound - moving its query could trip
-`insufficient_corpus_matches`, which throws and leaves the guest with no reply at all.
+**Voice is a static per-venue pack, not a retrieval** (decision 0008).
+`retrieveCorpusStage` loads the same pack for every message via `lib/rag/voice-pack.ts` -
+no query, no embedding, no similarity. Fails CLOSED on inbound (empty pack or load
+failure throws); followups proceed with whatever loaded.
 
 `lib/voices/regenerate-with-critique.ts` now **calls this stage** rather than reimplementing
 retrieval, which deletes a duplication that had already drifted once. Its contextual arm works
@@ -90,17 +92,18 @@ else as stale.
 | --- | --- | --- |
 | `SEND_FIDELITY_FLOOR` | 0.4 | below this the draft is refused outright, red alert, nothing persisted |
 | `AUTO_SEND_FIDELITY_FLOOR` | 0.6 | 0.4 to 0.6 queues for review |
-| `STRONG_MATCH_SIMILARITY` / `MIN_STRONG_MATCHES` | 0.3 / 1 | voice retrieval fails **closed** on inbound |
 | `KNOWLEDGE_RELEVANCE_FLOOR` | 0.3 | knowledge retrieval degrades **gracefully** |
-| `CORPUS_RETRIEVE_LIMIT` / `KNOWLEDGE_RETRIEVE_LIMIT` | 8 / 4 | |
+| `KNOWLEDGE_RETRIEVE_LIMIT` | 4 | |
+| `VOICE_PACK_MAX_ENTRIES` / `VOICE_PACK_CHAR_BUDGET` (`lib/rag/voice-pack.ts`) | 80 / 12,000 | growth ceilings; every live corpus fits whole today |
 | `KNOWLEDGE_GAP_WINDOW_MS` | 5 min | the only clock any trigger arms |
-| `COALESCE_SETTLE_MS` (`coalesce-turn.ts`) | 3 s | burst settle before claiming |
+| `COALESCE_SETTLE_MS` (`coalesce-turn.ts`) | 0 | settle before claiming; zero since the 2026-09 coalesce-window run, kept as the rollback lever |
 | `CLAIM_LEASE_MS` / `MAX_TURN_EXTENSIONS` / `MAX_TURN_RETRIES` | 120 s / 2 / 1 | |
 | `MAX_BUBBLES_PER_RESPONSE` / `INTER_BUBBLE_GAP_MS` (`split-message.ts`) | 3 / 1500 ms | |
 | `SPLIT_PROBABILITY` (`sentence-split.ts`) | 0.5 | the one splitting knob |
 
-The failure asymmetry is deliberate: voice failure breaks the thing we sell, so it fails
-closed; knowledge failure just means a less specific reply.
+The failure asymmetry is deliberate: voice failure (an unloadable or empty pack) breaks the
+thing we sell, so it fails closed on inbound; knowledge failure just means a less specific
+reply.
 
 ## Approval gates
 
@@ -131,17 +134,26 @@ about it, which beats **venue-wide policy**.
 `triggers[0]`, so a single-trigger assertion passes against a ranking that does not exist.
 Co-fire something the trigger under test must beat.
 
-### Post-generation checks all fail CLOSED
+### Post-generation checks: post-send on inbound, fail CLOSED on the pre-send paths
 
 `verify_grounding`, `verify_mechanic_offer`, `verify_prose_promise`,
-`verify_cancellation_claim`, `verify_closed_venue_arrival`: one immediate retry on a
-transient fault, then hold. Truncation is never retried - the fix is the cap.
-**Treat a proposal to loosen any one of them as a change to all five.** They run under
-`Promise.allSettled` so one fault cannot discard another's finding.
+`verify_cancellation_claim`, `verify_closed_venue_arrival`. Decision 0003 (rewritten
+2026-09-29) split the posture by path:
+
+- **Inbound**: the five run AFTER dispatch in `post-send-checks.ts` (waitUntil, never
+  throws, `disposition: 'sent'` on every capture so Slack says the reply already went out).
+  The gate receives the neutral values; only the deterministic triggers hold a draft. A
+  queued/dropped/silenced turn runs no checks.
+- **Followups and the holding message**: unchanged - pre-send, one immediate retry on a
+  transient fault, then hold. Truncation is never retried; the fix is the cap.
+
+**Treat a posture change to any one of them as a change to all five.** Both batches run
+under `Promise.allSettled` so one fault cannot discard another's finding.
 
 `checkDidNotComplete` (not `isGapTurn`) is what exempts an incomplete check from the
 protected-card drop. The two are separate expressions and a new check must be added to
-both, or a guest already holding a card gets silence.
+both, or a guest already holding a card gets silence. Both matter only where the checks
+still run pre-send.
 
 ### Two pending slots per guest
 
@@ -208,13 +220,47 @@ so a halted venue never accumulates recognition state or takes a claim.
 
 ## Intentions
 
-`intentions/`. Seven keys in `definitions.ts`, priority-ordered, arming on
-`visit_confirmed` / `open_recommendation` / `recorded_order` / `first_contact`.
+`intentions/`. Eight keys in `definitions.ts`, priority-ordered, arming on
+`visit_confirmed` / `first_recorded_order` / `open_recommendation` / `recorded_order` /
+`first_contact`.
+
+`first_recorded_order` and `recorded_order` are one word apart and opposite:
+`recorded_order` takes the NEWEST order and HOLDS it until the order has left the
+conversation it happened in ("did you try it?" a minute later is absurd), while
+`first_recorded_order` takes the EARLIEST and holds nothing, because the question it arms
+(`are_they_new_here`) is about the guest rather than the order and the counter session is
+the only moment it fits.
+
+`are_they_new_here` and `understand_order` can never be open on one turn: the first arms
+only once a transaction exists, and a transaction satisfies the second. That is why its
+priority is 15 rather than 5 - a test asserting it wins that race could never fail.
 
 Two predicates must move together: `shouldRenderOpenIntentions` (render side) and
 `renderableIntentions` (record side). Suppressing on one only means the post-send
 classifier is offered intentions the prompt never showed, which closes goals the guest
 never saw. A cross-module test iterates every category for exactly this.
+
+### A first conversation asks three things only (TAC-567)
+
+On a guest's FIRST conversation only `understand_order`, `learn_name` and
+`are_they_new_here` may be raised. The other five are suppressed. Ruled 2026-09-30 after a
+fresh scan asked four questions across three messages.
+
+`allowedOnFirstConversation` on the definition is the one declaration, so a new intention must
+answer it or fail `tsc`; nothing in `derive.ts` branches on a key. "First conversation" is
+TAC-560's `isFirstConversation` (`warm-close.ts`), resolved once in `build-runtime-context`
+against the same `conversationWindowMs` the brake reads, anchored on
+`first_contacted_at ?? created_at`, and carried on `RuntimeContext.firstConversation`.
+
+**`deriveOpenIntentions` applies it TWICE and neither is redundant.** The arming loop skips a
+suppressed intention, so no `eligible_at` row is written and its window does not start ticking
+on a question nobody may ask. The open-set filter is the actual guarantee: first-contact
+eligibility is STICKY, so a row already on file is never re-gated and only the filter can stop
+it rendering. `derive.test.ts` kills each half with its own test.
+
+The prompt half is a restraint paragraph the serializer renders into the intentions block when
+`firstConversation` is true. It rides that block, so it does not render on a first-conversation
+turn where nothing is open - stated at the constant, not discovered.
 
 `understand_order` must not arm off `guests.last_visit_at` - every writer of that column
 runs downstream of a transaction, and a transaction satisfies the intention. There is a
@@ -229,10 +275,18 @@ reads the question. The field rides along as the exact TAIL of the body - true b
 construction, because we did the joining - and `resolveDispatchBubbles(body, rng, tail)`
 peels it off as the final bubble.
 
-`intentionTailFor(question, renderedCount)` is the ONE gate, called by both dispatch arms.
-A question only bubbles when the intentions block actually rendered, which is
-`renderableIntentions` above. Two copies of that decision is the drift this directory
+`intentionTailFor(question, renderedCount)` is the ONE gate ON THE DISPATCH SIDE, called by
+both dispatch arms. A question only bubbles when the intentions block actually rendered, which
+is `renderableIntentions` above. Two copies of that decision is the drift this directory
 already pays for.
+
+**TAC-567 added a SECOND gate, upstream of it**: `composeReplyWithIntention` drops the
+question when the reply already asks one, so no turn ever sends two questions. It normalizes
+`intentionQuestion` to `''`, which is why `intentionTailFor` still needs no knowledge of it.
+The veto writes nothing and closes nothing, so the intention comes back open next turn; its
+firing rate rides on `intentionQuestionDroppedForBodyQuestion` because a guard nobody can
+count is how `comp_regex_backstop` became an illusion. Detector is a bare `?` in the answer:
+this reads our own outbound, where the copy always punctuates.
 
 **`''` is byte-identical to the pre-TAC-554 path**, asserted as an equivalence rather than
 by restating expected bubbles. The answer's own cap drops to `MAX_BUBBLES_PER_RESPONSE - 1`
@@ -244,6 +298,13 @@ the message in front of it - and only when a bubble is over 1000 bytes, so it is
 conditional regression nothing notices.
 
 Prompt wording cannot reach any of this: see `docs/decisions/0007-intention-question-is-its-own-bubble.md`.
+
+## Proactive sends (TAC-386)
+
+Three paths reach a guest with no inbound behind them: the scan greeting (TAC-536), the warm
+close (TAC-560), the inquiry follow-up (TAC-386, `lib/followups/`). **No two within 60
+minutes**, via `proactive-spacing.ts` and `guests.last_proactive_send_at`. A follow-up is NOT
+a warm-close anchor, excluded inside `loadWarmCloseCandidates`. Reasons in those headers.
 
 ## Other rules that bite
 

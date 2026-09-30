@@ -186,6 +186,10 @@ because this repo is public. **Never commit a delivery's signature beside its bo
 fixtures from logs by script, never by hand - a hand transcription put a postback's `mid`
 outside `postback` instead of inside it.
 
+**Two guards, and a new reader usually trips both.** `window-import-guard.test.ts`
+allow-lists importers of `window.ts`; `handle-events.test.ts` keeps a SEPARATE mention list
+for `provider_sent_at`.
+
 ---
 
 Root `CLAUDE.md` is the index for the whole repo, `docs/decisions/README.md` holds the
