@@ -3704,38 +3704,10 @@ describe('TAC-540 — the prediction that decides whether dots appear at all', (
   })
 
   /**
-   * The ticket's own closed-venue clause. `isVenueClosed` is a POSITIVE
-   * verdict only, so a venue whose hours nobody filled in still gets dots —
-   * which is why the fixture states real hours and a time outside them
-   * rather than leaving `hours` empty.
+   * TAC-540 had a third no-dots case here, a positively closed venue. TAC-565
+   * removed it; the closed venue now has its own describe below, asserting the
+   * opposite.
    */
-  it('shows no dots while the venue is positively closed', async () => {
-    const base = typingCtx()
-    buildRuntimeContextMock.mockResolvedValue(
-      typingCtx({
-        venue: {
-          ...base.venue,
-          timezone: 'America/Los_Angeles',
-          venueInfo: { hours: { monday: '7:00 AM – 3:00 PM' } },
-        },
-        // A Monday, 21:00 in Los Angeles: six hours after close.
-        recognition: {
-          ...base.recognition,
-          computedAt: new Date('2026-09-22T04:00:00.000Z'),
-        },
-      }),
-    )
-    applyApprovalPolicyStageMock.mockResolvedValue({ action: 'send' })
-    generateStageMock.mockResolvedValue({
-      status: 'success',
-      result: successResult(),
-    })
-    instagramSendSucceeds()
-
-    await handleInbound(INBOUND_ID)
-
-    expect(signalTypingMock).not.toHaveBeenCalled()
-  })
 
   /** AC 4, from the orchestrator's side. */
   it('a text conversation never reaches the typing switch at all', async () => {
@@ -3756,6 +3728,102 @@ describe('TAC-540 — the prediction that decides whether dots appear at all', (
     expect(signalTypingMock).not.toHaveBeenCalled()
     // The other half of AC 4: the text arm still runs, untouched.
     expect(scheduleAndSendMock).toHaveBeenCalledTimes(1)
+    expect(dispatchInstagramReplyMock).not.toHaveBeenCalled()
+  })
+})
+
+/**
+ * TAC-565. The dots after hours too.
+ *
+ * `mayAutoSendAfterClassification` is forwarded REAL by this file's `./stages`
+ * factory, so these two run the production predicate over a genuinely closed
+ * venue rather than a stub's opinion of one. The fixture states real hours and
+ * a real time six hours after close: `isVenueClosed` is a POSITIVE verdict, so
+ * an empty-hours venue resolves to `unknown`, reads as open, and would let a
+ * restored closed-venue clause pass unnoticed.
+ *
+ * MUTANT (run before this was reported): putting
+ * `!isVenueClosed(ctx.venue, ctx.recognition.computedAt)` back as the
+ * predicate's return kills both — the first on ['on','on'] vs [], the second
+ * on `flushTyping` never seeing an 'off'.
+ */
+describe('TAC-565 — the dots go on after hours too', () => {
+  /** See the drain in the TAC-540 describe: same reason, same shape. */
+  afterEach(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 10))
+  })
+
+  function closedVenueCtx(overrides: Record<string, unknown> = {}) {
+    const base = typingCtx()
+    return typingCtx({
+      venue: {
+        ...base.venue,
+        timezone: 'America/Los_Angeles',
+        venueInfo: { hours: { monday: '7:00 AM – 3:00 PM' } },
+      },
+      // A Monday, 21:00 in Los Angeles: six hours after close.
+      recognition: {
+        ...base.recognition,
+        computedAt: new Date('2026-09-22T04:00:00.000Z'),
+      },
+      ...overrides,
+    })
+  }
+
+  /**
+   * The ticket's first acceptance criterion. Both sites, like the open-venue
+   * case: after hours is where generation is least likely to be quick and
+   * Meta's 20-second timeout most likely to expire before the send.
+   */
+  it('turns the dots on for an auto-send while the venue is closed', async () => {
+    buildRuntimeContextMock.mockResolvedValue(closedVenueCtx())
+    applyApprovalPolicyStageMock.mockResolvedValue({ action: 'send' })
+    generateStageMock.mockResolvedValue({
+      status: 'success',
+      result: successResult(),
+    })
+    instagramSendSucceeds()
+
+    const r = await handleInbound(INBOUND_ID)
+
+    expect(r).toMatchObject({ status: 'sent' })
+    expect(typingSignals()).toEqual(['on', 'on'])
+    expect(signalTypingMock).toHaveBeenCalledWith(
+      { venueId: VENUE_ID, guestId: GUEST_ID, channel: 'instagram' },
+      'on',
+    )
+  })
+
+  /**
+   * The second acceptance criterion, and the one that makes the first safe to
+   * ship: a closed venue is where a draft is MOST likely to be held (trigger
+   * 17 and the closed-venue-arrival backstop can only fire while closed), so
+   * the correction has to hold here or TAC-565 trades a slow reply for a false
+   * promise. `off` is the last signal and nothing was dispatched.
+   */
+  it('turns them off again when the draft is held while closed, and sends nothing', async () => {
+    buildRuntimeContextMock.mockResolvedValue(closedVenueCtx())
+    generateStageMock.mockResolvedValue({
+      status: 'success',
+      result: successResult(),
+    })
+    applyApprovalPolicyStageMock.mockResolvedValue({
+      action: 'queue',
+      triggers: [APPROVAL_TRIGGERS.CLOSED_VENUE_ARRIVAL_EMITTED],
+      primaryTrigger: APPROVAL_TRIGGERS.CLOSED_VENUE_ARRIVAL_EMITTED,
+      existingPendingDraftId: null,
+    })
+    persistOrRegenQueuedDraftMock.mockResolvedValue({
+      outboundMessageId: 'card-1',
+      action: 'inserted',
+      priorReviewReason: null,
+    })
+
+    const r = await handleInbound(INBOUND_ID)
+    await flushTyping()
+
+    expect(r).toMatchObject({ status: 'queued' })
+    expect(typingSignals()).toEqual(['on', 'on', 'off'])
     expect(dispatchInstagramReplyMock).not.toHaveBeenCalled()
   })
 })
