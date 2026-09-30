@@ -186,29 +186,9 @@ because this repo is public. **Never commit a delivery's signature beside its bo
 fixtures from logs by script, never by hand - a hand transcription put a postback's `mid`
 outside `postback` instead of inside it.
 
-## Who may import the window, and why TAC-386 is the first that must (TAC-386)
-
-`window.ts` is on the outbound allow-list in `window-import-guard.test.ts`, so a new importer
-is a deliberate entry with a reason. Two were added for the inquiry follow-up, and it is the
-first mechanism that genuinely needs the window rather than inheriting it.
-
-TAC-536 and TAC-560 both deliberately **skip** the check, on the argument that they fire
-minutes after something the guest did so the window cannot have shut. That argument does not
-hold for a send three venue-hours later, and up to a day later when the hours roll pushes it
-into the next open period. So:
-
-- `lib/agent/schedule-inquiry-followup.ts` refuses to **arm** a row whose moment would land
-  past the window. Only the scheduler can make that call; dispatch cannot skip something it
-  was never handed.
-- `lib/followups/inquiry-followup-engine.ts` **resolves** a row whose window shut while it
-  waited, rather than spending a model call to learn what the timestamps already say.
-
-`dispatch-instagram-reply.ts` still re-derives the window immediately before every send, so
-neither of these is trusted as the gate.
-
-Both also read `messages.provider_sent_at`, so both are named in the second guard, the
-`provider_sent_at` mention list in `handle-events.test.ts`. **There are two guards, and a new
-Instagram reader usually trips both** - the import allow-list and the column-mention list.
+**Two guards, and a new reader usually trips both.** `window-import-guard.test.ts`
+allow-lists importers of `window.ts`; `handle-events.test.ts` keeps a SEPARATE mention list
+for `provider_sent_at`.
 
 ---
 

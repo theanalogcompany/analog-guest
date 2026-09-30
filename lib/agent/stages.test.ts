@@ -651,7 +651,7 @@ describe('classifyStage — 3-tier confidence routing (v1.11.0)', () => {
         category: 'casual_chatter',
         classifierConfidence: 0.2,
         reasoning: 'ambiguous',
-        promptVersion: 'v1.75.0',
+        promptVersion: 'v1.76.0',
         cacheReadTokens: 0,
         cacheWriteTokens: 0,
         crisisSafety: true,
@@ -673,7 +673,7 @@ describe('classifyStage — 3-tier confidence routing (v1.11.0)', () => {
         category: 'reply',
         classifierConfidence: 0.9,
         reasoning: 'clear',
-        promptVersion: 'v1.75.0',
+        promptVersion: 'v1.76.0',
         cacheReadTokens: 0,
         cacheWriteTokens: 0,
         crisisSafety: false,
@@ -699,7 +699,7 @@ describe('classifyStage — 3-tier confidence routing (v1.11.0)', () => {
         category: 'reply',
         classifierConfidence: 0.9,
         reasoning: 'clear',
-        promptVersion: 'v1.75.0',
+        promptVersion: 'v1.76.0',
         cacheReadTokens: 0,
         cacheWriteTokens: 0,
         crisisSafety: false,
@@ -720,7 +720,7 @@ describe('classifyStage — 3-tier confidence routing (v1.11.0)', () => {
         category: 'reply',
         classifierConfidence: 0.9,
         reasoning: 'clear',
-        promptVersion: 'v1.75.0',
+        promptVersion: 'v1.76.0',
         cacheReadTokens: 0,
         cacheWriteTokens: 0,
         crisisSafety: false,
@@ -742,7 +742,7 @@ describe('classifyStage — 3-tier confidence routing (v1.11.0)', () => {
         category: 'casual_chatter',
         classifierConfidence: 0.2,
         reasoning: 'ambiguous',
-        promptVersion: 'v1.75.0',
+        promptVersion: 'v1.76.0',
         cacheReadTokens: 0,
         cacheWriteTokens: 0,
         crisisSafety: false,
@@ -7031,16 +7031,20 @@ describe('closed-venue arrival (TAC-363)', () => {
 })
 
 /**
- * TAC-540. The prediction behind the typing dots.
+ * TAC-540. The prediction behind the typing dots, as TAC-565 left it.
  *
- * It mirrors gate triggers 6 and 8 plus the ticket's closed-venue clause, so
- * these tests are written against the same inputs those triggers read. What
- * they CANNOT establish is that the prediction is right — most of the gate's
- * triggers need a draft that does not exist when this runs, so a turn can
- * pass this and still queue. `typing_off` is what corrects that, and it is
- * tested in handle-inbound.test.ts.
+ * It mirrors gate triggers 6 and 8, so these tests are written against the
+ * same inputs those triggers read. What they CANNOT establish is that the
+ * prediction is right — most of the gate's triggers need a draft that does
+ * not exist when this runs, so a turn can pass this and still queue.
+ * `typing_off` is what corrects that, and it is tested in
+ * handle-inbound.test.ts.
+ *
+ * TAC-565 removed a third condition, the venue not being positively closed,
+ * so the hours cases below assert the opposite of what they asserted under
+ * TAC-540.
  */
-describe('mayAutoSendAfterClassification (TAC-540)', () => {
+describe('mayAutoSendAfterClassification (TAC-540, TAC-565)', () => {
   function venue(over: Record<string, unknown> = {}) {
     return {
       id: 'venue-1',
@@ -7125,7 +7129,17 @@ describe('mayAutoSendAfterClassification (TAC-540)', () => {
     ).toBe(true)
   })
 
-  it('is false while the venue is positively closed', () => {
+  /**
+   * TAC-565, and the one this file has to pin: real hours, a real time six
+   * hours after close, and the answer is still true. Restoring
+   * `!isVenueClosed(ctx.venue, ctx.recognition.computedAt)` as the return
+   * turns this false — verified by mutant, and it is the only test in this
+   * describe that the mutant breaks, which is why the fixture states hours
+   * rather than leaving them empty. An empty-hours venue resolves to
+   * `unknown`, which `isVenueClosed` calls open, so the mutant would survive
+   * it.
+   */
+  it('is true while the venue is positively closed', () => {
     expect(
       mayAutoSendAfterClassification(
         ctxFor(
@@ -7138,24 +7152,17 @@ describe('mayAutoSendAfterClassification (TAC-540)', () => {
           new Date('2026-09-22T04:00:00.000Z'),
         ),
       ),
-    ).toBe(false)
-  })
-
-  /**
-   * `isVenueClosed` is a POSITIVE verdict only. A venue whose hours nobody
-   * filled in resolves to `unknown`, and folding that in with `closed` would
-   * silently withhold the dots at every such venue — the inversion
-   * venue-open-state.ts's own header warns about.
-   */
-  it('is true when the hours cannot be read, because unknown is not closed', () => {
-    expect(
-      mayAutoSendAfterClassification(
-        ctxFor('new_question', { venueInfo: { hours: { monday: '—' } } }),
-      ),
     ).toBe(true)
   })
 
-  it('is true while the venue is open', () => {
+  /**
+   * The other two hours verdicts, together, because after TAC-565 the
+   * predicate does not read hours at all: open and unreadable have to agree
+   * with closed above. Stated as one case rather than two named ones so
+   * nothing here claims to distinguish a verdict this function no longer
+   * consults.
+   */
+  it('is true while the venue is open, and when the hours cannot be read', () => {
     expect(
       mayAutoSendAfterClassification(
         ctxFor(
@@ -7167,6 +7174,11 @@ describe('mayAutoSendAfterClassification (TAC-540)', () => {
           // Monday 10:00 in Los Angeles.
           new Date('2026-09-21T17:00:00.000Z'),
         ),
+      ),
+    ).toBe(true)
+    expect(
+      mayAutoSendAfterClassification(
+        ctxFor('new_question', { venueInfo: { hours: { monday: '—' } } }),
       ),
     ).toBe(true)
   })

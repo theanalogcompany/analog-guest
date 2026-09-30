@@ -289,6 +289,11 @@ describe('loadWarmCloseGuestFacts (TAC-560)', () => {
       'warm_close_sent_at',
       'opted_out_at',
       'instagram_scoped_id',
+      // TAC-386: a new gate reads this, and this guard is exactly the case it
+      // was written for. Dropping it from the select string would make the
+      // spacing check read `undefined` and go inert with no behavioural test
+      // able to see it.
+      'last_proactive_send_at',
     ]) {
       expect(select, column).toContain(column)
     }

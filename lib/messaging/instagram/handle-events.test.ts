@@ -1130,6 +1130,12 @@ describe('provider_sent_at', () => {
       // `askedAt`, to say which clock the caller must pass. It reads no row and
       // writes none, the same reason instagram-fields.ts is on this list. The
       // check is by mention.
+      // TAC-386: names the column in PROSE only, in the comment explaining why
+      // `hasInboundSince` must exclude the source row: `asked_at` is Meta's
+      // clock and the filter is on our insert time, so the question's own row is
+      // always "newer than the question". It reads no such column and writes
+      // none. The check is by mention.
+      join('lib', 'followups', 'inquiry-followup-store.ts'),
       join('lib', 'followups', 'inquiry-followup-timing.ts'),
       join('lib', 'messaging', 'instagram', 'handle-events.ts'),
       join('lib', 'messaging', 'instagram', 'reply-check.ts'),

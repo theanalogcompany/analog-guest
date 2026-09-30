@@ -257,47 +257,12 @@ conditional regression nothing notices.
 
 Prompt wording cannot reach any of this: see `docs/decisions/0007-intention-question-is-its-own-bubble.md`.
 
-## Proactive sends, and the spacing between them (TAC-386)
+## Proactive sends (TAC-386)
 
-Three mechanisms reach a guest with no inbound behind them. They are the only paths in this
-repo that do.
-
-| mechanism | fires | once per |
-| --- | --- | --- |
-| `instagram-scan-greeting.ts` (TAC-536) | ~5 min after a counter scan | guest per venue-local day |
-| `warm-close-timeout.ts` (TAC-560) | ~10 min after our last message goes quiet | guest, ever |
-| `lib/followups/inquiry-followup-engine.ts` (TAC-386) | ~3 venue-hours after a question | question |
-
-**No two within `PROACTIVE_SPACING_MINUTES` (60).** The rule and its predicate live in
-`lib/followups/proactive-spacing.ts`, which is pure and is imported by all three; the marker
-is `guests.last_proactive_send_at`, written on a **confirmed send only** and never released.
-A queued card writes nothing: that is an operator's decision and an operator sees the thread.
-
-That module is separate from the engine for a reason worth keeping: importing the constant
-from `inquiry-followup-engine.ts` pulls `handleFollowup`, and with it the Voyage client, into
-any test process that touches it. `warm-close-timeout.test.ts` stopped loading entirely.
-
-**An inquiry follow-up is not a warm-close anchor.** A follow-up is an outbound row, so left
-alone it would become "our last word" and open a **fresh** two-hour warm-close window hours
-after the original expired. Sixty minutes of spacing only delays that. The exclusion lives in
-`loadWarmCloseCandidates`, not in the processor, because that loop marks a guest `seen` on
-their newest row whatever it is: failing the test there disqualifies the guest for the tick,
-where a filter applied earlier would promote an **older** row to the anchor.
-
-## Trigger reasons allowed on Instagram
-
-`handle-followup.ts` refuses every follow-up on an Instagram conversation (TAC-469 rule 2:
-they fire days later with the window almost always shut) **except three**, each of which
-routes through `dispatchReply` rather than `scheduleAndSend`:
-
-- `instagram_scan_arrival` - the scan's own row opens the window.
-- `warm_close` - fires ten minutes after our own message, so the window cannot have closed.
-- `inquiry_followup` - fires hours later, so it is the one that **checks** the window rather
-  than arguing about it. Both the scheduler and the processor look; see
-  `lib/messaging/instagram/CLAUDE.md`.
-
-All three are refused on a **text** conversation rather than routed, each with its own
-`*_is_instagram_only` reason.
+Three paths reach a guest with no inbound behind them: the scan greeting (TAC-536), the warm
+close (TAC-560), the inquiry follow-up (TAC-386, `lib/followups/`). **No two within 60
+minutes**, via `proactive-spacing.ts` and `guests.last_proactive_send_at`. A follow-up is NOT
+a warm-close anchor, excluded inside `loadWarmCloseCandidates`. Reasons in those headers.
 
 ## Other rules that bite
 

@@ -1,7 +1,7 @@
 // TAC-386. The auth tests are the load-bearing ones here: this route sends an
 // unprompted message to a guest and is reachable from the public internet.
 //
-// Deliberately a near-copy of app/api/cron/inquiry-followups/route.test.ts. The two
+// Deliberately a near-copy of app/api/cron/warm-close/route.test.ts. The two
 // routes have the same auth contract, and the alternative to duplicating the
 // cases was a shared helper that would make a missing case in one route
 // invisible in the other.

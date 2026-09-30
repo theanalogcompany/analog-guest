@@ -2259,17 +2259,32 @@ export type ApprovalDecision =
  * we can already tell will not send, so the correction is rare rather than
  * routine.
  *
- * The three conditions mirror the gate, and each names the trigger it mirrors
+ * The two conditions mirror the gate, and each names the trigger it mirrors
  * so a reader can check them against it:
  *
  *   - the category's own policy       -> trigger 8, category_requires_approval
  *   - venues.hold_all_outbound        -> trigger 6, hold_all_outbound
- *   - a positively closed venue       -> TAC-540's own clause
  *
- * The closed-venue clause is not a gate trigger on its own (trigger 17 needs
- * an emitted arrival), and it is here because a closed venue is where a reply
- * is most likely to end up in front of an operator and least likely to be
- * something a guest should watch being typed.
+ * TAC-565 REMOVED A THIRD, "the venue is not positively closed". Replies
+ * still auto-send after hours — closed-hours answers, hours questions — and
+ * withholding the dots there left the guest on Seen for the whole generation
+ * on exactly the turns that feel slowest. Ruled: dots whenever a reply is
+ * being written for auto-send, open or closed. The clause was never a gate
+ * trigger of its own (trigger 17 needs an emitted arrival), so nothing about
+ * WHAT sends changed with it — only whether the guest watches it being
+ * written.
+ *
+ * WHAT THAT COSTS, since the clause was not arbitrary: a closed venue is
+ * where a draft is most likely to end up in front of an operator. Trigger 17
+ * is closed-only by construction, and `verifyClosedVenueArrivalStage` skips
+ * itself while open — the one way its trigger fires at an open venue is the
+ * orchestrator degrading a throw out of that stage to `check_failed`, which
+ * does not re-read the venue's state. So the `typing_off` correction runs
+ * more often after hours than during service: the guest watches dots for a
+ * few seconds and then they stop, which is the correction working. What it is
+ * NOT is a guest left watching dots for a reply that is never coming — that
+ * is the property `stopTypingUnlessSent` holds, and it holds on a closed
+ * venue exactly as it does on an open one.
  *
  * `hold_all_outbound` is not in the ticket's own wording and is included
  * anyway: at a venue carrying it, EVERY reply queues, so without it the dots
@@ -2299,7 +2314,9 @@ export function mayAutoSendAfterClassification(ctx: RuntimeContext): boolean {
   ) {
     return false
   }
-  return !isVenueClosed(ctx.venue, ctx.recognition.computedAt)
+  // No third condition. TAC-565 removed it: the venue's hours are
+  // deliberately not read here. See the header.
+  return true
 }
 
 export async function applyApprovalPolicyStage(

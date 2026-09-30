@@ -233,19 +233,6 @@ export async function releaseFollowupLogClaim(
 const MS_PER_DAY = 24 * 60 * 60 * 1000
 
 /**
- * Pre-load followup_log signals for every guest in `guestIds` (one venue).
- * Returns a Map keyed on guest_id. Guests with no rows are absent from
- * the map; the engine uses `emptyFollowupGuestSignals()` as the default.
- *
- * Two queries per venue (rolling-7d count + per-reason history) for
- * defensible single-round-trip-per-purpose semantics. At pilot scale
- * (single-digit guests per venue per tick) this is trivially fast.
- *
- * `announcedMechanicIds` is parsed in JS from any dedup_key matching the
- * `perk:` prefix on the per-reason history rows; the detector consumes
- * this Set to filter "newly eligible AND not announced."
- */
-/**
  * Is this stored `followup_log.reason` one the daily engine detects?
  *
  * A real membership test over FOLLOWUP_REASONS rather than a type assertion, so
@@ -270,6 +257,19 @@ function assertFollowupLogReason(value: string): FollowupLogReason {
   return value as FollowupLogReason
 }
 
+/**
+ * Pre-load followup_log signals for every guest in `guestIds` (one venue).
+ * Returns a Map keyed on guest_id. Guests with no rows are absent from
+ * the map; the engine uses `emptyFollowupGuestSignals()` as the default.
+ *
+ * Two queries per venue (rolling-7d count + per-reason history) for
+ * defensible single-round-trip-per-purpose semantics. At pilot scale
+ * (single-digit guests per venue per tick) this is trivially fast.
+ *
+ * `announcedMechanicIds` is parsed in JS from any dedup_key matching the
+ * `perk:` prefix on the per-reason history rows; the detector consumes
+ * this Set to filter "newly eligible AND not announced."
+ */
 export async function loadFollowupSnapshotsForVenue(
   venueId: string,
   guestIds: readonly string[],

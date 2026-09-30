@@ -437,6 +437,50 @@ describe('the suppressions, each re-checked at fire time', () => {
     expect(db.arrivals[0]?.outcome).toBe('inbound_during_window')
   })
 
+  // TAC-386: no two proactive messages to one guest within the hour. This
+  // mechanism WROTE the shared marker before it read it, so the rule was
+  // asserted in four files and enforced in two, and a scan greeting could still
+  // land minutes after a warm close or an inquiry follow-up.
+  it('HOLDS the greeting when another proactive message reached them 30 minutes ago', async () => {
+    const db = createScanArrivalsFake({
+      ...seed(),
+      guests: [
+        {
+          id: GUEST_ID,
+          opted_out_at: null,
+          last_proactive_send_at: new Date(
+            at(6 * MINUTE).getTime() - 30 * MINUTE,
+          ).toISOString(),
+        },
+      ],
+    })
+    const r = await processDueScanGreetings(at(6 * MINUTE), db.client)
+
+    expect(handleFollowupMock).not.toHaveBeenCalled()
+    expect(r.heldForSpacing).toBe(1)
+    // A HOLD, not a suppression: nothing is written, so the next tick
+    // reconsiders it rather than the scan being dropped.
+    expect(db.arrivals[0]?.outcome).toBeFalsy()
+  })
+
+  it('greets when the last proactive message was over an hour ago', async () => {
+    const db = createScanArrivalsFake({
+      ...seed(),
+      guests: [
+        {
+          id: GUEST_ID,
+          opted_out_at: null,
+          last_proactive_send_at: new Date(
+            at(6 * MINUTE).getTime() - 61 * MINUTE,
+          ).toISOString(),
+        },
+      ],
+    })
+    const r = await processDueScanGreetings(at(6 * MINUTE), db.client)
+    expect(r.greeted).toBe(1)
+    expect(r.heldForSpacing).toBe(0)
+  })
+
   it('suppresses when the opt-out read fails', async () => {
     const db = createScanArrivalsFake(seed())
     db.failNext('guests', 'select', { message: 'boom' })

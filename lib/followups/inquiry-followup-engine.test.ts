@@ -342,6 +342,9 @@ describe('processDueInquiryFollowups — permanent refusals resolve the row', ()
       VENUE,
       GUEST,
       ASKED_AT,
+      // And the question's own row is excluded: on our clock it is NEWER than
+      // asked_at, so without this the gate matched it and nothing could send.
+      SOURCE,
     )
   })
 
@@ -401,12 +404,36 @@ describe('processDueInquiryFollowups — permanent refusals resolve the row', ()
   })
 
   it('never records a prompt of its own, so it cannot feed the brake', async () => {
-    // Ruling 10(b): respects the brake's state, is not counted toward it. This
-    // trigger sits outside the intentions system entirely.
-    await processDueInquiryFollowups(NOW)
-    const calls = JSON.stringify(agent.loadIntentionRowsMock.mock.calls)
-    expect(calls).not.toContain('insert')
-    expect(store.recordProactiveSend).toHaveBeenCalled()
+    // Ruling 10(b): respects the brake's state, is never counted toward it.
+    //
+    // ASSERTED ON THE SOURCE, not on a mock's arguments. The first version of
+    // this test stringified `loadIntentionRows`'s calls (two UUIDs) and checked
+    // they did not contain "insert" - a string that could never appear either
+    // way, so the assertion held whatever the engine did. Found in review.
+    //
+    // The property is that this module imports no WRITER from the intentions
+    // system, which is what makes "the send is not counted" structural rather
+    // than a habit. Same technique as the history-window guard below.
+    const source = readFileSync(
+      join(__dirname, 'inquiry-followup-engine.ts'),
+      'utf8',
+    )
+    const intentionImports = source.match(
+      /from '@\/lib\/agent\/intentions[^']*'/g,
+    )
+    // Guards the guard: it imports the brake and the loader, so a regex that
+    // matched nothing would make the assertion below vacuous in a new way.
+    expect(intentionImports?.length).toBe(2)
+    for (const writer of [
+      'recordIntentionPrompt',
+      'recordIntentionEligibility',
+      // The write shape, not the bare table name: the module's own header says
+      // it writes no `guest_intention_prompts` row, so the name appears in
+      // prose and banning it outright fails on the comment that documents it.
+      ".from('guest_intention_prompts')",
+    ]) {
+      expect(source, writer).not.toContain(writer)
+    }
   })
 
   it('resolves a guest with no Instagram identifier', async () => {

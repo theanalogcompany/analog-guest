@@ -103,16 +103,19 @@ export type InquirySkipReason =
   /** The unanswered-prompt brake is engaged. */
   | 'brake_engaged'
   | 'not_instagram'
-  | 'disabled_for_venue'
   /** Meta's window has shut, or the row sat past its own horizon. */
   | 'window_closed'
   | 'past_horizon'
   /** A newer question took the guest's pending slot while this one generated. */
   | 'superseded'
   // ---- transient: the row stays pending for a later tick ----
+  //
+  // The VENUE-level gates (halted, quiet hours, no Instagram account, kill
+  // switch) are deliberately absent from this union: they skip the venue before
+  // its rows are read, so they are counted per venue rather than per row. They
+  // had members here and no way to reach them, which made the tick summary
+  // claim it could distinguish "the kill switch is off" from "nothing was due".
   | 'venue_closed_now'
-  | 'quiet_hours'
-  | 'venue_paused'
   | 'card_pending'
   | 'too_soon_after_proactive'
   /** Another tick claimed it first. */
@@ -124,6 +127,14 @@ export interface ProcessInquiryFollowupsResult {
   scanned: number
   sent: number
   skipped: Record<string, number>
+  /**
+   * Venues skipped whole, before their rows were read, by reason.
+   *
+   * Separate from `skipped`, which is per row. Without this the tick summary
+   * cannot tell "the kill switch is off at every venue" from "nothing was due",
+   * which is the first question anyone asks when no follow-ups appear.
+   */
+  skippedVenues: Record<string, number>
   errored: number
 }
 
@@ -227,10 +238,14 @@ export async function processDueInquiryFollowups(
     scanned: 0,
     sent: 0,
     skipped: {},
+    skippedVenues: {},
     errored: 0,
   }
   const bump = (reason: InquirySkipReason) => {
     result.skipped[reason] = (result.skipped[reason] ?? 0) + 1
+  }
+  const bumpVenue = (reason: string) => {
+    result.skippedVenues[reason] = (result.skippedVenues[reason] ?? 0) + 1
   }
 
   const venues = await loadInquiryFollowupVenues(supabase)
@@ -248,14 +263,26 @@ export async function processDueInquiryFollowups(
     //
     // A DENY-LIST on status, never an allow-list on 'active': the live pilot
     // venue is `pending` (docs/decisions/0002).
-    if (isVenueProcessingHalted(venue.status)) continue
+    if (isVenueProcessingHalted(venue.status)) {
+      bumpVenue('venue_halted')
+      continue
+    }
     // Instagram only (ruled 2026-09-30). A venue with no Instagram account can
     // have no Instagram conversation, so skip it whole.
-    if (venue.instagramAccountId === null) continue
+    if (venue.instagramAccountId === null) {
+      bumpVenue('no_instagram_account')
+      continue
+    }
 
     const gate = await resolveVenueGate(supabase, venue, now)
-    if (!gate.enabled) continue
-    if (gate.quietHours) continue
+    if (!gate.enabled) {
+      bumpVenue('disabled_for_venue')
+      continue
+    }
+    if (gate.quietHours) {
+      bumpVenue('quiet_hours')
+      continue
+    }
 
     const due = await loadDueInquiryFollowups(supabase, venue.id, now)
     if (!due.ok) {
@@ -415,6 +442,9 @@ async function considerRow(
     row.venueId,
     row.guestId,
     row.askedAt,
+    // The question's own row, which is newer than `asked_at` on our clock and
+    // would otherwise match this gate every time. See hasInboundSince.
+    row.sourceMessageId,
   )
   if (!wroteAgain.ok) return 'guest_unreadable'
   if (wroteAgain.data) {
@@ -514,7 +544,15 @@ async function considerRow(
   })
 
   if (RELEASES_CLAIM[agentResult.status]) {
-    await releaseFollowupLogClaim(logClaimIds)
+    // An orphan audit row makes every later tick conflict (`claim_lost`) until
+    // the window shuts, while still counting toward `weekly_cap`.
+    const releasedLog = await releaseFollowupLogClaim(logClaimIds)
+    if (!releasedLog.ok) {
+      console.error('[inquiry-followup] orphaned an audit row', {
+        inquiryFollowupId: row.id,
+        error: releasedLog.error,
+      })
+    }
     const back = await putRowBack(supabase, row)
     console.warn('[inquiry-followup] did not send; claim released', {
       agentRunId,
@@ -531,8 +569,24 @@ async function considerRow(
       ? agentResult.outboundMessageId
       : null
   if (messageId !== null) {
-    await recordInquiryDispatch(supabase, row.id, messageId)
-    await finalizeFollowupLogClaim(logClaimIds, messageId)
+    // CHECKED, and this one matters more than it looks. If it fails,
+    // `dispatched_message_id` stays null, `loadWarmCloseCandidates` cannot see
+    // that this outbound was a follow-up, and the warm close can anchor on it:
+    // the double proactive send the whole coordination exists to prevent.
+    const recorded = await recordInquiryDispatch(supabase, row.id, messageId)
+    if (!recorded.ok) {
+      console.error(
+        '[inquiry-followup] could not record the dispatch; the warm close may anchor on this send',
+        { inquiryFollowupId: row.id, messageId, error: recorded.error },
+      )
+    }
+    const finalized = await finalizeFollowupLogClaim(logClaimIds, messageId)
+    if (!finalized.ok) {
+      console.warn('[inquiry-followup] could not finalize the audit row', {
+        inquiryFollowupId: row.id,
+        error: finalized.error,
+      })
+    }
   }
 
   // The spacing marker, on a confirmed send only. A queued card is an operator's

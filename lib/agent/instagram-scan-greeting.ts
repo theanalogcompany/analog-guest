@@ -39,6 +39,7 @@ import { VenueHoursSchema, type VenueInfo } from '@/lib/schemas'
 import { isVenueProcessingHalted } from '@/lib/venues/status'
 import { captureInstagramScanGreeting } from '@/lib/analytics/posthog'
 import { recordProactiveSend } from '@/lib/followups/inquiry-followup-store'
+import { isTooSoonAfterProactive } from '@/lib/followups/proactive-spacing'
 import { handleFollowup } from './handle-followup'
 import {
   insertInboundTurnOutcome,
@@ -67,6 +68,16 @@ export interface ProcessScanGreetingsResult {
   scanned: number
   /** Rows whose five minutes have not elapsed. */
   notYet: number
+  /**
+   * TAC-386: rows held because another proactive message reached the guest
+   * within the last hour.
+   *
+   * Its own counter rather than a `suppressed` reason, because it is NOT a
+   * suppression: nothing is written to the row and the next tick reconsiders
+   * it, exactly like `notYet`. A `suppressed` entry would also need a new
+   * `instagram_scan_arrivals.outcome` value, which is a CHECK widening.
+   */
+  heldForSpacing: number
   /** Rows this run claimed and generated a greeting for. */
   greeted: number
   /** Rows suppressed before the claim, by reason. */
@@ -217,6 +228,36 @@ async function isOptedOut(
   return data?.opted_out_at != null
 }
 
+/**
+ * Has another proactive message reached this guest too recently for a greeting?
+ *
+ * Fails OPEN on an unreadable row, unlike `isOptedOut` above, and the asymmetry
+ * is deliberate: an opt-out we cannot read might mean the guest left, where a
+ * spacing marker we cannot read at worst costs one greeting landing closer to
+ * another message than the rule prefers. Suppressing every greeting at a venue
+ * on a transient read error is the worse failure.
+ */
+async function isTooSoonAfterAnotherProactiveSend(
+  supabase: AdminSupabaseClient,
+  guestId: string,
+  now: Date,
+): Promise<boolean> {
+  const { data, error } = await supabase
+    .from('guests')
+    .select('last_proactive_send_at')
+    .eq('id', guestId)
+    .maybeSingle()
+  if (error) {
+    logger.warn('[scan-greeting] spacing read failed; allowing the greeting', {
+      guestId,
+      error: error.message,
+    })
+    return false
+  }
+  const last = data?.last_proactive_send_at
+  return isTooSoonAfterProactive(last ? new Date(last) : null, now)
+}
+
 async function recordLedger(
   row: PendingScanArrival,
   entry: ReturnType<typeof ledgerEntryFor>,
@@ -271,6 +312,7 @@ export async function processDueScanGreetings(
   const result: ProcessScanGreetingsResult = {
     scanned: 0,
     notYet: 0,
+    heldForSpacing: 0,
     greeted: 0,
     suppressed: {},
     casLost: 0,
@@ -317,6 +359,21 @@ export async function processDueScanGreetings(
       if (await isOptedOut(supabase, row.guestId)) {
         await suppress(supabase, row, 'guest_opted_out', now)
         bump('guest_opted_out')
+        continue
+      }
+      // TAC-386: no two proactive messages to one guest within the hour. This
+      // mechanism WROTE the shared marker before it read it, which made the
+      // rule a claim four files asserted and two enforced: a scan greeting
+      // could still land minutes after a warm close or an inquiry follow-up.
+      // Found in review.
+      //
+      // A HOLD, not a suppression: the row is left for the next tick, so a scan
+      // whose hour is nearly up is greeted a few minutes later rather than
+      // dropped. `isScanTooStale` is the bound that eventually gives up on it.
+      if (
+        await isTooSoonAfterAnotherProactiveSend(supabase, row.guestId, now)
+      ) {
+        result.heldForSpacing += 1
         continue
       }
       // `unknown` hours proceed: isVenueClosed is true only for a POSITIVE

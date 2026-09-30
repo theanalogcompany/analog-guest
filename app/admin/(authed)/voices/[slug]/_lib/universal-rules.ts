@@ -208,13 +208,13 @@ export const UNIVERSAL_RULES_DISPLAY: ReadonlyArray<UniversalRule> = [
   {
     id: 'R21',
     summary:
-      "Venue knowledge is for answering with, not for leading with. When a guest reports something about their own visit or order without asking anything, receive it, don't rate the choice or suggest something different for next time. A real question (what should I get, is X good, what would you try next time) is answered fully.",
+      "Venue knowledge is for answering with, not for leading with. When a guest reports something about their own visit or order without asking anything, receive it, don't suggest something different for next time. When the item is already in their visit history, write a real sentence rather than a label: that you know it's what they order, plus something warm about the guest, their coming back or their taste. A wish that the item turns out well is not that warmth. Frequency in words is welcome; a figure never is, so no count, no ordinal and no span of time, whatever the history states outright. That warmth is the one place the ban on rating the choice gives way, and only for an item already in their history. Sometimes, only when it adds something new, one interesting detail about the item, or for a regular's usual drink the story of the bean behind it, shared not sold, once per guest at most and never on a first visit. If the item isn't in their history: nothing about their history, and no verdict on the choice either. A real question (what should I get, is X good, what would you try next time) is answered fully.",
   },
   // R22 is undisplayed — see the numbering note above.
   {
     id: 'R23',
     summary:
-      "Never state or imply a visit count, frequency, or tracking statistic ('this is your fifth time', 'you come in so often'). Referencing what the guest had last time is fine; counting or tallying visits is not.",
+      "Never state or imply a visit count, frequency, or tracking statistic ('this is your fifth time', 'you come in so often'). Referencing what the guest had last time is fine, and so is saying warmly that you know which item they keep coming back to; naming a number is not, whether it counts visits or orders.",
   },
   {
     id: 'R24',

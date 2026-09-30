@@ -25,6 +25,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 
 import type { Database } from '@/db/types'
+import { DELIVERED_OUTBOUND_STATUSES } from '@/lib/agent/group-responses'
 
 type AdminSupabaseClient = SupabaseClient<Database>
 
@@ -189,12 +190,22 @@ export async function loadInquiryGuestFacts(
  * 051: it is written once at guest creation, so it holds FIRST CONTACT. It is
  * always older than the question, so a comparison against it would be false on
  * every row and this gate would never fire while looking like it did.
+ *
+ * IT EXCLUDES THE SOURCE ROW BY ID, and that is not belt-and-braces: without it
+ * this gate matched the question itself and NOTHING could ever send. `asked_at`
+ * is Meta's clock (`provider_sent_at`) while the filter is on `created_at`, our
+ * insert time, and the two are 1.8 to 2.3 seconds apart in production, so the
+ * question's own row is always "an inbound after the question". Every row
+ * resolved `skipped / guest_wrote_again` and the counter reported a plausible
+ * reason for it. Found in review; the engine's test mocks this module, so no
+ * behavioural test could see it.
  */
 export async function hasInboundSince(
   supabase: AdminSupabaseClient,
   venueId: string,
   guestId: string,
   after: Date,
+  excludeMessageId: string,
 ): Promise<StoreResult<boolean>> {
   const { data, error } = await supabase
     .from('messages')
@@ -203,6 +214,7 @@ export async function hasInboundSince(
     .eq('guest_id', guestId)
     .eq('direction', 'inbound')
     .gt('created_at', after.toISOString())
+    .neq('id', excludeMessageId)
     .limit(1)
   if (error) return { ok: false, error: error.message }
   return { ok: true, data: (data ?? []).length > 0 }
@@ -226,6 +238,19 @@ export interface OurAnswer {
  * floor, a card can be skipped, a send can fail. The processor skips the row in
  * that case, because a message checking that our help worked out has nothing to
  * say when we never helped.
+ *
+ * IT FILTERS ON DELIVERY, and the first version did not. Every outbound draft
+ * carries `reply_to_message_id` from the moment it is inserted, INCLUDING the
+ * queue path (`status: 'pending_review'`, `review_state: 'pending'`), so taking
+ * the newest row returned a card an operator SKIPPED, or a send that FAILED, as
+ * "what we told them" - rendered verbatim into the prompt, giving the guest a
+ * check-in on advice they never received. That version selected `status` and
+ * then ignored it, which is the shape of the bug: the filter was intended and
+ * never written. `DELIVERED_OUTBOUND_STATUSES` and the `review_state` test are
+ * the same pair `loadWarmCloseCandidates` uses.
+ *
+ * It takes the newest row that PASSES, not the newest row, so a failed retry
+ * above a delivered original does not hide it.
  */
 export async function loadOurAnswer(
   supabase: AdminSupabaseClient,
@@ -233,17 +258,20 @@ export async function loadOurAnswer(
 ): Promise<StoreResult<OurAnswer | null>> {
   const { data, error } = await supabase
     .from('messages')
-    .select('id, body, status')
+    .select('id, body, status, review_state')
     .eq('reply_to_message_id', sourceMessageId)
     .eq('direction', 'outbound')
     .order('created_at', { ascending: false })
-    .limit(1)
-    .maybeSingle()
   if (error) return { ok: false, error: error.message }
-  if (!data) return { ok: true, data: null }
-  const body = (data.body ?? '').trim()
-  if (body.length === 0) return { ok: true, data: null }
-  return { ok: true, data: { messageId: data.id, body } }
+
+  for (const row of data ?? []) {
+    if (row.review_state === 'pending') continue
+    if (!DELIVERED_OUTBOUND_STATUSES.has(row.status)) continue
+    const body = (row.body ?? '').trim()
+    if (body.length === 0) continue
+    return { ok: true, data: { messageId: row.id, body } }
+  }
+  return { ok: true, data: null }
 }
 
 export type InquiryClaimResult =
