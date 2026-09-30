@@ -80,17 +80,57 @@ const A3_COMPLAINTS: LabelledFixture[] = [
 ]
 
 /**
- * ARM A4 — business inquiries. Held for an operator anyway, so there is no
- * answer of ours to check on. Belted structurally by the `manual` refusal.
+ * ARM A4 — what an operator arranges rather than the venue answering.
+ *
+ * WIDENED 2026-09-30, narrowly, after the first run: the instruction said "a
+ * business, press, wholesale or hiring inquiry" and `a4-event-space` still
+ * fired, because the model read a private-event rental as a venue SERVICE
+ * rather than a business enquiry. The same shape fired on eight real inbounds.
+ * So each of the five is now named in the prompt, and each has cases here.
+ *
+ * NOT belted structurally: ruled explicitly that `event_question` and
+ * `mechanic_request` stay off the scheduler's deny-list, because that would
+ * also stop "can I bring my dog" and a pre-order. The prompt is the only gate
+ * on this arm, which is why its bar is zero.
  */
-const A4_BUSINESS: LabelledFixture[] = [
+const A4_OPERATOR_ARRANGED: LabelledFixture[] = [
+  // wholesale / press / hiring / partnership
   { id: 'a4-wholesale', body: 'do you do wholesale pricing for offices?' },
   {
     id: 'a4-press',
     body: 'I write for a food blog, can I interview the owner?',
   },
   { id: 'a4-hiring', body: 'are you hiring baristas right now?' },
+  {
+    id: 'a4-partnership',
+    body: 'we run a co-working space nearby, any interest in a partnership?',
+  },
+  // private events and space rental — the shape that breached the first run
   { id: 'a4-event-space', body: 'can I rent the space for a private event?' },
+  { id: 'a4-buyout', body: 'could we book the whole cafe for a work party?' },
+  // catering — fired on three real inbounds
+  { id: 'a4-catering', body: 'do you offer catering' },
+  { id: 'a4-catering-50', body: 'do you do catering for 50 people' },
+  { id: 'a4-event-form', body: 'can you send me an event form' },
+  // bookings and reservations
+  { id: 'a4-reserve', body: 'can I reserve a table for six on Saturday?' },
+]
+
+/**
+ * ARM A5 — explicit arrivals. Excluded by ruling 1 of 2026-09-17, dropped by the
+ * widening because the trigger stopped being about visits, RESTORED 2026-09-30.
+ * TAC-297's arrival capture owns these, and it is fewer messages.
+ *
+ * Two of these are real Le Mil's inbounds that fired on the first run.
+ */
+const A5_ARRIVALS: LabelledFixture[] = [
+  {
+    id: 'a5-walking-over',
+    body: 'i\u2019m walking over. can you get a pink panther ready for me',
+  },
+  { id: 'a5-omw', body: 'omw can you get my order ready' },
+  { id: 'a5-heading-in', body: 'heading in now, save me a cortado' },
+  { id: 'a5-here', body: 'here now, just walked in' },
 ]
 
 /**
@@ -111,6 +151,15 @@ const POSITIVE_CONTROL: LabelledFixture[] = [
   { id: 'p-brew', body: 'how should I brew the beans I got from you' },
   { id: 'p-dog', body: 'can I bring my dog' },
   { id: 'p-try', body: 'whats something I should try when I get there' },
+  // The carve-out inside A4's exclusion: a PUBLIC event stays eligible (ruled
+  // 2026-09-30). It is in the control rather than in A4 precisely because the
+  // two lines sit next to each other in the prompt and the risk is the
+  // exclusion swallowing this.
+  { id: 'p-public-events', body: 'do you have any events coming up' },
+  {
+    id: 'p-events-november',
+    body: 'do you have any events coming up in november?',
+  },
 ]
 
 interface RealInbound {
@@ -282,7 +331,8 @@ async function main(): Promise<void> {
     ['A1 pure facts', A1_PURE_FACTS],
     ['A2 small talk', A2_SMALL_TALK],
     ['A3 complaints', A3_COMPLAINTS],
-    ['A4 business inquiries', A4_BUSINESS],
+    ['A4 operator-arranged', A4_OPERATOR_ARRANGED],
+    ['A5 explicit arrivals', A5_ARRIVALS],
   ] as const) {
     arms.push(await runFalsePositiveArm(name, fixtures, log, tokens))
   }

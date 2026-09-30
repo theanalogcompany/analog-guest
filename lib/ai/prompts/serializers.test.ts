@@ -4392,7 +4392,7 @@ describe('runtimeToProse — ## Following up on what they asked (TAC-386)', () =
 
   it('tells the model not to ask or assert the visit', () => {
     const out = block(render())
-    expect(out).toContain('Do not ask whether they came in')
+    expect(out).toContain('Do not ask or suggest whether they came in')
     expect(out).toContain('do not say or imply that we know whether they did')
     expect(out).toContain('Do not ask them to come in')
   })
@@ -4428,6 +4428,40 @@ describe('runtimeToProse — ## Following up on what they asked (TAC-386)', () =
     const out = block(render())
     expect(out).not.toContain('—')
     expect(out).not.toContain('–')
+  })
+
+  // Ruled 2026-09-30 after two of fifteen bodies contradicted and apologised for
+  // our own answer, because the block handed it over as data without saying it
+  // was final.
+  it('says what we told them is settled, not to be corrected or apologised for', () => {
+    const out = block(render())
+    expect(out).toContain('What we told them is what we said')
+    for (const move of [
+      'correct it',
+      're-verify it',
+      'walk it back',
+      'apologise for it',
+    ]) {
+      expect(out, move).toContain(move)
+    }
+  })
+
+  // Ruled 2026-09-30: "hope your pup had a good time if you made it in" breaches
+  // ruling 11. A conditional reference to the visit is still a reference.
+  it('rules out a CONDITIONAL visit reference, not just an assertion', () => {
+    expect(block(render())).toContain(
+      'Do not ask or suggest whether they came in, even conditionally',
+    )
+  })
+
+  // Ruled 2026-09-30 after seven of fifteen opened with a birthday wish, which
+  // pushed the repetition bar over on its own. Note there is no occasion BLOCK
+  // to suppress: the birthday is a freeform `observations` entry on the guest,
+  // so this is an instruction rather than data withheld upstream.
+  it('carries one subject and names the occasion case', () => {
+    const out = block(render())
+    expect(out).toContain('one subject and nothing else')
+    expect(out).toContain('Do not raise a birthday or any other occasion')
   })
 
   it('renders no follow-up-context block alongside it', () => {

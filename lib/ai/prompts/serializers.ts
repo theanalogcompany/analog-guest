@@ -735,6 +735,26 @@ function formatWarmClose(): string {
  *
  * "we" throughout and no named speaker: outreach always comes from the shop.
  * No em dash, per R3.
+ *
+ * THREE CLAUSES ADDED AFTER THE FIRST MEASUREMENT RUN, each answering something
+ * fifteen generated bodies actually did (ruled 2026-09-30):
+ *
+ *   SETTLED. Two of fifteen CONTRADICTED and apologised for our own answer,
+ *   because the block handed it over as data without saying it was final and the
+ *   model re-verified it against retrieval.
+ *
+ *   NOT EVEN CONDITIONALLY. One said "hope your pup had a good time if you made
+ *   it in". A conditional reference to the visit is still a reference, and
+ *   ruling 11 bars it.
+ *
+ *   ONE SUBJECT. Seven of fifteen opened by wishing the guest happy birthday,
+ *   which crowded out the reference in one and pushed the repetition bar over on
+ *   its own. NOTE THE RULING'S PREMISE DID NOT HOLD: there is no birthday or
+ *   occasion BLOCK to suppress. The birthday is a freeform `observations` entry
+ *   on the guest ("mentioned it's their birthday (September 29)"), so
+ *   withholding it would mean dropping observations wholesale, which also carry
+ *   the preferences this message may legitimately use. The suppression is
+ *   therefore an instruction here rather than data withheld upstream.
  */
 function formatInquiryFollowup(
   inquiry: NonNullable<RuntimeContext['inquiryFollowup']>,
@@ -744,7 +764,9 @@ function formatInquiryFollowup(
     'Recently they asked us something and we answered it. They have not been in touch since. This message checks that what we helped them with worked out.',
     `What they asked: "${inquiry.question}"`,
     `What we told them: "${inquiry.answer}"`,
-    'Refer to the specific thing they asked about and to what we actually suggested, in our own words. Do not ask whether they came in, and do not say or imply that we know whether they did, because we do not. Do not ask them to come in. This is the only message we send about it, so it needs no promise to stay in touch.',
+    'What we told them is what we said. Treat it as settled: do not correct it, re-verify it, walk it back, or apologise for it.',
+    'Refer to the specific thing they asked about and to what we actually suggested, in our own words. Do not ask or suggest whether they came in, even conditionally, and do not say or imply that we know whether they did, because we do not. Do not ask them to come in.',
+    'This message carries one subject and nothing else. Do not raise a birthday or any other occasion, do not open a new topic, and do not add a promise to stay in touch. It is the only message we send about it.',
   ].join('\n')
 }
 

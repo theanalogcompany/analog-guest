@@ -34,6 +34,7 @@ import { composePrompt } from '@/lib/ai/compose-prompt'
 import {
   GeneratedMessageSchema,
   MAX_OUTPUT_TOKENS,
+  replaceDashes,
   VOICE_FIDELITY_INSTRUCTION,
 } from '@/lib/ai/generate-message'
 import { INQUIRY_FOLLOWUP_INSTRUCTIONS } from '@/lib/ai/prompts/categories/inquiry-followup'
@@ -308,7 +309,14 @@ async function main(): Promise<void> {
           temperature: 0.7,
           maxOutputTokens: MAX_OUTPUT_TOKENS,
         })
-        body = object.body
+        // THROUGH THE SHIPPED DASH SUBSTITUTION, which this harness bypassed
+        // on its first run and so reported three em dashes as an R3 failure.
+        // `generateMessage` is not called here (it runs a regen loop this
+        // measurement deliberately does not want), but `replaceDashes` is a
+        // DETERMINISTIC rewrite applied to every body on the real path, so
+        // omitting it measured a body production would never send. Confirmed
+        // 2026-09-30: em dash and en dash become ", " before the send.
+        body = replaceDashes(object.body)
         error = null
         break
       } catch (e) {

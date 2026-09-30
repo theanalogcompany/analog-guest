@@ -855,11 +855,29 @@ describe('CLASSIFY_SYSTEM_PROMPT — followUpWorthy instruction (TAC-386)', () =
   it.each([
     ['pure facts', 'a pure fact with no action behind it'],
     ['small talk', 'small talk or a passing comment'],
-    ['business inquiries', 'a business, press, wholesale or hiring inquiry'],
     ['complaints', 'a complaint or a report that something was wrong'],
     ['crisis', "anything involving someone's safety or an emergency"],
+    // Ruled 2026-09-30, NARROWLY: the first version said "a business, press,
+    // wholesale or hiring inquiry" and a private-event rental still fired,
+    // because the model read it as a venue service rather than a business
+    // enquiry. Each of these is now named.
+    ['catering', 'catering'],
+    ['private events and space rental', 'renting out the space'],
+    ['bookings', 'taking a booking or reservation'],
+    ['wholesale and partnership', 'wholesale, press, hiring or partnership'],
+    // Restored 2026-09-30. It was in the visit-era instruction and the widening
+    // dropped it; TAC-297's arrival capture owns these.
+    ['explicit arrivals', 'already arriving or on their way'],
   ])('excludes %s explicitly', async (_label, phrase) => {
     expect(await systemPrompt()).toContain(phrase)
+  })
+
+  // The carve-out inside the operator-arranged exclusion. Without it the line
+  // would also catch a guest asking what is on this month, which stays eligible.
+  it('keeps PUBLIC events eligible inside the operator-arranged exclusion', async () => {
+    const prompt = await systemPrompt()
+    expect(prompt).toContain('PUBLIC events coming up is not one of these')
+    expect(prompt).toContain('do you have any events coming up')
   })
 
   // The distinction the hours arm turns on: "what time do you close" is a fact,

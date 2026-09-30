@@ -110,7 +110,11 @@ Separately again, set correctsPendingReply. Recent conversation may include a ve
 
 Separately again, set followUpWorthy. Set it to true when our answer to this message would help the guest do something afterwards, so that checking later whether it worked out would be natural. Examples: where to park or how to find the place; which beans or bag to buy; how to brew something at home; whether they can bring a dog; what to order or try.
 
-Set followUpWorthy to false when there is nothing to have worked out. That includes: a pure fact with no action behind it (e.g. "what time do you close", "are you open Monday", "do you have wifi"); small talk or a passing comment (e.g. "love this neighborhood", "hope you have a good day"); a business, press, wholesale or hiring inquiry; a complaint or a report that something was wrong; and anything involving someone's safety or an emergency.
+Set followUpWorthy to false when there is nothing to have worked out. That includes: a pure fact with no action behind it (e.g. "what time do you close", "are you open Monday", "do you have wifi"); small talk or a passing comment (e.g. "love this neighborhood", "hope you have a good day"); a complaint or a report that something was wrong; and anything involving someone's safety or an emergency.
+
+Set followUpWorthy to false for anything an operator arranges rather than the venue simply answering: catering, a private event or renting out the space, taking a booking or reservation, and wholesale, press, hiring or partnership enquiries (e.g. "do you offer catering", "can I rent the space for a private event", "do you do wholesale for offices"). Asking whether there are PUBLIC events coming up is not one of these and does qualify (e.g. "do you have any events coming up").
+
+Set followUpWorthy to false when the guest says they are already arriving or on their way (e.g. "omw", "walking over", "heading in now", "can you get my order ready"), which is a different signal handled elsewhere.
 
 A question can be factual and still qualify, but only when the answer is something the guest then goes and does. Asking when you close is not. Asking how to get there is.
 
