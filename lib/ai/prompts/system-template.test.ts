@@ -1508,6 +1508,59 @@ describe('SYSTEM_TEMPLATE — R21: a recognised order is received by saying so (
 // often" is close enough to "the one they order most" that the model is
 // pulled both ways. Without this the change is silently vetoed, which is the
 // TAC-327 / TAC-330 case-2 failure class.
+// THE RAIL'S SUMMARY CONTENT IS OTHERWISE UNGUARDED, and that is a gap this
+// ticket found by mutant rather than by reading. The lockstep guard above
+// covers the id SEQUENCE and the displayed/undisplayed partition; nothing
+// covered what a summary SAYS, so reverting R21's rail entry to its
+// pre-ruling wording passed all 294 tests in this file. CLAUDE.md calls
+// UNIVERSAL_RULES_DISPLAY a dual source of truth that "must move in
+// lockstep", and until this that was a claim nothing could falsify.
+//
+// Deliberately NOT an equality assertion against the template: the summary is
+// a paraphrase for an operator reading the Voices rail, and pinning it whole
+// would make every prompt reword a two-file edit for no gain. What is pinned
+// is the DISTINCTIONS the rulings turn on, so a summary that silently loses
+// one fails. It guards R21 and R23 only, the two this ticket owns; the general
+// fix is the structured rules registry CLAUDE.md already names as a follow-up.
+describe('UNIVERSAL_RULES_DISPLAY — R21 and R23 carry this ticket rulings (TAC-555)', () => {
+  const summaryFor = (id: string) => {
+    const entry = UNIVERSAL_RULES_DISPLAY.find((r) => r.id === id)
+    expect(entry, `${id} is missing from the rail`).toBeDefined()
+    return entry?.summary ?? ''
+  }
+
+  // RULING 3.
+  it('says the warmth is about the guest, and that a well-wish is not it', () => {
+    const r21 = summaryFor('R21')
+    expect(r21).toContain(
+      'something warm about the guest, their coming back or their taste',
+    )
+    expect(r21).toContain('A wish that the item turns out well is not that warmth.')
+  })
+
+  // RULING 5. Both halves, because a summary keeping only the permission reads
+  // as licensing a count and keeping only the ban reverts the ruling.
+  it('permits frequency in words and refuses it as a figure', () => {
+    expect(summaryFor('R21')).toContain(
+      'Frequency in words is welcome; a figure never is, so no count, no ordinal and no span of time',
+    )
+  })
+
+  // RULING 4, both sides: the scope AND the consequence for a new item.
+  it('scopes the give-way to an item already in the history', () => {
+    const r21 = summaryFor('R21')
+    expect(r21).toContain('and only for an item already in their history')
+    expect(r21).toContain('no verdict on the choice either')
+  })
+
+  // R23's carve-out is what keeps the recognition reachable at all.
+  it('keeps R23 scoped to visits while permitting order recognition', () => {
+    expect(summaryFor('R23')).toContain(
+      'so is saying warmly that you know which item they keep coming back to',
+    )
+  })
+})
+
 describe('SYSTEM_TEMPLATE — R23: the order-recognition carve-out (TAC-555)', () => {
   it('scopes the rule to how often they have been here, not to what they order', () => {
     expect(SYSTEM_TEMPLATE).toContain(
