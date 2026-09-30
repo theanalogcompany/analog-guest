@@ -27,6 +27,11 @@ const MS_PER_DAY = 24 * 60 * 60 * 1000
 
 const RULED_PRIORITY_ORDER: readonly IntentionKey[] = [
   'understand_order',
+  // TAC-558, priority 15. Sits between understand_order and
+  // got_the_recommendation: first in line among everything it can actually meet,
+  // and never able to meet understand_order at all (a transaction satisfies that
+  // one). See its priority comment in definitions.ts.
+  'are_they_new_here',
   'got_the_recommendation',
   'did_they_like_it',
   'learn_name',
@@ -36,6 +41,7 @@ const RULED_PRIORITY_ORDER: readonly IntentionKey[] = [
 ]
 
 const RULED_MIN_REPLIES = {
+  are_they_new_here: 3,
   got_the_recommendation: 3,
   did_they_like_it: 3,
   learn_name: 3,
@@ -44,22 +50,30 @@ const RULED_MIN_REPLIES = {
   why_theyre_here: 11,
 } satisfies Record<Exclude<IntentionKey, 'understand_order'>, number>
 
-// Which single fact, on its own, closes each intention. null = prompted-once
-// is the only closure until TAC-385.
+// Which facts, EACH ON ITS OWN, close each intention. An empty list means
+// prompted-once is the only closure until TAC-385.
+//
+// A LIST rather than one fact since TAC-558, which closes on either of two
+// independent proxies: the record already showing a repeat visit, or the guest's
+// own account being on file. A single-fact table could not express that, and
+// widening it is better than exempting the key from the truth table below.
 const SATISFIED_BY = {
-  understand_order: 'hasQualifyingTransaction',
-  got_the_recommendation: null,
-  did_they_like_it: null,
-  learn_name: 'hasFirstName',
-  are_they_local: 'hasHomeBase',
-  their_rhythm: null,
-  why_theyre_here: null,
-} satisfies Record<IntentionKey, keyof IntentionSatisfactionFacts | null>
+  understand_order: ['hasQualifyingTransaction'],
+  are_they_new_here: ['hasRepeatVisitsOnRecord', 'hasVenueHistoryOnFile'],
+  got_the_recommendation: [],
+  did_they_like_it: [],
+  learn_name: ['hasFirstName'],
+  are_they_local: ['hasHomeBase'],
+  their_rhythm: [],
+  why_theyre_here: [],
+} satisfies Record<IntentionKey, readonly (keyof IntentionSatisfactionFacts)[]>
 
 const NO_FACTS: IntentionSatisfactionFacts = {
   hasQualifyingTransaction: false,
   hasFirstName: false,
   hasHomeBase: false,
+  hasRepeatVisitsOnRecord: false,
+  hasVenueHistoryOnFile: false,
 }
 
 describe('INTENTION_DEFINITIONS — shape', () => {
@@ -69,7 +83,7 @@ describe('INTENTION_DEFINITIONS — shape', () => {
     }
   })
 
-  it('defines exactly the seven ruled intentions, in the ruled priority order', () => {
+  it('defines exactly the eight ruled intentions, in the ruled priority order', () => {
     expect(INTENTION_DEFINITIONS.map((d) => d.key)).toEqual(
       RULED_PRIORITY_ORDER,
     )
@@ -123,6 +137,21 @@ describe('INTENTION_DEFINITIONS — arming, gates and windows (rulings 2–4)', 
     expect(def.gate).toEqual({ kind: 'none' })
   })
 
+  // TAC-558. Pinned as its OWN kind rather than reusing recorded_order, which is
+  // the mistake this guards: that kind takes the NEWEST order and holds it until
+  // the conversation ends, which would push this question out of the counter
+  // session it exists for.
+  it('arms are_they_new_here off the first recorded order, on the replies-only gate', () => {
+    const def = INTENTION_DEFINITION_BY_KEY.are_they_new_here
+    expect(def.armsOn).toEqual({ kind: 'first_recorded_order' })
+    expect(def.armsOn).not.toEqual({ kind: 'recorded_order' })
+    expect(def.gate).toEqual({
+      kind: 'replies_only',
+      defaultMinReplies: 3,
+      firstMessageMinReplies: 3,
+    })
+  })
+
   it('arms the event-armed pair off their events', () => {
     expect(INTENTION_DEFINITION_BY_KEY.got_the_recommendation.armsOn).toEqual({
       kind: 'open_recommendation',
@@ -138,6 +167,7 @@ describe('INTENTION_DEFINITIONS — arming, gates and windows (rulings 2–4)', 
   it('re-arms exactly the two event-armed intentions', () => {
     const RULED_REARMS = {
       understand_order: false,
+      are_they_new_here: false,
       got_the_recommendation: true,
       did_they_like_it: true,
       learn_name: false,
@@ -159,6 +189,7 @@ describe('INTENTION_DEFINITIONS — arming, gates and windows (rulings 2–4)', 
   // describes it.
   it('gates each intention on the ruled kind, with the ruled reply counts', () => {
     const RULED_GATE_KIND = {
+      are_they_new_here: 'replies_only',
       got_the_recommendation: 'conversational',
       did_they_like_it: 'conversational',
       learn_name: 'replies_only',
@@ -184,6 +215,7 @@ describe('INTENTION_DEFINITIONS — arming, gates and windows (rulings 2–4)', 
   // against any value at all, which is the whole failure this pins.
   it('waives the reply count on a first-ever message for learn_name ONLY', () => {
     const RULED_FIRST_MESSAGE = {
+      are_they_new_here: 3,
       learn_name: 0,
       are_they_local: 5,
       their_rhythm: 8,
@@ -209,18 +241,32 @@ describe('INTENTION_DEFINITIONS — arming, gates and windows (rulings 2–4)', 
     }
   })
 
-  it('uses the ruled windows: 3 days for scan- and event-armed, 14 for first contact', () => {
+  // A LITERAL table since TAC-558, no longer derived from armsOn.kind. That
+  // derivation encoded "an order-armed intention gets the event window", which
+  // are_they_new_here breaks deliberately: it arms off an order and carries the
+  // 14-day first-contact window, because the question is about the guest rather
+  // than a perishable event. Derived, this test would have demanded the wrong
+  // number and looked like the definition was at fault.
+  it('uses the ruled window per intention', () => {
     expect(UNDERSTAND_ORDER_WINDOW_DAYS).toBe(3)
     expect(EVENT_ARMED_WINDOW_DAYS).toBe(3)
     expect(FIRST_CONTACT_WINDOW_DAYS).toBe(14)
+
+    const RULED_WINDOW_DAYS = {
+      understand_order: UNDERSTAND_ORDER_WINDOW_DAYS,
+      are_they_new_here: FIRST_CONTACT_WINDOW_DAYS,
+      got_the_recommendation: EVENT_ARMED_WINDOW_DAYS,
+      did_they_like_it: EVENT_ARMED_WINDOW_DAYS,
+      learn_name: FIRST_CONTACT_WINDOW_DAYS,
+      are_they_local: FIRST_CONTACT_WINDOW_DAYS,
+      their_rhythm: FIRST_CONTACT_WINDOW_DAYS,
+      why_theyre_here: FIRST_CONTACT_WINDOW_DAYS,
+    } satisfies Record<IntentionKey, number>
+
     for (const def of INTENTION_DEFINITIONS) {
-      const expectedDays =
-        def.armsOn.kind === 'first_contact'
-          ? FIRST_CONTACT_WINDOW_DAYS
-          : def.armsOn.kind === 'visit_confirmed'
-            ? UNDERSTAND_ORDER_WINDOW_DAYS
-            : EVENT_ARMED_WINDOW_DAYS
-      expect(def.expiresAfterMs, def.key).toBe(expectedDays * MS_PER_DAY)
+      expect(def.expiresAfterMs, def.key).toBe(
+        RULED_WINDOW_DAYS[def.key] * MS_PER_DAY,
+      )
     }
   })
 })
@@ -257,6 +303,8 @@ describe('INTENTION_DEFINITIONS — rule interactions', () => {
       ),
     ).toEqual({
       understand_order: "You haven't heard what this guest ordered yet.",
+      are_they_new_here:
+        "You don't know whether this guest is on their first visit or has been coming here for a while.",
       got_the_recommendation:
         "You suggested something to this guest and haven't heard whether they tried it.",
       did_they_like_it:
@@ -310,6 +358,47 @@ describe('INTENTION_DEFINITIONS — rule interactions', () => {
     )
   })
 
+  // TAC-558, ruled verbatim 2026-09-29. THE ORIGINAL WORDING, ruled back after a
+  // second one measured worse. Pinned as one contiguous literal above; these
+  // guard the properties a reworded line could lose while still reading
+  // plausibly.
+  //
+  // BOTH SIDES, and this is the one that carries the on-target rate. A second
+  // wording that named NEITHER side ("This guest's history with the café before
+  // today is unknown to you.") halved it: 10/20 for this line against 4/20 and
+  // 6/20, because a line that does not say what to ask produced questions about
+  // where the guest lives and what their name is, each of which closes this
+  // intention prompted-once having learned nothing.
+  //
+  // Asserted as two contiguous clauses rather than loose substrings, because per
+  // TAC-409 a sentence can be reversed while every asserted fragment survives.
+  it('names both sides of the new-or-regular question', () => {
+    const line = INTENTION_DEFINITION_BY_KEY.are_they_new_here.promptLine
+    expect(line).toContain('is on their first visit')
+    expect(line).toContain('has been coming here for a while')
+  })
+
+  // A STATE, never an instruction - promptLine's whole contract. A mutant
+  // rewriting this to "Ask whether this is their first visit" keeps both sides
+  // and breaks the contract, so the assertion above cannot catch it alone.
+  it('states the new-or-regular goal as a state, never as an instruction to ask', () => {
+    const line = INTENTION_DEFINITION_BY_KEY.are_they_new_here.promptLine
+    expect(line).toMatch(/^You don't know whether/)
+    expect(line).not.toMatch(/^Ask\b|\bAsk (whether|if|them|the guest)\b/i)
+  })
+
+  // NEWNESS, NEVER DURATION (ruling, 2026-09-29). A line about how LONG a guest
+  // has been coming invites "a couple of years, few times a month", and the model
+  // states it back on the next turn - the R23 trip their_rhythm was scoped to
+  // time of day to avoid. "history before today" asks nothing about frequency.
+  it('keeps frequency and duration out of the line', () => {
+    const line =
+      INTENTION_DEFINITION_BY_KEY.are_they_new_here.promptLine.toLowerCase()
+    expect(line).not.toContain('how long')
+    expect(line).not.toContain('how often')
+    expect(line).not.toMatch(/\bevery week\b|\bhow many\b|\btimes a\b/)
+  })
+
   // Every OTHER line stays a bare state. TAC-541 shaped one intention, and the
   // next reader should have to decide rather than copy: a second line growing
   // a worked example is a change, not a tidy.
@@ -339,7 +428,7 @@ describe('isSatisfied truth table', () => {
         expect(
           def.isSatisfied({ ...NO_FACTS, [fact]: true }),
           `${key} with ${fact}`,
-        ).toBe(SATISFIED_BY[key] === fact)
+        ).toBe((SATISFIED_BY[key] as readonly string[]).includes(fact))
       }
     },
   )

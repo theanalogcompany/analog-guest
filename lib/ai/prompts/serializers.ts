@@ -1070,6 +1070,17 @@ function formatGuestDetailsLines(
   // serializer only ever sees a string here.
   if (details.home_base) lines.push(`- Home base: ${details.home_base}`)
   if (details.workplace) lines.push(`- Work: ${details.workplace}`)
+  // TAC-558: the guest's own account of how long they have been coming here,
+  // captured when are_they_new_here is answered. Renders LAST of the details so
+  // the identity fields stay together at the top.
+  //
+  // This line and `Guest relationship:` in ## Right now can disagree, and that
+  // is accepted rather than reconciled (approved 2026-09-29): the relationship
+  // band is derived from signals we hold, this is what the guest told us, and a
+  // guest can truthfully say they have been coming for years while every signal
+  // still reads `new`. R23 governs what the model may then SAY about frequency.
+  if (details.history_here)
+    lines.push(`- History here: ${details.history_here}`)
   return lines
 }
 
@@ -1585,6 +1596,12 @@ function formatOpenIntentions(
   // can capture with no other path (TAC-325's whole premise). The opener now
   // asks the same question understand_order already wants asked, so the two
   // agree instead of racing.
+  //
+  // TAC-558 brought the new-versus-regular question BACK, as its own intention
+  // (are_they_new_here) rather than as a second question in the opener. It is
+  // not a reversal of the above: it arms only once a transaction exists, which
+  // satisfies understand_order, so the race this paragraph describes is now
+  // structurally impossible rather than merely avoided by wording.
   //
   // TAC-436 ruling 1, approved 2026-09-17. See the block comment above for what
   // changed and why: one restraint removed, the openings named positively.

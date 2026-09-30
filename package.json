@@ -27,6 +27,7 @@
     "measure-warm-close": "tsx --env-file=.env.local scripts/measurement/warm-close.ts",
     "measure-prose-promise-elliptical": "tsx --env-file=.env.local scripts/measurement/prose-promise-elliptical.ts",
     "measure-channel-self-reference": "tsx --env-file=.env.local scripts/measurement/channel-self-reference-replay.ts",
+    "measure-first-visit-question": "tsx --env-file=.env.local scripts/measurement/first-visit-question.ts",
     "measure-date-phrasing": "tsx --env-file=.env.local scripts/measurement/date-phrasing.ts",
     "measure-speaker-identity": "tsx --env-file=.env.local scripts/measurement/speaker-identity.ts",
     "measure-guest-name-frequency": "tsx --env-file=.env.local scripts/measurement/guest-name-frequency.ts",

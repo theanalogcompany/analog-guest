@@ -526,7 +526,49 @@ describe('buildRuntimeContext: conversation window (TAC-547)', () => {
     expect(call).toContain('conversationWindowMs,')
     expect(src.match(/parseFollowupRules\(/g) ?? []).toHaveLength(1)
   })
+
+  // TAC-558. Nothing runs buildRuntimeContext for real under test, and the
+  // supabase mock ignores its select() argument, so a behavioural test cannot
+  // reach this wiring - a dropped field reads as "the guest has no history on
+  // file", which is the OPEN direction for are_they_new_here and would ask a
+  // returner whether this is their first visit.
+  it('passes both TAC-558 facts into buildSatisfactionFacts', () => {
+    const callStart = src.indexOf('buildSatisfactionFacts({')
+    expect(callStart).toBeGreaterThan(-1)
+    const call = balancedCallText(src, callStart)
+    expect(call).toContain('recordedVisitCount,')
+    expect(call).toContain(
+      'venueHistory: parsedGuestContext.guest_details?.history_here,',
+    )
+  })
+
+  // THE RAW COUNT, not recentVisits.length. extractRecentVisits drops a row with
+  // unparseable raw_data, so the parsed length can read 1 for a guest with five
+  // visits - and closing are_they_new_here on the parsed count would ask them
+  // whether this is their first time. Pinned at the source because both values
+  // are plain numbers and no fixture distinguishes them.
+  it('derives recordedVisitCount from the RAW visit rows, never the parsed projection', () => {
+    expect(src).toContain(
+      'const recordedVisitCount = visitHistoryResult.data?.length ?? 0',
+    )
+    const callStart = src.indexOf('buildSatisfactionFacts({')
+    // COMMENTS STRIPPED FIRST. The source comment beside this argument names
+    // `recentVisits.length` to say why it is NOT used, so an unstripped check
+    // matches its own rationale and fails against correct code - which is what
+    // it did on the first run. A guard over source has to read code, not prose.
+    expect(stripLineComments(balancedCallText(src, callStart))).not.toContain(
+      'recentVisits.length',
+    )
+  })
 })
+
+/** Drop `//` line comments, so a source guard reads code rather than prose. */
+function stripLineComments(text: string): string {
+  return text
+    .split('\n')
+    .map((line) => line.replace(/\/\/.*$/, ''))
+    .join('\n')
+}
 
 /** The text of a `name({ ... })` call starting at `from`, to its matching brace. */
 function balancedCallText(src: string, from: number): string {

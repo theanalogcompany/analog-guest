@@ -1747,6 +1747,17 @@ import {
 // one short line, or not at all" became "the question is one short line on its
 // own, or not at all". The question has no position in the body any more, so
 // the old wording would be false.
+// v1.74.0 (TAC-558): a new intention, are_they_new_here, asking whether a guest
+//   is on their first visit once their order is on record, plus the
+//   guest_details.history_here capture field its answer lands in. The prompt
+//   change is one line in the # Guest context capture shape and two worked
+//   examples; the intention's own promptLine reaches the prompt through the
+//   ## What you're hoping to get to block rather than this template. Added
+//   because the field was unwritable without it: the measurement's first smoke
+//   run raised the question, got an answer, and stored nothing.
+//
+//   v1.73.0 was taken by TAC-560 while this branch was open, so this is v1.74.0.
+//   Both entries stay; they are different changes.
 // v1.73.0 (TAC-560): a new # Conversation close self-report block, and a new
 // `## Closing this conversation` user-prompt block in serializers.ts. No new
 // voice rule, and no change to any existing one.
@@ -1782,7 +1793,7 @@ import {
 // signed off and forbids naming anything new, both false when the guest sent
 // nothing. Handing the model a false premise as fact is the TAC-484 / TAC-502
 // failure class. See lib/ai/prompts/categories/warm-close.ts.
-export const PROMPT_VERSION = 'v1.73.0'
+export const PROMPT_VERSION = 'v1.74.0'
 
 export const SYSTEM_TEMPLATE = `You work at a hospitality venue (cafe, bakery, restaurant). You communicate with its guests via iMessage, in whatever voice the venue has configured below — its own collective voice, its owner's, or a named staff member's.
 
@@ -1902,10 +1913,10 @@ The rule: record what the guest SAID, not what you INFER. If the guest says "I'm
 
 contextUpdate has two optional sub-fields:
 - structured: a partial patch of the persisted guest profile. Use the shape:
-    { guest_details: { first_name, last_name, home_base, workplace },
+    { guest_details: { first_name, last_name, home_base, workplace, history_here },
       preferences: { dietary: [], favorites: [], dislikes: [] },
       life_context: [{ note, expires_at? }] }
-  Every field optional. guest_details.home_base and guest_details.workplace are bare strings — free-form ("Bernal Heights", "marketing agency near Union Square"), not nested objects. Arrays in structured REPLACE the existing values when emitted, so emit the full new array (e.g. if the guest says "I'm vegan AND gluten-free," emit preferences.dietary as ["vegan","gluten-free"], not just ["gluten-free"]). For life_context, the runtime stamps captured_at — you only need to provide note and (optionally) expires_at as an ISO timestamp for time-bound entries (trips, deadlines).
+  Every field optional. guest_details.home_base, guest_details.workplace and guest_details.history_here are bare strings — free-form ("Bernal Heights", "marketing agency near Union Square", "first time in today"), not nested objects. history_here is how long the guest has been coming to THIS venue, in their own words, recorded whichever way they answer. Arrays in structured REPLACE the existing values when emitted, so emit the full new array (e.g. if the guest says "I'm vegan AND gluten-free," emit preferences.dietary as ["vegan","gluten-free"], not just ["gluten-free"]). For life_context, the runtime stamps captured_at — you only need to provide note and (optionally) expires_at as an ISO timestamp for time-bound entries (trips, deadlines).
 - observation: a single short freeform sentence — the catch-all for anything that doesn't fit structured. Appended to an observations[] list with a timestamp the runtime stamps. Use this for pronouns, date of birth, specific addresses, or any other share that doesn't slot into guest_details / preferences / life_context. Examples: "uses they/them," "birthday is March 12," "mentioned she's a marathon runner," "said her dog's name is Hank," "works late shifts."
 
 When to emit each:
@@ -1913,6 +1924,8 @@ When to emit each:
 - "I'm vegan" → structured: { preferences: { dietary: ["vegan"] } }
 - "I live in Bernal Heights" → structured: { guest_details: { home_base: "Bernal Heights" } }
 - "I work at a small marketing agency near Union Square" → structured: { guest_details: { workplace: "marketing agency near Union Square" } }
+- "yeah first time in today" → structured: { guest_details: { history_here: "first time in today" } }
+- "been coming for about a year now" → structured: { guest_details: { history_here: "been coming about a year" } }
 - "Going to Tokyo for two weeks, back on the 30th" → structured: { life_context: [{ note: "in Tokyo until the 30th", expires_at: "<ISO date for the 30th>" }] } (you must include any existing life_context entries from the ## Guest context block that you still want to keep, since arrays replace)
 - "I use they/them" → observation: "uses they/them"
 - "I'm a runner" → observation: "mentioned she runs"

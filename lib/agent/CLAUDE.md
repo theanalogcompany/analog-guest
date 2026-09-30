@@ -208,8 +208,20 @@ so a halted venue never accumulates recognition state or takes a claim.
 
 ## Intentions
 
-`intentions/`. Seven keys in `definitions.ts`, priority-ordered, arming on
-`visit_confirmed` / `open_recommendation` / `recorded_order` / `first_contact`.
+`intentions/`. Eight keys in `definitions.ts`, priority-ordered, arming on
+`visit_confirmed` / `first_recorded_order` / `open_recommendation` / `recorded_order` /
+`first_contact`.
+
+`first_recorded_order` and `recorded_order` are one word apart and opposite:
+`recorded_order` takes the NEWEST order and HOLDS it until the order has left the
+conversation it happened in ("did you try it?" a minute later is absurd), while
+`first_recorded_order` takes the EARLIEST and holds nothing, because the question it arms
+(`are_they_new_here`) is about the guest rather than the order and the counter session is
+the only moment it fits.
+
+`are_they_new_here` and `understand_order` can never be open on one turn: the first arms
+only once a transaction exists, and a transaction satisfies the second. That is why its
+priority is 15 rather than 5 - a test asserting it wins that race could never fail.
 
 Two predicates must move together: `shouldRenderOpenIntentions` (render side) and
 `renderableIntentions` (record side). Suppressing on one only means the post-send

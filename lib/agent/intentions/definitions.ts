@@ -29,6 +29,7 @@ const MS_PER_DAY = 24 * 60 * 60 * 1000
 
 export type IntentionKey =
   | 'understand_order'
+  | 'are_they_new_here'
   | 'got_the_recommendation'
   | 'did_they_like_it'
   | 'learn_name'
@@ -86,6 +87,30 @@ export type IntentionArmsOn =
    * order was long ago would otherwise never be asked about a later one.
    */
   | { kind: 'recorded_order' }
+  /**
+   * TAC-558: the EARLIEST recorded order, armed as soon as one exists, with NO
+   * conversation-window hold.
+   *
+   * READ THE CONTRAST WITH `recorded_order` ABOVE, because the two are one word
+   * apart and mean opposite things. That one takes the NEWEST order and HOLDS
+   * it until the order has left the conversation it happened in, because
+   * "did you try it?" a minute after the order is absurd. This one takes the
+   * EARLIEST and holds nothing, because the question it arms is about the
+   * GUEST, not about the order: whether they are new here is just as askable in
+   * the same sitting, and a 48-hour hold would push it out of the counter
+   * session entirely, which is the only moment it naturally fits.
+   *
+   * A transaction existing is how "the order is captured" is read (TAC-558,
+   * approved 2026-09-29). Deliberately STRONGER than "understand_order closed":
+   * that intention also closes on prompted-once, i.e. we asked and the guest
+   * never answered, in which case the order was not captured at all.
+   *
+   * THAT IS ALSO WHAT MAKES A RACE WITH understand_order STRUCTURALLY
+   * IMPOSSIBLE rather than merely unlikely: a transaction satisfies
+   * understand_order through its own isSatisfied, so the two can never be open
+   * on one turn. See the priority comment on are_they_new_here.
+   */
+  | { kind: 'first_recorded_order' }
 
 /**
  * Whether a strictly newer event re-arms an intention that already has a row
@@ -102,6 +127,10 @@ export function rearmsOnNewerEvent(armsOn: IntentionArmsOn): boolean {
   switch (armsOn.kind) {
     case 'visit_confirmed':
     case 'first_contact':
+    // TAC-558. Whether a guest is new here is asked once and never again: a
+    // second order is not a new thing to ask about, it is the answer arriving
+    // by another route (and hasRepeatVisitsOnRecord closes the intention on it).
+    case 'first_recorded_order':
       return false
     case 'open_recommendation':
     case 'recorded_order':
@@ -179,6 +208,32 @@ export interface IntentionSatisfactionFacts {
   hasFirstName: boolean
   /** The parsed guest context carries a home_base. */
   hasHomeBase: boolean
+  /**
+   * TAC-558: the record shows MORE THAN ONE visit for this guest, so we already
+   * know they have been in before and there is nothing to ask.
+   *
+   * THE RAW TRANSACTION ROW COUNT, deliberately, where are_they_new_here ARMS
+   * off the PARSED visit list. Arm on what the model can SEE (## Visit history
+   * is built from the parsed projection, so an unparseable row shows the model
+   * no order to anchor on); close on what the RECORD knows. A guest with five
+   * rows of which four have unparseable raw_data must not be asked whether this
+   * is their first time, and the parsed count would say it is.
+   *
+   * Read POSITIVELY by isSatisfied, which is what keeps the Command Center
+   * loader's fail-closed branch honest - see the note at
+   * load-venue-intentions.ts, which warns that the guarantee holds only while
+   * every isSatisfied does.
+   */
+  hasRepeatVisitsOnRecord: boolean
+  /**
+   * TAC-558: the guest's own account of their history at this venue is on file
+   * (`guests.context.guest_details.history_here`).
+   *
+   * The `hasHomeBase` shape exactly: a free-form string the agent captured
+   * through contextUpdate, which both closes the intention and renders back into
+   * the ## Guest context block on later turns.
+   */
+  hasVenueHistoryOnFile: boolean
 }
 
 export interface IntentionDefinition {
@@ -265,6 +320,84 @@ const DEFINITIONS = {
       'Closes once raised, or once any transaction exists for this guest, from any source.',
     expiresAfterMs: UNDERSTAND_ORDER_WINDOW_DAYS * MS_PER_DAY,
     isSatisfied: (facts) => facts.hasQualifyingTransaction,
+  },
+  are_they_new_here: {
+    key: 'are_they_new_here',
+    // FIRST IN LINE ONCE ACTIVE (TAC-558), and 15 rather than 5 deliberately.
+    // It cannot co-occur with understand_order at priority 10: arming requires a
+    // transaction, and a transaction satisfies understand_order through its own
+    // isSatisfied, so the two are mutually exclusive by construction. A test
+    // asserting this beats understand_order could therefore never fail in
+    // production, which is the antipattern the root CLAUDE.md keeps logging. 15
+    // is first among everything it can actually meet (20 through 70) and records
+    // the exclusion honestly; 5 would imply a race that cannot happen.
+    priority: 15,
+    armsOn: { kind: 'first_recorded_order' },
+    // Rung 3, shared with learn_name, which is what gives `priority` real work
+    // to do: both open, this one renders first, and the restraint paragraph says
+    // take the first only.
+    //
+    // NO FIRST-MESSAGE WAIVER, and stated rather than inherited per the field's
+    // own docstring. Arming needs a captured order, which is impossible on a
+    // guest's first-ever message, so a waiver here could never fire.
+    gate: {
+      kind: 'replies_only',
+      defaultMinReplies: 3,
+      firstMessageMinReplies: 3,
+    },
+    // Ruled verbatim by Jaipal, 2026-09-29. THIS IS THE ORIGINAL WORDING, ruled
+    // back after a second one was tried and measured worse. Read the history
+    // before rewording it, because the obvious fix has been tried.
+    //
+    // WORDING 1 (this line) MEASURED AS A TEMPLATE. Over 20 conversations, 12
+    // questions raised, "have you been" in 11 of them. The diagnosis at the time
+    // was that the model was lifting "has been coming here for a while" straight
+    // out of this line.
+    //
+    // WORDING 2 WAS "This guest's history with the café before today is unknown
+    // to you." - no phrase a guest would say, so nothing to lift. It was worse on
+    // both counts. ON-TARGET rate HALVED: 10/20 for this line against 4/20 and
+    // 6/20 across two runs, because an abstract line does not tell the model what
+    // to ASK, so it asked about where the guest lives, or their name, or the
+    // neighbourhood. Each of those closes this intention prompted-once having
+    // learned nothing, which is worse than a repeated phrase. And variety FAILED
+    // ANYWAY: wording 2 shares no phrase with its own questions and still
+    // produced "have you been coming" in 3 of its 4 on-target questions.
+    //
+    // SO THE REPETITION IS NOT COPIED FROM HERE. "have you been...?" is how
+    // English asks whether someone has done something before, and no wording
+    // tested changes that. Rewording this line to chase phrasing variety is a
+    // road already walked; the mechanism route is TAC-564's.
+    //
+    // NO QUOTED EXAMPLE, which is enforced mechanically rather than by this
+    // comment - definitions.test.ts's "leaves every other promptLine a bare state
+    // with no worked example" asserts no double quote appears in any line but
+    // learn_name's. Necessary and, as wording 2 showed, NOT sufficient against
+    // verbatim repetition.
+    //
+    // BOTH SIDES NAMED, and this is what buys the on-target rate. Naming only the
+    // first ("you don't know whether this is their first visit") primes a yes/no;
+    // naming neither is wording 2.
+    //
+    // NEWNESS, NEVER DURATION. Deliberately not "how long this guest has been
+    // coming", which invites "a couple of years, few times a month" and then
+    // trips R23 on the NEXT turn when the model uses the answer. That is the
+    // same trap their_rhythm was scoped to time of day to avoid.
+    promptLine:
+      "You don't know whether this guest is on their first visit or has been coming here for a while.",
+    classifierDescription:
+      "asks whether this is the guest's first visit or whether they have been coming here for a while",
+    satisfactionLabel:
+      "Closes once raised, once the record shows more than one visit, or once the guest's own account of their history here is on file.",
+    // The first-contact window, not the 3-day event one: this question is about
+    // the guest rather than a perishable event, and TAC-519 found intentions are
+    // rarely raised, so a 3-day window on a rarely-read block mostly expires
+    // unasked. Measured from the earliest recorded order. PLACEHOLDER.
+    expiresAfterMs: FIRST_CONTACT_WINDOW_DAYS * MS_PER_DAY,
+    // TWO proxies, both read positively. The record already knowing they are a
+    // returner is as good a closure as the guest telling us.
+    isSatisfied: (facts) =>
+      facts.hasRepeatVisitsOnRecord || facts.hasVenueHistoryOnFile,
   },
   got_the_recommendation: {
     key: 'got_the_recommendation',
