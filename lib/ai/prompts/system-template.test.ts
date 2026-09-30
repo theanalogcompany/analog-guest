@@ -32,8 +32,8 @@ import {
 // SYSTEM_TEMPLATE body changes.
 
 describe('PROMPT_VERSION', () => {
-  it('is v1.74.0 (a new-or-regular intention, and the field its answer lands in)', () => {
-    expect(PROMPT_VERSION).toBe('v1.74.0')
+  it('is v1.75.0 (a recognised order is received by saying so, with warmth)', () => {
+    expect(PROMPT_VERSION).toBe('v1.75.0')
   })
 })
 
@@ -1269,6 +1269,338 @@ describe('SYSTEM_TEMPLATE — R21: no volunteered advice on an unprompted guest 
     expect(end).toBeGreaterThan(start)
     const tailBody = SYSTEM_TEMPLATE.slice(start, end)
     expect(tailBody).not.toMatch(/[—–]/)
+  })
+})
+
+// TAC-555: R21 gains the positive half of "receive it". Before this it said
+// "receive it" and then banned rating, comparing and suggesting, with no
+// statement of what receiving looks like, so the shortest safe move was a
+// bare receipt: a guest with cortado on 4 of 5 recorded visits typed "just
+// got a cortado" and the auto-sent reply was "nice".
+//
+// EVERY CLAUSE BELOW IS PINNED AS ONE EXACT CONTIGUOUS LITERAL, not as
+// fragments. TAC-409 and TAC-502 each record a sentence being reversed while
+// every asserted fragment survived, and TAC-502's landed on the very entry
+// citing TAC-409. A clause asserted in pieces can be inverted between them.
+describe('SYSTEM_TEMPLATE — R21: a recognised order is received by saying so (TAC-555)', () => {
+  // The positive half, whole. Splitting this would let "is not the same as
+  // saying as little as possible" invert to "is saying as little as
+  // possible" with every other fragment intact.
+  // A REAL SENTENCE, NOT A LABEL, is the ruled fix for the measured 43%
+  // templating breach ("your usual" in 6 of 14 replies). The bare-label
+  // sentence is what makes that a stated requirement rather than a hope.
+  it('requires a real sentence carrying both the recognition and the warmth', () => {
+    expect(SYSTEM_TEMPLATE).toContain(
+      "When the item they named is already in this guest's ## Visit history, write a real sentence, not a label. Two things always belong in it: that you know this is what they order, or that they have had it before, and something warm about them: about their coming back, or about the taste they have.",
+    )
+  })
+
+  // RULING 3 (2026-09-29), and this is the measured half. The first version
+  // asked for warmth "about the choice itself" and the model substituted a
+  // WELL-WISH about the drink in 8 of 20 replies, which was simultaneously
+  // the missing compliment and the 35% n=2 template. The exclusion is stated
+  // POSITIVELY (the warmth is about the guest) and the well-wish is DESCRIBED
+  // rather than quoted, because a quoted phrasing is the one thing the model
+  // reproduces verbatim and templated wording is this ticket's own defect.
+  //
+  // Pinned whole. Fragment-pinned, "it is not this" could invert to "it is
+  // this" with every other fragment surviving, which restores the defect.
+  it('rules a well-wish about the item out as the warm half', () => {
+    expect(SYSTEM_TEMPLATE).toContain(
+      'That warmth is about the guest and not about the drink. A wish that the item turns out well is a kind thing to say and it is not this, because it is about the order rather than about the person who chose it, so it never counts as the warm half.',
+    )
+  })
+
+  it('rejects a bare label naming the order and nothing else', () => {
+    expect(SYSTEM_TEMPLATE).toContain(
+      'Two or three words naming the order and nothing else is a label, not a sentence, and it is not this.',
+    )
+  })
+
+  // THE SCOPED REVERSAL. This rule's own ban on rating the choice is
+  // TAC-334's, sharpened post-UAT after "the right call" reached a guest, and
+  // it stays in force everywhere else. Pinned whole: a fragment-pinned
+  // version would survive widening "and only here" to every turn.
+  it('gives way on rating the choice ONLY when the item is already in their history', () => {
+    expect(SYSTEM_TEMPLATE).toContain(
+      "That warmth is also the one place this rule's ban on rating the choice gives way, and only for an item already in their ## Visit history, because a guest you recognize is not a stranger whose order you are grading.",
+    )
+  })
+
+  // RULING 4 (2026-09-29). "and only here" was measured LEAKING: on arm B,
+  // where the item is in no history at all, complimentsChoice went 2/10 in
+  // the control to 5/10 in the treatment, twice as the literal "good call" --
+  // one of this rule's OWN named banned shapes. Naming the block is what
+  // makes the scope checkable; the not-in-history branch below now says it
+  // again from the other side, because one statement of it demonstrably did
+  // not hold.
+  it('refuses a verdict on the choice for an item with no history', () => {
+    expect(SYSTEM_TEMPLATE).toContain(
+      'No verdict on the choice either, since the give-way above reaches only an order you already know; warmth about the item itself is still welcome there, but grading their pick is exactly what the start of this rule forbids.',
+    )
+  })
+
+  // The base prohibition must survive the carve-out, or the carve-out has
+  // eaten the rule it was scoped against.
+  it('keeps the base ban and its customer-service examples intact', () => {
+    expect(SYSTEM_TEMPLATE).toContain(
+      "Don't rate the choice, compare it to other options, or suggest something different for next time.",
+    )
+    expect(SYSTEM_TEMPLATE).toContain('good pick')
+    expect(SYSTEM_TEMPLATE).toContain('the right call')
+  })
+
+  // THE COUNT BAN, INLINE. Relying on R23 two bullets later demonstrably
+  // leaked once in fourteen ("third one in two weeks"), and the computable
+  // case is named because that is how it leaked: the model counted the
+  // bullets and did arithmetic on the deltas.
+  it('forbids a number inline, including when the dates make it computable', () => {
+    expect(SYSTEM_TEMPLATE).toContain(
+      'Frequency in words belongs to that recognition and is welcome: that they keep coming back to this one is the kind of thing to say. Frequency as a figure never is. No count of visits or orders, no ordinal placing this one in a sequence, and no span of time to measure them against.',
+    )
+  })
+
+  // RULING 5 (2026-09-29) narrowed the ban. The first version forbade "how
+  // often or how recently they come", which also forbade the warm, countless
+  // recognition the rule exists to produce; 4 of 20 replies tripped it saying
+  // nothing countable at all. Now: words yes, figures no. The two halves are
+  // pinned in ONE literal above, because splitting them would let the
+  // permission survive while the prohibition is deleted, or the reverse.
+  //
+  // THIS SENTENCE IS THE TAC-543 INTERACTION and it is new in v1.75.0. Since
+  // that ticket, ## Visit history renders the counts outright ("cortado
+  // (4x)"), so the model no longer has to do arithmetic on timestamps to name
+  // a number, which is how the v1.71.0 measurement leaked one ("third one in
+  // two weeks"). An inline ban that did not mention the block would be
+  // arguing against a page the model can read.
+  it('names the history block as the counts it must not repeat back', () => {
+    expect(SYSTEM_TEMPLATE).toContain(
+      'The ## Visit history block states those counts outright and its dates let more be worked out; none of that is yours to repeat back.',
+    )
+  })
+
+  // (c) and (d). Pinned whole because "only when it genuinely adds something"
+  // is the entire brake on it firing every turn.
+  it('permits one added detail or bean story, only when it adds something new', () => {
+    expect(SYSTEM_TEMPLATE).toContain(
+      "Sometimes one more thing belongs, and only when it genuinely adds something they would not already know. Either one specific and genuinely interesting detail about the item, drawn from the venue's own knowledge. Or, for a regular's usual drink and only when the moment invites it, the story of the bean behind it: where it comes from, and why that gives the drink the taste it has.",
+    )
+  })
+
+  it('makes taking the beans home an aside inside the story, never an offer', () => {
+    expect(SYSTEM_TEMPLATE).toContain(
+      'That the beans can go home with them to brew is a natural aside inside that story, never an offer.',
+    )
+  })
+
+  // THE SELLING CLAUSE, and it is about the SOURCE MATERIAL rather than about
+  // model manners. Le Mil's bean entries carry the origin story and the price
+  // list in one chunk (every one ends with sizes, dollar amounts and the
+  // shop URL), so this has to name the commercial half explicitly or the
+  // price rides along with the story.
+  it('excludes the commercial half of a knowledge entry from the story', () => {
+    expect(SYSTEM_TEMPLATE).toContain(
+      "All of it comes from the venue's own knowledge and nowhere else, and it has to read as sharing something you love rather than selling: where that knowledge also records how a bean is sold, in what sizes, at what price or on what website, none of that is part of the story. Say nothing about buying it and name no price unless the guest asks.",
+    )
+  })
+
+  it('caps the added detail at once per guest, never repeated, never on a first visit', () => {
+    expect(SYSTEM_TEMPLATE).toContain(
+      'Once per guest at most, never the same detail or story twice, and never to a guest whose first visit this is. It is entirely fine if it never comes up.',
+    )
+  })
+
+  it('forbids reciting the history back', () => {
+    expect(SYSTEM_TEMPLATE).toContain(
+      'Do not recite their history back to them in any of this.',
+    )
+  })
+
+  // THE FALSE-POSITIVE GUARD. This sentence is the only thing in the prompt
+  // standing between the change and a fabricated "your usual" for an item the
+  // guest has never ordered, which is the ticket's own 0/10 bar.
+  it('forbids saying anything about history when the item is NOT in it', () => {
+    expect(SYSTEM_TEMPLATE).toContain(
+      'If the item is not in their history, say nothing about their history: no recognition, nothing about them coming back, and no story.',
+    )
+  })
+
+  // The jurisdictional sentence, and it is load-bearing rather than
+  // decorative: `acknowledgment`'s "This is a close, not an opening" renders
+  // AFTER the universal rules, so without this it silently vetoes the clause
+  // on exactly the turn shape the device case came from. R22, R35 and R37
+  // each carry the same construction for the same reason (TAC-327/TAC-330).
+  it('states that a category register guidance cannot veto recognition', () => {
+    expect(SYSTEM_TEMPLATE).toContain(
+      "A category's register guidance, whether it frames the turn as a close or as small talk, is never authority over whether you recognize an order you know.",
+    )
+  })
+
+  // THE ## Length OVERRIDE, and it is why the first version templated. R20
+  // makes ## Length the only authority on length and R19 mirrors the guest, so
+  // a five-word inbound compressed the reply to a two-word label. Scoped to
+  // this turn only, or it becomes a general licence to run long.
+  it('overrides ## Length for one sentence, and for this turn only', () => {
+    expect(SYSTEM_TEMPLATE).toContain(
+      'Neither is the ## Length section: one real sentence is worth the room here, and that exception is this turn only.',
+    )
+  })
+
+  // THE OVERRIDE IS NOT SELF-EXECUTING, and this is the finding a smoke run
+  // produced before the full one: asserting the override inside R21 is not
+  // enough, because the two length rules PRE-EMPT it from above.
+  //
+  // R20 said "Nothing later in this prompt overrides it", categorically, 767
+  // characters before R21's override, so the prompt contained a flat
+  // contradiction and the model resolved it against R21: a treatment reply
+  // still came back as the two-word "the usual". R19's only escape clause was
+  // "when the ## Length section names an exception", and R21 is not that
+  // section. Neither could see R21.
+  //
+  // ## Length itself is `persona.lengthGuide`, per-venue data rendered by
+  // personaToProse, so it is not this file's to amend and not the right place:
+  // the fix is the two rules that claim authority over it.
+  //
+  // Neither wording was pinned before this, which is how the first version
+  // shipped believing the override worked.
+  it('R20 names the recognition exception, so the override is reachable at all', () => {
+    expect(SYSTEM_TEMPLATE).toContain(
+      'Nothing later in this prompt overrides it, with one exception, named in the rule below on receiving an order this guest has had before: there, one real sentence is worth the room.',
+    )
+  })
+
+  it('R19 lets a rule in the list, not only ## Length, name an exception to mirroring', () => {
+    expect(SYSTEM_TEMPLATE).toContain(
+      'When the ## Length section or another rule in this list names an exception, the exception beats mirroring.',
+    )
+  })
+
+  // R20's original authority claim must survive: the exception is one named
+  // carve-out, not a general demotion of ## Length.
+  it('keeps ## Length as the authority and keeps its own exception mechanism', () => {
+    expect(SYSTEM_TEMPLATE).toContain(
+      'The ## Length section below is the only authority on how long a message should be.',
+    )
+    expect(SYSTEM_TEMPLATE).toContain(
+      'Otherwise, when ## Length names an exception (for example, recommendations going deeper than the default), the exception holds.',
+    )
+  })
+
+  // NO QUOTED EXAMPLE, and the ban is the anti-template mechanism rather than
+  // a style preference: a quoted phrasing is the one thing the model
+  // reproduces verbatim, which is the defect the ticket names. R21's existing
+  // quotes are all things to AVOID and all sit outside this clause.
+  //
+  // The check looks for an OPENING quote (one preceded by whitespace or the
+  // clause start) rather than any apostrophe, because the clause legitimately
+  // contains "it's", "they've" and "guest's".
+  it('contains no quoted example phrase inside the recognition clause', () => {
+    const start = SYSTEM_TEMPLATE.indexOf(
+      'Receiving it is not the same as saying',
+    )
+    const end = SYSTEM_TEMPLATE.indexOf('The guest opens that door by asking')
+    expect(start).toBeGreaterThan(-1)
+    expect(end).toBeGreaterThan(start)
+    const clause = SYSTEM_TEMPLATE.slice(start, end)
+    expect(clause).not.toMatch(/(^|\s)['"‘“]/)
+  })
+})
+
+// R23 (TAC-555): the carve-out is NOT optional and is the part most likely to
+// be cut as redundant. R23 renders AFTER R21, so on most-proximate-wins it
+// beats the new recognition clause, and its own example "you come in so
+// often" is close enough to "the one they order most" that the model is
+// pulled both ways. Without this the change is silently vetoed, which is the
+// TAC-327 / TAC-330 case-2 failure class.
+// THE RAIL'S SUMMARY CONTENT IS OTHERWISE UNGUARDED, and that is a gap this
+// ticket found by mutant rather than by reading. The lockstep guard above
+// covers the id SEQUENCE and the displayed/undisplayed partition; nothing
+// covered what a summary SAYS, so reverting R21's rail entry to its
+// pre-ruling wording passed all 294 tests in this file. CLAUDE.md calls
+// UNIVERSAL_RULES_DISPLAY a dual source of truth that "must move in
+// lockstep", and until this that was a claim nothing could falsify.
+//
+// Deliberately NOT an equality assertion against the template: the summary is
+// a paraphrase for an operator reading the Voices rail, and pinning it whole
+// would make every prompt reword a two-file edit for no gain. What is pinned
+// is the DISTINCTIONS the rulings turn on, so a summary that silently loses
+// one fails. It guards R21 and R23 only, the two this ticket owns; the general
+// fix is the structured rules registry CLAUDE.md already names as a follow-up.
+describe('UNIVERSAL_RULES_DISPLAY — R21 and R23 carry this ticket rulings (TAC-555)', () => {
+  const summaryFor = (id: string) => {
+    const entry = UNIVERSAL_RULES_DISPLAY.find((r) => r.id === id)
+    expect(entry, `${id} is missing from the rail`).toBeDefined()
+    return entry?.summary ?? ''
+  }
+
+  // RULING 3.
+  it('says the warmth is about the guest, and that a well-wish is not it', () => {
+    const r21 = summaryFor('R21')
+    expect(r21).toContain(
+      'something warm about the guest, their coming back or their taste',
+    )
+    expect(r21).toContain(
+      'A wish that the item turns out well is not that warmth.',
+    )
+  })
+
+  // RULING 5. Both halves, because a summary keeping only the permission reads
+  // as licensing a count and keeping only the ban reverts the ruling.
+  it('permits frequency in words and refuses it as a figure', () => {
+    expect(summaryFor('R21')).toContain(
+      'Frequency in words is welcome; a figure never is, so no count, no ordinal and no span of time',
+    )
+  })
+
+  // RULING 4, both sides: the scope AND the consequence for a new item.
+  it('scopes the give-way to an item already in the history', () => {
+    const r21 = summaryFor('R21')
+    expect(r21).toContain('and only for an item already in their history')
+    expect(r21).toContain('no verdict on the choice either')
+  })
+
+  // R23's carve-out is what keeps the recognition reachable at all.
+  it('keeps R23 scoped to visits while permitting order recognition', () => {
+    expect(summaryFor('R23')).toContain(
+      'so is saying warmly that you know which item they keep coming back to',
+    )
+  })
+})
+
+describe('SYSTEM_TEMPLATE — R23: the order-recognition carve-out (TAC-555)', () => {
+  it('scopes the rule to how often they have been here, not to what they order', () => {
+    expect(SYSTEM_TEMPLATE).toContain(
+      'This rule is about how often they have been here, not about what they order: telling a guest you know which item they order most is the order-recognition guidance above, and is not a visit statistic.',
+    )
+  })
+
+  // The tally ban still covers BOTH kinds of number. Recognising an order is
+  // permitted; counting the orders is not, exactly as counting visits is not.
+  it('keeps every tally banned, orders as well as visits', () => {
+    expect(SYSTEM_TEMPLATE).toContain(
+      'What this rule forbids is naming a number, and that holds whether the number counts visits or orders.',
+    )
+  })
+
+  it('leaves the original prohibition and its examples intact', () => {
+    expect(SYSTEM_TEMPLATE).toContain(
+      'Never state or imply a visit count, frequency, or any statistic about how often the guest has been here',
+    )
+    expect(SYSTEM_TEMPLATE).toContain("'this is your fifth time'")
+    expect(SYSTEM_TEMPLATE).toContain("'you come in so often'")
+  })
+
+  // The ORDER is what makes the carve-out necessary, so it is asserted rather
+  // than assumed: if R23 ever moved above R21 the reasoning above changes.
+  it('renders after R21, which is why the carve-out lives here too', () => {
+    const r21 = SYSTEM_TEMPLATE.indexOf(
+      'Receiving it is not the same as saying',
+    )
+    const r23 = SYSTEM_TEMPLATE.indexOf(
+      'This rule is about how often they have been here',
+    )
+    expect(r21).toBeGreaterThan(-1)
+    expect(r23).toBeGreaterThan(r21)
   })
 })
 
