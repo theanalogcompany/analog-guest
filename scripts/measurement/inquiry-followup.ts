@@ -291,11 +291,21 @@ async function main(): Promise<void> {
   )
 
   const bodies: string[] = []
+  let rewrittenCount = 0
   for (const [index, c] of CASES.entries()) {
     const { composed } = index === 0 ? first : await composeFor(c)
     const system = `${composed.systemPrompt}\n\n${VOICE_FIDELITY_INSTRUCTION}`
 
     let body: string | null = null
+    /**
+     * The model's body BEFORE replaceDashes.
+     *
+     * Recorded because the first fixed run could not answer its own question:
+     * it applied the rewrite and stored only the result, so "voice checks:
+     * clean" could not distinguish "no dash was emitted" from "a dash was
+     * emitted and rewritten". Those are different facts about the prompt.
+     */
+    let rawBody: string | null = null
     let error: string | null = null
     // A bounded re-ask on a schema failure, byte-identical prompt each attempt.
     // Not the regen loop: no feedback, no sticky constraints.
@@ -316,6 +326,7 @@ async function main(): Promise<void> {
         // DETERMINISTIC rewrite applied to every body on the real path, so
         // omitting it measured a body production would never send. Confirmed
         // 2026-09-30: em dash and en dash become ", " before the send.
+        rawBody = object.body
         body = replaceDashes(object.body)
         error = null
         break
@@ -335,12 +346,15 @@ async function main(): Promise<void> {
       question: c.question,
       answer: c.answer,
       body,
+      rawBody,
+      dashRewritten: rawBody !== null && rawBody !== body,
       error,
       reference,
       visit,
       voice,
     })
     if (body !== null) bodies.push(body)
+    if (rawBody !== null && rawBody !== body) rewrittenCount += 1
 
     console.log(`--- ${index + 1}/${CASES.length} (${c.kind}) ---`)
     console.log(`  asked:  ${c.question}`)
@@ -394,6 +408,10 @@ async function main(): Promise<void> {
       console.log(`    ${p.count}x  ${JSON.stringify(p.phrase)}`)
     }
   }
+  const dashRewrites = rewrittenCount
+  console.log(
+    `  dash rewrites applied by the shipped path: ${dashRewrites} of ${units}`,
+  )
   const voiceProblems = bodies
     .map((b, i) => ({ i: i + 1, v: findsVoiceProblems(b) }))
     .filter(
