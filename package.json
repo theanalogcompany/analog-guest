@@ -25,6 +25,7 @@
     "test:watch": "vitest",
     "prepare": "husky",
     "measure-instagram-copy": "tsx --env-file=.env.local scripts/measurement/instagram-channel-copy.ts",
+    "measure-jev-classify": "tsx --env-file=.env.local scripts/measurement/jev-classify-eval.ts",
     "measure-prose-promise": "tsx --env-file=.env.local scripts/measurement/prose-promise-catch-rate.ts",
     "measure-warm-close": "tsx --env-file=.env.local scripts/measurement/warm-close.ts",
     "measure-prose-promise-elliptical": "tsx --env-file=.env.local scripts/measurement/prose-promise-elliptical.ts",

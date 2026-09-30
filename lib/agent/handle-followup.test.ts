@@ -59,10 +59,10 @@ vi.mock('./build-runtime-context', () => ({
 // import, and the real lib/rag module transitively hits voyageai's ESM
 // directory-import resolution failure (the same module-load gotcha CLAUDE.md
 // documents for lib/tunables/manifest.test.ts) unless it's mocked away here
-// too, even though neither retrieveContext nor retrieveKnowledgeContext is
+// too, even though neither loadVoicePack nor retrieveKnowledgeContext is
 // exercised directly in this file.
 vi.mock('@/lib/rag', () => ({
-  retrieveContext: vi.fn(),
+  loadVoicePack: vi.fn(),
   retrieveKnowledgeContext: vi.fn(),
 }))
 vi.mock('@/lib/ai', () => ({

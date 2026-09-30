@@ -27,8 +27,9 @@ id **before** `generateStage` sees it.
 
 ## Stage pipeline
 
-`context_build` -> `classify` -> `retrieve` -> `retrieve_knowledge` -> `generate` ->
-post-generation checks -> `send`.
+Inbound: `context_build` -> `classify` -> `retrieve` -> `retrieve_knowledge` ->
+`generate` -> gate -> `send` -> post-generation checks (post-send, decision 0003).
+Followups keep the checks between `generate` and the gate.
 
 `retrieveKnowledgeStage(ctx, category, query)` takes its query **explicitly**. There is no
 fallback and none may be added: a derived query is the defect that made every proactive
@@ -65,9 +66,10 @@ off-topic) and fall inside `ctx.conversationWindowMs` - hoisted onto `RuntimeCon
 than re-derived, because TAC-380 ruling 1 made that the one definition of "the same
 conversation".
 
-**Voice retrieval is deliberately unchanged.** Voice corpus is style, not fact, and
-`retrieveCorpusStage` fails CLOSED on inbound - moving its query could trip
-`insufficient_corpus_matches`, which throws and leaves the guest with no reply at all.
+**Voice is a static per-venue pack, not a retrieval** (decision 0008).
+`retrieveCorpusStage` loads the same pack for every message via `lib/rag/voice-pack.ts` -
+no query, no embedding, no similarity. Fails CLOSED on inbound (empty pack or load
+failure throws); followups proceed with whatever loaded.
 
 `lib/voices/regenerate-with-critique.ts` now **calls this stage** rather than reimplementing
 retrieval, which deletes a duplication that had already drifted once. Its contextual arm works
@@ -90,17 +92,18 @@ else as stale.
 | --- | --- | --- |
 | `SEND_FIDELITY_FLOOR` | 0.4 | below this the draft is refused outright, red alert, nothing persisted |
 | `AUTO_SEND_FIDELITY_FLOOR` | 0.6 | 0.4 to 0.6 queues for review |
-| `STRONG_MATCH_SIMILARITY` / `MIN_STRONG_MATCHES` | 0.3 / 1 | voice retrieval fails **closed** on inbound |
 | `KNOWLEDGE_RELEVANCE_FLOOR` | 0.3 | knowledge retrieval degrades **gracefully** |
-| `CORPUS_RETRIEVE_LIMIT` / `KNOWLEDGE_RETRIEVE_LIMIT` | 8 / 4 | |
+| `KNOWLEDGE_RETRIEVE_LIMIT` | 4 | |
+| `VOICE_PACK_MAX_ENTRIES` / `VOICE_PACK_CHAR_BUDGET` (`lib/rag/voice-pack.ts`) | 80 / 12,000 | growth ceilings; every live corpus fits whole today |
 | `KNOWLEDGE_GAP_WINDOW_MS` | 5 min | the only clock any trigger arms |
-| `COALESCE_SETTLE_MS` (`coalesce-turn.ts`) | 3 s | burst settle before claiming |
+| `COALESCE_SETTLE_MS` (`coalesce-turn.ts`) | 0 | settle before claiming; zero since the 2026-09 coalesce-window run, kept as the rollback lever |
 | `CLAIM_LEASE_MS` / `MAX_TURN_EXTENSIONS` / `MAX_TURN_RETRIES` | 120 s / 2 / 1 | |
 | `MAX_BUBBLES_PER_RESPONSE` / `INTER_BUBBLE_GAP_MS` (`split-message.ts`) | 3 / 1500 ms | |
 | `SPLIT_PROBABILITY` (`sentence-split.ts`) | 0.5 | the one splitting knob |
 
-The failure asymmetry is deliberate: voice failure breaks the thing we sell, so it fails
-closed; knowledge failure just means a less specific reply.
+The failure asymmetry is deliberate: voice failure (an unloadable or empty pack) breaks the
+thing we sell, so it fails closed on inbound; knowledge failure just means a less specific
+reply.
 
 ## Approval gates
 
@@ -131,17 +134,26 @@ about it, which beats **venue-wide policy**.
 `triggers[0]`, so a single-trigger assertion passes against a ranking that does not exist.
 Co-fire something the trigger under test must beat.
 
-### Post-generation checks all fail CLOSED
+### Post-generation checks: post-send on inbound, fail CLOSED on the pre-send paths
 
 `verify_grounding`, `verify_mechanic_offer`, `verify_prose_promise`,
-`verify_cancellation_claim`, `verify_closed_venue_arrival`: one immediate retry on a
-transient fault, then hold. Truncation is never retried - the fix is the cap.
-**Treat a proposal to loosen any one of them as a change to all five.** They run under
-`Promise.allSettled` so one fault cannot discard another's finding.
+`verify_cancellation_claim`, `verify_closed_venue_arrival`. Decision 0003 (rewritten
+2026-09-29) split the posture by path:
+
+- **Inbound**: the five run AFTER dispatch in `post-send-checks.ts` (waitUntil, never
+  throws, `disposition: 'sent'` on every capture so Slack says the reply already went out).
+  The gate receives the neutral values; only the deterministic triggers hold a draft. A
+  queued/dropped/silenced turn runs no checks.
+- **Followups and the holding message**: unchanged - pre-send, one immediate retry on a
+  transient fault, then hold. Truncation is never retried; the fix is the cap.
+
+**Treat a posture change to any one of them as a change to all five.** Both batches run
+under `Promise.allSettled` so one fault cannot discard another's finding.
 
 `checkDidNotComplete` (not `isGapTurn`) is what exempts an incomplete check from the
 protected-card drop. The two are separate expressions and a new check must be added to
-both, or a guest already holding a card gets silence.
+both, or a guest already holding a card gets silence. Both matter only where the checks
+still run pre-send.
 
 ### Two pending slots per guest
 

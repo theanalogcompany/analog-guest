@@ -3,7 +3,6 @@ import {
   captureCancellationCheckUnavailable,
   captureCancellationClaimUnbacked,
   captureClassificationLowConfidence,
-  captureCorpusRetrievalBelowThreshold,
   captureDashViolationPersisted,
   captureDemoBypassedApprovalGate,
   captureEmojiDirectiveViolated,
@@ -18,8 +17,8 @@ import {
   captureVoiceFidelityLow,
   CLASSIFICATION_CONFIDENCE_LOW_THRESHOLD,
   CLASSIFICATION_CONFIDENCE_REROUTE_THRESHOLD,
-  CORPUS_TOP_SIMILARITY_LOW_THRESHOLD,
   VOICE_FIDELITY_LOW_THRESHOLD,
+  type CheckDisposition,
 } from '@/lib/analytics/posthog'
 import {
   classifyMessage,
@@ -68,7 +67,7 @@ import {
   resolvePolicyDecision,
 } from '@/lib/schemas/approval-policy'
 import { parseVenueLinks } from '@/lib/schemas/venue-info'
-import { retrieveContext, retrieveKnowledgeContext } from '@/lib/rag'
+import { loadVoicePack, retrieveKnowledgeContext } from '@/lib/rag'
 import { fireRedAlert } from './alerts'
 import { matchComp } from './comp-backstop'
 import { isFloorCategory, matchForwardCommitment } from './complaint-floor'
@@ -112,15 +111,17 @@ import type {
 } from './types'
 import type { MessageCategory } from '@/lib/ai'
 
-export const STRONG_MATCH_SIMILARITY = 0.3
-export const MIN_STRONG_MATCHES = 1
+// STRONG_MATCH_SIMILARITY / MIN_STRONG_MATCHES / CORPUS_RETRIEVE_LIMIT lived
+// here until decision 0008 (2026-09-29): voice is a static per-venue pack
+// (lib/rag/voice-pack.ts), not a similarity retrieval, so there is no match
+// to score. The inbound fail-closed direction survives as the empty-pack
+// throw in retrieveCorpusStage below.
 export const SEND_FIDELITY_FLOOR = 0.4
 // TAC-212: voice fidelity below this queues the draft for operator review;
 // above auto-sends (subject to the rest of applyApprovalPolicyStage).
 // Sits above SEND_FIDELITY_FLOOR — < 0.4 still refuses, 0.4..0.6 queues,
 // >= 0.6 evaluates the resource-commitment + sticky-pending triggers.
 export const AUTO_SEND_FIDELITY_FLOOR = 0.6
-export const CORPUS_RETRIEVE_LIMIT = 8
 export const KNOWLEDGE_RETRIEVE_LIMIT = 4
 
 /**
@@ -841,75 +842,31 @@ export async function classifyStage(
 }
 
 /**
- * Internal: retrieve voice-corpus matches and enforce the orchestrator's
- * threshold rule — at least MIN_STRONG_MATCHES (1) chunk scoring at or above
- * STRONG_MATCH_SIMILARITY (0.3). Below that, fail closed; the prompt doesn't
- * have enough venue voice to ground a generation.
+ * Internal: load the venue's static voice pack (decision 0008, 2026-09-29).
+ * The SAME pack for every message — voice is one consistent style, so there
+ * is no query, no embedding and no similarity here. Selection rule and the
+ * production measurement behind the budgets: lib/rag/voice-pack.ts.
  *
- * TODO(THE-158): per-category thresholds — generic messages like "hi"
- * shouldn't need the same corpus depth as topic-specific ones. Calibrate
- * against real corpus data after first 100 inbound messages.
+ * Fail direction, unchanged from the retrieval era: CLOSED on inbound. A DB
+ * failure or an empty pack throws, because a generation with no venue voice
+ * behind it is the thing this product cannot ship. Followups proceed with
+ * whatever loaded (THE-231: operator-initiated, and generateStage handles an
+ * empty corpus gracefully — ragChunksToProse drops the block entirely).
+ * What this deliberately deletes: the per-turn Voyage dependency, which was
+ * a whole outage mode (embedding down = no inbound replies venue-wide).
  */
 export async function retrieveCorpusStage(
   ctx: RuntimeContext,
 ): Promise<CorpusMatch[]> {
-  const query =
-    ctx.currentMessage?.body ??
-    (ctx.followupTrigger
-      ? `Followup ${ctx.followupTrigger.reason} for ${ctx.guest.firstName ?? 'guest'}`
-      : '')
-  if (!query) {
-    throw new Error(
-      'retrieveCorpusStage: no query available (no inbound, no followup)',
-    )
-  }
-  const r = await retrieveContext({
-    venueId: ctx.venue.id,
-    query,
-    limit: CORPUS_RETRIEVE_LIMIT,
-  })
+  const r = await loadVoicePack({ venueId: ctx.venue.id })
   if (!r.ok) {
     throw new Error(`retrieveCorpusStage: ${r.error}`)
   }
-  const strongCount = r.data.filter(
-    (m) => m.similarity >= STRONG_MATCH_SIMILARITY,
-  ).length
-  // THE-231: only fail closed on the inbound path. Followups are operator-
-  // initiated (cron trigger or Command Center button); the synthetic followup
-  // query — "Followup manual for {firstName}" — rarely embeds anywhere near
-  // the venue's actual voice corpus, so the strong-match gate was failing
-  // every Follow Up button click. Proceed with whatever surfaced (even zero);
-  // generateStage handles an empty corpus gracefully (ragChunksToProse drops
-  // the block entirely). The captureCorpusRetrievalBelowThreshold event below
-  // still fires on both paths so the visibility doesn't change.
-  if (ctx.currentMessage && strongCount < MIN_STRONG_MATCHES) {
+  if (ctx.currentMessage && r.data.length === 0) {
     throw new Error(
-      `retrieveCorpusStage: insufficient_corpus_matches (got ${strongCount} above ${STRONG_MATCH_SIMILARITY}, need ${MIN_STRONG_MATCHES}; total ${r.data.length})`,
+      'retrieveCorpusStage: empty_voice_pack (venue has no usable voice_corpus entries)',
     )
   }
-
-  // Observability event: thin retrieval. Looser bar than the gate above —
-  // retrieval succeeded structurally but the best match is weak, suggesting
-  // the prompt may lack venue-voice grounding.
-  const topSimilarity =
-    r.data.length > 0 ? Math.max(...r.data.map((m) => m.similarity)) : 0
-  if (topSimilarity < CORPUS_TOP_SIMILARITY_LOW_THRESHOLD) {
-    const topMatch =
-      r.data.length > 0
-        ? r.data.reduce((a, b) => (a.similarity >= b.similarity ? a : b))
-        : null
-    await captureCorpusRetrievalBelowThreshold({
-      agentRunId: ctx.agentRunId,
-      venueId: ctx.venue.id,
-      guestId: ctx.guest.id,
-      totalMatches: r.data.length,
-      strongMatchCount: strongCount,
-      topSimilarity,
-      inboundBody: ctx.currentMessage?.body ?? null,
-      topMatchPreview: topMatch ? topMatch.text.slice(0, 200) : null,
-    })
-  }
-
   return r.data
 }
 
@@ -1393,6 +1350,12 @@ export async function verifyGroundingStage(
     GenerateMessageResult,
     'knowledgeGap' | 'body' | 'userPrompt'
   >,
+  // Decision 0003 (rewritten 2026-09-29): 'held' when the caller runs this
+  // check pre-send and its finding can still hold the draft (followups, the
+  // holding message); 'sent' when post-send-checks.ts runs it after the
+  // inbound reply already dispatched. Event-layer only — the verdict logic
+  // is identical either way.
+  disposition: CheckDisposition = 'held',
 ): Promise<GroundingBackstopResult> {
   if (ctx.guest.isDemo === true) return { status: 'skipped' }
   if (generation.knowledgeGap === true) return { status: 'skipped' }
@@ -1460,7 +1423,7 @@ export async function verifyGroundingStage(
     // fabrication check that fires under real traffic did not run.
     const truncated = r.errorCode === VERIFY_GROUNDING_TRUNCATED_ERROR_CODE
     console.warn(
-      `[agent] grounding backstop ${truncated ? 'TRUNCATED' : 'degraded'} (failing CLOSED) for venue=${ctx.venue.id}: ${r.error}${r.errorCode ? ` (${r.errorCode})` : ''}`,
+      `[agent] grounding backstop ${truncated ? 'TRUNCATED' : 'degraded'} (${disposition === 'held' ? 'failing CLOSED' : 'post-send, reply already dispatched'}) for venue=${ctx.venue.id}: ${r.error}${r.errorCode ? ` (${r.errorCode})` : ''}`,
     )
     // Decided BEFORE the emit, deliberately. The emit cannot throw today
     // (capturePostHogEvent and postToSlack both swallow their own errors),
@@ -1477,15 +1440,16 @@ export async function verifyGroundingStage(
       venueId: ctx.venue.id,
       guestId: ctx.guest.id,
       outcome: truncated ? 'truncated' : 'degraded',
-      // TAC-424: true on BOTH outcomes now. It stays as its own field rather
-      // than being re-derived from `outcome` so a query for "turns that sent
-      // without a grounding verdict" is one boolean filter, and so the day a
-      // third outcome lands its consequence has to be stated rather than
-      // inferred.
-      failedClosed: true,
+      // TAC-424: true on both outcomes when the check runs pre-send. It stays
+      // as its own field rather than being re-derived from `outcome` so a
+      // query for "turns that sent without a grounding verdict" is one
+      // boolean filter. Decision 0003 rewrite: on the post-send path nothing
+      // holds, so the claim follows the disposition.
+      failedClosed: disposition === 'held',
       retried,
       error: r.error,
       errorCode: r.errorCode,
+      disposition,
     })
     return verdict
   }
@@ -1501,6 +1465,7 @@ export async function verifyGroundingStage(
     inboundBody: ctx.currentMessage?.body ?? '(none — proactive)',
     replyBody: generation.body,
     ungroundedClaims: r.data.ungroundedClaims,
+    disposition,
   })
 
   return { status: 'flagged', claims: r.data.ungroundedClaims }
@@ -1616,6 +1581,7 @@ export async function verifyMechanicOfferStage(
     GenerateMessageResult,
     'body' | 'requiresOperatorApproval' | 'commitment'
   >,
+  disposition: CheckDisposition = 'held',
 ): Promise<MechanicOfferBackstopResult> {
   if (ctx.guest.isDemo === true) return { status: 'skipped' }
   if (isModelFlagged(generation) || isCommitmentTypeGated(generation)) {
@@ -1636,7 +1602,7 @@ export async function verifyMechanicOfferStage(
   })
   if (!r.ok) {
     console.warn(
-      `[agent] mechanic-offer backstop degraded (failing CLOSED) for venue=${ctx.venue.id}: ${r.error}${r.errorCode ? ` (${r.errorCode})` : ''}`,
+      `[agent] mechanic-offer backstop degraded (${disposition === 'held' ? 'failing CLOSED' : 'post-send, reply already dispatched'}) for venue=${ctx.venue.id}: ${r.error}${r.errorCode ? ` (${r.errorCode})` : ''}`,
     )
     return { status: 'check_failed' }
   }
@@ -1659,6 +1625,7 @@ export async function verifyMechanicOfferStage(
     guestId: ctx.guest.id,
     mechanicId: r.data.mechanicId,
     replyBody: generation.body,
+    disposition,
   })
 
   return { status: 'flagged', mechanicId: r.data.mechanicId }
@@ -1736,6 +1703,7 @@ export async function verifyProsePromiseStage(
     'agentRunId' | 'guest' | 'venue' | 'classification' | 'currentMessage'
   >,
   generation: Pick<GenerateMessageResult, 'body' | 'commitment'>,
+  disposition: CheckDisposition = 'held',
 ): Promise<ProsePromiseBackstopResult> {
   if (ctx.guest.isDemo === true) return { status: 'skipped' }
   if (isCommitmentTypeGated(generation)) return { status: 'skipped' }
@@ -1769,7 +1737,7 @@ export async function verifyProsePromiseStage(
   if (!r.ok) {
     const truncated = r.errorCode === VERIFY_PROSE_PROMISE_TRUNCATED_ERROR_CODE
     console.warn(
-      `[agent] prose-promise check ${truncated ? 'TRUNCATED' : 'degraded'} (failing CLOSED) for venue=${ctx.venue.id}: ${r.error}${r.errorCode ? ` (${r.errorCode})` : ''}`,
+      `[agent] prose-promise check ${truncated ? 'TRUNCATED' : 'degraded'} (${disposition === 'held' ? 'failing CLOSED' : 'post-send, reply already dispatched'}) for venue=${ctx.venue.id}: ${r.error}${r.errorCode ? ` (${r.errorCode})` : ''}`,
     )
     await captureProsePromiseCheckUnavailable({
       agentRunId: ctx.agentRunId,
@@ -1779,6 +1747,7 @@ export async function verifyProsePromiseStage(
       retried,
       error: r.error,
       errorCode: r.errorCode,
+      disposition,
     })
     return { status: 'check_failed' }
   }
@@ -1815,6 +1784,7 @@ export async function verifyProsePromiseStage(
     // verdict was actually formed against rather than what it might have been.
     guestInboundBody: verifyInput.guestInboundBody,
     replyBody: generation.body,
+    disposition,
   })
 
   return { status: 'flagged', commitment }
@@ -1868,6 +1838,7 @@ export type ClosedVenueArrivalBackstopResult =
 export async function verifyClosedVenueArrivalStage(
   ctx: Pick<RuntimeContext, 'agentRunId' | 'guest' | 'venue' | 'recognition'>,
   generation: Pick<GenerateMessageResult, 'body' | 'arrivalCapture'>,
+  disposition: CheckDisposition = 'held',
 ): Promise<ClosedVenueArrivalBackstopResult> {
   if (ctx.guest.isDemo === true) return { status: 'skipped' }
   if (generation.body.trim().length === 0) return { status: 'skipped' }
@@ -1895,7 +1866,7 @@ export async function verifyClosedVenueArrivalStage(
     const truncated =
       r.errorCode === VERIFY_CLOSED_VENUE_ARRIVAL_TRUNCATED_ERROR_CODE
     console.warn(
-      `[agent] closed-venue arrival check ${truncated ? 'TRUNCATED' : 'degraded'} (failing CLOSED) for venue=${ctx.venue.id}: ${r.error}${r.errorCode ? ` (${r.errorCode})` : ''}${retried ? ' (after one retry)' : ''}`,
+      `[agent] closed-venue arrival check ${truncated ? 'TRUNCATED' : 'degraded'} (${disposition === 'held' ? 'failing CLOSED' : 'post-send, reply already dispatched'}) for venue=${ctx.venue.id}: ${r.error}${r.errorCode ? ` (${r.errorCode})` : ''}${retried ? ' (after one retry)' : ''}`,
     )
     return { status: 'check_failed' }
   }
@@ -1908,6 +1879,7 @@ export async function verifyClosedVenueArrivalStage(
     guestId: ctx.guest.id,
     source: 'text_backstop',
     replyBody: generation.body,
+    disposition,
   })
 
   return { status: 'flagged' }
@@ -1968,6 +1940,7 @@ export async function verifyCancellationClaimStage(
     'agentRunId' | 'guest' | 'venue' | 'classification' | 'activeCommitments'
   >,
   generation: Pick<GenerateMessageResult, 'body' | 'cancelsCommitmentId'>,
+  disposition: CheckDisposition = 'held',
 ): Promise<CancellationBackstopResult> {
   const resolution = resolveCancellation(
     generation.cancelsCommitmentId,
@@ -1993,7 +1966,7 @@ export async function verifyCancellationClaimStage(
     const truncated =
       r.errorCode === VERIFY_CANCELLATION_CLAIM_TRUNCATED_ERROR_CODE
     console.warn(
-      `[agent] cancellation-claim check ${truncated ? 'TRUNCATED' : 'degraded'} (failing CLOSED) for venue=${ctx.venue.id}: ${r.error}${r.errorCode ? ` (${r.errorCode})` : ''}`,
+      `[agent] cancellation-claim check ${truncated ? 'TRUNCATED' : 'degraded'} (${disposition === 'held' ? 'failing CLOSED' : 'post-send, reply already dispatched'}) for venue=${ctx.venue.id}: ${r.error}${r.errorCode ? ` (${r.errorCode})` : ''}`,
     )
     await captureCancellationCheckUnavailable({
       agentRunId: ctx.agentRunId,
@@ -2003,6 +1976,7 @@ export async function verifyCancellationClaimStage(
       retried,
       error: r.error,
       errorCode: r.errorCode,
+      disposition,
     })
     return { resolution, claim: 'check_failed' }
   }
@@ -2026,6 +2000,7 @@ export async function verifyCancellationClaimStage(
         activeCommitmentCount: ctx.activeCommitments.length,
         replyBody: generation.body,
         bodyClaimedIt: false,
+        disposition,
       })
     }
     return { resolution, claim: 'clean' }
@@ -2041,6 +2016,7 @@ export async function verifyCancellationClaimStage(
     activeCommitmentCount: ctx.activeCommitments.length,
     replyBody: generation.body,
     bodyClaimedIt: true,
+    disposition,
   })
 
   return { resolution, claim: 'flagged' }
@@ -2638,6 +2614,9 @@ export async function applyApprovalPolicyStage(
       guestId: ctx.guest.id,
       source: 'structured',
       replyBody: generation.body,
+      // The structural half always fires in the gate, pre-send, and its
+      // trigger queues the draft — 'held' on every path.
+      disposition: 'held',
     })
   }
   // Both non-clean states, one trigger — see CLOSED_VENUE_ARRIVAL_BACKSTOP.
@@ -2686,6 +2665,27 @@ export async function applyApprovalPolicyStage(
     cancellationBackstop.resolution.status === 'unresolved'
   ) {
     triggers.push(APPROVAL_TRIGGERS.UNRESOLVED_CANCELLATION_ID)
+    // Decision 0003 rewrite: on the inbound path the claim check is deferred
+    // post-send (`claim === 'skipped'`), so the stage that used to emit for
+    // this hold never runs pre-send — and "the hold fires with no event
+    // anywhere" is the exact shape the stage's own comment warns about.
+    // Emitted HERE only when the claim was skipped, so paths that ran the
+    // stage pre-send (followups, the holding message) do not double-fire.
+    // Known widening: a demo guest's or empty-body draft's unresolved id now
+    // emits too, where it used to be silent. That is a fix, not a cost.
+    if (cancellationBackstop.claim === 'skipped') {
+      await captureCancellationClaimUnbacked({
+        agentRunId: ctx.agentRunId,
+        venueId: ctx.venue.id,
+        guestId: ctx.guest.id,
+        category: ctx.classification?.category ?? null,
+        unresolvedCommitmentId: cancellationBackstop.resolution.claimedId,
+        activeCommitmentCount: ctx.activeCommitments.length,
+        replyBody: generation.body,
+        bodyClaimedIt: false,
+        disposition: 'held',
+      })
+    }
   }
 
   // Trigger 15 (TAC-513): the cancellation-claim check produced no readable

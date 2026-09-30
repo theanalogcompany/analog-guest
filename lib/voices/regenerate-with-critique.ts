@@ -47,17 +47,14 @@ import {
 import { buildRuntimeContext } from '@/lib/agent/build-runtime-context'
 import {
   buildAiRuntime,
-  CORPUS_RETRIEVE_LIMIT,
   retrieveKnowledgeWithContextStage,
-  MIN_STRONG_MATCHES,
-  STRONG_MATCH_SIMILARITY,
 } from '@/lib/agent/stages'
 import type { EmojiDirective } from '@/lib/ai/emoji-cadence'
 import { createAdminClient } from '@/lib/db/admin'
 import { noopAgentTrace } from '@/lib/observability'
 import { logger } from '@/lib/observability/logger'
 import { parseMessageChannel } from '@/lib/schemas/message-channel'
-import { retrieveContext } from '@/lib/rag'
+import { loadVoicePack } from '@/lib/rag'
 
 export interface RegenerateWithCritiqueInput {
   venueId: string
@@ -355,29 +352,24 @@ export async function regenerateWithCritique(
     }
   }
 
-  // 4. Retrieve voice corpus (mirrors stages.ts retrieveCorpusStage's
-  // strong-match floor for inbound paths — fail closed when grounding
-  // is too thin). No PostHog event on retrieval-thinness here.
-  const corpus = await retrieveContext({
-    venueId: input.venueId,
-    query: load.data.inbound.body,
-    limit: CORPUS_RETRIEVE_LIMIT,
-  })
+  // 4. Load the static voice pack (decision 0008) — the same pack the live
+  // turn used, because it is the same pack every turn uses. Mirrors
+  // retrieveCorpusStage's inbound direction: fail closed on a DB error or an
+  // empty pack, because a regeneration with no venue voice behind it is not
+  // a regeneration worth showing.
+  const corpus = await loadVoicePack({ venueId: input.venueId })
   if (!corpus.ok) {
     return {
       ok: false,
       errorCode: 'retrieve_failed',
-      error: `voice corpus retrieval failed: ${corpus.error}`,
+      error: `voice pack load failed: ${corpus.error}`,
     }
   }
-  const strongCount = corpus.data.filter(
-    (m) => m.similarity >= STRONG_MATCH_SIMILARITY,
-  ).length
-  if (strongCount < MIN_STRONG_MATCHES) {
+  if (corpus.data.length === 0) {
     return {
       ok: false,
       errorCode: 'retrieve_failed',
-      error: `insufficient_corpus_matches (got ${strongCount} above ${STRONG_MATCH_SIMILARITY}, need ${MIN_STRONG_MATCHES}; total ${corpus.data.length})`,
+      error: 'empty_voice_pack (venue has no usable voice_corpus entries)',
     }
   }
 
