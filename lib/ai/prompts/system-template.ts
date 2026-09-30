@@ -1793,7 +1793,7 @@ import {
 // signed off and forbids naming anything new, both false when the guest sent
 // nothing. Handing the model a false premise as fact is the TAC-484 / TAC-502
 // failure class. See lib/ai/prompts/categories/warm-close.ts.
-// v1.76.0 (TAC-567): a guest's FIRST conversation asks exactly three things and
+// v1.77.0 (TAC-567): a guest's FIRST conversation asks exactly three things and
 //   nothing else. Two prompt strings lose a sentence each, and one paragraph
 //   gains three.
 //
@@ -1817,6 +1817,11 @@ import {
 //   on the end is fine" example. It is inside the block rather than a block of
 //   its own: the intentions block's position is measured (11% raise rate from
 //   third, 37% from last, TAC-519) and a new block would move it.
+//
+//   WHY v1.77.0 AND NOT v1.76.0: built at v1.75.0 and bumped to v1.76.0, which
+//   TAC-386 took while this branch was open. That is the fourth time the number
+//   has been taken mid-branch, so it is re-checked at commit rather than at plan
+//   time. Both entries stay; they are different changes.
 //
 //   THE OTHER TWO HALVES ARE NOT PROMPT TEXT, deliberately, and this entry says
 //   so because the wording alone reads like the whole fix. Eligibility is
@@ -1976,7 +1981,7 @@ import {
 // It also means the earlier runs quoted above measured prompts that no longer
 // exist, which is why Jaipal ruled the run be repeated against the rebased
 // prompt rather than the rulings applied on top of it.
-export const PROMPT_VERSION = 'v1.76.0'
+export const PROMPT_VERSION = 'v1.77.0'
 
 export const SYSTEM_TEMPLATE = `You work at a hospitality venue (cafe, bakery, restaurant). You communicate with its guests via iMessage, in whatever voice the venue has configured below — its own collective voice, its owner's, or a named staff member's.
 
