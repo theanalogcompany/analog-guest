@@ -451,11 +451,19 @@ export function composeReplyWithIntention(
   // argument recorded on weAskedAQuestion in lib/agent/warm-close.ts, which
   // widens for the opposite reason on the opposite population.
   //
-  // A FALSE POSITIVE COSTS ONE TURN, NEVER THE INTENTION. Nothing is written
-  // here, and the post-send classifier reads the sent body, which now carries no
+  // A FALSE POSITIVE COSTS ONE TURN, NOT THE INTENTION. Nothing is written here,
+  // and the post-send classifier reads the sent body, which now carries no
   // getting-to-know-you question, so the intention is not recorded as raised and
   // comes back open on the next turn. The failure direction is a question asked
   // later, never a question asked twice.
+  //
+  // ONE EXCEPTION, and it is pre-existing policy rather than something this gate
+  // introduces: when classifyIntentionPrompts fails twice, recording closes
+  // everything renderableIntentions offered it, pessimistically (TAC-380 ruling
+  // 4, see record.ts). On a turn where this gate fired, the dropped question's
+  // intention is in that set and closes having never been asked. The gate does
+  // enlarge the population of turns where the block rendered and nothing was
+  // asked, so it enlarges the exposure; it does not change the rule.
   //
   // Downstream needs nothing: intentionQuestion is '' so intentionTailFor
   // returns '' on both dispatch arms, exactly as on a turn that asked nothing.

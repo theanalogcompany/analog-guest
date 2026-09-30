@@ -361,6 +361,19 @@ export interface RuntimeContext {
    * Two readers: deriveOpenIntentions suppresses every intention whose
    * definition says allowedOnFirstConversation is false, and the serializer
    * renders the first-conversation restraint into the intentions block.
+   *
+   * IT IS TRUE ON A PROACTIVE TURN TOO, AND THAT IS NOT WHAT MAKES IT SAFE. This
+   * is clock-derived and computed unconditionally, so a cron follow-up, a holding
+   * message or an operator decline inside the window all see `true`. What keeps
+   * the restraint off those turns is that buildRuntimeContext derives intentions
+   * only when `input.currentMessage` is set and leaves `openIntentions` empty
+   * otherwise, so formatOpenIntentions never runs and the restraint never
+   * renders. None of those three paths passes a currentMessage.
+   *
+   * SO THE DAY A PROACTIVE PATH DERIVES INTENTIONS, re-read this. TAC-536's scan
+   * greeting is the obvious candidate, and its own category text says "Ask what
+   * they just got" - exactly the turn a restraint saying the reply asks nothing
+   * must not reach.
    */
   firstConversation: boolean
   recognition: RecognitionSnapshot

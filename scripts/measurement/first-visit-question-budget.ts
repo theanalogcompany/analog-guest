@@ -27,9 +27,27 @@
 //     device transcript verbatim. That is where the real risk sits: a detector
 //     that cannot fire turns all three bars into decoration.
 //   - MEASURE_ARM=control runs the real derivation with isFirstConversation FALSE,
-//     which restores the pre-ticket eligibility and drops the first-conversation
-//     restraint, on the same guest, venue and turn bodies. It should produce
-//     off-target questions. It is the contrast for bars 1 and 2.
+//     which restores the pre-ticket eligibility AND drops the first-conversation
+//     restraint, on the same guest, venue and turn bodies. It produces off-target
+//     questions (14 of 15 against 0 of 15) and is the contrast for bars 1 and 2.
+//
+//     BUT IT VARIES TWO THINGS AT ONCE, AND THE RESTRAINT IS DOING MOST OF THE
+//     WORK. Read what this five-turn fixture can actually express before reading
+//     the delta as a test of the eligibility suppression:
+//       their_rhythm needs 8 replies and why_theyre_here 11, and
+//         repliedMessageCount maxes at GUEST_TURNS (5), so neither is ever gated
+//         open, in either arm;
+//       got_the_recommendation is handed no open recommendations, so it never arms;
+//       did_they_like_it arms off the NEWEST order, which newestEventArming HELDs
+//         while it is inside conversationWindowMs, and the only order here is 60s
+//         old, so it never arms either;
+//       are_they_local is the ONE suppressed intention that can differ, and only
+//         on turn 5, and only once all three allowed intentions have closed.
+//     So the control's off-target questions are mostly the model INVENTING them
+//     with no restraint to stop it, not suppressed intentions rendering. The
+//     eligibility half is carried by derive.test.ts, which drives one fixture with
+//     all eight open through both arms. This run does not test it and must not be
+//     read as if it did.
 //   - BAR 3 HAS NO IN-PROCESS CONTROL and this file says so rather than implying
 //     one: the opener is a compiled string constant, so an arm cannot restore it
 //     without editing the source. Its contrast is the mutation pass on the ticket
@@ -730,6 +748,11 @@ async function main(): Promise<void> {
   console.log(
     `[tac567] clean conversations            : ${summary.cleanConversations}/${summary.valid}`,
   )
+  // CONVENTION 8: the floor is evaluated here, not tallied. Every bar above counts
+  // a bad thing, so a run that asked nothing would sweep them.
+  console.log(
+    `[tac567] FLOOR  order question asked    : ${summary.orderAskedConversations}/${summary.valid} (floor ${summary.orderAskedRequired}) ${summary.floorMet ? 'MET' : 'BREACHED'}`,
+  )
   console.log(`[tac567] questions attributed by intention:`)
   for (const [k, n] of [...askedByKey.entries()].sort((a, b) => b[1] - a[1]))
     console.log(`[tac567]   ${k}: ${n}`)
@@ -743,7 +766,15 @@ async function main(): Promise<void> {
     console.log(
       `[tac567] NOTE control = isFirstConversation:false. Both arms carry the new opener text and the two-question gate, so bar 3 cannot differ by arm and bar 2 is partly floored by the gate in both.`,
     )
+    console.log(
+      `[tac567] NOTE this arm does NOT test the eligibility suppression. In a ${GUEST_TURNS}-turn fixture only are_they_local can differ by arm; the other four never arm or never gate open. The off-target questions here are mostly invented with no restraint to stop them. derive.test.ts covers eligibility.`,
+    )
   }
+  // The harness's own divergences from production, printed rather than left in a
+  // comment, because a reader of the output is the one who needs them.
+  console.log(
+    `[tac567] DIVERGENCE applyCurrentTurnSuppression is NOT applied, so turn 2 renders "you haven't heard what this guest ordered yet" on the turn that names the order. Production suppresses it for that turn. Inherited from first-visit-question.ts; against absolute-zero bars it can only cost the arm, never flatter it.`,
+  )
 
   // The summary as a final unit, because RunLog is append-only by design: the
   // checkpoint IS the append, and a harness that held results to write at the end

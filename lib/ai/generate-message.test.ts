@@ -1494,6 +1494,47 @@ describe('generateMessage — intentionQuestion (TAC-554)', () => {
     expect(r.data.intentionQuestion).toBe("by the way, what's your name?")
   })
 
+  // TAC-567: THE WIRING, not the predicate. composeReplyWithIntention's own tests
+  // prove the gate computes the right answer; this proves the answer reaches the
+  // caller. Without it, deleting the one assignment in generateMessage leaves the
+  // whole suite green and the harness reports "gate fired on 0 turns" forever,
+  // which reads as "the gate was never needed" rather than "the flag is dead".
+  // That is the claim-nothing-enforces class, on the one field that makes this
+  // guard countable at all.
+  it('reports the two-question gate firing on the shipped attempt', async () => {
+    queueResponses({
+      body: "that's a good one to start with. how'd you like it?",
+      voiceFidelity: 0.9,
+      reasoning: 'ok',
+      intentionQuestion: "by the way, what's your name?",
+    })
+    const r = await generateMessage(makeInput())
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+    expect(r.data.intentionQuestionDroppedForBodyQuestion).toBe(true)
+    // The bubble is gone and the reply kept its own question.
+    expect(r.data.intentionQuestion).toBe('')
+    expect(r.data.body).toBe(
+      "that's a good one to start with. how'd you like it?",
+    )
+  })
+
+  // The other side of the same wiring: a turn the gate did not touch must report
+  // false, or the flag is a constant and counts nothing.
+  it('reports the two-question gate not firing when the reply asked nothing', async () => {
+    queueResponses({
+      body: "that's a good one to start with.",
+      voiceFidelity: 0.9,
+      reasoning: 'ok',
+      intentionQuestion: "by the way, what's your name?",
+    })
+    const r = await generateMessage(makeInput())
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+    expect(r.data.intentionQuestionDroppedForBodyQuestion).toBe(false)
+    expect(r.data.intentionQuestion).toBe("by the way, what's your name?")
+  })
+
   it('reports the duplicate guard firing on the shipped attempt', async () => {
     queueResponses({
       body: "nice one. by the way, what's your name?",

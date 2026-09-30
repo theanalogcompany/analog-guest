@@ -505,6 +505,66 @@ describe('summarize', () => {
     }
   })
 
+  // THE FLOOR, and this is the case every bar in this run is blind to: the agent
+  // asks NOTHING. All three bars count a bad thing, so a silent run sweeps them
+  // and would print PASS without this.
+  it('fails a run where the agent asked nothing at all', () => {
+    const silent = scoreConversation(
+      [{ ...okTurn, body: 'hey, welcome!', attributedTo: [], raisedKeys: [] }],
+      VENUE,
+    )
+    const s = summarize([silent, silent, silent])
+    expect(s.valid).toBe(3)
+    expect(s.offTargetConversations).toBe(0)
+    expect(s.twoQuestionTurns).toBe(0)
+    expect(s.strictIdentityConversations).toBe(0)
+    expect(s.cleanConversations).toBe(3)
+    // Every bar clean, and it still fails.
+    expect(s.orderAskedConversations).toBe(0)
+    expect(s.floorMet).toBe(false)
+    expect(s.pass).toBe(false)
+  })
+
+  // The floor is a ratio, so it has to bite at the boundary rather than only at
+  // zero. Four conversations require ceil(4 * 0.8) = 4.
+  it('fails a run where the order question went missing in one of four', () => {
+    const silent = scoreConversation(
+      [{ ...okTurn, body: 'hey, welcome!', attributedTo: [], raisedKeys: [] }],
+      VENUE,
+    )
+    const s = summarize([ok(), ok(), ok(), silent])
+    expect(s.orderAskedConversations).toBe(3)
+    expect(s.orderAskedRequired).toBe(4)
+    expect(s.floorMet).toBe(false)
+    expect(s.pass).toBe(false)
+  })
+
+  it('meets the floor when every conversation asked the order', () => {
+    const s = summarize([ok(), ok(), ok(), ok()])
+    expect(s.orderAskedConversations).toBe(4)
+    expect(s.floorMet).toBe(true)
+    expect(s.pass).toBe(true)
+  })
+
+  // The floor reads BOTH judges, so an order question that arrived as the bubble
+  // rather than in the body still counts.
+  it('counts the order question whichever judge saw it', () => {
+    const viaBubble = scoreConversation(
+      [
+        {
+          ...okTurn,
+          body: 'hey, welcome! what did you get?',
+          tail: 'what did you get?',
+          attributedTo: [],
+          raisedKeys: ['understand_order'],
+        },
+      ],
+      VENUE,
+    )
+    expect(viaBubble.askedKeys).toEqual(['understand_order'])
+    expect(summarize([viaBubble]).floorMet).toBe(true)
+  })
+
   it('counts invalid conversations without letting them fail the bars', () => {
     const dead = scoreConversation(
       [{ ...okTurn, body: "you've reached us", failed: true }],

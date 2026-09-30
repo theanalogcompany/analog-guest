@@ -551,6 +551,33 @@ function gateOpen(
 }
 
 /**
+ * TAC-567: is this intention held back because the guest is still inside their
+ * first conversation?
+ *
+ * THE ONE EXPRESSION, called from both places deriveOpenIntentions needs it
+ * (the arming loop and the open-set filter), because two copies of one
+ * suppression rule is the drift this directory already pays for once - see
+ * renderableIntentions against shouldRenderOpenIntentions below.
+ *
+ * Reads the definition, never the key: adding an intention means answering
+ * allowedOnFirstConversation on its definition, and `satisfies Record<...>`
+ * makes omitting it fail `tsc`. Nothing here branches on which intention it is.
+ *
+ * NOT EXPORTED. Both call sites are in this file and the behaviour is covered
+ * through deriveOpenIntentions, which is the path production takes; an export
+ * with no importer widens the module boundary for nothing.
+ */
+function isSuppressedOnFirstConversation(
+  key: IntentionKey,
+  isFirstConversation: boolean,
+): boolean {
+  return (
+    isFirstConversation &&
+    !INTENTION_DEFINITION_BY_KEY[key].allowedOnFirstConversation
+  )
+}
+
+/**
  * The agent's full derivation for one inbound turn: record state, plus live
  * arming and gating for intentions with no row yet, plus re-arming, plus the
  * brake.
@@ -581,29 +608,6 @@ function gateOpen(
  * recommendations couldn't be read, got_the_recommendation is held the same way:
  * that read fails closed, as the read at build-runtime-context.ts:203 does.
  */
-/**
- * TAC-567: is this intention held back because the guest is still inside their
- * first conversation?
- *
- * THE ONE EXPRESSION, called from both places deriveOpenIntentions needs it
- * (the arming loop and the open-set filter), because two copies of one
- * suppression rule is the drift this directory already pays for once - see
- * renderableIntentions against shouldRenderOpenIntentions below.
- *
- * Reads the definition, never the key: adding an intention means answering
- * allowedOnFirstConversation on its definition, and `satisfies Record<...>`
- * makes omitting it fail `tsc`. Nothing here branches on which intention it is.
- */
-export function isSuppressedOnFirstConversation(
-  key: IntentionKey,
-  isFirstConversation: boolean,
-): boolean {
-  return (
-    isFirstConversation &&
-    !INTENTION_DEFINITION_BY_KEY[key].allowedOnFirstConversation
-  )
-}
-
 export function deriveOpenIntentions(
   input: DeriveOpenIntentionsInput,
 ): DeriveOpenIntentionsResult {

@@ -1557,7 +1557,9 @@ function formatMechanicEligibility(
 //
 //      DO NOT RESTORE IT IN ANY FORM. The same instruction lived in TAC-536's
 //      scan greeting (GUEST_ARRIVED_INSTRUCTIONS_NEW) and was deleted in the
-//      same ticket, and serializers.test.ts pins the absence on both.
+//      same ticket. serializers.test.ts pins the absence on THIS string, on both
+//      channels; categories/index.test.ts pins it on the scan greeting, on both
+//      of its variants. Two files, because the two strings live in two modules.
 //
 //      The clause was conditional on the guest's own message not naming a
 //      person. Le Mil's prefill names the venue and not a person, so every

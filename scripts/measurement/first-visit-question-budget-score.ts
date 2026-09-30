@@ -254,6 +254,8 @@ export interface ConversationVerdict {
   twoQuestionTurns: number
   /** Bar 1: attributed keys outside the ruled three, deduped. */
   offTargetKeys: string[]
+  /** Every key either judge attributed a question to, deduped. Feeds the floor. */
+  askedKeys: string[]
   /** Bar 1's other half: turns whose question matched no intention at all. */
   unattributedTurns: number
   /** Bar 3: identity claims found in the opener only. */
@@ -284,6 +286,9 @@ export function scoreConversation(
   const offTargetKeys = [
     ...new Set(verdicts.flatMap((v) => v.offTargetKeys)),
   ].sort()
+  const askedKeys = [
+    ...new Set(turns.flatMap((t) => [...t.attributedTo, ...t.raisedKeys])),
+  ].sort()
   const twoQuestionTurns = verdicts.filter((v) => v.twoQuestions).length
   const unattributedTurns = verdicts.filter(
     (v) => v.unattributedQuestion,
@@ -293,6 +298,7 @@ export function scoreConversation(
     questionCount: verdicts.reduce((n, v) => n + v.questionCount, 0),
     twoQuestionTurns,
     offTargetKeys,
+    askedKeys,
     unattributedTurns,
     openerIdentityClaims,
     opener,
@@ -305,6 +311,32 @@ export function scoreConversation(
     invalid,
   }
 }
+
+/**
+ * THE FLOOR, and it is the other half of convention 8: a bar answers "did it
+ * work", a ceiling or floor answers "did it break something while working".
+ *
+ * EVERY BAR IN THIS RUN COUNTS A BAD THING, so a run where the agent asks NOTHING
+ * AT ALL scores three perfect zeros and would print PASS. That is not a
+ * hypothetical shape: the first-conversation restraint renders LAST in the
+ * intentions block and says "the reply itself asks them nothing", while
+ * FIRST_TOUCH_OPENER, 25 lines above it in the same block, says "Ask what they
+ * just got". On most-proximate-wins the restraint could suppress the scripted
+ * order question, and without this floor the run would report that as a clean
+ * sweep.
+ *
+ * THE ORDER QUESTION IS THE RIGHT THING TO FLOOR. The opener scripts it outright,
+ * so it is the one question a first-touch turn should essentially always carry.
+ * The other two are deliberately NOT floored: the restraint paragraph's default is
+ * not to ask, and 3 of 15 conversations legitimately ended with only the order
+ * question when the guest went quiet. Flooring those would fail the arm for
+ * behaviour the ruling permits.
+ *
+ * ADDED AFTER THE FIRST RUNS, not pre-registered before them, which is stated
+ * plainly because the ticket's own convention is to pre-register. The runs it
+ * was written against cleared it at 15/15 and 15/15.
+ */
+export const ORDER_QUESTION_FLOOR_RATIO = 0.8
 
 export interface RunSummary {
   conversations: number
@@ -319,7 +351,13 @@ export interface RunSummary {
   strictIdentityConversations: number
   equivalentIdentityConversations: number
   cleanConversations: number
-  /** Every bar met across every valid conversation. */
+  /** The floor: valid conversations where the order question was actually asked. */
+  orderAskedConversations: number
+  /** What the floor requires, given the valid count. */
+  orderAskedRequired: number
+  /** True when the floor was met. A breach fails the arm whatever the bars read. */
+  floorMet: boolean
+  /** Every bar met AND the floor met, across every valid conversation. */
   pass: boolean
 }
 
@@ -351,10 +389,18 @@ export function summarize(
       v.openerIdentityClaims.some((c) => c.tier === 'equivalent'),
     ).length,
     cleanConversations: valid.filter((v) => v.clean).length,
+    orderAskedConversations: valid.filter((v) =>
+      v.askedKeys.includes('understand_order'),
+    ).length,
+    orderAskedRequired: Math.ceil(valid.length * ORDER_QUESTION_FLOOR_RATIO),
+    floorMet: false,
     pass: false,
   }
+  summary.floorMet =
+    summary.orderAskedConversations >= summary.orderAskedRequired
   summary.pass =
     valid.length > 0 &&
+    summary.floorMet &&
     summary.offTargetConversations === 0 &&
     summary.unattributedConversations === 0 &&
     summary.twoQuestionTurns === 0 &&
