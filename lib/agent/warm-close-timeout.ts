@@ -92,6 +92,13 @@ export type WarmCloseSkipReason =
   /** Not an Instagram conversation. */
   | 'not_instagram'
   /**
+   * TAC-568: this venue has no `followup_rules.warm_close_text`, so there is no
+   * close to send. Counted rather than silent: an unconfigured venue should be
+   * visible in the tick summary, not indistinguishable from one with no
+   * candidates.
+   */
+  | 'no_warm_close_text'
+  /**
    * TAC-386: a proactive message reached this guest within the last hour, so
    * the close waits rather than stacking on it. Transient; it comes round again
    * inside the two-hour bound.
@@ -119,6 +126,8 @@ interface VenueGate {
   pauseMs: number
   conversationWindowMs: number
   quietHours: boolean
+  /** TAC-568: the fixed text this venue's close sends, '' when unconfigured. */
+  warmCloseText: string
 }
 
 function resolveVenueGate(venue: WarmCloseVenue, now: Date): VenueGate {
@@ -127,6 +136,7 @@ function resolveVenueGate(venue: WarmCloseVenue, now: Date): VenueGate {
     venue,
     pauseMs: rules.warm_close_pause_minutes * 60 * 1000,
     conversationWindowMs: rules.recent_conversation_hours * 60 * 60 * 1000,
+    warmCloseText: rules.warm_close_text,
     // The ONE definition of quiet hours, imported rather than restated. Note it
     // fails OPEN on an unreadable timezone (returns false, so the close is
     // allowed): that direction is inherited from the follow-up engine
@@ -181,6 +191,15 @@ export async function processDueWarmCloses(
     // Instagram only (ruled 2026-09-29). A venue with no Instagram account can
     // have no Instagram conversation, so skip it whole.
     if (venue.instagramAccountId === null) continue
+    // TAC-568: no configured close, nothing to send. Checked venue-wide and
+    // BEFORE the candidate scan, for the reason the gates above are: a venue
+    // that can never close anyone should cost one venues row per tick, not a
+    // scan. handleFollowup re-checks it, because the config can change between
+    // this tick and the run.
+    if (gate.warmCloseText.trim() === '') {
+      bump('no_warm_close_text')
+      continue
+    }
 
     // The window is bounded by the max age, so the scan is small: at two hours
     // this is a handful of rows per venue.

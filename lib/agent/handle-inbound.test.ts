@@ -245,6 +245,9 @@ vi.mock('./extract-reported-order', async () => {
 const recordIntentionPromptsMock = vi.fn()
 // TAC-560
 const markWarmCloseSentMock = vi.fn()
+// TAC-568: the claim is taken BEFORE the send and given back when the close did
+// not reach the guest, so both halves are mocked and both are asserted.
+const releaseWarmCloseClaimMock = vi.fn()
 const captureWarmCloseSentMock = vi.fn()
 const recordIntentionEligibilityMock = vi.fn()
 // TAC-324: same posture as extractReportedOrder above — fire-and-forget side
@@ -254,6 +257,7 @@ const recordIntentionEligibilityMock = vi.fn()
 // lets a rejection propagate.
 vi.mock('./warm-close-store', () => ({
   markWarmCloseSent: (...a: unknown[]) => markWarmCloseSentMock(...a),
+  releaseWarmCloseClaim: (...a: unknown[]) => releaseWarmCloseClaimMock(...a),
 }))
 vi.mock('./intentions/record', () => ({
   recordIntentionPrompts: (...a: unknown[]) => recordIntentionPromptsMock(...a),
@@ -430,6 +434,10 @@ function makeCtx(overrides: Record<string, unknown> = {}) {
       sendblueNumber: '+1',
       holdAllOutbound: false,
       approvalPolicy: { default: 'auto_send', perCategory: {} },
+      // TAC-568: the default fixture venue has NO configured close, so no turn
+      // in this file appends one unless it opts in. Tests that exercise the
+      // goodbye path override it.
+      warmCloseText: '',
     },
     guest: {
       id: GUEST_ID,
@@ -4105,39 +4113,171 @@ describe('TAC-540 — each verify check owns its own span window', () => {
   })
 })
 
-// TAC-560: the in-conversation half of the once-per-guest-ever marker.
-describe('handleInbound — the warm close marker (TAC-560)', () => {
-  beforeEach(() => {
-    markWarmCloseSentMock.mockResolvedValue({ ok: true, data: 'marked' })
-    generateStageMock.mockResolvedValue({
-      status: 'success',
-      result: successResult(),
-    })
-  })
+// TAC-568: the goodbye path. The close is a FIXED per-venue string appended as
+// this response's own last bubble, claimed BEFORE the send.
+//
+// scheduleAndSend is mocked in this file and dispatch-reply.ts (the switch) is
+// real, so `warmCloseBubble` is asserted where the orchestrator actually hands it
+// over. What the splitter then does with it is sentence-split.test.ts's job.
+describe('handleInbound — the warm close on a goodbye (TAC-568)', () => {
+  // NOT Le Mil's live wording. These tests assert the bubble equals THE SETTING;
+  // pinning production copy here would let them pass by agreeing with a literal.
+  const VENUE_TEXT = 'the line is open here, message us anytime \u2615'
 
-  it('writes the marker when the model reports this reply WAS the close', async () => {
+  /** A turn that closes a first conversation: both signals, and a text to send. */
+  const closingTurn = (over: Record<string, unknown> = {}): void => {
+    buildRuntimeContextMock.mockResolvedValue(
+      makeCtx({
+        firstConversation: true,
+        venue: {
+          ...makeCtx().venue,
+          warmCloseText: VENUE_TEXT,
+        },
+        ...over,
+      }),
+    )
+    classifyStageMock.mockResolvedValue({
+      category: 'acknowledgment',
+      classifierConfidence: 0.9,
+      reasoning: 'signed off',
+      crisisSafety: false,
+    })
     generateStageMock.mockResolvedValue({
       status: 'success',
       result: { ...successResult(), closedTheConversation: true },
     })
-    await handleInbound(INBOUND_ID)
-    expect(markWarmCloseSentMock).toHaveBeenCalledTimes(1)
-    expect(markWarmCloseSentMock.mock.calls[0]?.[1]).toBe(GUEST_ID)
+  }
+
+  const bubbleSent = (): unknown =>
+    scheduleAndSendMock.mock.calls[0]?.[2]?.warmCloseBubble
+
+  beforeEach(() => {
+    markWarmCloseSentMock.mockResolvedValue({ ok: true, data: 'marked' })
+    releaseWarmCloseClaimMock.mockResolvedValue(undefined)
   })
 
-  // THE MUTANT THE ACCEPTANCE CRITERION NAMES, from this side. Without the
-  // marker the pause timer finds a null column and closes the guest a second
-  // time, which is the one thing AC 1 forbids.
-  it('writes NO marker on an ordinary reply', async () => {
+  it('appends the venue text and claims the marker once', async () => {
+    closingTurn()
+    const r = await handleInbound(INBOUND_ID)
+    expect(r).toMatchObject({ status: 'sent' })
+    expect(markWarmCloseSentMock).toHaveBeenCalledTimes(1)
+    expect(markWarmCloseSentMock.mock.calls[0]?.[1]).toBe(GUEST_ID)
+    expect(releaseWarmCloseClaimMock).not.toHaveBeenCalled()
+  })
+
+  // AC 5: BYTE-IDENTICAL to the setting. Compared against the fixture's own
+  // value rather than a re-spelled copy, so a normalizer that trimmed, collapsed
+  // or re-cased a character would fail here.
+  it('hands dispatch the setting byte for byte', async () => {
+    closingTurn()
     await handleInbound(INBOUND_ID)
+    const sent = bubbleSent()
+    expect(sent).toBe(VENUE_TEXT)
+    expect(typeof sent).toBe('string')
+    expect(Buffer.from(sent as string, 'utf8')).toEqual(
+      Buffer.from(VENUE_TEXT, 'utf8'),
+    )
+  })
+
+  // AC 3, and THE MUTANT THE ACCEPTANCE CRITERION NAMES. Delete the
+  // `already_marked` branch in claimWarmCloseForTurn and this goes red: the guest
+  // gets a second close after the timer already sent one.
+  it('appends NOTHING when this guest has already been closed', async () => {
+    closingTurn()
+    markWarmCloseSentMock.mockResolvedValue({
+      ok: true,
+      data: 'already_marked',
+    })
+    const r = await handleInbound(INBOUND_ID)
+    expect(r).toMatchObject({ status: 'sent' })
+    expect(bubbleSent()).toBe('')
+    // No release: this turn never owned the claim, and releasing would clear a
+    // marker some other path legitimately set.
+    expect(releaseWarmCloseClaimMock).not.toHaveBeenCalled()
+  })
+
+  // AC 4, first half: the guest signed off but the reply did not say goodbye.
+  it('appends nothing when the reply is not a goodbye', async () => {
+    closingTurn()
+    generateStageMock.mockResolvedValue({
+      status: 'success',
+      result: { ...successResult(), closedTheConversation: false },
+    })
+    await handleInbound(INBOUND_ID)
+    expect(bubbleSent()).toBe('')
     expect(markWarmCloseSentMock).not.toHaveBeenCalled()
   })
 
-  it('reports the path and the marker outcome', async () => {
-    generateStageMock.mockResolvedValue({
-      status: 'success',
-      result: { ...successResult(), closedTheConversation: true },
+  // AC 4, second half: the reply says goodbye but the guest did not sign off.
+  // This is the half the AND buys — the self-report alone would fire here.
+  it('appends nothing when the guest did not sign off', async () => {
+    closingTurn()
+    classifyStageMock.mockResolvedValue({
+      category: 'new_question',
+      classifierConfidence: 0.9,
+      reasoning: 'asked something',
+      crisisSafety: false,
     })
+    await handleInbound(INBOUND_ID)
+    expect(bubbleSent()).toBe('')
+    expect(markWarmCloseSentMock).not.toHaveBeenCalled()
+  })
+
+  // AC 4: not on later conversations.
+  it('appends nothing outside a first conversation', async () => {
+    closingTurn({ firstConversation: false })
+    await handleInbound(INBOUND_ID)
+    expect(bubbleSent()).toBe('')
+    expect(markWarmCloseSentMock).not.toHaveBeenCalled()
+  })
+
+  // An unconfigured venue sends no close at all, rather than some default copy.
+  it('appends nothing when the venue has no configured text', async () => {
+    closingTurn()
+    buildRuntimeContextMock.mockResolvedValue(
+      makeCtx({
+        firstConversation: true,
+        venue: { ...makeCtx().venue, warmCloseText: '' },
+      }),
+    )
+    await handleInbound(INBOUND_ID)
+    expect(bubbleSent()).toBe('')
+    expect(markWarmCloseSentMock).not.toHaveBeenCalled()
+  })
+
+  it('appends nothing when the text is only whitespace', async () => {
+    closingTurn()
+    buildRuntimeContextMock.mockResolvedValue(
+      makeCtx({
+        firstConversation: true,
+        venue: { ...makeCtx().venue, warmCloseText: '   \n ' },
+      }),
+    )
+    await handleInbound(INBOUND_ID)
+    expect(bubbleSent()).toBe('')
+    expect(markWarmCloseSentMock).not.toHaveBeenCalled()
+  })
+
+  // FAILS CLOSED. An unknown marker state must not send: the alternative is a
+  // possible second close, which is the one outcome this mechanism prevents.
+  it('sends the reply but no close when the marker write fails', async () => {
+    closingTurn()
+    markWarmCloseSentMock.mockResolvedValue({ ok: false, error: 'boom' })
+    const r = await handleInbound(INBOUND_ID)
+    expect(r).toMatchObject({ status: 'sent' })
+    expect(bubbleSent()).toBe('')
+  })
+
+  it('sends the reply but no close when the marker write throws', async () => {
+    closingTurn()
+    markWarmCloseSentMock.mockRejectedValue(new Error('boom'))
+    const r = await handleInbound(INBOUND_ID)
+    expect(r).toMatchObject({ status: 'sent' })
+    expect(bubbleSent()).toBe('')
+  })
+
+  it('reports the send on the in_conversation path', async () => {
+    closingTurn()
     await handleInbound(INBOUND_ID)
     expect(captureWarmCloseSentMock).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -4147,45 +4287,121 @@ describe('handleInbound — the warm close marker (TAC-560)', () => {
     )
   })
 
-  it('reports an existing marker rather than overwriting it', async () => {
-    // A guest the timer closed moments earlier keeps that earlier timestamp.
-    markWarmCloseSentMock.mockResolvedValue({
-      ok: true,
-      data: 'already_marked',
-    })
-    generateStageMock.mockResolvedValue({
-      status: 'success',
-      result: { ...successResult(), closedTheConversation: true },
-    })
+  it('reports nothing on an ordinary reply', async () => {
     await handleInbound(INBOUND_ID)
-    expect(captureWarmCloseSentMock).toHaveBeenCalledWith(
-      expect.objectContaining({ markerOutcome: 'already_marked' }),
-    )
+    expect(captureWarmCloseSentMock).not.toHaveBeenCalled()
+    expect(markWarmCloseSentMock).not.toHaveBeenCalled()
   })
 
-  // The guest already has the message, so a failed marker write must never turn a
-  // delivered reply into a failed request. The cost is one guest who could
-  // receive the close twice, which the timer's `acknowledgment` belt catches.
-  it('still reports sent when the marker write fails', async () => {
-    markWarmCloseSentMock.mockResolvedValue({ ok: false, error: 'boom' })
-    generateStageMock.mockResolvedValue({
-      status: 'success',
-      result: { ...successResult(), closedTheConversation: true },
-    })
-    const result = await handleInbound(INBOUND_ID)
-    expect(result.status).toBe('sent')
-    expect(captureWarmCloseSentMock).toHaveBeenCalledWith(
-      expect.objectContaining({ markerOutcome: 'write_failed' }),
-    )
-  })
+  // THE CLAIM RELEASE. The claim is taken BEFORE the send, so a reply that never
+  // reached the guest would otherwise spend their one close on nothing — for
+  // ever, because the marker is `is null` and never reconsidered. Releasing it
+  // lets the pause timer close them properly inside its own window.
+  //
+  // Exercised on the Instagram arm because it is the only one that can decline:
+  // the text arm sends the whole reply or throws.
+  describe('the claim release', () => {
+    const igClosingTurn = (): void => {
+      buildRuntimeContextMock.mockResolvedValue(
+        makeCtx({
+          conversationChannel: 'instagram',
+          firstConversation: true,
+          venue: { ...makeCtx().venue, warmCloseText: VENUE_TEXT },
+        }),
+      )
+      classifyStageMock.mockResolvedValue({
+        category: 'acknowledgment',
+        classifierConfidence: 0.9,
+        reasoning: 'signed off',
+        crisisSafety: false,
+      })
+      generateStageMock.mockResolvedValue({
+        status: 'success',
+        result: { ...successResult(), closedTheConversation: true },
+      })
+    }
 
-  it('does not fail the turn when the marker write throws', async () => {
-    markWarmCloseSentMock.mockRejectedValue(new Error('boom'))
-    generateStageMock.mockResolvedValue({
-      status: 'success',
-      result: { ...successResult(), closedTheConversation: true },
+    it('releases when the reply did not go out at all', async () => {
+      igClosingTurn()
+      dispatchInstagramReplyMock.mockResolvedValue({
+        kind: 'not_sent',
+        reason: 'window_closed',
+      })
+      await handleInbound(INBOUND_ID)
+      expect(markWarmCloseSentMock).toHaveBeenCalledTimes(1)
+      expect(releaseWarmCloseClaimMock).toHaveBeenCalledTimes(1)
+      // Scoped to this guest and to the EXACT timestamp this turn wrote, so it
+      // can never clear a marker the timer set in between.
+      expect(releaseWarmCloseClaimMock.mock.calls[0]?.[1]).toBe(GUEST_ID)
+      expect(releaseWarmCloseClaimMock.mock.calls[0]?.[2]).toBe(
+        markWarmCloseSentMock.mock.calls[0]?.[2],
+      )
     })
-    const result = await handleInbound(INBOUND_ID)
-    expect(result.status).toBe('sent')
+
+    it('releases when the reply became a card', async () => {
+      igClosingTurn()
+      dispatchInstagramReplyMock.mockResolvedValue({
+        kind: 'carded',
+        reason: 'window_closed_by_gate',
+        cardId: 'card-7',
+      })
+      await handleInbound(INBOUND_ID)
+      expect(releaseWarmCloseClaimMock).toHaveBeenCalledTimes(1)
+    })
+
+    // THE CASE THE ORDERING MAKES POSSIBLE. The close is the LAST bubble, so a
+    // partly delivered reply is precisely the one where it did not go out — and
+    // the run still reports `sent`, which is why this cannot be inferred from the
+    // status.
+    it('releases when the reply was only partly delivered', async () => {
+      igClosingTurn()
+      dispatchInstagramReplyMock.mockResolvedValue({
+        kind: 'sent',
+        outboundMessageId: 'ig-row-1',
+        providerMessageId: 'mid-1',
+        generationId: 'gen-1',
+        bubbleCount: 2,
+        deliveredBody: 'see you soon',
+        undelivered: { reason: 'window_closed', cardId: 'card-9' },
+      })
+      const r = await handleInbound(INBOUND_ID)
+      expect(r).toMatchObject({ status: 'sent' })
+      expect(releaseWarmCloseClaimMock).toHaveBeenCalledTimes(1)
+      // And it is NOT reported as a close that happened.
+      expect(captureWarmCloseSentMock).not.toHaveBeenCalled()
+    })
+
+    it('does NOT release when the whole reply reached the guest', async () => {
+      igClosingTurn()
+      dispatchInstagramReplyMock.mockResolvedValue({
+        kind: 'sent',
+        outboundMessageId: 'ig-row-1',
+        providerMessageId: 'mid-1',
+        generationId: 'gen-1',
+        bubbleCount: 2,
+        deliveredBody: 'see you soon',
+        undelivered: null,
+      })
+      await handleInbound(INBOUND_ID)
+      expect(releaseWarmCloseClaimMock).not.toHaveBeenCalled()
+      expect(captureWarmCloseSentMock).toHaveBeenCalledWith(
+        expect.objectContaining({ via: 'in_conversation' }),
+      )
+    })
+
+    it('releases nothing on a failed reply that never claimed', async () => {
+      // No close was owed on this turn, so there is nothing to give back. Guards
+      // against a release that fires unconditionally and clears someone else's
+      // marker.
+      buildRuntimeContextMock.mockResolvedValue(
+        makeCtx({ conversationChannel: 'instagram' }),
+      )
+      dispatchInstagramReplyMock.mockResolvedValue({
+        kind: 'not_sent',
+        reason: 'window_closed',
+      })
+      await handleInbound(INBOUND_ID)
+      expect(releaseWarmCloseClaimMock).not.toHaveBeenCalled()
+    })
   })
 })

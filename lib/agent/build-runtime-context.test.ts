@@ -496,8 +496,14 @@ describe('buildRuntimeContext: conversation window (TAC-547)', () => {
   const src = readFileSync(join(__dirname, 'build-runtime-context.ts'), 'utf-8')
 
   it('derives the window from followup_rules, not from a literal', () => {
+    // TAC-568 hoisted the parse into `followupRules` so the venue's warm close
+    // text and this window come from ONE read. The property under test is
+    // unchanged: the number comes from the config, never from a literal.
+    expect(src).toContain(
+      'const followupRules = parseFollowupRules(config.followup_rules)',
+    )
     expect(src).toMatch(
-      /const conversationWindowMs =\s*parseFollowupRules\(config\.followup_rules\)\.recent_conversation_hours \*\s*60 \*\s*60 \*\s*1000/,
+      /const conversationWindowMs =\s*followupRules\.recent_conversation_hours \* 60 \* 60 \* 1000/,
     )
   })
 
@@ -593,14 +599,31 @@ function balancedCallText(src: string, from: number): string {
 // Source-level, like everything else in this file. It catches the flag being
 // hardcoded or read off the wrong thing; it does not prove the value is right at
 // runtime, which handle-followup.test.ts covers from the trigger side.
-describe('buildRuntimeContext: the warm-close flag (TAC-560)', () => {
+// TAC-568 replaced TAC-560's warmClose trigger flag. The close is no longer
+// generated, so there is no prompt flag to derive; what the context has to carry
+// instead is the venue's FIXED TEXT, and carrying it is the whole mechanism.
+// Source-level for the reason stated at the top of the file.
+describe('buildRuntimeContext: the warm close text (TAC-568)', () => {
   const src = readFileSync(join(__dirname, 'build-runtime-context.ts'), 'utf-8')
 
-  it('derives warmClose from the trigger reason, never a literal', () => {
-    expect(src).toContain(
-      "warmClose: input.followupTrigger?.reason === 'warm_close',",
-    )
-    expect(src).not.toMatch(/warmClose:\s*(?:true|false)\s*,/)
+  it('reads the text from followup_rules, never a literal', () => {
+    // A literal here would ship one venue's copy to every venue, which is the
+    // exact failure the empty default exists to prevent.
+    expect(src).toContain('warmCloseText: followupRules.warm_close_text,')
+    expect(src).not.toMatch(/warmCloseText:\s*['\`"]/)
+  })
+
+  it('reads it from the SAME parse the conversation window uses', () => {
+    // One parse, so the text and the window cannot come from two different reads
+    // of the same row. The count is the guard: a second parseFollowupRules call
+    // would satisfy the assertion above while reintroducing the split.
+    expect(src.match(/parseFollowupRules\(/g) ?? []).toHaveLength(1)
+  })
+
+  it('no longer derives a warmClose prompt flag', () => {
+    // The deletion's tripwire. A resurrected flag with no block to render is the
+    // well-named-thing-with-no-reader failure this repo keeps paying for.
+    expect(src).not.toContain('warmClose:')
   })
 })
 

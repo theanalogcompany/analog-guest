@@ -188,3 +188,61 @@ export function isFirstConversation(
  * rather than adding a flag to the pure splitter.
  */
 export const NEVER_SPLIT_RNG = (): number => 1
+
+/**
+ * Is THIS reply the one that closes the guest's first conversation?
+ *
+ * TAC-568. The goodbye path's whole decision, pure, so the boundary is drivable
+ * without a database or a model.
+ *
+ * TWO SIGNALS, ANDed, and the AND is the point. They answer the two halves of
+ * the ruling's own sentence ("the guest signed off AND the agent answered with a
+ * goodbye"), and both already existed for TAC-560:
+ *
+ *   guestSignedOff   the inbound classified `acknowledgment`. This is the timer's
+ *                    own belt (loadLastInboundCategory), read off the current
+ *                    turn instead of a query. Venue-neutral and structural.
+ *   agentSaidGoodbye the model's closedTheConversation self-report, reworded in
+ *                    v1.78.0 from "this reply IS the warm close" to "this reply
+ *                    says goodbye" — the old meaning dies with Le Mil's rule 15.
+ *
+ * THE RISK DIRECTION IS THE OPPOSITE OF weAskedAQuestion'S, which is why this
+ * narrows where that one widens. A FALSE POSITIVE is the expensive direction
+ * here: it spends the guest's one close, for ever, on a turn that was not
+ * closing anything. A false negative costs nothing at all, because the pause
+ * timer is still running and sends the same text ten minutes later. So the
+ * cheap mistake is missing, and the AND buys that.
+ *
+ * Self-report is not trusted alone, on this repo's record (TAC-350: 8 of 8
+ * fabrications self-reported clean) — which is the second reason it is ANDed
+ * with something structural rather than read on its own.
+ *
+ * NO qr_scan CHECK AND NO CHANNEL CHECK, unlike the timer. Ruling 5: the pause
+ * path stays scan-only, the goodbye path is any first conversation. The close
+ * happens on SMS too, and the marker has always meant "this guest has been
+ * closed", not "the timer ran".
+ *
+ * `warmCloseText` empty means the venue has no close configured, and no path
+ * sends one. Checked here rather than at dispatch so the claim is never taken
+ * for a message that was never going to exist.
+ */
+export function closesFirstConversation(input: {
+  guestSignedOff: boolean
+  agentSaidGoodbye: boolean
+  isFirstConversation: boolean
+  warmCloseText: string
+}): boolean {
+  if (input.warmCloseText.trim() === '') return false
+  if (!input.isFirstConversation) return false
+  return input.guestSignedOff && input.agentSaidGoodbye
+}
+
+/**
+ * The inbound category that means the guest signed off.
+ *
+ * Named rather than spelled at both call sites: the timer compares
+ * loadLastInboundCategory against it and the goodbye path compares
+ * ctx.classification.category against it, and two string literals is how those
+ * two drift into two different ideas of "signed off".
+ */
+export const SIGN_OFF_CATEGORY = 'acknowledgment'

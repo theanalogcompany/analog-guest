@@ -228,12 +228,44 @@ export function resolveDispatchBubbles(
   // rather than inherit an answer by staying silent. A fourth dispatch arm
   // added later fails `tsc` until it decides.
   intentionTail: string,
+  // TAC-568: the fixed warm-close text, appended AS ITS OWN LAST BUBBLE, and
+  // '' on every turn that is not closing a first conversation.
+  //
+  // REQUIRED, for the reason intentionTail above is: a dispatch arm added later
+  // has to SAY it sends no warm close rather than inherit that by staying
+  // silent. Both arms fail `tsc` until they decide.
+  //
+  // IT IS NOT PART OF `body` AND IS NEVER PARSED OUT OF IT, which is the whole
+  // difference from intentionTail. That one is SLICED off a body the model
+  // composed, so it needs the endsWith belt and the strip. This one is
+  // APPENDED, a per-venue constant a human approved, so it must reach the guest
+  // byte for byte: no collapseToSingleMessage, no stripTerminalPeriod, no
+  // sentence split. Byte-identity is then a property of the code rather than a
+  // claim about what the normalizers happen to do to today's wording.
+  warmCloseBubble: string,
 ): string[] {
   // Stray model-emitted [[BREAK]] markers (and near-misses) are noise now;
   // collapseToSingleMessage strips them and normalizes whitespace, keeping
   // the invariant that no delimiter ever reaches Sendblue or the database.
   const cleaned = collapseToSingleMessage(body)
   if (cleaned.length === 0) return []
+
+  // TAC-568: the close takes a slot off the top, so the answer and any
+  // intention question split within what is left and the total still honours
+  // MAX_BUBBLES_PER_RESPONSE. Same arithmetic the intention tail already
+  // applies, one level up, so the two cannot add to four between them.
+  //
+  // Checked for renderable content the way the intention tail is: a setting
+  // holding only whitespace or punctuation is not a message, and appending it
+  // would send the guest a bubble with nothing in it.
+  const warmClose =
+    warmCloseBubble.length > 0 && hasRenderableContent(warmCloseBubble)
+      ? warmCloseBubble
+      : ''
+  const budget =
+    warmClose === '' ? MAX_BUBBLES_PER_RESPONSE : MAX_BUBBLES_PER_RESPONSE - 1
+  const withWarmClose = (bubbles: string[]): string[] =>
+    warmClose === '' ? bubbles : [...bubbles, warmClose]
 
   const tail = collapseToSingleMessage(intentionTail)
 
@@ -255,14 +287,14 @@ export function resolveDispatchBubbles(
     tail.length > 0 && hasRenderableContent(tail) && cleaned.endsWith(tail)
 
   if (!tailIsOwnMessage) {
-    return splitToBubbles(cleaned, rng, MAX_BUBBLES_PER_RESPONSE)
+    return withWarmClose(splitToBubbles(cleaned, rng, budget))
   }
 
   const answer = cleaned.slice(0, cleaned.length - tail.length).trim()
 
   // The model put everything in the field and nothing in the body. One
   // message, which is the question, and never an empty bubble in front of it.
-  if (answer === '') return [stripTerminalPeriod(tail)]
+  if (answer === '') return withWarmClose([stripTerminalPeriod(tail)])
 
   // The answer's own cap drops by one so the total still honours
   // MAX_BUBBLES_PER_RESPONSE: four bubbles in a row stops reading as texting,
@@ -273,10 +305,8 @@ export function resolveDispatchBubbles(
   // behind it the answer IS a separate message, and TAC-319's rule is that a
   // piece dispatching as its own bubble does not end in a period. Idempotent:
   // splitToBubbles already stripped them if it split.
-  const answerBubbles = splitToBubbles(
-    answer,
-    rng,
-    MAX_BUBBLES_PER_RESPONSE - 1,
-  ).map(stripTerminalPeriod)
-  return [...answerBubbles, stripTerminalPeriod(tail)]
+  const answerBubbles = splitToBubbles(answer, rng, budget - 1).map(
+    stripTerminalPeriod,
+  )
+  return withWarmClose([...answerBubbles, stripTerminalPeriod(tail)])
 }

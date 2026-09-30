@@ -1863,6 +1863,32 @@ import {
 // signed off and forbids naming anything new, both false when the guest sent
 // nothing. Handing the model a false premise as fact is the TAC-484 / TAC-502
 // failure class. See lib/ai/prompts/categories/warm-close.ts.
+// v1.78.0 (TAC-568): the # Conversation close self-report block changes MEANING,
+// and the `## Closing this conversation` user-prompt block and the warm-close
+// category instructions are DELETED. No voice rule changes.
+//
+// The warm close is no longer generated. It is a fixed per-venue string,
+// `followup_rules.warm_close_text`, approved verbatim by Jaipal and sent word
+// for word on both paths: appended as its own last bubble right after the agent
+// says goodbye, and sent alone by the pause timer for a guest who just stops
+// replying. v1.73.0's two blocks existed only to steer a generation that no
+// longer happens, so they go with it.
+//
+// WHY THE SELF-REPORT SURVIVES THE DELETION RATHER THAN GOING WITH THEM. It is
+// now the model's half of detecting a CLOSING TURN, which is what decides
+// whether the fixed bubble is appended. Its old meaning ("this reply IS the warm
+// close that names what they can message about") becomes unreachable the moment
+// Le Mil's rule 15 is removed, so leaving the wording alone would have left a
+// required boolean that is false for ever — a signal with no reader, which this
+// repo has paid for three times. The new meaning is the one thing a model can
+// still answer that the schema cannot: did this reply say goodbye.
+//
+// It is ANDed with the inbound's `acknowledgment` classification, never trusted
+// alone (TAC-350: 8 of 8 fabrications self-reported clean). The AND is biased
+// toward MISSING a close: a false positive spends the guest's one close for
+// ever, where a false negative costs nothing because the pause timer still sends
+// the same text ten minutes later. See closesFirstConversation in
+// lib/agent/warm-close.ts.
 // v1.75.0 (TAC-555): R21 gains the positive half of "receive it", and R23
 // gains the carve-out that keeps it reachable. Device case at Le Mil's,
 // 2026-09-29: a guest with cortado on 4 of 5 recorded visits scanned the
@@ -2013,7 +2039,7 @@ import {
 // It also means the earlier runs quoted above measured prompts that no longer
 // exist, which is why Jaipal ruled the run be repeated against the rebased
 // prompt rather than the rulings applied on top of it.
-export const PROMPT_VERSION = 'v1.77.0'
+export const PROMPT_VERSION = 'v1.78.0'
 
 export const SYSTEM_TEMPLATE = `You work at a hospitality venue (cafe, bakery, restaurant). You communicate with its guests via iMessage, in whatever voice the venue has configured below — its own collective voice, its owner's, or a named staff member's.
 
@@ -2047,7 +2073,7 @@ Be honest about which one it is. A message that says sorry, or offers anything, 
 This field does not change what you write. Write the right message first, then label it.
 
 # Conversation close self-report
-Set closedTheConversation to true when this reply is the warm close your voice rules describe for a first conversation that is winding down: the one that tells the guest the line is open and names what they can message about anytime. Set it to false on every other reply, including one that simply ends warmly.
+Set closedTheConversation to true when this reply says goodbye and ends the conversation: the guest has signed off or signalled they are done, and this message is your sign-off back. Set it to false on every other reply, including one that ends warmly but carries on the exchange, and any reply that asks the guest something.
 
 # Knowledge gaps
 The output field "knowledgeGap" records whether this reply answers a question you could NOT ground in what you were given: the venue knowledge section, the venue facts, the current context, or the corpus examples.

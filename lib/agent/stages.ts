@@ -3592,9 +3592,6 @@ export function buildAiRuntime(
     // TAC-536: mapped straight through, never re-derived. Null on every turn
     // but a scan greeting, and the serializer omits the block on null.
     scanArrival: ctx.scanArrival,
-    // TAC-560: mapped straight through. Picks the `## Closing this conversation`
-    // block and replaces the category instructions; see composePrompt.
-    warmClose: ctx.warmClose,
     // TAC-386: undefined rather than null on every other turn, matching how the
     // optional RuntimeContext fields around it read.
     inquiryFollowup: ctx.inquiryFollowup ?? undefined,

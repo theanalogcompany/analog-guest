@@ -61,13 +61,21 @@ const NOW = new Date('2026-09-29T18:15:00.000Z')
 /** 15 minutes before NOW: past the 10-minute floor, inside the 2-hour bound. */
 const SENT_AT = new Date('2026-09-29T18:00:00.000Z')
 
+// TAC-568: a stand-in for a venue's configured close. NOT Le Mil's live wording:
+// these tests assert that whatever the setting holds is what goes out, and
+// pinning production copy here would let one pass by agreeing with a literal.
+const WARM_CLOSE_TEXT = 'the line is open here, message us anytime \u2615'
+
 function venue(over: Record<string, unknown> = {}) {
   return {
     id: VENUE,
     timezone: 'America/Los_Angeles',
     status: 'pending',
     instagramAccountId: 'ig-account',
-    followupRules: null,
+    // TAC-568: a venue with no configured close is skipped venue-wide before the
+    // candidate scan, so the default fixture carries one. The skip has its own
+    // test below.
+    followupRules: { warm_close_text: WARM_CLOSE_TEXT },
     ...over,
   }
 }
@@ -331,6 +339,58 @@ describe('processDueWarmCloses: venue-wide gates (TAC-560)', () => {
     expect(store.loadWarmCloseCandidates).not.toHaveBeenCalled()
   })
 
+  // TAC-568: no configured close, nothing to send. Gated venue-wide and BEFORE
+  // the candidate scan, for the same reason the paused gate is: a venue that can
+  // never close anyone should cost one venues row per tick, not a scan.
+  //
+  // COUNTED rather than silent. An unconfigured venue has to be distinguishable
+  // in the tick summary from a venue with no candidates, or the feature can ship
+  // inert at a venue and nothing says so.
+  it('no_warm_close_text: the venue has no configured close', async () => {
+    store.loadWarmCloseVenues.mockResolvedValue({
+      ok: true,
+      data: [venue({ followupRules: { warm_close_text: '' } })],
+    })
+    const r = await processDueWarmCloses(NOW)
+    expect(r.closed).toBe(0)
+    expect(r.scanned).toBe(0)
+    expect(r.skipped.no_warm_close_text).toBe(1)
+    expect(store.loadWarmCloseCandidates).not.toHaveBeenCalled()
+  })
+
+  it('no_warm_close_text: followup_rules carries no key at all', async () => {
+    // A venue whose row predates the key takes the schema default, which is ''.
+    store.loadWarmCloseVenues.mockResolvedValue({
+      ok: true,
+      data: [venue({ followupRules: null })],
+    })
+    const r = await processDueWarmCloses(NOW)
+    expect(r.closed).toBe(0)
+    expect(r.skipped.no_warm_close_text).toBe(1)
+  })
+
+  it('reads the close text off the venue setting, not a constant', async () => {
+    // What the guest receives must be THIS venue's string. Two venues with
+    // different settings must not be able to send the same text.
+    const OTHER = 'drop us a line whenever'
+    store.loadWarmCloseVenues.mockResolvedValue({
+      ok: true,
+      data: [venue({ followupRules: { warm_close_text: OTHER } })],
+    })
+    await processDueWarmCloses(NOW)
+    expect(handleFollowupMock).toHaveBeenCalledTimes(1)
+    // The processor hands the reason and the guest; handleFollowup reads the text
+    // off the context it builds for that venue. What this pins is that the
+    // processor did NOT pass a body of its own, which would be a second source
+    // of truth for the wording.
+    const input = handleFollowupMock.mock.calls[0]?.[0] as Record<
+      string,
+      unknown
+    >
+    expect(input).not.toHaveProperty('body')
+    expect(input.trigger).toMatchObject({ reason: 'warm_close' })
+  })
+
   it('processes a `pending` venue, because the gate is a DENY-list', async () => {
     // The live pilot venue is `pending`. An allow-list on `active` would switch
     // this off for the only venue that has it (docs/decisions/0002).
@@ -369,7 +429,16 @@ describe('processDueWarmCloses: venue-wide gates (TAC-560)', () => {
     // followup_rules.warm_close_pause_minutes. At 30 minutes, 15 is not yet due.
     store.loadWarmCloseVenues.mockResolvedValue({
       ok: true,
-      data: [venue({ followupRules: { warm_close_pause_minutes: 30 } })],
+      data: [
+        venue({
+          followupRules: {
+            warm_close_pause_minutes: 30,
+            // TAC-568: kept, or the venue-wide no-text gate skips before the
+            // pause length is ever consulted.
+            warm_close_text: WARM_CLOSE_TEXT,
+          },
+        }),
+      ],
     })
     const r = await processDueWarmCloses(NOW)
     expect(r.closed).toBe(0)

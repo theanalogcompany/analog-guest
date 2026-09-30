@@ -393,6 +393,11 @@ export async function buildRuntimeContext(input: {
     ),
   }
 
+  // TAC-380 / TAC-568: ONE parse of followup_rules for this run. The venue's
+  // warm close text and the conversation window both come from it, so the two
+  // cannot disagree about which row they read.
+  const followupRules = parseFollowupRules(config.followup_rules)
+
   const venue: VenueContext = {
     id: venueRow.id,
     slug: venueRow.slug,
@@ -410,6 +415,10 @@ export async function buildRuntimeContext(input: {
     // null/malformed; the defaults route comp_complaint to operator review, so
     // a bad policy row yields more oversight rather than less.
     approvalPolicy: parseApprovalPolicy(config.approval_policy),
+    // TAC-568: the fixed warm close, from the same parse conversationWindowMs
+    // reads below. '' when this venue has none configured, which means neither
+    // the goodbye path nor the pause timer sends one.
+    warmCloseText: followupRules.warm_close_text,
   }
 
   // TAC-296: parse guests.context JSONB at the boundary. fail-OPEN on
@@ -473,10 +482,7 @@ export async function buildRuntimeContext(input: {
   // Computed once here rather than inside the intentions branch, so the
   // retrieval layer reads the same number rather than re-deriving it.
   const conversationWindowMs =
-    parseFollowupRules(config.followup_rules).recent_conversation_hours *
-    60 *
-    60 *
-    1000
+    followupRules.recent_conversation_hours * 60 * 60 * 1000
 
   // TAC-567: resolved ONCE here, beside the window it measures against, and
   // carried on the context. Two readers need it (the intention derivation and
@@ -773,10 +779,14 @@ export async function buildRuntimeContext(input: {
       // raised while this is true.
       isFirstConversation: firstConversation,
       // Ruling 1: one definition of "still in the same conversation" across
-      // followups and intentions. Le Mil's followup_rules is NULL, so it runs on
-      // the code default (48h), at which the brake rarely fires. That is the
-      // intended failure direction: under-braking, since a prompt closes on
-      // being asked anyway.
+      // followups and intentions. Le Mil's carries no explicit
+      // recent_conversation_hours, so it runs on the code default (48h), at
+      // which the brake rarely fires. That is the intended failure direction:
+      // under-braking, since a prompt closes on being asked anyway.
+      //
+      // (This comment used to say Le Mil's followup_rules was NULL. It is not,
+      // and has not been since 2026-09-30 — the row carries a full object now.
+      // Corrected on TAC-568 rather than left to mislead the next reader.)
       conversationWindowMs,
     })
     intentions = {
@@ -843,7 +853,6 @@ export async function buildRuntimeContext(input: {
     // trigger rather than derived, because whether this turn is a close is the
     // caller's decision (the processor claimed it), not something re-inferable
     // from the guest's state here.
-    warmClose: input.followupTrigger?.reason === 'warm_close',
     // TAC-386: the question and our answer both come off the trigger, which the
     // processor filled in after resolving the answer from `messages`. Nothing
     // here reads the database for them.

@@ -136,6 +136,36 @@ export const FollowupRulesSchema = z.object({
   // written before this key existed do not carry it and take the default;
   // followup-rules.test.ts pins 028's own eleven values separately.
   inquiry_followup_enabled: z.boolean().default(true),
+
+  // TAC-568: the fixed "by the way, you can always message us here" text the
+  // warm close sends, WORD FOR WORD, on both paths. Approved verbatim by Jaipal
+  // and never generated: ruling 1 is that this message is the same every time.
+  //
+  // PER VENUE because the topics it names are a product decision. Le Mil's
+  // names coffee and beans, what to get next time, and what is coming up at the
+  // shop; another venue's three will differ. This is the same argument
+  // categories/warm-close.ts makes for why the PROMPT names no topics, applied
+  // one layer out: the venue supplies the content, the mechanism supplies the
+  // moment.
+  //
+  // THE DEFAULT IS EMPTY, AND THAT IS THE FEATURE. A default carrying Le Mil's
+  // wording would ship one venue's copy to every venue on the day it shipped,
+  // which is the failure `docs/decisions` keeps calling out under "every venue
+  // is its own isolated block". Empty means this venue has not been given a
+  // close, so neither path sends one; the timer counts it as
+  // `no_warm_close_text` and handle-inbound logs it, so an unconfigured venue
+  // is visible rather than silently inert.
+  //
+  // IT IS COPY IN A RULES BLOB, which is a stretch this column has now made
+  // three times (warm_close_pause_minutes, inquiry_followup_enabled, this). The
+  // alternative is a venue_configs column of its own; that tension is recorded
+  // on TAC-568 as a follow-up rather than resolved here.
+  //
+  // NOT IN MIGRATION 028's BACKFILL LITERAL, because it postdates it. Le Mil's
+  // live value was written directly into `followup_rules` (TAC-568 ruling), so
+  // no migration ships with this key; followup-rules.test.ts pins that 028's own
+  // eleven values are unchanged and asserts the post-028 keys separately.
+  warm_close_text: z.string().default(''),
 })
 
 export type FollowupRules = z.infer<typeof FollowupRulesSchema>
@@ -161,6 +191,7 @@ export const FOLLOWUP_RULES_DEFAULT: FollowupRules = {
   cron_hour_local: 10,
   warm_close_pause_minutes: 10,
   inquiry_followup_enabled: true,
+  warm_close_text: '',
 }
 
 /**

@@ -473,6 +473,16 @@ export async function scheduleAndSend(
      * Omitted -> NULL, the value every pre-TAC-436 auto-sent row carries.
      */
     renderedIntentions?: readonly OpenIntention[]
+    /**
+     * TAC-568: the venue's fixed warm-close text, to ride as this response's
+     * own last bubble. Omitted or '' on every turn that is not closing a first
+     * conversation, which is almost all of them.
+     *
+     * Optional here and REQUIRED on resolveDispatchBubbles, the shape TAC-554
+     * settled for intentionTail: the orchestrator decides once, and the pure
+     * splitter cannot be called without an answer.
+     */
+    warmCloseBubble?: string
   } = {},
 ): Promise<{
   outboundMessageId: string
@@ -498,6 +508,8 @@ export async function scheduleAndSend(
       generation.intentionQuestion,
       options.renderedIntentions?.length ?? 0,
     ),
+    // TAC-568: '' on every turn handle-inbound has not claimed a warm close for.
+    options.warmCloseBubble ?? '',
   )
   if (bubbles.length === 0) {
     // Body was empty, whitespace-only, or nothing but delimiters. Nothing has

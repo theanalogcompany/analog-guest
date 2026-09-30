@@ -685,36 +685,6 @@ function formatScanArrival(
 }
 
 /**
- * TAC-560: the pause-triggered warm close.
- *
- * WHY A BLOCK AT ALL, when Le Mil's rule 15 already describes this close: that
- * rule's own trigger clause is "(they say thanks, ok, or signal they're done)".
- * On a pause the guest signalled NOTHING, so the rule's condition is unmet and
- * the model can read it as not applying. This block supplies the premise the
- * rule needs; the rule supplies the three topics and the voice.
- *
- * IT NAMES NO TOPICS. They are Le Mil's choice, carried in that venue's own
- * voice rules, and restating them here would ship one venue's product decision
- * into every venue's prompt.
- *
- * Every line is true on this turn, which is the point: "it has gone quiet" and
- * "nothing here is waiting on an answer from them" are both established before
- * the processor claims the close (the question deferral is what makes the second
- * one true). Handing the model a false statement as fact is the TAC-484 /
- * TAC-502 failure class.
- *
- * No em dash: R3 bans them in output and the prompt should not model one.
- */
-function formatWarmClose(): string {
-  return [
-    '## Closing this conversation',
-    "This is the guest's first conversation with the venue, and it has gone quiet. They have not replied for a while, and nothing here is waiting on an answer from them.",
-    'Send the warm close your voice rules describe for a first conversation that is winding down: let them know the line is open, and name the things they can message about anytime, in your own words.',
-    'One short message. Do not ask a question, do not open a new topic, and do not mention the pause or that they stopped replying.',
-  ].join('\n')
-}
-
-/**
  * TAC-386: the inquiry follow-up's own block.
  *
  * Both strings render VERBATIM and in full. The one thing this message must do
@@ -1908,11 +1878,10 @@ export function runtimeToProse(
   //
   // The POSITION is a choice, not a measurement, exactly as TAC-536's is. The
   // full-order test in serializers.test.ts exists so moving it is deliberate.
-  if (runtime.warmClose === true) {
-    blocks.push(formatWarmClose())
-  }
-  // TAC-386: the same slot as the warm close above, and mutually exclusive with
-  // it in practice — each is set only on its own trigger reason.
+  // TAC-568 removed the warm close's block from this slot. The close is no
+  // longer generated at all: it is a fixed per-venue string
+  // (`followup_rules.warm_close_text`) that the dispatch layer sends, so there
+  // is nothing here for a prompt to steer.
   if (runtime.inquiryFollowup) {
     blocks.push(formatInquiryFollowup(runtime.inquiryFollowup))
   }

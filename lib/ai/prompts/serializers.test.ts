@@ -1132,103 +1132,26 @@ describe("runtimeToProse — ## What you're hoping to get to block (TAC-324)", (
   })
 })
 
-// TAC-560: the pause-triggered warm close.
-describe('runtimeToProse — ## Closing this conversation (TAC-560)', () => {
-  const render = (over: Record<string, unknown> = {}): string =>
-    runtimeToProse(
-      { mechanics: [], warmClose: true, ...over },
-      'acknowledgment',
-      NOW,
-    )
-
-  /** Just this block, so a later block's wording cannot satisfy or trip a check. */
-  const block = (out: string): string => {
-    const start = out.indexOf('## Closing this conversation')
-    expect(start).toBeGreaterThanOrEqual(0)
-    const rest = out.slice(start)
-    const next = rest.indexOf('\n## ')
-    return next === -1 ? rest : rest.slice(0, next)
-  }
-
-  it('omits the block on every other turn', () => {
+// TAC-568 deleted the `## Closing this conversation` block. The close is no
+// longer generated: it is a fixed per-venue string the dispatch layer appends,
+// so there is no prompt block left to steer it.
+//
+// THIS TEST IS THE DELETION'S TRIPWIRE, and it is here rather than nowhere for
+// the reason the block's own tests existed: a block that stops rendering while
+// its serializer survives is invisible, and so is a serializer that comes back.
+describe('runtimeToProse — the warm close block is gone (TAC-568)', () => {
+  it('renders no closing-conversation block on an acknowledgment turn', () => {
     expect(
       runtimeToProse({ mechanics: [] }, 'acknowledgment', NOW),
     ).not.toContain('## Closing this conversation')
-    expect(
-      runtimeToProse({ mechanics: [], warmClose: false }, 'reply', NOW),
-    ).not.toContain('## Closing this conversation')
   })
 
-  // THE PREMISE IS THE WHOLE REASON THE BLOCK EXISTS. Le Mil's rule 15 fires on
-  // "(they say thanks, ok, or signal they're done)", which is FALSE on a pause,
-  // so without this the rule's own condition is unmet and the model can read it
-  // as not applying. Pinned as one contiguous clause, not fragments: the TAC-409
-  // lesson is that a sentence can be reversed while every asserted fragment
-  // survives.
-  it('states that the conversation has gone quiet, and that nothing is owed', () => {
-    expect(render()).toContain(
-      "This is the guest's first conversation with the venue, and it has gone quiet. They have not replied for a while, and nothing here is waiting on an answer from them.",
-    )
-  })
-
-  // It must NOT name the three topics. They are Le Mil's choice, carried in that
-  // venue's own voice rules; restating them here would ship one venue's product
-  // decision into every venue's prompt.
-  it("points at the venue's own voice rules rather than naming any topic", () => {
-    const out = render()
-    expect(out).toContain(
-      'Send the warm close your voice rules describe for a first conversation that is winding down: let them know the line is open, and name the things they can message about anytime, in your own words.',
-    )
-    for (const leaked of ['beans', 'specials', 'events', 'menu', 'coffee']) {
-      expect(block(out), leaked).not.toContain(leaked)
+  it('renders no closing-conversation block on any category', () => {
+    for (const category of ['reply', 'acknowledgment', 'follow_up'] as const) {
+      expect(runtimeToProse({ mechanics: [] }, category, NOW)).not.toContain(
+        '## Closing this conversation',
+      )
     }
-  })
-
-  it('asks for one message and no question', () => {
-    // One message is in rule 15 and in this ticket's criteria; dispatch enforces
-    // it separately with NEVER_SPLIT_RNG. No question keeps the close from
-    // reopening the conversation it is closing.
-    expect(render()).toContain(
-      'One short message. Do not ask a question, do not open a new topic, and do not mention the pause or that they stopped replying.',
-    )
-  })
-
-  it('models no em dash', () => {
-    // R3 bans them in output and the prompt should not model one.
-    expect(block(render())).not.toContain('\u2014')
-    expect(block(render())).not.toContain('\u2013')
-  })
-
-  it('pins the full block order on a warm-close turn', () => {
-    // The POSITION is a choice, not a measurement, exactly as TAC-536's is. This
-    // exists so moving it is deliberate.
-    const out = runtimeToProse(
-      {
-        today,
-        mechanics: [],
-        warmClose: true,
-        recentVisits: [
-          {
-            visitedAt: new Date(NOW.getTime() - 86_400_000),
-            items: ['cortado'],
-          },
-        ],
-        emojiDirective: 'none',
-      },
-      'acknowledgment',
-      NOW,
-    )
-    const order = out
-      .split('\n')
-      .filter((l) => l.startsWith('## '))
-      .map((l) => l.trim())
-    expect(order).toEqual([
-      '## Right now',
-      '## Closing this conversation',
-      '## What this guest can access',
-      '## Visit history',
-      '## Emoji for this message',
-    ])
   })
 })
 

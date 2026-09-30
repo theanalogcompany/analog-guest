@@ -71,6 +71,17 @@ export interface VenueContext {
   // defaults route comp_complaint to review — so a malformed policy produces
   // MORE operator oversight, never less.
   approvalPolicy: ApprovalPolicy
+  /**
+   * TAC-568: `followup_rules.warm_close_text`, the fixed close this venue sends
+   * word for word on both paths. '' when the venue has none configured, which
+   * means no close is sent at all rather than some fallback wording.
+   *
+   * Carried on the context rather than re-read at dispatch for the reason
+   * conversationWindowMs is: build-runtime-context already parses
+   * followup_rules for that, so this is the same parse rather than a second
+   * read that could disagree with it.
+   */
+  warmCloseText: string
 }
 
 export interface GuestContext {
@@ -320,12 +331,6 @@ export interface RuntimeContext {
     hadPriorConversation: boolean
     hasRecordedVisit: boolean
   } | null
-  /**
-   * TAC-560: true only on the pause-triggered warm-close turn. Picks the
-   * `## Closing this conversation` block AND replaces the category instructions,
-   * so it reaches composePrompt rather than only the serializer.
-   */
-  warmClose: boolean
   /**
    * TAC-386: the question and our answer, on an inquiry-follow-up turn only.
    * Null on every other turn. Reaches composePrompt rather than only the

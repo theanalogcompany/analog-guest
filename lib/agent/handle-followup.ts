@@ -22,6 +22,7 @@ import { dispatchReply } from './dispatch-reply'
 import { undeliveredAgentResult } from './handle-inbound'
 import { persistOrRegenQueuedDraft, scheduleAndSend } from './schedule-and-send'
 import { NEVER_SPLIT_RNG } from './warm-close'
+import { PROMPT_VERSION } from '@/lib/ai/prompts/system-template'
 import {
   applyApprovalPolicyStage,
   operatorInstructionQuery,
@@ -47,6 +48,7 @@ import {
   buildKnowledgeCorpusContent,
   buildRecognitionContent,
 } from './trace-content'
+import type { GenerateMessageResult } from '@/lib/ai'
 import type {
   AgentResult,
   Classification,
@@ -54,6 +56,61 @@ import type {
   RuntimeContext,
 } from './types'
 import { resolveCancellation } from '@/lib/schemas/guest-commitment'
+
+/**
+ * TAC-568: the warm close, as a generation that no model produced.
+ *
+ * Ruling 1 is that this message is FIXED — the same words every time, approved
+ * verbatim, stored per venue. So the pause path stops asking a model for it and
+ * hands the pipeline the venue's own string instead. Everything downstream is
+ * untouched: the approval gate, NEVER_SPLIT_RNG, dispatchReply, persistence,
+ * RELEASES_CLAIM and recordProactiveSend all see an ordinary generation.
+ *
+ * A TOTAL CONSTRUCTION over GenerateMessageResult, deliberately, the way
+ * buildGenerationFailureGeneration in handle-inbound.ts is. A field added to
+ * that type later fails `tsc` here until someone decides what a fixed message
+ * should say for it, rather than inheriting a default that quietly misdescribes
+ * this path.
+ *
+ * `voiceFidelity: 1` is the honest value and not a flattering one. The floors
+ * exist to judge whether a MODEL matched the venue's voice; this text IS the
+ * venue's voice, chosen by the venue, so there is nothing for the score to
+ * measure and nothing a retry could improve. Same reason every self-flag below
+ * is false: they report what a model did, and no model ran.
+ */
+function fixedWarmCloseGeneration(text: string): GenerateMessageResult {
+  return {
+    body: text,
+    voiceFidelity: 1,
+    reasoning: 'TAC-568: fixed per-venue warm close; no model call',
+    unverifiedUrls: [],
+    requiresOperatorApproval: false,
+    approvalReason: '',
+    complaintIntent: 'none',
+    knowledgeGap: false,
+    contextUpdate: {},
+    commitment: {},
+    arrivalCapture: {},
+    cancelsCommitmentId: '',
+    intentionQuestion: '',
+    // The close is not itself a report that a conversation closed: this IS the
+    // close, and the marker was already claimed by the processor.
+    closedTheConversation: false,
+    intentionQuestionDuplicateStripped: false,
+    intentionQuestionDroppedForBodyQuestion: false,
+    attempts: 0,
+    attemptScores: [],
+    attemptHistory: [],
+    systemPrompt: '',
+    userPrompt: '',
+    promptVersion: PROMPT_VERSION,
+    cacheReadTokens: 0,
+    cacheWriteTokens: 0,
+    dashViolationPersisted: false,
+    selfTalkViolationPersisted: false,
+    emojiDirectiveViolated: false,
+  }
+}
 
 /**
  * TAC-394: report a followup draft that had nowhere to go.
@@ -586,9 +643,34 @@ export async function handleFollowup(input: {
       ctx.knowledgeCorpus = []
     }
 
-    // Generate
+    // Generate — unless this is the warm close, which is not generated at all.
+    //
+    // TAC-568 ruling 1: the close is a FIXED per-venue string. Asking a model to
+    // reproduce fixed text is the one job a model cannot do better than a
+    // constant, and it was the source of the stiff, off-moment wording this
+    // ticket exists to replace. The venue's setting IS the message.
+    //
+    // An empty setting is refused rather than sent: the processor checks it too
+    // and never claims the guest's close, so reaching here empty means the
+    // venue's config changed between the scan and the run.
+    const isFixedWarmClose = input.trigger.reason === 'warm_close'
+    if (isFixedWarmClose && ctx.venue.warmCloseText.trim() === '') {
+      const reason = 'no_warm_close_text'
+      console.warn('[agent] warm close refused: venue has no warm_close_text', {
+        agentRunId,
+        venueId: ctx.venue.id,
+        guestId: ctx.guest.id,
+      })
+      trace.update({ output: { status: 'refused', reason } })
+      return { status: 'refused', reason }
+    }
     const generateSpan = trace.span('generate', { category })
-    const gen = await generateStage(ctx, category)
+    const gen = isFixedWarmClose
+      ? ({
+          status: 'ok',
+          result: fixedWarmCloseGeneration(ctx.venue.warmCloseText),
+        } as const)
+      : await generateStage(ctx, category)
     if (gen.status === 'failed') {
       generateSpan.end({ level: 'ERROR', statusMessage: gen.error })
       await fireRedAlert({
@@ -792,15 +874,54 @@ export async function handleFollowup(input: {
       prosePromiseSettled,
       cancellationSettled,
       closedVenueArrivalSettled,
-    ] = await Promise.allSettled([
-      verifyGroundingStage(ctx, gen.result),
-      verifyMechanicOfferStage(ctx, gen.result),
-      verifyProsePromiseStage(ctx, gen.result),
-      verifyCancellationClaimStage(ctx, gen.result),
-      // TAC-363: fifth independent check. Skips without a model call unless
-      // the venue is positively closed, so it costs nothing during service.
-      verifyClosedVenueArrivalStage(ctx, gen.result),
-    ])
+    ] = await Promise.allSettled(
+      // TAC-568 (Q1, ruled 2026-09-30): THE FIVE CHECKS DO NOT RUN ON THE FIXED
+      // WARM CLOSE, and this is a recorded change to decision 0003 rather than
+      // an exception smuggled in beside it.
+      //
+      // 0003 says the five fail closed on MODEL OUTPUT, and that a proposal to
+      // loosen one is a proposal about all five. The premise does not hold here:
+      // no model ran. Every one of the five asks a question about something a
+      // model might have invented — a fact it could not ground, a mechanic it
+      // offered, a promise it made in prose, a cancellation it claimed, an
+      // arrival at a closed venue — and a per-venue constant a human approved
+      // can contain none of them, on this turn or any other, because it is the
+      // same 143 bytes every time.
+      //
+      // What running them would buy is not safety but exposure: five verifier
+      // calls that fail closed after one retry, on text that cannot be wrong, so
+      // the only outcome they can produce is refusing a message that is correct.
+      //
+      // THE GOODBYE PATH IS NOT AFFECTED. There the model writes the reply and
+      // all five run on it exactly as before; only the appended fixed bubble is
+      // unchecked, for the reason above.
+      isFixedWarmClose
+        ? [
+            Promise.resolve<GroundingBackstopResult>({ status: 'skipped' }),
+            Promise.resolve<MechanicOfferBackstopResult>({ status: 'skipped' }),
+            Promise.resolve<ProsePromiseBackstopResult>({ status: 'skipped' }),
+            Promise.resolve<CancellationBackstopResult>({
+              // This type is the odd one out: a resolution plus a claim verdict,
+              // not a single status. A fixed string cancels nothing and claims
+              // nothing, so both say so.
+              resolution: { status: 'none' },
+              claim: 'skipped',
+            }),
+            Promise.resolve<ClosedVenueArrivalBackstopResult>({
+              status: 'skipped',
+            }),
+          ]
+        : [
+            verifyGroundingStage(ctx, gen.result),
+            verifyMechanicOfferStage(ctx, gen.result),
+            verifyProsePromiseStage(ctx, gen.result),
+            verifyCancellationClaimStage(ctx, gen.result),
+            // TAC-363: fifth independent check. Skips without a model call
+            // unless the venue is positively closed, so it costs nothing during
+            // service.
+            verifyClosedVenueArrivalStage(ctx, gen.result),
+          ],
+    )
     if (groundingSettled.status === 'rejected') {
       console.warn(
         '[agent] followup verifyGroundingStage threw unexpectedly (degrading to skipped)',

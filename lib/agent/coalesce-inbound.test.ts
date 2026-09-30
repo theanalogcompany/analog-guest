@@ -384,6 +384,10 @@ function makeCtx(overrides: Record<string, unknown> = {}) {
       sendblueNumber: '+1',
       holdAllOutbound: false,
       approvalPolicy: { default: 'auto_send', perCategory: {} },
+      // TAC-568: the default fixture venue has NO configured close, so no turn
+      // in this file appends one unless it opts in. Tests that exercise the
+      // goodbye path override it.
+      warmCloseText: '',
     },
     guest: {
       id: GUEST_ID,
