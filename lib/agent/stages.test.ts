@@ -24,6 +24,9 @@ import {
   verifyProsePromiseStage,
   verifyCancellationClaimStage,
 } from './stages'
+// Derived from the live constant: a stale fixture literal ships green, and
+// nothing fails (see .claude/rules/prompt-versioning.md).
+import { PROMPT_VERSION } from '@/lib/ai/prompts/system-template'
 import type {
   CorpusMatch,
   FollowupTrigger,
@@ -651,7 +654,7 @@ describe('classifyStage — 3-tier confidence routing (v1.11.0)', () => {
         category: 'casual_chatter',
         classifierConfidence: 0.2,
         reasoning: 'ambiguous',
-        promptVersion: 'v1.76.0',
+        promptVersion: PROMPT_VERSION,
         cacheReadTokens: 0,
         cacheWriteTokens: 0,
         crisisSafety: true,
@@ -673,7 +676,7 @@ describe('classifyStage — 3-tier confidence routing (v1.11.0)', () => {
         category: 'reply',
         classifierConfidence: 0.9,
         reasoning: 'clear',
-        promptVersion: 'v1.76.0',
+        promptVersion: PROMPT_VERSION,
         cacheReadTokens: 0,
         cacheWriteTokens: 0,
         crisisSafety: false,
@@ -699,7 +702,7 @@ describe('classifyStage — 3-tier confidence routing (v1.11.0)', () => {
         category: 'reply',
         classifierConfidence: 0.9,
         reasoning: 'clear',
-        promptVersion: 'v1.76.0',
+        promptVersion: PROMPT_VERSION,
         cacheReadTokens: 0,
         cacheWriteTokens: 0,
         crisisSafety: false,
@@ -720,7 +723,7 @@ describe('classifyStage — 3-tier confidence routing (v1.11.0)', () => {
         category: 'reply',
         classifierConfidence: 0.9,
         reasoning: 'clear',
-        promptVersion: 'v1.76.0',
+        promptVersion: PROMPT_VERSION,
         cacheReadTokens: 0,
         cacheWriteTokens: 0,
         crisisSafety: false,
@@ -742,7 +745,7 @@ describe('classifyStage — 3-tier confidence routing (v1.11.0)', () => {
         category: 'casual_chatter',
         classifierConfidence: 0.2,
         reasoning: 'ambiguous',
-        promptVersion: 'v1.76.0',
+        promptVersion: PROMPT_VERSION,
         cacheReadTokens: 0,
         cacheWriteTokens: 0,
         crisisSafety: false,

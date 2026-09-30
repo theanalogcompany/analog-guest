@@ -3,6 +3,9 @@
 import { readFile } from 'node:fs/promises'
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+// Derived from the live constant: a stale fixture literal ships green, and
+// nothing fails (see .claude/rules/prompt-versioning.md).
+import { PROMPT_VERSION } from '@/lib/ai/prompts/system-template'
 
 vi.mock('@/lib/db/admin', () => ({
   createAdminClient: vi.fn(),
@@ -319,7 +322,7 @@ describe('regenerateWithCritique — crisis-safety refusal (TAC-348)', () => {
         crisisSafety: true,
         correctsPendingReply: false,
         followUpWorthy: false,
-        promptVersion: 'v1.76.0',
+        promptVersion: PROMPT_VERSION,
       },
     })
   })

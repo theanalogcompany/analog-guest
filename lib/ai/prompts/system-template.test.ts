@@ -1367,7 +1367,7 @@ describe('SYSTEM_TEMPLATE — R21: a recognised order is received by saying so (
   // pinned in ONE literal above, because splitting them would let the
   // permission survive while the prohibition is deleted, or the reverse.
   //
-  // THIS SENTENCE IS THE TAC-543 INTERACTION and it is new in v1.76.0. Since
+  // THIS SENTENCE IS THE TAC-543 INTERACTION and it is new in v1.75.0. Since
   // that ticket, ## Visit history renders the counts outright ("cortado
   // (4x)"), so the model no longer has to do arithmetic on timestamps to name
   // a number, which is how the v1.71.0 measurement leaked one ("third one in

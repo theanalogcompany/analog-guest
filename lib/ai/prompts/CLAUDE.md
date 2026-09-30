@@ -130,7 +130,7 @@ block-order test is the only thing that catches a move past it.
   example pulls the model the other way. Delete it and the change is silently vetoed. Not
   counter-scoped: `scanArrival` is set only on the five-minute greeting cron, and TAC-536's
   carry-forward reaches `visitConfirmedAt`, which goes to intention arming and never to the
-  prompt. Full reasoning is the v1.76.0 header in `system-template.ts`.
+  prompt. Full reasoning is the v1.75.0 header in `system-template.ts`.
 - **SHIPPED UNDER ITS BAR, on a reading of the bodies rather than a rate** (ruled
   2026-09-30, four runs). Recognition 0/20 and 4/20 control to 15/20 and 16/20 treatment,
   bare labels 15/20 to 0/20: that is the deliverable. The warm half scored 9, 7, 7 against a
