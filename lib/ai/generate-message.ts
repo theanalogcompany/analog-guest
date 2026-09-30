@@ -398,7 +398,12 @@ export function stripTrailingDuplicate(
 export function composeReplyWithIntention(
   rawBody: string,
   rawQuestion: string,
-): { body: string; intentionQuestion: string; duplicateStripped: boolean } {
+): {
+  body: string
+  intentionQuestion: string
+  duplicateStripped: boolean
+  droppedForBodyQuestion: boolean
+} {
   const answerIn = replaceDashes(rawBody)
   const question = replaceDashes(rawQuestion)
 
@@ -407,7 +412,12 @@ export function composeReplyWithIntention(
   // reader has to think about it. This is also where replaceDashes' refusal
   // case lands: a field containing only an em dash comes back as "—".
   if (question.trim() === '' || !hasRenderableContent(question)) {
-    return { body: answerIn, intentionQuestion: '', duplicateStripped: false }
+    return {
+      body: answerIn,
+      intentionQuestion: '',
+      duplicateStripped: false,
+      droppedForBodyQuestion: false,
+    }
   }
 
   const answer = stripTrailingDuplicate(answerIn, question)
@@ -416,13 +426,53 @@ export function composeReplyWithIntention(
   // The model put the whole reply in the field, or the answer was nothing but
   // a repeat of the question. One message, which is the question.
   if (answer.trim() === '') {
-    return { body: question, intentionQuestion: question, duplicateStripped }
+    return {
+      body: question,
+      intentionQuestion: question,
+      duplicateStripped,
+      droppedForBodyQuestion: false,
+    }
+  }
+
+  // TAC-567, ruled 2026-09-30: NEVER TWO QUESTIONS IN ONE TURN. The reply keeps
+  // its own question and the intention bubble is dropped, which is the
+  // direction the ruling names ("no intention bubble is added that turn").
+  //
+  // On device a first-visit turn read "that's a good one to start with 🌸 how'd
+  // you like it?" and then, as its own bubble, "by the way, what's your name?".
+  // Two questions for a guest to answer in one turn, and the prompt cannot
+  // reliably prevent it: the same lesson as TAC-554's, one layer on. So this is
+  // structural, at the one seam where the two halves meet.
+  //
+  // THE DETECTOR IS A BARE QUESTION MARK IN THE ANSWER, not looksLikeQuestion.
+  // This reads OUR OWN outbound, where the venue's copy always punctuates
+  // ("never drop a question mark"), so recall is near-total on this population
+  // and the wider detector would only add false positives. See the recall
+  // argument recorded on weAskedAQuestion in lib/agent/warm-close.ts, which
+  // widens for the opposite reason on the opposite population.
+  //
+  // A FALSE POSITIVE COSTS ONE TURN, NEVER THE INTENTION. Nothing is written
+  // here, and the post-send classifier reads the sent body, which now carries no
+  // getting-to-know-you question, so the intention is not recorded as raised and
+  // comes back open on the next turn. The failure direction is a question asked
+  // later, never a question asked twice.
+  //
+  // Downstream needs nothing: intentionQuestion is '' so intentionTailFor
+  // returns '' on both dispatch arms, exactly as on a turn that asked nothing.
+  if (answer.includes('?')) {
+    return {
+      body: answer,
+      intentionQuestion: '',
+      duplicateStripped,
+      droppedForBodyQuestion: true,
+    }
   }
 
   return {
     body: `${answer} ${question}`,
     intentionQuestion: question,
     duplicateStripped,
+    droppedForBodyQuestion: false,
   }
 }
 
@@ -559,6 +609,8 @@ export async function generateMessage(
     // Assigned per attempt alongside lastResult, so it describes the same
     // attempt the body came from rather than any earlier one.
     let duplicateStripped = false
+    // TAC-567: whether the two-question gate fired on the shipped attempt.
+    let droppedForBodyQuestion = false
     // Order-preserving and deduped, so a link flagged on attempt 1 is still
     // named on attempt 3 alongside anything new attempt 2 invented.
     const unverifiedUrlsSeen: string[] = []
@@ -658,6 +710,14 @@ export async function generateMessage(
           '[ai] generateMessage: stripped a duplicated intention question from the answer',
         )
       }
+      // TAC-567: logged, not silent. The gate edits guest-facing text by
+      // removing a question the model meant to ask, and a guard nobody can count
+      // is how comp_regex_backstop came to look like it was working.
+      if (composed.droppedForBodyQuestion) {
+        console.warn(
+          '[ai] generateMessage: dropped the intention question, the reply already asked one',
+        )
+      }
       const object = {
         ...rawObject,
         body: composed.body,
@@ -665,6 +725,7 @@ export async function generateMessage(
       }
       lastResult = object
       duplicateStripped = composed.duplicateStripped
+      droppedForBodyQuestion = composed.droppedForBodyQuestion
       attemptScores.push(object.voiceFidelity)
       attemptHistory.push({
         body: object.body,
@@ -763,6 +824,10 @@ export async function generateMessage(
         // the guard is countable — it edits guest-facing text, and that was
         // approved on the condition it is reported rather than silent.
         intentionQuestionDuplicateStripped: duplicateStripped,
+        // TAC-567: whether the two-question gate dropped this turn's bubble.
+        // Carried for the same reason as the line above: it edits guest-facing
+        // text, so its firing rate has to be countable rather than inferred.
+        intentionQuestionDroppedForBodyQuestion: droppedForBodyQuestion,
         attempts,
         attemptScores,
         attemptHistory,

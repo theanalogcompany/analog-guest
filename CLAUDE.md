@@ -305,7 +305,7 @@ The live floors, all in `lib/agent/stages.ts`. A number quoted anywhere else may
 | `AUTO_SEND_FIDELITY_FLOOR` 0.6 | 0.4 to 0.6 queues for an operator |
 | `STRONG_MATCH_SIMILARITY` 0.3 / `MIN_STRONG_MATCHES` 1 | voice retrieval, fails **closed** on inbound |
 | `KNOWLEDGE_RELEVANCE_FLOOR` 0.3 | knowledge retrieval, degrades **gracefully** |
-| `PROMPT_VERSION` v1.75.0 | bumping it is a repo-wide sweep - `.claude/rules/prompt-versioning.md` |
+| `PROMPT_VERSION` v1.76.0 | bumping it is a repo-wide sweep - `.claude/rules/prompt-versioning.md` |
 
 **23 approval triggers compose; any one queues the draft.** All five post-generation checks
 fail **closed** after one retry - treat a proposal to loosen one as a change to all five

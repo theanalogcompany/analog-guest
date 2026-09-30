@@ -3569,6 +3569,11 @@ export function buildAiRuntime(
     // priority order. Not simply ctx.openIntentions; see renderedIntentionLines.
     openIntentions: renderedIntentionLines(ctx),
     firstTouchAfterQrScan,
+    // TAC-567: carried, never recomputed. build-runtime-context resolved it
+    // against the same conversationWindowMs the intention derivation used, so
+    // the prompt and the derivation cannot disagree about which turn is a first
+    // conversation.
+    firstConversation: ctx.firstConversation,
     // TAC-389: only handle-operator-decline.ts sets this, on the trigger it
     // hands to buildRuntimeContext. Every other path (inbound, cron follow-up,
     // ordinary Command Center manual follow-up) leaves it false, so the

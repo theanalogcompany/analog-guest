@@ -277,6 +277,9 @@ function makeCtx(overrides: Partial<RuntimeContext>): RuntimeContext {
     pendingQuestion: null,
     recentMessages: [],
     conversationWindowMs: 48 * 60 * 60 * 1000,
+    // TAC-567: this fixture is an established guest, not a first conversation,
+    // so every intention is eligible as before.
+    firstConversation: false,
     recognition: {} as RuntimeContext['recognition'],
     mechanics: [],
     recentVisits: [],
@@ -645,7 +648,7 @@ describe('classifyStage — 3-tier confidence routing (v1.11.0)', () => {
         category: 'casual_chatter',
         classifierConfidence: 0.2,
         reasoning: 'ambiguous',
-        promptVersion: 'v1.75.0',
+        promptVersion: 'v1.76.0',
         cacheReadTokens: 0,
         cacheWriteTokens: 0,
         crisisSafety: true,
@@ -666,7 +669,7 @@ describe('classifyStage — 3-tier confidence routing (v1.11.0)', () => {
         category: 'reply',
         classifierConfidence: 0.9,
         reasoning: 'clear',
-        promptVersion: 'v1.75.0',
+        promptVersion: 'v1.76.0',
         cacheReadTokens: 0,
         cacheWriteTokens: 0,
         crisisSafety: false,
@@ -691,7 +694,7 @@ describe('classifyStage — 3-tier confidence routing (v1.11.0)', () => {
         category: 'reply',
         classifierConfidence: 0.9,
         reasoning: 'clear',
-        promptVersion: 'v1.75.0',
+        promptVersion: 'v1.76.0',
         cacheReadTokens: 0,
         cacheWriteTokens: 0,
         crisisSafety: false,
@@ -711,7 +714,7 @@ describe('classifyStage — 3-tier confidence routing (v1.11.0)', () => {
         category: 'reply',
         classifierConfidence: 0.9,
         reasoning: 'clear',
-        promptVersion: 'v1.75.0',
+        promptVersion: 'v1.76.0',
         cacheReadTokens: 0,
         cacheWriteTokens: 0,
         crisisSafety: false,
@@ -732,7 +735,7 @@ describe('classifyStage — 3-tier confidence routing (v1.11.0)', () => {
         category: 'casual_chatter',
         classifierConfidence: 0.2,
         reasoning: 'ambiguous',
-        promptVersion: 'v1.75.0',
+        promptVersion: 'v1.76.0',
         cacheReadTokens: 0,
         cacheWriteTokens: 0,
         crisisSafety: false,
@@ -1049,6 +1052,7 @@ function makeGenerationResult(
     intentionQuestion: '',
     closedTheConversation: false,
     intentionQuestionDuplicateStripped: false,
+    intentionQuestionDroppedForBodyQuestion: false,
     attempts: 1,
     attemptScores: [0.85],
     attemptHistory: [],
@@ -2141,6 +2145,19 @@ describe('buildAiRuntime — first-touch intentions wiring (TAC-324)', () => {
     const aiRuntime = buildAiRuntime(qrScanCtx())
     expect(aiRuntime.firstTouchAfterQrScan).toBe(true)
   })
+
+  // TAC-567: CARRIED, never recomputed. build-runtime-context resolved it against
+  // the same conversationWindowMs the intention derivation read, so recomputing it
+  // here would let the prompt and the derivation disagree about which turn is a
+  // first conversation. Both values asserted, because a hardcoded `true` or a
+  // dropped field each pass a single-value test.
+  it.each([true, false])(
+    'carries ctx.firstConversation through unchanged (%s)',
+    (firstConversation) => {
+      const aiRuntime = buildAiRuntime(qrScanCtx({ firstConversation }))
+      expect(aiRuntime.firstConversation).toBe(firstConversation)
+    },
+  )
 
   it('is false on the followup path (no currentMessage)', () => {
     const aiRuntime = buildAiRuntime(qrScanCtx({ currentMessage: null }))

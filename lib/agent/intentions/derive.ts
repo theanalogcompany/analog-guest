@@ -3,6 +3,7 @@ import { bodyMentionsMenuItem } from '@/lib/agent/extract-reported-order'
 import type { MenuItem } from '@/lib/schemas'
 import type { IntentionRules } from '@/lib/schemas/intention-rules'
 import {
+  INTENTION_DEFINITION_BY_KEY,
   INTENTION_DEFINITIONS,
   type IntentionDefinition,
   type IntentionKey,
@@ -309,6 +310,19 @@ export interface DeriveOpenIntentionsInput {
    * this; see isIntentionBrakeEngaged.
    */
   inboundHistoryFrom: Date
+  /**
+   * TAC-567: is the guest still inside their FIRST conversation with the venue?
+   *
+   * Resolved by the caller through isFirstConversation (lib/agent/warm-close.ts),
+   * TAC-560's one definition, so this file does not grow a second one. Carried
+   * as a boolean rather than as the anchor date for the same reason
+   * conversationWindowMs is hoisted onto RuntimeContext: one derivation, read in
+   * several places, never re-derived.
+   *
+   * True suppresses every intention whose definition says
+   * allowedOnFirstConversation is false. See isSuppressedOnFirstConversation.
+   */
+  isFirstConversation: boolean
 }
 
 export interface DeriveOpenIntentionsResult {
@@ -567,6 +581,29 @@ function gateOpen(
  * recommendations couldn't be read, got_the_recommendation is held the same way:
  * that read fails closed, as the read at build-runtime-context.ts:203 does.
  */
+/**
+ * TAC-567: is this intention held back because the guest is still inside their
+ * first conversation?
+ *
+ * THE ONE EXPRESSION, called from both places deriveOpenIntentions needs it
+ * (the arming loop and the open-set filter), because two copies of one
+ * suppression rule is the drift this directory already pays for once - see
+ * renderableIntentions against shouldRenderOpenIntentions below.
+ *
+ * Reads the definition, never the key: adding an intention means answering
+ * allowedOnFirstConversation on its definition, and `satisfies Record<...>`
+ * makes omitting it fail `tsc`. Nothing here branches on which intention it is.
+ */
+export function isSuppressedOnFirstConversation(
+  key: IntentionKey,
+  isFirstConversation: boolean,
+): boolean {
+  return (
+    isFirstConversation &&
+    !INTENTION_DEFINITION_BY_KEY[key].allowedOnFirstConversation
+  )
+}
+
 export function deriveOpenIntentions(
   input: DeriveOpenIntentionsInput,
 ): DeriveOpenIntentionsResult {
@@ -601,6 +638,12 @@ export function deriveOpenIntentions(
   // open row or not; the intentions themselves are kept.
   const held = new Set<IntentionKey>()
   for (const def of INTENTION_DEFINITIONS) {
+    // TAC-567. Skipped BEFORE arming, so a suppressed intention records no
+    // eligible_at row during the first conversation and its window does not
+    // start ticking on a question nobody may ask. It arms fresh on the second.
+    // The open-set filter below is what actually guarantees it never renders.
+    if (isSuppressedOnFirstConversation(def.key, input.isFirstConversation))
+      continue
     const existing = entries.get(def.key)
     // Sticky unless this intention re-arms: an existing row decides.
     if (existing !== undefined && !rearmsOnNewerEvent(def.armsOn)) continue
@@ -665,7 +708,17 @@ export function deriveOpenIntentions(
           entries,
           facts: input.facts,
           now: input.now,
-        }).filter((o) => !held.has(o.key)),
+        }).filter(
+          (o) =>
+            !held.has(o.key) &&
+            // TAC-567. NOT redundant with the arming-loop skip above: that one
+            // stops a row being written, this one stops a row already on file
+            // from rendering. First-contact eligibility is sticky, so every
+            // guest mid-first-conversation when this shipped has rows for
+            // intentions the ruling now suppresses, and only this filter sees
+            // them.
+            !isSuppressedOnFirstConversation(o.key, input.isFirstConversation),
+        ),
     newlyEligible,
     brakeEngaged,
   }

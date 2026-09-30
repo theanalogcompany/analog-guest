@@ -396,6 +396,15 @@ export type RuntimeContext = {
   // anywhere else. Computed inline in buildAiRuntime; never true on the
   // followup path (no currentMessage there).
   firstTouchAfterQrScan?: boolean
+  // TAC-567: true while the guest is inside their FIRST conversation with the
+  // venue (TAC-560's isFirstConversation, resolved once in
+  // build-runtime-context and carried on the orchestrator's RuntimeContext).
+  // The serializer reads it to render the first-conversation restraint into the
+  // intentions block; the intention derivation reads the same boolean to
+  // suppress the five intentions the ruling holds back. Absent reads as false,
+  // which is the safe direction: it renders no extra restraint rather than
+  // silencing a question on a turn that is not a first conversation.
+  firstConversation?: boolean
   // TAC-389: true only on an operator-initiated decline turn. Computed in
   // buildAiRuntime from ctx.followupTrigger.isOperatorDecline; the serializer
   // reads it to render the decline-specific `## Active commitments` intro,
@@ -630,6 +639,17 @@ export type GenerateMessageResult = {
   // guest-facing text; a guard whose firing rate nobody can produce is how
   // comp_regex_backstop became an illusion for two months.
   intentionQuestionDuplicateStripped: boolean
+  /**
+   * TAC-567: whether the never-two-questions gate dropped this turn's
+   * getting-to-know-you bubble because the reply already asked something.
+   *
+   * Same contract as the line above and for the same reason: the gate removes a
+   * question the model meant to ask, so its firing rate is reported rather than
+   * silent. composeReplyWithIntention is where it fires; the synthetic
+   * construction sites (crisis safety, the holding-message fallback, the crash
+   * card) say `false` because they never compose a question at all.
+   */
+  intentionQuestionDroppedForBodyQuestion: boolean
   attempts: number
   // Each attempt's voiceFidelity score, in attempt order. Length === attempts.
   // Loop exits early on the first attempt that crosses MIN_VOICE_FIDELITY, so

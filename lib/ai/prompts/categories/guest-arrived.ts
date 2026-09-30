@@ -29,9 +29,17 @@
 //      has none, and giving handleFollowup one is what its TAC-244
 //      inbound-XOR-outbound invariant throws on.
 //
-// So the variant below says the same three things the opener says (hello, who
-// they have reached, what did you get) in the opener's own words, with the two
-// clauses the absent message made false rewritten and nothing else changed.
+// So the variant below says the same things the opener says in the opener's own
+// words, with the clauses the absent message made false rewritten and nothing
+// else changed.
+//
+// TAC-567 (ruled 2026-09-30) DELETED "and say who they have reached" from both
+// this variant and the opener it mirrors. A guest who just scanned this venue's
+// code does not need telling whose code it was, and on device the instruction
+// beat a persona rule saying not to. The two strings were changed together
+// because the ticket named this one explicitly; keeping them in step is the
+// whole reason this header records the relationship. Do not restore it here
+// either - categories/index.test.ts pins the absence.
 //
 // REGISTER ONLY, per TAC-314 and TAC-327. Neither variant prescribes length
 // beyond the one short line the ruling specified, and neither says what goals
@@ -47,7 +55,7 @@ export const GUEST_ARRIVED_INSTRUCTIONS_RETURNING = `The guest just scanned the 
  * No messages on our record. See the header for why this is not TAC-423's
  * opener character for character.
  */
-export const GUEST_ARRIVED_INSTRUCTIONS_NEW = `The guest just scanned the sign at your pickup counter and has not written anything yet, so they are in the shop right now. They have just ordered and collected it. Say hello, and say who they have reached. Ask what they just got. One short line. Say only what the facts below say about past visits.`
+export const GUEST_ARRIVED_INSTRUCTIONS_NEW = `The guest just scanned the sign at your pickup counter and has not written anything yet, so they are in the shop right now. They have just ordered and collected it. Say hello. Ask what they just got. One short line. Say only what the facts below say about past visits.`
 
 /**
  * Pick the variant.

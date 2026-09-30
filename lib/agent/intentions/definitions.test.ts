@@ -411,6 +411,72 @@ describe('INTENTION_DEFINITIONS — rule interactions', () => {
   })
 })
 
+// TAC-567, ruled by Jaipal 2026-09-30: a guest's FIRST conversation asks exactly
+// three things, and nothing else.
+//
+// THE EXPECTATION IS A LITERAL TRANSCRIBED FROM THE RULING, never read back out
+// of the definitions, for the reason stated at the top of this file. Written as
+// an exhaustive record keyed by IntentionKey rather than as two arrays, so adding
+// an intention fails `tsc` here until someone decides which side it is on - the
+// same totality argument as the source map's own `satisfies`.
+const ALLOWED_ON_FIRST_CONVERSATION = {
+  // The reason the guest scanned at all.
+  understand_order: true,
+  // The question the ruled flow ends on.
+  are_they_new_here: true,
+  // The one thing it is natural to ask for on a first hello.
+  learn_name: true,
+  got_the_recommendation: false,
+  did_they_like_it: false,
+  are_they_local: false,
+  their_rhythm: false,
+  why_theyre_here: false,
+} satisfies Record<IntentionKey, boolean>
+
+describe('allowedOnFirstConversation (TAC-567)', () => {
+  it.each(INTENTION_KEYS)('%s matches the ruling', (key) => {
+    expect(INTENTION_DEFINITION_BY_KEY[key].allowedOnFirstConversation).toBe(
+      ALLOWED_ON_FIRST_CONVERSATION[key],
+    )
+  })
+
+  // The counts are asserted separately from the per-key table on purpose. The
+  // table catches a flipped flag; this catches a flag flipped on one intention
+  // and compensated on another, which the table would report as two failures and
+  // a careless fix could turn into one.
+  it('allows exactly three and suppresses exactly five', () => {
+    const allowed = INTENTION_DEFINITIONS.filter(
+      (d) => d.allowedOnFirstConversation,
+    ).map((d) => d.key)
+    expect(allowed).toEqual([
+      'understand_order',
+      'are_they_new_here',
+      'learn_name',
+    ])
+    expect(INTENTION_DEFINITIONS.length - allowed.length).toBe(5)
+  })
+
+  // WHAT THIS RULES OUT, and it is the reason the flag lives on the definition
+  // rather than being inferred. The three allowed intentions share no arming kind
+  // and no gate kind, and two of their arming kinds also appear among the
+  // suppressed five, so there is no structural property this could be read off.
+  // A future reader looking for one should find this test instead.
+  it('is not inferable from armsOn or from the gate', () => {
+    const allowedArmings = new Set(
+      INTENTION_DEFINITIONS.filter((d) => d.allowedOnFirstConversation).map(
+        (d) => d.armsOn.kind,
+      ),
+    )
+    const suppressedArmings = new Set(
+      INTENTION_DEFINITIONS.filter((d) => !d.allowedOnFirstConversation).map(
+        (d) => d.armsOn.kind,
+      ),
+    )
+    const shared = [...allowedArmings].filter((k) => suppressedArmings.has(k))
+    expect(shared.length).toBeGreaterThan(0)
+  })
+})
+
 describe('isSatisfied truth table', () => {
   it('closes nothing when no fact is present', () => {
     for (const def of INTENTION_DEFINITIONS) {

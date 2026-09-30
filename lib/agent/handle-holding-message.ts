@@ -693,6 +693,8 @@ function buildFallbackGeneration(): GenerateMessageResult {
     // TAC-560: a holding message is never the warm close. It asserts nothing and closes nothing.
     closedTheConversation: false,
     intentionQuestionDuplicateStripped: false,
+    // TAC-567: this path composes no question, so the gate never fired.
+    intentionQuestionDroppedForBodyQuestion: false,
     attempts: 0,
     attemptScores: [],
     attemptHistory: [],

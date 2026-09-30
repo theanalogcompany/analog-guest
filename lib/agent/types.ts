@@ -84,6 +84,13 @@ export interface GuestContext {
   firstName: string | null
   createdAt: Date
   createdVia: string
+  // TAC-567: guests.first_contacted_at, the moment this guest's relationship
+  // with the venue began. Both inbound webhooks stamp it at guest creation,
+  // including the QR enrollment (resolveCreatedVia in the Sendblue route), so on
+  // the scan population it IS the scan. Null only for rows predating the
+  // column; build-runtime-context falls back to createdAt, which marks the same
+  // moment. Read only to resolve isFirstConversation.
+  firstContactedAt: Date | null
   // TAC-284: per-guest demo flag. When true, the agent runtime bypasses the
   // TAC-212 approval policy gate (applyApprovalPolicyStage short-circuits to
   // send) and skips the read receipt and typing indicators. (Pre-TAC-421 it
@@ -303,6 +310,19 @@ export interface RuntimeContext {
    * so the two cannot drift into two definitions of the same thing.
    */
   conversationWindowMs: number
+  /**
+   * TAC-567: is the guest still inside their FIRST conversation with the venue?
+   *
+   * TAC-560's isFirstConversation (lib/agent/warm-close.ts), resolved once in
+   * build-runtime-context against the same conversationWindowMs above, and
+   * carried rather than re-derived so the intention derivation and the prompt
+   * cannot disagree about which turn is a first conversation.
+   *
+   * Two readers: deriveOpenIntentions suppresses every intention whose
+   * definition says allowedOnFirstConversation is false, and the serializer
+   * renders the first-conversation restraint into the intentions block.
+   */
+  firstConversation: boolean
   recognition: RecognitionSnapshot
   // Mechanics this guest is currently eligible for. Filtered at load time in
   // build-runtime-context.ts by guest's recognition state and redemption

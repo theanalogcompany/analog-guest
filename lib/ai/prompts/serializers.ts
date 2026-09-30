@@ -1485,9 +1485,27 @@ function formatMechanicEligibility(
 //      one, and the one it dropped was the warmth. Dropped here instead, so
 //      the reply is a hello and one question by design. Warmth is voice.
 //
-//   2. The identity clause is conditional on the guest's own message not
-//      naming a person. Le Mil's prefill names the venue and not a person, so
-//      every ordinary scan takes the introduce branch.
+//   2. THE IDENTITY CLAUSE IS GONE ENTIRELY (TAC-567, ruled 2026-09-30). What
+//      follows is the history of a sentence this string no longer carries; it
+//      is kept because the clause has been rewritten twice already and the next
+//      reader will otherwise restore it as an oversight.
+//
+//      It read "If their message doesn't name a person, say who they've reached
+//      as well", and it won over a persona rule saying not to. On device a
+//      fresh scan opened "hey, welcome! you've reached Le Mil's on Polk
+//      Street", to a guest who had just scanned Le Mil's code and tapped "Hi Le
+//      Mil's!". The ruling is that this is pointless rather than mis-worded:
+//      the guest chose the venue a second earlier, so there is nobody to
+//      introduce. R1's carve-out already says the channel itself is the shared
+//      context.
+//
+//      DO NOT RESTORE IT IN ANY FORM. The same instruction lived in TAC-536's
+//      scan greeting (GUEST_ARRIVED_INSTRUCTIONS_NEW) and was deleted in the
+//      same ticket, and serializers.test.ts pins the absence on both.
+//
+//      The clause was conditional on the guest's own message not naming a
+//      person. Le Mil's prefill names the venue and not a person, so every
+//      ordinary scan took the introduce branch.
 //
 //      TAC-541 (2026-09-26) DELETED the second half of it, which read "even
 //      where your voice guidance would otherwise have you hold your name
@@ -1548,7 +1566,7 @@ function formatMechanicEligibility(
 // channel-variants.ts has the mechanism; a phrase that stops matching throws
 // at load, which is what keeps the two channels from drifting apart.
 const FIRST_TOUCH_OPENER =
-  "This is the guest's first message on this number, sent right after they scanned the sign at your pickup counter. They have just ordered and collected it. Say hello. If their message doesn't name a person, say who they've reached as well. Ask what they just got."
+  "This is the guest's first message on this number, sent right after they scanned the sign at your pickup counter. They have just ordered and collected it. Say hello. Ask what they just got."
 
 const FIRST_TOUCH_OPENER_CHANNEL_SUBSTITUTIONS = {
   text: [],
@@ -1578,10 +1596,51 @@ export function firstTouchOpenerFor(channel: MessageChannel | null): string {
   return FIRST_TOUCH_OPENER_BY_CHANNEL[copyVariantFor(channel)]
 }
 
+/**
+ * TAC-567, approved verbatim by Jaipal 2026-09-30. Rendered as the LAST lines of
+ * the intentions block's restraint paragraph, and only while the guest is inside
+ * their first conversation.
+ *
+ * WHAT IT IS FOR. A fresh scan asked four questions across three messages: the
+ * opener's "what did you get", then a body question the model invented ("how'd
+ * you like it?") with TAC-554's name bubble on top of it, then the first-visit
+ * question. The bubble half is now impossible in code (composeReplyWithIntention
+ * drops the question when the body already asks one). This text is the other
+ * half: the body inventing a question of its own, which no code gate can supply
+ * a reply for.
+ *
+ * WHY HERE RATHER THAN A BLOCK OF ITS OWN. The intentions block renders last of
+ * the content blocks and that position is MEASURED (11% raise rate from third,
+ * 37% from last, TAC-519). A new block would move it and put that measurement
+ * back in play. Inside the paragraph, no block moves. It also lands after the
+ * paragraph's own "One short question on the end is fine" example, so on
+ * most-proximate-wins it governs the turn it applies to.
+ *
+ * KNOWN LIMIT, stated rather than discovered: this rides the intentions block,
+ * so it does not render on a first-conversation turn where nothing is open. That
+ * turn carries no bubble either, so "never two questions" still holds; "no
+ * invented question" does not. Through the ruled flow at least one of the three
+ * allowed intentions is always open.
+ *
+ * NO QUOTED QUESTION, deliberately and unlike most rules here. A worked example
+ * is the thing a model reproduces verbatim, and an invented question is the
+ * defect itself, so an example would model it. Same reasoning as
+ * are_they_new_here's promptLine carrying none. serializers.test.ts pins this as
+ * one contiguous literal, not fragments: a sentence can be reversed while every
+ * asserted fragment survives.
+ */
+const FIRST_CONVERSATION_RESTRAINT = [
+  'This is your first conversation with this guest. The reply itself asks',
+  'them nothing: no question of your own, however natural one would be',
+  'here. The only question this turn is the one listed above, and only if a',
+  'line above fits.',
+] as const
+
 function formatOpenIntentions(
   lines: readonly string[],
   firstTouchAfterQrScan: boolean,
   channel: MessageChannel | null,
+  firstConversation: boolean,
 ): string | null {
   if (lines.length === 0) return null
   const header = "## What you're hoping to get to"
@@ -1646,6 +1705,10 @@ function formatOpenIntentions(
     'raise one twice.',
     '',
     'If nothing fits, let it wait. There will be other conversations.',
+    // TAC-567. Last in the paragraph on purpose: proximity reads as authority,
+    // and this has to outrank the "one short question on the end is fine"
+    // opening above it.
+    ...(firstConversation ? ['', ...FIRST_CONVERSATION_RESTRAINT] : []),
   ].join('\n')
   const opener = firstTouchAfterQrScan
     ? `${firstTouchOpenerFor(channel)}\n\n`
@@ -1898,6 +1961,7 @@ export function runtimeToProse(
       runtime.openIntentions,
       runtime.firstTouchAfterQrScan === true,
       channel,
+      runtime.firstConversation === true,
     )
     if (block) blocks.push(block)
   }

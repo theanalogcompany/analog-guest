@@ -87,6 +87,8 @@ export function buildCrisisSafetyResult(): GenerateMessageResult {
     // TAC-560: a fixed crisis reply is never the warm close.
     closedTheConversation: false,
     intentionQuestionDuplicateStripped: false,
+    // TAC-567: this path composes no question, so the gate never fired.
+    intentionQuestionDroppedForBodyQuestion: false,
     attempts: 1,
     attemptScores: [0],
     attemptHistory: [

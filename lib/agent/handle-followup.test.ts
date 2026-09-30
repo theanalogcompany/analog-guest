@@ -194,6 +194,9 @@ function makeCtx(
     pendingQuestion: null,
     recentMessages: [],
     conversationWindowMs: 48 * 60 * 60 * 1000,
+    // TAC-567: these fixtures are established guests, not a first
+    // conversation, so every intention is eligible as before.
+    firstConversation: false,
     recognition: {
       state: 'regular',
       score: 0,
@@ -232,7 +235,7 @@ function successResult() {
     attemptHistory: [],
     systemPrompt: '',
     userPrompt: '',
-    promptVersion: 'v1.75.0',
+    promptVersion: 'v1.76.0',
     dashViolationPersisted: false,
     selfTalkViolationPersisted: false,
     emojiDirectiveViolated: false,

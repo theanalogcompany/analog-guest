@@ -603,3 +603,57 @@ describe('buildRuntimeContext: the warm-close flag (TAC-560)', () => {
     expect(src).not.toMatch(/warmClose:\s*(?:true|false)\s*,/)
   })
 })
+
+// TAC-567: the first-conversation suppression is useless if this file never
+// resolves the flag or never hands it on. Source-level for the reason stated at
+// the top of the file - buildRuntimeContext needs a database to run - and the
+// behaviour itself is tested in intentions/derive.test.ts and warm-close.test.ts.
+// These catch the wiring those cannot see.
+describe('buildRuntimeContext: first conversation (TAC-567)', () => {
+  const src = readFileSync(join(__dirname, 'build-runtime-context.ts'), 'utf-8')
+
+  // Without the column every guest reads as null and falls to created_at. That
+  // is a sound fallback but a silent one, so the select is pinned: it is the
+  // difference between the intended anchor and the backup.
+  it('selects first_contacted_at with the guest', () => {
+    const guestQuery = src.slice(src.indexOf(".from('guests')"))
+    expect(guestQuery.slice(0, guestQuery.indexOf('.eq('))).toMatch(
+      /\bfirst_contacted_at\b/,
+    )
+  })
+
+  // ONE DEFINITION. Reimplementing the window comparison here rather than calling
+  // TAC-560's predicate is the drift this guard exists to prevent: the warm close
+  // and the intention suppression would then disagree about which turn is a first
+  // conversation, and nothing would say so.
+  it('resolves it through TAC-560 isFirstConversation, with the created_at fallback', () => {
+    expect(src).toContain("import { isFirstConversation } from './warm-close'")
+    expect(src).toContain(
+      [
+        '  const firstConversation = isFirstConversation(',
+        '    guest.firstContactedAt ?? guest.createdAt,',
+        '    computedAt,',
+        '    conversationWindowMs,',
+        '  )',
+      ].join('\n'),
+    )
+  })
+
+  // The two readers. Either one missing is a silent half-fix: without the first
+  // the five suppressed intentions still render, without the second the prompt
+  // loses the restraint that stops an invented question.
+  it('passes it to the intention derivation and carries it on the context', () => {
+    expect(src).toContain('isFirstConversation: firstConversation,')
+    expect(src).toMatch(/^ {4}firstConversation,$/m)
+  })
+
+  // Measured against the SAME window the derivation uses, not a second constant.
+  // A literal 48h here would pass every test above and quietly ignore a venue's
+  // recent_conversation_hours.
+  it('measures it against conversationWindowMs rather than its own constant', () => {
+    const call = src.slice(
+      src.indexOf('const firstConversation = isFirstConversation('),
+    )
+    expect(call.slice(0, call.indexOf(')'))).toContain('conversationWindowMs')
+  })
+})

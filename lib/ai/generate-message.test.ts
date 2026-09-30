@@ -548,12 +548,12 @@ describe('generateMessage — basic shape', () => {
     expect(r.ok).toBe(true)
   })
 
-  it('exposes promptVersion v1.75.0 on a successful result', async () => {
+  it('exposes promptVersion v1.76.0 on a successful result', async () => {
     queueResponses({ body: 'hi', voiceFidelity: 0.9, reasoning: 'ok' })
     const r = await generateMessage(makeInput())
     expect(r.ok).toBe(true)
     if (!r.ok) return
-    expect(r.data.promptVersion).toBe('v1.75.0')
+    expect(r.data.promptVersion).toBe('v1.76.0')
   })
 })
 
@@ -1328,6 +1328,85 @@ describe('composeReplyWithIntention', () => {
     expect(r.body).toBe("what's your name?")
     expect(r.intentionQuestion).toBe("what's your name?")
     expect(r.duplicateStripped).toBe(true)
+  })
+})
+
+// TAC-567, ruled 2026-09-30: NEVER TWO QUESTIONS IN ONE TURN. When the reply
+// already asks something, the getting-to-know-you bubble is dropped.
+describe('composeReplyWithIntention — the two-question gate (TAC-567)', () => {
+  // THE DEVICE CASE, verbatim from the ticket. The body invented "how'd you like
+  // it?" and TAC-554's bubble added "by the way, what's your name?" on top, which
+  // is four questions across three messages on a guest's first visit.
+  it('drops the bubble when the reply already asked something', () => {
+    const r = composeReplyWithIntention(
+      "that's a good one to start with. how'd you like it?",
+      "by the way, what's your name?",
+    )
+    expect(r.body).toBe("that's a good one to start with. how'd you like it?")
+    expect(r.intentionQuestion).toBe('')
+    expect(r.droppedForBodyQuestion).toBe(true)
+  })
+
+  // The bubble is what goes, not the reply. The ruling reads "no intention bubble
+  // is added that turn", and the reply is the answer to what the guest actually
+  // said, so it cannot be the half that is discarded.
+  it('keeps the reply intact rather than editing its question out', () => {
+    const r = composeReplyWithIntention(
+      'we close at 3 today. you coming by?',
+      'what should we call you?',
+    )
+    expect(r.body).toContain('you coming by?')
+    expect(r.body).not.toContain('what should we call you?')
+  })
+
+  // THE NO-CHANGE HALF, asserted as an equivalence rather than by restating the
+  // expected text: a reply that asks nothing composes exactly as it did before
+  // this gate existed, question mark inside the question notwithstanding.
+  it('is unchanged when the reply asks nothing', () => {
+    const r = composeReplyWithIntention(
+      "that's a good one to start with.",
+      "by the way, what's your name?",
+    )
+    expect(r.body).toBe(
+      "that's a good one to start with. by the way, what's your name?",
+    )
+    expect(r.intentionQuestion).toBe("by the way, what's your name?")
+    expect(r.droppedForBodyQuestion).toBe(false)
+  })
+
+  // The gate reads the answer AFTER the duplicate strip, not the raw body. A
+  // model that put the question in both fields leaves a trailing "?" in the raw
+  // body, and reading that would drop the bubble on the one case TAC-554's guard
+  // already handles correctly.
+  it('reads the answer after the duplicate strip, not the raw body', () => {
+    const r = composeReplyWithIntention(
+      "nice one. by the way, what's your name?",
+      "by the way, what's your name?",
+    )
+    expect(r.duplicateStripped).toBe(true)
+    expect(r.droppedForBodyQuestion).toBe(false)
+    expect(r.intentionQuestion).toBe("by the way, what's your name?")
+    expect(r.body.endsWith(r.intentionQuestion)).toBe(true)
+  })
+
+  // A question-only reply is still one message, not zero. This branch returns
+  // before the gate, so the guest is never left with nothing.
+  it('still sends a question-only reply as the question', () => {
+    const r = composeReplyWithIntention(
+      "what's your name?",
+      "what's your name?",
+    )
+    expect(r.body).toBe("what's your name?")
+    expect(r.intentionQuestion).toBe("what's your name?")
+    expect(r.droppedForBodyQuestion).toBe(false)
+  })
+
+  // Nothing to drop is not a firing. Keeps the reported rate honest: the flag
+  // counts turns where a question was actually removed.
+  it('does not report a drop when there was no question to ask', () => {
+    const r = composeReplyWithIntention('we close at 3 today. you nearby?', '')
+    expect(r.intentionQuestion).toBe('')
+    expect(r.droppedForBodyQuestion).toBe(false)
   })
 })
 
