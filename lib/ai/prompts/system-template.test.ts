@@ -1411,7 +1411,9 @@ describe('SYSTEM_TEMPLATE — R21: a recognised order is received by saying so (
   })
 
   it('forbids reciting the history back', () => {
-    expect(SYSTEM_TEMPLATE).toContain('Do not recite their history back to them in any of this.')
+    expect(SYSTEM_TEMPLATE).toContain(
+      'Do not recite their history back to them in any of this.',
+    )
   })
 
   // THE FALSE-POSITIVE GUARD. This sentence is the only thing in the prompt
@@ -1493,7 +1495,9 @@ describe('SYSTEM_TEMPLATE — R21: a recognised order is received by saying so (
   // clause start) rather than any apostrophe, because the clause legitimately
   // contains "it's", "they've" and "guest's".
   it('contains no quoted example phrase inside the recognition clause', () => {
-    const start = SYSTEM_TEMPLATE.indexOf('Receiving it is not the same as saying')
+    const start = SYSTEM_TEMPLATE.indexOf(
+      'Receiving it is not the same as saying',
+    )
     const end = SYSTEM_TEMPLATE.indexOf('The guest opens that door by asking')
     expect(start).toBeGreaterThan(-1)
     expect(end).toBeGreaterThan(start)
@@ -1535,7 +1539,9 @@ describe('UNIVERSAL_RULES_DISPLAY — R21 and R23 carry this ticket rulings (TAC
     expect(r21).toContain(
       'something warm about the guest, their coming back or their taste',
     )
-    expect(r21).toContain('A wish that the item turns out well is not that warmth.')
+    expect(r21).toContain(
+      'A wish that the item turns out well is not that warmth.',
+    )
   })
 
   // RULING 5. Both halves, because a summary keeping only the permission reads
@@ -1587,8 +1593,12 @@ describe('SYSTEM_TEMPLATE — R23: the order-recognition carve-out (TAC-555)', (
   // The ORDER is what makes the carve-out necessary, so it is asserted rather
   // than assumed: if R23 ever moved above R21 the reasoning above changes.
   it('renders after R21, which is why the carve-out lives here too', () => {
-    const r21 = SYSTEM_TEMPLATE.indexOf('Receiving it is not the same as saying')
-    const r23 = SYSTEM_TEMPLATE.indexOf('This rule is about how often they have been here')
+    const r21 = SYSTEM_TEMPLATE.indexOf(
+      'Receiving it is not the same as saying',
+    )
+    const r23 = SYSTEM_TEMPLATE.indexOf(
+      'This rule is about how often they have been here',
+    )
     expect(r21).toBeGreaterThan(-1)
     expect(r23).toBeGreaterThan(r21)
   })

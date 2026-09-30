@@ -117,7 +117,6 @@ const TEMPLATE_MAX_SHARE = 0.25
  */
 const TEMPLATE_NGRAM = 2
 
-
 // ---------------------------------------------------------------------------
 // Scenarios
 // ---------------------------------------------------------------------------
@@ -204,10 +203,14 @@ function buildUnits(
   ) => {
     const visits: Visit[] = []
     for (let i = 0; i < shape.visits; i += 1) {
-      const item = i < shape.dominant ? dominant : (filler[i % filler.length] as string)
+      const item =
+        i < shape.dominant ? dominant : (filler[i % filler.length] as string)
       // Most recent first, spaced a few days apart, all inside the 90-day
       // window the real block loads.
-      visits.push({ items: [item], visitedAt: new Date(now - (i * 5 + 3) * day) })
+      visits.push({
+        items: [item],
+        visitedAt: new Date(now - (i * 5 + 3) * day),
+      })
     }
     return visits
   }
@@ -215,7 +218,10 @@ function buildUnits(
   for (let i = 0; i < frequentCount; i += 1) {
     const dominant = ordered[i % ordered.length] as string
     const filler = ordered.filter((m) => m !== dominant)
-    const shape = SHAPES[i % SHAPES.length] as { visits: number; dominant: number }
+    const shape = SHAPES[i % SHAPES.length] as {
+      visits: number
+      dominant: number
+    }
     const phrasing = PHRASINGS[i % PHRASINGS.length] as (item: string) => string
     const visits = makeVisits(dominant, filler, shape)
     // The first `multiTurnCount` units run three turns on one guest.
@@ -237,14 +243,24 @@ function buildUnits(
     // The dominant item and the named item are DIFFERENT, and the named item
     // appears nowhere in the history. That is the whole of arm B.
     const dominant = ordered[i % ordered.length] as string
-    const named = ordered[(i + Math.floor(ordered.length / 2)) % ordered.length] as string
+    const named = ordered[
+      (i + Math.floor(ordered.length / 2)) % ordered.length
+    ] as string
     if (named === dominant) continue
     const filler = ordered.filter((m) => m !== dominant && m !== named)
-    const shape = SHAPES[i % SHAPES.length] as { visits: number; dominant: number }
+    const shape = SHAPES[i % SHAPES.length] as {
+      visits: number
+      dominant: number
+    }
     const phrasing = PHRASINGS[i % PHRASINGS.length] as (item: string) => string
-    const visits = makeVisits(dominant, filler.length > 0 ? filler : [dominant], shape)
+    const visits = makeVisits(
+      dominant,
+      filler.length > 0 ? filler : [dominant],
+      shape,
+    )
     const historyItems = [...new Set(visits.flatMap((v) => v.items))]
-    if (historyItems.some((h) => h.toLowerCase() === named.toLowerCase())) continue
+    if (historyItems.some((h) => h.toLowerCase() === named.toLowerCase()))
+      continue
     units.push({
       id: `new-${String(i + 1).padStart(2, '0')}`,
       population: 'new',
@@ -387,7 +403,10 @@ async function judgeRepeatedly(
   historyItems: readonly string[],
   knowledgeTexts: readonly string[],
 ): Promise<JudgeVerdict> {
-  const counts = Object.fromEntries(JUDGE_FLAGS.map((f) => [f, 0])) as Record<JudgeFlag, number>
+  const counts = Object.fromEntries(JUDGE_FLAGS.map((f) => [f, 0])) as Record<
+    JudgeFlag,
+    number
+  >
   const v: JudgeVerdict = {
     ...counts,
     reps: JUDGE_REPS,
@@ -515,7 +534,6 @@ function buildUnitHistory(now: Date): RuntimeMessage[] {
   ] as RuntimeMessage[]
 }
 
-
 // ---------------------------------------------------------------------------
 // Run
 // ---------------------------------------------------------------------------
@@ -597,7 +615,11 @@ async function generateTurn(
     out.category = classification.category
     ctx.corpus = await retrieveCorpusStage(ctx)
     ctx.knowledgeCorpus = shouldRetrieveKnowledge(ctx)
-      ? await retrieveKnowledgeStage(ctx, classification.category, unit.turns[turnIndex] as string)
+      ? await retrieveKnowledgeStage(
+          ctx,
+          classification.category,
+          unit.turns[turnIndex] as string,
+        )
       : []
 
     const ragChunks: AiVoiceCorpusChunk[] = (ctx.corpus ?? []).map((c) => ({
@@ -680,7 +702,10 @@ async function generateTurn(
         // caveat that the harness bypassed that seam; it no longer does. The
         // dash-driven REGEN loop is still bypassed, so this is normalization
         // rather than the full production path.
-        const composedReply = composeReplyWithIntention(object.body, object.intentionQuestion)
+        const composedReply = composeReplyWithIntention(
+          object.body,
+          object.intentionQuestion,
+        )
         out.reply = composedReply.body
         out.intentionQuestion = composedReply.intentionQuestion
         out.error = null
@@ -710,7 +735,8 @@ async function main() {
     .select('id, slug, timezone')
     .eq('slug', venueSlug)
     .maybeSingle()
-  if (venueError || !venue) throw new Error(`venue ${venueSlug} not found: ${venueError?.message}`)
+  if (venueError || !venue)
+    throw new Error(`venue ${venueSlug} not found: ${venueError?.message}`)
 
   // The busiest non-synthetic guest, so the loaded corpus and persona are a
   // real venue's rather than a fixture's. Their own visit history is REPLACED
@@ -722,7 +748,10 @@ async function main() {
     .eq('venue_id', venue.id)
     .eq('is_test_synthetic', false)
   const candidates = (guests ?? []).filter(
-    (g) => !String(g.first_name ?? '').toLowerCase().startsWith('synthetic'),
+    (g) =>
+      !String(g.first_name ?? '')
+        .toLowerCase()
+        .startsWith('synthetic'),
   )
   let guest: (typeof candidates)[number] | null = null
   let guestMessageCount = 0
@@ -737,13 +766,18 @@ async function main() {
     }
   }
   if (!guest) throw new Error('no non-synthetic guest at this venue')
-  const channel: 'text' | 'instagram' = guest.phone_number ? 'text' : 'instagram'
+  const channel: 'text' | 'instagram' = guest.phone_number
+    ? 'text'
+    : 'instagram'
 
   const { count: statesBefore } = await db
     .from('guest_states')
     .select('*', { count: 'exact', head: true })
 
-  const trace = startAgentTrace({ name: 'tac555-measure', agentRunId: randomUUID() })
+  const trace = startAgentTrace({
+    name: 'tac555-measure',
+    agentRunId: randomUUID(),
+  })
   const now = new Date()
 
   // ONE context build for the whole run, cloned per unit, so computeGuestState
@@ -767,7 +801,9 @@ async function main() {
     .map((m) => m.name)
     .filter((n): n is string => typeof n === 'string' && n.trim() !== '')
   if (menu.length < 4) {
-    console.error(`✗ ${venueSlug} has ${menu.length} usable menu item names; need at least 4.`)
+    console.error(
+      `✗ ${venueSlug} has ${menu.length} usable menu item names; need at least 4.`,
+    )
     process.exit(1)
   }
 
@@ -814,15 +850,18 @@ async function main() {
       frequentUnits: units.filter((u) => u.population === 'frequent').length,
       newUnits: units.filter((u) => u.population === 'new').length,
       multiTurnUnits: units.filter((u) => u.turns.length > 1).length,
-      coffeeUnitsInArmA: units.filter((u) => u.population === 'frequent' && u.beanStoryAvailable)
-        .length,
+      coffeeUnitsInArmA: units.filter(
+        (u) => u.population === 'frequent' && u.beanStoryAvailable,
+      ).length,
       judgeReps: JUDGE_REPS,
       menuItemsAvailable: menu.length,
       statesBefore,
     },
   })
 
-  console.log(`[tac555] venue ${venueSlug} | prompt ${PROMPT_VERSION} | channel ${channel}`)
+  console.log(
+    `[tac555] venue ${venueSlug} | prompt ${PROMPT_VERSION} | channel ${channel}`,
+  )
   console.log(
     `[tac555] ${units.length} units x ${ARMS.length} arms | ${units.filter((u) => u.turns.length > 1).length} multi-turn | judge reps ${JUDGE_REPS}`,
   )
@@ -841,14 +880,36 @@ async function main() {
       const history: RuntimeMessage[] = buildUnitHistory(now)
 
       for (let t = 0; t < unit.turns.length; t += 1) {
-        let outcome = await generateTurn(baseCtx, unit, arm, t, history, channel, now)
+        let outcome = await generateTurn(
+          baseCtx,
+          unit,
+          arm,
+          t,
+          history,
+          channel,
+          now,
+        )
 
         // RETRY A TRANSPORT FAULT, not a schema or slice failure. A slice
         // failure is a real defect and retrying it would hide it.
-        for (let r = 0; r < UNIT_RETRIES && outcome.invalid && looksTransient(outcome.error); r += 1) {
-          console.log(`    ${unit.id} ${arm} t${t}: transient fault, retrying in ${RETRY_PAUSE_MS / 1000}s`)
+        for (
+          let r = 0;
+          r < UNIT_RETRIES && outcome.invalid && looksTransient(outcome.error);
+          r += 1
+        ) {
+          console.log(
+            `    ${unit.id} ${arm} t${t}: transient fault, retrying in ${RETRY_PAUSE_MS / 1000}s`,
+          )
           await sleep(RETRY_PAUSE_MS)
-          outcome = await generateTurn(baseCtx, unit, arm, t, history, channel, now)
+          outcome = await generateTurn(
+            baseCtx,
+            unit,
+            arm,
+            t,
+            history,
+            channel,
+            now,
+          )
         }
 
         let invalid = outcome.invalid
@@ -861,22 +922,36 @@ async function main() {
                 unit.historyItems,
                 outcome.knowledgeTexts,
               )
-        if (judgeVerdict !== null && judgeVerdict.failures === JUDGE_REPS) invalid = true
+        if (judgeVerdict !== null && judgeVerdict.failures === JUDGE_REPS)
+          invalid = true
 
         const flags = Object.fromEntries(
           JUDGE_FLAGS.map((f) => [
             f,
             judgeVerdict !== null &&
-              majority(judgeVerdict[f], judgeVerdict.reps, judgeVerdict.failures),
+              majority(
+                judgeVerdict[f],
+                judgeVerdict.reps,
+                judgeVerdict.failures,
+              ),
           ]),
         ) as Record<JudgeFlag, boolean>
 
         const reply = outcome.reply
-        const count = reply === null ? { found: false, matches: [] } : findCountClaim(reply)
-        const selling = reply === null ? { found: false, matches: [] } : findSellingLanguage(reply)
-        const freq = reply === null ? { found: false, matches: [] } : findVisitFrequencyClaim(reply)
+        const count =
+          reply === null ? { found: false, matches: [] } : findCountClaim(reply)
+        const selling =
+          reply === null
+            ? { found: false, matches: [] }
+            : findSellingLanguage(reply)
+        const freq =
+          reply === null
+            ? { found: false, matches: [] }
+            : findVisitFrequencyClaim(reply)
         const orderFreq =
-          reply === null ? { found: false, matches: [] } : findOrderFrequencyPhrase(reply)
+          reply === null
+            ? { found: false, matches: [] }
+            : findOrderFrequencyPhrase(reply)
         const others =
           reply === null
             ? { found: false, matches: [] }
@@ -929,12 +1004,26 @@ async function main() {
 
         const marks = [
           rec.invalid ? 'INVALID' : '',
-          rec.flags.claimsMostFrequent ? 'usual' : rec.flags.recognizesPriorOrder ? 'had-before' : '',
-          rec.flags.complimentsReturning || rec.flags.verdictOnPick ? 'warm' : '',
+          rec.flags.claimsMostFrequent
+            ? 'usual'
+            : rec.flags.recognizesPriorOrder
+              ? 'had-before'
+              : '',
+          rec.flags.complimentsReturning || rec.flags.verdictOnPick
+            ? 'warm'
+            : '',
           rec.bareLabel ? 'LABEL' : '',
-          rec.flags.statesCount || rec.countClaimMatches.length > 0 ? 'COUNT' : '',
-          rec.flags.includesBeanStory ? 'bean' : rec.flags.includesItemDetail ? 'detail' : '',
-          rec.flags.readsAsSelling || rec.sellingMatches.length > 0 ? 'SELL' : '',
+          rec.flags.statesCount || rec.countClaimMatches.length > 0
+            ? 'COUNT'
+            : '',
+          rec.flags.includesBeanStory
+            ? 'bean'
+            : rec.flags.includesItemDetail
+              ? 'detail'
+              : '',
+          rec.flags.readsAsSelling || rec.sellingMatches.length > 0
+            ? 'SELL'
+            : '',
         ]
           .filter((m) => m !== '')
           .join(' ')
@@ -956,11 +1045,18 @@ async function main() {
 // Report
 // ---------------------------------------------------------------------------
 
-function report(records: UnitRecord[], statesBefore: number, statesAfter: number, startedAt: Date) {
+function report(
+  records: UnitRecord[],
+  statesBefore: number,
+  statesAfter: number,
+  startedAt: Date,
+) {
   // The RECOGNITION turn is turn 1. Turns 2 and 3 exist only for the repeat
   // check, and scoring them as recognition turns would dilute every rate.
   const pick = (population: 'frequent' | 'new', arm: Arm) =>
-    records.filter((r) => r.population === population && r.arm === arm && r.turn === 1)
+    records.filter(
+      (r) => r.population === population && r.arm === arm && r.turn === 1,
+    )
 
   console.log(`\n${'='.repeat(78)}`)
   console.log('TAC-555 usual-order recognition')
@@ -985,7 +1081,9 @@ function report(records: UnitRecord[], statesBefore: number, statesAfter: number
 
   for (const arm of ARMS) {
     const valid = pick('frequent', arm).filter((r) => !r.invalid)
-    const rec = valid.filter((r) => r.flags.recognizesPriorOrder || r.flags.claimsMostFrequent)
+    const rec = valid.filter(
+      (r) => r.flags.recognizesPriorOrder || r.flags.claimsMostFrequent,
+    )
     const warm = valid.filter(warmAboutGuest)
     const both = valid.filter(meetsBar)
     console.log(
@@ -1023,15 +1121,29 @@ function report(records: UnitRecord[], statesBefore: number, statesAfter: number
   {
     const valid = pick('frequent', 'treatment').filter((r) => !r.invalid)
     const labels = valid.filter((r) => r.bareLabel)
-    const counts = valid.filter((r) => r.flags.statesCount || r.countClaimMatches.length > 0)
+    const counts = valid.filter(
+      (r) => r.flags.statesCount || r.countClaimMatches.length > 0,
+    )
     const recites = valid.filter((r) => r.flags.recitesHistory)
-    if (labels.length > 0) failures.push(`arm A treatment: ${labels.length} bare label(s), ceiling is 0`)
-    if (counts.length > 0) failures.push(`arm A treatment: ${counts.length} count claim(s), ceiling is 0`)
-    if (recites.length > 0) failures.push(`arm A treatment: ${recites.length} recited history, ceiling is 0`)
+    if (labels.length > 0)
+      failures.push(
+        `arm A treatment: ${labels.length} bare label(s), ceiling is 0`,
+      )
+    if (counts.length > 0)
+      failures.push(
+        `arm A treatment: ${counts.length} count claim(s), ceiling is 0`,
+      )
+    if (recites.length > 0)
+      failures.push(
+        `arm A treatment: ${recites.length} recited history, ceiling is 0`,
+      )
     console.log(
       `${labels.length === 0 ? 'PASS' : 'FAIL'}  ceiling: bare labels ${labels.length}/${valid.length}`,
     )
-    for (const r of labels) console.log(`      ${r.unitId}: (${r.wordCount}w) ${JSON.stringify(r.reply)}`)
+    for (const r of labels)
+      console.log(
+        `      ${r.unitId}: (${r.wordCount}w) ${JSON.stringify(r.reply)}`,
+      )
     console.log(
       `${counts.length === 0 ? 'PASS' : 'FAIL'}  ceiling: count claims ${counts.length}/${valid.length}`,
     )
@@ -1043,14 +1155,17 @@ function report(records: UnitRecord[], statesBefore: number, statesAfter: number
     console.log(
       `${recites.length === 0 ? 'PASS' : 'FAIL'}  ceiling: recited history ${recites.length}/${valid.length}`,
     )
-    for (const r of recites) console.log(`      ${r.unitId}: ${JSON.stringify(r.reply)}`)
+    for (const r of recites)
+      console.log(`      ${r.unitId}: ${JSON.stringify(r.reply)}`)
   }
 
   // (c) AND (d) RATES. Expected some, not most. Reported rather than barred,
   // except that every (d) must be grounded and must not read as selling.
   {
     const valid = pick('frequent', 'treatment').filter((r) => !r.invalid)
-    const detail = valid.filter((r) => r.flags.includesItemDetail && !r.flags.includesBeanStory)
+    const detail = valid.filter(
+      (r) => r.flags.includesItemDetail && !r.flags.includesBeanStory,
+    )
     const bean = valid.filter((r) => r.flags.includesBeanStory)
     const coffee = valid.filter((r) => r.beanStoryAvailable)
     console.log(
@@ -1061,30 +1176,48 @@ function report(records: UnitRecord[], statesBefore: number, statesAfter: number
         `      (d) ${r.unitId} [${r.namedItem}] beans=${JSON.stringify(r.judge?.beansNamed ?? [])} grounded=${!r.flags.detailUngrounded} | ${JSON.stringify(r.reply)}`,
       )
     }
-    for (const r of detail) console.log(`      (c) ${r.unitId} | ${JSON.stringify(r.reply)}`)
+    for (const r of detail)
+      console.log(`      (c) ${r.unitId} | ${JSON.stringify(r.reply)}`)
 
     // A bean story on a pastry is a finding: (d) is scoped to a drink.
     const beanOnPastry = bean.filter((r) => !r.beanStoryAvailable)
     if (beanOnPastry.length > 0) {
-      failures.push(`${beanOnPastry.length} bean story/stories on an item that is not a coffee drink`)
-      console.log(`FAIL  bean story on a non-coffee item: ${beanOnPastry.length}`)
-      for (const r of beanOnPastry) console.log(`      ${r.unitId} [${r.namedItem}]: ${JSON.stringify(r.reply)}`)
+      failures.push(
+        `${beanOnPastry.length} bean story/stories on an item that is not a coffee drink`,
+      )
+      console.log(
+        `FAIL  bean story on a non-coffee item: ${beanOnPastry.length}`,
+      )
+      for (const r of beanOnPastry)
+        console.log(
+          `      ${r.unitId} [${r.namedItem}]: ${JSON.stringify(r.reply)}`,
+        )
     }
 
     // Grounding and selling, both ceilings on the added content.
     const ungrounded = valid.filter(
-      (r) => (r.flags.includesItemDetail || r.flags.includesBeanStory) && r.flags.detailUngrounded,
+      (r) =>
+        (r.flags.includesItemDetail || r.flags.includesBeanStory) &&
+        r.flags.detailUngrounded,
     )
-    const selling = valid.filter((r) => r.flags.readsAsSelling || r.sellingMatches.length > 0)
+    const selling = valid.filter(
+      (r) => r.flags.readsAsSelling || r.sellingMatches.length > 0,
+    )
     if (ungrounded.length > 0) {
-      failures.push(`${ungrounded.length} added detail/story not grounded in the venue's knowledge`)
+      failures.push(
+        `${ungrounded.length} added detail/story not grounded in the venue's knowledge`,
+      )
     }
-    if (selling.length > 0) failures.push(`${selling.length} repl(y/ies) read as selling`)
+    if (selling.length > 0)
+      failures.push(`${selling.length} repl(y/ies) read as selling`)
     console.log(
       `${ungrounded.length === 0 ? 'PASS' : 'FAIL'}  ceiling: ungrounded added detail ${ungrounded.length}`,
     )
-    for (const r of ungrounded) console.log(`      ${r.unitId}: ${JSON.stringify(r.reply)}`)
-    console.log(`${selling.length === 0 ? 'PASS' : 'FAIL'}  ceiling: reads as selling ${selling.length}`)
+    for (const r of ungrounded)
+      console.log(`      ${r.unitId}: ${JSON.stringify(r.reply)}`)
+    console.log(
+      `${selling.length === 0 ? 'PASS' : 'FAIL'}  ceiling: reads as selling ${selling.length}`,
+    )
     for (const r of selling) {
       console.log(
         `      ${r.unitId}: judge=${r.flags.readsAsSelling} regex=${JSON.stringify(r.sellingMatches)} | ${JSON.stringify(r.reply)}`,
@@ -1095,7 +1228,9 @@ function report(records: UnitRecord[], statesBefore: number, statesAfter: number
   // BAR 2: arm B claims nothing, in either arm.
   for (const arm of ARMS) {
     const valid = pick('new', arm).filter((r) => !r.invalid)
-    const claims = valid.filter((r) => r.flags.claimsMostFrequent || r.flags.recognizesPriorOrder)
+    const claims = valid.filter(
+      (r) => r.flags.claimsMostFrequent || r.flags.recognizesPriorOrder,
+    )
     const returning = valid.filter((r) => r.flags.complimentsReturning)
     const beans = valid.filter((r) => r.flags.includesBeanStory)
     // RULING 4 (2026-09-29), PRE-REGISTERED AS A BAR THIS RUN. The give-way on
@@ -1104,33 +1239,45 @@ function report(records: UnitRecord[], statesBefore: number, statesAfter: number
     // literal "good call", which is one of R21's own named banned shapes. A new
     // item may still get warmth, which is why `warmthAboutItem` is not a bar.
     const verdicts = valid.filter((r) => r.flags.verdictOnPick)
-    if (claims.length > 0) failures.push(`arm B ${arm}: ${claims.length} false prior-order claim(s)`)
+    if (claims.length > 0)
+      failures.push(`arm B ${arm}: ${claims.length} false prior-order claim(s)`)
     if (returning.length > 0) {
-      failures.push(`arm B ${arm}: ${returning.length} compliment(s) on returning`)
+      failures.push(
+        `arm B ${arm}: ${returning.length} compliment(s) on returning`,
+      )
     }
-    if (beans.length > 0) failures.push(`arm B ${arm}: ${beans.length} bean story/stories on a new item`)
+    if (beans.length > 0)
+      failures.push(
+        `arm B ${arm}: ${beans.length} bean story/stories on a new item`,
+      )
     if (verdicts.length > 0) {
-      failures.push(`arm B ${arm}: ${verdicts.length} verdict(s) on the choice of a new item`)
+      failures.push(
+        `arm B ${arm}: ${verdicts.length} verdict(s) on the choice of a new item`,
+      )
     }
     console.log(
       `\n${claims.length === 0 ? 'PASS' : 'FAIL'}  bar: arm B ${arm} false prior-order claims ${claims.length}/${valid.length}`,
     )
-    for (const r of claims) console.log(`      ${r.unitId}: ${JSON.stringify(r.reply)}`)
+    for (const r of claims)
+      console.log(`      ${r.unitId}: ${JSON.stringify(r.reply)}`)
     console.log(
       `${returning.length === 0 ? 'PASS' : 'FAIL'}  bar: arm B ${arm} compliments on returning ${returning.length}/${valid.length}`,
     )
-    for (const r of returning) console.log(`      ${r.unitId}: ${JSON.stringify(r.reply)}`)
+    for (const r of returning)
+      console.log(`      ${r.unitId}: ${JSON.stringify(r.reply)}`)
     console.log(
       `${verdicts.length === 0 ? 'PASS' : 'FAIL'}  bar: arm B ${arm} verdicts on the choice ${verdicts.length}/${valid.length}`,
     )
-    for (const r of verdicts) console.log(`      ${r.unitId}: ${JSON.stringify(r.reply)}`)
+    for (const r of verdicts)
+      console.log(`      ${r.unitId}: ${JSON.stringify(r.reply)}`)
     console.log(
       `${valid.filter((r) => r.flags.warmthAboutItem).length} of ${valid.length} carry warmth about the item, which is permitted here`,
     )
     console.log(
       `${beans.length === 0 ? 'PASS' : 'FAIL'}  bar: arm B ${arm} bean stories ${beans.length}/${valid.length}`,
     )
-    for (const r of beans) console.log(`      ${r.unitId}: ${JSON.stringify(r.reply)}`)
+    for (const r of beans)
+      console.log(`      ${r.unitId}: ${JSON.stringify(r.reply)}`)
   }
 
   // BAR 3: templating, at BOTH widths the ruling names.
@@ -1139,7 +1286,10 @@ function report(records: UnitRecord[], statesBefore: number, statesAfter: number
       .filter((r) => !r.invalid && r.reply !== null)
       .map((r) => r.reply as string)
     const lengths = bodies.map((b) => countWords(b)).sort((a, b) => a - b)
-    const median = lengths.length === 0 ? 0 : (lengths[Math.floor(lengths.length / 2)] as number)
+    const median =
+      lengths.length === 0
+        ? 0
+        : (lengths[Math.floor(lengths.length / 2)] as number)
     console.log(`\nmedian arm A treatment reply length: ${median} words`)
 
     for (const n of [TEMPLATE_NGRAM, TEMPLATE_NGRAM + 1]) {
@@ -1151,17 +1301,27 @@ function report(records: UnitRecord[], statesBefore: number, statesAfter: number
         failures.push(
           `templating bar at n=${n} VOID: only ${scorable}/${bodies.length} replies reach ${n} words`,
         )
-        console.log(`VOID  bar: templating at n=${n} could not be evaluated (${scorable}/${bodies.length} scorable)`)
+        console.log(
+          `VOID  bar: templating at n=${n} could not be evaluated (${scorable}/${bodies.length} scorable)`,
+        )
         continue
       }
-      const repeats = repeatedPhrases(bodies, { n, maxShare: TEMPLATE_MAX_SHARE })
+      const repeats = repeatedPhrases(bodies, {
+        n,
+        maxShare: TEMPLATE_MAX_SHARE,
+      })
       const ok = repeats.length === 0
-      if (!ok) failures.push(`templating at n=${n}: ${repeats.length} phrase(s) over the quarter share`)
+      if (!ok)
+        failures.push(
+          `templating at n=${n}: ${repeats.length} phrase(s) over the quarter share`,
+        )
       console.log(
         `${ok ? 'PASS' : 'FAIL'}  bar: no ${n}-word phrase in more than ${Math.round(TEMPLATE_MAX_SHARE * 100)}% of ${bodies.length} arm A treatment replies`,
       )
       for (const p of repeats) {
-        console.log(`      "${p.phrase}" in ${p.replies}/${bodies.length} = ${Math.round((p.replies / bodies.length) * 100)}%`)
+        console.log(
+          `      "${p.phrase}" in ${p.replies}/${bodies.length} = ${Math.round((p.replies / bodies.length) * 100)}%`,
+        )
       }
     }
   }
@@ -1170,31 +1330,45 @@ function report(records: UnitRecord[], statesBefore: number, statesAfter: number
   // within one conversation. The rule says once per guest and NOTHING enforces
   // it, by instruction, so this is the only thing that would show it failing.
   {
-    const multi = records.filter((r) => r.arm === 'treatment' && r.population === 'frequent')
+    const multi = records.filter(
+      (r) => r.arm === 'treatment' && r.population === 'frequent',
+    )
     const byUnit = new Map<string, UnitRecord[]>()
     for (const r of multi) {
       const b = byUnit.get(r.unitId) ?? []
       b.push(r)
       byUnit.set(r.unitId, b)
     }
-    const conversations = [...byUnit.entries()].filter(([, rs]) => rs.length > 1)
+    const conversations = [...byUnit.entries()].filter(
+      ([, rs]) => rs.length > 1,
+    )
     let repeated = 0
-    console.log(`\n3-turn same-guest check: ${conversations.length} conversation(s)`)
+    console.log(
+      `\n3-turn same-guest check: ${conversations.length} conversation(s)`,
+    )
     for (const [id, rs] of conversations) {
       const ordered = [...rs].sort((a, b) => a.turn - b.turn)
       const withContent = ordered.filter(
-        (r) => !r.invalid && (r.flags.includesItemDetail || r.flags.includesBeanStory),
+        (r) =>
+          !r.invalid &&
+          (r.flags.includesItemDetail || r.flags.includesBeanStory),
       )
-      const beanTurns = ordered.filter((r) => !r.invalid && r.flags.includesBeanStory)
+      const beanTurns = ordered.filter(
+        (r) => !r.invalid && r.flags.includesBeanStory,
+      )
       if (beanTurns.length > 1) {
         repeated += 1
-        failures.push(`${id}: a bean story appears on ${beanTurns.length} turns of one conversation`)
+        failures.push(
+          `${id}: a bean story appears on ${beanTurns.length} turns of one conversation`,
+        )
       }
       console.log(
         `    ${id}: turns with added content ${withContent.map((r) => r.turn).join(',') || 'none'} | bean story on turns ${beanTurns.map((r) => r.turn).join(',') || 'none'}`,
       )
       for (const r of ordered) {
-        console.log(`        t${r.turn} "${r.guestMessage}" -> ${JSON.stringify(r.reply)}`)
+        console.log(
+          `        t${r.turn} "${r.guestMessage}" -> ${JSON.stringify(r.reply)}`,
+        )
       }
     }
     console.log(
@@ -1226,7 +1400,8 @@ function report(records: UnitRecord[], statesBefore: number, statesAfter: number
     console.log(
       `INFO arm A treatment: well-wishes about the item ${wishes.length}/${valid.length}, of which ${wishOnly.length} carry NO warmth about the guest`,
     )
-    for (const r of wishOnly) console.log(`      ${r.unitId}: ${JSON.stringify(r.reply)}`)
+    for (const r of wishOnly)
+      console.log(`      ${r.unitId}: ${JSON.stringify(r.reply)}`)
   }
 
   // FINDING C, which Jaipal asked to be noted with its rate. R21's base forbids
@@ -1238,49 +1413,81 @@ function report(records: UnitRecord[], statesBefore: number, statesAfter: number
       console.log(
         `INFO arm A ${arm}: replies suggesting a DIFFERENT item (R21 base forbids) ${suggests.length}/${valid.length}`,
       )
-      for (const r of suggests) console.log(`      ${r.unitId}: ${JSON.stringify(r.reply)}`)
+      for (const r of suggests)
+        console.log(`      ${r.unitId}: ${JSON.stringify(r.reply)}`)
     }
   }
 
   // The getting-to-know-you field, recorded so "expected empty" is measured.
   {
-    const withQuestion = records.filter((r) => !r.invalid && r.intentionQuestion !== '')
+    const withQuestion = records.filter(
+      (r) => !r.invalid && r.intentionQuestion !== '',
+    )
     console.log(
       `INFO replies whose intentionQuestion was non-empty: ${withQuestion.length} (expected 0; openIntentions is empty on these turns)`,
     )
     for (const r of withQuestion) {
-      console.log(`      ${r.unitId} t${r.turn} ${r.arm}: ${JSON.stringify(r.intentionQuestion)}`)
+      console.log(
+        `      ${r.unitId} t${r.turn} ${r.arm}: ${JSON.stringify(r.intentionQuestion)}`,
+      )
     }
   }
 
   // ADVISORY, NOT BARS.
   {
-    const flagged = records.filter((r) => !r.invalid && r.visitFrequencyMatches.length > 0)
-    console.log(`\nADVISORY (not a bar) VISIT-frequency claims, which R23's base still forbids: ${flagged.length}`)
+    const flagged = records.filter(
+      (r) => !r.invalid && r.visitFrequencyMatches.length > 0,
+    )
+    console.log(
+      `\nADVISORY (not a bar) VISIT-frequency claims, which R23's base still forbids: ${flagged.length}`,
+    )
     for (const r of flagged) {
-      console.log(`      ${r.unitId} t${r.turn} ${r.arm}: ${JSON.stringify(r.visitFrequencyMatches)} | ${JSON.stringify(r.reply)}`)
+      console.log(
+        `      ${r.unitId} t${r.turn} ${r.arm}: ${JSON.stringify(r.visitFrequencyMatches)} | ${JSON.stringify(r.reply)}`,
+      )
     }
   }
   {
-    const flagged = records.filter((r) => !r.invalid && r.otherHistoryItemMatches.length > 0)
-    console.log(`ADVISORY (not a bar) replies naming a DIFFERENT past item (R15 cap): ${flagged.length}`)
+    const flagged = records.filter(
+      (r) => !r.invalid && r.otherHistoryItemMatches.length > 0,
+    )
+    console.log(
+      `ADVISORY (not a bar) replies naming a DIFFERENT past item (R15 cap): ${flagged.length}`,
+    )
     for (const r of flagged) {
-      console.log(`      ${r.unitId} t${r.turn} ${r.arm}: ${JSON.stringify(r.otherHistoryItemMatches)} | ${JSON.stringify(r.reply)}`)
+      console.log(
+        `      ${r.unitId} t${r.turn} ${r.arm}: ${JSON.stringify(r.otherHistoryItemMatches)} | ${JSON.stringify(r.reply)}`,
+      )
     }
   }
 
   const invalid = records.filter((r) => r.invalid)
-  console.log(`\ninvalid units after retries: ${invalid.length}/${records.length}`)
-  for (const r of invalid) console.log(`      ${r.unitId} t${r.turn} ${r.arm}: ${r.error ?? 'no reply'}`)
+  console.log(
+    `\ninvalid units after retries: ${invalid.length}/${records.length}`,
+  )
+  for (const r of invalid)
+    console.log(
+      `      ${r.unitId} t${r.turn} ${r.arm}: ${r.error ?? 'no reply'}`,
+    )
 
-  console.log(`\nguest_states rows: ${statesBefore} before, ${statesAfter} after`)
-  console.log(`elapsed: ${Math.round((Date.now() - startedAt.getTime()) / 1000)}s`)
+  console.log(
+    `\nguest_states rows: ${statesBefore} before, ${statesAfter} after`,
+  )
+  console.log(
+    `elapsed: ${Math.round((Date.now() - startedAt.getTime()) / 1000)}s`,
+  )
 
   console.log(`\n${'-'.repeat(78)}`)
-  console.log(failures.length === 0 ? 'ALL PRE-REGISTERED BARS AND CEILINGS PASS' : 'FAILED:')
+  console.log(
+    failures.length === 0
+      ? 'ALL PRE-REGISTERED BARS AND CEILINGS PASS'
+      : 'FAILED:',
+  )
   for (const f of failures) console.log(`  - ${f}`)
   console.log(`${'-'.repeat(78)}`)
-  console.log('\nThe recognition+compliment bar and every (d) are HAND-READ before')
+  console.log(
+    '\nThe recognition+compliment bar and every (d) are HAND-READ before',
+  )
   console.log('anything ships. A rate cannot tell warmth from a formula, nor a')
   console.log('grounded bean story from a pitch.\n')
 }

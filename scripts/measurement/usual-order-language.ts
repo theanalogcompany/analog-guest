@@ -274,7 +274,9 @@ export function findOrderFrequencyPhrase(body: string): LanguageFinding {
     const m = folded.match(re)
     if (m && m[0]) matches.push(m[0])
   }
-  return matches.length === 0 ? EMPTY : { found: true, matches: [...new Set(matches)] }
+  return matches.length === 0
+    ? EMPTY
+    : { found: true, matches: [...new Set(matches)] }
 }
 
 export function findVisitFrequencyClaim(body: string): LanguageFinding {
@@ -284,7 +286,9 @@ export function findVisitFrequencyClaim(body: string): LanguageFinding {
     const m = folded.match(re)
     if (m && m[0]) matches.push(m[0])
   }
-  return matches.length === 0 ? EMPTY : { found: true, matches: [...new Set(matches)] }
+  return matches.length === 0
+    ? EMPTY
+    : { found: true, matches: [...new Set(matches)] }
 }
 
 /**
@@ -370,7 +374,9 @@ export function findSellingLanguage(body: string): LanguageFinding {
     const m = folded.match(re)
     if (m && m[0]) matches.push(m[0])
   }
-  return matches.length === 0 ? EMPTY : { found: true, matches: [...new Set(matches)] }
+  return matches.length === 0
+    ? EMPTY
+    : { found: true, matches: [...new Set(matches)] }
 }
 
 export function findOtherHistoryItems(
@@ -384,7 +390,9 @@ export function findOtherHistoryItems(
   for (const raw of historyItems) {
     const item = fold(raw)
     if (item === '' || item === named) continue
-    const re = new RegExp(`(?<![a-z0-9])${item.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![a-z0-9])`)
+    const re = new RegExp(
+      `(?<![a-z0-9])${item.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![a-z0-9])`,
+    )
     if (re.test(folded)) matches.push(raw)
   }
   return matches.length === 0 ? EMPTY : { found: true, matches }
