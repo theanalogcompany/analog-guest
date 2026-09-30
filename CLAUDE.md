@@ -145,8 +145,9 @@ Neither tier proceeds on `[NEEDS-INPUT]` alone. A change to guest-facing copy sh
 wording **verbatim** in the plan and waits for approval of that wording.
 
 **Audit first.** Before writing code: this file, the nested `CLAUDE.md` for the directory,
-the neighbouring files, the migrations touching the relevant tables, and the existing tests.
-Cite specific paths in the plan. Do not infer architecture from filenames.
+the neighbouring files, the migrations touching the relevant tables, and the existing tests -
+the `describe` block covering the behaviour you touch, not whole test files. Cite specific
+paths in the plan. Do not infer architecture from filenames.
 
 **Comment protocol.** Every Linear comment opens with `**[FROM CLAUDE CODE]**` on its own
 line - Linear shows Jaipal as author of MCP-posted comments, so the prefix is the only
@@ -278,10 +279,15 @@ should be added - fix the Node, never the guard. `tsc` is unaffected.
 
 Coverage is report-only and deliberately ungated (`npx vitest run --coverage`).
 
-Roughly 7,000 tests across roughly 300 files, as a smell test only. **Measure the real number,
-never estimate it, and never quote a recorded one** - an exact baseline in this file disagreed
-with `.claude/rules/testing-discipline.md`'s figures for the same day, and a number that
-precise is read as authoritative:
+Roughly 7,000 tests across roughly 300 files, as a smell test only. **Quote a count only when
+the number carries the claim, and then only from a run you executed in this session** - never
+an estimate, never a recorded one. An exact baseline in this file once disagreed with
+`.claude/rules/testing-discipline.md`'s figures for the same day, and a number that precise is
+read as authoritative. Most sessions need no count at all: vitest's summary line for your own
+run is the whole report.
+
+When the claim IS a delta ("added N", "none broke"), measure both sides in one session - the
+before in a throwaway worktree, the after in this checkout:
 
 ```
 git worktree add .worktrees/baseline origin/main

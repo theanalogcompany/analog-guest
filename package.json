@@ -32,7 +32,8 @@
     "measure-speaker-identity": "tsx --env-file=.env.local scripts/measurement/speaker-identity.ts",
     "measure-guest-name-frequency": "tsx --env-file=.env.local scripts/measurement/guest-name-frequency.ts",
     "langfuse-smoke": "tsx --env-file=.env.local scripts/measurement/langfuse-v5-smoke.ts",
-    "measure-usual-order-recognition": "tsx --env-file=.env.local scripts/measurement/usual-order-recognition.ts"
+    "measure-usual-order-recognition": "tsx --env-file=.env.local scripts/measurement/usual-order-recognition.ts",
+    "test-churn": "node scripts/test-churn.mjs"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^3.0.71",
