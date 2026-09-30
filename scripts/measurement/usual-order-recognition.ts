@@ -304,11 +304,11 @@ const JUDGE_SYSTEM = `You are grading one reply a cafe sent to a guest who just 
 
 Answer each question about the REPLY only.
 
-- recognizesPriorOrder: does the reply indicate, in any wording, that the guest has had this item before, or that the venue knows this order? Saying nothing about their history is false. Merely naming the item back is false on its own.
+- recognizesPriorOrder: does the reply indicate, in any wording, that the guest has had this item before, or that the venue knows this order as theirs? Saying nothing about their history is false. Merely naming the item back is false on its own. CRITICAL: the guest has just told the venue what they ordered THIS time, so warmth about that order in hand is not recognition of a PRIOR one. "glad you tried it", "glad you got one", "hope it was good" all concern the order they just named and are false here. Answer true only for something that could not be said to a first-time buyer of that item.
 - claimsMostFrequent: does the reply indicate this is what the guest usually gets, their regular order, or the one they get more than anything else? A plain "you've had that before" is false here and true for recognizesPriorOrder.
 - complimentsReturning: is there warmth about the guest coming back, being here again, or being glad to see them? Warmth about the ITEM is not this.
-- verdictOnPick: does the reply approve of the guest's CHOICE, or of their taste or judgement in choosing it? This is about the person who chose, so approval directed at the decision or the chooser is true here. Warmth about the item on its own is not.
-- warmthAboutItem: is there warmth or affection about the ITEM itself, without approving of the guest's decision to choose it? Calling the item lovely is true here; calling their choice a good one is verdictOnPick instead.
+- verdictOnPick: does the reply praise the guest's ACT OF CHOOSING, or their taste or judgement in having chosen it? Ask what the praise is predicated of. If it is predicated of the DECISION or of the GUEST ("good call", "good pick", "nice choice", "you have good taste", "you know what you like"), answer true. If it is predicated of the ITEM, answer false even when the praise is warm and even when the guest chose it: "that one's a keeper", "it's so underrated", "that one goes fast for a reason", "that's a good one" are all claims about the item, not about the chooser, so they are false here and true for warmthAboutItem. A reply can be affectionate about the item and pass no judgement on the guest at all; that is the common case and it is false here.
+- warmthAboutItem: is there warmth, affection or praise directed at the ITEM itself? Calling it a keeper, underrated, lovely, popular, or good is true here. This is the counterpart of verdictOnPick: praise predicated of the item is this, praise predicated of the guest or their decision is that. Both can be true in one reply, but do not answer true to verdictOnPick merely because the item praise happens to concern something the guest ordered.
 - wishesItemWell: does the reply wish or hope that the item turns out well, tastes good, or turned out well? This is a wish about the drink or food, not a statement about the guest. Answer it independently of the others.
 - suggestsDifferentItem: does the reply suggest, recommend, or invite the guest to try any item OTHER than the one they just named? A reply that only discusses the named item is false.
 - recitesHistory: does the reply read the history back, listing past visits, naming dates, or naming other past items? A single reference to the item the guest just named is not reciting.
@@ -321,7 +321,15 @@ Answer each question about the REPLY only.
 
 Judge the wording as written. Do not reward or penalise tone.`
 
-async function judge(
+/**
+ * Exported so the judge can be re-run against bodies a finished run already
+ * produced, which is how its item-vs-pick sharpening was validated without
+ * spending a generation call. Same reasoning as TAC-423's
+ * `first-touch-question-score.ts`: a detector fix should be checkable against
+ * data already on disk, and re-declaring the prompt in a validation script
+ * would test a COPY rather than the prompt the run uses.
+ */
+export async function judge(
   guestMessage: string,
   reply: string,
   historyItems: readonly string[],
