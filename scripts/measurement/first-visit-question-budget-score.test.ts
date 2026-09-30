@@ -142,13 +142,17 @@ describe('identityClaims', () => {
   })
 })
 
-describe('the allowed three', () => {
+describe('the allowed two', () => {
   it('is the ruled set and nothing else', () => {
-    expect([...ALLOWED_KEYS]).toEqual([
-      'understand_order',
-      'learn_name',
-      'are_they_new_here',
-    ])
+    expect([...ALLOWED_KEYS]).toEqual(['understand_order', 'learn_name'])
+  })
+
+  // TAC-568 moved are_they_new_here OFF the first conversation, so the scorer's
+  // bar moved with it. Named explicitly rather than left to the list above: a
+  // run scored before 2026-09-30 counted this key as on-target, so a figure
+  // carried across that date is comparing two different bars.
+  it('treats are_they_new_here as off-target now (TAC-568)', () => {
+    expect([...ALLOWED_KEYS]).not.toContain('are_they_new_here')
   })
 
   it.each([
@@ -268,16 +272,31 @@ describe('scoreTurn', () => {
     ).toEqual(['their_rhythm'])
   })
 
-  it('accepts all three of the ruled keys', () => {
+  it('accepts both of the ruled keys', () => {
     expect(
       scoreTurn(
         turn({
           body: 'what did you get?',
           attributedTo: ['understand_order'],
-          raisedKeys: ['learn_name', 'are_they_new_here'],
+          raisedKeys: ['learn_name'],
         }),
       ).offTargetKeys,
     ).toEqual([])
+  })
+
+  // The same turn, with the key TAC-568 removed, is now a finding. This is the
+  // arm that proves the change above reaches the scorer rather than only the
+  // constant.
+  it('reports are_they_new_here as off-target (TAC-568)', () => {
+    expect(
+      scoreTurn(
+        turn({
+          body: 'first time in?',
+          attributedTo: [],
+          raisedKeys: ['are_they_new_here'],
+        }),
+      ).offTargetKeys,
+    ).toEqual(['are_they_new_here'])
   })
 
   it('dedupes an off-target key both judges reported', () => {
@@ -337,12 +356,16 @@ describe('scoreConversation', () => {
       raisedKeys: ['learn_name'],
       failed: false,
     },
+    // TAC-568: THE RULED FLOW ENDS HERE, on the name. The third turn this
+    // fixture used to carry asked "first time in?" and is now off-target - see
+    // the arm below, which keeps that exact turn as the DEFECT case rather than
+    // deleting the evidence.
     {
-      stage: 'new-here',
-      body: 'Jaipal, glad you came by. first time in, or have you been coming a while?',
-      tail: 'first time in, or have you been coming a while?',
+      stage: 'nice-to-meet-you',
+      body: 'Jaipal, nice to meet you',
+      tail: '',
       attributedTo: [],
-      raisedKeys: ['are_they_new_here'],
+      raisedKeys: [],
       failed: false,
     },
   ]
@@ -350,17 +373,37 @@ describe('scoreConversation', () => {
   it('passes the ruled flow', () => {
     const v = scoreConversation(clean, VENUE)
     expect(v.clean).toBe(true)
-    expect(v.questionCount).toBe(3)
+    expect(v.questionCount).toBe(2)
     expect(v.twoQuestionTurns).toBe(0)
     expect(v.offTargetKeys).toEqual([])
     expect(v.openerIdentityClaims).toEqual([])
+  })
+
+  // THE SAME CONVERSATION WITH TAC-567'S THIRD QUESTION STILL ON IT. It scored
+  // clean until 2026-09-30 and must not now, or the scorer cannot tell the two
+  // rulings apart on the runs that exist to compare them.
+  it('fails the old three-question flow (TAC-568)', () => {
+    const withNewHere: TurnInput[] = [
+      clean[0]!,
+      clean[1]!,
+      {
+        stage: 'new-here',
+        body: 'Jaipal, glad you came by. first time in, or have you been coming a while?',
+        tail: 'first time in, or have you been coming a while?',
+        attributedTo: [],
+        raisedKeys: ['are_they_new_here'],
+        failed: false,
+      },
+    ]
+    const v = scoreConversation(withNewHere, VENUE)
+    expect(v.clean).toBe(false)
+    expect(v.offTargetKeys).toEqual(['are_they_new_here'])
   })
 
   it('collects every question in order, for the verbatim report', () => {
     expect(scoreConversation(clean, VENUE).questions).toEqual([
       'what did you get today?',
       "by the way, what's your name?",
-      'first time in, or have you been coming a while?',
     ])
   })
 

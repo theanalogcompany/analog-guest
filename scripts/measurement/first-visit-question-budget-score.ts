@@ -18,16 +18,16 @@
 // is the expensive defect, and a printed PASS is exactly such a claim.
 
 /**
- * The three intentions a first conversation may raise (TAC-567). Kept as a
- * literal transcribed from the ruling rather than read off
+ * The two intentions a first conversation may raise (TAC-567, narrowed by
+ * TAC-568). Kept as a literal transcribed from the ruling rather than read off
  * allowedOnFirstConversation, because a scorer that derives its expectation from
  * the code under test can only confirm that code equals itself.
+ *
+ * TAC-568 REMOVED are_they_new_here, and it is named here rather than silently
+ * deleted: a run scored before 2026-09-30 counted it as allowed, so a figure
+ * carried across that date is comparing two different bars.
  */
-export const ALLOWED_KEYS = [
-  'understand_order',
-  'learn_name',
-  'are_they_new_here',
-] as const
+export const ALLOWED_KEYS = ['understand_order', 'learn_name'] as const
 
 export type AllowedKey = (typeof ALLOWED_KEYS)[number]
 
@@ -206,7 +206,7 @@ export interface TurnVerdict {
   questionCount: number
   /** Bar 2. */
   twoQuestions: boolean
-  /** Bar 1: attributed keys outside the ruled three. */
+  /** Bar 1: attributed keys outside the ruled two. */
   offTargetKeys: string[]
   /**
    * The BODY asked a question and the full ballot attributed it to nothing at all.
@@ -252,7 +252,7 @@ export interface ConversationVerdict {
   questionCount: number
   /** Bar 2: how many turns carried more than one question. */
   twoQuestionTurns: number
-  /** Bar 1: attributed keys outside the ruled three, deduped. */
+  /** Bar 1: attributed keys outside the ruled two, deduped. */
   offTargetKeys: string[]
   /** Every key either judge attributed a question to, deduped. Feeds the floor. */
   askedKeys: string[]

@@ -517,9 +517,18 @@ describe('resolveDispatchBubbles — the intention tail', () => {
 // the one piece of guest-facing text in this module that must survive byte for
 // byte.
 describe('resolveDispatchBubbles — the warm close bubble (TAC-568)', () => {
-  // Le Mil's live wording, and deliberately the awkward case: an apostrophe, two
-  // commas, no terminal punctuation, and a trailing multi-byte emoji. If any
-  // normalizer touches the tail, one of these is what it damages.
+  // A FIXTURE, NOT ANY VENUE'S LIVE WORDING, and it is chosen to be hostile to
+  // the normalizers rather than to be realistic: apostrophes, two commas, no
+  // terminal punctuation, and a trailing multi-byte emoji. If a trim, a
+  // whitespace collapse, a period strip or an emoji re-encode ever runs over
+  // this bubble, one of those is what it damages.
+  //
+  // It read "Le Mil's live wording" until TAC-568's follow-on, and by then it
+  // was not: the venue's text had been rewritten in production, with no emoji.
+  // Pinning live copy in a splitter test is the mistake either way — the
+  // byte-identity property belongs where the SETTING is read
+  // (handle-inbound.test.ts, handle-followup.test.ts), and a fixture that
+  // chases production copy makes a pure test fail on a data edit.
   const CLOSE =
     "by the way, you can always message us here, whether it's about our coffee and beans, what to get next time, or what's coming up at the shop ☕"
 

@@ -422,10 +422,12 @@ describe('INTENTION_DEFINITIONS — rule interactions', () => {
 const ALLOWED_ON_FIRST_CONVERSATION = {
   // The reason the guest scanned at all.
   understand_order: true,
-  // The question the ruled flow ends on.
-  are_they_new_here: true,
-  // The one thing it is natural to ask for on a first hello.
+  // The one thing it is natural to ask for on a first hello, and since TAC-568
+  // the moment the first conversation closes on.
   learn_name: true,
+  // TAC-568 took this back off the first conversation the same day TAC-567 put
+  // it on. Transcribed from the ruling, not read off the definition.
+  are_they_new_here: false,
   got_the_recommendation: false,
   did_they_like_it: false,
   are_they_local: false,
@@ -433,7 +435,7 @@ const ALLOWED_ON_FIRST_CONVERSATION = {
   why_theyre_here: false,
 } satisfies Record<IntentionKey, boolean>
 
-describe('allowedOnFirstConversation (TAC-567)', () => {
+describe('allowedOnFirstConversation (TAC-567, narrowed by TAC-568)', () => {
   it.each(INTENTION_KEYS)('%s matches the ruling', (key) => {
     expect(INTENTION_DEFINITION_BY_KEY[key].allowedOnFirstConversation).toBe(
       ALLOWED_ON_FIRST_CONVERSATION[key],
@@ -444,16 +446,26 @@ describe('allowedOnFirstConversation (TAC-567)', () => {
   // table catches a flipped flag; this catches a flag flipped on one intention
   // and compensated on another, which the table would report as two failures and
   // a careless fix could turn into one.
-  it('allows exactly three and suppresses exactly five', () => {
+  it('allows exactly two and suppresses exactly six', () => {
     const allowed = INTENTION_DEFINITIONS.filter(
       (d) => d.allowedOnFirstConversation,
     ).map((d) => d.key)
-    expect(allowed).toEqual([
-      'understand_order',
-      'are_they_new_here',
-      'learn_name',
-    ])
-    expect(INTENTION_DEFINITIONS.length - allowed.length).toBe(5)
+    expect(allowed).toEqual(['understand_order', 'learn_name'])
+    expect(INTENTION_DEFINITIONS.length - allowed.length).toBe(6)
+  })
+
+  // TAC-568, and it is asserted on its own rather than left to the table above
+  // because this one flag is what the ruled first-visit flow turns on. Flipping
+  // it back to `true` restores the behaviour the device test filed: the visit
+  // stalls on "nice to meet you" whenever the model declines to raise it.
+  it('suppresses are_they_new_here on a first conversation and nowhere else', () => {
+    const def = INTENTION_DEFINITION_BY_KEY.are_they_new_here
+    expect(def.allowedOnFirstConversation).toBe(false)
+    // Still fully defined, still armed the same way, still expiring the same
+    // way: suppression is about ONE conversation, not about retiring it.
+    expect(def.armsOn.kind).toBe('first_recorded_order')
+    expect(def.promptLine.length).toBeGreaterThan(0)
+    expect(def.expiresAfterMs).toBeGreaterThan(0)
   })
 
   // WHAT THIS RULES OUT, and it is the reason the flag lives on the definition

@@ -264,9 +264,18 @@ vi.mock('./intentions/record', () => ({
   recordIntentionEligibility: (...a: unknown[]) =>
     recordIntentionEligibilityMock(...a),
 }))
+// TAC-568 follow-on: DRIVABLE, where this was `() => true` and a stub.
+//
+// The name arm of the warm close turns on updateGuestContext's own
+// identityColumnsChanged, so a test has to be able to say "this turn wrote
+// first_name". Both default to the old behaviour in beforeEach (an empty
+// update, so the block never runs), which is what keeps every other test in
+// this file on the path it was written for.
+const isEmptyContextUpdateMock = vi.fn()
+const updateGuestContextMock = vi.fn()
 vi.mock('@/lib/guests/context', () => ({
-  isEmptyContextUpdate: () => true,
-  updateGuestContext: vi.fn(),
+  isEmptyContextUpdate: (...a: unknown[]) => isEmptyContextUpdateMock(...a),
+  updateGuestContext: (...a: unknown[]) => updateGuestContextMock(...a),
 }))
 vi.mock('@/lib/analytics/posthog', () => ({
   // Deliberately a LOWER bar than production (inbound 35s / followup 20s) so the
@@ -496,6 +505,18 @@ beforeEach(() => {
   // TAC-540: clearAllMocks wipes this too, and an undefined return makes
   // handle-inbound's `.catch()` on it throw.
   signalTypingMock.mockResolvedValue({ status: 'sent' })
+  // TAC-568 follow-on: the pre-existing default, restored after clearAllMocks.
+  // An empty contextUpdate short-circuits the write entirely, so no turn in this
+  // file learns a name unless it opts in.
+  isEmptyContextUpdateMock.mockReturnValue(true)
+  updateGuestContextMock.mockResolvedValue({
+    ok: true,
+    data: {
+      hasStructured: false,
+      hasObservation: false,
+      identityColumnsChanged: [],
+    },
+  })
   spanLog.events = []
   inboundSingleMock.mockResolvedValue({
     data: {
@@ -4403,5 +4424,240 @@ describe('handleInbound — the warm close on a goodbye (TAC-568)', () => {
       await handleInbound(INBOUND_ID)
       expect(releaseWarmCloseClaimMock).not.toHaveBeenCalled()
     })
+  })
+})
+
+// TAC-568 follow-on, ruled 2026-09-30. Learning the guest's name IS the closing
+// moment of a first conversation, and since are_they_new_here came off the
+// first-conversation set it is the ordinary one — the goodbye path only fires
+// for a guest who signs off.
+//
+// THE SIGNAL IS THE COLUMN WRITE. Every test here drives
+// updateGuestContext's identityColumnsChanged rather than the model's proposed
+// contextUpdate, because that is the difference the ruling turns on: a name the
+// model offered and the database refused has not been learned.
+describe('handleInbound — the warm close on a learned name (TAC-568)', () => {
+  const VENUE_TEXT = 'the line is open here, message us anytime \u2615'
+
+  /** updateGuestContext's answer when the turn really did write first_name. */
+  const wroteFirstName = {
+    ok: true,
+    data: {
+      hasStructured: true,
+      hasObservation: false,
+      identityColumnsChanged: ['first_name'],
+    },
+  }
+
+  /**
+   * A first-conversation turn on a guest with NO name yet, whose reply says no
+   * goodbye and whose guest did not sign off. Nothing but the name can close it,
+   * which is what makes every assertion below about the name arm alone.
+   */
+  const namingTurn = (over: Record<string, unknown> = {}): void => {
+    const base = makeCtx()
+    buildRuntimeContextMock.mockResolvedValue(
+      makeCtx({
+        firstConversation: true,
+        venue: { ...base.venue, warmCloseText: VENUE_TEXT },
+        guest: { ...base.guest, firstName: null },
+        ...over,
+      }),
+    )
+    classifyStageMock.mockResolvedValue({
+      category: 'new_question',
+      classifierConfidence: 0.9,
+      reasoning: 'told us their name',
+      crisisSafety: false,
+    })
+    generateStageMock.mockResolvedValue({
+      status: 'success',
+      result: {
+        ...successResult(),
+        body: 'jp, nice to meet you',
+        closedTheConversation: false,
+        contextUpdate: { structured: { guest_details: { first_name: 'jp' } } },
+      },
+    })
+    isEmptyContextUpdateMock.mockReturnValue(false)
+    updateGuestContextMock.mockResolvedValue(wroteFirstName)
+  }
+
+  const bubbleSent = (): unknown =>
+    scheduleAndSendMock.mock.calls[0]?.[2]?.warmCloseBubble
+
+  beforeEach(() => {
+    markWarmCloseSentMock.mockResolvedValue({ ok: true, data: 'marked' })
+    releaseWarmCloseClaimMock.mockResolvedValue(undefined)
+  })
+
+  // THE DEVICE TEST THAT FILED THE RULING. The visit used to stall exactly here:
+  // "jp, nice to meet you", no goodbye, no close, ten minutes of silence.
+  it('closes on the name with no goodbye anywhere in the turn', async () => {
+    namingTurn()
+    const r = await handleInbound(INBOUND_ID)
+    expect(r).toMatchObject({ status: 'sent' })
+    expect(bubbleSent()).toBe(VENUE_TEXT)
+    expect(markWarmCloseSentMock).toHaveBeenCalledTimes(1)
+    expect(markWarmCloseSentMock.mock.calls[0]?.[1]).toBe(GUEST_ID)
+    expect(releaseWarmCloseClaimMock).not.toHaveBeenCalled()
+  })
+
+  it('hands dispatch the setting byte for byte', async () => {
+    namingTurn()
+    await handleInbound(INBOUND_ID)
+    const sent = bubbleSent()
+    expect(sent).toBe(VENUE_TEXT)
+    expect(Buffer.from(sent as string, 'utf8')).toEqual(
+      Buffer.from(VENUE_TEXT, 'utf8'),
+    )
+  })
+
+  // THE MUTANT THE ACCEPTANCE CRITERION NAMES, on the new arm. Delete the
+  // `already_marked` branch and a guest closed by the goodbye path or the timer
+  // gets a second close the moment they give their name.
+  it('appends NOTHING when this guest has already been closed', async () => {
+    namingTurn()
+    markWarmCloseSentMock.mockResolvedValue({
+      ok: true,
+      data: 'already_marked',
+    })
+    const r = await handleInbound(INBOUND_ID)
+    expect(r).toMatchObject({ status: 'sent' })
+    expect(bubbleSent()).toBe('')
+    expect(releaseWarmCloseClaimMock).not.toHaveBeenCalled()
+  })
+
+  // THE "no prior name" HALF, and it is the one a careless reading drops. The
+  // model re-emitting a name we already had is not learning it, and without this
+  // every later turn that restates the name would try to close again.
+  it('does not close when the guest already had a name on record', async () => {
+    const base = makeCtx()
+    namingTurn({ guest: { ...base.guest, firstName: 'jp' } })
+    await handleInbound(INBOUND_ID)
+    expect(bubbleSent()).toBe('')
+    expect(markWarmCloseSentMock).not.toHaveBeenCalled()
+  })
+
+  // Whitespace is not a name on record. `' '` must read as "no name" or a guest
+  // whose column holds a stray space can never be closed by this arm.
+  it('treats a whitespace-only stored name as no name', async () => {
+    const base = makeCtx()
+    namingTurn({ guest: { ...base.guest, firstName: '   ' } })
+    await handleInbound(INBOUND_ID)
+    expect(bubbleSent()).toBe(VENUE_TEXT)
+  })
+
+  // THE WRITE IS THE SIGNAL, from the failing side. The model proposed a name,
+  // the UPDATE failed, nothing was learned — so nothing closes, and the pause
+  // timer still covers this guest inside its own window.
+  it('does not close when the context write failed', async () => {
+    namingTurn()
+    updateGuestContextMock.mockResolvedValue({
+      ok: false,
+      error: 'db down',
+      errorCode: 'db_write_failed',
+    })
+    const r = await handleInbound(INBOUND_ID)
+    expect(r).toMatchObject({ status: 'sent' })
+    expect(bubbleSent()).toBe('')
+    expect(markWarmCloseSentMock).not.toHaveBeenCalled()
+  })
+
+  // The same shape one layer in: the write SUCCEEDED but carried no identity
+  // column, which is every ordinary contextUpdate (an observation, a preference).
+  it('does not close on a context write that touched no identity column', async () => {
+    namingTurn()
+    updateGuestContextMock.mockResolvedValue({
+      ok: true,
+      data: {
+        hasStructured: true,
+        hasObservation: true,
+        identityColumnsChanged: [],
+      },
+    })
+    await handleInbound(INBOUND_ID)
+    expect(bubbleSent()).toBe('')
+    expect(markWarmCloseSentMock).not.toHaveBeenCalled()
+  })
+
+  // last_name is not a closing moment. Named explicitly because
+  // identityColumnsChanged carries both, and `.length > 0` would have passed
+  // every other test in this block while closing on a surname.
+  it('does not close when only last_name was written', async () => {
+    namingTurn()
+    updateGuestContextMock.mockResolvedValue({
+      ok: true,
+      data: {
+        hasStructured: true,
+        hasObservation: false,
+        identityColumnsChanged: ['last_name'],
+      },
+    })
+    await handleInbound(INBOUND_ID)
+    expect(bubbleSent()).toBe('')
+    expect(markWarmCloseSentMock).not.toHaveBeenCalled()
+  })
+
+  it('does not close outside a first conversation', async () => {
+    namingTurn({ firstConversation: false })
+    await handleInbound(INBOUND_ID)
+    expect(bubbleSent()).toBe('')
+    expect(markWarmCloseSentMock).not.toHaveBeenCalled()
+  })
+
+  it('does not close when the venue has no configured text', async () => {
+    const base = makeCtx()
+    namingTurn({ venue: { ...base.venue, warmCloseText: '' } })
+    await handleInbound(INBOUND_ID)
+    expect(bubbleSent()).toBe('')
+    expect(markWarmCloseSentMock).not.toHaveBeenCalled()
+  })
+
+  // THE CLAIM IS RELEASED when the close never reached the guest. The goodbye
+  // path has this covered; the name arm takes the same claim, so it needs the
+  // same proof rather than inheriting the argument.
+  it('gives the claim back when the reply is not delivered', async () => {
+    namingTurn()
+    scheduleAndSendMock.mockResolvedValue({ kind: 'not_sent', reason: 'boom' })
+    await handleInbound(INBOUND_ID)
+    expect(markWarmCloseSentMock).toHaveBeenCalledTimes(1)
+    expect(releaseWarmCloseClaimMock).toHaveBeenCalledTimes(1)
+    expect(releaseWarmCloseClaimMock.mock.calls[0]?.[1]).toBe(GUEST_ID)
+    // Scoped to the exact timestamp this turn wrote, so it can never clear a
+    // marker the timer set in between.
+    expect(releaseWarmCloseClaimMock.mock.calls[0]?.[2]).toBe(
+      markWarmCloseSentMock.mock.calls[0]?.[2],
+    )
+  })
+
+  // ONCE PER GUEST ACROSS BOTH IN-CONVERSATION ARMS. A turn that both learns the
+  // name AND closes with a goodbye must still take exactly one claim and append
+  // exactly one bubble — not two, and not one per arm.
+  it('claims once when the name and the goodbye both fire on one turn', async () => {
+    namingTurn()
+    classifyStageMock.mockResolvedValue({
+      category: 'acknowledgment',
+      classifierConfidence: 0.9,
+      reasoning: 'signed off and gave a name',
+      crisisSafety: false,
+    })
+    generateStageMock.mockResolvedValue({
+      status: 'success',
+      result: {
+        ...successResult(),
+        body: 'jp, nice to meet you. see you soon',
+        closedTheConversation: true,
+        contextUpdate: { structured: { guest_details: { first_name: 'jp' } } },
+      },
+    })
+    await handleInbound(INBOUND_ID)
+    expect(markWarmCloseSentMock).toHaveBeenCalledTimes(1)
+    expect(bubbleSent()).toBe(VENUE_TEXT)
+    expect(
+      scheduleAndSendMock.mock.calls.filter(
+        (c) => c?.[2]?.warmCloseBubble === VENUE_TEXT,
+      ),
+    ).toHaveLength(1)
   })
 })

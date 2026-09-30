@@ -247,20 +247,28 @@ export interface IntentionDefinition {
   armsOn: IntentionArmsOn
   gate: IntentionGate
   /**
-   * TAC-567: may this intention be raised during the guest's FIRST
-   * conversation?
+   * TAC-567, narrowed by TAC-568: may this intention be raised during the
+   * guest's FIRST conversation?
    *
-   * Jaipal ruled (2026-09-30) that a first conversation asks exactly three
-   * things: what they got (understand_order), their name (learn_name), and
-   * whether they are new here (are_they_new_here). A fresh scan that asked
-   * four questions across three messages read as an interview, and the
-   * relationship is meant to build over visits rather than in one sitting.
+   * Jaipal ruled (2026-09-30) that a first conversation asks exactly TWO
+   * things: what they got (understand_order) and their name (learn_name). A
+   * fresh scan that asked four questions across three messages read as an
+   * interview, and the relationship is meant to build over visits rather than
+   * in one sitting.
    *
-   * DECLARED PER INTENTION, NEVER INFERRED FROM `armsOn` OR `priority`. The
-   * three allowed ones share no arming kind (visit_confirmed, first_contact,
-   * first_recorded_order) and the five suppressed ones cover two of those same
-   * kinds, so there is no structural property to read this off. Nothing in
-   * derive.ts branches on an intention's key; it reads this field.
+   * TAC-567 ALLOWED A THIRD, are_they_new_here, and TAC-568 took it back the
+   * same day. That is worth keeping because the reason was not a rethink of the
+   * wording: armed and open, the model declined to raise it, and the visit
+   * stalled with no close. A first conversation that ENDS on an optional
+   * question ends on whether the model felt like asking it. It now ends on the
+   * name, which is a thing that either happened or did not.
+   *
+   * DECLARED PER INTENTION, NEVER INFERRED FROM `armsOn` OR `priority`. The two
+   * allowed ones share no arming kind (visit_confirmed, first_contact), and
+   * `first_contact` also arms three of the six suppressed ones, so there is no
+   * structural property to read this off. Nothing in derive.ts branches on an
+   * intention's key; it reads this field. definitions.test.ts asserts that
+   * overlap rather than asserting the claim, so it cannot go stale silently.
    *
    * `false` SUPPRESSES RATHER THAN CLOSES, in two places (deriveOpenIntentions):
    * the arming loop skips it, so no eligible_at row is written and its window
@@ -338,8 +346,9 @@ const DEFINITIONS = {
     priority: 10,
     armsOn: { kind: 'visit_confirmed' },
     gate: { kind: 'none' },
-    // TAC-567: one of the three a first conversation may ask. It is the reason
-    // the guest scanned at all, and the opener asks it outright.
+    // TAC-567: one of the two a first conversation may ask, after TAC-568 took
+    // the third back. It is the reason the guest scanned at all, and the opener
+    // asks it outright.
     allowedOnFirstConversation: true,
     promptLine: "You haven't heard what this guest ordered yet.",
     // Deliberately says nothing about how the drink or food WAS: that belongs
@@ -375,9 +384,20 @@ const DEFINITIONS = {
       defaultMinReplies: 3,
       firstMessageMinReplies: 3,
     },
-    // TAC-567: one of the three. This is the question the ruled first-visit
-    // flow ends on, before the warm close.
-    allowedOnFirstConversation: true,
+    // TAC-568: OFF the first conversation, reversing TAC-567's third slot.
+    //
+    // TAC-567 put this here because the ruled flow was meant to END on it. The
+    // device test showed the opposite: armed and open, the model declined to
+    // raise it, and the first visit simply stalled on "nice to meet you" with
+    // no close. It is not that the question was wrong; it is that a first
+    // conversation has nowhere to put it once the order and the name are in,
+    // and holding the conversation open waiting for it costs the close.
+    //
+    // Jaipal ruled (2026-09-30) that a first conversation asks TWO things, and
+    // learning the name is the closing moment instead. This intention keeps its
+    // definition, its arming and its window untouched and becomes eligible from
+    // the SECOND conversation on, exactly like the other five suppressed ones.
+    allowedOnFirstConversation: false,
     // Ruled verbatim by Jaipal, 2026-09-29. THIS IS THE ORIGINAL WORDING, ruled
     // back after a second one was tried and measured worse. Read the history
     // before rewording it, because the obvious fix has been tried.
@@ -479,8 +499,15 @@ const DEFINITIONS = {
       defaultMinReplies: 3,
       firstMessageMinReplies: 0,
     },
-    // TAC-567: one of the three. A name is the one thing it is natural to ask
-    // for on a first hello, which is also why it alone waives the reply count.
+    // TAC-567: one of the two, and since TAC-568 the LAST one. A name is the
+    // one thing it is natural to ask for on a first hello, which is also why it
+    // alone waives the reply count.
+    //
+    // It is now also the first conversation's CLOSING MOMENT: the turn that
+    // stores a name is the turn the warm close rides on (closesFirstConversation
+    // in lib/agent/warm-close.ts). Nothing here enforces that — the close reads
+    // the guests row, not this definition — but a future change that stops this
+    // intention closing on a stored name would take the close with it.
     allowedOnFirstConversation: true,
     // TAC-541 ruling 3. THE SHAPE IS PART OF THE LINE, and the generic
     // restraint paragraph is what made that necessary: "one short question on

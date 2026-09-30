@@ -32,7 +32,7 @@ boolean or string is free.
 `correctsPendingReply`, `followUpWorthy`. None is `.optional()`, which is what makes the
 compiler name every site synthesizing a `Classification`.
 
-`PROMPT_VERSION` (`prompts/system-template.ts`, currently v1.78.0) covers the
+`PROMPT_VERSION` (`prompts/system-template.ts`, currently v1.79.0) covers the
 classify/generate contract. Every other module here carries its own, and they are
 deliberately not linked:
 

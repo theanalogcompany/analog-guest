@@ -1863,6 +1863,25 @@ import {
 // signed off and forbids naming anything new, both false when the guest sent
 // nothing. Handing the model a false premise as fact is the TAC-484 / TAC-502
 // failure class. See lib/ai/prompts/categories/warm-close.ts.
+// v1.79.0 (TAC-568 follow-on): NO TEMPLATE TEXT CHANGED, and the bump is
+//   deliberate anyway. `are_they_new_here` came off the first-conversation
+//   allowed set (allowedOnFirstConversation on its definition), so the
+//   "## What you're hoping to get to" block can render one fewer line on a
+//   first conversation than it could at v1.78.0. The composed prompt a first
+//   visit sees is therefore not the same document, which is what this constant
+//   versions — it is not a version of this FILE.
+//
+//   RECORDED BECAUSE THE NEXT READER WILL LOOK FOR A DIFF HERE AND FIND NONE.
+//   A bump with no textual change looks like a mistake; the alternative, not
+//   bumping, silently pools two different first-visit prompts under one version
+//   in every trace and every measurement run. The measurement harnesses group
+//   by this string, so leaving it would make the before and after of this
+//   ruling indistinguishable in exactly the runs that exist to tell them apart.
+//
+//   FIRST_CONVERSATION_RESTRAINT is untouched and still says "the only question
+//   this turn is the one listed above" — true of two listed lines as it was of
+//   three, which is why it names no count and needed no edit.
+//
 // v1.78.0 (TAC-568): the # Conversation close self-report block changes MEANING,
 // and the `## Closing this conversation` user-prompt block and the warm-close
 // category instructions are DELETED. No voice rule changes.
@@ -2039,7 +2058,7 @@ import {
 // It also means the earlier runs quoted above measured prompts that no longer
 // exist, which is why Jaipal ruled the run be repeated against the rebased
 // prompt rather than the rulings applied on top of it.
-export const PROMPT_VERSION = 'v1.78.0'
+export const PROMPT_VERSION = 'v1.79.0'
 
 export const SYSTEM_TEMPLATE = `You work at a hospitality venue (cafe, bakery, restaurant). You communicate with its guests via iMessage, in whatever voice the venue has configured below — its own collective voice, its owner's, or a named staff member's.
 

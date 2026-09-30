@@ -1760,8 +1760,8 @@ describe('deriveOpenIntentions — are_they_new_here (TAC-558)', () => {
   })
 })
 
-// TAC-567, ruled 2026-09-30: on a guest's FIRST conversation only
-// understand_order, learn_name and are_they_new_here may be raised.
+// TAC-567, ruled 2026-09-30 and narrowed by TAC-568 the same day: on a guest's
+// FIRST conversation only understand_order and learn_name may be raised.
 //
 // ONE FIXTURE, TWO ARMS, and that is what makes these tests mean something. The
 // input below opens ALL EIGHT intentions - 11 lifetime replies clears every
@@ -1770,7 +1770,7 @@ describe('deriveOpenIntentions — are_they_new_here (TAC-558)', () => {
 // conversation window. Only `isFirstConversation` differs between the arms, so a
 // suppression that worked by accident (a gate, a window, an expiry) would show up
 // as the control arm losing intentions too.
-describe('deriveOpenIntentions — first conversation (TAC-567)', () => {
+describe('deriveOpenIntentions — first conversation (TAC-567/TAC-568)', () => {
   const ALL_EIGHT_OPEN: Partial<DeriveOpenIntentionsInput> = {
     responseRate: 100,
     repliedMessageCount: 11,
@@ -1802,21 +1802,23 @@ describe('deriveOpenIntentions — first conversation (TAC-567)', () => {
     ])
   })
 
-  it('opens only the ruled three on a first conversation', () => {
+  it('opens only the ruled two on a first conversation', () => {
     const { open } = deriveOpenIntentions(
       input({ ...ALL_EIGHT_OPEN, isFirstConversation: true }),
     )
-    expect(keysOf(open)).toEqual([
-      'understand_order',
-      'are_they_new_here',
-      'learn_name',
-    ])
+    expect(keysOf(open)).toEqual(['understand_order', 'learn_name'])
   })
 
   // Each suppressed intention named individually, because the two list
-  // assertions above would both pass if four of the five were suppressed and one
+  // assertions above would both pass if five of the six were suppressed and one
   // were suppressed for an unrelated reason.
+  //
+  // are_they_new_here JOINED THIS LIST IN TAC-568, and it is the one that
+  // matters: the fixture arms it (a recorded order, 11 replies), so the control
+  // arm below proves it is still fully alive on a second conversation. A
+  // suppression that had accidentally retired the intention would fail there.
   it.each([
+    'are_they_new_here',
     'got_the_recommendation',
     'did_they_like_it',
     'are_they_local',
@@ -1833,7 +1835,7 @@ describe('deriveOpenIntentions — first conversation (TAC-567)', () => {
     expect(keysOf(later.open)).toContain(key)
   })
 
-  it.each(['understand_order', 'are_they_new_here', 'learn_name'] as const)(
+  it.each(['understand_order', 'learn_name'] as const)(
     '%s is eligible on a first conversation',
     (key) => {
       const { open } = deriveOpenIntentions(
@@ -1852,7 +1854,6 @@ describe('deriveOpenIntentions — first conversation (TAC-567)', () => {
       input({ ...ALL_EIGHT_OPEN, isFirstConversation: true }),
     )
     expect(newlyEligible.map((n) => n.key).sort()).toEqual([
-      'are_they_new_here',
       'learn_name',
       'understand_order',
     ])
@@ -1887,19 +1888,19 @@ describe('deriveOpenIntentions — first conversation (TAC-567)', () => {
     const first = deriveOpenIntentions(
       input({ ...shared, isFirstConversation: true }),
     )
-    expect(keysOf(first.open)).toEqual([
-      'understand_order',
-      'are_they_new_here',
-      'learn_name',
-    ])
+    expect(keysOf(first.open)).toEqual(['understand_order', 'learn_name'])
   })
 
-  // The ruled sequence, as the production turn shape produces it: turn 1 has no
-  // transaction, so are_they_new_here is unarmed and learn_name rides its
-  // first-message waiver; the order lands and turn 3 arms are_they_new_here, which
-  // outranks learn_name on priority. Nothing here sets a flag to make that happen -
-  // it is the gates and armings already shipped, read through the new filter.
-  it('walks the ruled first-visit flow: the order, then the name, then new here', () => {
+  // The ruled sequence, as the production turn shape produces it. TAC-568
+  // rewrote its ENDING: the order lands, and where turn 3 used to arm
+  // are_they_new_here and let it outrank learn_name, the filter now drops it and
+  // the name is the only thing left to ask. That is the whole point of the
+  // ruling - the visit ends on something that either happened or did not,
+  // rather than on a question the model may decline to raise.
+  //
+  // Nothing here sets a flag to make that happen: it is the gates and armings
+  // already shipped, read through the filter.
+  it('walks the ruled first-visit flow: the order, then the name, and it ends there', () => {
     const turnOne = deriveOpenIntentions(
       input({
         isFirstConversation: true,
@@ -1918,6 +1919,23 @@ describe('deriveOpenIntentions — first conversation (TAC-567)', () => {
         facts: { ...NO_FACTS, hasQualifyingTransaction: true },
       }),
     )
-    expect(keysOf(turnThree.open)).toEqual(['are_they_new_here', 'learn_name'])
+    // are_they_new_here IS ARMED HERE and still does not render: the fixture
+    // gives it a recorded order and 3 replies, which is exactly what TAC-558
+    // needs. Only the first-conversation filter stops it, so this assertion
+    // fails the moment the flag goes back to true.
+    expect(keysOf(turnThree.open)).toEqual(['learn_name'])
+
+    // The same turn, on a LATER conversation, is the control: identical inputs,
+    // one flag flipped, and the intention comes back at the head of the list.
+    const laterVisit = deriveOpenIntentions(
+      input({
+        isFirstConversation: false,
+        repliedMessageCount: 3,
+        visitConfirmedAt: hoursAgo(1),
+        recordedOrderTimes: [hoursAgo(1)],
+        facts: { ...NO_FACTS, hasQualifyingTransaction: true },
+      }),
+    )
+    expect(keysOf(laterVisit.open)).toEqual(['are_they_new_here', 'learn_name'])
   })
 })

@@ -240,11 +240,14 @@ Two predicates must move together: `shouldRenderOpenIntentions` (render side) an
 classifier is offered intentions the prompt never showed, which closes goals the guest
 never saw. A cross-module test iterates every category for exactly this.
 
-### A first conversation asks three things only (TAC-567)
+### A first conversation asks two things only (TAC-567, narrowed by TAC-568)
 
-On a guest's FIRST conversation only `understand_order`, `learn_name` and
-`are_they_new_here` may be raised. The other five are suppressed. Ruled 2026-09-30 after a
-fresh scan asked four questions across three messages.
+On a guest's FIRST conversation only `understand_order` and `learn_name` may be raised. The
+other six are suppressed. Ruled 2026-09-30 after a fresh scan asked four questions across
+three messages. TAC-568 took `are_they_new_here` back out the same day: armed and open, the
+model declined to raise it and the visit stalled with no close. It is eligible again from the
+second conversation. **Learning the name is now the first conversation's closing moment** -
+`closesFirstConversation` (`warm-close.ts`) sends the warm close on the turn that stores it.
 
 `allowedOnFirstConversation` on the definition is the one declaration, so a new intention must
 answer it or fail `tsc`; nothing in `derive.ts` branches on a key. "First conversation" is
