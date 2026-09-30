@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   countWords,
   findCountClaim,
+  findOrderFrequencyPhrase,
   findOtherHistoryItems,
   findSellingLanguage,
   findVisitFrequencyClaim,
@@ -42,6 +43,27 @@ describe('findCountClaim — the pre-registered R23 ceiling', () => {
     expect(findCountClaim(body).found).toBe(false)
   })
 
+  // THE LIVE FALSE POSITIVE. Run 2 reported a count-ceiling breach on
+  // freq-17, and there is no count in that reply at all: `one` after `the` is
+  // a pronoun, and `come` landed inside the tally window. The arm was reported
+  // as breaching a pre-registered ceiling on the strength of this bug, so
+  // every one of these is pinned with the shape that produced it.
+  it.each([
+    ['the live body, verbatim', "that's the one you always come back to."],
+    ['that one, beside a tally word', "that one you order more than anything"],
+    ['this one, beside had', "this one you've had before"],
+    ['another one, beside come', 'another one when you come in'],
+  ])('does NOT read a determiner `one` as a count: %s', (_label, body) => {
+    expect(findCountClaim(body).found).toBe(false)
+  })
+
+  // The determiner fix must not cost the ordinal. Run 1's real breach is the
+  // reason the ceiling exists, and `third` is what catches it, not `one`.
+  it('still finds an ordinal introduced by a determiner', () => {
+    const v = findCountClaim("that's the third one in two weeks")
+    expect(v.found).toBe(true)
+  })
+
   it('reports the matched span so a false positive can be read', () => {
     const v = findCountClaim("you've had it twice now")
     expect(v.matches[0]).toContain('twice')
@@ -64,11 +86,21 @@ describe('findCountClaim — the pre-registered R23 ceiling', () => {
 describe('findVisitFrequencyClaim — advisory, not a bar', () => {
   it.each([
     ["R23's own example", 'you come in so often'],
-    ['always + come', 'you always come in around now'],
-    ['every time', 'every time you stop by'],
+    ['every visit', 'every visit you stop by'],
     ['regular', "you're a regular at this point"],
-  ])('flags a frequency claim: %s', (_label, body) => {
+  ])('flags a VISIT frequency claim: %s', (_label, body) => {
     expect(findVisitFrequencyClaim(body).found).toBe(true)
+  })
+
+  // RULING 5 moved order frequency out of this detector. These are about what
+  // the guest ORDERS, which is now the recognition the rule asks for, so
+  // scoring them here would report the desired output as a breach.
+  it.each([
+    ['every time, about the item', "that one's yours every time"],
+    ['always come back to', "that's the one you always come back to"],
+    ['keeps coming back to', 'you keep coming back to that one'],
+  ])('does NOT flag order frequency: %s', (_label, body) => {
+    expect(findVisitFrequencyClaim(body).found).toBe(false)
   })
 
   it.each([
@@ -81,8 +113,47 @@ describe('findVisitFrequencyClaim — advisory, not a bar', () => {
   })
 
   it('deduplicates repeated matches of the same phrase', () => {
-    const v = findVisitFrequencyClaim('every time, and I mean every time')
+    const v = findVisitFrequencyClaim('every visit, and I mean every visit')
+    expect(v.matches).toEqual(['every visit'])
+  })
+})
+
+// RULING 5 (2026-09-29): this is the shape the rule WANTS, so a high rate here
+// is a good sign rather than a finding. It is reported so the permitted
+// recognition is countable, and it is deliberately not a bar in either
+// direction: nothing says every reply must phrase recognition this way.
+describe('findOrderFrequencyPhrase — the permitted recognition', () => {
+  it.each([
+    ['every time, about the item', "that one's yours every time"],
+    ['always come back to', "that's the one you always come back to"],
+    ['go-to', "that cappuccino's been your go-to lately"],
+    ['your move', "that's your move"],
+    ['become your thing', "that one's become your thing"],
+    ['keeps coming back', 'you keep coming back to it'],
+  ])('finds it: %s', (_label, body) => {
+    expect(findOrderFrequencyPhrase(body).found).toBe(true)
+  })
+
+  it.each([
+    ['a plain receipt', 'nice, enjoy it'],
+    ['a well-wish', 'hope it hit right'],
+    ['a visit-frequency claim, which is the other detector', 'you come in so often'],
+  ])('does NOT fire on: %s', (_label, body) => {
+    expect(findOrderFrequencyPhrase(body).found).toBe(false)
+  })
+
+  it('deduplicates repeated matches of the same phrase', () => {
+    const v = findOrderFrequencyPhrase('every time, and I mean every time')
     expect(v.matches).toEqual(['every time'])
+  })
+
+  // A count is banned however warmly it is phrased, so the two detectors are
+  // independent rather than exclusive: this body is permitted recognition AND
+  // a ceiling breach, and the run has to see both.
+  it('is independent of the count ceiling', () => {
+    const body = "that one's become your thing. third one in two weeks."
+    expect(findOrderFrequencyPhrase(body).found).toBe(true)
+    expect(findCountClaim(body).found).toBe(true)
   })
 })
 

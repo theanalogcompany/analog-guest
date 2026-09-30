@@ -146,8 +146,43 @@ const TALLY_CONTEXT = new Set([
 /** How many words either side of a number are searched for tally context. */
 const TALLY_WINDOW = 3
 
+/**
+ * Words that make a following `one` a DETERMINER rather than a tally.
+ *
+ * THIS EXISTS BECAUSE THE CEILING REPORTED A BREACH THAT WAS NOT ONE. Run 2's
+ * freq-17 read "that's the one you always come back to", which states no count
+ * whatever, and it tripped `findCountClaim`: `one` is in NUMBER_TOKENS and
+ * `come` is in TALLY_CONTEXT three words later. The judge said statesCount
+ * false and the judge was right, so the arm was reported as breaching a
+ * pre-registered ceiling on the strength of my own regex.
+ *
+ * Only `one` is affected. An ordinal keeps counting however it is introduced:
+ * "the third one" is a tally and `third` is what catches it, which is why
+ * run 1's "third one in two weeks" still fires with this in place.
+ */
+const ONE_DETERMINERS = new Set([
+  'the',
+  'that',
+  'this',
+  'these',
+  'those',
+  'which',
+  'whichever',
+  'another',
+  'other',
+  'any',
+  'no',
+])
+
 function isNumberToken(w: string): boolean {
   return NUMBER_TOKENS.has(w) || /^\d+$/.test(w)
+}
+
+/** True when `ws[i]` is `one` used as a determiner or pronoun, not a count. */
+function isDeterminerOne(ws: readonly string[], i: number): boolean {
+  if (ws[i] !== 'one') return false
+  const prev = i > 0 ? ws[i - 1] : undefined
+  return prev !== undefined && ONE_DETERMINERS.has(prev)
 }
 
 /**
@@ -168,6 +203,7 @@ export function findCountClaim(body: string): LanguageFinding {
   for (let i = 0; i < ws.length; i += 1) {
     const w = ws[i]
     if (w === undefined || !isNumberToken(w)) continue
+    if (isDeterminerOne(ws, i)) continue
     const from = Math.max(0, i - TALLY_WINDOW)
     const to = Math.min(ws.length, i + TALLY_WINDOW + 1)
     let hit = false
@@ -184,13 +220,13 @@ export function findCountClaim(body: string): LanguageFinding {
 /**
  * A claim about HOW OFTEN the guest comes in, with no number in it.
  *
- * ADVISORY, NOT A BAR. R23's own example "you come in so often" carries no
- * number, so this is the shape of R23 breach a count check structurally
- * cannot see, and it is the specific risk this change introduces. It is
- * reported prominently and is deliberately not one of the ceilings the run
- * was pre-registered against: adding a bar after the fact moves the goalposts
- * even when it moves them in the stricter direction. Jaipal reads these and
- * decides.
+ * ADVISORY, NOT A BAR, and narrowed by ruling 5 to VISIT frequency only.
+ * R23's own example "you come in so often" carries no number, so this is the
+ * shape of R23 breach a count check structurally cannot see. Statements about
+ * how often the guest keeps choosing an ITEM moved to
+ * `findOrderFrequencyPhrase` when ruling 5 permitted them; what is left here
+ * is about how often they have BEEN HERE, which R23's base still forbids and
+ * which this ticket did not touch.
  *
  * Note what it does NOT match, and must not: saying an item is the one they
  * order most is the recognition the change is for, and is about the ORDER
@@ -199,11 +235,47 @@ export function findCountClaim(body: string): LanguageFinding {
 const VISIT_FREQUENCY_PATTERNS: readonly RegExp[] = [
   /\b(?:you )?come in (?:so |pretty |quite |that )?(?:often|regularly|a lot|all the time)\b/,
   /\b(?:you are|you're|youre) (?:in )?here (?:so |pretty |quite )?(?:often|regularly|a lot|all the time)\b/,
-  /\bevery (?:time|visit|single time)\b/,
-  /\b(?:you )?(?:always|never) (?:come|order|get|stop)\b/,
+  /\bevery (?:visit|single visit)\b/,
   /\ba regular\b/,
   /\bone of (?:our|the) regulars\b/,
 ]
+
+/**
+ * Warm, countless recognition that the guest keeps choosing this item.
+ *
+ * RULING 5 (2026-09-29) MOVED THIS FROM A FINDING TO THE DESIRED OUTPUT, so
+ * this function exists to report a rate that is GOOD when it is high. The
+ * first version of the rule banned saying "how often or how recently they
+ * come", which also banned this, and 4 of 20 replies tripped it while stating
+ * nothing countable. What is banned now is a FIGURE, which is
+ * `findCountClaim`'s job and the pre-registered bar.
+ *
+ * Kept apart from `findVisitFrequencyClaim` because the two are about
+ * different things and only one of them is permitted: R23's base prohibition
+ * on statements about how often the guest has BEEN HERE is untouched by this
+ * ticket, while frequency about what they ORDER is the recognition the rule
+ * exists to produce. That distinction is R23's carve-out, in the prompt, and
+ * splitting the detectors is what lets the run report on each separately
+ * rather than scoring the permitted shape as a breach.
+ */
+const ORDER_FREQUENCY_PATTERNS: readonly RegExp[] = [
+  /\bevery (?:time|single time)\b/,
+  /\b(?:you )?always (?:come back to|go for|get|order|pick|choose)\b/,
+  /\bkeep(?:s)? coming back to\b/,
+  /\byour go.?to\b/,
+  /\bthat(?:'s| is) your (?:move|thing|order)\b/,
+  /\b(?:has |have )?become your thing\b/,
+]
+
+export function findOrderFrequencyPhrase(body: string): LanguageFinding {
+  const folded = fold(body)
+  const matches: string[] = []
+  for (const re of ORDER_FREQUENCY_PATTERNS) {
+    const m = folded.match(re)
+    if (m && m[0]) matches.push(m[0])
+  }
+  return matches.length === 0 ? EMPTY : { found: true, matches: [...new Set(matches)] }
+}
 
 export function findVisitFrequencyClaim(body: string): LanguageFinding {
   const folded = fold(body)

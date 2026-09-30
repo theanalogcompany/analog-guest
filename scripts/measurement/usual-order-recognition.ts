@@ -51,6 +51,7 @@ import {
 import { getClassificationModel, getGenerationModel } from '@/lib/ai/client'
 import { composePrompt } from '@/lib/ai/compose-prompt'
 import {
+  composeReplyWithIntention,
   GeneratedMessageSchema,
   MAX_OUTPUT_TOKENS,
   VOICE_FIDELITY_INSTRUCTION,
@@ -66,6 +67,7 @@ import type { RecentMessage as RuntimeMessage, Visit } from '@/lib/ai/types'
 import {
   countWords,
   findCountClaim,
+  findOrderFrequencyPhrase,
   findOtherHistoryItems,
   findSellingLanguage,
   findVisitFrequencyClaim,
@@ -82,7 +84,7 @@ import { createRunLog } from './run-log'
  * mismatch is a startup failure.
  */
 const R21_CLAUSE =
-  " Receiving it is not the same as saying as little as possible. When the item they named is already in this guest's ## Visit history, write a real sentence, not a label. Two things always belong in it: that you know this is what they order, or that they have had it before, and something warm about them coming back and about the choice itself. That warmth is the one place this rule's ban on rating the choice gives way, and only here, because a guest you recognize is not a stranger whose order you are grading. Say it in your own words. Two or three words naming the order and nothing else is a label, not a sentence, and it is not this. Never put a number on any of it: not a count of visits or orders, not how often or how recently they come, not even when the dates in their history would let you work it out. Sometimes one more thing belongs, and only when it genuinely adds something they would not already know. Either one specific and genuinely interesting detail about the item, drawn from the venue's own knowledge. Or, for a regular's usual drink and only when the moment invites it, the story of the bean behind it: where it comes from, and why that gives the drink the taste it has. That the beans can go home with them to brew is a natural aside inside that story, never an offer. All of it comes from the venue's own knowledge and nowhere else, and it has to read as sharing something you love rather than selling: where that knowledge also records how a bean is sold, in what sizes, at what price or on what website, none of that is part of the story. Say nothing about buying it and name no price unless the guest asks. Once per guest at most, never the same detail or story twice, and never to a guest whose first visit this is. It is entirely fine if it never comes up. Do not recite their history back to them in any of this. If the item is not in their history, say nothing about their history: no recognition, nothing about them coming back, and no story. A category's register guidance, whether it frames the turn as a close or as small talk, is never authority over whether you recognize an order you know. Neither is the ## Length section: one real sentence is worth the room here, and that exception is this turn only."
+  " Receiving it is not the same as saying as little as possible. When the item they named is already in this guest's ## Visit history, write a real sentence, not a label. Two things always belong in it: that you know this is what they order, or that they have had it before, and something warm about them: about their coming back, or about the taste they have. That warmth is about the guest and not about the drink. A wish that the item turns out well is a kind thing to say and it is not this, because it is about the order rather than about the person who chose it, so it never counts as the warm half. That warmth is also the one place this rule's ban on rating the choice gives way, and only for an item already in their ## Visit history, because a guest you recognize is not a stranger whose order you are grading. Say it in your own words. Two or three words naming the order and nothing else is a label, not a sentence, and it is not this. Frequency in words belongs to that recognition and is welcome: that they keep coming back to this one is the kind of thing to say. Frequency as a figure never is. No count of visits or orders, no ordinal placing this one in a sequence, and no span of time to measure them against. The ## Visit history block states those counts outright and its dates let more be worked out; none of that is yours to repeat back. Sometimes one more thing belongs, and only when it genuinely adds something they would not already know. Either one specific and genuinely interesting detail about the item, drawn from the venue's own knowledge. Or, for a regular's usual drink and only when the moment invites it, the story of the bean behind it: where it comes from, and why that gives the drink the taste it has. That the beans can go home with them to brew is a natural aside inside that story, never an offer. All of it comes from the venue's own knowledge and nowhere else, and it has to read as sharing something you love rather than selling: where that knowledge also records how a bean is sold, in what sizes, at what price or on what website, none of that is part of the story. Say nothing about buying it and name no price unless the guest asks. Once per guest at most, never the same detail or story twice, and never to a guest whose first visit this is. It is entirely fine if it never comes up. Do not recite their history back to them in any of this. If the item is not in their history, say nothing about their history: no recognition, nothing about them coming back, and no story. No verdict on the choice either, since the give-way above reaches only an order you already know; warmth about the item itself is still welcome there, but grading their pick is exactly what the start of this rule forbids. A category's register guidance, whether it frames the turn as a close or as small talk, is never authority over whether you recognize an order you know. Neither is the ## Length section: one real sentence is worth the room here, and that exception is this turn only."
 
 const R23_CLAUSE =
   ' This rule is about how often they have been here, not about what they order: telling a guest you know which item they order most is the order-recognition guidance above, and is not a visit statistic. What this rule forbids is naming a number, and that holds whether the number counts visits or orders.'
@@ -272,7 +274,21 @@ const JudgeSchema = z.object({
   recognizesPriorOrder: z.boolean(),
   claimsMostFrequent: z.boolean(),
   complimentsReturning: z.boolean(),
-  complimentsChoice: z.boolean(),
+  /**
+   * Approval of the guest's PICK or their taste. Ruling 3 makes this one of
+   * the two ways (b) can be satisfied; ruling 4 makes it the thing arm B must
+   * never contain.
+   */
+  verdictOnPick: z.boolean(),
+  /** Warmth about the item itself, praising no decision. Permitted everywhere. */
+  warmthAboutItem: z.boolean(),
+  /**
+   * The measured substitution: a wish about how the item turns out. Ruling 3
+   * says this is not the compliment, so it can never satisfy (b).
+   */
+  wishesItemWell: z.boolean(),
+  /** R21's base prohibition, which finding C caught once in 20. */
+  suggestsDifferentItem: z.boolean(),
   recitesHistory: z.boolean(),
   statesCount: z.boolean(),
   includesItemDetail: z.boolean(),
@@ -291,7 +307,10 @@ Answer each question about the REPLY only.
 - recognizesPriorOrder: does the reply indicate, in any wording, that the guest has had this item before, or that the venue knows this order? Saying nothing about their history is false. Merely naming the item back is false on its own.
 - claimsMostFrequent: does the reply indicate this is what the guest usually gets, their regular order, or the one they get more than anything else? A plain "you've had that before" is false here and true for recognizesPriorOrder.
 - complimentsReturning: is there warmth about the guest coming back, being here again, or being glad to see them? Warmth about the ITEM is not this.
-- complimentsChoice: is there warmth or approval about the choice itself, the item being a good one?
+- verdictOnPick: does the reply approve of the guest's CHOICE, or of their taste or judgement in choosing it? This is about the person who chose, so approval directed at the decision or the chooser is true here. Warmth about the item on its own is not.
+- warmthAboutItem: is there warmth or affection about the ITEM itself, without approving of the guest's decision to choose it? Calling the item lovely is true here; calling their choice a good one is verdictOnPick instead.
+- wishesItemWell: does the reply wish or hope that the item turns out well, tastes good, or turned out well? This is a wish about the drink or food, not a statement about the guest. Answer it independently of the others.
+- suggestsDifferentItem: does the reply suggest, recommend, or invite the guest to try any item OTHER than the one they just named? A reply that only discusses the named item is false.
 - recitesHistory: does the reply read the history back, listing past visits, naming dates, or naming other past items? A single reference to the item the guest just named is not reciting.
 - statesCount: does the reply state a number of visits, a number of times they have ordered something, or how often or how recently they come? A quantity in the guest's own order is not a count.
 - includesItemDetail: does the reply add a specific factual detail about the item itself, beyond recognising it? A flavour note, an ingredient, how it is made.
@@ -333,7 +352,10 @@ const JUDGE_FLAGS = [
   'recognizesPriorOrder',
   'claimsMostFrequent',
   'complimentsReturning',
-  'complimentsChoice',
+  'verdictOnPick',
+  'warmthAboutItem',
+  'wishesItemWell',
+  'suggestsDifferentItem',
   'recitesHistory',
   'statesCount',
   'includesItemDetail',
@@ -414,6 +436,10 @@ interface UnitRecord {
   countClaimMatches: string[]
   sellingMatches: string[]
   visitFrequencyMatches: string[]
+  /** The now-PERMITTED countless recognition (ruling 5). High is good here. */
+  orderFrequencyMatches: string[]
+  /** TAC-554's field as production would send it. Expected "" on these turns. */
+  intentionQuestion: string
   otherHistoryItemMatches: string[]
 }
 
@@ -507,7 +533,17 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
 interface TurnOutcome {
   category: string | null
+  /** What the guest receives: the model's body with intentionQuestion joined on. */
   reply: string | null
+  /**
+   * The question TAC-554 peels into its own bubble, recorded separately.
+   *
+   * Expected "" on every unit here, because openIntentions is empty on these
+   * turns, and recorded anyway so that expectation is a MEASUREMENT rather than
+   * an assumption. A non-empty value means a getting-to-know-you question rode
+   * along on a recognition turn, which nothing in this run has judged.
+   */
+  intentionQuestion: string
   error: string | null
   invalid: boolean
   calls: number
@@ -527,6 +563,7 @@ async function generateTurn(
   const out: TurnOutcome = {
     category: null,
     reply: null,
+    intentionQuestion: '',
     error: null,
     invalid: false,
     calls: 0,
@@ -620,7 +657,24 @@ async function generateTurn(
           temperature: 0.7,
           maxOutputTokens: MAX_OUTPUT_TOKENS,
         })
-        out.reply = object.body
+        // WHAT THE GUEST RECEIVES, not what the model put in `body`.
+        //
+        // TAC-554 (v1.72.0) made the getting-to-know-you question its own
+        // emission field, and production JOINS it onto the reply through
+        // composeReplyWithIntention before anything reads the text. Judging
+        // `object.body` alone would score a message the guest never gets, and
+        // it would do so silently, because on these turns openIntentions is
+        // empty and the field is expected to come back "". A harness that is
+        // right only while a field stays empty is not right.
+        //
+        // It also routes both parts through replaceDashes, which is where
+        // production normalizes an em dash. Run 2 reported 4 dashes with the
+        // caveat that the harness bypassed that seam; it no longer does. The
+        // dash-driven REGEN loop is still bypassed, so this is normalization
+        // rather than the full production path.
+        const composedReply = composeReplyWithIntention(object.body, object.intentionQuestion)
+        out.reply = composedReply.body
+        out.intentionQuestion = composedReply.intentionQuestion
         out.error = null
         break
       } catch (e) {
@@ -813,6 +867,8 @@ async function main() {
         const count = reply === null ? { found: false, matches: [] } : findCountClaim(reply)
         const selling = reply === null ? { found: false, matches: [] } : findSellingLanguage(reply)
         const freq = reply === null ? { found: false, matches: [] } : findVisitFrequencyClaim(reply)
+        const orderFreq =
+          reply === null ? { found: false, matches: [] } : findOrderFrequencyPhrase(reply)
         const others =
           reply === null
             ? { found: false, matches: [] }
@@ -840,6 +896,8 @@ async function main() {
           countClaimMatches: count.matches,
           sellingMatches: selling.matches,
           visitFrequencyMatches: freq.matches,
+          orderFrequencyMatches: orderFreq.matches,
+          intentionQuestion: outcome.intentionQuestion,
           otherHistoryItemMatches: others.matches,
         }
         records.push(rec)
@@ -864,7 +922,7 @@ async function main() {
         const marks = [
           rec.invalid ? 'INVALID' : '',
           rec.flags.claimsMostFrequent ? 'usual' : rec.flags.recognizesPriorOrder ? 'had-before' : '',
-          rec.flags.complimentsReturning || rec.flags.complimentsChoice ? 'warm' : '',
+          rec.flags.complimentsReturning || rec.flags.verdictOnPick ? 'warm' : '',
           rec.bareLabel ? 'LABEL' : '',
           rec.flags.statesCount || rec.countClaimMatches.length > 0 ? 'COUNT' : '',
           rec.flags.includesBeanStory ? 'bean' : rec.flags.includesItemDetail ? 'detail' : '',
@@ -904,15 +962,23 @@ function report(records: UnitRecord[], statesBefore: number, statesAfter: number
 
   // The ruled requirement is BOTH: a recognition and warmth, in a real
   // sentence. A reply with one and not the other does not meet it.
+  // RULING 3 (2026-09-29). The warm half is about the GUEST: their coming back,
+  // or their taste. A wish that the item turns out well does NOT satisfy it,
+  // and that exclusion is the whole point of re-measuring, because the wish is
+  // exactly what the model substituted in 8 of 20 replies last run. Note what
+  // is absent: `warmthAboutItem` is not in this disjunction either, for the
+  // same reason.
+  const warmAboutGuest = (r: UnitRecord) =>
+    r.flags.complimentsReturning || r.flags.verdictOnPick
   const meetsBar = (r: UnitRecord) =>
     (r.flags.recognizesPriorOrder || r.flags.claimsMostFrequent) &&
-    (r.flags.complimentsReturning || r.flags.complimentsChoice) &&
+    warmAboutGuest(r) &&
     !r.bareLabel
 
   for (const arm of ARMS) {
     const valid = pick('frequent', arm).filter((r) => !r.invalid)
     const rec = valid.filter((r) => r.flags.recognizesPriorOrder || r.flags.claimsMostFrequent)
-    const warm = valid.filter((r) => r.flags.complimentsReturning || r.flags.complimentsChoice)
+    const warm = valid.filter(warmAboutGuest)
     const both = valid.filter(meetsBar)
     console.log(
       `arm A, ${arm}: recognition ${rec.length}/${valid.length}, warmth ${warm.length}/${valid.length}, BOTH in a real sentence ${both.length}/${valid.length}`,
@@ -1024,11 +1090,20 @@ function report(records: UnitRecord[], statesBefore: number, statesAfter: number
     const claims = valid.filter((r) => r.flags.claimsMostFrequent || r.flags.recognizesPriorOrder)
     const returning = valid.filter((r) => r.flags.complimentsReturning)
     const beans = valid.filter((r) => r.flags.includesBeanStory)
+    // RULING 4 (2026-09-29), PRE-REGISTERED AS A BAR THIS RUN. The give-way on
+    // rating the choice is scoped to an item already in the history, and it was
+    // measured LEAKING here: 2/10 control to 5/10 treatment, twice as the
+    // literal "good call", which is one of R21's own named banned shapes. A new
+    // item may still get warmth, which is why `warmthAboutItem` is not a bar.
+    const verdicts = valid.filter((r) => r.flags.verdictOnPick)
     if (claims.length > 0) failures.push(`arm B ${arm}: ${claims.length} false prior-order claim(s)`)
     if (returning.length > 0) {
       failures.push(`arm B ${arm}: ${returning.length} compliment(s) on returning`)
     }
     if (beans.length > 0) failures.push(`arm B ${arm}: ${beans.length} bean story/stories on a new item`)
+    if (verdicts.length > 0) {
+      failures.push(`arm B ${arm}: ${verdicts.length} verdict(s) on the choice of a new item`)
+    }
     console.log(
       `\n${claims.length === 0 ? 'PASS' : 'FAIL'}  bar: arm B ${arm} false prior-order claims ${claims.length}/${valid.length}`,
     )
@@ -1037,6 +1112,13 @@ function report(records: UnitRecord[], statesBefore: number, statesAfter: number
       `${returning.length === 0 ? 'PASS' : 'FAIL'}  bar: arm B ${arm} compliments on returning ${returning.length}/${valid.length}`,
     )
     for (const r of returning) console.log(`      ${r.unitId}: ${JSON.stringify(r.reply)}`)
+    console.log(
+      `${verdicts.length === 0 ? 'PASS' : 'FAIL'}  bar: arm B ${arm} verdicts on the choice ${verdicts.length}/${valid.length}`,
+    )
+    for (const r of verdicts) console.log(`      ${r.unitId}: ${JSON.stringify(r.reply)}`)
+    console.log(
+      `${valid.filter((r) => r.flags.warmthAboutItem).length} of ${valid.length} carry warmth about the item, which is permitted here`,
+    )
     console.log(
       `${beans.length === 0 ? 'PASS' : 'FAIL'}  bar: arm B ${arm} bean stories ${beans.length}/${valid.length}`,
     )
@@ -1112,10 +1194,61 @@ function report(records: UnitRecord[], statesBefore: number, statesAfter: number
     )
   }
 
+  // RULING 5 (2026-09-29): countless frequency is the DESIRED recognition, so
+  // this rate is reported as information and a high number is a good sign. The
+  // BAR that replaced it is the count ceiling above, which now also has to hold
+  // against TAC-543 rendering "(4x)" straight onto the page.
+  {
+    for (const arm of ARMS) {
+      const valid = pick('frequent', arm).filter((r) => !r.invalid)
+      const permitted = valid.filter((r) => r.orderFrequencyMatches.length > 0)
+      console.log(
+        `\nINFO arm A ${arm}: countless order-frequency recognition (permitted) ${permitted.length}/${valid.length}`,
+      )
+    }
+  }
+
+  // RULING 3's measured substitution, reported so the cause is visible whether
+  // or not the bar is met. A well-wish is not a defect on its own; a well-wish
+  // INSTEAD of warmth about the guest is what missed the bar last run.
+  {
+    const valid = pick('frequent', 'treatment').filter((r) => !r.invalid)
+    const wishes = valid.filter((r) => r.flags.wishesItemWell)
+    const wishOnly = wishes.filter((r) => !warmAboutGuest(r))
+    console.log(
+      `INFO arm A treatment: well-wishes about the item ${wishes.length}/${valid.length}, of which ${wishOnly.length} carry NO warmth about the guest`,
+    )
+    for (const r of wishOnly) console.log(`      ${r.unitId}: ${JSON.stringify(r.reply)}`)
+  }
+
+  // FINDING C, which Jaipal asked to be noted with its rate. R21's base forbids
+  // suggesting something different; run 2 caught it once, on freq-04.
+  {
+    for (const arm of ARMS) {
+      const valid = pick('frequent', arm).filter((r) => !r.invalid)
+      const suggests = valid.filter((r) => r.flags.suggestsDifferentItem)
+      console.log(
+        `INFO arm A ${arm}: replies suggesting a DIFFERENT item (R21 base forbids) ${suggests.length}/${valid.length}`,
+      )
+      for (const r of suggests) console.log(`      ${r.unitId}: ${JSON.stringify(r.reply)}`)
+    }
+  }
+
+  // The getting-to-know-you field, recorded so "expected empty" is measured.
+  {
+    const withQuestion = records.filter((r) => !r.invalid && r.intentionQuestion !== '')
+    console.log(
+      `INFO replies whose intentionQuestion was non-empty: ${withQuestion.length} (expected 0; openIntentions is empty on these turns)`,
+    )
+    for (const r of withQuestion) {
+      console.log(`      ${r.unitId} t${r.turn} ${r.arm}: ${JSON.stringify(r.intentionQuestion)}`)
+    }
+  }
+
   // ADVISORY, NOT BARS.
   {
     const flagged = records.filter((r) => !r.invalid && r.visitFrequencyMatches.length > 0)
-    console.log(`\nADVISORY (not a bar) visit-frequency claims with no number: ${flagged.length}`)
+    console.log(`\nADVISORY (not a bar) VISIT-frequency claims, which R23's base still forbids: ${flagged.length}`)
     for (const r of flagged) {
       console.log(`      ${r.unitId} t${r.turn} ${r.arm}: ${JSON.stringify(r.visitFrequencyMatches)} | ${JSON.stringify(r.reply)}`)
     }
