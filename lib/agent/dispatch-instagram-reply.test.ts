@@ -99,10 +99,15 @@ function makeCtx(): RuntimeContext {
     },
     followupTrigger: null,
     scanArrival: null,
+    warmClose: false,
+    inquiryFollowup: null,
     conversationChannel: 'instagram',
     pendingQuestion: null,
     recentMessages: [],
     conversationWindowMs: 48 * 60 * 60 * 1000,
+    // TAC-567: these fixtures are established guests, not a first
+    // conversation, so every intention is eligible as before.
+    firstConversation: false,
     recognition: {
       state: 'new',
       score: 0,
@@ -121,6 +126,7 @@ function makeCtx(): RuntimeContext {
       reasoning: 'r',
       crisisSafety: false,
       correctsPendingReply: false,
+      followUpWorthy: false,
     },
     trace: { id: 'trace-1' } as RuntimeContext['trace'],
   }
@@ -144,7 +150,9 @@ function generation(
     arrivalCapture: {},
     cancelsCommitmentId: '',
     intentionQuestion: '',
+    closedTheConversation: false,
     intentionQuestionDuplicateStripped: false,
+    intentionQuestionDroppedForBodyQuestion: false,
     attempts: 1,
     attemptScores: [0.8],
     attemptHistory: [],

@@ -3,6 +3,7 @@ export {
   langfuseInitFailed,
   noopAgentTrace,
   startAgentTrace,
+  toAgentUsage,
   _resetLangfuseClientForTest,
 } from './langfuse'
 export type {
@@ -10,6 +11,7 @@ export type {
   AgentSpanUpdate,
   AgentTrace,
   AgentTraceUpdate,
+  AgentUsage,
   ApiTraceWithFullDetails,
   StartAgentTraceOptions,
 } from './langfuse'

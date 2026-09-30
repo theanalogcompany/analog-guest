@@ -33,14 +33,12 @@ import {
   mergeKnowledgeMatches,
   type MergeRule,
 } from '@/lib/agent/retrieval-context'
-import { retrieveContext } from '@/lib/rag'
 import type { MessageCategory } from '@/lib/ai/types'
 import type { KnowledgeMatch, RuntimeContext } from '@/lib/agent/types'
 import { createRunLog } from './run-log'
 import { runBhadraE2E } from './knowledge-context-e2e'
 
 const VENUE_SLUG = 'le-mils-coffee'
-const VOICE_PROBE_LIMIT = 5
 
 export type Fixture = {
   id: string
@@ -99,18 +97,6 @@ async function runArm(
       rows: [],
       result: { failed: e instanceof Error ? e.message : String(e) },
     }
-  }
-}
-
-async function voiceProbe(venueId: string, query: string) {
-  const r = await retrieveContext({ venueId, query, limit: VOICE_PROBE_LIMIT })
-  if (!r.ok) return { failed: r.error }
-  return {
-    top:
-      r.data.length > 0
-        ? Number(Math.max(...r.data.map((m) => m.similarity)).toFixed(4))
-        : 0,
-    strong: r.data.filter((m) => m.similarity >= 0.3).length,
   }
 }
 
@@ -223,13 +209,10 @@ async function main() {
         }
       }
 
-      // Voice-corpus observation only. TAC-547 leaves voice retrieval alone;
-      // this is the evidence for that rather than an assertion.
-      const voice = {
-        control: await voiceProbe(venue.id, f.followUp),
-        ctx2: await voiceProbe(venue.id, contextQuery(f, 2)),
-      }
-
+      // The voice probe that lived here (evidence for TAC-547's "leave voice
+      // retrieval alone") was removed with the mechanism it observed: voice is
+      // a static pack (decision 0008), so there is no per-query voice
+      // similarity left to measure.
       log.appendUnit({
         population,
         fixture: f.id,
@@ -245,7 +228,6 @@ async function main() {
             return [a, 'failed' in r ? null : r.ids.indexOf(f.target)]
           }),
         ),
-        voice,
       })
       process.stdout.write('.')
     }

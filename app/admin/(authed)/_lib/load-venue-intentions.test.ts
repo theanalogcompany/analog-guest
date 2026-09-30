@@ -410,6 +410,67 @@ describe('loadVenueOpenIntentions', () => {
     warn.mockRestore()
   })
 
+  // TAC-558, and this is the trap the comment at the fail-closed branch warns
+  // about. That branch used to mark PRESENCE; are_they_new_here closes on MORE
+  // THAN ONE visit, so a fail-closed count of 1 would read as "one visit on
+  // record, still worth asking" and fail OPEN on exactly the intention the
+  // unreadable read cannot judge. The eligibility row is what makes this
+  // reachable: without it the intention has no row and never renders anyway.
+  it('fails closed for are_they_new_here too, not just understand_order', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    mockTables({
+      guest_intention_prompts: {
+        data: [eligibility('are_they_new_here', 1)],
+        error: null,
+      },
+      guests: { data: [guestRow()], error: null },
+      transactions: { data: null, error: { message: 'connection reset' } },
+    })
+
+    const { rows, degraded } = await loadVenueOpenIntentions(VENUE_ID, NOW)
+    expect(rows).toHaveLength(0)
+    expect(degraded).toBe(true)
+    warn.mockRestore()
+  })
+
+  // The positive control for the pair above: with the read WORKING and a single
+  // visit on record, the intention is genuinely open. Without this, the
+  // fail-closed test passes against a loader that closes are_they_new_here
+  // unconditionally.
+  it('leaves are_they_new_here open on a single recorded visit', async () => {
+    mockTables({
+      guest_intention_prompts: {
+        data: [eligibility('are_they_new_here', 1)],
+        error: null,
+      },
+      guests: { data: [guestRow()], error: null },
+      transactions: { data: [{ guest_id: GUEST_ID }], error: null },
+    })
+
+    const { rows, degraded } = await loadVenueOpenIntentions(VENUE_ID, NOW)
+    expect(rows[0].openKeys).toEqual(['are_they_new_here'])
+    expect(degraded).toBe(false)
+  })
+
+  // A guest the record already shows twice is never asked. Two rows for one
+  // guest is what a repeat visit looks like to this loader.
+  it('closes are_they_new_here for a guest with two recorded visits', async () => {
+    mockTables({
+      guest_intention_prompts: {
+        data: [eligibility('are_they_new_here', 1)],
+        error: null,
+      },
+      guests: { data: [guestRow()], error: null },
+      transactions: {
+        data: [{ guest_id: GUEST_ID }, { guest_id: GUEST_ID }],
+        error: null,
+      },
+    })
+
+    const { rows } = await loadVenueOpenIntentions(VENUE_ID, NOW)
+    expect(rows).toHaveLength(0)
+  })
+
   it('degrades to empty and flags degraded when the eligibility read fails', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
     mockTables({

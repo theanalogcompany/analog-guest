@@ -28,7 +28,7 @@ stylistic.
 
 | pattern | direction | why |
 | --- | --- | --- |
-| voice-corpus retrieval | **closed** | voice failure breaks the thing we sell |
+| voice pack load (inbound) | **closed** | voice failure breaks the thing we sell; followups proceed with what loaded |
 | knowledge retrieval | **open** (degrade to `[]`) | a less specific reply still ships |
 | the five post-generation checks | **closed** after one retry | no prior to degrade to |
 | coalescing claim table | **open** | a guest silenced by a claim-table hiccup is a worse, newly-introduced failure |

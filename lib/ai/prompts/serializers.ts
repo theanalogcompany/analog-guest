@@ -684,6 +684,92 @@ function formatScanArrival(
   ].join('\n')
 }
 
+/**
+ * TAC-560: the pause-triggered warm close.
+ *
+ * WHY A BLOCK AT ALL, when Le Mil's rule 15 already describes this close: that
+ * rule's own trigger clause is "(they say thanks, ok, or signal they're done)".
+ * On a pause the guest signalled NOTHING, so the rule's condition is unmet and
+ * the model can read it as not applying. This block supplies the premise the
+ * rule needs; the rule supplies the three topics and the voice.
+ *
+ * IT NAMES NO TOPICS. They are Le Mil's choice, carried in that venue's own
+ * voice rules, and restating them here would ship one venue's product decision
+ * into every venue's prompt.
+ *
+ * Every line is true on this turn, which is the point: "it has gone quiet" and
+ * "nothing here is waiting on an answer from them" are both established before
+ * the processor claims the close (the question deferral is what makes the second
+ * one true). Handing the model a false statement as fact is the TAC-484 /
+ * TAC-502 failure class.
+ *
+ * No em dash: R3 bans them in output and the prompt should not model one.
+ */
+function formatWarmClose(): string {
+  return [
+    '## Closing this conversation',
+    "This is the guest's first conversation with the venue, and it has gone quiet. They have not replied for a while, and nothing here is waiting on an answer from them.",
+    'Send the warm close your voice rules describe for a first conversation that is winding down: let them know the line is open, and name the things they can message about anytime, in your own words.',
+    'One short message. Do not ask a question, do not open a new topic, and do not mention the pause or that they stopped replying.',
+  ].join('\n')
+}
+
+/**
+ * TAC-386: the inquiry follow-up's own block.
+ *
+ * Both strings render VERBATIM and in full. The one thing this message must do
+ * is reference the specific thing the guest asked and what we actually
+ * suggested, and a paraphrase of either loses exactly the detail that makes the
+ * check-in worth sending rather than generic.
+ *
+ * NO EXAMPLE PHRASE, and no analogy that reads as one: Jaipal's standing rule is
+ * that quoted examples get copied verbatim, and this is the most forward message
+ * the agent sends, so a template is the worst thing to hand it. The instruction
+ * describes the MOVE and leaves the words to the venue's own voice rules.
+ *
+ * "Recently" rather than a relative time (ruled 2026-09-30). A follow-up whose
+ * delay rolled to the next open period goes out the following morning, so
+ * "earlier today" would be false on most sends. The exact delta is deliberately
+ * not rendered either: the message does not need it, and a wrong one is worse
+ * than none.
+ *
+ * "we" throughout and no named speaker: outreach always comes from the shop.
+ * No em dash, per R3.
+ *
+ * THREE CLAUSES ADDED AFTER THE FIRST MEASUREMENT RUN, each answering something
+ * fifteen generated bodies actually did (ruled 2026-09-30):
+ *
+ *   SETTLED. Two of fifteen CONTRADICTED and apologised for our own answer,
+ *   because the block handed it over as data without saying it was final and the
+ *   model re-verified it against retrieval.
+ *
+ *   NOT EVEN CONDITIONALLY. One said "hope your pup had a good time if you made
+ *   it in". A conditional reference to the visit is still a reference, and
+ *   ruling 11 bars it.
+ *
+ *   ONE SUBJECT. Seven of fifteen opened by wishing the guest happy birthday,
+ *   which crowded out the reference in one and pushed the repetition bar over on
+ *   its own. NOTE THE RULING'S PREMISE DID NOT HOLD: there is no birthday or
+ *   occasion BLOCK to suppress. The birthday is a freeform `observations` entry
+ *   on the guest ("mentioned it's their birthday (September 29)"), so
+ *   withholding it would mean dropping observations wholesale, which also carry
+ *   the preferences this message may legitimately use. The suppression is
+ *   therefore an instruction here rather than data withheld upstream.
+ */
+function formatInquiryFollowup(
+  inquiry: NonNullable<RuntimeContext['inquiryFollowup']>,
+): string {
+  return [
+    '## Following up on what they asked',
+    'Recently they asked us something and we answered it. They have not been in touch since. This message checks that what we helped them with worked out.',
+    `What they asked: "${inquiry.question}"`,
+    `What we told them: "${inquiry.answer}"`,
+    'What we told them is what we said. Treat it as settled: do not correct it, re-verify it, walk it back, or apologise for it.',
+    'Refer to the specific thing they asked about and to what we actually suggested, in our own words. Do not ask or suggest whether they came in, even conditionally, and do not say or imply that we know whether they did, because we do not. Do not ask them to come in.',
+    'This message carries one subject and nothing else. Do not raise a birthday or any other occasion, do not open a new topic, and do not add a promise to stay in touch. It is the only message we send about it.',
+  ].join('\n')
+}
+
 function formatRightNow(today: NonNullable<RuntimeContext['today']>): string {
   // TAC-522: the calendar sits directly under the date so the two date facts
   // are together, and the status line stays last where TAC-301's
@@ -1040,6 +1126,17 @@ function formatGuestDetailsLines(
   // serializer only ever sees a string here.
   if (details.home_base) lines.push(`- Home base: ${details.home_base}`)
   if (details.workplace) lines.push(`- Work: ${details.workplace}`)
+  // TAC-558: the guest's own account of how long they have been coming here,
+  // captured when are_they_new_here is answered. Renders LAST of the details so
+  // the identity fields stay together at the top.
+  //
+  // This line and `Guest relationship:` in ## Right now can disagree, and that
+  // is accepted rather than reconciled (approved 2026-09-29): the relationship
+  // band is derived from signals we hold, this is what the guest told us, and a
+  // guest can truthfully say they have been coming for years while every signal
+  // still reads `new`. R23 governs what the model may then SAY about frequency.
+  if (details.history_here)
+    lines.push(`- History here: ${details.history_here}`)
   return lines
 }
 
@@ -1444,9 +1541,29 @@ function formatMechanicEligibility(
 //      one, and the one it dropped was the warmth. Dropped here instead, so
 //      the reply is a hello and one question by design. Warmth is voice.
 //
-//   2. The identity clause is conditional on the guest's own message not
-//      naming a person. Le Mil's prefill names the venue and not a person, so
-//      every ordinary scan takes the introduce branch.
+//   2. THE IDENTITY CLAUSE IS GONE ENTIRELY (TAC-567, ruled 2026-09-30). What
+//      follows is the history of a sentence this string no longer carries; it
+//      is kept because the clause has been rewritten twice already and the next
+//      reader will otherwise restore it as an oversight.
+//
+//      It read "If their message doesn't name a person, say who they've reached
+//      as well", and it won over a persona rule saying not to. On device a
+//      fresh scan opened "hey, welcome! you've reached Le Mil's on Polk
+//      Street", to a guest who had just scanned Le Mil's code and tapped "Hi Le
+//      Mil's!". The ruling is that this is pointless rather than mis-worded:
+//      the guest chose the venue a second earlier, so there is nobody to
+//      introduce. R1's carve-out already says the channel itself is the shared
+//      context.
+//
+//      DO NOT RESTORE IT IN ANY FORM. The same instruction lived in TAC-536's
+//      scan greeting (GUEST_ARRIVED_INSTRUCTIONS_NEW) and was deleted in the
+//      same ticket. serializers.test.ts pins the absence on THIS string, on both
+//      channels; categories/index.test.ts pins it on the scan greeting, on both
+//      of its variants. Two files, because the two strings live in two modules.
+//
+//      The clause was conditional on the guest's own message not naming a
+//      person. Le Mil's prefill names the venue and not a person, so every
+//      ordinary scan took the introduce branch.
 //
 //      TAC-541 (2026-09-26) DELETED the second half of it, which read "even
 //      where your voice guidance would otherwise have you hold your name
@@ -1507,7 +1624,7 @@ function formatMechanicEligibility(
 // channel-variants.ts has the mechanism; a phrase that stops matching throws
 // at load, which is what keeps the two channels from drifting apart.
 const FIRST_TOUCH_OPENER =
-  "This is the guest's first message on this number, sent right after they scanned the sign at your pickup counter. They have just ordered and collected it. Say hello. If their message doesn't name a person, say who they've reached as well. Ask what they just got."
+  "This is the guest's first message on this number, sent right after they scanned the sign at your pickup counter. They have just ordered and collected it. Say hello. Ask what they just got."
 
 const FIRST_TOUCH_OPENER_CHANNEL_SUBSTITUTIONS = {
   text: [],
@@ -1537,10 +1654,51 @@ export function firstTouchOpenerFor(channel: MessageChannel | null): string {
   return FIRST_TOUCH_OPENER_BY_CHANNEL[copyVariantFor(channel)]
 }
 
+/**
+ * TAC-567, approved verbatim by Jaipal 2026-09-30. Rendered as the LAST lines of
+ * the intentions block's restraint paragraph, and only while the guest is inside
+ * their first conversation.
+ *
+ * WHAT IT IS FOR. A fresh scan asked four questions across three messages: the
+ * opener's "what did you get", then a body question the model invented ("how'd
+ * you like it?") with TAC-554's name bubble on top of it, then the first-visit
+ * question. The bubble half is now impossible in code (composeReplyWithIntention
+ * drops the question when the body already asks one). This text is the other
+ * half: the body inventing a question of its own, which no code gate can supply
+ * a reply for.
+ *
+ * WHY HERE RATHER THAN A BLOCK OF ITS OWN. The intentions block renders last of
+ * the content blocks and that position is MEASURED (11% raise rate from third,
+ * 37% from last, TAC-519). A new block would move it and put that measurement
+ * back in play. Inside the paragraph, no block moves. It also lands after the
+ * paragraph's own "One short question on the end is fine" example, so on
+ * most-proximate-wins it governs the turn it applies to.
+ *
+ * KNOWN LIMIT, stated rather than discovered: this rides the intentions block,
+ * so it does not render on a first-conversation turn where nothing is open. That
+ * turn carries no bubble either, so "never two questions" still holds; "no
+ * invented question" does not. Through the ruled flow at least one of the three
+ * allowed intentions is always open.
+ *
+ * NO QUOTED QUESTION, deliberately and unlike most rules here. A worked example
+ * is the thing a model reproduces verbatim, and an invented question is the
+ * defect itself, so an example would model it. Same reasoning as
+ * are_they_new_here's promptLine carrying none. serializers.test.ts pins this as
+ * one contiguous literal, not fragments: a sentence can be reversed while every
+ * asserted fragment survives.
+ */
+const FIRST_CONVERSATION_RESTRAINT = [
+  'This is your first conversation with this guest. The reply itself asks',
+  'them nothing: no question of your own, however natural one would be',
+  'here. The only question this turn is the one listed above, and only if a',
+  'line above fits.',
+] as const
+
 function formatOpenIntentions(
   lines: readonly string[],
   firstTouchAfterQrScan: boolean,
   channel: MessageChannel | null,
+  firstConversation: boolean,
 ): string | null {
   if (lines.length === 0) return null
   const header = "## What you're hoping to get to"
@@ -1555,6 +1713,12 @@ function formatOpenIntentions(
   // can capture with no other path (TAC-325's whole premise). The opener now
   // asks the same question understand_order already wants asked, so the two
   // agree instead of racing.
+  //
+  // TAC-558 brought the new-versus-regular question BACK, as its own intention
+  // (are_they_new_here) rather than as a second question in the opener. It is
+  // not a reversal of the above: it arms only once a transaction exists, which
+  // satisfies understand_order, so the race this paragraph describes is now
+  // structurally impossible rather than merely avoided by wording.
   //
   // TAC-436 ruling 1, approved 2026-09-17. See the block comment above for what
   // changed and why: one restraint removed, the openings named positively.
@@ -1599,6 +1763,10 @@ function formatOpenIntentions(
     'raise one twice.',
     '',
     'If nothing fits, let it wait. There will be other conversations.',
+    // TAC-567. Last in the paragraph on purpose: proximity reads as authority,
+    // and this has to outrank the "one short question on the end is fine"
+    // opening above it.
+    ...(firstConversation ? ['', ...FIRST_CONVERSATION_RESTRAINT] : []),
   ].join('\n')
   const opener = firstTouchAfterQrScan
     ? `${firstTouchOpenerFor(channel)}\n\n`
@@ -1729,6 +1897,25 @@ export function runtimeToProse(
   if (runtime.scanArrival) {
     blocks.push(formatScanArrival(runtime.scanArrival))
   }
+  // TAC-560: beside `## Guest just arrived` because both are facts about this
+  // moment, and above everything else in the user prompt for the same reason
+  // that one is: the turn's own situation comes before the history it draws on.
+  //
+  // The two are mutually exclusive in practice (a scan greeting is the FIRST
+  // thing said to a guest, a warm close the last), but nothing enforces that and
+  // nothing needs to: they make different claims and neither contradicts the
+  // other.
+  //
+  // The POSITION is a choice, not a measurement, exactly as TAC-536's is. The
+  // full-order test in serializers.test.ts exists so moving it is deliberate.
+  if (runtime.warmClose === true) {
+    blocks.push(formatWarmClose())
+  }
+  // TAC-386: the same slot as the warm close above, and mutually exclusive with
+  // it in practice — each is set only on its own trigger reason.
+  if (runtime.inquiryFollowup) {
+    blocks.push(formatInquiryFollowup(runtime.inquiryFollowup))
+  }
   // THE-232: Operator instruction block sits above runtime context
   // (mechanics, last visit, recent conversation) so Sonnet treats it as the
   // primary intent. Only fires when the operator typed a note in the Follow
@@ -1837,6 +2024,7 @@ export function runtimeToProse(
       runtime.openIntentions,
       runtime.firstTouchAfterQrScan === true,
       channel,
+      runtime.firstConversation === true,
     )
     if (block) blocks.push(block)
   }

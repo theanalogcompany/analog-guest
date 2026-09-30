@@ -12,6 +12,9 @@
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+// Derived from the live constant: a stale fixture literal ships green, and
+// nothing fails (see .claude/rules/prompt-versioning.md).
+import { PROMPT_VERSION } from '@/lib/ai/prompts/system-template'
 import type { ActiveCommitment } from '@/lib/schemas/guest-commitment'
 import type { CoalesceDeps } from './coalesce-turn'
 
@@ -20,7 +23,7 @@ import type { CoalesceDeps } from './coalesce-turn'
 // testability".
 vi.mock('voyageai', () => ({ VoyageAIClient: class {} }))
 vi.mock('@/lib/rag', () => ({
-  retrieveContext: vi.fn(),
+  loadVoicePack: vi.fn(),
   retrieveKnowledgeContext: vi.fn(),
 }))
 
@@ -240,12 +243,18 @@ vi.mock('./extract-reported-order', async () => {
   }
 })
 const recordIntentionPromptsMock = vi.fn()
+// TAC-560
+const markWarmCloseSentMock = vi.fn()
+const captureWarmCloseSentMock = vi.fn()
 const recordIntentionEligibilityMock = vi.fn()
 // TAC-324: same posture as extractReportedOrder above — fire-and-forget side
 // effect, mocked wholesale; its own unit coverage lives in
 // lib/agent/intentions/record.test.ts. This file only needs to prove the
 // call site: gated on ctx.openIntentions, fired with the right shape, never
 // lets a rejection propagate.
+vi.mock('./warm-close-store', () => ({
+  markWarmCloseSent: (...a: unknown[]) => markWarmCloseSentMock(...a),
+}))
 vi.mock('./intentions/record', () => ({
   recordIntentionPrompts: (...a: unknown[]) => recordIntentionPromptsMock(...a),
   recordIntentionEligibility: (...a: unknown[]) =>
@@ -256,9 +265,14 @@ vi.mock('@/lib/guests/context', () => ({
   updateGuestContext: vi.fn(),
 }))
 vi.mock('@/lib/analytics/posthog', () => ({
-  AGENT_LATENCY_HIGH_THRESHOLD_MS: 10_000,
+  // Deliberately a LOWER bar than production (inbound 35s / followup 20s) so the
+  // emit branch is reachable without advancing the clock 35s. NOT production
+  // semantics: the real per-kind thresholds are pinned in
+  // lib/analytics/posthog.test.ts.
+  isAgentLatencyHigh: (_kind: unknown, ms: number) => ms > 10_000,
   captureAgentLatencyHigh: vi.fn(),
   captureDraftQueued: (...a: unknown[]) => captureDraftQueuedMock(...a),
+  captureWarmCloseSent: (...a: unknown[]) => captureWarmCloseSentMock(...a),
   captureCrisisSafetyReplySent: (...a: unknown[]) =>
     captureCrisisSafetyReplySentMock(...a),
   captureDraftRegenerated: vi.fn(),
@@ -272,7 +286,6 @@ vi.mock('@/lib/analytics/posthog', () => ({
     captureIntentionPromptRaisedMock(...a),
   // Also consumed by the real ./stages, loaded via importActual below.
   captureClassificationLowConfidence: vi.fn(),
-  captureCorpusRetrievalBelowThreshold: vi.fn(),
   captureDashViolationPersisted: vi.fn(),
   captureDemoBypassedApprovalGate: vi.fn(),
   captureRegenerationTriggered: vi.fn(),
@@ -280,7 +293,6 @@ vi.mock('@/lib/analytics/posthog', () => ({
   captureGenerationTruncated: vi.fn(),
   CLASSIFICATION_CONFIDENCE_LOW_THRESHOLD: 0.7,
   CLASSIFICATION_CONFIDENCE_REROUTE_THRESHOLD: 0.3,
-  CORPUS_TOP_SIMILARITY_LOW_THRESHOLD: 0.5,
   VOICE_FIDELITY_LOW_THRESHOLD: 0.5,
 }))
 vi.mock('@/lib/notifications/send', () => ({
@@ -297,10 +309,12 @@ vi.mock('@/lib/notifications/send-commitment-push', () => ({
   sendCommitmentArrivalPush: (...a: unknown[]) =>
     sendCommitmentArrivalPushMock(...a),
 }))
-// TAC-526: the settle is a REAL 8-second wall-clock wait once the flag is on,
-// and every call in this file goes through it — `handleInbound(id)` with no
-// options takes the shipped gate and the default deps. Unmocked, this one file
-// went from ~2s to over two minutes.
+// TAC-526: the settle is a REAL wall-clock wait once the flag is on and the
+// constant is nonzero — 8s originally, 3s after TAC-540, 0 today — and every
+// call in this file goes through it: `handleInbound(id)` with no options takes
+// the shipped gate and the default deps. Unmocked at 8s, this one file went
+// from ~2s to over two minutes. The mock stays at settle=0 so a nonzero
+// rollback cannot silently reintroduce that wait into the suite.
 //
 // ONLY `sleep` is replaced. The claim, the adopt and the extension all run for
 // real against this file's mocked admin client, which has no `.insert`, so
@@ -343,29 +357,45 @@ const traceControl = vi.hoisted(() => ({ flushThrows: false }))
 const spanLog = vi.hoisted(() => ({
   events: [] as Array<{ name: string; phase: 'open' | 'close' }>,
 }))
-vi.mock('@/lib/observability', () => ({
-  startAgentTrace: () => ({
-    id: '',
-    captureContent: false,
-    span: (name: string) => {
-      spanLog.events.push({ name, phase: 'open' })
-      return {
-        span: () => ({ end: () => undefined }),
-        end: () => {
-          spanLog.events.push({ name, phase: 'close' })
-        },
-        update: () => undefined,
-      }
-    },
-    update: () => undefined,
-    // TAC-523: `await trace.flushAsync()` sits in runInboundTurn's `finally`,
-    // which is the only way the orchestrator can throw past its own top-level
-    // catch — and therefore the only way to reach the wrapper's catch.
-    flushAsync: async () => {
-      if (traceControl.flushThrows) throw new Error('flush failed')
-    },
-  }),
-}))
+vi.mock('@/lib/observability', () => {
+  // `span` and `generation` must log IDENTICALLY. In production they differ only
+  // in the recorded observation type, never in position in the tree, so a fake
+  // where only one of them logs would silently drop a stage from spanLog — and
+  // the stage-ordering assertions below would then be asserting over a pipeline
+  // missing `classify`, and still pass.
+  const open = (name: string) => {
+    spanLog.events.push({ name, phase: 'open' })
+    return {
+      span: () => ({ end: () => undefined }),
+      generation: () => ({ end: () => undefined }),
+      end: () => {
+        spanLog.events.push({ name, phase: 'close' })
+      },
+      update: () => undefined,
+    }
+  }
+  return {
+    // Present only because the orchestrator calls it. NOTHING in this file asserts
+    // on the result, so this must NOT reimplement the mapping: an earlier version
+    // did, and that copy still carried the input/cached double-billing the real
+    // function was fixed for - a mock drifting from production while looking like
+    // coverage. The mapping is covered in langfuse.test.ts, with mutants.
+    toAgentUsage: () => ({}),
+    startAgentTrace: () => ({
+      id: '',
+      captureContent: false,
+      span: open,
+      generation: open,
+      update: () => undefined,
+      // TAC-523: `await trace.flushAsync()` sits in runInboundTurn's `finally`,
+      // which is the only way the orchestrator can throw past its own top-level
+      // catch — and therefore the only way to reach the wrapper's catch.
+      flushAsync: async () => {
+        if (traceControl.flushThrows) throw new Error('flush failed')
+      },
+    }),
+  }
+})
 vi.mock('./trace-content', () => ({
   buildCorpusContent: () => ({}),
   buildGenerateAttemptContent: () => ({}),
@@ -981,12 +1011,15 @@ function successResult() {
     // string. `resolveCancellation` reads both as "cancels nothing", so the
     // omission is invisible until a test means to exercise a real id.
     cancelsCommitmentId: '',
+    // TAC-560: REQUIRED on GenerateMessageResult for the same reason. `false` is
+    // the ordinary turn; a test that means to exercise the close overrides it.
+    closedTheConversation: false,
     attempts: 1,
     attemptScores: [0.9],
     attemptHistory: [],
     systemPrompt: '',
     userPrompt: '',
-    promptVersion: 'v1.72.0',
+    promptVersion: PROMPT_VERSION,
     dashViolationPersisted: false,
     selfTalkViolationPersisted: false,
     emojiDirectiveViolated: false,
@@ -1469,7 +1502,9 @@ describe('handleInbound — crisis-safety short circuit (TAC-348)', () => {
       reasoning: 'mock',
       crisisSafety: true,
     })
-    retrieveCorpusStageMock.mockRejectedValueOnce(new Error('voyage exploded'))
+    retrieveCorpusStageMock.mockRejectedValueOnce(
+      new Error('voice pack load failed'),
+    )
     scheduleAndSendMock.mockResolvedValue({
       outboundMessageId: 'crisis-4',
       providerMessageId: 'p',
@@ -1838,88 +1873,154 @@ describe('handleInbound — the queued draft push carries the guest turn (TAC-53
   })
 })
 
-describe('handleInbound — grounding backstop wiring (TAC-350)', () => {
-  it('threads a non-null verifyGroundingStage finding into applyApprovalPolicyStage as the third argument', async () => {
+// ---------------------------------------------------------------------------
+// Decision 0003, rewritten 2026-09-29: the five post-generation checks are
+// DEFERRED past dispatch on the inbound path.
+// ---------------------------------------------------------------------------
+//
+// This block REVERSES (not deletes) the TAC-350/TAC-355/TAC-367/TAC-424
+// wiring tests that pinned the old posture, where each verify stage ran
+// between generateStage and the gate and its verdict was threaded into
+// applyApprovalPolicyStage. The gate now receives the documented neutral
+// values, the stages run AFTER the reply dispatches (runPostSendChecks,
+// disposition 'sent'), and a queued/dropped/silenced turn runs no checks at
+// all. The stages' own behaviour — retries, degrade states, event emissions
+// — is covered in stages.test.ts and post-send-checks.test.ts; this file
+// owns the orchestrator hops. One test carries over from the old block
+// almost unchanged: the prose-promise persist-options hop, because the gate
+// can still return `promisedCommitment` and the orchestrator must not drop
+// it.
+describe('handleInbound — deferred post-generation checks (decision 0003 rewrite)', () => {
+  it('passes the neutral deferred values to the gate', async () => {
     generateStageMock.mockResolvedValue({
       status: 'success',
       result: successResult(),
-    })
-    verifyGroundingStageMock.mockResolvedValueOnce({
-      status: 'flagged',
-      claims: ['invents a wifi network name not in venue facts'],
-    })
-    applyApprovalPolicyStageMock.mockResolvedValue({
-      action: 'queue',
-      triggers: [APPROVAL_TRIGGERS.KNOWLEDGE_GAP_BACKSTOP],
-      primaryTrigger: APPROVAL_TRIGGERS.KNOWLEDGE_GAP_BACKSTOP,
-      compMatchedPattern: null,
-      // TAC-364: the gate ALWAYS returns this on a queue decision (it is
-      // required on ApprovalDecision), so a fixture omitting it would feed
-      // `undefined` down a path production never produces. null is what a
-      // followup / skipped-check turn actually carries — see ruling 3.
-      ungroundedClaims: null,
-      existingPendingDraftId: null,
-      pendingUntil: new Date(),
-      blankBody: true,
-    })
-
-    await handleInbound(INBOUND_ID)
-
-    expect(applyApprovalPolicyStageMock).toHaveBeenCalledTimes(1)
-    const [, , groundingBackstopArg] =
-      applyApprovalPolicyStageMock.mock.calls[0]
-    expect(groundingBackstopArg).toEqual({
-      status: 'flagged',
-      claims: ['invents a wifi network name not in venue facts'],
-    })
-  })
-
-  // TAC-401. The orchestrator hop for the prose-promise check, and it is the
-  // assertion whose absence let the carrier never reach the card at all: the
-  // check ran, fired its event and its Slack relay, and the promise auto-sent,
-  // with the whole suite green. Mutant: pass `{ status: 'skipped' }` to
-  // applyApprovalPolicyStage instead of the stage's result.
-  it('threads the prose-promise verdict through to applyApprovalPolicyStage', async () => {
-    generateStageMock.mockResolvedValue({
-      status: 'success',
-      result: successResult(),
-    })
-    verifyProsePromiseStageMock.mockResolvedValueOnce({
-      status: 'flagged',
-      commitment: {
-        type: 'comp',
-        description: 'a replacement cortado',
-        code: 'A1B2',
-        expiresAt: null,
-      },
     })
     applyApprovalPolicyStageMock.mockResolvedValue({ action: 'send' })
     scheduleAndSendMock.mockResolvedValue({
-      outboundMessageId: 'sent-p',
+      outboundMessageId: 'sent-d1',
       providerMessageId: 'p',
     })
 
     await handleInbound(INBOUND_ID)
 
-    const [, , , , prosePromiseArg] = applyApprovalPolicyStageMock.mock.calls[0]
-    expect(prosePromiseArg).toEqual({
-      status: 'flagged',
-      commitment: {
-        type: 'comp',
-        description: 'a replacement cortado',
-        code: 'A1B2',
-        expiresAt: null,
-      },
+    expect(applyApprovalPolicyStageMock).toHaveBeenCalledTimes(1)
+    const [
+      ,
+      ,
+      grounding,
+      mechanicOffer,
+      prosePromise,
+      cancellation,
+      closedVenue,
+    ] = applyApprovalPolicyStageMock.mock.calls[0]
+    expect(grounding).toBeNull()
+    expect(mechanicOffer).toEqual({ status: 'skipped' })
+    expect(prosePromise).toEqual({ status: 'skipped' })
+    expect(cancellation).toEqual({
+      resolution: { status: 'none' },
+      claim: 'skipped',
     })
+    expect(closedVenue).toEqual({ status: 'skipped' })
   })
 
-  // TAC-401. THE acceptance criterion: the commitment the check named has to
-  // reach the row, or the promise is caught and still untracked. Asserted on
-  // the persist call's options rather than on a returned value, because the
-  // persist layer is mocked here and a mock returns its fixture whatever it is
-  // handed — the TAC-385 mutant, which is exactly how this shipped broken the
-  // first time.
-  it('passes the named commitment into the persist options', async () => {
+  // The falsifiable half of "deferred": the count is snapshotted INSIDE the
+  // gate mock, so a regression that moves any check back before the gate
+  // fails here even though all five have been called by the end of the turn.
+  it('calls no verify stage before the gate decides, and all five after the send', async () => {
+    generateStageMock.mockResolvedValue({
+      status: 'success',
+      result: successResult(),
+    })
+    let callsAtGateTime = -1
+    applyApprovalPolicyStageMock.mockImplementation(async () => {
+      callsAtGateTime =
+        verifyGroundingStageMock.mock.calls.length +
+        verifyMechanicOfferStageMock.mock.calls.length +
+        verifyProsePromiseStageMock.mock.calls.length +
+        verifyCancellationClaimStageMock.mock.calls.length +
+        verifyClosedVenueArrivalStageMock.mock.calls.length
+      return { action: 'send' }
+    })
+    scheduleAndSendMock.mockResolvedValue({
+      outboundMessageId: 'sent-d2',
+      providerMessageId: 'p',
+    })
+
+    await handleInbound(INBOUND_ID)
+
+    expect(callsAtGateTime).toBe(0)
+    expect(verifyGroundingStageMock).toHaveBeenCalledTimes(1)
+    expect(verifyMechanicOfferStageMock).toHaveBeenCalledTimes(1)
+    expect(verifyProsePromiseStageMock).toHaveBeenCalledTimes(1)
+    expect(verifyCancellationClaimStageMock).toHaveBeenCalledTimes(1)
+    expect(verifyClosedVenueArrivalStageMock).toHaveBeenCalledTimes(1)
+  })
+
+  it("runs every post-send check with disposition 'sent'", async () => {
+    generateStageMock.mockResolvedValue({
+      status: 'success',
+      result: successResult(),
+    })
+    applyApprovalPolicyStageMock.mockResolvedValue({ action: 'send' })
+    scheduleAndSendMock.mockResolvedValue({
+      outboundMessageId: 'sent-d3',
+      providerMessageId: 'p',
+    })
+
+    await handleInbound(INBOUND_ID)
+
+    for (const mock of [
+      verifyGroundingStageMock,
+      verifyMechanicOfferStageMock,
+      verifyProsePromiseStageMock,
+      verifyCancellationClaimStageMock,
+      verifyClosedVenueArrivalStageMock,
+    ]) {
+      expect(mock).toHaveBeenCalledTimes(1)
+      expect(mock.mock.calls[0][2]).toBe('sent')
+    }
+  })
+
+  // A queued draft is already in front of an operator; drop/silence sent
+  // nothing. Running the checks there would alert on text no guest ever saw.
+  it('runs no checks when the gate queues', async () => {
+    generateStageMock.mockResolvedValue({
+      status: 'success',
+      result: successResult(),
+    })
+    applyApprovalPolicyStageMock.mockResolvedValue({
+      action: 'queue',
+      triggers: [APPROVAL_TRIGGERS.FIDELITY_BELOW_AUTO_SEND_FLOOR],
+      primaryTrigger: APPROVAL_TRIGGERS.FIDELITY_BELOW_AUTO_SEND_FLOOR,
+      compMatchedPattern: null,
+      ungroundedClaims: null,
+      existingPendingDraftId: null,
+      blankBody: false,
+    })
+    persistOrRegenQueuedDraftMock.mockResolvedValue({
+      outboundMessageId: 'card-d1',
+      action: 'inserted',
+      priorReviewReason: null,
+    })
+
+    await handleInbound(INBOUND_ID)
+
+    expect(verifyGroundingStageMock).not.toHaveBeenCalled()
+    expect(verifyMechanicOfferStageMock).not.toHaveBeenCalled()
+    expect(verifyProsePromiseStageMock).not.toHaveBeenCalled()
+    expect(verifyCancellationClaimStageMock).not.toHaveBeenCalled()
+    expect(verifyClosedVenueArrivalStageMock).not.toHaveBeenCalled()
+  })
+
+  // TAC-401's acceptance criterion, carried over from the reversed block: the
+  // commitment the gate names has to reach the row, or a caught promise is
+  // still untracked. On the deferred posture the inbound gate always receives
+  // a 'skipped' prose check and so returns promisedCommitment null in
+  // production — this pins the HOP so a posture revert cannot land on an
+  // orchestrator that silently drops the carrier. Asserted on the persist
+  // call's options rather than a returned value (the TAC-385 mutant).
+  it('passes a gate-named commitment into the persist options', async () => {
     const commitment = {
       type: 'comp' as const,
       description: 'a replacement cortado',
@@ -1929,10 +2030,6 @@ describe('handleInbound — grounding backstop wiring (TAC-350)', () => {
     generateStageMock.mockResolvedValue({
       status: 'success',
       result: successResult(),
-    })
-    verifyProsePromiseStageMock.mockResolvedValueOnce({
-      status: 'flagged',
-      commitment,
     })
     applyApprovalPolicyStageMock.mockResolvedValue({
       action: 'queue',
@@ -1947,7 +2044,7 @@ describe('handleInbound — grounding backstop wiring (TAC-350)', () => {
       promisedCommitment: commitment,
     })
     persistOrRegenQueuedDraftMock.mockResolvedValue({
-      outboundMessageId: 'card-1',
+      outboundMessageId: 'card-d2',
       action: 'inserted',
       priorReviewReason: null,
     })
@@ -1959,93 +2056,10 @@ describe('handleInbound — grounding backstop wiring (TAC-350)', () => {
     expect(options.promisedCommitment).toEqual(commitment)
   })
 
-  it('passes the skipped state through when the backstop finds nothing', async () => {
-    generateStageMock.mockResolvedValue({
-      status: 'success',
-      result: successResult(),
-    })
-    applyApprovalPolicyStageMock.mockResolvedValue({ action: 'send' })
-    scheduleAndSendMock.mockResolvedValue({
-      outboundMessageId: 'sent-2',
-      providerMessageId: 'p',
-    })
-
-    await handleInbound(INBOUND_ID)
-
-    expect(verifyGroundingStageMock).toHaveBeenCalledTimes(1)
-    const [, , groundingBackstopArg] =
-      applyApprovalPolicyStageMock.mock.calls[0]
-    expect(groundingBackstopArg).toEqual({ status: 'skipped' })
-  })
-
-  // TAC-367: the truncated state has to survive the orchestrator hop. It is
-  // the only grounding state that changes the send/queue outcome without
-  // carrying any payload, so a hop that flattened it to 'skipped' would look
-  // correct everywhere and silently restore fail-open.
-  it('threads the truncated state through to applyApprovalPolicyStage', async () => {
-    generateStageMock.mockResolvedValue({
-      status: 'success',
-      result: successResult(),
-    })
-    verifyGroundingStageMock.mockResolvedValueOnce({ status: 'truncated' })
-    applyApprovalPolicyStageMock.mockResolvedValue({
-      action: 'queue',
-      triggers: [APPROVAL_TRIGGERS.GROUNDING_CHECK_FAILED],
-      primaryTrigger: APPROVAL_TRIGGERS.GROUNDING_CHECK_FAILED,
-      compMatchedPattern: null,
-      // TAC-364: the gate ALWAYS returns this on a queue decision (it is
-      // required on ApprovalDecision), so a fixture omitting it would feed
-      // `undefined` down a path production never produces. null is what a
-      // followup / skipped-check turn actually carries — see ruling 3.
-      ungroundedClaims: null,
-      existingPendingDraftId: null,
-      blankBody: false,
-    })
-
-    await handleInbound(INBOUND_ID)
-
-    const [, , groundingBackstopArg] =
-      applyApprovalPolicyStageMock.mock.calls[0]
-    expect(groundingBackstopArg).toEqual({ status: 'truncated' })
-  })
-
-  // TAC-424: the same threading assertion for the state this ticket added.
-  // `degraded` is the one whose whole point is that it USED to arrive as
-  // `clean`, so a hop that flattened it would restore the exact defect and
-  // look correct everywhere — the gate would queue nothing and the row would
-  // record a pass.
-  it('threads the degraded state through to applyApprovalPolicyStage', async () => {
-    generateStageMock.mockResolvedValue({
-      status: 'success',
-      result: successResult(),
-    })
-    verifyGroundingStageMock.mockResolvedValueOnce({ status: 'degraded' })
-    applyApprovalPolicyStageMock.mockResolvedValue({
-      action: 'queue',
-      triggers: [
-        APPROVAL_TRIGGERS.GROUNDING_CHECK_FAILED,
-        APPROVAL_TRIGGERS.GROUNDING_CHECK_DEGRADED,
-      ],
-      primaryTrigger: APPROVAL_TRIGGERS.GROUNDING_CHECK_FAILED,
-      compMatchedPattern: null,
-      ungroundedClaims: null,
-      existingPendingDraftId: null,
-      blankBody: false,
-    })
-
-    await handleInbound(INBOUND_ID)
-
-    const [, , groundingBackstopArg] =
-      applyApprovalPolicyStageMock.mock.calls[0]
-    expect(groundingBackstopArg).toEqual({ status: 'degraded' })
-    expect(scheduleAndSendMock).not.toHaveBeenCalled()
-  })
-
-  // TAC-367: an unexpected throw is OUR bug, not evidence about the reply.
-  // It must degrade to 'skipped', never to the fail-closed 'truncated' —
-  // otherwise any future defect in this stage becomes a fleet-wide queue
-  // flood rather than a logged degradation.
-  it('degrades an unexpected throw to skipped, not to truncated', async () => {
+  // Reverses TAC-367's "degrades an unexpected throw to skipped": there is no
+  // gate input left to degrade. The invariant that replaces it is that a
+  // post-send throw cannot touch the already-sent reply's outcome.
+  it('reports the turn sent even when a post-send check throws', async () => {
     generateStageMock.mockResolvedValue({
       status: 'success',
       result: successResult(),
@@ -2055,159 +2069,13 @@ describe('handleInbound — grounding backstop wiring (TAC-350)', () => {
     )
     applyApprovalPolicyStageMock.mockResolvedValue({ action: 'send' })
     scheduleAndSendMock.mockResolvedValue({
-      outboundMessageId: 'sent-3',
+      outboundMessageId: 'sent-d4',
       providerMessageId: 'p',
     })
 
-    await handleInbound(INBOUND_ID)
+    const result = await handleInbound(INBOUND_ID)
 
-    const [, , groundingBackstopArg] =
-      applyApprovalPolicyStageMock.mock.calls[0]
-    expect(groundingBackstopArg).toEqual({ status: 'skipped' })
-  })
-})
-
-describe('handleInbound — mechanic-offer backstop wiring (TAC-355)', () => {
-  it('threads a "flagged" verifyMechanicOfferStage result into applyApprovalPolicyStage as the fourth argument', async () => {
-    generateStageMock.mockResolvedValue({
-      status: 'success',
-      result: successResult(),
-    })
-    verifyMechanicOfferStageMock.mockResolvedValueOnce({
-      status: 'flagged',
-      mechanicId: 'mech-1',
-    })
-    applyApprovalPolicyStageMock.mockResolvedValue({
-      action: 'queue',
-      triggers: [APPROVAL_TRIGGERS.MECHANIC_OFFER_BACKSTOP],
-      primaryTrigger: APPROVAL_TRIGGERS.MECHANIC_OFFER_BACKSTOP,
-      compMatchedPattern: null,
-      // TAC-364: the gate ALWAYS returns this on a queue decision (it is
-      // required on ApprovalDecision), so a fixture omitting it would feed
-      // `undefined` down a path production never produces. null is what a
-      // followup / skipped-check turn actually carries — see ruling 3.
-      ungroundedClaims: null,
-      existingPendingDraftId: null,
-      blankBody: false,
-    })
-
-    await handleInbound(INBOUND_ID)
-
-    expect(verifyMechanicOfferStageMock).toHaveBeenCalledTimes(1)
-    expect(applyApprovalPolicyStageMock).toHaveBeenCalledTimes(1)
-    const [, , , mechanicOfferBackstopArg] =
-      applyApprovalPolicyStageMock.mock.calls[0]
-    expect(mechanicOfferBackstopArg).toEqual({
-      status: 'flagged',
-      mechanicId: 'mech-1',
-    })
-  })
-
-  it('runs verifyGroundingStage and verifyMechanicOfferStage concurrently, both threaded through on a clean turn', async () => {
-    generateStageMock.mockResolvedValue({
-      status: 'success',
-      result: successResult(),
-    })
-    applyApprovalPolicyStageMock.mockResolvedValue({ action: 'send' })
-    scheduleAndSendMock.mockResolvedValue({
-      outboundMessageId: 'sent-3',
-      providerMessageId: 'p',
-    })
-
-    await handleInbound(INBOUND_ID)
-
-    expect(verifyGroundingStageMock).toHaveBeenCalledTimes(1)
-    expect(verifyMechanicOfferStageMock).toHaveBeenCalledTimes(1)
-    const [, , groundingBackstopArg, mechanicOfferBackstopArg] =
-      applyApprovalPolicyStageMock.mock.calls[0]
-    expect(groundingBackstopArg).toEqual({ status: 'skipped' })
-    expect(mechanicOfferBackstopArg).toEqual({ status: 'skipped' })
-  })
-
-  // [Operator follow-up] verifyGroundingStage and verifyMechanicOfferStage
-  // are proven never to throw (every call inside each is independently
-  // try/catch-safe — see the code comment at the Promise.allSettled call
-  // site), but that invariant lives in other files. These two tests prove
-  // the COMPOSITION itself degrades safely if that invariant were ever
-  // violated: allSettled means one stage rejecting does not discard the
-  // other stage's real finding, and each one's rejection degrades to
-  // the orchestrator's own documented degradation for that stage.
-  //
-  // TAC-424 corrects this comment, which was wrong in both halves and named a
-  // return value ('null') that stage has not produced since TAC-367. The
-  // degradations are 'skipped' for grounding and 'check_failed' for
-  // mechanic-offer, and they are NOT symmetric: the mechanic-offer one queues,
-  // while grounding's 'skipped' is a pass-through to send. That asymmetry is
-  // deliberate — a throw in our own code is not evidence about the reply — but
-  // it is the one path left where an unchecked reply reaches a guest, so do
-  // not read these two tests as proving nothing can.
-  it('does not lose the mechanic-offer finding if verifyGroundingStage unexpectedly throws', async () => {
-    generateStageMock.mockResolvedValue({
-      status: 'success',
-      result: successResult(),
-    })
-    verifyGroundingStageMock.mockRejectedValueOnce(
-      new Error('unexpected throw'),
-    )
-    verifyMechanicOfferStageMock.mockResolvedValueOnce({
-      status: 'flagged',
-      mechanicId: 'mech-1',
-    })
-    applyApprovalPolicyStageMock.mockResolvedValue({
-      action: 'queue',
-      triggers: [APPROVAL_TRIGGERS.MECHANIC_OFFER_BACKSTOP],
-      primaryTrigger: APPROVAL_TRIGGERS.MECHANIC_OFFER_BACKSTOP,
-      compMatchedPattern: null,
-      // TAC-364: the gate ALWAYS returns this on a queue decision (it is
-      // required on ApprovalDecision), so a fixture omitting it would feed
-      // `undefined` down a path production never produces. null is what a
-      // followup / skipped-check turn actually carries — see ruling 3.
-      ungroundedClaims: null,
-      existingPendingDraftId: null,
-      blankBody: false,
-    })
-
-    await handleInbound(INBOUND_ID)
-
-    expect(applyApprovalPolicyStageMock).toHaveBeenCalledTimes(1)
-    const [, , groundingBackstopArg, mechanicOfferBackstopArg] =
-      applyApprovalPolicyStageMock.mock.calls[0]
-    expect(groundingBackstopArg).toEqual({ status: 'skipped' })
-    expect(mechanicOfferBackstopArg).toEqual({
-      status: 'flagged',
-      mechanicId: 'mech-1',
-    })
-  })
-
-  it('degrades to check_failed (still queues) if verifyMechanicOfferStage unexpectedly throws', async () => {
-    generateStageMock.mockResolvedValue({
-      status: 'success',
-      result: successResult(),
-    })
-    verifyGroundingStageMock.mockResolvedValueOnce({ status: 'skipped' })
-    verifyMechanicOfferStageMock.mockRejectedValueOnce(
-      new Error('unexpected throw'),
-    )
-    applyApprovalPolicyStageMock.mockResolvedValue({
-      action: 'queue',
-      triggers: [APPROVAL_TRIGGERS.MECHANIC_OFFER_BACKSTOP],
-      primaryTrigger: APPROVAL_TRIGGERS.MECHANIC_OFFER_BACKSTOP,
-      compMatchedPattern: null,
-      // TAC-364: the gate ALWAYS returns this on a queue decision (it is
-      // required on ApprovalDecision), so a fixture omitting it would feed
-      // `undefined` down a path production never produces. null is what a
-      // followup / skipped-check turn actually carries — see ruling 3.
-      ungroundedClaims: null,
-      existingPendingDraftId: null,
-      blankBody: false,
-    })
-
-    await handleInbound(INBOUND_ID)
-
-    expect(applyApprovalPolicyStageMock).toHaveBeenCalledTimes(1)
-    const [, , , mechanicOfferBackstopArg] =
-      applyApprovalPolicyStageMock.mock.calls[0]
-    expect(mechanicOfferBackstopArg).toEqual({ status: 'check_failed' })
+    expect(result.status).toBe('sent')
   })
 })
 
@@ -2646,11 +2514,10 @@ describe('handleInbound — cancellation carrier (TAC-513)', () => {
     created_at: new Date().toISOString(),
   }
 
-  // Kills the mutant that replaces the stage call with an inline clean result.
-  // Both sibling backstops pin their own invocation this way; this one did not,
-  // so the check could be disconnected from the orchestrator entirely with the
-  // whole suite green.
-  it('calls verifyCancellationClaimStage once per inbound', async () => {
+  // Kills the mutant that disconnects the cancellation check from the
+  // post-send batch entirely. Since the decision 0003 rewrite the call this
+  // pins happens AFTER dispatch (runPostSendChecks), not before the gate.
+  it('calls verifyCancellationClaimStage once per sent inbound', async () => {
     generateStageMock.mockResolvedValue({
       status: 'success',
       result: successResult(),
@@ -2679,14 +2546,6 @@ describe('handleInbound — cancellation carrier (TAC-513)', () => {
       status: 'success',
       result: { ...successResult(), cancelsCommitmentId: TONIC.id },
     })
-    verifyCancellationClaimStageMock.mockResolvedValueOnce({
-      resolution: {
-        status: 'resolved',
-        cancellation: pendingCancellation,
-        commitment: TONIC,
-      },
-      claim: 'skipped',
-    })
     applyApprovalPolicyStageMock.mockResolvedValue({
       action: 'queue',
       triggers: [APPROVAL_TRIGGERS.COMMITMENT_CANCELLATION_GATED],
@@ -2710,12 +2569,13 @@ describe('handleInbound — cancellation carrier (TAC-513)', () => {
     expect(options.pendingCancellation).toEqual(pendingCancellation)
   })
 
-  // The degrade branch, and the reason it RECOMPUTES rather than assuming.
-  // `resolveCancellation` is pure, so on an unexpected throw the orchestrator
-  // can still answer the question correctly. Assuming `{ status: 'none' }`
-  // instead would discard a resolvable id and hand the operator a card saying
-  // the check did not run, with no carrier behind text that says a comp is off.
-  it('recomputes a RESOLVED resolution when the stage unexpectedly throws', async () => {
+  // Decision 0003 rewrite: the LLM claim check is deferred post-send, but the
+  // PURE resolution still reaches the gate inline — a draft whose emission
+  // cancels a real commitment has to queue (trigger 13) whatever happens to
+  // the deferred check. Reverses "recomputes a RESOLVED resolution when the
+  // stage unexpectedly throws": there is no throw to recover from, because
+  // the orchestrator now computes the resolution itself.
+  it('passes a RESOLVED pure resolution to the gate when the reply cancels a live commitment', async () => {
     buildRuntimeContextMock.mockResolvedValue(
       makeCtx({ activeCommitments: [TONIC] }),
     )
@@ -2723,13 +2583,10 @@ describe('handleInbound — cancellation carrier (TAC-513)', () => {
       status: 'success',
       result: { ...successResult(), cancelsCommitmentId: TONIC.id },
     })
-    verifyCancellationClaimStageMock.mockRejectedValueOnce(
-      new Error('unexpected throw'),
-    )
     applyApprovalPolicyStageMock.mockResolvedValue({
       action: 'queue',
-      triggers: [APPROVAL_TRIGGERS.PROSE_CANCELLATION_CHECK_FAILED],
-      primaryTrigger: APPROVAL_TRIGGERS.PROSE_CANCELLATION_CHECK_FAILED,
+      triggers: [APPROVAL_TRIGGERS.COMMITMENT_CANCELLATION_GATED],
+      primaryTrigger: APPROVAL_TRIGGERS.COMMITMENT_CANCELLATION_GATED,
       compMatchedPattern: null,
       ungroundedClaims: null,
       existingPendingDraftId: null,
@@ -2751,35 +2608,23 @@ describe('handleInbound — cancellation carrier (TAC-513)', () => {
         cancellation: { commitmentId: TONIC.id },
         commitment: TONIC,
       },
-      claim: 'check_failed',
+      claim: 'skipped',
     })
   })
 
-  // The other direction, and it is why the degrade is not simply 'unresolved'.
-  // On the ordinary turn the field is '', so assuming unresolved would fire
-  // trigger 14 and hold a reply that says nothing about a cancellation, under
-  // copy telling the operator it cancels something.
-  it('recomputes NONE on a throw when the reply cancels nothing', async () => {
+  // The other direction. On the ordinary turn the emission is empty, and the
+  // gate must see NONE — not 'unresolved', which would fire trigger 16 and
+  // hold a reply that says nothing about a cancellation. Reverses
+  // "recomputes NONE on a throw when the reply cancels nothing".
+  it('passes a NONE pure resolution to the gate on an ordinary reply', async () => {
     generateStageMock.mockResolvedValue({
       status: 'success',
       result: successResult(),
     })
-    verifyCancellationClaimStageMock.mockRejectedValueOnce(
-      new Error('unexpected throw'),
-    )
-    applyApprovalPolicyStageMock.mockResolvedValue({
-      action: 'queue',
-      triggers: [APPROVAL_TRIGGERS.PROSE_CANCELLATION_CHECK_FAILED],
-      primaryTrigger: APPROVAL_TRIGGERS.PROSE_CANCELLATION_CHECK_FAILED,
-      compMatchedPattern: null,
-      ungroundedClaims: null,
-      existingPendingDraftId: null,
-      blankBody: false,
-    })
-    persistOrRegenQueuedDraftMock.mockResolvedValue({
-      outboundMessageId: 'card-c3',
-      action: 'inserted',
-      priorReviewReason: null,
+    applyApprovalPolicyStageMock.mockResolvedValue({ action: 'send' })
+    scheduleAndSendMock.mockResolvedValue({
+      outboundMessageId: 'sent-c3',
+      providerMessageId: 'p',
     })
 
     await handleInbound(INBOUND_ID)
@@ -2788,7 +2633,7 @@ describe('handleInbound — cancellation carrier (TAC-513)', () => {
       applyApprovalPolicyStageMock.mock.calls[0]
     expect(cancellationArg).toEqual({
       resolution: { status: 'none' },
-      claim: 'check_failed',
+      claim: 'skipped',
     })
   })
 })
@@ -2916,9 +2761,7 @@ describe('handleInbound — records the turn outcome (TAC-523)', () => {
     // PostHog event and the Langfuse trace for the same run. `expect.any(String)`
     // would pass against a freshly minted uuid, so this pins it against the id
     // the alert for the SAME turn carries.
-    retrieveCorpusStageMock.mockRejectedValue(
-      new Error('below MIN_STRONG_MATCHES'),
-    )
+    retrieveCorpusStageMock.mockRejectedValue(new Error('empty_voice_pack'))
 
     await handleInbound(INBOUND_ID)
 
@@ -2944,9 +2787,7 @@ describe('handleInbound — records the turn outcome (TAC-523)', () => {
   })
 
   it('hands over a FAILED result — the fail-closed corpus retrieval, known path 2', async () => {
-    retrieveCorpusStageMock.mockRejectedValue(
-      new Error('below MIN_STRONG_MATCHES'),
-    )
+    retrieveCorpusStageMock.mockRejectedValue(new Error('empty_voice_pack'))
 
     const r = await handleInbound(INBOUND_ID)
 
@@ -3126,10 +2967,11 @@ describe('handleInbound — paused and archived venues (TAC-529)', () => {
   // buildRuntimeContext assertion above covers only the context-build half,
   // so moving the gate below the coalescing block passed all 101 tests.
   //
-  // It matters because COALESCE_SETTLE_MS is 8_000 and coalescing is on: a
-  // gate one block later would put an 8-second sleep plus a claim insert,
-  // release and hand-off on EVERY inbound at a paused venue, which is exactly
-  // the churn the placement exists to avoid.
+  // It matters because coalescing is on: a gate one block later would put a
+  // claim insert, release and hand-off (plus the settle sleep, whenever the
+  // constant is nonzero — it was 8s when this was written) on EVERY inbound
+  // at a paused venue, which is exactly the churn the placement exists to
+  // avoid.
   //
   // Asserted through the injected deps rather than behaviourally, the same
   // technique handle-operator-decline.test.ts uses for its persist-not-send
@@ -3490,10 +3332,7 @@ describe('TAC-540 — typing dots on the auto-send path', () => {
     [
       'failed in generation, with no card',
       () => {
-        generateStageMock.mockResolvedValue({
-          status: 'failed',
-          error: 'boom',
-        })
+        generateStageMock.mockResolvedValue({ status: 'failed', error: 'boom' })
         loadPendingRowsBySlotMock.mockRejectedValue(
           new Error('no card for you'),
         )
@@ -3502,7 +3341,9 @@ describe('TAC-540 — typing dots on the auto-send path', () => {
     [
       'failed in the corpus stage',
       () => {
-        retrieveCorpusStageMock.mockRejectedValue(new Error('voyage exploded'))
+        retrieveCorpusStageMock.mockRejectedValue(
+          new Error('voice pack load failed'),
+        )
       },
     ],
     [
@@ -3676,40 +3517,6 @@ describe('TAC-540 — the prediction that decides whether dots appear at all', (
     expect(signalTypingMock).not.toHaveBeenCalled()
   })
 
-  /**
-   * The ticket's own closed-venue clause. `isVenueClosed` is a POSITIVE
-   * verdict only, so a venue whose hours nobody filled in still gets dots —
-   * which is why the fixture states real hours and a time outside them
-   * rather than leaving `hours` empty.
-   */
-  it('shows no dots while the venue is positively closed', async () => {
-    const base = typingCtx()
-    buildRuntimeContextMock.mockResolvedValue(
-      typingCtx({
-        venue: {
-          ...base.venue,
-          timezone: 'America/Los_Angeles',
-          venueInfo: { hours: { monday: '7:00 AM – 3:00 PM' } },
-        },
-        // A Monday, 21:00 in Los Angeles: six hours after close.
-        recognition: {
-          ...base.recognition,
-          computedAt: new Date('2026-09-22T04:00:00.000Z'),
-        },
-      }),
-    )
-    applyApprovalPolicyStageMock.mockResolvedValue({ action: 'send' })
-    generateStageMock.mockResolvedValue({
-      status: 'success',
-      result: successResult(),
-    })
-    instagramSendSucceeds()
-
-    await handleInbound(INBOUND_ID)
-
-    expect(signalTypingMock).not.toHaveBeenCalled()
-  })
-
   /** AC 4, from the orchestrator's side. */
   it('a text conversation never reaches the typing switch at all', async () => {
     buildRuntimeContextMock.mockResolvedValue(makeCtx())
@@ -3729,6 +3536,101 @@ describe('TAC-540 — the prediction that decides whether dots appear at all', (
     expect(signalTypingMock).not.toHaveBeenCalled()
     // The other half of AC 4: the text arm still runs, untouched.
     expect(scheduleAndSendMock).toHaveBeenCalledTimes(1)
+    expect(dispatchInstagramReplyMock).not.toHaveBeenCalled()
+  })
+})
+
+/**
+ * TAC-565. The dots after hours too.
+ *
+ * `mayAutoSendAfterClassification` is forwarded REAL by this file's `./stages`
+ * factory, so these two run the production predicate over a genuinely closed
+ * venue rather than a stub's opinion of one. The fixture states real hours and
+ * a real time six hours after close: `isVenueClosed` is a POSITIVE verdict, so
+ * an empty-hours venue resolves to `unknown`, reads as open, and would let a
+ * restored closed-venue clause pass unnoticed.
+ *
+ * MUTANT (run before this was reported): putting
+ * `!isVenueClosed(ctx.venue, ctx.recognition.computedAt)` back as the
+ * predicate's return kills both — the first on ['on','on'] vs [], the second
+ * on `flushTyping` never seeing an 'off'.
+ */
+describe('TAC-565 — the dots go on after hours too', () => {
+  /** See the drain in the TAC-540 describe: same reason, same shape. */
+  afterEach(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 10))
+  })
+
+  function closedVenueCtx() {
+    const base = typingCtx()
+    return typingCtx({
+      venue: {
+        ...base.venue,
+        timezone: 'America/Los_Angeles',
+        venueInfo: { hours: { monday: '7:00 AM – 3:00 PM' } },
+      },
+      // A Monday, 21:00 in Los Angeles: six hours after close.
+      recognition: {
+        ...base.recognition,
+        computedAt: new Date('2026-09-22T04:00:00.000Z'),
+      },
+    })
+  }
+
+  /**
+   * The ticket's first acceptance criterion. Both sites, like the open-venue
+   * case: after hours is where generation is least likely to be quick and
+   * Meta's 20-second timeout most likely to expire before the send.
+   */
+  it('turns the dots on for an auto-send while the venue is closed', async () => {
+    buildRuntimeContextMock.mockResolvedValue(closedVenueCtx())
+    applyApprovalPolicyStageMock.mockResolvedValue({ action: 'send' })
+    generateStageMock.mockResolvedValue({
+      status: 'success',
+      result: successResult(),
+    })
+    instagramSendSucceeds()
+
+    const r = await handleInbound(INBOUND_ID)
+
+    expect(r).toMatchObject({ status: 'sent' })
+    expect(typingSignals()).toEqual(['on', 'on'])
+    expect(signalTypingMock).toHaveBeenCalledWith(
+      { venueId: VENUE_ID, guestId: GUEST_ID, channel: 'instagram' },
+      'on',
+    )
+  })
+
+  /**
+   * The second acceptance criterion, and the one that makes the first safe to
+   * ship: a closed venue is where a draft is MOST likely to be held (trigger
+   * 17 and the closed-venue-arrival backstop can only fire while closed), so
+   * the correction has to hold here or TAC-565 trades a slow reply for a false
+   * promise. `off` is the last signal and nothing was dispatched.
+   */
+  it('turns them off again when the draft is held while closed, and sends nothing', async () => {
+    buildRuntimeContextMock.mockResolvedValue(closedVenueCtx())
+    generateStageMock.mockResolvedValue({
+      status: 'success',
+      result: successResult(),
+    })
+    applyApprovalPolicyStageMock.mockResolvedValue({
+      action: 'queue',
+      triggers: [APPROVAL_TRIGGERS.CLOSED_VENUE_ARRIVAL_EMITTED],
+      primaryTrigger: APPROVAL_TRIGGERS.CLOSED_VENUE_ARRIVAL_EMITTED,
+      existingPendingDraftId: null,
+    })
+    persistOrRegenQueuedDraftMock.mockResolvedValue({
+      outboundMessageId: 'card-1',
+      action: 'inserted',
+      priorReviewReason: null,
+    })
+
+    const r = await handleInbound(INBOUND_ID)
+    await flushTyping()
+
+    expect(r).toMatchObject({ status: 'queued' })
+    expect(typingSignals()).toEqual(['on', 'on', 'off'])
     expect(dispatchInstagramReplyMock).not.toHaveBeenCalled()
   })
 })
@@ -4014,7 +3916,9 @@ describe('TAC-540 — classify and voice retrieval overlap', () => {
     const onUnhandled = (reason: unknown) => unhandled.push(reason)
     process.on('unhandledRejection', onUnhandled)
     try {
-      retrieveCorpusStageMock.mockRejectedValue(new Error('voyage exploded'))
+      retrieveCorpusStageMock.mockRejectedValue(
+        new Error('voice pack load failed'),
+      )
       classifyStageMock.mockRejectedValue(new Error('anthropic exploded'))
 
       const r = await handleInbound(INBOUND_ID)
@@ -4031,7 +3935,9 @@ describe('TAC-540 — classify and voice retrieval overlap', () => {
 
   /** The corpus failure keeps its own stage and its own alert. */
   it('a corpus failure still fails as corpus, in its old position', async () => {
-    retrieveCorpusStageMock.mockRejectedValue(new Error('voyage exploded'))
+    retrieveCorpusStageMock.mockRejectedValue(
+      new Error('voice pack load failed'),
+    )
 
     const r = await handleInbound(INBOUND_ID)
 
@@ -4196,5 +4102,90 @@ describe('TAC-540 — each verify check owns its own span window', () => {
       .filter((e) => e.phase === 'close')
       .map((e) => e.name)
     expect(closed).toContain('verify_grounding')
+  })
+})
+
+// TAC-560: the in-conversation half of the once-per-guest-ever marker.
+describe('handleInbound — the warm close marker (TAC-560)', () => {
+  beforeEach(() => {
+    markWarmCloseSentMock.mockResolvedValue({ ok: true, data: 'marked' })
+    generateStageMock.mockResolvedValue({
+      status: 'success',
+      result: successResult(),
+    })
+  })
+
+  it('writes the marker when the model reports this reply WAS the close', async () => {
+    generateStageMock.mockResolvedValue({
+      status: 'success',
+      result: { ...successResult(), closedTheConversation: true },
+    })
+    await handleInbound(INBOUND_ID)
+    expect(markWarmCloseSentMock).toHaveBeenCalledTimes(1)
+    expect(markWarmCloseSentMock.mock.calls[0]?.[1]).toBe(GUEST_ID)
+  })
+
+  // THE MUTANT THE ACCEPTANCE CRITERION NAMES, from this side. Without the
+  // marker the pause timer finds a null column and closes the guest a second
+  // time, which is the one thing AC 1 forbids.
+  it('writes NO marker on an ordinary reply', async () => {
+    await handleInbound(INBOUND_ID)
+    expect(markWarmCloseSentMock).not.toHaveBeenCalled()
+  })
+
+  it('reports the path and the marker outcome', async () => {
+    generateStageMock.mockResolvedValue({
+      status: 'success',
+      result: { ...successResult(), closedTheConversation: true },
+    })
+    await handleInbound(INBOUND_ID)
+    expect(captureWarmCloseSentMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        via: 'in_conversation',
+        markerOutcome: 'marked',
+      }),
+    )
+  })
+
+  it('reports an existing marker rather than overwriting it', async () => {
+    // A guest the timer closed moments earlier keeps that earlier timestamp.
+    markWarmCloseSentMock.mockResolvedValue({
+      ok: true,
+      data: 'already_marked',
+    })
+    generateStageMock.mockResolvedValue({
+      status: 'success',
+      result: { ...successResult(), closedTheConversation: true },
+    })
+    await handleInbound(INBOUND_ID)
+    expect(captureWarmCloseSentMock).toHaveBeenCalledWith(
+      expect.objectContaining({ markerOutcome: 'already_marked' }),
+    )
+  })
+
+  // The guest already has the message, so a failed marker write must never turn a
+  // delivered reply into a failed request. The cost is one guest who could
+  // receive the close twice, which the timer's `acknowledgment` belt catches.
+  it('still reports sent when the marker write fails', async () => {
+    markWarmCloseSentMock.mockResolvedValue({ ok: false, error: 'boom' })
+    generateStageMock.mockResolvedValue({
+      status: 'success',
+      result: { ...successResult(), closedTheConversation: true },
+    })
+    const result = await handleInbound(INBOUND_ID)
+    expect(result.status).toBe('sent')
+    expect(captureWarmCloseSentMock).toHaveBeenCalledWith(
+      expect.objectContaining({ markerOutcome: 'write_failed' }),
+    )
+  })
+
+  it('does not fail the turn when the marker write throws', async () => {
+    markWarmCloseSentMock.mockRejectedValue(new Error('boom'))
+    generateStageMock.mockResolvedValue({
+      status: 'success',
+      result: { ...successResult(), closedTheConversation: true },
+    })
+    const result = await handleInbound(INBOUND_ID)
+    expect(result.status).toBe('sent')
   })
 })
