@@ -491,8 +491,10 @@ interface ClaimedWarmClose {
  *
  * FAILS CLOSED. A marker write that errors returns null, so the bubble is NOT
  * appended. The alternative — sending on an unknown marker state — is the one
- * outcome this mechanism is built to avoid, and the pause timer will try again
- * inside its own window.
+ * outcome this mechanism is built to avoid. For an Instagram scan guest the
+ * pause timer will try again inside its own window; for an SMS or non-scan
+ * guest there is no second attempt, and failing closed is still right, because
+ * a duplicated close is worse than a missing one (TAC-569).
  */
 async function claimWarmCloseForTurn(
   ctx: RuntimeContext,
@@ -1864,12 +1866,20 @@ async function runInboundTurn(
         now: ctx.recognition.computedAt,
       })
       if (writeResult.ok) {
-        // TAC-568 follow-on: the CLOSING SIGNAL IS THE COLUMN WRITE, not the
-        // model's proposed contextUpdate. identityColumnsChanged is
-        // updateGuestContext's own report of which identity columns the UPDATE
-        // actually carried, so a write that failed, or a patch that never
-        // mentioned first_name, leaves this false and sends no close. The pause
-        // timer still covers that guest inside its own window.
+        // TAC-568 follow-on: the closing signal is the COLUMN WRITE.
+        // identityColumnsChanged is updateGuestContext's own report of which
+        // identity columns the UPDATE actually carried, so a write that failed,
+        // or a patch that never mentioned first_name, leaves this false and
+        // sends no close.
+        //
+        // That is narrower than "a verified name": WHAT was written still came
+        // from the model's contextUpdate. See closesFirstConversation's own
+        // docstring, which states the bound rather than claiming a guarantee.
+        //
+        // A miss here costs nothing for an Instagram scan guest, whom the pause
+        // timer still covers inside its own window, and is PERMANENT for anyone
+        // else — the timer gates on qr_scan and Instagram, this path does not.
+        // TAC-569.
         nameJustStored =
           !nameOnRecordBefore &&
           writeResult.data.identityColumnsChanged.includes('first_name')
@@ -2526,8 +2536,9 @@ async function runInboundTurn(
         trace.update({ output: { status: dispatched.kind } })
         // TAC-568: nothing reached the guest, so the close did not happen. Give
         // the marker back rather than spending this guest's one close on a
-        // message they never saw; the pause timer can still close them inside
-        // its own two-hour window.
+        // message they never saw. An Instagram scan guest then gets the timer's
+        // own two-hour window; on SMS this turn was the only chance, which is
+        // the more reason to release rather than keep a claim nothing spent.
         await releaseClaimedWarmClose(claimedWarmClose, agentRunId)
         return undeliveredAgentResult(ctx, dispatched)
       }

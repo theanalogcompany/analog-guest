@@ -4317,7 +4317,8 @@ describe('handleInbound — the warm close on a goodbye (TAC-568)', () => {
   // THE CLAIM RELEASE. The claim is taken BEFORE the send, so a reply that never
   // reached the guest would otherwise spend their one close on nothing — for
   // ever, because the marker is `is null` and never reconsidered. Releasing it
-  // lets the pause timer close them properly inside its own window.
+  // lets the pause timer close them properly inside its own window (for an
+  // Instagram scan guest; on SMS there is no second attempt — TAC-569).
   //
   // Exercised on the Instagram arm because it is the only one that can decline:
   // the text arm sends the whole reply or throws.

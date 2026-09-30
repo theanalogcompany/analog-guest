@@ -108,10 +108,16 @@ describe('weAskedAQuestion (TAC-560, fixed by TAC-568)', () => {
 // TAC-568. The predicate both in-conversation paths turn on, driven directly
 // rather than only through the orchestrator.
 //
-// WHY A TRUTH TABLE RATHER THAN A FEW CASES: this function decides whether a
-// guest spends their one warm close, for ever. Every input combination is
-// therefore worth stating, and the two gates are asserted to beat BOTH arms
-// rather than just the one a single example would exercise.
+// WHY MORE CASES THAN USUAL: this function decides whether a guest spends their
+// one warm close, for ever, so each arm is driven from both sides and the two
+// gates are asserted to beat BOTH arms rather than just the one a single example
+// would exercise.
+//
+// NOT AN EXHAUSTIVE TRUTH TABLE, which an earlier version of this comment
+// claimed it was. It covers 4 of the 8 combinations of the three arm inputs; the
+// name/goodbye co-fire in particular is exercised through the orchestrator
+// (handle-inbound.test.ts, "claims once when the name and the goodbye both
+// fire"), not here.
 describe('closesFirstConversation (TAC-568)', () => {
   const TEXT = 'if you ever need anything, we are always here to help'
 
