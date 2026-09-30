@@ -326,8 +326,8 @@ export async function handleHoldingMessage(input: {
       ctx.corpus = await retrieveCorpusStage(ctx)
     } catch (e) {
       // Outbound path, so retrieveCorpusStage does NOT enforce the
-      // strong-match floor (THE-231) — a throw here means Voyage or the DB
-      // is down, not thin retrieval. No corpus means no voice, and a
+      // empty-pack throw (THE-231 grace, kept by decision 0008) — a throw
+      // here means the DB read failed. No pack means no voice, and a
       // voiceless holding message is exactly what the fallback is for.
       const errMsg = e instanceof Error ? e.message : String(e)
       logger.warn(

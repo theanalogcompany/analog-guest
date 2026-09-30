@@ -6,11 +6,6 @@
 // viewer at /admin/tunables consumes this array directly. Editable
 // overrides are Phase 2.
 //
-// Invariant: STRONG_MATCH_SIMILARITY (agent gate) >= SIMILARITY_FLOOR
-// (rag layer filter). The agent's gate counts chunks the rag layer has
-// already admitted; if the agent gate were lower, the count would be
-// capped by what rag returned anyway. Asserted in manifest.test.ts.
-
 import {
   MAX_HISTORY_DAYS,
   MAX_HISTORY_MESSAGES,
@@ -26,13 +21,10 @@ import {
 } from '@/lib/agent/intentions/definitions'
 import {
   AUTO_SEND_FIDELITY_FLOOR,
-  CORPUS_RETRIEVE_LIMIT,
   KNOWLEDGE_GAP_WINDOW_MS,
   KNOWLEDGE_RELEVANCE_FLOOR,
   KNOWLEDGE_RETRIEVE_LIMIT,
-  MIN_STRONG_MATCHES,
   SEND_FIDELITY_FLOOR,
-  STRONG_MATCH_SIMILARITY,
 } from '@/lib/agent/stages'
 import { MAX_CLASSIFIER_INPUT_CHARS } from '@/lib/ai/classify-message'
 import {
@@ -45,7 +37,6 @@ import {
   AGENT_LATENCY_HIGH_THRESHOLD_MS,
   CLASSIFICATION_CONFIDENCE_LOW_THRESHOLD,
   CLASSIFICATION_CONFIDENCE_REROUTE_THRESHOLD,
-  CORPUS_TOP_SIMILARITY_LOW_THRESHOLD,
   VOICE_FIDELITY_LOW_THRESHOLD,
   WEBHOOK_SILENCE_THRESHOLD_HOURS,
 } from '@/lib/analytics/posthog'
@@ -97,7 +88,7 @@ export interface Tunable {
 
 export const TUNABLES = [
   // ---------------------------------------------------------------------------
-  // agent_runtime (11)
+  // agent_runtime (count asserted in manifest.test.ts, not here)
   // ---------------------------------------------------------------------------
   {
     name: 'agent_latency_high_threshold_ms_inbound',
@@ -118,15 +109,6 @@ export const TUNABLES = [
     description:
       'Followup latency above which the agent_latency_high PostHog event fires. ' +
       'Separate from inbound because followup p50 is 0.2s against inbound 18.0s.',
-  },
-  {
-    name: 'corpus_top_similarity_low_threshold',
-    value: CORPUS_TOP_SIMILARITY_LOW_THRESHOLD,
-    type: 'number',
-    category: 'agent_runtime',
-    source: 'lib/analytics/posthog.ts',
-    description:
-      'Top-match cosine score below which a thin-retrieval alert fires.',
   },
   {
     name: 'max_visit_history_days',
@@ -340,16 +322,8 @@ export const TUNABLES = [
   },
 
   // ---------------------------------------------------------------------------
-  // retrieval (10)
+  // retrieval (count asserted in manifest.test.ts, not here)
   // ---------------------------------------------------------------------------
-  {
-    name: 'corpus_retrieve_limit',
-    value: CORPUS_RETRIEVE_LIMIT,
-    type: 'number',
-    category: 'retrieval',
-    source: 'lib/agent/stages.ts',
-    description: 'Top-K voice corpus chunks the agent requests per run.',
-  },
   {
     name: 'default_limit',
     value: DEFAULT_LIMIT,
@@ -357,7 +331,7 @@ export const TUNABLES = [
     category: 'retrieval',
     source: 'lib/rag/retrieve.ts',
     description:
-      'Fallback voice corpus retrieval limit when the caller passes none.',
+      'Fallback knowledge corpus retrieval limit when the caller passes none.',
   },
   {
     name: 'knowledge_confidence_floor_default',
@@ -408,22 +382,13 @@ export const TUNABLES = [
     relatedTickets: ['THE-238'],
   },
   {
-    name: 'min_strong_matches',
-    value: MIN_STRONG_MATCHES,
-    type: 'number',
-    category: 'retrieval',
-    source: 'lib/agent/stages.ts',
-    description:
-      'Minimum chunks at or above STRONG_MATCH_SIMILARITY required on the inbound path; below, the agent bails to a fallback acknowledgment. Followup path skips this gate.',
-  },
-  {
     name: 'similarity_floor',
     value: SIMILARITY_FLOOR,
     type: 'number',
     category: 'retrieval',
     source: 'lib/rag/retrieve.ts',
     description:
-      'Cosine score below which retrieval results are dropped at the rag layer (filters before chunks reach the agent).',
+      'Cosine score below which knowledge retrieval results are dropped at the rag layer (filters before chunks reach the agent).',
   },
   {
     name: 'similarity_threshold',
@@ -434,15 +399,6 @@ export const TUNABLES = [
     description:
       'Cosine threshold for two voice critiques to count as cluster members.',
     relatedTickets: ['THE-238'],
-  },
-  {
-    name: 'strong_match_similarity',
-    value: STRONG_MATCH_SIMILARITY,
-    type: 'number',
-    category: 'retrieval',
-    source: 'lib/agent/stages.ts',
-    description:
-      'Cosine threshold a voice corpus chunk must meet to count as a strong match for the inbound retrieval gate.',
   },
 
   // ---------------------------------------------------------------------------

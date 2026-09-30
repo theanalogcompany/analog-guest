@@ -591,24 +591,34 @@ describe('the shipped constants', () => {
     expect(INBOUND_COALESCING_ENABLED).toBe(true)
   })
 
-  it('pins the settle window at 3s and the lease at 2 minutes', () => {
+  it('pins the settle window at ZERO and the lease at 2 minutes', () => {
     // The window is a costed trade, not a default. See the constant's own
-    // docstring for the no-settle alternative and what it buys.
+    // docstring for the measurement that priced it.
     //
-    // 8s until TAC-540, 3s since. The pin exists so that change has to be
-    // DELIBERATE: the settle sits in front of every turn, bursty or not, so
-    // moving it moves p50 for every guest. Nothing else in the suite would
-    // fail if someone edited the constant, because the burst tests seed
-    // their fragments up front and the fake sleep never waits.
-    expect(COALESCE_SETTLE_MS).toBe(3_000)
+    // 8s until TAC-540, 3s until the 2026-09 coalesce-window run (251
+    // inbound, 4 folded bursts), 0 since. The pin exists so any change has
+    // to be DELIBERATE: the settle sits in front of every turn, bursty or
+    // not, so moving it moves p50 for every guest. Nothing else in the
+    // suite would fail if someone edited the constant, because the burst
+    // tests seed their fragments up front and the fake sleep never waits —
+    // and at zero the sleep-application property itself is untestable
+    // through the orchestrator (the `> 0` guard skips it), so this pin is
+    // also what forces a nonzero rollback to revisit the settle tests.
+    expect(COALESCE_SETTLE_MS).toBe(0)
     expect(CLAIM_LEASE_MS).toBe(120_000)
   })
 
   it('keeps the lease comfortably above a worst-case turn', () => {
     // A lease shorter than a turn would let a live run be taken over mid-turn,
-    // which is the duplicate-reply defect wearing a different hat.
+    // which is the duplicate-reply defect wearing a different hat. The turn's
+    // cost is model calls — an ~18s floor plus up to two extension re-runs
+    // (see CLAIM_LEASE_MS's docstring) — not the settle, which is currently
+    // zero. The settle term stays so a future nonzero settle is inside the
+    // bound automatically rather than silently outside it.
+    const WORST_CASE_TURN_FLOOR_MS = 18_000
     expect(CLAIM_LEASE_MS).toBeGreaterThan(
-      COALESCE_SETTLE_MS * (MAX_TURN_EXTENSIONS + 1),
+      (WORST_CASE_TURN_FLOOR_MS + COALESCE_SETTLE_MS) *
+        (MAX_TURN_EXTENSIONS + 1),
     )
   })
 

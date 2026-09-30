@@ -316,12 +316,14 @@ The live floors, all in `lib/agent/stages.ts`. A number quoted anywhere else may
 | --- | --- |
 | `SEND_FIDELITY_FLOOR` 0.4 | below this the draft is refused; nothing persists |
 | `AUTO_SEND_FIDELITY_FLOOR` 0.6 | 0.4 to 0.6 queues for an operator |
-| `STRONG_MATCH_SIMILARITY` 0.3 / `MIN_STRONG_MATCHES` 1 | voice retrieval, fails **closed** on inbound |
+| voice pack (`lib/rag/voice-pack.ts`) | static per venue, no similarity; empty pack fails **closed** on inbound (decision 0008) |
 | `KNOWLEDGE_RELEVANCE_FLOOR` 0.3 | knowledge retrieval, degrades **gracefully** |
 | `PROMPT_VERSION` v1.76.0 | bumping it is a repo-wide sweep - `.claude/rules/prompt-versioning.md` |
 
-**23 approval triggers compose; any one queues the draft.** All five post-generation checks
-fail **closed** after one retry - treat a proposal to loosen one as a change to all five
+**23 approval triggers compose; any one queues the draft.** The five post-generation LLM
+checks run **post-send** on inbound (Slack forward on a finding, never a hold) and keep the
+fail-**closed**-after-one-retry posture on followups and the holding message - treat a
+posture change to one as a change to all five
 (`docs/decisions/0003-post-generation-checks-fail-closed.md`). `lib/agent/CLAUDE.md` has the
 trigger table and priority order.
 
@@ -340,7 +342,7 @@ generation rather than asked for in prose
 
 One line per purpose. Defaults and behaviour live with the code that reads them.
 
-**LLM** `ANTHROPIC_API_KEY` · **Embeddings** `VOYAGE_API_KEY` · **DB** `SUPABASE_SECRET_KEY`,
+**LLM** `ANTHROPIC_API_KEY` · **Jev classification** `JEV_API_KEY` · **Embeddings** `VOYAGE_API_KEY` · **DB** `SUPABASE_SECRET_KEY`,
 `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` · **Sendblue**
 `SENDBLUE_API_KEY_ID`, `SENDBLUE_API_SECRET_KEY`, `SENDBLUE_SIGNING_SECRET` · **Instagram**
 `META_VERIFY_TOKEN`, `INSTAGRAM_APP_SECRET`, `INSTAGRAM_APP_ID`, `INSTAGRAM_ACCESS_TOKEN`,

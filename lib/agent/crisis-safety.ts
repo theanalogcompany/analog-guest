@@ -13,11 +13,11 @@
 // Consumed identically from two call sites, both right after classifyStage,
 // before any retrieval or generation: lib/agent/handle-inbound.ts (the real
 // pipeline) and scripts/onboarding/run-test-scenarios.ts (the TAC-347
-// harness that grades `adversarial_safety_critical` scenarios) — retrieval
-// fails CLOSED on the inbound path (retrieveCorpusStage throws below
-// MIN_STRONG_MATCHES), so a crisis message with no corpus resemblance could
-// abort the whole run before generateStage is ever reached. The short
-// circuit has to fire before retrieval, not just before generation, and it
+// harness that grades `adversarial_safety_critical` scenarios) — the voice
+// pack fails CLOSED on the inbound path (retrieveCorpusStage throws on an
+// empty pack or a load failure), so a crisis message at a venue with a
+// broken corpus read could abort the whole run before generateStage is ever
+// reached. The short circuit has to fire before that stage, and it
 // has to exist as a shared pure step so the harness exercises the same
 // mechanism that ships.
 

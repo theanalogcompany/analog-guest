@@ -43,13 +43,10 @@ import { VERIFY_CANCELLATION_CLAIM_TRUNCATED_ERROR_CODE } from '@/lib/ai/verify-
 import { BrandPersonaSchema } from '@/lib/schemas'
 import { gapFlagsFromTriggers } from './pending-slots'
 
-// Mocks: retrieveContext (lib/rag) is the network call we don't want to make;
-// captureCorpusRetrievalBelowThreshold is fire-and-forget observability —
-// we mock it to assert it still fires on the followup path (regression
-// guard for THE-231's "observability stays useful" invariant). classifyMessage
-// (lib/ai) is mocked for the classifyStage routing tests added in TAC-240.
-const retrieveContextMock = vi.fn()
-const captureLowMock = vi.fn()
+// Mocks: loadVoicePack (lib/rag) is the DB read we don't want to make.
+// classifyMessage (lib/ai) is mocked for the classifyStage routing tests
+// added in TAC-240.
+const loadVoicePackMock = vi.fn()
 const captureClassificationLowMock = vi.fn()
 const classifyMessageMock = vi.fn()
 const retrieveKnowledgeContextMock = vi.fn()
@@ -115,7 +112,7 @@ vi.mock('@/lib/db/admin', () => ({
 }))
 
 vi.mock('@/lib/rag', () => ({
-  retrieveContext: (...args: unknown[]) => retrieveContextMock(...args),
+  loadVoicePack: (...args: unknown[]) => loadVoicePackMock(...args),
   retrieveKnowledgeContext: (...args: unknown[]) =>
     retrieveKnowledgeContextMock(...args),
 }))
@@ -143,13 +140,10 @@ vi.mock('@/lib/ai', () => ({
 
 vi.mock('@/lib/analytics/posthog', () => ({
   // Real module exports several helpers + threshold constants. We need the
-  // thresholds here because retrieveCorpusStage and classifyStage compare
-  // against them; the rest are stubs since stages.ts imports them at module
-  // load.
+  // thresholds here because classifyStage compares against them; the rest
+  // are stubs since stages.ts imports them at module load.
   captureClassificationLowConfidence: (...args: unknown[]) =>
     captureClassificationLowMock(...args),
-  captureCorpusRetrievalBelowThreshold: (...args: unknown[]) =>
-    captureLowMock(...args),
   captureDashViolationPersisted: vi.fn(),
   captureDemoBypassedApprovalGate: (...args: unknown[]) =>
     captureDemoBypassMock(...args),
@@ -181,14 +175,12 @@ vi.mock('@/lib/analytics/posthog', () => ({
   capturePostHogEvent: vi.fn(),
   CLASSIFICATION_CONFIDENCE_LOW_THRESHOLD: 0.7,
   CLASSIFICATION_CONFIDENCE_REROUTE_THRESHOLD: 0.3,
-  CORPUS_TOP_SIMILARITY_LOW_THRESHOLD: 0.5,
   VOICE_FIDELITY_LOW_THRESHOLD: 0.5,
 }))
 
 // Minimal RuntimeContext factory. retrieveCorpusStage only reads venue.id,
-// agentRunId, guest.{id,firstName}, currentMessage, followupTrigger — cast
-// the rest as never to avoid hand-building VenueContext / RecognitionSnapshot
-// / etc. for a focused test.
+// currentMessage and followupTrigger — cast the rest as never to avoid
+// hand-building VenueContext / RecognitionSnapshot / etc. for a focused test.
 // TAC-301: buildAiRuntime reads venue.venueInfo.hours to resolve open/closed.
 // Production always has it (buildRuntimeContext safeParses venue_info and
 // throws on failure; `hours` carries a .default({})), but every fixture in
@@ -324,21 +316,21 @@ function makeMatch(similarity: number, id = 'c1'): CorpusMatch {
   } as CorpusMatch
 }
 
-describe('retrieveCorpusStage — inbound path (existing behavior)', () => {
+// Rewritten for decision 0008: voice is a static per-venue pack. There is
+// no query, no similarity and no strong-match gate left; what survives is
+// the fail direction — CLOSED on inbound (empty pack or load failure
+// throws), graceful on followups (empty pack proceeds).
+describe('retrieveCorpusStage — static voice pack (decision 0008)', () => {
   beforeEach(() => {
-    retrieveContextMock.mockReset()
-    captureLowMock.mockReset()
+    loadVoicePackMock.mockReset()
   })
 
   afterEach(() => {
     vi.restoreAllMocks()
   })
 
-  it('throws insufficient_corpus_matches when no chunk crosses the strong-match floor', async () => {
-    retrieveContextMock.mockResolvedValueOnce({
-      ok: true,
-      data: [makeMatch(0.2), makeMatch(0.15)], // none ≥ 0.3
-    })
+  it('loads the pack by venue id alone — no query derived from the message', async () => {
+    loadVoicePackMock.mockResolvedValueOnce({ ok: true, data: [makeMatch(1)] })
     const ctx = makeCtx({
       currentMessage: {
         id: 'm1',
@@ -346,14 +338,14 @@ describe('retrieveCorpusStage — inbound path (existing behavior)', () => {
         providerMessageId: 'p1',
       } as RuntimeContext['currentMessage'],
     })
-    await expect(retrieveCorpusStage(ctx)).rejects.toThrow(
-      /insufficient_corpus_matches/,
-    )
+    await retrieveCorpusStage(ctx)
+    expect(loadVoicePackMock).toHaveBeenCalledTimes(1)
+    expect(loadVoicePackMock).toHaveBeenCalledWith({ venueId: ctx.venue.id })
   })
 
-  it('returns matches when at least one crosses the strong-match floor', async () => {
-    const matches = [makeMatch(0.45), makeMatch(0.2)]
-    retrieveContextMock.mockResolvedValueOnce({ ok: true, data: matches })
+  it('returns the pack unchanged on inbound', async () => {
+    const pack = [makeMatch(1), makeMatch(1)]
+    loadVoicePackMock.mockResolvedValueOnce({ ok: true, data: pack })
     const ctx = makeCtx({
       currentMessage: {
         id: 'm1',
@@ -362,38 +354,23 @@ describe('retrieveCorpusStage — inbound path (existing behavior)', () => {
       } as RuntimeContext['currentMessage'],
     })
     const out = await retrieveCorpusStage(ctx)
-    expect(out).toEqual(matches)
-  })
-})
-
-describe('retrieveCorpusStage — followup path (THE-231)', () => {
-  beforeEach(() => {
-    retrieveContextMock.mockReset()
-    captureLowMock.mockReset()
+    expect(out).toEqual(pack)
   })
 
-  afterEach(() => {
-    vi.restoreAllMocks()
-  })
-
-  it('does NOT throw on zero strong matches when followup-triggered', async () => {
-    retrieveContextMock.mockResolvedValueOnce({
-      ok: true,
-      data: [makeMatch(0.2)], // below floor, would have failed pre-THE-231
-    })
+  it('throws empty_voice_pack on inbound when the venue has no usable entries', async () => {
+    loadVoicePackMock.mockResolvedValueOnce({ ok: true, data: [] })
     const ctx = makeCtx({
-      followupTrigger: {
-        reason: 'manual',
-        triggeredAt: new Date(),
-      } as RuntimeContext['followupTrigger'],
+      currentMessage: {
+        id: 'm1',
+        body: 'hi',
+        providerMessageId: 'p1',
+      } as RuntimeContext['currentMessage'],
     })
-    const out = await retrieveCorpusStage(ctx)
-    expect(out).toHaveLength(1)
-    expect(out[0].similarity).toBe(0.2)
+    await expect(retrieveCorpusStage(ctx)).rejects.toThrow(/empty_voice_pack/)
   })
 
-  it('returns empty array when followup query returns zero matches', async () => {
-    retrieveContextMock.mockResolvedValueOnce({ ok: true, data: [] })
+  it('proceeds with an empty pack on the followup path (THE-231 grace)', async () => {
+    loadVoicePackMock.mockResolvedValueOnce({ ok: true, data: [] })
     const ctx = makeCtx({
       followupTrigger: {
         reason: 'manual',
@@ -404,50 +381,25 @@ describe('retrieveCorpusStage — followup path (THE-231)', () => {
     expect(out).toEqual([])
   })
 
-  it('still fires the low-similarity observability event on the followup path', async () => {
-    // Top similarity 0.2 (< CORPUS_TOP_SIMILARITY_LOW_THRESHOLD of 0.5) →
-    // captureCorpusRetrievalBelowThreshold should fire. THE-231 invariant:
-    // observability stays useful even when we don't fail closed.
-    retrieveContextMock.mockResolvedValueOnce({
-      ok: true,
-      data: [makeMatch(0.2)],
+  it('throws on a pack load failure regardless of inbound vs followup', async () => {
+    loadVoicePackMock.mockResolvedValueOnce({ ok: false, error: 'db down' })
+    const inbound = makeCtx({
+      currentMessage: {
+        id: 'm1',
+        body: 'hi',
+        providerMessageId: 'p1',
+      } as RuntimeContext['currentMessage'],
     })
-    const ctx = makeCtx({
+    await expect(retrieveCorpusStage(inbound)).rejects.toThrow(/db down/)
+
+    loadVoicePackMock.mockResolvedValueOnce({ ok: false, error: 'db down' })
+    const followup = makeCtx({
       followupTrigger: {
         reason: 'manual',
         triggeredAt: new Date(),
       } as RuntimeContext['followupTrigger'],
     })
-    await retrieveCorpusStage(ctx)
-    expect(captureLowMock).toHaveBeenCalledTimes(1)
-    const props = captureLowMock.mock.calls[0][0] as {
-      strongMatchCount: number
-      topSimilarity: number
-      inboundBody: string | null
-    }
-    expect(props.strongMatchCount).toBe(0)
-    expect(props.topSimilarity).toBe(0.2)
-    // No inbound on the followup path — captured as null, as expected.
-    expect(props.inboundBody).toBeNull()
-  })
-
-  it('still throws on rag-layer failure regardless of inbound vs followup', async () => {
-    retrieveContextMock.mockResolvedValueOnce({
-      ok: false,
-      error: 'voyage timeout',
-    })
-    const ctx = makeCtx({
-      followupTrigger: {
-        reason: 'manual',
-        triggeredAt: new Date(),
-      } as RuntimeContext['followupTrigger'],
-    })
-    await expect(retrieveCorpusStage(ctx)).rejects.toThrow(/voyage timeout/)
-  })
-
-  it('still throws on missing query (neither inbound nor followup)', async () => {
-    const ctx = makeCtx({})
-    await expect(retrieveCorpusStage(ctx)).rejects.toThrow(/no query available/)
+    await expect(retrieveCorpusStage(followup)).rejects.toThrow(/db down/)
   })
 })
 
@@ -3426,6 +3378,33 @@ describe('verifyGroundingStage (TAC-350)', () => {
     expect(call.outcome).toBe('degraded')
     expect(call.failedClosed).toBe(true)
     expect(call.retried).toBe(true)
+    // Decision 0003 rewrite: no third argument means the pre-send callers
+    // (followups, holding message), whose finding can still hold the draft.
+    expect(call.disposition).toBe('held')
+  })
+
+  // Decision 0003, rewritten 2026-09-29: the post-send caller passes 'sent',
+  // and on that path NOTHING holds — failedClosed must say so, or a query for
+  // "turns that sent without a grounding verdict" reads the deferred checks
+  // as holds that never happened.
+  it("emits disposition 'sent' AND failedClosed=false on the unavailable event when run post-send", async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    verifyGroundingMock
+      .mockResolvedValueOnce({
+        ok: false,
+        error: 'socket hang up',
+        errorCode: 'ai_verify_grounding_failed',
+      })
+      .mockResolvedValueOnce({
+        ok: false,
+        error: 'socket hang up',
+        errorCode: 'ai_verify_grounding_failed',
+      })
+    await verifyGroundingStage(inboundCtx(), makeGen(), 'sent')
+    expect(captureGroundingVerifierUnavailableMock).toHaveBeenCalledTimes(1)
+    const call = captureGroundingVerifierUnavailableMock.mock.calls[0][0]
+    expect(call.disposition).toBe('sent')
+    expect(call.failedClosed).toBe(false)
   })
 
   // TAC-367: the fail-CLOSED half. Truncation is a verdict the model produced
@@ -3559,6 +3538,30 @@ describe('verifyGroundingStage (TAC-350)', () => {
       'invents a wifi network name and password',
     ])
     expect(call.replyBody).toBe('Le Mils Guest')
+    // Decision 0003 rewrite: the default is the pre-send posture. The Slack
+    // headline branches on this field, so 'held' here is the claim that the
+    // draft was actually stopped.
+    expect(call.disposition).toBe('held')
+  })
+
+  // Decision 0003, rewritten 2026-09-29: post-send the same catch describes a
+  // reply the guest already has, and the event must say so.
+  it("emits disposition 'sent' on the caught event when run post-send", async () => {
+    verifyGroundingMock.mockResolvedValueOnce({
+      ok: true,
+      data: {
+        hasUngroundedClaim: true,
+        ungroundedClaims: ['invents a wifi network name and password'],
+        promptVersion: 'v1.0.0',
+        cacheReadTokens: 0,
+        cacheWriteTokens: 0,
+      },
+    })
+    await verifyGroundingStage(inboundCtx(), makeGen(), 'sent')
+    expect(captureUngroundedClaimCaughtMock).toHaveBeenCalledTimes(1)
+    expect(captureUngroundedClaimCaughtMock.mock.calls[0][0].disposition).toBe(
+      'sent',
+    )
   })
 
   // TAC-502. The stage's job here is to hand over `ctx.conversationChannel`
@@ -3993,6 +3996,33 @@ describe('verifyMechanicOfferStage (TAC-355)', () => {
     expect(captureMechanicOfferBackstopCaughtMock).toHaveBeenCalledTimes(1)
     const call = captureMechanicOfferBackstopCaughtMock.mock.calls[0][0]
     expect(call.mechanicId).toBe('mech-1')
+    // Decision 0003 rewrite: omitted third arg means the pre-send posture.
+    expect(call.disposition).toBe('held')
+  })
+
+  // Decision 0003 rewrite: post-send-checks.ts passes 'sent', and the Slack
+  // headline branches on it. A hardcoded 'held' in this capture survived a
+  // mutation pass on 2026-09-29 because nothing asserted the threading here.
+  it("threads disposition 'sent' into the caught event", async () => {
+    verifyMechanicOfferMock.mockResolvedValueOnce({
+      ok: true,
+      data: {
+        offersGatedMechanic: true,
+        mechanicId: 'mech-1',
+        promptVersion: 'v1.0.0',
+      },
+    })
+    const ctx = makeCtx({ mechanics: [gatedMechanic] })
+    await verifyMechanicOfferStage(
+      ctx,
+      makeGenerationResult({
+        body: 'since your friend came in, something special is on us',
+      }),
+      'sent',
+    )
+    expect(
+      captureMechanicOfferBackstopCaughtMock.mock.calls[0][0].disposition,
+    ).toBe('sent')
   })
 
   // [CODE REVIEW / operator follow-up] Defense-in-depth against the exact bug
@@ -5761,6 +5791,46 @@ describe('verifyProsePromiseStage (TAC-401)', () => {
     expect(props.commitmentType).toBe('comp')
     expect(props.commitmentDescription).toBe('a replacement cortado')
     expect(props.replacedRecommendation).toBe(true)
+    // Decision 0003 rewrite: no third argument is the pre-send posture.
+    expect(props.disposition).toBe('held')
+  })
+
+  // Decision 0003, rewritten 2026-09-29: the sibling representative for the
+  // post-send path — 'sent' must thread into BOTH of this stage's captures,
+  // because the Slack headline branches on it ("already sent" vs a hold).
+  it("threads disposition 'sent' into the caught event when run post-send", async () => {
+    verifyProsePromiseMock.mockResolvedValueOnce(
+      flagged('comp', 'a replacement cortado'),
+    )
+    await verifyProsePromiseStage(
+      makeCtx({}),
+      makeGenerationResult({ body: "next one's on us" }),
+      'sent',
+    )
+    expect(captureProsePromiseCaughtMock).toHaveBeenCalledTimes(1)
+    expect(captureProsePromiseCaughtMock.mock.calls[0]?.[0].disposition).toBe(
+      'sent',
+    )
+  })
+
+  it("threads disposition 'sent' into the unavailable event when run post-send", async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    verifyProsePromiseMock
+      .mockResolvedValueOnce({
+        ok: false,
+        error: 'fetch failed',
+        errorCode: 'ai_verify_prose_promise_failed',
+      })
+      .mockResolvedValueOnce({
+        ok: false,
+        error: 'fetch failed again',
+        errorCode: 'ai_verify_prose_promise_failed',
+      })
+    await verifyProsePromiseStage(makeCtx({}), makeGenerationResult({}), 'sent')
+    expect(captureProsePromiseCheckUnavailableMock).toHaveBeenCalledTimes(1)
+    expect(
+      captureProsePromiseCheckUnavailableMock.mock.calls[0]?.[0].disposition,
+    ).toBe('sent')
   })
 
   // ---- The guest's own message (TAC-527) ----
@@ -5883,6 +5953,8 @@ describe('verifyProsePromiseStage (TAC-401)', () => {
     const props = captureProsePromiseCheckUnavailableMock.mock.calls[0]?.[0]
     expect(props.outcome).toBe('errored')
     expect(props.retried).toBe(true)
+    // Decision 0003 rewrite: no third argument is the pre-send posture.
+    expect(props.disposition).toBe('held')
   })
 
   // Truncation is NOT retried: the cap was already hit, so a second call hits
@@ -6144,6 +6216,28 @@ describe('verifyCancellationClaimStage (TAC-513)', () => {
       claim: 'flagged',
     })
     expect(captureCancellationClaimUnbackedMock).toHaveBeenCalledTimes(1)
+    // Decision 0003 rewrite: omitted third arg means the pre-send posture.
+    expect(
+      captureCancellationClaimUnbackedMock.mock.calls[0][0].disposition,
+    ).toBe('held')
+  })
+
+  // Decision 0003 rewrite: post-send-checks.ts passes 'sent'. A hardcoded
+  // 'held' in this capture survived a mutation pass on 2026-09-29 because
+  // nothing asserted the threading here.
+  it("threads disposition 'sent' into the unbacked event", async () => {
+    verifyCancellationClaimMock.mockResolvedValueOnce(claims)
+    await verifyCancellationClaimStage(
+      makeCtx({ activeCommitments: [TONIC] }),
+      makeGenerationResult({
+        body: 'got it, just the cortado then. the comp for the blossom tonic is cancelled.',
+        cancelsCommitmentId: '',
+      }),
+      'sent',
+    )
+    expect(
+      captureCancellationClaimUnbackedMock.mock.calls[0][0].disposition,
+    ).toBe('sent')
   })
 
   it('runs the check even when the guest has NO active commitments', async () => {
@@ -6758,6 +6852,9 @@ describe('closed-venue arrival (TAC-363)', () => {
         source: 'structured',
         venueId: 'venue-1',
         replyBody: 'See you soon!',
+        // The structural half fires in the gate, pre-send on every path, and
+        // its trigger queues the draft — 'held' is by design, not a default.
+        disposition: 'held',
       })
     })
   })
@@ -6962,7 +7059,27 @@ describe('closed-venue arrival (TAC-363)', () => {
         captureClosedVenueArrivalCaughtMock.mock.calls[0][0],
       ).toMatchObject({
         source: 'text_backstop',
+        // Decision 0003 rewrite: omitted third arg means the pre-send posture.
+        disposition: 'held',
       })
+    })
+
+    // Decision 0003 rewrite: post-send-checks.ts passes 'sent'. A hardcoded
+    // 'held' in this capture survived a mutation pass on 2026-09-29 because
+    // nothing asserted the threading here.
+    it("threads disposition 'sent' into the caught event", async () => {
+      verifyClosedVenueArrivalMock.mockResolvedValue({
+        ok: true,
+        data: { confirmsArrival: true, promptVersion: 'v1.0.0' },
+      })
+      await verifyClosedVenueArrivalStage(
+        ctxAt(AFTER_CLOSE),
+        makeGenerationResult({ body: 'See you soon!' }),
+        'sent',
+      )
+      expect(
+        captureClosedVenueArrivalCaughtMock.mock.calls[0][0].disposition,
+      ).toBe('sent')
     })
 
     it('returns clean and reports nothing when the reply is fine', async () => {
