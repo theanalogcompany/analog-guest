@@ -40,6 +40,12 @@ export interface VenueRow {
 export interface GuestRow {
   id: string
   opted_out_at: string | null
+  /**
+   * TAC-386: the shared proactive-send spacing marker. Optional here only so
+   * every pre-existing fixture in this file's callers stays valid; the
+   * processor treats absent and null alike, as "no proactive send yet".
+   */
+  last_proactive_send_at?: string | null
 }
 
 export interface MessageRow {

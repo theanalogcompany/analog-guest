@@ -32,8 +32,8 @@ import {
 // SYSTEM_TEMPLATE body changes.
 
 describe('PROMPT_VERSION', () => {
-  it('is v1.75.0 (a recognised order is received by saying so, with warmth)', () => {
-    expect(PROMPT_VERSION).toBe('v1.75.0')
+  it('is v1.76.0 (a follow-up that checks our answer worked out)', () => {
+    expect(PROMPT_VERSION).toBe('v1.76.0')
   })
 })
 

@@ -275,6 +275,10 @@ export async function handleHoldingMessage(input: {
       crisisSafety: false,
       // TAC-397: no guest inbound on this path — see handle-followup.ts.
       correctsPendingReply: false,
+      // TAC-386: a holding message answers nothing yet, so there is nothing to
+      // check back on. The guest's original inbound is classified on its own
+      // turn and arms the follow-up there if it qualifies.
+      followUpWorthy: false,
     }
 
     // Knowledge corpus: SKIPPED, unconditionally (TAC-367). A holding message

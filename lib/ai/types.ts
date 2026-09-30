@@ -304,6 +304,19 @@ export type RuntimeContext = {
    * asserts the guest signed off, which is false here).
    */
   warmClose?: boolean
+  /**
+   * TAC-386: set only on an inquiry-follow-up turn.
+   *
+   * Both strings render VERBATIM. The message has to reference the specific
+   * thing the guest asked and what we actually suggested (ruled 2026-09-30), and
+   * a paraphrase of either loses the detail that makes the check-in worth
+   * sending.
+   *
+   * Reaches composePrompt rather than only the serializer, for the reason
+   * `warmClose` above does: it renders its own block AND replaces the category
+   * instructions, whose text tells the model to check in on a past visit.
+   */
+  inquiryFollowup?: { question: string; answer: string }
   recentMessages?: RecentMessage[]
   // Mechanics this guest is currently eligible for. The serializer renders
   // a "What this guest can access" block when this is provided. An empty
@@ -771,6 +784,12 @@ export type ClassifyMessageResult = {
   // whenever nothing is pending — the classifier only ever sees a pending
   // draft as a NOT SENT line in the recent conversation.
   correctsPendingReply: boolean
+  // TAC-386: independent of category. True when our answer to this message
+  // would help the guest do something afterwards, so checking later that it
+  // worked out is hospitality. Read by handle-inbound.ts, which arms an
+  // `inquiry_followups` row a few venue-hours later; false is the only value
+  // that reaches anything for every other message.
+  followUpWorthy: boolean
 }
 
 export type AIResult<T> =

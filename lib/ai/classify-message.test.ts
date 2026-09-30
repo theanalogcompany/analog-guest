@@ -192,7 +192,7 @@ describe('classifyMessage — schema accepts new categories', () => {
       if (!r.ok) return
       expect(r.data.category).toBe(cat)
       expect(r.data.classifierConfidence).toBe(0.9)
-      expect(r.data.promptVersion).toBe('v1.75.0')
+      expect(r.data.promptVersion).toBe('v1.76.0')
     })
   }
 })
@@ -812,4 +812,147 @@ describe('classifyMessage — correctsPendingReply pass-through (TAC-397)', () =
       expect(r.data.correctsPendingReply).toBe(value)
     },
   )
+})
+
+// TAC-386: followUpWorthy, the third independent boolean on this call. The line
+// it draws was ruled 2026-09-30 and widened the trigger from visit-implying
+// questions to any inquiry our answer helps the guest ACT on.
+describe('CLASSIFY_SYSTEM_PROMPT — followUpWorthy instruction (TAC-386)', () => {
+  beforeEach(() => {
+    generateObjectMock.mockReset()
+    generateObjectMock.mockResolvedValue({
+      object: {
+        category: 'reply',
+        classifierConfidence: 0.9,
+        reasoning: 'noop',
+        crisisSafety: false,
+        correctsPendingReply: false,
+        followUpWorthy: false,
+      },
+    })
+  })
+
+  async function systemPrompt(): Promise<string> {
+    await classifyMessage({ inboundBody: 'where do I park' })
+    return generateObjectMock.mock.calls[0]?.[0]?.system as string
+  }
+
+  it('introduces the field as independent of category', async () => {
+    expect(await systemPrompt()).toContain(
+      'Separately again, set followUpWorthy',
+    )
+  })
+
+  it('states the rule as our answer helping them do something afterwards', async () => {
+    const prompt = await systemPrompt()
+    expect(prompt).toContain('would help the guest do something afterwards')
+  })
+
+  // The four excluded shapes each have a named false-positive measurement arm
+  // with a bar of ZERO, so each one being NAMED in the prompt is load-bearing
+  // rather than decorative. A prompt that dropped one of these lines would move
+  // its arm and nothing else would notice.
+  it.each([
+    ['pure facts', 'a pure fact with no action behind it'],
+    ['small talk', 'small talk or a passing comment'],
+    ['complaints', 'a complaint or a report that something was wrong'],
+    ['crisis', "anything involving someone's safety or an emergency"],
+    // Ruled 2026-09-30, NARROWLY: the first version said "a business, press,
+    // wholesale or hiring inquiry" and a private-event rental still fired,
+    // because the model read it as a venue service rather than a business
+    // enquiry. Each of these is now named.
+    ['catering', 'catering'],
+    ['private events and space rental', 'renting out the space'],
+    ['bookings', 'taking a booking or reservation'],
+    ['wholesale and partnership', 'wholesale, press, hiring or partnership'],
+    // Restored 2026-09-30. It was in the visit-era instruction and the widening
+    // dropped it; TAC-297's arrival capture owns these.
+    ['explicit arrivals', 'already arriving or on their way'],
+  ])('excludes %s explicitly', async (_label, phrase) => {
+    expect(await systemPrompt()).toContain(phrase)
+  })
+
+  // The carve-out inside the operator-arranged exclusion. Without it the line
+  // would also catch a guest asking what is on this month, which stays eligible.
+  it('keeps PUBLIC events eligible inside the operator-arranged exclusion', async () => {
+    const prompt = await systemPrompt()
+    expect(prompt).toContain('PUBLIC events coming up is not one of these')
+    expect(prompt).toContain('do you have any events coming up')
+  })
+
+  // The distinction the hours arm turns on: "what time do you close" is a fact,
+  // "how do I get there" is a fact the guest then acts on. Ruling 1 of
+  // 2026-09-17 excluded a bare hours question and the widening kept that.
+  it('draws the factual-but-actionable line, with hours on the excluded side', async () => {
+    const prompt = await systemPrompt()
+    expect(prompt).toContain('A question can be factual and still qualify')
+    expect(prompt).toContain('Asking when you close is not')
+    expect(prompt).toContain('what time do you close')
+  })
+
+  it('names the inquiry shapes that DO qualify', async () => {
+    const prompt = await systemPrompt()
+    for (const shape of [
+      'where to park',
+      'which beans',
+      'how to brew',
+      'bring a dog',
+      'what to order or try',
+    ]) {
+      expect(prompt).toContain(shape)
+    }
+  })
+
+  // No named speaker anywhere in the pipeline's outreach (ruled 2026-09-30).
+  // The classifier prompt is not guest-facing, but it also has no business
+  // naming a host, and this is the cheap place to notice if one appears.
+  it('names no venue host', async () => {
+    const prompt = await systemPrompt()
+    expect(prompt).not.toContain('Himanshu')
+    expect(prompt).not.toContain('Neha')
+  })
+})
+
+describe('classifyMessage — followUpWorthy round-trip (TAC-386)', () => {
+  beforeEach(() => {
+    generateObjectMock.mockReset()
+  })
+
+  it.each([true, false])(
+    'returns the model’s value unchanged (%s)',
+    async (value) => {
+      generateObjectMock.mockResolvedValue({
+        object: {
+          category: 'new_question',
+          classifierConfidence: 0.9,
+          reasoning: 'noop',
+          crisisSafety: false,
+          correctsPendingReply: false,
+          followUpWorthy: value,
+        },
+      })
+      const r = await classifyMessage({ inboundBody: 'where do I park' })
+      expect(r.ok).toBe(true)
+      if (!r.ok) return
+      expect(r.data.followUpWorthy).toBe(value)
+    },
+  )
+
+  it('is independent of category, like the other two booleans', async () => {
+    generateObjectMock.mockResolvedValue({
+      object: {
+        category: 'recommendation_request',
+        classifierConfidence: 0.8,
+        reasoning: 'noop',
+        crisisSafety: false,
+        correctsPendingReply: false,
+        followUpWorthy: true,
+      },
+    })
+    const r = await classifyMessage({ inboundBody: 'what should I try' })
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+    expect(r.data.followUpWorthy).toBe(true)
+    expect(r.data.category).toBe('recommendation_request')
+  })
 })

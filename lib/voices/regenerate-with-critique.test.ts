@@ -321,6 +321,7 @@ describe('regenerateWithCritique — crisis-safety refusal (TAC-348)', () => {
         reasoning: 'r',
         crisisSafety: true,
         correctsPendingReply: false,
+        followUpWorthy: false,
         promptVersion: PROMPT_VERSION,
       },
     })
@@ -385,6 +386,7 @@ describe('regenerateWithCritique — happy path', () => {
         reasoning: 'r',
         crisisSafety: false,
         correctsPendingReply: false,
+        followUpWorthy: false,
         promptVersion: 'v1.8.0',
       },
     })
@@ -858,6 +860,7 @@ describe('regenerateWithCritique — corpus thinness', () => {
         reasoning: 'r',
         crisisSafety: false,
         correctsPendingReply: false,
+        followUpWorthy: false,
         promptVersion: 'v1.8.0',
       },
     })
@@ -925,6 +928,7 @@ describe('regenerateWithCritique — knowledge retrieval delegates to stages.ts 
         reasoning: 'r',
         crisisSafety: false,
         correctsPendingReply: false,
+        followUpWorthy: false,
         promptVersion: 'v1.8.0',
       },
     })
