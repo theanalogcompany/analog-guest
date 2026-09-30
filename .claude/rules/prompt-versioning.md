@@ -42,7 +42,8 @@ guard works; the instruction above did not.
 **A carried count is worse than no count - no count makes you grep, a stale one tells you
 that you already did.** The site list has grown on essentially every bump, because every new
 orchestrator test adds a `promptVersion` fixture. Recorded history: 4 files, then 7, then 8,
-then 9, then 12 sites in 9 files, then 14 in 13.
+then 9, then 12 sites in 9 files, then 14 in 13. Fixture inputs left that population on
+2026-09-29 (they derive the constant now); only assertions and prose can still grow it.
 
 **Re-run the grep after EVERY rebase**, and do not carry the earlier result forward. One
 sweep found 14 sites and its re-run found 12, and the two sets were not the same. Another
@@ -51,10 +52,22 @@ them from a ticket that had merged into the very head commit being rebased onto.
 expensive direction: a carried list silently **omits** the new sites, and those are fixture
 values fed to mocks, so nothing fails.
 
-## Most hits are fixtures that fail silently
+## Fixture inputs derive the constant; assertions stay literal
 
 A `promptVersion` in a mocked result is never compared against the live constant, so a stale
-one ships green. Update every live hit, not only the ones a failing test forces.
+one ships green - that used to be the majority of every sweep. Since 2026-09-29 fixture
+INPUTS derive the live constant instead of spelling a version (11 sites across 7 files:
+`stages`, `handle-inbound`, `handle-followup`, `two-pending-slots`, `coalesce-inbound`,
+`holding-message-replay`, `regenerate-with-critique`). A new mock or factory imports
+`PROMPT_VERSION`; it must never spell a version string. Historical literals in fixtures
+(`v1.6.0`, `v1.13.0`, `v1.16.0`) are deliberate old-version shapes and are not sweep hits.
+
+What the grep still finds, and must keep finding, is ASSERTION literals
+(`expect(r.data.promptVersion).toBe('v1.7x.0')`). Those are the tripwires: they go red the
+moment the constant moves, which is what makes the sweep unavoidable rather than optional.
+Replacing one with the imported constant would be circular - the test would compare the
+constant to itself and certify nothing (testing-discipline.md: "a test comparing a
+derivation against a literal that could never differ from it").
 
 ## Two kinds of hit you must NOT change
 

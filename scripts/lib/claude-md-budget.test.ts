@@ -84,8 +84,19 @@ const RULE_MAX_LINES = 400
  * doubled", which is a conversation trigger rather than a budget. If it fires
  * again, consider whether a per-file cap plus a file-count cap says the same
  * thing without the pressure to shave prose to fit an aggregate nobody loads.
+ *
+ * THE RESHAPE, LANDED 2026-09-29 ON THE SECOND FIRE'S OWN TERMS. The comment
+ * above held to the letter: the gate fired on a branch whose subject WAS
+ * testing cost (+~2,900 bytes of rule text: pay-rent, mutation scoping, the
+ * PROMPT_VERSION fixture derivation) against ~1,000 bytes of headroom, and the
+ * options were gutting the rules or a third raise. Neither. The combined-bytes
+ * ceiling is gone, replaced by MAX_INSTRUCTION_FILES: per-file caps are what
+ * protect context, and the count answers the only question the total ever
+ * answered - "has the corpus quietly doubled" - without pricing prose against
+ * an aggregate no session loads. The byte total still prints in the count
+ * test's failure message, as signal.
  */
-const COMBINED_MAX_BYTES = 160_000
+const MAX_INSTRUCTION_FILES = 17
 
 /** One 362 KB line is how 135 KB of duplicated text stayed invisible. */
 const MAX_LINE_CHARS = 2_000
@@ -190,16 +201,20 @@ describe('instruction file budget', () => {
     ).toEqual([])
   })
 
-  it(`keeps every instruction file combined under ${COMBINED_MAX_BYTES} bytes`, () => {
+  it(`keeps the instruction corpus at most ${MAX_INSTRUCTION_FILES} files`, () => {
     const all = [rootFile, ...nestedFiles, ...ruleFiles].map(measure)
     const total = all.reduce((sum, m) => sum + m.bytes, 0)
     const breakdown = all
       .sort((a, b) => b.bytes - a.bytes)
       .map((m) => `${m.path} ${m.bytes}`)
       .join(', ')
-    expect(total, `total ${total} bytes: ${breakdown}`).toBeLessThanOrEqual(
-      COMBINED_MAX_BYTES,
-    )
+    expect(
+      all.length,
+      `${all.length} instruction files (total ${total} bytes: ${breakdown}). ` +
+        `Per-file caps protect context; this count answers "has the corpus quietly ` +
+        `doubled". Splitting an existing file is fine - a new subsystem file is the ` +
+        `conversation the cap exists to start.`,
+    ).toBeLessThanOrEqual(MAX_INSTRUCTION_FILES)
   })
 })
 
