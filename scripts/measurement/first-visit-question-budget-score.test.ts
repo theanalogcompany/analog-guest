@@ -159,18 +159,38 @@ describe('the allowed two', () => {
 
   // WHAT MAKES THE BAR ABOVE CORRECT RATHER THAN MERELY STRICT. The intention is
   // allowed on a first conversation once the close has gone out, so this scorer
-  // is only right while the harnesses feeding it model the PRE-close flow. That
+  // is only right while the harness feeding it models the PRE-close flow. That
   // is an input to production code, not a claim in a comment, so it is read off
-  // the harness sources - a harness switched to `warmCloseSent: true` would make
-  // this constant wrong, and nothing else would say so.
-  it.each(['first-visit-question.ts', 'first-visit-question-budget.ts'])(
-    '%s drives the derivation with warmCloseSent: false',
-    (file) => {
-      const src = readFileSync(join(import.meta.dirname, file), 'utf8')
-      expect(src).toContain('warmCloseSent: false,')
-      expect(src).not.toContain('warmCloseSent: true')
-    },
-  )
+  // the harness source - switched to `warmCloseSent: true` the constant would be
+  // wrong, and nothing else would say so.
+  //
+  // SCOPED TO THE BUDGET HARNESS ALONE, and the first version was not. It also
+  // pinned first-visit-question.ts, which imports its scorer from
+  // ./first-visit-question-score and never reads ALLOWED_KEYS - so the guard had
+  // no premise there, and it fired on the correct fix for that harness, which
+  // MUST run with warmCloseSent: true or its target intention is never open. A
+  // guard over a file it does not govern is worse than no guard: it blocks the
+  // change it cannot judge.
+  it('the budget harness drives the derivation with warmCloseSent: false', () => {
+    const src = readFileSync(
+      join(import.meta.dirname, 'first-visit-question-budget.ts'),
+      'utf8',
+    )
+    expect(src).toContain('warmCloseSent: false,')
+    expect(src).not.toContain('warmCloseSent: true')
+  })
+
+  // The other half of the same premise: this scorer governs the budget harness,
+  // and that is why the one above is the file it reads. Asserted rather than
+  // stated, because "which harness feeds which scorer" is exactly what the first
+  // version of this guard got wrong.
+  it('is the scorer the budget harness imports', () => {
+    const src = readFileSync(
+      join(import.meta.dirname, 'first-visit-question-budget.ts'),
+      'utf8',
+    )
+    expect(src).toContain('first-visit-question-budget-score')
+  })
 
   it.each([
     'are_they_local',
@@ -264,7 +284,7 @@ describe('scoreTurn', () => {
     expect(v.unattributedQuestion).toBe(false)
   })
 
-  it('names an attributed key outside the ruled three', () => {
+  it('names an attributed key outside the ruled two', () => {
     expect(
       scoreTurn(
         turn({

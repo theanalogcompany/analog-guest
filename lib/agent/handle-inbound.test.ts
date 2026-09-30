@@ -4317,7 +4317,8 @@ describe('handleInbound — the warm close on a goodbye (TAC-568)', () => {
   // THE CLAIM RELEASE. The claim is taken BEFORE the send, so a reply that never
   // reached the guest would otherwise spend their one close on nothing — for
   // ever, because the marker is `is null` and never reconsidered. Releasing it
-  // lets the pause timer close them properly inside its own window.
+  // lets the pause timer close them properly inside its own window (for an
+  // Instagram scan guest; on SMS there is no second attempt — TAC-569).
   //
   // Exercised on the Instagram arm because it is the only one that can decline:
   // the text arm sends the whole reply or throws.
@@ -4629,6 +4630,44 @@ describe('handleInbound — the warm close on a learned name (TAC-568)', () => {
     expect(releaseWarmCloseClaimMock.mock.calls[0]?.[2]).toBe(
       markWarmCloseSentMock.mock.calls[0]?.[2],
     )
+  })
+
+  // THE MISSING ARM OF THE TEST ABOVE, and the expensive one. A dispatch that
+  // REPORTS failure released the claim; a dispatch that THROWS took neither
+  // release path, so the marker stayed claimed for a close that never went out.
+  //
+  // WHY THAT WAS PERMANENT RATHER THAN A RETRY: `failed` is a retrying status
+  // (shouldRetryTurn), and the retry then read `already_marked` — so one
+  // transient send error meant the guest could never be closed by ANY path, the
+  // timer included. Delete the release in the `catch` and this goes red.
+  it('gives the claim back when dispatch throws', async () => {
+    namingTurn()
+    scheduleAndSendMock.mockRejectedValue(new Error('sendMessage failed: boom'))
+    const r = await handleInbound(INBOUND_ID)
+    expect(r).toMatchObject({ status: 'failed' })
+    expect(markWarmCloseSentMock).toHaveBeenCalledTimes(1)
+    expect(releaseWarmCloseClaimMock).toHaveBeenCalledTimes(1)
+    expect(releaseWarmCloseClaimMock.mock.calls[0]?.[1]).toBe(GUEST_ID)
+    // Same CAS scoping as the reported-failure path: the exact timestamp this
+    // turn wrote, never a marker the timer set in between.
+    expect(releaseWarmCloseClaimMock.mock.calls[0]?.[2]).toBe(
+      markWarmCloseSentMock.mock.calls[0]?.[2],
+    )
+  })
+
+  // The same throw on a turn that never claimed must not release anything. A
+  // release keyed off the error rather than off the claim would clear a marker
+  // this turn does not own — which is the mirror-image bug, and the reason
+  // releaseClaimedWarmClose takes the claim rather than a guest id.
+  it('releases nothing when a throwing turn never claimed', async () => {
+    namingTurn()
+    markWarmCloseSentMock.mockResolvedValue({
+      ok: true,
+      data: 'already_marked',
+    })
+    scheduleAndSendMock.mockRejectedValue(new Error('sendMessage failed: boom'))
+    await handleInbound(INBOUND_ID)
+    expect(releaseWarmCloseClaimMock).not.toHaveBeenCalled()
   })
 
   // ONCE PER GUEST ACROSS BOTH IN-CONVERSATION ARMS. A turn that both learns the

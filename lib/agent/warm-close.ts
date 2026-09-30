@@ -238,24 +238,45 @@ export const NEVER_SPLIT_RNG = (): number => 1
  * model declined to raise it. So the close now rides on something that either
  * happened or did not.
  *
- * `nameJustStored` IS A DATABASE WRITE, NOT A MODEL SELF-REPORT, and that is the
- * whole reason this arm needs no partner signal where the goodbye arm needs two.
- * The caller builds it from updateGuestContext's own `identityColumnsChanged`
- * — the `first_name` column actually written on this turn — ANDed with the guest
- * having had no name before it. "Way one" trusts the model twice and so is
- * ANDed with something structural (TAC-350: 8 of 8 fabrications self-reported
- * clean); this one never asks the model anything.
+ * `nameJustStored` IS A COLUMN WRITE, AND THAT IS NOT THE SAME AS A VERIFIED
+ * NAME. Stated precisely because the first version of this comment claimed the
+ * arm "never asks the model anything", and that was false.
+ *
+ * The caller builds it from updateGuestContext's `identityColumnsChanged` — the
+ * `first_name` column actually written on this turn — ANDed with the guest
+ * having had no name before it. What that buys is real but narrow: the write
+ * happened, and it happened once. WHAT TO WRITE still came from the model, via
+ * `contextUpdate.structured.guest_details.first_name` (lib/guests/context.ts),
+ * with nothing between the model and this marker checking that the guest said a
+ * name at all. So a fabrication spends the guest's one close, permanently, on
+ * what is now the ordinary path — the same failure class TAC-350 records (8 of 8
+ * fabrications self-reported clean) and the reason "way one" is ANDed with
+ * something structural.
+ *
+ * `nameOnRecordBefore` BOUNDS THE DAMAGE RATHER THAN PREVENTING IT: at most one
+ * wrong close per guest, never a repeat. That is the honest claim.
+ *
+ * Verifying the name against the inbound body was proposed and deliberately NOT
+ * taken (2026-09-30) — it is a design change with its own cost, since the
+ * extractor normalises nicknames and casing. TAC-569 carries it.
  *
  * Requiring "no name before" is what makes it LEARNING a name rather than
- * re-asserting one, and it matches learn_name's own isSatisfied (`hasFirstName`)
- * so the close fires on the turn the intention actually closes.
+ * re-asserting one. It is CLOSE TO learn_name's own isSatisfied (`hasFirstName`)
+ * but not identical: that one trim-checks and this one does not, so a blank
+ * `first_name` fires the close while leaving the intention open. Also TAC-569.
  *
  * THE RISK DIRECTION IS THE OPPOSITE OF weAskedAQuestion'S, which is why this
  * narrows where that one widens. A FALSE POSITIVE is the expensive direction
  * here: it spends the guest's one close, for ever, on a turn that was not
- * closing anything. A false negative costs nothing at all, because the pause
- * timer is still running and sends the same text ten minutes later. So the
- * cheap mistake is missing, and every condition above buys that.
+ * closing anything.
+ *
+ * A false negative is the cheap mistake FOR THE POPULATION THE TIMER SERVES —
+ * and only for that one. The pause timer gates on `created_via = 'qr_scan'` and
+ * an Instagram identifier (warm-close-timeout.ts), while this predicate
+ * deliberately checks neither, so an SMS or non-scan guest has NO backup: a miss
+ * here is permanent for them. The narrowing above is still right, because a
+ * wrong close is worse than a missing one either way, but "the timer will catch
+ * it" is true of Instagram scan guests and false of everyone else. TAC-569.
  *
  * Self-report is not trusted alone, on this repo's record (TAC-350: 8 of 8
  * fabrications self-reported clean) — which is the second reason it is ANDed

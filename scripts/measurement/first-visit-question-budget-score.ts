@@ -341,7 +341,7 @@ export function scoreConversation(
  *
  * THE ORDER QUESTION IS THE RIGHT THING TO FLOOR. The opener scripts it outright,
  * so it is the one question a first-touch turn should essentially always carry.
- * The other two are deliberately NOT floored: the restraint paragraph's default is
+ * The other is deliberately NOT floored: the restraint paragraph's default is
  * not to ask, and 3 of 15 conversations legitimately ended with only the order
  * question when the guest went quiet. Flooring those would fail the arm for
  * behaviour the ruling permits.

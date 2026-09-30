@@ -12,11 +12,12 @@
 // the guest ANSWERS WHATEVER WAS ASKED. That is the ticket's own scenario. The
 // guest never asks anything of their own, deliberately: a guest question changes
 // what the reply is about and the metric here is what the VENUE asks unprompted.
-// Five turns rather than the ruled three so there is room for a fourth question to
+// Five turns rather than the ruled two so there is room for a further question to
 // appear if it is going to.
 //
 // THE THREE BARS, all absolute zeros, in first-visit-question-budget-score.ts:
-//   1. questions asked: only the order, the name and the first-visit question
+//   1. questions asked: only the order and the name (TAC-568 moved the
+//      first-visit question behind the warm close, so it is off-target here)
 //   2. turns carrying two questions (body question plus bubble): 0
 //   3. "you've reached" or equivalent in the opener: 0
 //
@@ -145,6 +146,17 @@ const GENERIC_ANSWER = 'yeah, it was really good'
 
 /** What the guest says when nothing was asked. Keeps the turn comparable. */
 const NEUTRAL_CONTINUATION = 'cool, thanks'
+
+// TAC-568: which intentions can actually differ between the arms in this
+// fixture, named once and printed from here rather than spelled into the NOTE.
+//
+// The NOTE used to say "only are_they_local", which was true until
+// are_they_new_here became first-conversation-suppressed: the fixture gives it a
+// recorded order and clears its replies_only gate by turn 3, so it is open in
+// the control arm and suppressed in `after`. That line is printed run output
+// that gets pasted onto a ticket, which is the one place a stale count does the
+// most damage.
+const ARMS_CAN_DIFFER_ON = ['are_they_local', 'are_they_new_here'] as const
 
 async function main(): Promise<void> {
   const arm = process.env.MEASURE_ARM as Arm | undefined
@@ -774,7 +786,7 @@ async function main(): Promise<void> {
       `[tac567] NOTE control = isFirstConversation:false. Both arms carry the new opener text and the two-question gate, so bar 3 cannot differ by arm and bar 2 is partly floored by the gate in both.`,
     )
     console.log(
-      `[tac567] NOTE this arm does NOT test the eligibility suppression. In a ${GUEST_TURNS}-turn fixture only are_they_local can differ by arm; the other four never arm or never gate open. The off-target questions here are mostly invented with no restraint to stop them. derive.test.ts covers eligibility.`,
+      `[tac567] NOTE this arm does NOT test the eligibility suppression. In a ${GUEST_TURNS}-turn fixture ${ARMS_CAN_DIFFER_ON.join(' and ')} can differ by arm; the rest never arm or never gate open. The off-target questions here are mostly invented with no restraint to stop them. derive.test.ts covers eligibility.`,
     )
   }
   // The harness's own divergences from production, printed rather than left in a
