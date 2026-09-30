@@ -2271,14 +2271,16 @@ export type ApprovalDecision =
  * written.
  *
  * WHAT THAT COSTS, since the clause was not arbitrary: a closed venue is
- * where a draft is most likely to end up in front of an operator, because
- * trigger 17 and the closed-venue-arrival backstop can only fire while
- * closed. So the `typing_off` correction runs more often after hours than
- * during service: the guest watches dots for a few seconds and then they
- * stop, which is the correction working. What it is NOT is a guest left
- * watching dots for a reply that is never coming — that is the property
- * `stopTypingUnlessSent` holds, and it holds on a closed venue exactly as it
- * does on an open one.
+ * where a draft is most likely to end up in front of an operator. Trigger 17
+ * is closed-only by construction, and `verifyClosedVenueArrivalStage` skips
+ * itself while open — the one way its trigger fires at an open venue is the
+ * orchestrator degrading a throw out of that stage to `check_failed`, which
+ * does not re-read the venue's state. So the `typing_off` correction runs
+ * more often after hours than during service: the guest watches dots for a
+ * few seconds and then they stop, which is the correction working. What it is
+ * NOT is a guest left watching dots for a reply that is never coming — that
+ * is the property `stopTypingUnlessSent` holds, and it holds on a closed
+ * venue exactly as it does on an open one.
  *
  * `hold_all_outbound` is not in the ticket's own wording and is included
  * anyway: at a venue carrying it, EVERY reply queues, so without it the dots

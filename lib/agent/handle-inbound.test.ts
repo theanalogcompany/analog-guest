@@ -3703,12 +3703,6 @@ describe('TAC-540 — the prediction that decides whether dots appear at all', (
     expect(signalTypingMock).not.toHaveBeenCalled()
   })
 
-  /**
-   * TAC-540 had a third no-dots case here, a positively closed venue. TAC-565
-   * removed it; the closed venue now has its own describe below, asserting the
-   * opposite.
-   */
-
   /** AC 4, from the orchestrator's side. */
   it('a text conversation never reaches the typing switch at all', async () => {
     buildRuntimeContextMock.mockResolvedValue(makeCtx())
@@ -3753,7 +3747,7 @@ describe('TAC-565 — the dots go on after hours too', () => {
     await new Promise((resolve) => setTimeout(resolve, 10))
   })
 
-  function closedVenueCtx(overrides: Record<string, unknown> = {}) {
+  function closedVenueCtx() {
     const base = typingCtx()
     return typingCtx({
       venue: {
@@ -3766,7 +3760,6 @@ describe('TAC-565 — the dots go on after hours too', () => {
         ...base.recognition,
         computedAt: new Date('2026-09-22T04:00:00.000Z'),
       },
-      ...overrides,
     })
   }
 
