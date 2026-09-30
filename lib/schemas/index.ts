@@ -98,8 +98,10 @@ export {
 } from './guest-context'
 export {
   type EngineFollowupReason,
+  FOLLOWUP_LOG_REASONS,
   FOLLOWUP_REASONS,
   FOLLOWUP_RULES_DEFAULT,
+  type FollowupLogReason,
   type FollowupRules,
   FollowupRulesSchema,
   parseFollowupRules,

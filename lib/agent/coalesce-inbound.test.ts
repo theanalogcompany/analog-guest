@@ -16,6 +16,10 @@
 // constant happens to say would lose that coverage the moment it flipped.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+// Relative import for the same reason as every import in this file. Derived
+// from the live constant: a stale fixture literal ships green, and nothing
+// fails (see .claude/rules/prompt-versioning.md).
+import { PROMPT_VERSION } from '../ai/prompts/system-template'
 
 // ./stages pulls in @/lib/rag → voyageai, whose ESM build trips vitest's
 // directory-import resolver at module load. See CLAUDE.md "Module split for
@@ -508,7 +512,7 @@ function successResult() {
     attemptHistory: [],
     systemPrompt: '',
     userPrompt: '',
-    promptVersion: 'v1.75.0',
+    promptVersion: PROMPT_VERSION,
     dashViolationPersisted: false,
     selfTalkViolationPersisted: false,
     emojiDirectiveViolated: false,

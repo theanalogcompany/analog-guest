@@ -1,5 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { SPLIT_PROBABILITY } from './sentence-split'
+// Derived from the live constant: a stale fixture literal ships green, and
+// nothing fails (see .claude/rules/prompt-versioning.md).
+import { PROMPT_VERSION } from '@/lib/ai/prompts/system-template'
 
 // TAC-355: scoped narrowly to the wiring this ticket adds to
 // handleFollowup — the mechanic-offer backstop is invoked on cron-triggered
@@ -190,6 +193,7 @@ function makeCtx(
     followupTrigger,
     scanArrival: null,
     warmClose: false,
+    inquiryFollowup: null,
     conversationChannel: 'text',
     pendingQuestion: null,
     recentMessages: [],
@@ -232,7 +236,7 @@ function successResult() {
     attemptHistory: [],
     systemPrompt: '',
     userPrompt: '',
-    promptVersion: 'v1.75.0',
+    promptVersion: PROMPT_VERSION,
     dashViolationPersisted: false,
     selfTalkViolationPersisted: false,
     emojiDirectiveViolated: false,
@@ -1440,5 +1444,171 @@ describe('handleFollowup — the warm close (TAC-560)', () => {
       status: 'refused',
       reason: 'warm_close_is_instagram_only',
     })
+  })
+})
+
+// TAC-386: the third reason allowed on an Instagram conversation.
+describe('handleFollowup — the inquiry follow-up (TAC-386)', () => {
+  const inquiryTrigger = (): FollowupTrigger => ({
+    reason: 'inquiry_followup',
+    triggeredAt: new Date(),
+    inquiryFollowup: {
+      question: 'where do I park around there',
+      answer: 'Street parking on Polk is usually fine before 9.',
+      answerMessageId: 'our-answer-msg',
+    },
+  })
+
+  beforeEach(() => {
+    buildRuntimeContextMock.mockImplementation(
+      async (args: { followupTrigger: RuntimeContext['followupTrigger'] }) => ({
+        ...makeCtx(args.followupTrigger),
+        conversationChannel: 'instagram',
+      }),
+    )
+    // The same trap the warm-close and scan-greeting blocks each document:
+    // these two are reset by the file's own beforeEach with NO default, and
+    // this block is one of the few that generates and therefore reaches them.
+    // Omitting them fails as `context_build` with "reading 'status'" of
+    // undefined, which names neither the mock nor the stage.
+    verifyMechanicOfferStageMock.mockResolvedValue({ status: 'skipped' })
+    applyApprovalPolicyStageMock.mockResolvedValue({ action: 'send' })
+  })
+
+  it('generates and sends on Instagram, where a day-based follow-up is refused', async () => {
+    const result = await handleFollowup({
+      venueId: VENUE_ID,
+      guestId: GUEST_ID,
+      trigger: inquiryTrigger(),
+    })
+    expect(result).toMatchObject({ status: 'sent' })
+    expect(generateStageMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('routes through dispatchReply, not scheduleAndSend', async () => {
+    await handleFollowup({
+      venueId: VENUE_ID,
+      guestId: GUEST_ID,
+      trigger: inquiryTrigger(),
+    })
+    expect(dispatchReplyMock).toHaveBeenCalled()
+    expect(scheduleAndSendMock).not.toHaveBeenCalled()
+  })
+
+  it('names OUR ANSWER as the message it follows, not the guest question', async () => {
+    // The question already has an outbound answering it. A second outbound
+    // claiming the same inbound would make two rows answer one message, and the
+    // honest answer to "what does this follow" is our own answer.
+    await handleFollowup({
+      venueId: VENUE_ID,
+      guestId: GUEST_ID,
+      trigger: inquiryTrigger(),
+    })
+    expect(dispatchReplyMock.mock.calls[0]?.[2]).toMatchObject({
+      answersInboundId: 'our-answer-msg',
+    })
+  })
+
+  it('exempts the reply check', async () => {
+    // Sharper than the warm close's reason: the guest's message HAS already
+    // been answered, by construction, because that answer is the thing this
+    // follow-up exists to check on. Handing the check the question would refuse
+    // every send.
+    await handleFollowup({
+      venueId: VENUE_ID,
+      guestId: GUEST_ID,
+      trigger: inquiryTrigger(),
+    })
+    expect(dispatchReplyMock.mock.calls[0]?.[2]).toMatchObject({
+      replyCheck: 'exempt',
+    })
+  })
+
+  it('exempts it by REASON, not by happening to carry no scan id', async () => {
+    // The assertion above passes with or without replyCheckFor's explicit
+    // branch, because an inquiry trigger carries no instagramScanArrival and the
+    // fallthrough returns 'exempt' on its own. That makes it a test of an
+    // accident rather than of the rule, which a mutation run showed directly:
+    // deleting the branch left the whole file green.
+    //
+    // So this hands the trigger a scan id it would never carry in production.
+    // The shape is artificial; the property is not. It is the only way to state
+    // that the exemption comes from the reason, so the branch has a reader and
+    // cannot be deleted silently.
+    await handleFollowup({
+      venueId: VENUE_ID,
+      guestId: GUEST_ID,
+      trigger: {
+        ...inquiryTrigger(),
+        instagramScanArrival: {
+          scanMessageId: 'a-scan-row',
+          hadPriorConversation: false,
+        },
+      },
+    })
+    expect(dispatchReplyMock.mock.calls[0]?.[2]).toMatchObject({
+      replyCheck: 'exempt',
+    })
+  })
+
+  it('records it as follow_up, so no messages.category widening is needed', async () => {
+    await handleFollowup({
+      venueId: VENUE_ID,
+      guestId: GUEST_ID,
+      trigger: inquiryTrigger(),
+    })
+    expect(generateStageMock.mock.calls[0]?.[1]).toBe('follow_up')
+  })
+
+  // Ruled 2026-09-30: Instagram only for now, SMS is a follow-up ticket.
+  it('refuses a text conversation', async () => {
+    buildRuntimeContextMock.mockImplementation(
+      async (args: { followupTrigger: RuntimeContext['followupTrigger'] }) => ({
+        ...makeCtx(args.followupTrigger),
+        conversationChannel: 'text',
+      }),
+    )
+    const result = await handleFollowup({
+      venueId: VENUE_ID,
+      guestId: GUEST_ID,
+      trigger: inquiryTrigger(),
+    })
+    expect(result).toEqual({
+      status: 'refused',
+      reason: 'inquiry_followup_is_instagram_only',
+    })
+    expect(generateStageMock).not.toHaveBeenCalled()
+    expect(dispatchReplyMock).not.toHaveBeenCalled()
+  })
+
+  it('refuses an unresolved channel too', async () => {
+    buildRuntimeContextMock.mockImplementation(
+      async (args: { followupTrigger: RuntimeContext['followupTrigger'] }) => ({
+        ...makeCtx(args.followupTrigger),
+        conversationChannel: null,
+      }),
+    )
+    const result = await handleFollowup({
+      venueId: VENUE_ID,
+      guestId: GUEST_ID,
+      trigger: inquiryTrigger(),
+    })
+    expect(result).toEqual({
+      status: 'refused',
+      reason: 'inquiry_followup_is_instagram_only',
+    })
+  })
+
+  it('never arms another follow-up from its own turn', async () => {
+    // The structural half of ruling 7. handleFollowup synthesizes a
+    // Classification, and followUpWorthy is false there, so a generated
+    // follow-up cannot loop into arming a second one.
+    await handleFollowup({
+      venueId: VENUE_ID,
+      guestId: GUEST_ID,
+      trigger: inquiryTrigger(),
+    })
+    const classification = generateStageMock.mock.calls[0]?.[0]?.classification
+    expect(classification?.followUpWorthy).toBe(false)
   })
 })

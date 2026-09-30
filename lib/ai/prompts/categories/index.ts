@@ -37,6 +37,7 @@ import { UNKNOWN_INSTRUCTIONS } from './unknown'
 // MessageCategory (it stores `acknowledgment`), it is a per-turn replacement
 // chosen in categoryInstructionsFor. See that function.
 import { WARM_CLOSE_INSTRUCTIONS } from './warm-close'
+import { INQUIRY_FOLLOWUP_INSTRUCTIONS } from './inquiry-followup'
 import { WELCOME_INSTRUCTIONS } from './welcome'
 
 export function getCategoryInstructions(category: MessageCategory): string {
@@ -166,8 +167,18 @@ export function categoryInstructionsFor(
   // Takes NO channel substitution: the copy names no channel. The scope guard in
   // index.test.ts fails if a channel claim is ever introduced into it.
   warmClose = false,
+  // TAC-386: the THIRD per-turn exception, on the same reasoning as the two
+  // above. An inquiry follow-up stores `category: 'follow_up'`, but that
+  // category's text is written for a message days after a VISIT and tells the
+  // model to check in on it, which is the one thing ruling 11 forbids here.
+  //
+  // Checked alongside the warm close, before the category lookup. Defaults false
+  // so every other call site is unchanged. Takes no channel substitution: the
+  // copy names no channel.
+  inquiryFollowup = false,
 ): string {
   if (warmClose) return WARM_CLOSE_INSTRUCTIONS
+  if (inquiryFollowup) return INQUIRY_FOLLOWUP_INSTRUCTIONS
   if (category === 'guest_arrived')
     return guestArrivedInstructionsFor(scanArrival)
   return (

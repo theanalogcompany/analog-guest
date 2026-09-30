@@ -100,6 +100,7 @@ function makeCtx(): RuntimeContext {
     followupTrigger: null,
     scanArrival: null,
     warmClose: false,
+    inquiryFollowup: null,
     conversationChannel: 'instagram',
     pendingQuestion: null,
     recentMessages: [],
@@ -122,6 +123,7 @@ function makeCtx(): RuntimeContext {
       reasoning: 'r',
       crisisSafety: false,
       correctsPendingReply: false,
+      followUpWorthy: false,
     },
     trace: { id: 'trace-1' } as RuntimeContext['trace'],
   }

@@ -28,7 +28,11 @@ boolean or string is free.
 
 ## Prompt versions are independent by design
 
-`PROMPT_VERSION` (`prompts/system-template.ts`, currently v1.75.0) covers the
+**`classifyMessage` carries three independent booleans**: `crisisSafety`,
+`correctsPendingReply`, `followUpWorthy`. None is `.optional()`, which is what makes the
+compiler name every site synthesizing a `Classification`.
+
+`PROMPT_VERSION` (`prompts/system-template.ts`, currently v1.76.0) covers the
 classify/generate contract. Every other module here carries its own, and they are
 deliberately not linked:
 

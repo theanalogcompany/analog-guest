@@ -76,6 +76,17 @@ export const ClassifiedMessageSchema = z.object({
   // is answering. It is what tells the approval gate to regenerate that reply
   // in place instead of giving this message its own card.
   correctsPendingReply: z.boolean(),
+  // TAC-386: independent of category, same shape and same reasoning as the two
+  // booleans above — one more field on the existing call, never `.optional()`,
+  // so no new model call and no new latency on the reply path.
+  //
+  // True when OUR ANSWER would help the guest do something afterwards, which is
+  // what makes checking back later hospitality rather than surveillance. The
+  // line it draws is ruled (2026-09-30) and drawn in the prompt below; the
+  // scheduler ALSO refuses the categories that must never be followed up
+  // (lib/agent/schedule-inquiry-followup.ts), because a prompt instruction
+  // nothing enforces is not a gate.
+  followUpWorthy: z.boolean(),
 })
 
 const CLASSIFY_SYSTEM_PROMPT = `You classify inbound text messages from guests of a hospitality venue (cafe, bakery, restaurant) into one of these categories:
@@ -104,6 +115,18 @@ Separately from category, set crisisSafety to true when the message expresses ei
 Set crisisSafety to false for everything else, including hyperbole and idiom that merely uses this language ("this coffee is to die for", "dying to try this place", "I'm dying laughing", "this latte is a matter of life and death"). When genuinely ambiguous between hyperbole and a real signal, prefer true — a false positive here costs one unnecessary safety message; a false negative costs missing a guest who needs help.
 
 Separately again, set correctsPendingReply. Recent conversation may include a venue line marked NOT SENT — a reply the venue has drafted but not yet approved. That marker also appears on replies the venue decided not to send; judge only against one that is waiting for the venue to approve it. Set correctsPendingReply to true only when this message clearly corrects, amends, or changes the question that NOT SENT reply is answering ("actually make that oat milk", "wait, I meant tomorrow", "sorry, I meant Friday not Thursday"). If more than one NOT SENT line appears, judge only against the most recent one. Set it to false for everything else, including a new and unrelated question, an acknowledgement, a reaction, and small talk — and false whenever there is no NOT SENT line at all. When genuinely unsure, prefer false: a wrongly-true value rewrites a reply the guest was waiting for, while a wrongly-false one only means they get a second, separate reply.
+
+Separately again, set followUpWorthy. Set it to true when our answer to this message would help the guest do something afterwards, so that checking later whether it worked out would be natural. Examples: where to park or how to find the place; which beans or bag to buy; how to brew something at home; whether they can bring a dog; what to order or try.
+
+Set followUpWorthy to false when there is nothing to have worked out. That includes: a pure fact with no action behind it (e.g. "what time do you close", "are you open Monday", "do you have wifi"); small talk or a passing comment (e.g. "love this neighborhood", "hope you have a good day"); a complaint or a report that something was wrong; and anything involving someone's safety or an emergency.
+
+Set followUpWorthy to false for anything an operator arranges rather than the venue simply answering: catering, a private event or renting out the space, taking a booking or reservation, and wholesale, press, hiring or partnership enquiries (e.g. "do you offer catering", "can I rent the space for a private event", "do you do wholesale for offices"). Asking whether there are PUBLIC events coming up is not one of these and does qualify (e.g. "do you have any events coming up").
+
+Set followUpWorthy to false when the guest says they are already arriving or on their way (e.g. "omw", "walking over", "heading in now", "can you get my order ready"), which is a different signal handled elsewhere.
+
+A question can be factual and still qualify, but only when the answer is something the guest then goes and does. Asking when you close is not. Asking how to get there is.
+
+Set followUpWorthy to false for everything else.
 
 Return your classification with a confidence score (DECIMAL between 0.0 and 1.0, NOT a 1-10 score) and a one-sentence reasoning. Be conservative with confidence. If the message is genuinely ambiguous, score lower so the operator can review it.
 
@@ -287,6 +310,7 @@ export async function classifyMessage(
         promptVersion: PROMPT_VERSION,
         crisisSafety: object.crisisSafety,
         correctsPendingReply: object.correctsPendingReply,
+        followUpWorthy: object.followUpWorthy,
         // Returned so the orchestrator can price this call on the Langfuse
         // `classify` generation. Read from the SDK result rather than from the
         // model factory, because `response.modelId` is what the provider

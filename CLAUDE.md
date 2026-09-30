@@ -145,8 +145,9 @@ Neither tier proceeds on `[NEEDS-INPUT]` alone. A change to guest-facing copy sh
 wording **verbatim** in the plan and waits for approval of that wording.
 
 **Audit first.** Before writing code: this file, the nested `CLAUDE.md` for the directory,
-the neighbouring files, the migrations touching the relevant tables, and the existing tests.
-Cite specific paths in the plan. Do not infer architecture from filenames.
+the neighbouring files, the migrations touching the relevant tables, and the existing tests -
+the `describe` block covering the behaviour you touch, not whole test files. Cite specific
+paths in the plan. Do not infer architecture from filenames.
 
 **Comment protocol.** Every Linear comment opens with `**[FROM CLAUDE CODE]**` on its own
 line - Linear shows Jaipal as author of MCP-posted comments, so the prefix is the only
@@ -189,7 +190,11 @@ command when the question is which variables exist.
 ### Git
 
 Branch protection on `main`; everything goes through a PR. CI must be green:
-`tsc --noEmit`, `npm run lint`, `npx vitest run`, `npm run build`.
+`tsc --noEmit`, `npm run lint`, `npx prettier --check .`, `npx jscpd` (the duplication
+gate; threshold in `.jscpd.json`, tests excluded), `npx vitest run`, `npm run build`.
+`.github/workflows/ci.yml` is the source of truth for this list - read it before claiming
+a change is verified, because this line has been stale before (prettier shipped in TAC-554
+and the list above missed it, and a branch failed CI on exactly that).
 
 Branch `<your-username>/<ticket>-short-description`, ticket id lowercase. Any single path
 segment works as the owner; `team/alex/<ticket>-x` and a bare `<ticket>-x` do not, because the
@@ -209,8 +214,11 @@ is refused outright. Branch each PR from `main` and take the conflict at merge t
 conflict is visible and recoverable, a destroyed PR object is not. Stack only when a PR
 genuinely cannot be reviewed without its parent, and budget a replacement PR.
 
-Pre-commit hook: `eslint --fix` on staged TS, `tsc --noEmit` project-wide, `vitest related`.
-Do not `--no-verify` without a reason. **In a `git worktree` the hook half-fails** on
+Pre-commit hook: lint-staged (`eslint --fix` + `prettier --write`) on staged files,
+`tsc --noEmit` project-wide, `vitest related`. Do not `--no-verify` without a reason - and
+when the hook cannot run (an environment floor, e.g. git under lint-staged's minimum), the
+manual substitute must mirror every step including lint-staged's prettier pass; skipping
+the step the hook could not reach is how a formatting failure reaches CI as news. **In a `git worktree` the hook half-fails** on
 `.git/index.lock` *after* those checks pass, and the commit still lands - check
 `git status --porcelain` and `git show --stat HEAD` rather than reading `[FAILED]` as a
 rejection.
@@ -278,10 +286,15 @@ should be added - fix the Node, never the guard. `tsc` is unaffected.
 
 Coverage is report-only and deliberately ungated (`npx vitest run --coverage`).
 
-Roughly 7,000 tests across roughly 300 files, as a smell test only. **Measure the real number,
-never estimate it, and never quote a recorded one** - an exact baseline in this file disagreed
-with `.claude/rules/testing-discipline.md`'s figures for the same day, and a number that
-precise is read as authoritative:
+Roughly 7,000 tests across roughly 300 files, as a smell test only. **Quote a count only when
+the number carries the claim, and then only from a run you executed in this session** - never
+an estimate, never a recorded one. An exact baseline in this file once disagreed with
+`.claude/rules/testing-discipline.md`'s figures for the same day, and a number that precise is
+read as authoritative. Most sessions need no count at all: vitest's summary line for your own
+run is the whole report.
+
+When the claim IS a delta ("added N", "none broke"), measure both sides in one session - the
+before in a throwaway worktree, the after in this checkout:
 
 ```
 git worktree add .worktrees/baseline origin/main
@@ -305,7 +318,7 @@ The live floors, all in `lib/agent/stages.ts`. A number quoted anywhere else may
 | `AUTO_SEND_FIDELITY_FLOOR` 0.6 | 0.4 to 0.6 queues for an operator |
 | voice pack (`lib/rag/voice-pack.ts`) | static per venue, no similarity; empty pack fails **closed** on inbound (decision 0008) |
 | `KNOWLEDGE_RELEVANCE_FLOOR` 0.3 | knowledge retrieval, degrades **gracefully** |
-| `PROMPT_VERSION` v1.75.0 | bumping it is a repo-wide sweep - `.claude/rules/prompt-versioning.md` |
+| `PROMPT_VERSION` v1.76.0 | bumping it is a repo-wide sweep - `.claude/rules/prompt-versioning.md` |
 
 **23 approval triggers compose; any one queues the draft.** The five post-generation LLM
 checks run **post-send** on inbound (Slack forward on a finding, never a hold) and keep the

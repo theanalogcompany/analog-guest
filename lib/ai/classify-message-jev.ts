@@ -321,6 +321,14 @@ export async function classifyMessageViaJev(
       promptVersion: CLASSIFY_JEV_PROMPT_VERSION,
       crisisSafety: crisis.noul >= JEV_CRISIS_THRESHOLD,
       correctsPendingReply: correctsPending.noul >= JEV_CORRECTS_PENDING_THRESHOLD,
+      // TAC-386 KNOWN GAP: the Jev unit (v1.13.0) has no followUpWorthy
+      // question, so a Jev-classified turn never arms an inquiry follow-up.
+      // False is the cheap direction by TAC-386's own posture (a missed
+      // follow-up, never a broken turn). Adding the question to the Jev unit
+      // is the v-next work item; do NOT derive it from category here - the
+      // 2026-09-30 ruling drew the line on what the answer helps the guest DO,
+      // which a category cannot express.
+      followUpWorthy: false,
     },
   }
 }

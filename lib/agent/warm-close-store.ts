@@ -28,6 +28,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 
 import type { Database } from '@/db/types'
+import { isInquiryFollowupMessage } from '@/lib/followups/inquiry-followup-store'
 import { DELIVERED_OUTBOUND_STATUSES } from './group-responses'
 
 type AdminSupabaseClient = SupabaseClient<Database>
@@ -67,6 +68,12 @@ export interface WarmCloseCandidate {
 /** The guest facts every check needs, in one read. */
 export interface WarmCloseGuestFacts {
   createdVia: string | null
+  /**
+   * TAC-386: when a proactive message last reached this guest, from ANY of the
+   * three mechanisms. Read before the claim to keep PROACTIVE_SPACING_MINUTES
+   * between two of them.
+   */
+  lastProactiveSendAt: Date | null
   firstContactedAt: Date | null
   warmCloseSentAt: Date | null
   optedOutAt: Date | null
@@ -154,6 +161,34 @@ export async function loadWarmCloseCandidates(
     .limit(limit)
   if (error) return { ok: false, error: error.message }
 
+  // TAC-386: AN INQUIRY FOLLOW-UP IS NOT AN ANCHOR.
+  //
+  // A follow-up is an outbound row, so without this it would become "our last
+  // word" and open a FRESH two-hour warm-close window three hours after the
+  // original one expired. The guest would then get a second proactive message
+  // ten minutes later. The 60-minute spacing rule only DELAYS that by an hour.
+  //
+  // The premise is this mechanism's own: a warm close closes a conversation the
+  // guest is IN, and an unprompted follow-up is not one.
+  //
+  // Checked HERE rather than in the processor, and that placement is the point.
+  // The loop below marks a guest `seen` on their newest row whatever it is, so
+  // hitting this test and continuing DISQUALIFIES the guest for this tick. A
+  // filter applied earlier would instead let an OLDER delivered row stand in as
+  // the anchor, which is exactly what the `seen` comment below warns against.
+  const outboundIds = (data ?? [])
+    .filter((row) => row.direction === 'outbound')
+    .map((row) => row.id)
+  const proactive = await isInquiryFollowupMessage(supabase, outboundIds)
+  if (!proactive.ok) {
+    // A failed read has not shown these are ordinary outbounds. Reporting the
+    // error costs a delayed close; guessing costs a double send.
+    return {
+      ok: false,
+      error: `loadWarmCloseCandidates (provenance): ${proactive.error}`,
+    }
+  }
+
   const seen = new Set<string>()
   const candidates: WarmCloseCandidate[] = []
   for (const row of data ?? []) {
@@ -164,6 +199,17 @@ export async function loadWarmCloseCandidates(
     // rather than letting an older delivered row stand in as our last word.
     seen.add(guestId)
     if (row.direction !== 'outbound') continue
+    if (proactive.data.has(row.id)) {
+      console.log(
+        '[warm-close] newest outbound is a follow-up; not an anchor',
+        {
+          venueId,
+          guestId,
+          messageId: row.id,
+        },
+      )
+      continue
+    }
     if (row.review_state === 'pending') continue
     if (!DELIVERED_OUTBOUND_STATUSES.has(row.status)) continue
 
@@ -203,7 +249,7 @@ export async function loadWarmCloseGuestFacts(
   const { data, error } = await supabase
     .from('guests')
     .select(
-      'created_via, first_contacted_at, warm_close_sent_at, opted_out_at, instagram_scoped_id, phone_number',
+      'created_via, first_contacted_at, warm_close_sent_at, opted_out_at, instagram_scoped_id, phone_number, last_proactive_send_at',
     )
     .eq('id', guestId)
     .maybeSingle()
@@ -223,6 +269,11 @@ export async function loadWarmCloseGuestFacts(
     ok: true,
     data: {
       createdVia: data.created_via ?? null,
+      lastProactiveSendAt:
+        typeof data.last_proactive_send_at === 'string' &&
+        Number.isFinite(new Date(data.last_proactive_send_at).getTime())
+          ? new Date(data.last_proactive_send_at)
+          : null,
       firstContactedAt:
         firstContactedAt !== null && Number.isFinite(firstContactedAt.getTime())
           ? firstContactedAt

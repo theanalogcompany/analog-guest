@@ -819,6 +819,17 @@ export async function buildRuntimeContext(input: {
     // caller's decision (the processor claimed it), not something re-inferable
     // from the guest's state here.
     warmClose: input.followupTrigger?.reason === 'warm_close',
+    // TAC-386: the question and our answer both come off the trigger, which the
+    // processor filled in after resolving the answer from `messages`. Nothing
+    // here reads the database for them.
+    inquiryFollowup:
+      input.followupTrigger?.reason === 'inquiry_followup' &&
+      input.followupTrigger.inquiryFollowup
+        ? {
+            question: input.followupTrigger.inquiryFollowup.question,
+            answer: input.followupTrigger.inquiryFollowup.answer,
+          }
+        : null,
     intentionDerivation: {
       newlyEligible: intentions.newlyEligible,
       brakeEngaged: intentions.brakeEngaged,

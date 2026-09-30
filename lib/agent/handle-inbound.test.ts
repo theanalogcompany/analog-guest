@@ -12,6 +12,9 @@
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+// Derived from the live constant: a stale fixture literal ships green, and
+// nothing fails (see .claude/rules/prompt-versioning.md).
+import { PROMPT_VERSION } from '@/lib/ai/prompts/system-template'
 import type { ActiveCommitment } from '@/lib/schemas/guest-commitment'
 import type { CoalesceDeps } from './coalesce-turn'
 
@@ -1016,7 +1019,7 @@ function successResult() {
     attemptHistory: [],
     systemPrompt: '',
     userPrompt: '',
-    promptVersion: 'v1.75.0',
+    promptVersion: PROMPT_VERSION,
     dashViolationPersisted: false,
     selfTalkViolationPersisted: false,
     emojiDirectiveViolated: false,

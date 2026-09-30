@@ -269,6 +269,13 @@ conditional regression nothing notices.
 
 Prompt wording cannot reach any of this: see `docs/decisions/0007-intention-question-is-its-own-bubble.md`.
 
+## Proactive sends (TAC-386)
+
+Three paths reach a guest with no inbound behind them: the scan greeting (TAC-536), the warm
+close (TAC-560), the inquiry follow-up (TAC-386, `lib/followups/`). **No two within 60
+minutes**, via `proactive-spacing.ts` and `guests.last_proactive_send_at`. A follow-up is NOT
+a warm-close anchor, excluded inside `loadWarmCloseCandidates`. Reasons in those headers.
+
 ## Other rules that bite
 
 - **A mock's recorded argument is a live reference.** These orchestrators mutate the `ctx`
