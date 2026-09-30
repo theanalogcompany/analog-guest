@@ -118,12 +118,28 @@ export function buildSatisfactionFacts(input: {
   hasQualifyingTransaction: boolean
   firstName: string | null
   homeBase: string | undefined
+  /**
+   * TAC-558: the RAW transaction row count for this guest at this venue. Raw
+   * rather than the parsed visit list on purpose - see
+   * IntentionSatisfactionFacts.hasRepeatVisitsOnRecord.
+   *
+   * A caller that cannot read it must pass a count ABOVE 1, not 0: the fact is
+   * read positively to close are_they_new_here, so a failed read has to look
+   * like "we already know they are a returner" for the derivation to fail
+   * closed.
+   */
+  recordedVisitCount: number
+  /** TAC-558: `guests.context.guest_details.history_here`, if any. */
+  venueHistory: string | undefined
 }): IntentionSatisfactionFacts {
   return {
     hasQualifyingTransaction: input.hasQualifyingTransaction,
     hasFirstName: input.firstName !== null && input.firstName.trim().length > 0,
     hasHomeBase:
       input.homeBase !== undefined && input.homeBase.trim().length > 0,
+    hasRepeatVisitsOnRecord: input.recordedVisitCount > 1,
+    hasVenueHistoryOnFile:
+      input.venueHistory !== undefined && input.venueHistory.trim().length > 0,
   }
 }
 
@@ -411,7 +427,34 @@ function armingFor(
         input.conversationWindowMs,
         now,
       )
+    // TAC-558. The EARLIEST recorded order, and NO conversation-window hold -
+    // the contrast with `recorded_order` directly above is documented on the
+    // arming kind itself. Reuses recordedOrderTimes rather than adding an input:
+    // that is the PARSED visit list, the same one ## Visit history renders, so a
+    // guest whose only transaction has unparseable raw_data shows the model no
+    // order and correctly does not arm.
+    //
+    // eventAt and eligibleAt are the same instant, as for visit_confirmed: there
+    // is no window to wait out, so the moment the order is on record is both the
+    // event and the moment it became askable.
+    case 'first_recorded_order': {
+      const earliest = earliestFinite(input.recordedOrderTimes)
+      return earliest === null
+        ? null
+        : { eligibleAt: earliest, eventAt: earliest }
+    }
   }
+}
+
+/** The earliest usable time in a list, or null when it holds none. */
+function earliestFinite(times: readonly Date[]): Date | null {
+  let earliest: number | null = null
+  for (const time of times) {
+    const at = time.getTime()
+    if (!Number.isFinite(at)) continue
+    if (earliest === null || at < earliest) earliest = at
+  }
+  return earliest === null ? null : new Date(earliest)
 }
 
 /**

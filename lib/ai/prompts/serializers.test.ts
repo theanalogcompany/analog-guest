@@ -2821,6 +2821,43 @@ describe('runtimeToProse — ## Guest context block (TAC-296)', () => {
     expect(out).toContain('Home base: Bernal Heights, SF')
   })
 
+  // TAC-558. The write half is GuestContextPatchSchema; this is the read half,
+  // and it is what makes storing the answer worth anything: a later turn sees
+  // what the guest said about their own history.
+  it("renders the guest's account of their history at the venue", () => {
+    const out = runtimeToProse(
+      {
+        today,
+        guestContext: {
+          guest_details: {
+            first_name: 'Sarah',
+            history_here: 'been coming since they opened',
+          },
+        },
+      },
+      'reply',
+    )
+    expect(out).toContain('## Guest context')
+    expect(out).toContain('History here: been coming since they opened')
+  })
+
+  // It is the only renderable field here, so the block must still appear. A
+  // fixture carrying a name alongside would pass with the new field ignored
+  // entirely, which is the fixture-cannot-reach-the-code shape.
+  it('renders the block for a guest whose only detail is their history here', () => {
+    const out = runtimeToProse(
+      {
+        today,
+        guestContext: {
+          guest_details: { history_here: 'first time in today' },
+        },
+      },
+      'reply',
+    )
+    expect(out).toContain('## Guest context')
+    expect(out).toContain('History here: first time in today')
+  })
+
   it('renders preferences as bulleted lines', () => {
     const out = runtimeToProse(
       {

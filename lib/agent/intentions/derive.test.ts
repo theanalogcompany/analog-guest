@@ -36,6 +36,8 @@ const NO_FACTS = {
   hasQualifyingTransaction: false,
   hasFirstName: false,
   hasHomeBase: false,
+  hasRepeatVisitsOnRecord: false,
+  hasVenueHistoryOnFile: false,
 }
 
 /**
@@ -1089,7 +1091,12 @@ describe('deriveOpenIntentions — satisfaction proxies', () => {
 })
 
 describe('deriveOpenIntentions — priority', () => {
-  it('returns open intentions in priority order, event-armed right after understand_order', () => {
+  // TAC-558 put are_they_new_here at the head of this list, which is what
+  // "first in line once active" buys: this fixture has a recorded order, so it
+  // arms, and it outranks every intention it can meet. understand_order is
+  // absent for the reason it always was here - hasQualifyingTransaction closes
+  // it - which is also why the two can never appear together.
+  it('returns open intentions in priority order, are_they_new_here first once an order is on record', () => {
     const result = deriveOpenIntentions(
       input({
         ...engaged(11),
@@ -1099,6 +1106,7 @@ describe('deriveOpenIntentions — priority', () => {
       }),
     )
     expect(keysOf(result.open)).toEqual([
+      'are_they_new_here',
       'got_the_recommendation',
       'did_they_like_it',
       'learn_name',
@@ -1565,5 +1573,186 @@ describe('applyCurrentTurnSuppression — real-word-collision regression corpus 
       [{ name: 'San Pellegrino' }],
     )
     expect(keysOf(result)).not.toContain('understand_order')
+  })
+})
+
+// TAC-558. The ticket's acceptance criteria are claims about WHEN this arms, so
+// they are pinned here on the real predicate rather than left to the measurement
+// run. The measurement confirms them end to end; these are what make them
+// properties.
+describe('deriveOpenIntentions — are_they_new_here (TAC-558)', () => {
+  // AC 1's "0 before the order", as a structural fact. With no recorded order
+  // there is no anchor, so the intention never becomes eligible at all - it is
+  // not merely unrendered, it is not recorded eligible either, which is what
+  // stops a later turn inheriting a sticky row from before the order.
+  it('does not arm before an order is on record, and records no eligibility', () => {
+    const result = deriveOpenIntentions(
+      input({ ...engaged(3), recordedOrderTimes: [] }),
+    )
+    expect(keysOf(result.open)).not.toContain('are_they_new_here')
+    expect(result.newlyEligible.map((e) => e.key)).not.toContain(
+      'are_they_new_here',
+    )
+  })
+
+  it('arms as soon as one order is on record', () => {
+    const result = deriveOpenIntentions(
+      input({ ...engaged(3), recordedOrderTimes: [hoursAgo(1)] }),
+    )
+    expect(keysOf(result.open)).toContain('are_they_new_here')
+    expect(result.newlyEligible.map((e) => e.key)).toContain(
+      'are_they_new_here',
+    )
+  })
+
+  // THE DISTINCTION FROM did_they_like_it, and the reason this needed its own
+  // arming kind. An order an hour old is still inside the conversation window, so
+  // recorded_order arming HOLDS - which is right for "did you try it?" and wrong
+  // here, because the counter session is the only moment this question fits. Both
+  // assertions in one test deliberately: apart, neither shows the contrast.
+  it('arms in the same conversation as the order, where did_they_like_it is held', () => {
+    const result = deriveOpenIntentions(
+      input({ ...engaged(3), recordedOrderTimes: [hoursAgo(1)] }),
+    )
+    expect(keysOf(result.open)).toContain('are_they_new_here')
+    expect(keysOf(result.open)).not.toContain('did_they_like_it')
+  })
+
+  // AC 3. A guest the record already shows as a returner is never asked.
+  it('is closed by a repeat visit on record', () => {
+    const result = deriveOpenIntentions(
+      input({
+        ...engaged(3),
+        recordedOrderTimes: [hoursAgo(1)],
+        facts: { ...NO_FACTS, hasRepeatVisitsOnRecord: true },
+      }),
+    )
+    expect(keysOf(result.open)).not.toContain('are_they_new_here')
+    expect(result.newlyEligible.map((e) => e.key)).not.toContain(
+      'are_they_new_here',
+    )
+  })
+
+  // The second proxy: the guest answered, so it closes whether or not the record
+  // ever catches up. This is what makes the answer worth storing rather than
+  // relying on prompted-once alone.
+  it("is closed by the guest's own account being on file", () => {
+    const result = deriveOpenIntentions(
+      input({
+        ...engaged(3),
+        recordedOrderTimes: [hoursAgo(1)],
+        facts: { ...NO_FACTS, hasVenueHistoryOnFile: true },
+      }),
+    )
+    expect(keysOf(result.open)).not.toContain('are_they_new_here')
+  })
+
+  // MUTUAL EXCLUSION WITH understand_order, which is what makes the ticket's
+  // "never competes with, or comes before, the order question" structural rather
+  // than a matter of priority. Whichever way the facts fall, exactly one of the
+  // two can be open: no order means no arming here, and an order closes that one.
+  it('can never be open at the same time as understand_order', () => {
+    const before = keysOf(
+      deriveOpenIntentions(
+        input({
+          ...engaged(3),
+          visitConfirmedAt: hoursAgo(2),
+          recordedOrderTimes: [],
+        }),
+      ).open,
+    )
+    expect(before).toContain('understand_order')
+    expect(before).not.toContain('are_they_new_here')
+
+    const after = keysOf(
+      deriveOpenIntentions(
+        input({
+          ...engaged(3),
+          visitConfirmedAt: hoursAgo(2),
+          recordedOrderTimes: [hoursAgo(1)],
+          facts: { ...NO_FACTS, hasQualifyingTransaction: true },
+        }),
+      ).open,
+    )
+    expect(after).toContain('are_they_new_here')
+    expect(after).not.toContain('understand_order')
+  })
+
+  // Prompted-once, and NEVER re-armed by a later order. A second order is not a
+  // new thing to ask about; it is the answer arriving another way.
+  it('stays closed once raised, even when a newer order lands', () => {
+    const result = deriveOpenIntentions(
+      input({
+        ...engaged(3),
+        recordedOrderTimes: [daysAgo(4), hoursAgo(1)],
+        rows: {
+          prompted: [promptedRow('are_they_new_here', daysAgo(3))],
+          eligible: [],
+        },
+      }),
+    )
+    expect(keysOf(result.open)).not.toContain('are_they_new_here')
+    expect(result.newlyEligible.map((e) => e.key)).not.toContain(
+      'are_they_new_here',
+    )
+  })
+
+  // The gate. Arming alone is not the right to ask: two replies is the shape of
+  // a guest who has scanned and named an order and nothing more, and the pacing
+  // rule wants a turn of daylight after the order question.
+  it('waits for the third reply, so it never lands on the turn the order is named', () => {
+    const shared = { recordedOrderTimes: [hoursAgo(1)] }
+    expect(
+      keysOf(deriveOpenIntentions(input({ ...engaged(2), ...shared })).open),
+    ).not.toContain('are_they_new_here')
+    expect(
+      keysOf(deriveOpenIntentions(input({ ...engaged(3), ...shared })).open),
+    ).toContain('are_they_new_here')
+  })
+
+  // The window runs from the EARLIEST order, and it is the 14-day first-contact
+  // one rather than the 3-day event window. An order 15 days old is past it.
+  it('expires 14 days after the earliest order, not 3', () => {
+    const atThirteen = keysOf(
+      deriveOpenIntentions(
+        input({ ...engaged(3), recordedOrderTimes: [daysAgo(13)] }),
+      ).open,
+    )
+    expect(atThirteen).toContain('are_they_new_here')
+
+    const atFifteen = keysOf(
+      deriveOpenIntentions(
+        input({ ...engaged(3), recordedOrderTimes: [daysAgo(15)] }),
+      ).open,
+    )
+    expect(atFifteen).not.toContain('are_they_new_here')
+  })
+
+  // EARLIEST, not newest - the anchor choice, which only a two-order fixture can
+  // show. Both orders are inside the window here, so a newest-wins bug would
+  // pass; the expiry pair above is what separates them.
+  it('anchors on the earliest order when several are on record', () => {
+    const result = deriveOpenIntentions(
+      input({
+        ...engaged(3),
+        recordedOrderTimes: [hoursAgo(1), daysAgo(13)],
+      }),
+    )
+    const entry = result.newlyEligible.find(
+      (e) => e.key === 'are_they_new_here',
+    )
+    expect(entry?.eligibleAt).toEqual(daysAgo(13))
+  })
+
+  // An unusable timestamp is skipped rather than arming at the epoch, which would
+  // make the intention instantly expired and silently unaskable forever.
+  it('ignores an unparseable order time', () => {
+    const result = deriveOpenIntentions(
+      input({
+        ...engaged(3),
+        recordedOrderTimes: [new Date(Number.NaN)],
+      }),
+    )
+    expect(keysOf(result.open)).not.toContain('are_they_new_here')
   })
 })

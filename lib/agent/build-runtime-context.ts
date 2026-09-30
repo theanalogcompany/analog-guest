@@ -542,7 +542,8 @@ export async function buildRuntimeContext(input: {
     // "Have we heard what they ordered" reuses the visit-history query rather
     // than issuing another: the RAW row count, before extractRecentVisits's
     // parse-projection, since we heard it even if raw_data is unparseable.
-    const hasQualifyingTransaction = (visitHistoryResult.data?.length ?? 0) > 0
+    const recordedVisitCount = visitHistoryResult.data?.length ?? 0
+    const hasQualifyingTransaction = recordedVisitCount > 0
 
     // TAC-436 ruling 3: arms understand_order off the EARLIEST confirmed visit,
     // from either source, rather than off QR enrollment alone.
@@ -732,6 +733,12 @@ export async function buildRuntimeContext(input: {
         hasQualifyingTransaction,
         firstName: guest.firstName,
         homeBase: parsedGuestContext.guest_details?.home_base,
+        // TAC-558. The RAW row count, not recentVisits.length: closing
+        // are_they_new_here must not depend on raw_data parsing, or a guest with
+        // five visits of which four are unparseable gets asked whether this is
+        // their first time. See hasRepeatVisitsOnRecord.
+        recordedVisitCount,
+        venueHistory: parsedGuestContext.guest_details?.history_here,
       }),
       visitConfirmedAt,
       openRecommendationTimes,

@@ -17,6 +17,16 @@ import {
 } from '@/lib/schemas/guest-context'
 import { guestNameWithPhone } from './guest-name'
 
+/**
+ * What the fail-closed branch writes as a guest's recorded-visit count.
+ *
+ * Any value above 1 closes are_they_new_here (hasRepeatVisitsOnRecord) as well
+ * as understand_order (hasQualifyingTransaction), which is the direction an
+ * unreadable transactions list has to fail in. Named rather than a bare 2 so the
+ * next fact keyed on this count has to think about it.
+ */
+const FAIL_CLOSED_VISIT_COUNT = 2
+
 // TAC-381, reworked by TAC-380: which intentions are OPEN right now for the
 // guests of one venue.
 //
@@ -222,20 +232,28 @@ async function _loadVenueOpenIntentions(
   // because every isSatisfied reads this fact POSITIVELY. A future definition
   // written `isSatisfied: (f) => !f.hasQualifyingTransaction` would fail OPEN
   // here under unchanged code.
-  const hasTransaction = new Set<string>()
+  //
+  // TAC-558 made this a COUNT rather than a presence set, because
+  // are_they_new_here closes on MORE THAN ONE recorded visit. The fail-closed
+  // branch therefore has to write a count above 1, not merely mark presence: a
+  // count of 1 would read as "one visit on record, still worth asking" and fail
+  // OPEN on exactly the intention this read cannot judge.
+  const visitCount = new Map<string, number>()
   if (txResult.error) {
     console.warn(
       `[loadVenueOpenIntentions] transactions query failed: ${txResult.error.message}. Failing closed.`,
     )
     degraded = true
-    for (const id of guestIds) hasTransaction.add(id)
+    for (const id of guestIds) visitCount.set(id, FAIL_CLOSED_VISIT_COUNT)
   } else {
     // transactions.guest_id is nullable — a POS row stays unmatched until a
     // card fingerprint or tap resolves it (migration 030). The .in() filter
     // above already excludes nulls, so this is the type being honest rather
     // than a live branch.
     for (const row of txResult.data ?? []) {
-      if (row.guest_id !== null) hasTransaction.add(row.guest_id)
+      if (row.guest_id !== null) {
+        visitCount.set(row.guest_id, (visitCount.get(row.guest_id) ?? 0) + 1)
+      }
     }
   }
 
@@ -258,9 +276,11 @@ async function _loadVenueOpenIntentions(
         entriesByGuest.get(guestId) ??
         new Map<IntentionKey, IntentionStateEntry>(),
       facts: buildSatisfactionFacts({
-        hasQualifyingTransaction: hasTransaction.has(guestId),
+        hasQualifyingTransaction: (visitCount.get(guestId) ?? 0) > 0,
         firstName: guest.first_name,
         homeBase: context.guest_details?.home_base,
+        recordedVisitCount: visitCount.get(guestId) ?? 0,
+        venueHistory: context.guest_details?.history_here,
       }),
       now,
     })

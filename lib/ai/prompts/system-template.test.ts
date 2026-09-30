@@ -32,8 +32,8 @@ import {
 // SYSTEM_TEMPLATE body changes.
 
 describe('PROMPT_VERSION', () => {
-  it('is v1.73.0 (the warm close on a pause, and its self-report field)', () => {
-    expect(PROMPT_VERSION).toBe('v1.73.0')
+  it('is v1.74.0 (a new-or-regular intention, and the field its answer lands in)', () => {
+    expect(PROMPT_VERSION).toBe('v1.74.0')
   })
 })
 
@@ -2896,5 +2896,37 @@ describe('# Getting-to-know-you questions (TAC-554)', () => {
 
   it('carries no em or en dash', () => {
     expect(blockOf(SYSTEM_TEMPLATE)).not.toMatch(/[—–]/)
+  })
+})
+
+// TAC-558. The schema field and the render line are useless without this: a
+// field the model is never told about is a field nobody writes, which the
+// measurement smoke run demonstrated before these lines existed (question raised,
+// answer given, nothing stored).
+describe('# Guest context capture — history_here (TAC-558)', () => {
+  it('names history_here in the shape the model is shown', () => {
+    expect(SYSTEM_TEMPLATE).toContain(
+      '{ guest_details: { first_name, last_name, home_base, workplace, history_here },',
+    )
+  })
+
+  // ONE CONTIGUOUS CLAUSE, per TAC-409: a sentence can be reversed while every
+  // asserted fragment survives. This one says what the field holds and that it is
+  // recorded either way, which is the half a rewrite would quietly drop.
+  it('says what the field holds, and that it is captured either way', () => {
+    expect(SYSTEM_TEMPLATE).toContain(
+      'history_here is how long the guest has been coming to THIS venue, in their own words, recorded whichever way they answer.',
+    )
+  })
+
+  // BOTH DIRECTIONS. A single first-visit example would teach capture of the new
+  // case only, and the regular case is the one that has to inform later turns.
+  it('works both answers, not just the first-visit one', () => {
+    expect(SYSTEM_TEMPLATE).toContain(
+      '- "yeah first time in today" → structured: { guest_details: { history_here: "first time in today" } }',
+    )
+    expect(SYSTEM_TEMPLATE).toContain(
+      '- "been coming for about a year now" → structured: { guest_details: { history_here: "been coming about a year" } }',
+    )
   })
 })
