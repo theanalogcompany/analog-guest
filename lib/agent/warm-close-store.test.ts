@@ -103,7 +103,10 @@ describe('loadWarmCloseVenues (TAC-560)', () => {
 
 describe('loadWarmCloseCandidates (TAC-560)', () => {
   it('scopes to the venue, to Instagram, to the window, newest first', async () => {
-    const { client, queries } = queryRecorder({ messages: [ok([row()])] })
+    const { client, queries } = queryRecorder({
+      inquiry_followups: [ok([])],
+      messages: [ok([row()])],
+    })
     await loadWarmCloseCandidates(client, VENUE, WINDOW_START)
     const q = queries[0]
     expect(callsNamed(q, 'eq')).toEqual(
@@ -127,7 +130,10 @@ describe('loadWarmCloseCandidates (TAC-560)', () => {
     // The filter is applied in TS deliberately. Filtering to outbound here would
     // make a guest who replied look like a guest who went quiet, because the
     // older outbound would be promoted to "our last word".
-    const { client, queries } = queryRecorder({ messages: [ok([row()])] })
+    const { client, queries } = queryRecorder({
+      inquiry_followups: [ok([])],
+      messages: [ok([row()])],
+    })
     await loadWarmCloseCandidates(client, VENUE, WINDOW_START)
     expect(callsNamed(queries[0], 'eq')).not.toEqual(
       expect.arrayContaining([['direction', 'outbound']]),
@@ -135,7 +141,10 @@ describe('loadWarmCloseCandidates (TAC-560)', () => {
   })
 
   it('produces a candidate for an outbound that reached the guest', async () => {
-    const { client } = queryRecorder({ messages: [ok([row()])] })
+    const { client } = queryRecorder({
+      inquiry_followups: [ok([])],
+      messages: [ok([row()])],
+    })
     const r = await loadWarmCloseCandidates(client, VENUE, WINDOW_START)
     expect(r.ok && r.data).toHaveLength(1)
     expect(r.ok && r.data[0].messageId).toBe('m-out')
@@ -145,6 +154,7 @@ describe('loadWarmCloseCandidates (TAC-560)', () => {
     // The newest row is theirs, so they are marked seen and our older outbound
     // never becomes a candidate. This is how the timer resets on a reply.
     const { client } = queryRecorder({
+      inquiry_followups: [ok([])],
       messages: [
         ok([
           row({
@@ -170,6 +180,7 @@ describe('loadWarmCloseCandidates (TAC-560)', () => {
       { review_state: 'auto_sent', status: 'failed' },
     ]) {
       const { client } = queryRecorder({
+        inquiry_followups: [ok([])],
         messages: [
           ok([
             row({
@@ -186,14 +197,65 @@ describe('loadWarmCloseCandidates (TAC-560)', () => {
     }
   })
 
+  // TAC-386: a follow-up is an outbound row, so without this it would become
+  // "our last word" and open a fresh two-hour warm-close window hours after the
+  // original expired. The guest would then get a second proactive message ten
+  // minutes later, which 60-minute spacing only delays.
+  it('produces NO candidate when the newest outbound is an inquiry follow-up', async () => {
+    const { client } = queryRecorder({
+      inquiry_followups: [ok([{ dispatched_message_id: 'm-followup' }])],
+      messages: [
+        ok([
+          row({ id: 'm-followup', created_at: '2026-09-29T14:05:00.000Z' }),
+          row(),
+        ]),
+      ],
+    })
+    const r = await loadWarmCloseCandidates(client, VENUE, WINDOW_START)
+    // And crucially NOT the older `m-out`: the guest is disqualified for this
+    // tick rather than having an earlier row promoted to the anchor.
+    expect(r.ok && r.data).toEqual([])
+  })
+
+  it('still produces a candidate when the follow-up is not the newest row', async () => {
+    // The exclusion is about the ANCHOR, not about the guest ever having had a
+    // follow-up. A real reply after one is a perfectly good thing to close on.
+    const { client } = queryRecorder({
+      inquiry_followups: [ok([{ dispatched_message_id: 'm-followup' }])],
+      messages: [
+        ok([
+          row({ id: 'm-out', created_at: '2026-09-29T14:06:00.000Z' }),
+          row({ id: 'm-followup', created_at: '2026-09-29T14:05:00.000Z' }),
+        ]),
+      ],
+    })
+    const r = await loadWarmCloseCandidates(client, VENUE, WINDOW_START)
+    expect(r.ok && r.data).toHaveLength(1)
+    expect(r.ok && r.data[0].messageId).toBe('m-out')
+  })
+
+  it('reports an error rather than guessing when provenance cannot be read', async () => {
+    // A failed read has not shown these are ordinary outbounds. Erroring costs a
+    // delayed close; guessing costs a double send.
+    const { client } = queryRecorder({
+      inquiry_followups: [{ data: null, error: { message: 'boom' } }],
+      messages: [ok([row()])],
+    })
+    const r = await loadWarmCloseCandidates(client, VENUE, WINDOW_START)
+    expect(r.ok).toBe(false)
+    expect(!r.ok && r.error).toContain('provenance')
+  })
+
   it('counts rendered intentions off the carrier, and reads a missing one as none', async () => {
     const withOne = queryRecorder({
+      inquiry_followups: [ok([])],
       messages: [ok([row({ rendered_intentions: [{ key: 'learn_name' }] })])],
     })
     const a = await loadWarmCloseCandidates(withOne.client, VENUE, WINDOW_START)
     expect(a.ok && a.data[0].renderedIntentionCount).toBe(1)
 
     const withNone = queryRecorder({
+      inquiry_followups: [ok([])],
       messages: [ok([row({ rendered_intentions: null })])],
     })
     const b = await loadWarmCloseCandidates(

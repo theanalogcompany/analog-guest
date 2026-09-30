@@ -23,6 +23,21 @@ vi.mock('./record-inbound-turn-outcome', async (importOriginal) => {
     insertInboundTurnOutcome: (...args: unknown[]) => insertLedgerMock(...args),
   }
 })
+// TAC-386: the shared proactive-send spacing marker. Mocked so this file's fake
+// client never has to know TAC-386's table.
+// `vi.hoisted` because vi.mock's factory is hoisted above every top-level
+// declaration, so a factory closing over a plain `const` throws
+// "Cannot access ... before initialization".
+const { recordProactiveSendMock } = vi.hoisted(() => ({
+  recordProactiveSendMock: vi.fn(async () => ({
+    ok: true as const,
+    data: null,
+  })),
+}))
+vi.mock('@/lib/followups/inquiry-followup-store', () => ({
+  recordProactiveSend: recordProactiveSendMock,
+}))
+
 vi.mock('@/lib/analytics/posthog', () => ({
   captureInstagramScanGreeting: (...args: unknown[]) => captureMock(...args),
 }))

@@ -38,6 +38,7 @@ import { logger } from '@/lib/observability/logger'
 import { VenueHoursSchema, type VenueInfo } from '@/lib/schemas'
 import { isVenueProcessingHalted } from '@/lib/venues/status'
 import { captureInstagramScanGreeting } from '@/lib/analytics/posthog'
+import { recordProactiveSend } from '@/lib/followups/inquiry-followup-store'
 import { handleFollowup } from './handle-followup'
 import {
   insertInboundTurnOutcome,
@@ -378,6 +379,13 @@ export async function processDueScanGreetings(
       })
 
       await resolveScanArrival(supabase, row.id, 'greeted', new Date())
+      // TAC-386: the shared proactive-send spacing marker, so the warm close and
+      // the inquiry follow-up can both see that this guest has just heard from
+      // us unprompted. On a confirmed send only: a queued card is an operator's
+      // decision and an operator can see the whole thread.
+      if (outcome.status === 'sent') {
+        await recordProactiveSend(supabase, row.guestId, now)
+      }
       await recordLedger(row, ledgerEntryFor(outcome), agentRunId)
       await captureInstagramScanGreeting({
         venueId: row.venueId,

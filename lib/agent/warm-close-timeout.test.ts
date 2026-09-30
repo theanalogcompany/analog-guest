@@ -35,6 +35,21 @@ vi.mock('./pending-slots', () => ({
 }))
 vi.mock('./warm-close-store', () => store)
 
+// TAC-386: the spacing marker lives on TAC-386's store because that ticket owns
+// the column. Mocked here so this file's fake client never has to know it.
+// `vi.hoisted` because vi.mock's factory is hoisted above every top-level
+// declaration, so a factory closing over a plain `const` throws
+// "Cannot access ... before initialization".
+const { recordProactiveSendMock } = vi.hoisted(() => ({
+  recordProactiveSendMock: vi.fn(async () => ({
+    ok: true as const,
+    data: null,
+  })),
+}))
+vi.mock('@/lib/followups/inquiry-followup-store', () => ({
+  recordProactiveSend: recordProactiveSendMock,
+}))
+
 import { processDueWarmCloses } from './warm-close-timeout'
 
 const VENUE = '11111111-1111-4111-8111-111111111111'
@@ -77,6 +92,11 @@ function facts(over: Record<string, unknown> = {}) {
     optedOutAt: null,
     instagramScopedId: 'igsid',
     phoneNumber: null,
+    // TAC-386. Present, not omitted: WarmCloseGuestFacts types this `Date |
+    // null`, and a fixture that leaves it undefined does not match the
+    // interface it stands in for. Omitting it made every happy-path test in this
+    // file fail as `errored` rather than as the gate it was testing.
+    lastProactiveSendAt: null,
     ...over,
   }
 }
@@ -423,5 +443,51 @@ describe('processDueWarmCloses: failure posture (TAC-560)', () => {
     store.loadWarmCloseVenues.mockResolvedValue({ ok: false, error: 'boom' })
     const r = await processDueWarmCloses(NOW)
     expect(r).toMatchObject({ errored: 1, closed: 0, scanned: 0 })
+  })
+})
+
+// TAC-386: no two proactive messages to one guest within the hour.
+describe('processDueWarmCloses: proactive spacing (TAC-386)', () => {
+  it('holds the close when a proactive message reached them 30 minutes ago', async () => {
+    store.loadWarmCloseGuestFacts.mockResolvedValue({
+      ok: true,
+      data: facts({
+        lastProactiveSendAt: new Date(NOW.getTime() - 30 * 60 * 1000),
+      }),
+    })
+    const r = await processDueWarmCloses(NOW)
+    expect(r.closed).toBe(0)
+    expect(r.skipped.too_soon_after_proactive).toBe(1)
+    // A DELAY, not a refusal: the claim must not have been spent.
+    expect(store.claimWarmClose).not.toHaveBeenCalled()
+  })
+
+  it('closes when the last proactive message was over an hour ago', async () => {
+    store.loadWarmCloseGuestFacts.mockResolvedValue({
+      ok: true,
+      data: facts({
+        lastProactiveSendAt: new Date(NOW.getTime() - 61 * 60 * 1000),
+      }),
+    })
+    const r = await processDueWarmCloses(NOW)
+    expect(r.closed).toBe(1)
+  })
+
+  it('closes when no proactive message has ever reached them', async () => {
+    const r = await processDueWarmCloses(NOW)
+    expect(r.closed).toBe(1)
+  })
+
+  it('writes the spacing marker after a confirmed send', async () => {
+    await processDueWarmCloses(NOW)
+    expect(recordProactiveSendMock).toHaveBeenCalled()
+  })
+
+  it('writes NO marker when the close was only queued', async () => {
+    // A card is an operator's decision and an operator can see the whole
+    // thread, so it does not consume the guest's spacing window.
+    handleFollowupMock.mockResolvedValue({ status: 'queued' })
+    await processDueWarmCloses(NOW)
+    expect(recordProactiveSendMock).not.toHaveBeenCalled()
   })
 })
