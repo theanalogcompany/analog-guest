@@ -73,6 +73,23 @@ reads it.
   omitted; the verification pass finds it independently, so the two cannot silently disagree
   about what was dropped and why.
 
+## A classifier harness needs a positive control (TAC-386)
+
+`measure-follow-up-worthy` scores a boolean against four named false-positive arms whose bar
+is ZERO true. **A field stuck on `false` passes every one of them perfectly**, which is the
+most flattering result the harness can produce and the one it must not be able to report. So
+it carries a positive-control arm that MUST fire, and the report says outright that a silent
+control makes every other pass meaningless.
+
+The same reasoning runs through `follow-up-worthy-score.ts`: precision is `null`, never `1`,
+when the classifier called nothing positive. Both have their own tests, and both were
+mutation-verified after one test turned out unable to fail at all.
+
+**Record the CATEGORY alongside the verdict**, not just the boolean. The first run of this
+harness did not, and that was the difference between "the prompt slipped" and "the prompt
+slipped and nothing behind it catches the slip": a false positive in a category the scheduler
+refuses structurally is a prompt defect, while the same one in an unrefused category ships.
+
 ## Measurement harness convention
 
 A harness answers a question about live behaviour via many expensive model calls. **Its

@@ -1747,6 +1747,31 @@ import {
 // one short line, or not at all" became "the question is one short line on its
 // own, or not at all". The question has no position in the body any more, so
 // the old wording would be false.
+// v1.75.0 (TAC-386): a new `## Following up on what they asked` user-prompt
+//   block in serializers.ts, and a new per-turn category replacement in
+//   categories/inquiry-followup.ts. No new voice rule, and no change to any
+//   existing one; R1 in particular is untouched.
+//
+//   The block supplies what the turn cannot otherwise know: the guest asked us
+//   something a few venue-hours ago, we answered it, and they have not written
+//   since. Both halves render VERBATIM, because the one thing this message must
+//   do is reference the specific thing they asked and what we actually
+//   suggested, and no paraphrase of either survives the round trip.
+//
+//   THE CATEGORY INSTRUCTIONS ARE REPLACED, not layered over. The row stores
+//   `category: 'follow_up'` (so no messages.category widening, which would be a
+//   hard stop), and that category's own text is written for a message days after
+//   a VISIT and tells the model to check in on it, which is the one thing ruling
+//   11 forbids here. Handing the model a false premise as fact is the TAC-484 /
+//   TAC-502 failure class, the third time this seam has been used for it.
+//
+//   The wording is TIMING-NEUTRAL ("Recently they asked us"). An earlier draft
+//   opened "Earlier today", which is false on every send that rolled to the next
+//   open period, and at Le Mil's hours that is most of them.
+//
+//   The classifier also gains a `followUpWorthy` boolean, on the same call as
+//   crisisSafety and correctsPendingReply, which is a change to
+//   CLASSIFY_SYSTEM_PROMPT rather than to this template.
 // v1.74.0 (TAC-558): a new intention, are_they_new_here, asking whether a guest
 //   is on their first visit once their order is on record, plus the
 //   guest_details.history_here capture field its answer lands in. The prompt
@@ -1793,7 +1818,7 @@ import {
 // signed off and forbids naming anything new, both false when the guest sent
 // nothing. Handing the model a false premise as fact is the TAC-484 / TAC-502
 // failure class. See lib/ai/prompts/categories/warm-close.ts.
-export const PROMPT_VERSION = 'v1.74.0'
+export const PROMPT_VERSION = 'v1.75.0'
 
 export const SYSTEM_TEMPLATE = `You work at a hospitality venue (cafe, bakery, restaurant). You communicate with its guests via iMessage, in whatever voice the venue has configured below — its own collective voice, its owner's, or a named staff member's.
 

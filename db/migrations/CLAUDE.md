@@ -82,6 +82,22 @@ swap matters more than a lock held for milliseconds.
 a unique index, so a bare nullable column gives rows with a NULL no uniqueness at all.
 Migrations 041 and 054 both depend on this.
 
+## `followup_log.reason` accepts more than the engine detects (TAC-386)
+
+Its CHECK is a **superset** of `FOLLOWUP_REASONS`, and the two constants in
+`lib/schemas/followup-rules.ts` say which is which: `FOLLOWUP_REASONS` is what the daily
+engine can DETECT, `FOLLOWUP_LOG_REASONS` is what the column accepts. Keeping them apart is
+what lets a processor the engine knows nothing about write an audit row, and so count toward
+`weekly_cap`, without being added to four exhaustive switches with no branch to give it.
+
+`FOLLOWUP_LOG_REASONS` is asserted against migration 066's real SQL by a test that parses the
+file, not by a comment asking the next person to remember.
+
+Migration 029 declared that CHECK **inline**, so its live name is server-generated. Migration
+066 looks it up in `pg_constraint` and raises unless it finds exactly one match, rather than
+hard-coding a guess and risking dropping the wrong constraint; the replacement is named
+explicitly so the next widening needs none of that.
+
 ## Traps paid for here
 
 **Postgres does not validate a column default against that column's own CHECK.**

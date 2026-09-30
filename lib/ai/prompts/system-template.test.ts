@@ -32,8 +32,8 @@ import {
 // SYSTEM_TEMPLATE body changes.
 
 describe('PROMPT_VERSION', () => {
-  it('is v1.74.0 (a new-or-regular intention, and the field its answer lands in)', () => {
-    expect(PROMPT_VERSION).toBe('v1.74.0')
+  it('is v1.75.0 (a new-or-regular intention, and the field its answer lands in)', () => {
+    expect(PROMPT_VERSION).toBe('v1.75.0')
   })
 })
 

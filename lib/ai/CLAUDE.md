@@ -28,7 +28,21 @@ boolean or string is free.
 
 ## Prompt versions are independent by design
 
-`PROMPT_VERSION` (`prompts/system-template.ts`, currently v1.74.0) covers the
+**`classifyMessage` carries three independent booleans**, not one: `crisisSafety` (TAC-348),
+`correctsPendingReply` (TAC-397) and `followUpWorthy` (TAC-386). None is `.optional()`, per
+the explicit-presence convention, and that is what makes the compiler name every site that
+synthesizes a `Classification` when a fourth is added. All three follow the unbounded
+`reasoning` field, which is the ordering that truncated TAC-309 and TAC-367;
+`scripts/measurement/follow-up-worthy.ts` measures the headroom against the 200-token cap.
+
+**A category's instructions can be REPLACED for one turn**, via `categoryInstructionsFor`'s
+trailing flags. Three turns do it, all for the same reason: the row stores an existing
+`messages.category` value (so no CHECK widening, which is a hard stop) whose own text is
+FALSE on that turn. `guest_arrived`/TAC-536, `warm-close.ts`/TAC-560 and
+`inquiry-followup.ts`/TAC-386. Handing the model a false premise as fact is the
+TAC-484 / TAC-502 failure class.
+
+`PROMPT_VERSION` (`prompts/system-template.ts`, currently v1.75.0) covers the
 classify/generate contract. Every other module here carries its own, and they are
 deliberately not linked:
 

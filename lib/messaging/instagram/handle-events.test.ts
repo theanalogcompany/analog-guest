@@ -1120,6 +1120,17 @@ describe('provider_sent_at', () => {
       // the staleness bound run on the same clock the guest's action happened
       // on, falling back to created_at when the delivery carried none.
       join('lib', 'agent', 'scan-arrival-store.ts'),
+      // TAC-386: a READER, and never of a Sendblue row. It reads the column for
+      // ONE inbound (the question it is arming a follow-up behind) so the
+      // 24-hour window is derived from Meta's clock rather than from our
+      // webhook's receive time, which is later and would put the derived close
+      // PAST the true one.
+      join('lib', 'agent', 'schedule-inquiry-followup.ts'),
+      // TAC-386: names the column in PROSE only, in the doc comment on
+      // `askedAt`, to say which clock the caller must pass. It reads no row and
+      // writes none, the same reason instagram-fields.ts is on this list. The
+      // check is by mention.
+      join('lib', 'followups', 'inquiry-followup-timing.ts'),
       join('lib', 'messaging', 'instagram', 'handle-events.ts'),
       join('lib', 'messaging', 'instagram', 'reply-check.ts'),
       join('lib', 'messaging', 'instagram', 'window.ts'),
