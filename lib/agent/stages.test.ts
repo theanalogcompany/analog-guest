@@ -7553,20 +7553,3 @@ describe('retrieveKnowledgeWithContextStage (TAC-547)', () => {
     )
   })
 })
-
-// TAC-560: the wiring, because a mutant hardcoding `warmClose: false` here
-// survived all 648 tests in this file and serializers.test.ts. Every prompt test
-// passes its own `warmClose` straight to runtimeToProse, so nothing was checking
-// that buildAiRuntime carries the flag across — and with it dropped, the block
-// never renders in production and the whole feature ships inert with a green
-// suite. That is this repo's signature failure: the author's mutants ask what the
-// code computes, the survivors ask whether anything wires it in.
-describe('buildAiRuntime — warmClose (TAC-560)', () => {
-  it('carries the flag through to the AI runtime', () => {
-    expect(buildAiRuntime(makeCtx({ warmClose: true })).warmClose).toBe(true)
-  })
-
-  it('carries false through on every other turn', () => {
-    expect(buildAiRuntime(makeCtx({ warmClose: false })).warmClose).toBe(false)
-  })
-})

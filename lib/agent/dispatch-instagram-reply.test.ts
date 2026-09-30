@@ -99,7 +99,6 @@ function makeCtx(): RuntimeContext {
     },
     followupTrigger: null,
     scanArrival: null,
-    warmClose: false,
     inquiryFollowup: null,
     conversationChannel: 'instagram',
     pendingQuestion: null,

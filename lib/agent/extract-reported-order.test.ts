@@ -235,7 +235,6 @@ function makeCtx(overrides: Partial<RuntimeContext> = {}): RuntimeContext {
     } as RuntimeContext['currentMessage'],
     followupTrigger: null,
     scanArrival: null,
-    warmClose: false,
     inquiryFollowup: null,
     conversationChannel: 'text',
     recentMessages: [],

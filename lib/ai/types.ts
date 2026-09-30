@@ -296,15 +296,6 @@ export type RuntimeContext = {
   }
 
   /**
-   * TAC-560: true only on the pause-triggered warm-close turn.
-   *
-   * Reaches composePrompt rather than only the serializer because it does two
-   * things: it renders `## Closing this conversation`, and it REPLACES the
-   * category instructions (the row stores `acknowledgment`, whose own text
-   * asserts the guest signed off, which is false here).
-   */
-  warmClose?: boolean
-  /**
    * TAC-386: set only on an inquiry-follow-up turn.
    *
    * Both strings render VERBATIM. The message has to reference the specific
@@ -313,7 +304,7 @@ export type RuntimeContext = {
    * sending.
    *
    * Reaches composePrompt rather than only the serializer, for the reason
-   * `warmClose` above does: it renders its own block AND replaces the category
+   * TAC-560's removed `warmClose` flag did: it renders its own block AND replaces the category
    * instructions, whose text tells the model to check in on a past visit.
    */
   inquiryFollowup?: { question: string; answer: string }

@@ -36,7 +36,6 @@ import { UNKNOWN_INSTRUCTIONS } from './unknown'
 // TAC-560: NOT in getCategoryInstructions' switch below. The warm close is not a
 // MessageCategory (it stores `acknowledgment`), it is a per-turn replacement
 // chosen in categoryInstructionsFor. See that function.
-import { WARM_CLOSE_INSTRUCTIONS } from './warm-close'
 import { INQUIRY_FOLLOWUP_INSTRUCTIONS } from './inquiry-followup'
 import { WELCOME_INSTRUCTIONS } from './welcome'
 
@@ -153,31 +152,18 @@ export function categoryInstructionsFor(
   category: MessageCategory,
   channel: MessageChannel | null,
   scanArrival: { hadPriorConversation: boolean } | null = null,
-  // TAC-560: the SECOND per-turn exception, on the same reasoning the paragraph
-  // above gives for the first. The pause-triggered warm close stores
-  // `category: 'acknowledgment'` so it needs no new messages.category value and
-  // therefore no migration against a high-stakes table, but that category's own
-  // text asserts the guest signed off and forbids naming anything new, both
-  // false on a turn where the guest sent nothing. So the instruction is
-  // REPLACED, not layered over.
-  //
-  // Checked BEFORE the category lookup for that reason. Defaults false so every
-  // other call site is unchanged.
-  //
-  // Takes NO channel substitution: the copy names no channel. The scope guard in
-  // index.test.ts fails if a channel claim is ever introduced into it.
-  warmClose = false,
-  // TAC-386: the THIRD per-turn exception, on the same reasoning as the two
+  // TAC-386: a per-turn exception, on the same reasoning as the scan-arrival one
   // above. An inquiry follow-up stores `category: 'follow_up'`, but that
   // category's text is written for a message days after a VISIT and tells the
   // model to check in on it, which is the one thing ruling 11 forbids here.
   //
-  // Checked alongside the warm close, before the category lookup. Defaults false
-  // so every other call site is unchanged. Takes no channel substitution: the
-  // copy names no channel.
+  // Checked before the category lookup. Defaults false so every other call site
+  // is unchanged. Takes no channel substitution: the copy names no channel.
+  //
+  // TAC-560 added a second such exception for the warm close; TAC-568 removed it
+  // again, because the close is no longer generated.
   inquiryFollowup = false,
 ): string {
-  if (warmClose) return WARM_CLOSE_INSTRUCTIONS
   if (inquiryFollowup) return INQUIRY_FOLLOWUP_INSTRUCTIONS
   if (category === 'guest_arrived')
     return guestArrivedInstructionsFor(scanArrival)

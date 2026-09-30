@@ -18,7 +18,6 @@ import { PERSONAL_HISTORY_QUESTION_INSTRUCTIONS } from './personal-history-quest
 import { RECOMMENDATION_REQUEST_INSTRUCTIONS } from './recommendation-request'
 import { REPLY_INSTRUCTIONS } from './reply'
 import { UNKNOWN_INSTRUCTIONS } from './unknown'
-import { WARM_CLOSE_INSTRUCTIONS } from './warm-close'
 import { INQUIRY_FOLLOWUP_INSTRUCTIONS } from './inquiry-followup'
 import { WELCOME_INSTRUCTIONS } from './welcome'
 
@@ -906,100 +905,47 @@ describe('the scan-greeting instruction (TAC-536)', () => {
   })
 })
 
-// TAC-560: the pause-triggered warm close REPLACES the category instructions.
-describe('categoryInstructionsFor — warm close (TAC-560)', () => {
-  it('replaces the acknowledgment instructions entirely', () => {
-    // NOT layered over. The row stores `category: 'acknowledgment'` so no
-    // messages.category widening is needed (that would be a hard stop), but that
-    // category's own text is FALSE on this turn: the guest sent nothing, so they
-    // are not "wrapping up the thread or signing off", and "do not turn the
-    // closer into a fresh exchange" fights naming what the guest can message
-    // about. Handing the model a false premise as fact is the TAC-484 / TAC-502
-    // failure class.
-    const out = categoryInstructionsFor(
-      'acknowledgment',
-      'instagram',
-      null,
-      true,
-    )
-    expect(out).toBe(WARM_CLOSE_INSTRUCTIONS)
-    expect(out).not.toContain('wrapping up the thread')
-    expect(out).not.toContain('do not turn the closer into a fresh exchange')
-  })
-
-  it('leaves every other turn untouched', () => {
-    // Defaults false, so no existing call site changes.
+// TAC-568 removed the warm-close category exception. The close is no longer
+// generated, so there is no turn on which the acknowledgment instructions need
+// replacing — and the acknowledgment category gets its own text back.
+//
+// The tripwire for the deletion: the exception's whole job was to keep a FALSE
+// premise out of the prompt on a turn where the guest had sent nothing. There is
+// no such turn any more, so acknowledgment must now be plain everywhere.
+describe('categoryInstructionsFor — no warm close exception (TAC-568)', () => {
+  it('gives an acknowledgment turn the acknowledgment instructions', () => {
     expect(categoryInstructionsFor('acknowledgment', 'instagram')).toBe(
       ACKNOWLEDGMENT_INSTRUCTIONS,
     )
-    expect(
-      categoryInstructionsFor('acknowledgment', 'instagram', null, false),
-    ).toBe(ACKNOWLEDGMENT_INSTRUCTIONS)
-  })
-
-  it('beats the guest_arrived exception when both are somehow set', () => {
-    // Not reachable in production (a scan greeting is the first thing said to a
-    // guest and a warm close the last), but the order has to be decided rather
-    // than accidental, and the close is the more specific claim about this turn.
-    expect(
-      categoryInstructionsFor(
-        'guest_arrived',
-        'instagram',
-        { hadPriorConversation: true },
-        true,
-      ),
-    ).toBe(WARM_CLOSE_INSTRUCTIONS)
-  })
-
-  it('names no channel, so it needs no channel variant', () => {
-    // The scope guard this mirrors: the copy says nothing about how the guest is
-    // reaching us, so there is nothing to swap and both channels are identical.
-    expect(categoryInstructionsFor('acknowledgment', 'text', null, true)).toBe(
-      categoryInstructionsFor('acknowledgment', 'instagram', null, true),
+    // And with the exception gone, the only thing that can still vary the
+    // acknowledgment text is the channel variant, not a warm-close flag.
+    expect(categoryInstructionsFor('acknowledgment', 'instagram', null)).toBe(
+      categoryInstructionsFor('acknowledgment', 'instagram'),
     )
-    for (const claim of [
-      'text',
-      'SMS',
-      'DM',
-      'number',
-      'Instagram',
-      'iMessage',
-    ]) {
-      expect(WARM_CLOSE_INSTRUCTIONS, claim).not.toContain(claim)
-    }
   })
 
-  it("names no topic, so the venue's own voice rules carry them", () => {
-    for (const leaked of ['beans', 'specials', 'events', 'menu', 'coffee']) {
-      expect(WARM_CLOSE_INSTRUCTIONS, leaked).not.toContain(leaked)
-    }
-  })
-
-  it('models no em dash', () => {
-    expect(WARM_CLOSE_INSTRUCTIONS).not.toContain('—')
-    expect(WARM_CLOSE_INSTRUCTIONS).not.toContain('–')
+  it('takes no warm-close argument any more', () => {
+    // categoryInstructionsFor's arity is the deletion made checkable: a
+    // resurrected fifth positional would fail `tsc` here rather than silently
+    // reintroducing a prompt block nothing sets.
+    expect(categoryInstructionsFor.length).toBe(2)
   })
 })
 
-// TAC-386: the THIRD per-turn exception. An inquiry follow-up stores
+// TAC-386: the remaining per-turn exception (TAC-568 removed the warm
+// close's). An inquiry follow-up stores
 // `category: 'follow_up'`, so it needs no new messages.category value and
 // therefore no migration against a high-stakes table, but that category's own
 // text is written for a message days after a VISIT.
 describe('categoryInstructionsFor — inquiry follow-up (TAC-386)', () => {
   it('replaces the follow_up instructions rather than layering over them', () => {
-    const out = categoryInstructionsFor(
-      'follow_up',
-      'instagram',
-      null,
-      false,
-      true,
-    )
+    const out = categoryInstructionsFor('follow_up', 'instagram', null, true)
     expect(out).toBe(INQUIRY_FOLLOWUP_INSTRUCTIONS)
     // The specific premise ruling 11 forbids. The follow_up copy is written
     // around a visit having happened; this turn knows only what the guest asked
     // and what we said.
     expect(out).not.toBe(
-      categoryInstructionsFor('follow_up', 'instagram', null, false, false),
+      categoryInstructionsFor('follow_up', 'instagram', null, false),
     )
   })
 
@@ -1009,26 +955,12 @@ describe('categoryInstructionsFor — inquiry follow-up (TAC-386)', () => {
     expect(categoryInstructionsFor('follow_up', 'instagram', null, false)).toBe(
       plain,
     )
-    expect(
-      categoryInstructionsFor('follow_up', 'instagram', null, false, false),
-    ).toBe(plain)
-  })
-
-  it('loses to the warm close when both are somehow set', () => {
-    // Not reachable: each is set only on its own trigger reason, and the
-    // processors will not let two proactive sends land together anyway. But the
-    // order has to be decided rather than accidental, and the warm close is
-    // checked first because it is the more specific claim about a turn where the
-    // guest sent nothing at all.
-    expect(
-      categoryInstructionsFor('follow_up', 'instagram', null, true, true),
-    ).toBe(WARM_CLOSE_INSTRUCTIONS)
   })
 
   it('names no channel, so it needs no channel variant', () => {
-    expect(
-      categoryInstructionsFor('follow_up', 'text', null, false, true),
-    ).toBe(categoryInstructionsFor('follow_up', 'instagram', null, false, true))
+    expect(categoryInstructionsFor('follow_up', 'text', null, true)).toBe(
+      categoryInstructionsFor('follow_up', 'instagram', null, true),
+    )
     for (const claim of [
       'text',
       'SMS',

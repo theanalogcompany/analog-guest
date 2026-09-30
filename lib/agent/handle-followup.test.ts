@@ -172,6 +172,12 @@ import { handleFollowup } from './handle-followup'
 import type { ActiveCommitment } from '@/lib/schemas/guest-commitment'
 import type { FollowupTrigger, RuntimeContext } from './types'
 
+// TAC-568: a stand-in for a venue's configured close. Deliberately NOT Le Mil's
+// live wording: these tests assert that whatever the setting holds is what goes
+// out byte for byte, and pinning the real copy here would let a test pass by
+// agreeing with a hardcoded string instead.
+const WARM_CLOSE_TEXT = 'the line is open here, message us anytime ☕'
+
 const VENUE_ID = '11111111-1111-4111-8111-111111111111'
 const GUEST_ID = '22222222-2222-4222-8222-222222222222'
 
@@ -180,7 +186,13 @@ function makeCtx(
 ): RuntimeContext {
   return {
     agentRunId: 'run-1',
-    venue: { id: VENUE_ID, holdAllOutbound: false } as RuntimeContext['venue'],
+    venue: {
+      id: VENUE_ID,
+      holdAllOutbound: false,
+      // TAC-568: the pause path reads this and refuses an empty one, so the
+      // default fixture carries a close. Tests for the refusal override it.
+      warmCloseText: WARM_CLOSE_TEXT,
+    } as RuntimeContext['venue'],
     guest: {
       id: GUEST_ID,
       firstName: 'Sam',
@@ -192,7 +204,6 @@ function makeCtx(
     // is mocked, so this has to be set to whatever the test's own trigger is.
     followupTrigger,
     scanArrival: null,
-    warmClose: false,
     inquiryFollowup: null,
     conversationChannel: 'text',
     pendingQuestion: null,
@@ -1326,7 +1337,7 @@ describe('handleFollowup — the warm close (TAC-560)', () => {
     applyApprovalPolicyStageMock.mockResolvedValue({ action: 'send' })
   })
 
-  it('generates and sends on Instagram where every other reason is refused', async () => {
+  it('sends on Instagram where every other reason is refused', async () => {
     // TAC-469 rule 2 refuses Instagram follow-ups because they fire days later
     // with the window almost always shut. A warm close fires TEN MINUTES after
     // our own last message, so the window cannot have closed.
@@ -1336,7 +1347,70 @@ describe('handleFollowup — the warm close (TAC-560)', () => {
       trigger: warmTrigger(),
     })
     expect(result).toMatchObject({ status: 'sent' })
-    expect(generateStageMock).toHaveBeenCalledTimes(1)
+  })
+
+  // TAC-568 ruling 1: FIXED TEXT, NO MODEL CALL. This is the assertion that
+  // makes that real rather than described — before it, the close was generated
+  // and the stiff wording this ticket exists to replace is what came back.
+  it('calls no model at all, and sends the venue setting byte for byte', async () => {
+    const result = await handleFollowup({
+      venueId: VENUE_ID,
+      guestId: GUEST_ID,
+      trigger: warmTrigger(),
+    })
+    expect(result).toMatchObject({ status: 'sent' })
+    expect(generateStageMock).not.toHaveBeenCalled()
+    const generation = dispatchReplyMock.mock.calls[0]?.[1] as { body: string }
+    expect(generation.body).toBe(WARM_CLOSE_TEXT)
+    expect(Buffer.from(generation.body, 'utf8')).toEqual(
+      Buffer.from(WARM_CLOSE_TEXT, 'utf8'),
+    )
+  })
+
+  // Q1, ruled 2026-09-30, and recorded as a change to decision 0003: the five
+  // post-generation checks do NOT run on this path. There is no model output for
+  // them to check, and fail-closed verifiers on text that cannot be wrong can
+  // only refuse something correct.
+  //
+  // Asserted on all five, not a sample: 0003's own rule is that a change to one
+  // is a change to all five, so a resurrected single call should fail here.
+  it('runs none of the five post-generation checks', async () => {
+    await handleFollowup({
+      venueId: VENUE_ID,
+      guestId: GUEST_ID,
+      trigger: warmTrigger(),
+    })
+    expect(verifyGroundingStageMock).not.toHaveBeenCalled()
+    expect(verifyMechanicOfferStageMock).not.toHaveBeenCalled()
+    expect(verifyProsePromiseStageMock).not.toHaveBeenCalled()
+    expect(verifyCancellationClaimStageMock).not.toHaveBeenCalled()
+    expect(verifyClosedVenueArrivalStageMock).not.toHaveBeenCalled()
+  })
+
+  // An unconfigured venue sends nothing rather than some fallback wording. The
+  // processor gates on this too; this is the re-check for a config that changed
+  // between the scan and the run.
+  it('refuses when the venue has no configured text', async () => {
+    buildRuntimeContextMock.mockImplementation(
+      async (args: { followupTrigger: RuntimeContext['followupTrigger'] }) => ({
+        ...makeCtx(args.followupTrigger),
+        conversationChannel: 'instagram',
+        venue: {
+          ...makeCtx(args.followupTrigger).venue,
+          warmCloseText: '',
+        },
+      }),
+    )
+    const result = await handleFollowup({
+      venueId: VENUE_ID,
+      guestId: GUEST_ID,
+      trigger: warmTrigger(),
+    })
+    expect(result).toMatchObject({
+      status: 'refused',
+      reason: 'no_warm_close_text',
+    })
+    expect(dispatchReplyMock).not.toHaveBeenCalled()
   })
 
   it('sends through dispatchReply, never scheduleAndSend', async () => {
@@ -1399,13 +1473,18 @@ describe('handleFollowup — the warm close (TAC-560)', () => {
     })
   })
 
+  // Still `acknowledgment`, so no messages.category widening (a hard stop) is
+  // needed. Read off the CONTEXT rather than off generateStage's arguments, which
+  // is where it used to be visible: nothing generates on this path any more, and
+  // triggerToCategory is what the persistence reads.
   it('records it as acknowledgment, so no messages.category widening is needed', async () => {
     await handleFollowup({
       venueId: VENUE_ID,
       guestId: GUEST_ID,
       trigger: warmTrigger(),
     })
-    expect(generateStageMock.mock.calls[0]?.[1]).toBe('acknowledgment')
+    const ctx = dispatchReplyMock.mock.calls[0]?.[0] as RuntimeContext
+    expect(ctx.classification?.category).toBe('acknowledgment')
   })
 
   // Ruled 2026-09-29: Instagram only for now. The SMS arm is a follow-up, and it

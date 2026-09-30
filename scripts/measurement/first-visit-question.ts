@@ -576,6 +576,9 @@ async function main(): Promise<void> {
             gen.data.body,
             () => seededFlip(`${conversationId}-t${t}`),
             tail,
+            // TAC-568: this harness measures the question bubble, not the warm
+            // close, and no turn here closes a first conversation.
+            '',
           )
           turnRow.bubbles = bubbles
           record.bubbles = bubbles

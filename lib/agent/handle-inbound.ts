@@ -53,7 +53,8 @@ import {
   recordIntentionEligibility,
   recordIntentionPrompts,
 } from './intentions/record'
-import { markWarmCloseSent } from './warm-close-store'
+import { markWarmCloseSent, releaseWarmCloseClaim } from './warm-close-store'
+import { closesFirstConversation, SIGN_OFF_CATEGORY } from './warm-close'
 import { recordInboundTurnOutcome } from './record-inbound-turn-outcome'
 import { isVenueProcessingHalted } from '@/lib/venues/status'
 import { persistOrRegenQueuedDraft } from './schedule-and-send'
@@ -464,6 +465,93 @@ function buildGenerationFailureGeneration(): GenerateMessageResult {
  * fails OPEN on a value outside PUSH_POLICY's total map, so this card pushes,
  * as it should: nobody is coming to look at it otherwise.
  */
+/**
+ * TAC-568: a warm close this turn owns, and the text it will send.
+ *
+ * `null` everywhere else, which is the ordinary case: the guest is not closing a
+ * first conversation, or another path already closed them.
+ */
+interface ClaimedWarmClose {
+  /** The venue's fixed text, byte for byte as the setting holds it. */
+  text: string
+  /** The guest whose one close this is. */
+  guestId: string
+  /** The timestamp written into the marker, so a release can scope to it. */
+  claimedAt: Date
+}
+
+/**
+ * Take this guest's one warm close, or find it already taken.
+ *
+ * markWarmCloseSent is a CAS (`... where warm_close_sent_at is null`), so
+ * `already_marked` is the answer for a guest the pause timer closed ten minutes
+ * ago, or one this venue closed on an earlier turn. Either way no second close
+ * goes out, and that is the acceptance criterion the ticket asks for a mutant
+ * against: delete the `already_marked` branch and a guest can be closed twice.
+ *
+ * FAILS CLOSED. A marker write that errors returns null, so the bubble is NOT
+ * appended. The alternative — sending on an unknown marker state — is the one
+ * outcome this mechanism is built to avoid, and the pause timer will try again
+ * inside its own window.
+ */
+async function claimWarmCloseForTurn(
+  ctx: RuntimeContext,
+  agentRunId: string,
+): Promise<ClaimedWarmClose | null> {
+  const claimedAt = new Date()
+  const marked = await markWarmCloseSent(
+    createAdminClient(),
+    ctx.guest.id,
+    claimedAt,
+  ).catch((e: unknown) => ({
+    ok: false as const,
+    error: e instanceof Error ? e.message : String(e),
+  }))
+
+  if (!marked.ok) {
+    console.warn('[agent] warm close marker write failed; not closing', {
+      agentRunId,
+      guestId: ctx.guest.id,
+      error: marked.error,
+    })
+    return null
+  }
+  if (marked.data === 'already_marked') {
+    console.log(
+      '[agent] warm close already sent to this guest; not repeating',
+      {
+        agentRunId,
+        guestId: ctx.guest.id,
+      },
+    )
+    return null
+  }
+  return { text: ctx.venue.warmCloseText, guestId: ctx.guest.id, claimedAt }
+}
+
+/**
+ * Give back a claim whose close never reached the guest.
+ *
+ * Scoped to the exact timestamp this turn wrote (releaseWarmCloseClaim's own
+ * guard), so it can never clear a marker the timer set in between. A no-op when
+ * nothing was claimed.
+ */
+async function releaseClaimedWarmClose(
+  claimed: ClaimedWarmClose | null,
+  agentRunId: string,
+): Promise<void> {
+  if (claimed === null) return
+  console.warn('[agent] warm close did not reach the guest; claim released', {
+    agentRunId,
+    guestId: claimed.guestId,
+  })
+  await releaseWarmCloseClaim(
+    createAdminClient(),
+    claimed.guestId,
+    claimed.claimedAt,
+  )
+}
+
 function pushSendFailureCard(ctx: RuntimeContext, cardId: string): void {
   if (!shouldSendDraftFlaggedPush(INSTAGRAM_SEND_FAILED_REVIEW_REASON)) return
   waitUntil(
@@ -2355,11 +2443,35 @@ async function runInboundTurn(
     // and, when applyApprovalPolicyStage short-circuited the gate, the send is
     // stamped review_reason='demo_bypass' (approval.reason is undefined on a
     // normal untriggered send).
+    // TAC-568: does this reply close the guest's first conversation?
+    //
+    // Decided BEFORE the send, and the marker is CLAIMED before the send too,
+    // because the claim is what makes "once per guest, ever" a fact Postgres
+    // enforces rather than an argument about ordering. This is the timer's own
+    // claim-before-the-side-effect rule (warm-close-timeout.ts), applied on the
+    // path that actually talks to a guest who is still in the conversation.
+    //
+    // The pause timer cannot race this: its candidate scan only produces a guest
+    // whose NEWEST message is our outbound, and an inbound turn in flight means
+    // the guest's own message is newest. The CAS is the belt anyway.
+    const claimedWarmClose = closesFirstConversation({
+      guestSignedOff: ctx.classification.category === SIGN_OFF_CATEGORY,
+      agentSaidGoodbye: gen.result.closedTheConversation,
+      isFirstConversation: ctx.firstConversation,
+      warmCloseText: ctx.venue.warmCloseText,
+    })
+      ? await claimWarmCloseForTurn(ctx, agentRunId)
+      : null
+
     const sendSpan = trace.span('send', { bodyLength: gen.result.body.length })
     try {
       const dispatched = await dispatchReply(ctx, gen.result, {
         skipHumanFeelDelay: ctx.guest.isDemo === true,
         reviewReason: approval.reason,
+        // TAC-568: the fixed close rides as this response's own last bubble,
+        // 1.5s after the goodbye. '' whenever the claim was not taken — which
+        // includes a guest who has already been closed by either path.
+        warmCloseBubble: claimedWarmClose?.text ?? '',
         // TAC-436 ruling 4: the SAME hoisted value the queue branch stores
         // and this branch records against, so what a card carries and what
         // an auto-send carries cannot drift. The recording below is what
@@ -2382,6 +2494,11 @@ async function runInboundTurn(
           output: { outcome: dispatched.kind },
         })
         trace.update({ output: { status: dispatched.kind } })
+        // TAC-568: nothing reached the guest, so the close did not happen. Give
+        // the marker back rather than spending this guest's one close on a
+        // message they never saw; the pause timer can still close them inside
+        // its own two-hour window.
+        await releaseClaimedWarmClose(claimedWarmClose, agentRunId)
         return undeliveredAgentResult(ctx, dispatched)
       }
       const {
@@ -2391,6 +2508,10 @@ async function runInboundTurn(
         bubbleCount,
       } = dispatched
       if (dispatched.undelivered !== null) {
+        // TAC-568: the close is the LAST bubble, so a partly delivered reply is
+        // precisely the case where it did not go out. Release before anything
+        // else reads the marker.
+        await releaseClaimedWarmClose(claimedWarmClose, agentRunId)
         // Part of a split Instagram reply went out; the rest became a card (or
         // couldn't, and the Slack event says why).
         console.warn('[agent] inbound reply partly delivered', {
@@ -2535,51 +2656,24 @@ async function runInboundTurn(
             }),
         )
       }
-      // TAC-560: the in-conversation half of the once-per-guest-ever marker.
+      // TAC-568: the close went out as this response's last bubble. The marker
+      // was already claimed before the send (see claimWarmCloseForTurn), so
+      // nothing is written here — this only reports it.
       //
-      // When the model reports that this reply WAS the warm close (the guest said
-      // thanks, and the venue's own voice rule closed the conversation), record
-      // it, so the pause timer never sends a second one.
-      //
-      // Fire-and-forget, after the send, mirroring the intention recorder above:
-      // the guest already has the message, so a failed marker write must never
-      // turn a delivered reply into a failed request. The cost of that failure is
-      // one guest who could receive the close twice, which the timer's own belt
-      // (a last inbound that classified `acknowledgment`) is there to catch.
-      //
-      // NOT gated on the channel. The in-conversation close happens on SMS too,
-      // and marking it there is right even while the TIMER is Instagram-only:
-      // the marker means "this guest has been closed", not "the timer ran".
-      if (gen.result.closedTheConversation) {
-        const venueId = ctx.venue.id
-        const guestId = ctx.guest.id
-        const answersMessageId = ctx.currentMessage?.id ?? null
-        waitUntil(
-          markWarmCloseSent(createAdminClient(), guestId, new Date())
-            .then(async (marked) => {
-              if (!marked.ok) {
-                console.warn('[agent] warm close marker write failed', {
-                  agentRunId,
-                  guestId,
-                  error: marked.error,
-                })
-              }
-              await captureWarmCloseSent({
-                agentRunId,
-                venueId,
-                guestId,
-                via: 'in_conversation',
-                answersMessageId,
-                markerOutcome: marked.ok ? marked.data : 'write_failed',
-              })
-            })
-            .catch((e) => {
-              console.error('[agent] warm close marker threw unexpectedly', {
-                agentRunId,
-                error: e instanceof Error ? e.message : String(e),
-              })
-            }),
-        )
+      // WHY THE CLAIM MOVED. Before TAC-568 the model WROTE the close itself and
+      // this block recorded that it had, after the fact. Now the close is a fixed
+      // string this code appends, so "did we send it" and "is it marked" are one
+      // decision and belong in one statement. Marking after the send would leave
+      // a window in which a second path could claim the same guest.
+      if (claimedWarmClose !== null && dispatched.undelivered === null) {
+        await captureWarmCloseSent({
+          agentRunId,
+          venueId: ctx.venue.id,
+          guestId: ctx.guest.id,
+          via: 'in_conversation',
+          answersMessageId: ctx.currentMessage?.id ?? null,
+          markerOutcome: 'marked',
+        })
       }
       console.log('[agent] inbound sent + persisted', {
         agentRunId,

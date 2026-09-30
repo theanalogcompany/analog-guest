@@ -73,22 +73,30 @@ describe('FOLLOWUP_RULES_DEFAULT', () => {
   })
 
   it('adds exactly the post-028 keys, and no others, by accident', () => {
-    // The exact key set, so a twelfth key cannot arrive silently. TAC-560's
-    // `warm_close_pause_minutes` (TAC-560) and `inquiry_followup_enabled`
-    // (TAC-386) are the two so far. This assertion is what forced each of them
-    // to be declared post-028 deliberately rather than folded into the backfill
-    // literal, which is the whole reason it is written as an exact key set.
+    // The exact key set, so a further key cannot arrive silently.
+    // `warm_close_pause_minutes` (TAC-560), `inquiry_followup_enabled`
+    // (TAC-386) and `warm_close_text` (TAC-568) are the three so far. This
+    // assertion is what forced each of them to be declared post-028
+    // deliberately rather than folded into the backfill literal, which is the
+    // whole reason it is written as an exact key set.
     expect(Object.keys(FOLLOWUP_RULES_DEFAULT).sort()).toEqual(
       [
         ...Object.keys(MIGRATION_028_LITERAL),
         'warm_close_pause_minutes',
         'inquiry_followup_enabled',
+        'warm_close_text',
       ].sort(),
     )
     expect(FOLLOWUP_RULES_DEFAULT.warm_close_pause_minutes).toBe(10)
     // TAC-386: on by default, so the mechanism is live at a venue nobody has
     // configured. The kill switch is for turning it OFF.
     expect(FOLLOWUP_RULES_DEFAULT.inquiry_followup_enabled).toBe(true)
+    // TAC-568: EMPTY by default, and the opposite direction from the switch
+    // above on purpose. An unconfigured venue sends NO close rather than some
+    // other venue's wording; the text names topics that are one venue's product
+    // decision. A default carrying Le Mil's copy would have shipped it fleet-wide
+    // on the day it landed.
+    expect(FOLLOWUP_RULES_DEFAULT.warm_close_text).toBe('')
   })
 })
 
