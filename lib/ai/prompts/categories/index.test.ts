@@ -791,14 +791,35 @@ describe('the scan-greeting instruction (TAC-536)', () => {
     )
   })
 
-  it('tells a guest with no record on file who they have reached', () => {
+  // TAC-567 (2026-09-30) deleted "and say who they have reached" from this
+  // variant, in step with the opener it mirrors. The guest scanned this venue's
+  // own code, so there is nobody to introduce.
+  it('greets a guest with no record on file and asks the order, nothing more', () => {
     const text = categoryInstructionsFor('guest_arrived', 'instagram', {
       hadPriorConversation: false,
     })
     expect(text).toBe(
-      'The guest just scanned the sign at your pickup counter and has not written anything yet, so they are in the shop right now. They have just ordered and collected it. Say hello, and say who they have reached. Ask what they just got. One short line. Say only what the facts below say about past visits.',
+      'The guest just scanned the sign at your pickup counter and has not written anything yet, so they are in the shop right now. They have just ordered and collected it. Say hello. Ask what they just got. One short line. Say only what the facts below say about past visits.',
     )
   })
+
+  // THE TAC-567 CANARY, on both variants and wider than the deleted sentence, for
+  // the reason the opener's twin carries the same sweep: a reworded revival
+  // ("tell them which shop this is") would pass a literal-revert check. The
+  // returning variant's own "don't introduce yourself" is deliberately excluded
+  // from the introduce pattern by matching the imperative form only.
+  it.each([true, false])(
+    'never asks the venue to identify itself, hadPriorConversation=%s (TAC-567)',
+    (hadPriorConversation) => {
+      const text = categoryInstructionsFor('guest_arrived', 'instagram', {
+        hadPriorConversation,
+      })
+      expect(text).not.toMatch(/reached/i)
+      expect(text).not.toMatch(/say who/i)
+      expect(text).not.toMatch(/who (you|they) are/i)
+      expect(text).not.toMatch(/(^|[.,;]\s*)introduce\b/i)
+    },
+  )
 
   // THE TAC-541 CANARY. Both variants, because a future edit is as likely to
   // add the override to the returning one. "Say who they have reached" now
@@ -817,27 +838,34 @@ describe('the scan-greeting instruction (TAC-536)', () => {
     },
   )
 
-  // A wiring bug, not a reachable state. It falls to the variant that
-  // introduces itself, because an introduction nobody needed is odd and
-  // telling a stranger "you have talked before" is false.
+  // A wiring bug, not a reachable state. It falls to the NEW-guest variant,
+  // because telling a stranger "you have talked before" is the worse falsehood.
+  //
+  // TAC-567 CHANGED THE FRAGMENT THIS MATCHES ON, and the choice matters. It used
+  // to be "say who they have reached", which the ruling deleted from this variant
+  // and which never appeared in the returning one - so it distinguished them. The
+  // replacement has to keep that property or this test and the two
+  // inverted-branch tests below stop killing the mutant they exist for.
+  // "has not written anything yet" is the new-guest variant's own premise and is
+  // false of a returning guest by construction.
   it.each([null, undefined])(
     'falls back to the new-guest variant on %s',
     (missing) => {
       expect(
         categoryInstructionsFor('guest_arrived', 'instagram', missing ?? null),
-      ).toContain('say who they have reached')
+      ).toContain('has not written anything yet')
     },
   )
 
   // Inverting the branch is the mutant that matters, and these two together
   // are what kill it: each asserts the OTHER variant's distinctive clause is
   // absent, which a single positive assertion would not.
-  it('never tells a returning guest to introduce itself', () => {
+  it('never hands a returning guest the new-guest variant', () => {
     expect(
       categoryInstructionsFor('guest_arrived', 'instagram', {
         hadPriorConversation: true,
       }),
-    ).not.toContain('say who they have reached')
+    ).not.toContain('has not written anything yet')
   })
 
   it('never tells a new guest it has talked to them before', () => {

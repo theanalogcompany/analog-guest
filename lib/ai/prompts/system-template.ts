@@ -1747,6 +1747,44 @@ import {
 // one short line, or not at all" became "the question is one short line on its
 // own, or not at all". The question has no position in the body any more, so
 // the old wording would be false.
+// v1.77.0 (TAC-567): a guest's FIRST conversation asks exactly three things and
+//   nothing else. Two prompt strings lose a sentence each, and one paragraph
+//   gains three.
+//
+//   Filed from a device scan at Le Mil's, 2026-09-30: four questions across
+//   three messages, opening "hey, welcome! you've reached Le Mil's on Polk
+//   Street" to a guest who had just scanned Le Mil's own code and tapped "Hi Le
+//   Mil's!". Jaipal: it did not feel human, and a relationship builds over
+//   visits.
+//
+//   THE IDENTITY SENTENCE IS DELETED from FIRST_TOUCH_OPENER and from TAC-536's
+//   GUEST_ARRIVED_INSTRUCTIONS_NEW. TAC-541 had already cut its override half
+//   after it produced "I'm Himanshu" on a live scan; this is the rest of it. The
+//   ruling is that the instruction is pointless rather than mis-worded, since the
+//   guest chose the venue a second earlier. Both openers carry a canary wider
+//   than the deleted wording, because a reworded revival would pass a
+//   literal-revert check.
+//
+//   THE INTENTIONS BLOCK GAINS A FIRST-CONVERSATION RESTRAINT, rendered only
+//   while RuntimeContext.firstConversation is true and placed last in the
+//   restraint paragraph so it outranks that paragraph's own "one short question
+//   on the end is fine" example. It is inside the block rather than a block of
+//   its own: the intentions block's position is measured (11% raise rate from
+//   third, 37% from last, TAC-519) and a new block would move it.
+//
+//   WHY v1.77.0 AND NOT v1.76.0: built at v1.75.0 and bumped to v1.76.0, which
+//   TAC-386 took while this branch was open. That is the fourth time the number
+//   has been taken mid-branch, so it is re-checked at commit rather than at plan
+//   time. Both entries stay; they are different changes.
+//
+//   THE OTHER TWO HALVES ARE NOT PROMPT TEXT, deliberately, and this entry says
+//   so because the wording alone reads like the whole fix. Eligibility is
+//   suppressed in lib/agent/intentions (allowedOnFirstConversation on the
+//   definition, applied twice in deriveOpenIntentions), and the never-two-
+//   questions rule is a code gate in composeReplyWithIntention that drops the
+//   bubble when the reply already asked something. Prompt wording could not
+//   reach either: the TAC-554 lesson, one layer on.
+//
 // v1.76.0 (TAC-386): a new `## Following up on what they asked` user-prompt
 //   block in serializers.ts, and a new per-turn category replacement in
 //   categories/inquiry-followup.ts. No new voice rule, and no change to any
@@ -1975,7 +2013,7 @@ import {
 // It also means the earlier runs quoted above measured prompts that no longer
 // exist, which is why Jaipal ruled the run be repeated against the rebased
 // prompt rather than the rulings applied on top of it.
-export const PROMPT_VERSION = 'v1.76.0'
+export const PROMPT_VERSION = 'v1.77.0'
 
 export const SYSTEM_TEMPLATE = `You work at a hospitality venue (cafe, bakery, restaurant). You communicate with its guests via iMessage, in whatever voice the venue has configured below — its own collective voice, its owner's, or a named staff member's.
 

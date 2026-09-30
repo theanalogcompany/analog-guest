@@ -70,6 +70,9 @@ function input(
     inboundTimes: [NOW],
     conversationWindowMs: WINDOW_48H,
     inboundHistoryFrom: daysAgo(14),
+    // TAC-567: false in the baseline, so every existing test keeps measuring the
+    // pre-ticket rule. The first-conversation tests set it to true explicitly.
+    isFirstConversation: false,
     ...overrides,
   }
 }
@@ -1754,5 +1757,167 @@ describe('deriveOpenIntentions — are_they_new_here (TAC-558)', () => {
       }),
     )
     expect(keysOf(result.open)).not.toContain('are_they_new_here')
+  })
+})
+
+// TAC-567, ruled 2026-09-30: on a guest's FIRST conversation only
+// understand_order, learn_name and are_they_new_here may be raised.
+//
+// ONE FIXTURE, TWO ARMS, and that is what makes these tests mean something. The
+// input below opens ALL EIGHT intentions - 11 lifetime replies clears every
+// replies_only count, a response rate of 100 clears the conversational floor, and
+// an old recommendation and an old order arm the two event-armed kinds outside the
+// conversation window. Only `isFirstConversation` differs between the arms, so a
+// suppression that worked by accident (a gate, a window, an expiry) would show up
+// as the control arm losing intentions too.
+describe('deriveOpenIntentions — first conversation (TAC-567)', () => {
+  const ALL_EIGHT_OPEN: Partial<DeriveOpenIntentionsInput> = {
+    responseRate: 100,
+    repliedMessageCount: 11,
+    visitConfirmedAt: hoursAgo(1),
+    // OLDER THAN THE 48h CONVERSATION WINDOW, which is what arms the two
+    // event-armed kinds: inside it they are HELD, not open, so daysAgo(1) would
+    // leave the control arm short of two intentions and the comparison blind.
+    // Still inside their own 3-day expiry, measured from the moment they left the
+    // window (24h ago here).
+    openRecommendationTimes: [daysAgo(3)],
+    recordedOrderTimes: [daysAgo(3)],
+  }
+
+  // The control. If this ever stops listing all eight, every assertion below is
+  // measuring a fixture that cannot express the thing under test.
+  it('opens all eight when the guest is past their first conversation', () => {
+    const { open } = deriveOpenIntentions(
+      input({ ...ALL_EIGHT_OPEN, isFirstConversation: false }),
+    )
+    expect(keysOf(open)).toEqual([
+      'understand_order',
+      'are_they_new_here',
+      'got_the_recommendation',
+      'did_they_like_it',
+      'learn_name',
+      'are_they_local',
+      'their_rhythm',
+      'why_theyre_here',
+    ])
+  })
+
+  it('opens only the ruled three on a first conversation', () => {
+    const { open } = deriveOpenIntentions(
+      input({ ...ALL_EIGHT_OPEN, isFirstConversation: true }),
+    )
+    expect(keysOf(open)).toEqual([
+      'understand_order',
+      'are_they_new_here',
+      'learn_name',
+    ])
+  })
+
+  // Each suppressed intention named individually, because the two list
+  // assertions above would both pass if four of the five were suppressed and one
+  // were suppressed for an unrelated reason.
+  it.each([
+    'got_the_recommendation',
+    'did_they_like_it',
+    'are_they_local',
+    'their_rhythm',
+    'why_theyre_here',
+  ] as const)('%s is ineligible on a first conversation', (key) => {
+    const first = deriveOpenIntentions(
+      input({ ...ALL_EIGHT_OPEN, isFirstConversation: true }),
+    )
+    const later = deriveOpenIntentions(
+      input({ ...ALL_EIGHT_OPEN, isFirstConversation: false }),
+    )
+    expect(keysOf(first.open)).not.toContain(key)
+    expect(keysOf(later.open)).toContain(key)
+  })
+
+  it.each(['understand_order', 'are_they_new_here', 'learn_name'] as const)(
+    '%s is eligible on a first conversation',
+    (key) => {
+      const { open } = deriveOpenIntentions(
+        input({ ...ALL_EIGHT_OPEN, isFirstConversation: true }),
+      )
+      expect(keysOf(open)).toContain(key)
+    },
+  )
+
+  // THE HALF A RENDER-SIDE FILTER ALONE WOULD MISS. A suppressed intention must
+  // not be RECORDED eligible either, or its expiry window starts running during a
+  // conversation where nothing may raise it, and TAC-380 ruling 5 measures expiry
+  // from eligible_at. It would then perish unraised before the second visit.
+  it('records no eligibility for a suppressed intention', () => {
+    const { newlyEligible } = deriveOpenIntentions(
+      input({ ...ALL_EIGHT_OPEN, isFirstConversation: true }),
+    )
+    expect(newlyEligible.map((n) => n.key).sort()).toEqual([
+      'are_they_new_here',
+      'learn_name',
+      'understand_order',
+    ])
+  })
+
+  // THE OTHER HALF, and it is why the suppression is applied twice rather than
+  // once. First-contact eligibility is STICKY: an existing row decides and the
+  // gate is never re-checked, so every guest who was mid-first-conversation when
+  // this shipped already has rows the arming-loop skip can never see. Only the
+  // open-set filter stops those rendering.
+  //
+  // Deleting the filter and keeping the skip is a mutant this kills; deleting the
+  // skip and keeping the filter is killed by the test above.
+  it('filters a suppressed intention that already has an eligibility row', () => {
+    const shared = {
+      ...ALL_EIGHT_OPEN,
+      rows: {
+        prompted: [],
+        eligible: [
+          { intentionKey: 'are_they_local', eligibleAt: hoursAgo(2) },
+          { intentionKey: 'their_rhythm', eligibleAt: hoursAgo(2) },
+        ],
+      },
+    } as Partial<DeriveOpenIntentionsInput>
+
+    const later = deriveOpenIntentions(
+      input({ ...shared, isFirstConversation: false }),
+    )
+    expect(keysOf(later.open)).toContain('are_they_local')
+    expect(keysOf(later.open)).toContain('their_rhythm')
+
+    const first = deriveOpenIntentions(
+      input({ ...shared, isFirstConversation: true }),
+    )
+    expect(keysOf(first.open)).toEqual([
+      'understand_order',
+      'are_they_new_here',
+      'learn_name',
+    ])
+  })
+
+  // The ruled sequence, as the production turn shape produces it: turn 1 has no
+  // transaction, so are_they_new_here is unarmed and learn_name rides its
+  // first-message waiver; the order lands and turn 3 arms are_they_new_here, which
+  // outranks learn_name on priority. Nothing here sets a flag to make that happen -
+  // it is the gates and armings already shipped, read through the new filter.
+  it('walks the ruled first-visit flow: the order, then the name, then new here', () => {
+    const turnOne = deriveOpenIntentions(
+      input({
+        isFirstConversation: true,
+        repliedMessageCount: 1,
+        visitConfirmedAt: hoursAgo(1),
+      }),
+    )
+    expect(keysOf(turnOne.open)).toEqual(['understand_order', 'learn_name'])
+
+    const turnThree = deriveOpenIntentions(
+      input({
+        isFirstConversation: true,
+        repliedMessageCount: 3,
+        visitConfirmedAt: hoursAgo(1),
+        recordedOrderTimes: [hoursAgo(1)],
+        facts: { ...NO_FACTS, hasQualifyingTransaction: true },
+      }),
+    )
+    expect(keysOf(turnThree.open)).toEqual(['are_they_new_here', 'learn_name'])
   })
 })

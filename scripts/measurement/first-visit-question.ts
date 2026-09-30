@@ -428,6 +428,15 @@ async function main(): Promise<void> {
         inboundTimes: [receivedAt],
         conversationWindowMs: 48 * 60 * 60 * 1000,
         inboundHistoryFrom: new Date(startedAt.getTime() - 14 * MS_PER_DAY),
+        // TAC-567: true, because every conversation this harness generates IS a
+        // first one (a fresh qr_scan guest, four turns inside one sitting). That
+        // is the production value, and it now suppresses the five intentions the
+        // 2026-09-30 ruling holds back on a first visit. are_they_new_here, this
+        // harness's target, is one of the three still allowed, so the metric it
+        // measures is unchanged - but the off-target denominator is, because
+        // are_they_local and their_rhythm can no longer appear in it. A re-run
+        // after this ticket is not comparable to the runs recorded on TAC-558.
+        isFirstConversation: true,
       })
 
       const derivedOpenKeys = derived.open.map((o) => o.key)

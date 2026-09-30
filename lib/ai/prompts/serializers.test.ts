@@ -1429,16 +1429,39 @@ describe("runtimeToProse — ## What you're hoping to get to first-touch opener 
   // name back", and it did exactly that, overriding `owner` framing's "Do not
   // name yourself unless the guest asks" to produce "I'm Himanshu" on a live
   // scan.
-  it('makes the introduction conditional, and no longer overrides the voice setting', () => {
+  // TAC-567 (2026-09-30) DELETED the clause entirely, and this test inverts with
+  // it: it used to assert the conditional introduction was present. On device the
+  // clause produced "hey, welcome! you've reached Le Mil's on Polk Street" to a
+  // guest who had just scanned Le Mil's code, so the ruling is that there is
+  // nobody to introduce. TAC-541 had already cut its override half; this is the
+  // rest of the sentence.
+  it('says hello and asks the order, and never says who they have reached', () => {
     const out = runtimeToProse(
       { mechanics: [], openIntentions, firstTouchAfterQrScan: true },
       'reply',
       NOW,
     )
-    expect(out).toContain(
-      "Say hello. If their message doesn't name a person, say who they've reached as well.",
-    )
+    expect(out).toContain('Say hello. Ask what they just got.')
+    expect(out).not.toMatch(/reached/i)
+    expect(out).not.toMatch(/name a person/i)
   })
+
+  // THE CANARY ON THE DELETION, and it is deliberately wider than the sentence
+  // that was removed. A reworded revival ("tell them which shop this is",
+  // "introduce the venue") would pass a literal-revert check, so both openers are
+  // swept for the ACT of introducing rather than for the old phrasing. This is
+  // the one thing standing between the ruling and a well-meaning restoration.
+  it.each(['text', 'instagram'] as const)(
+    'the %s opener never asks the venue to identify itself (TAC-567)',
+    (channel) => {
+      const opener = firstTouchOpenerFor(channel)
+      expect(opener).not.toMatch(/reached/i)
+      expect(opener).not.toMatch(/name a person/i)
+      expect(opener).not.toMatch(/introduce/i)
+      expect(opener).not.toMatch(/who (you|they) are/i)
+      expect(opener).not.toMatch(/say who/i)
+    },
+  )
 
   // THE CANARY, and it is the whole of TAC-541's opener half. Restoring the
   // override in either channel's copy fails here. Deliberately matched on the
@@ -1639,6 +1662,110 @@ describe("runtimeToProse — ## What you're hoping to get to openings (TAC-436)"
   })
 })
 
+// TAC-567, ruled 2026-09-30: on a guest's FIRST conversation the reply itself
+// asks nothing, so the only question that turn is the intention bubble.
+//
+// This is the prompt half. The bubble half is structural (the two-question gate in
+// composeReplyWithIntention) and cannot be talked past; a question the model
+// INVENTS in the body has no code gate that could supply a reply instead, which is
+// why this text exists at all.
+describe("runtimeToProse — ## What you're hoping to get to first conversation (TAC-567)", () => {
+  const openIntentions = ["You don't know this guest's name yet."]
+  const render = (firstConversation: boolean) =>
+    runtimeToProse(
+      { mechanics: [], openIntentions, firstConversation },
+      'reply',
+      NOW,
+    )
+
+  // PINNED AS ONE CONTIGUOUS LITERAL, never as fragments. A sentence can be
+  // reversed while every asserted fragment survives - three mutants did exactly
+  // that on this directory's rules and passed 36 of 36 assertions.
+  const RESTRAINT =
+    'This is your first conversation with this guest. The reply itself asks\n' +
+    'them nothing: no question of your own, however natural one would be\n' +
+    'here. The only question this turn is the one listed above, and only if a\n' +
+    'line above fits.'
+
+  it('renders the approved wording on a first conversation', () => {
+    expect(render(true)).toContain(RESTRAINT)
+  })
+
+  it('renders nothing of it once the guest is past their first conversation', () => {
+    const out = render(false)
+    expect(out).not.toContain('This is your first conversation with this guest')
+    expect(out).not.toContain('The reply itself asks')
+  })
+
+  // ABSENT READS AS FALSE. Every caller that does not know about this field - the
+  // regen path's hand-built runtime, a test fixture, a future harness - gets the
+  // pre-ticket prompt rather than a restraint on a turn that is not a first
+  // conversation. The safe direction is fewer suppressions, not more.
+  it('treats an absent flag as not a first conversation', () => {
+    const out = runtimeToProse({ mechanics: [], openIntentions }, 'reply', NOW)
+    expect(out).not.toContain('This is your first conversation with this guest')
+  })
+
+  // POSITION IS THE MECHANISM, not a detail. Proximity reads as authority in this
+  // prompt (six defects paid for it), and this text has to outrank the paragraph's
+  // own "one short question on the end is fine" example, which sits above it and
+  // says the opposite for a turn like this one.
+  it('lands after the natural-opening example, last in the paragraph', () => {
+    const out = render(true)
+    const example = out.indexOf('short question on the end is fine')
+    const wait = out.indexOf('If nothing fits, let it wait.')
+    const restraint = out.indexOf(RESTRAINT)
+    expect(example).toBeGreaterThan(-1)
+    expect(restraint).toBeGreaterThan(example)
+    expect(restraint).toBeGreaterThan(wait)
+  })
+
+  // The block still ends where it did: this text is inside the intentions block,
+  // so the emoji directive keeps its own measured last-block position and the
+  // intentions block keeps its own (11% raise rate from third, 37% from last).
+  it('stays inside the intentions block, ahead of the emoji directive', () => {
+    const out = runtimeToProse(
+      {
+        mechanics: [],
+        openIntentions,
+        firstConversation: true,
+        emojiDirective: 'none',
+      },
+      'reply',
+      NOW,
+    )
+    const restraint = out.indexOf(RESTRAINT)
+    const emoji = out.indexOf('emoji')
+    expect(restraint).toBeGreaterThan(-1)
+    expect(emoji).toBeGreaterThan(restraint)
+  })
+
+  // No worked question, deliberately: an invented question is the defect itself,
+  // and a quoted example is the thing a model reproduces verbatim. Same reasoning
+  // as are_they_new_here's promptLine carrying none.
+  it('models no question of its own and no em dash', () => {
+    expect(RESTRAINT).not.toContain('?')
+    expect(RESTRAINT).not.toMatch(/[—–]/)
+  })
+
+  // The block is omitted wholesale on these two categories, and this text rides
+  // it, so it must go too. Rendering a first-conversation restraint on an apology
+  // turn would be a second authority on a turn TAC-436 deliberately left silent.
+  it.each(['opt_out', 'comp_complaint'] as const)(
+    'is suppressed with the block on %s',
+    (category) => {
+      const out = runtimeToProse(
+        { mechanics: [], openIntentions, firstConversation: true },
+        category,
+        NOW,
+      )
+      expect(out).not.toContain(
+        'This is your first conversation with this guest',
+      )
+    },
+  )
+})
+
 // TAC-436: the STRUCTURAL half of ruling 1's apology carve-out. The block
 // renders LAST in the user prompt and COMP_COMPLAINT_INSTRUCTIONS lives in the
 // SYSTEM prompt, so on proximity the block wins — the same failure class
@@ -1813,17 +1940,20 @@ describe('runtimeToProse — R1 carve-out signal line (TAC-324)', () => {
 // TAC-495: the first-visit opener's channel variants.
 // ---------------------------------------------------------------------------
 //
-// The SMS opener is TAC-423's wording as approved on 2026-09-22. The Instagram
-// opener swaps ONE phrase and nothing else, down from two: the old second swap
-// turned "who they're texting" into "who they're messaging", and "who they've
-// reached" is true on both channels, so it is gone. The literals here are
-// transcribed from the approved wording; the full strings are pinned against
-// the assembled prompt in compose-prompt.test.ts.
+// The SMS opener is TAC-423's wording as approved on 2026-09-22, minus the
+// identity sentence TAC-567 deleted on 2026-09-30. The Instagram opener swaps ONE
+// phrase and nothing else, down from two: the old second swap turned "who they're
+// texting" into "who they're messaging", and the clause that needed it is gone
+// altogether now. The literals here are transcribed from the approved wording;
+// the full strings are pinned against the assembled prompt in
+// compose-prompt.test.ts.
 describe('firstTouchOpenerFor — channel variants (TAC-495)', () => {
+  // TAC-567 removed the identity sentence from both. One swap remains, so the
+  // two literals still differ in exactly one clause.
   const SMS_OPENER =
-    "This is the guest's first message on this number, sent right after they scanned the sign at your pickup counter. They have just ordered and collected it. Say hello. If their message doesn't name a person, say who they've reached as well. Ask what they just got."
+    "This is the guest's first message on this number, sent right after they scanned the sign at your pickup counter. They have just ordered and collected it. Say hello. Ask what they just got."
   const INSTAGRAM_OPENER =
-    "This is the guest's first message, sent right after they scanned the sign at your pickup counter. They have just ordered and collected it. Say hello. If their message doesn't name a person, say who they've reached as well. Ask what they just got."
+    "This is the guest's first message, sent right after they scanned the sign at your pickup counter. They have just ordered and collected it. Say hello. Ask what they just got."
 
   it('the SMS opener is the approved wording and the Instagram opener swaps one phrase', () => {
     expect(firstTouchOpenerFor('text')).toBe(SMS_OPENER)
@@ -1856,7 +1986,7 @@ describe('firstTouchOpenerFor — channel variants (TAC-495)', () => {
     for (const phrase of [
       'sent right after they scanned the sign at your pickup counter.',
       'They have just ordered and collected it.',
-      "Say hello. If their message doesn't name a person, say who they've reached as well.",
+      'Say hello.',
       'Ask what they just got.',
     ]) {
       expect(firstTouchOpenerFor('text')).toContain(phrase)

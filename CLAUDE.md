@@ -318,7 +318,7 @@ The live floors, all in `lib/agent/stages.ts`. A number quoted anywhere else may
 | `AUTO_SEND_FIDELITY_FLOOR` 0.6 | 0.4 to 0.6 queues for an operator |
 | voice pack (`lib/rag/voice-pack.ts`) | static per venue, no similarity; empty pack fails **closed** on inbound (decision 0008) |
 | `KNOWLEDGE_RELEVANCE_FLOOR` 0.3 | knowledge retrieval, degrades **gracefully** |
-| `PROMPT_VERSION` v1.76.0 | bumping it is a repo-wide sweep - `.claude/rules/prompt-versioning.md` |
+| `PROMPT_VERSION` v1.77.0 | bumping it is a repo-wide sweep - `.claude/rules/prompt-versioning.md` |
 
 **23 approval triggers compose; any one queues the draft.** The five post-generation LLM
 checks run **post-send** on inbound (Slack forward on a finding, never a hold) and keep the

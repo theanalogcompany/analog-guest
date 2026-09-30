@@ -180,6 +180,7 @@ function generation(
     intentionQuestion: '',
     closedTheConversation: false,
     intentionQuestionDuplicateStripped: false,
+    intentionQuestionDroppedForBodyQuestion: false,
     attempts: 1,
     attemptScores: [0.85],
     attemptHistory: [],

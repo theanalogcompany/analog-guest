@@ -240,6 +240,28 @@ Two predicates must move together: `shouldRenderOpenIntentions` (render side) an
 classifier is offered intentions the prompt never showed, which closes goals the guest
 never saw. A cross-module test iterates every category for exactly this.
 
+### A first conversation asks three things only (TAC-567)
+
+On a guest's FIRST conversation only `understand_order`, `learn_name` and
+`are_they_new_here` may be raised. The other five are suppressed. Ruled 2026-09-30 after a
+fresh scan asked four questions across three messages.
+
+`allowedOnFirstConversation` on the definition is the one declaration, so a new intention must
+answer it or fail `tsc`; nothing in `derive.ts` branches on a key. "First conversation" is
+TAC-560's `isFirstConversation` (`warm-close.ts`), resolved once in `build-runtime-context`
+against the same `conversationWindowMs` the brake reads, anchored on
+`first_contacted_at ?? created_at`, and carried on `RuntimeContext.firstConversation`.
+
+**`deriveOpenIntentions` applies it TWICE and neither is redundant.** The arming loop skips a
+suppressed intention, so no `eligible_at` row is written and its window does not start ticking
+on a question nobody may ask. The open-set filter is the actual guarantee: first-contact
+eligibility is STICKY, so a row already on file is never re-gated and only the filter can stop
+it rendering. `derive.test.ts` kills each half with its own test.
+
+The prompt half is a restraint paragraph the serializer renders into the intentions block when
+`firstConversation` is true. It rides that block, so it does not render on a first-conversation
+turn where nothing is open - stated at the constant, not discovered.
+
 `understand_order` must not arm off `guests.last_visit_at` - every writer of that column
 runs downstream of a transaction, and a transaction satisfies the intention. There is a
 source-level guard matching both the snake_case column and the camelCase field.
@@ -253,10 +275,18 @@ reads the question. The field rides along as the exact TAIL of the body - true b
 construction, because we did the joining - and `resolveDispatchBubbles(body, rng, tail)`
 peels it off as the final bubble.
 
-`intentionTailFor(question, renderedCount)` is the ONE gate, called by both dispatch arms.
-A question only bubbles when the intentions block actually rendered, which is
-`renderableIntentions` above. Two copies of that decision is the drift this directory
+`intentionTailFor(question, renderedCount)` is the ONE gate ON THE DISPATCH SIDE, called by
+both dispatch arms. A question only bubbles when the intentions block actually rendered, which
+is `renderableIntentions` above. Two copies of that decision is the drift this directory
 already pays for.
+
+**TAC-567 added a SECOND gate, upstream of it**: `composeReplyWithIntention` drops the
+question when the reply already asks one, so no turn ever sends two questions. It normalizes
+`intentionQuestion` to `''`, which is why `intentionTailFor` still needs no knowledge of it.
+The veto writes nothing and closes nothing, so the intention comes back open next turn; its
+firing rate rides on `intentionQuestionDroppedForBodyQuestion` because a guard nobody can
+count is how `comp_regex_backstop` became an illusion. Detector is a bare `?` in the answer:
+this reads our own outbound, where the copy always punctuates.
 
 **`''` is byte-identical to the pre-TAC-554 path**, asserted as an equivalence rather than
 by restating expected bubbles. The answer's own cap drops to `MAX_BUBBLES_PER_RESPONSE - 1`

@@ -442,6 +442,8 @@ function buildGenerationFailureGeneration(): GenerateMessageResult {
     // TAC-560: the crash card is a blank draft for an operator, not a close.
     closedTheConversation: false,
     intentionQuestionDuplicateStripped: false,
+    // TAC-567: this path composes no question, so the gate never fired.
+    intentionQuestionDroppedForBodyQuestion: false,
     attempts: 2,
     attemptScores: [],
     attemptHistory: [],

@@ -247,6 +247,33 @@ export interface IntentionDefinition {
   armsOn: IntentionArmsOn
   gate: IntentionGate
   /**
+   * TAC-567: may this intention be raised during the guest's FIRST
+   * conversation?
+   *
+   * Jaipal ruled (2026-09-30) that a first conversation asks exactly three
+   * things: what they got (understand_order), their name (learn_name), and
+   * whether they are new here (are_they_new_here). A fresh scan that asked
+   * four questions across three messages read as an interview, and the
+   * relationship is meant to build over visits rather than in one sitting.
+   *
+   * DECLARED PER INTENTION, NEVER INFERRED FROM `armsOn` OR `priority`. The
+   * three allowed ones share no arming kind (visit_confirmed, first_contact,
+   * first_recorded_order) and the five suppressed ones cover two of those same
+   * kinds, so there is no structural property to read this off. Nothing in
+   * derive.ts branches on an intention's key; it reads this field.
+   *
+   * `false` SUPPRESSES RATHER THAN CLOSES, in two places (deriveOpenIntentions):
+   * the arming loop skips it, so no eligible_at row is written and its window
+   * does not start ticking unraised; and the open set is filtered, which is the
+   * actual guarantee because it also covers a row that already exists, since
+   * first-contact eligibility is sticky and the gate is never re-checked. The
+   * intention arrives intact on the guest's second conversation.
+   *
+   * "First conversation" is TAC-560's one definition, isFirstConversation in
+   * lib/agent/warm-close.ts, resolved by the caller and passed in.
+   */
+  allowedOnFirstConversation: boolean
+  /**
    * Rendered verbatim as one line in the "## What you're hoping to get to"
    * block. Phrased as a state Sana is in ("you don't know...") rather than an
    * instruction ("ask...") — the difference is the whole mechanism.
@@ -311,6 +338,9 @@ const DEFINITIONS = {
     priority: 10,
     armsOn: { kind: 'visit_confirmed' },
     gate: { kind: 'none' },
+    // TAC-567: one of the three a first conversation may ask. It is the reason
+    // the guest scanned at all, and the opener asks it outright.
+    allowedOnFirstConversation: true,
     promptLine: "You haven't heard what this guest ordered yet.",
     // Deliberately says nothing about how the drink or food WAS: that belongs
     // to did_they_like_it. Left in, a "how was your drink?" send would close
@@ -345,6 +375,9 @@ const DEFINITIONS = {
       defaultMinReplies: 3,
       firstMessageMinReplies: 3,
     },
+    // TAC-567: one of the three. This is the question the ruled first-visit
+    // flow ends on, before the warm close.
+    allowedOnFirstConversation: true,
     // Ruled verbatim by Jaipal, 2026-09-29. THIS IS THE ORIGINAL WORDING, ruled
     // back after a second one was tried and measured worse. Read the history
     // before rewording it, because the obvious fix has been tried.
@@ -404,6 +437,9 @@ const DEFINITIONS = {
     priority: 20,
     armsOn: { kind: 'open_recommendation' },
     gate: { kind: 'conversational', defaultMinReplies: 3 },
+    // TAC-567: not on a first visit. A suggestion made in that first sitting is
+    // not something to follow up inside it.
+    allowedOnFirstConversation: false,
     promptLine:
       "You suggested something to this guest and haven't heard whether they tried it.",
     classifierDescription:
@@ -421,6 +457,10 @@ const DEFINITIONS = {
     priority: 30,
     armsOn: { kind: 'recorded_order' },
     gate: { kind: 'conversational', defaultMinReplies: 3 },
+    // TAC-567: not on a first visit. "how'd you like it?" is the exact fourth
+    // question the ruled flow deletes; the device transcript shows the agent
+    // inventing it in the body on turn 2.
+    allowedOnFirstConversation: false,
     promptLine:
       'You know what this guest ordered, but not whether they liked it.',
     classifierDescription:
@@ -439,6 +479,9 @@ const DEFINITIONS = {
       defaultMinReplies: 3,
       firstMessageMinReplies: 0,
     },
+    // TAC-567: one of the three. A name is the one thing it is natural to ask
+    // for on a first hello, which is also why it alone waives the reply count.
+    allowedOnFirstConversation: true,
     // TAC-541 ruling 3. THE SHAPE IS PART OF THE LINE, and the generic
     // restraint paragraph is what made that necessary: "one short question on
     // the end is fine" is true of every intention here, and on a name it
@@ -474,6 +517,8 @@ const DEFINITIONS = {
       defaultMinReplies: 5,
       firstMessageMinReplies: 5,
     },
+    // TAC-567: not on a first visit.
+    allowedOnFirstConversation: false,
     promptLine: "You don't know whether this guest lives or works nearby.",
     classifierDescription:
       "asks whether the guest lives or works nearby, or where they're coming from",
@@ -491,6 +536,8 @@ const DEFINITIONS = {
       defaultMinReplies: 8,
       firstMessageMinReplies: 8,
     },
+    // TAC-567: not on a first visit.
+    allowedOnFirstConversation: false,
     // TIME OF DAY, never frequency (TAC-380 ruling 2). R23 bans stating or
     // implying how often a guest visits, and the real trip is the turn AFTER
     // the question — "since you're in most mornings" — when the model uses the
@@ -514,6 +561,8 @@ const DEFINITIONS = {
       defaultMinReplies: 11,
       firstMessageMinReplies: 11,
     },
+    // TAC-567: not on a first visit.
+    allowedOnFirstConversation: false,
     promptLine: "You don't know what brings this guest in.",
     classifierDescription:
       'asks what brings the guest in, or what they come in for',

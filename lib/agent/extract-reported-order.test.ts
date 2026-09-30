@@ -240,6 +240,9 @@ function makeCtx(overrides: Partial<RuntimeContext> = {}): RuntimeContext {
     conversationChannel: 'text',
     recentMessages: [],
     conversationWindowMs: 48 * 60 * 60 * 1000,
+    // TAC-567: these fixtures are established guests, not a first
+    // conversation, so every intention is eligible as before.
+    firstConversation: false,
     recognition: {} as RuntimeContext['recognition'],
     mechanics: [],
     recentVisits: [],
