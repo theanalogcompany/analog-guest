@@ -2942,3 +2942,60 @@ export async function captureInstagramDeletionUnmatchedAccount(
     ].join('\n'),
   )
 }
+
+// TAC-560: the warm "line is open" close.
+//
+// Slack-relayed on a SEND because this is a proactive guest-facing message with
+// no operator and no inbound behind it, and at pilot volume the relay IS the
+// answer to "has this ever fired, and by which path". The skip event is PostHog
+// only: `not_yet` alone would fire on every tick, so a relay there would train
+// people to ignore the channel (the `agent_latency_high` lesson).
+export interface WarmCloseSentProps {
+  agentRunId: string | null
+  venueId: string
+  guestId: string
+  /**
+   * Which path closed the conversation. `in_conversation` is the guest saying
+   * thanks and the model reporting it; `pause_timer` is this ticket's cron.
+   */
+  via: 'in_conversation' | 'pause_timer'
+  /** The outbound row the close answers, or null on the in-conversation path. */
+  answersMessageId?: string | null
+  /** How long the guest had been silent, on the timer path. */
+  pauseMs?: number
+  /** Whether our own last message had asked them something. */
+  weAskedAQuestion?: boolean
+  /** On the in-conversation path: whether the marker was already set. */
+  markerOutcome?: 'marked' | 'already_marked' | 'write_failed'
+}
+
+export async function captureWarmCloseSent(
+  props: WarmCloseSentProps,
+): Promise<void> {
+  await capturePostHogEvent('warm_close_sent', props.guestId, { ...props })
+  await postToSlack(
+    [
+      `*Warm close sent* via \`${props.via}\`: the guest's first conversation ended with the line left open.`,
+      props.via === 'pause_timer'
+        ? `they had been quiet for ${Math.round((props.pauseMs ?? 0) / 60_000)}m${props.weAskedAQuestion ? ', and our last message had asked them something' : ''}`
+        : `marker: \`${props.markerOutcome ?? 'unknown'}\``,
+      `venue: \`${props.venueId}\``,
+      `guest: \`${props.guestId}\``,
+    ].join('\n'),
+  )
+}
+
+export interface WarmCloseSkippedProps {
+  venueId: string
+  guestId: string
+  messageId: string
+  reason: string
+  /** Set when the skip was a send that did not land, not a pre-claim refusal. */
+  agentStatus?: string
+}
+
+export async function captureWarmCloseSkipped(
+  props: WarmCloseSkippedProps,
+): Promise<void> {
+  await capturePostHogEvent('warm_close_skipped', props.guestId, { ...props })
+}

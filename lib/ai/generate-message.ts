@@ -281,6 +281,27 @@ export const GeneratedMessageSchema = z.object({
   // through v1.17.0 the id was missing from the block, the model reached for
   // the code instead, and every arrival capture no-op'd.
   cancelsCommitmentId: z.string(),
+  // TAC-560: did THIS reply close the guest's first conversation, in the way the
+  // venue's own voice rules describe (the line is open, here is what you can
+  // message us about anytime)?
+  //
+  // A BARE REQUIRED BOOLEAN, for the reason knowledgeGap is: Anthropic counts
+  // only optionals against the 24-property cap, this schema sits at exactly 20
+  // against a repo budget of 22 (lib/ai/schema-budget.test.ts), and a required
+  // field costs nothing there.
+  //
+  // WHAT IT IS FOR. The close is once per guest EVER, from either path, and the
+  // timer needs to know the in-conversation close already went out. Nothing
+  // structural marks that turn: it is an ordinary reply to "thanks!", stored
+  // under whatever the classifier picked. So the model reports it, and
+  // handle-inbound.ts writes guests.warm_close_sent_at post-dispatch.
+  //
+  // SELF-REPORT IS NOT TRUSTED ALONE, on this repo's own record (TAC-350: 8 of 8
+  // fabrications self-reported clean). The timer carries an independent belt: a
+  // last inbound that classified `acknowledgment` IS the sign-off turn, so it
+  // stands down whatever this field said. Both signals point the same way, and
+  // over-marking (no close) is the cheaper mistake than under-marking (two).
+  closedTheConversation: z.boolean(),
   // TAC-554: the getting-to-know-you question this reply is asking, alone, and
   // NOT in `body`. Empty string on every turn that is not asking one, which is
   // most turns.
@@ -483,6 +504,7 @@ export async function generateMessage(
       arrivalCapture: z.infer<typeof ArrivalCaptureEmissionSchema>
       cancelsCommitmentId: string
       intentionQuestion: string
+      closedTheConversation: boolean
     } | null = null
     const attemptScores: number[] = []
     const attemptHistory: GenerateMessageAttempt[] = []
@@ -657,6 +679,7 @@ export async function generateMessage(
         arrivalCapture: object.arrivalCapture,
         cancelsCommitmentId: object.cancelsCommitmentId,
         intentionQuestion: object.intentionQuestion,
+        closedTheConversation: object.closedTheConversation,
         userPromptOverride:
           userPromptForAttempt !== userPrompt
             ? userPromptForAttempt
@@ -727,6 +750,11 @@ export async function generateMessage(
         // SAID back (TAC-296 precedent).
         arrivalCapture: lastResult.arrivalCapture,
         cancelsCommitmentId: lastResult.cancelsCommitmentId,
+        // TAC-560: did this reply close the guest's first conversation? The
+        // in-conversation half of a once-per-guest-ever marker; handle-inbound.ts
+        // writes guests.warm_close_sent_at post-dispatch when it is true, so the
+        // pause timer never sends a second close.
+        closedTheConversation: lastResult.closedTheConversation,
         // TAC-554: the exact tail of `body`. Dispatch splits there so the
         // question goes out as its own last message. '' means this turn asked
         // nothing, and dispatch then behaves exactly as it did before.

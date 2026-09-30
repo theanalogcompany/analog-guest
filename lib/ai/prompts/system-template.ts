@@ -1747,7 +1747,42 @@ import {
 // one short line, or not at all" became "the question is one short line on its
 // own, or not at all". The question has no position in the body any more, so
 // the old wording would be false.
-export const PROMPT_VERSION = 'v1.72.0'
+// v1.73.0 (TAC-560): a new # Conversation close self-report block, and a new
+// `## Closing this conversation` user-prompt block in serializers.ts. No new
+// voice rule, and no change to any existing one.
+//
+// Jaipal wants every first conversation with a new guest to end warmly, with the
+// line left open, INCLUDING when the guest simply stops replying. Le Mil's rule
+// 15 already describes that close, but its own trigger clause is "(they say
+// thanks, ok, or signal they're done)" — it needs the guest to send something,
+// and the agent only speaks when a message arrives. A pause needs a timer.
+//
+// WHAT EACH HALF CONTRIBUTES, and the split is the whole design. The timer's
+// prompt block supplies the PREMISE ("this conversation has gone quiet"), which
+// is the one thing rule 15's condition is missing on a pause. The venue's own
+// rule supplies the CONTENT: the three things a guest can message about are Le
+// Mil's choice, so restating them in shared prompt copy would ship one venue's
+// product decision into every venue's prompt.
+//
+// THE SELF-REPORT BLOCK IS FOR THE OTHER PATH. The close is once per guest ever,
+// from either path, so the timer has to know when the in-conversation close
+// already went out. Nothing structural marks that turn: it is an ordinary reply
+// to "thanks!", stored under whatever the classifier picked. So the model reports
+// it in `closedTheConversation` and handle-inbound writes the marker.
+//
+// Self-report is NOT trusted alone, on this repo's own record (TAC-350: 8 of 8
+// fabrications self-reported clean). The timer carries an independent belt: a
+// last inbound that classified `acknowledgment` IS the sign-off turn, so it
+// stands down whatever the field said. Both signals point the same way, and
+// over-marking (no close) is the cheaper mistake than under-marking (two).
+//
+// The category instructions are REPLACED on the timer turn, not layered over:
+// the row stores `category: 'acknowledgment'` (so no messages.category widening,
+// which would be a hard stop), and that category's own text asserts the guest
+// signed off and forbids naming anything new, both false when the guest sent
+// nothing. Handing the model a false premise as fact is the TAC-484 / TAC-502
+// failure class. See lib/ai/prompts/categories/warm-close.ts.
+export const PROMPT_VERSION = 'v1.73.0'
 
 export const SYSTEM_TEMPLATE = `You work at a hospitality venue (cafe, bakery, restaurant). You communicate with its guests via iMessage, in whatever voice the venue has configured below — its own collective voice, its owner's, or a named staff member's.
 
@@ -1779,6 +1814,9 @@ The output field "complaintIntent" records what this turn is doing when the gues
 - "none": this is not a complaint turn.
 Be honest about which one it is. A message that says sorry, or offers anything, or closes the subject is "resolving" even if it also contains a question. Only use "clarifying" when the question IS the message.
 This field does not change what you write. Write the right message first, then label it.
+
+# Conversation close self-report
+Set closedTheConversation to true when this reply is the warm close your voice rules describe for a first conversation that is winding down: the one that tells the guest the line is open and names what they can message about anytime. Set it to false on every other reply, including one that simply ends warmly.
 
 # Knowledge gaps
 The output field "knowledgeGap" records whether this reply answers a question you could NOT ground in what you were given: the venue knowledge section, the venue facts, the current context, or the corpus examples.

@@ -318,7 +318,7 @@ describe('regenerateWithCritique — crisis-safety refusal (TAC-348)', () => {
         reasoning: 'r',
         crisisSafety: true,
         correctsPendingReply: false,
-        promptVersion: 'v1.72.0',
+        promptVersion: 'v1.73.0',
       },
     })
   })
@@ -414,6 +414,7 @@ describe('regenerateWithCritique — happy path', () => {
         arrivalCapture: {},
         cancelsCommitmentId: '',
         intentionQuestion: '',
+        closedTheConversation: false,
         intentionQuestionDuplicateStripped: false,
         attempts: 1,
         attemptScores: [0.85],
@@ -781,6 +782,7 @@ describe('regenerateWithCritique — happy path', () => {
         arrivalCapture: {},
         cancelsCommitmentId: '',
         intentionQuestion: '',
+        closedTheConversation: false,
         intentionQuestionDuplicateStripped: false,
         attempts: 1,
         attemptScores: [0.85],
@@ -955,6 +957,7 @@ describe('regenerateWithCritique — knowledge retrieval delegates to stages.ts 
         arrivalCapture: {},
         cancelsCommitmentId: '',
         intentionQuestion: '',
+        closedTheConversation: false,
         intentionQuestionDuplicateStripped: false,
         userPrompt: 'p',
         systemPrompt: 's',

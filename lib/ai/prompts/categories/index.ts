@@ -33,6 +33,10 @@ import { PERSONAL_HISTORY_QUESTION_INSTRUCTIONS } from './personal-history-quest
 import { RECOMMENDATION_REQUEST_INSTRUCTIONS } from './recommendation-request'
 import { REPLY_INSTRUCTIONS } from './reply'
 import { UNKNOWN_INSTRUCTIONS } from './unknown'
+// TAC-560: NOT in getCategoryInstructions' switch below. The warm close is not a
+// MessageCategory (it stores `acknowledgment`), it is a per-turn replacement
+// chosen in categoryInstructionsFor. See that function.
+import { WARM_CLOSE_INSTRUCTIONS } from './warm-close'
 import { WELCOME_INSTRUCTIONS } from './welcome'
 
 export function getCategoryInstructions(category: MessageCategory): string {
@@ -148,7 +152,22 @@ export function categoryInstructionsFor(
   category: MessageCategory,
   channel: MessageChannel | null,
   scanArrival: { hadPriorConversation: boolean } | null = null,
+  // TAC-560: the SECOND per-turn exception, on the same reasoning the paragraph
+  // above gives for the first. The pause-triggered warm close stores
+  // `category: 'acknowledgment'` so it needs no new messages.category value and
+  // therefore no migration against a high-stakes table, but that category's own
+  // text asserts the guest signed off and forbids naming anything new, both
+  // false on a turn where the guest sent nothing. So the instruction is
+  // REPLACED, not layered over.
+  //
+  // Checked BEFORE the category lookup for that reason. Defaults false so every
+  // other call site is unchanged.
+  //
+  // Takes NO channel substitution: the copy names no channel. The scope guard in
+  // index.test.ts fails if a channel claim is ever introduced into it.
+  warmClose = false,
 ): string {
+  if (warmClose) return WARM_CLOSE_INSTRUCTIONS
   if (category === 'guest_arrived')
     return guestArrivedInstructionsFor(scanArrival)
   return (

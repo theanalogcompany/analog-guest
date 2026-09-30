@@ -294,6 +294,16 @@ export type RuntimeContext = {
     // ambiguous case resolves to silence rather than to "closed".
     openState?: OpenState
   }
+
+  /**
+   * TAC-560: true only on the pause-triggered warm-close turn.
+   *
+   * Reaches composePrompt rather than only the serializer because it does two
+   * things: it renders `## Closing this conversation`, and it REPLACES the
+   * category instructions (the row stores `acknowledgment`, whose own text
+   * asserts the guest signed off, which is false here).
+   */
+  warmClose?: boolean
   recentMessages?: RecentMessage[]
   // Mechanics this guest is currently eligible for. The serializer renders
   // a "What this guest can access" block when this is provided. An empty
@@ -515,6 +525,14 @@ export type GenerateMessageAttempt = {
   // TAC-554: this attempt's getting-to-know-you question, already composed
   // onto `body`. Kept per attempt so a trace shows what each one asked.
   intentionQuestion: string
+  /**
+   * TAC-560: did this reply close the guest's first conversation, in the way the
+   * venue's own voice rules describe? Required, so it costs nothing against the
+   * optional-field budget. handle-inbound.ts writes guests.warm_close_sent_at
+   * post-dispatch when it is true, which is what stops the pause timer sending a
+   * second close.
+   */
+  closedTheConversation: boolean
   // TAC-297: per-attempt commitment emission. Final attempt's value becomes
   // GenerateMessageResult.commitment.
   commitment: GenerateMessageCommitment
@@ -599,6 +617,14 @@ export type GenerateMessageResult = {
   // safety, the holding-message fallback, the crash card) has to SAY '' rather
   // than omit it — the same reason cancelsCommitmentId above is required.
   intentionQuestion: string
+  /**
+   * TAC-560: did this reply close the guest's first conversation, in the way the
+   * venue's own voice rules describe? Required, so it costs nothing against the
+   * optional-field budget. handle-inbound.ts writes guests.warm_close_sent_at
+   * post-dispatch when it is true, which is what stops the pause timer sending a
+   * second close.
+   */
+  closedTheConversation: boolean
   // TAC-554: whether the duplicate guard stripped a repeat of the question off
   // the end of the answer. Reported rather than silent because that guard edits
   // guest-facing text; a guard whose firing rate nobody can produce is how

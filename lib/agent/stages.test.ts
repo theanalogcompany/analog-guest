@@ -272,6 +272,7 @@ function makeCtx(overrides: Partial<RuntimeContext>): RuntimeContext {
     currentMessage: null,
     followupTrigger: null,
     scanArrival: null,
+    warmClose: false,
     conversationChannel: 'text' as const,
     pendingQuestion: null,
     recentMessages: [],
@@ -644,7 +645,7 @@ describe('classifyStage — 3-tier confidence routing (v1.11.0)', () => {
         category: 'casual_chatter',
         classifierConfidence: 0.2,
         reasoning: 'ambiguous',
-        promptVersion: 'v1.72.0',
+        promptVersion: 'v1.73.0',
         cacheReadTokens: 0,
         cacheWriteTokens: 0,
         crisisSafety: true,
@@ -665,7 +666,7 @@ describe('classifyStage — 3-tier confidence routing (v1.11.0)', () => {
         category: 'reply',
         classifierConfidence: 0.9,
         reasoning: 'clear',
-        promptVersion: 'v1.72.0',
+        promptVersion: 'v1.73.0',
         cacheReadTokens: 0,
         cacheWriteTokens: 0,
         crisisSafety: false,
@@ -690,7 +691,7 @@ describe('classifyStage — 3-tier confidence routing (v1.11.0)', () => {
         category: 'reply',
         classifierConfidence: 0.9,
         reasoning: 'clear',
-        promptVersion: 'v1.72.0',
+        promptVersion: 'v1.73.0',
         cacheReadTokens: 0,
         cacheWriteTokens: 0,
         crisisSafety: false,
@@ -710,7 +711,7 @@ describe('classifyStage — 3-tier confidence routing (v1.11.0)', () => {
         category: 'reply',
         classifierConfidence: 0.9,
         reasoning: 'clear',
-        promptVersion: 'v1.72.0',
+        promptVersion: 'v1.73.0',
         cacheReadTokens: 0,
         cacheWriteTokens: 0,
         crisisSafety: false,
@@ -731,7 +732,7 @@ describe('classifyStage — 3-tier confidence routing (v1.11.0)', () => {
         category: 'casual_chatter',
         classifierConfidence: 0.2,
         reasoning: 'ambiguous',
-        promptVersion: 'v1.72.0',
+        promptVersion: 'v1.73.0',
         cacheReadTokens: 0,
         cacheWriteTokens: 0,
         crisisSafety: false,
@@ -1046,6 +1047,7 @@ function makeGenerationResult(
     arrivalCapture: {},
     cancelsCommitmentId: '',
     intentionQuestion: '',
+    closedTheConversation: false,
     intentionQuestionDuplicateStripped: false,
     attempts: 1,
     attemptScores: [0.85],
@@ -7380,5 +7382,22 @@ describe('retrieveKnowledgeWithContextStage (TAC-547)', () => {
     expect(retrieveKnowledgeContextMock.mock.calls[1][0].query).toBe(
       `newer\n${CURRENT}`,
     )
+  })
+})
+
+// TAC-560: the wiring, because a mutant hardcoding `warmClose: false` here
+// survived all 648 tests in this file and serializers.test.ts. Every prompt test
+// passes its own `warmClose` straight to runtimeToProse, so nothing was checking
+// that buildAiRuntime carries the flag across — and with it dropped, the block
+// never renders in production and the whole feature ships inert with a green
+// suite. That is this repo's signature failure: the author's mutants ask what the
+// code computes, the survivors ask whether anything wires it in.
+describe('buildAiRuntime — warmClose (TAC-560)', () => {
+  it('carries the flag through to the AI runtime', () => {
+    expect(buildAiRuntime(makeCtx({ warmClose: true })).warmClose).toBe(true)
+  })
+
+  it('carries false through on every other turn', () => {
+    expect(buildAiRuntime(makeCtx({ warmClose: false })).warmClose).toBe(false)
   })
 })

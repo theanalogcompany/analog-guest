@@ -157,6 +157,12 @@ export interface FollowupTrigger {
     // one that routes its send through dispatchReply rather than
     // scheduleAndSend.
     | 'instagram_scan_arrival'
+    // TAC-560: a new guest's first conversation went quiet after a counter scan,
+    // and the venue is closing it warmly. The SECOND reason allowed on an
+    // Instagram conversation (handle-followup.ts refuses every other), and the
+    // second that routes its send through dispatchReply rather than
+    // scheduleAndSend.
+    | 'warm_close'
   // TAC-123: engine-aggregated secondary reasons for this run. The primary
   // already lives on `reason` above; this array carries the OTHER reasons that
   // also applied on this guest's tick, already mapped to the AI-side
@@ -196,6 +202,20 @@ export interface FollowupTrigger {
   instagramScanArrival?: {
     scanMessageId: string | null
     hadPriorConversation: boolean
+  }
+  /**
+   * TAC-560: set only when `reason === 'warm_close'`. Typed channel rather than
+   * metadata, for the reason perkMechanic, isOperatorDecline and
+   * instagramScanArrival are: it drives routing, so the schema is structural.
+   *
+   * `answersMessageId` is OUR last outbound row, the one the guest went quiet
+   * after. It is written to reply_to_message_id and handed to the Instagram
+   * reply check, because a reply naming no inbound is read as answering
+   * everything before it, which would silence the agent's own reply to whatever
+   * the guest says next.
+   */
+  warmClose?: {
+    answersMessageId: string
   }
   triggeredAt: Date
   metadata?: Record<string, unknown>
@@ -261,6 +281,12 @@ export interface RuntimeContext {
     hadPriorConversation: boolean
     hasRecordedVisit: boolean
   } | null
+  /**
+   * TAC-560: true only on the pause-triggered warm-close turn. Picks the
+   * `## Closing this conversation` block AND replaces the category instructions,
+   * so it reaches composePrompt rather than only the serializer.
+   */
+  warmClose: boolean
   // TAC-495: the conversation's channel. Set once by build-runtime-context.ts
   // via resolveConversationChannel, from the guest's identifiers, the inbound
   // message's channel and (TAC-469) the guest's last inbound channel. It picks

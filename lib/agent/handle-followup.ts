@@ -21,6 +21,7 @@ import type { CommitmentIdentity, SlotDropReason } from './pending-slots'
 import { dispatchReply } from './dispatch-reply'
 import { undeliveredAgentResult } from './handle-inbound'
 import { persistOrRegenQueuedDraft, scheduleAndSend } from './schedule-and-send'
+import { NEVER_SPLIT_RNG } from './warm-close'
 import {
   applyApprovalPolicyStage,
   operatorInstructionQuery,
@@ -139,9 +140,46 @@ function scanMessageIdOf(trigger: FollowupTrigger): string | null {
   return trigger.instagramScanArrival?.scanMessageId ?? null
 }
 
-function scanReplyCheckFor(
+/**
+ * The message this proactive send answers, or null.
+ *
+ * TAC-560 widened this from the scan row alone. Both reasons that reach
+ * dispatchReply have to name something, for the same reason: a reply naming no
+ * inbound is read by the Instagram reply check as answering everything before
+ * it, so a send that named nothing would silence the agent's own reply to
+ * whatever the guest says next.
+ *
+ * A warm close names OUR OWN last outbound, not an inbound, and that is the
+ * honest answer to "what is this a reply to": it is the message the guest went
+ * quiet after. The reply check compares timestamps and ids, not directions.
+ */
+function answeredMessageIdOf(trigger: FollowupTrigger): string | null {
+  return trigger.warmClose?.answersMessageId ?? scanMessageIdOf(trigger)
+}
+
+/**
+ * The reply check's input, or 'exempt'.
+ *
+ * A WARM CLOSE IS EXEMPT, and this is the one place the two dispatchReply reasons
+ * genuinely differ. That check asks "has this guest's MESSAGE already been
+ * answered", keyed on an inbound row; a warm close answers no message, so there
+ * is no inbound to hand it and an outbound id would resolve to nothing.
+ *
+ * What the check exists to prevent is handled upstream instead, and more
+ * directly: the processor's candidate scan takes the guest's NEWEST message,
+ * whatever it is. A reply staff typed by hand arrives as an echo, which is an
+ * outbound row that reached the guest, so it BECOMES the anchor and the pause
+ * restarts from it. Staff answering by hand delays the close rather than racing
+ * it.
+ *
+ * Note this is not the same as exempting the close from naming what it follows.
+ * It still sets reply_to_message_id (see answeredMessageIdOf), which is what
+ * stops it reading as an answer to everything before it.
+ */
+function replyCheckFor(
   trigger: FollowupTrigger,
 ): { inboundMessageId: string } | 'exempt' {
+  if (trigger.reason === 'warm_close') return 'exempt'
   const id = scanMessageIdOf(trigger)
   return id === null ? 'exempt' : { inboundMessageId: id }
 }
@@ -180,6 +218,21 @@ function triggerToCategory(
     // which is false for the common case here.
     case 'instagram_scan_arrival':
       return 'guest_arrived'
+    // TAC-560. `acknowledgment` and NOT a category of its own, deliberately: a
+    // new messages.category value needs a CHECK widening on `messages`, which is
+    // a hard stop (db/migrations/CLAUDE.md), and the close does not need one. It
+    // IS a sign-off, which is what that category means since migration 016.
+    //
+    // The cost is honest and recorded: a warm close is not separable by
+    // `category` in SQL. It is separable by guests.warm_close_sent_at and by the
+    // warm_close_sent PostHog event.
+    //
+    // The category's own INSTRUCTIONS would be false here ("The guest is
+    // wrapping up the thread or signing off" is untrue when the guest sent
+    // nothing), so composePrompt replaces them on this turn via the warmClose
+    // flag. See lib/ai/prompts/categories/warm-close.ts.
+    case 'warm_close':
+      return 'acknowledgment'
   }
 }
 
@@ -327,9 +380,34 @@ export async function handleFollowup(input: {
     // still re-derives it immediately before going out
     // (dispatch-instagram-reply.ts), so nothing here is trusting the window
     // rather than checking it.
+    //
+    // TAC-560 carves out the SECOND, on a stronger version of the same argument.
+    // A warm close fires TEN MINUTES after our own last message, which itself
+    // answered something the guest sent, so the window is not merely likely open,
+    // it cannot have closed. The send still re-derives it.
+    //
+    // The mirror of that carve-out is the refusal directly below it: ruled
+    // 2026-09-29, the warm close is INSTAGRAM ONLY for now, so a text
+    // conversation is refused here rather than routed. The SMS arm is a
+    // follow-up.
     const isInstagramScanArrival =
       input.trigger.reason === 'instagram_scan_arrival'
-    if (ctx.conversationChannel !== 'text' && !isInstagramScanArrival) {
+    const isWarmClose = input.trigger.reason === 'warm_close'
+    const routesThroughDispatchReply = isInstagramScanArrival || isWarmClose
+    if (isWarmClose && ctx.conversationChannel !== 'instagram') {
+      const reason = 'warm_close_is_instagram_only'
+      console.warn(
+        '[agent] warm close refused: not an Instagram conversation',
+        {
+          agentRunId,
+          guestId: ctx.guest.id,
+          channel: ctx.conversationChannel,
+        },
+      )
+      trace.update({ output: { status: 'refused', reason } })
+      return { status: 'refused', reason }
+    }
+    if (ctx.conversationChannel !== 'text' && !routesThroughDispatchReply) {
       const reason =
         ctx.conversationChannel === 'instagram'
           ? 'instagram_followups_are_manual'
@@ -1120,17 +1198,27 @@ export async function handleFollowup(input: {
       // on the reason makes the blast radius on the follow-up cron and the
       // Command Center button provably zero rather than argued. A test pins
       // that every other reason still calls scheduleAndSend.
-      const dispatched = isInstagramScanArrival
+      const dispatched = routesThroughDispatchReply
         ? await dispatchReply(ctx, gen.result, {
             skipHumanFeelDelay: true,
             reviewReason: demoBypassReviewReason,
+            // TAC-560: the warm close is ONE message, always. Rule 15 asks for
+            // one and so does this ticket's acceptance criteria, and
+            // resolveDispatchBubbles would otherwise split a two-sentence close
+            // on a fair coin about half the time. NEVER_SPLIT_RNG removes the
+            // coin rather than tuning it, using the rng parameter TAC-319 built
+            // for exactly this kind of caller.
+            //
+            // A scan greeting keeps the ordinary coin: nothing in TAC-536 asks
+            // for one bubble.
+            ...(isWarmClose ? { rng: NEVER_SPLIT_RNG } : {}),
             // The scan row. NOT OPTIONAL: a reply naming no inbound is read by
             // the reply check as answering everything before it, so a greeting
             // that named nothing would silence the agent's own reply to
             // whatever the guest says next. Same reason the holding message
             // passes it.
-            answersInboundId: scanMessageIdOf(input.trigger) ?? undefined,
-            replyCheck: scanReplyCheckFor(input.trigger),
+            answersInboundId: answeredMessageIdOf(input.trigger) ?? undefined,
+            replyCheck: replyCheckFor(input.trigger),
             onUndelivered: 'card',
           })
         : {

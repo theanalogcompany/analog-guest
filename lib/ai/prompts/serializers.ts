@@ -684,6 +684,36 @@ function formatScanArrival(
   ].join('\n')
 }
 
+/**
+ * TAC-560: the pause-triggered warm close.
+ *
+ * WHY A BLOCK AT ALL, when Le Mil's rule 15 already describes this close: that
+ * rule's own trigger clause is "(they say thanks, ok, or signal they're done)".
+ * On a pause the guest signalled NOTHING, so the rule's condition is unmet and
+ * the model can read it as not applying. This block supplies the premise the
+ * rule needs; the rule supplies the three topics and the voice.
+ *
+ * IT NAMES NO TOPICS. They are Le Mil's choice, carried in that venue's own
+ * voice rules, and restating them here would ship one venue's product decision
+ * into every venue's prompt.
+ *
+ * Every line is true on this turn, which is the point: "it has gone quiet" and
+ * "nothing here is waiting on an answer from them" are both established before
+ * the processor claims the close (the question deferral is what makes the second
+ * one true). Handing the model a false statement as fact is the TAC-484 /
+ * TAC-502 failure class.
+ *
+ * No em dash: R3 bans them in output and the prompt should not model one.
+ */
+function formatWarmClose(): string {
+  return [
+    '## Closing this conversation',
+    "This is the guest's first conversation with the venue, and it has gone quiet. They have not replied for a while, and nothing here is waiting on an answer from them.",
+    'Send the warm close your voice rules describe for a first conversation that is winding down: let them know the line is open, and name the things they can message about anytime, in your own words.',
+    'One short message. Do not ask a question, do not open a new topic, and do not mention the pause or that they stopped replying.',
+  ].join('\n')
+}
+
 function formatRightNow(today: NonNullable<RuntimeContext['today']>): string {
   // TAC-522: the calendar sits directly under the date so the two date facts
   // are together, and the status line stays last where TAC-301's
@@ -1728,6 +1758,20 @@ export function runtimeToProse(
   // accidental.
   if (runtime.scanArrival) {
     blocks.push(formatScanArrival(runtime.scanArrival))
+  }
+  // TAC-560: beside `## Guest just arrived` because both are facts about this
+  // moment, and above everything else in the user prompt for the same reason
+  // that one is: the turn's own situation comes before the history it draws on.
+  //
+  // The two are mutually exclusive in practice (a scan greeting is the FIRST
+  // thing said to a guest, a warm close the last), but nothing enforces that and
+  // nothing needs to: they make different claims and neither contradicts the
+  // other.
+  //
+  // The POSITION is a choice, not a measurement, exactly as TAC-536's is. The
+  // full-order test in serializers.test.ts exists so moving it is deliberate.
+  if (runtime.warmClose === true) {
+    blocks.push(formatWarmClose())
   }
   // THE-232: Operator instruction block sits above runtime context
   // (mechanics, last visit, recent conversation) so Sonnet treats it as the

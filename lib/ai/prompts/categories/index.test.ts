@@ -18,6 +18,7 @@ import { PERSONAL_HISTORY_QUESTION_INSTRUCTIONS } from './personal-history-quest
 import { RECOMMENDATION_REQUEST_INSTRUCTIONS } from './recommendation-request'
 import { REPLY_INSTRUCTIONS } from './reply'
 import { UNKNOWN_INSTRUCTIONS } from './unknown'
+import { WARM_CLOSE_INSTRUCTIONS } from './warm-close'
 import { WELCOME_INSTRUCTIONS } from './welcome'
 
 // THE-228 added 4 new categories. Below the round-trip table makes the
@@ -873,5 +874,80 @@ describe('the scan-greeting instruction (TAC-536)', () => {
         }),
       ).not.toMatch(/[—–]/)
     }
+  })
+})
+
+// TAC-560: the pause-triggered warm close REPLACES the category instructions.
+describe('categoryInstructionsFor — warm close (TAC-560)', () => {
+  it('replaces the acknowledgment instructions entirely', () => {
+    // NOT layered over. The row stores `category: 'acknowledgment'` so no
+    // messages.category widening is needed (that would be a hard stop), but that
+    // category's own text is FALSE on this turn: the guest sent nothing, so they
+    // are not "wrapping up the thread or signing off", and "do not turn the
+    // closer into a fresh exchange" fights naming what the guest can message
+    // about. Handing the model a false premise as fact is the TAC-484 / TAC-502
+    // failure class.
+    const out = categoryInstructionsFor(
+      'acknowledgment',
+      'instagram',
+      null,
+      true,
+    )
+    expect(out).toBe(WARM_CLOSE_INSTRUCTIONS)
+    expect(out).not.toContain('wrapping up the thread')
+    expect(out).not.toContain('do not turn the closer into a fresh exchange')
+  })
+
+  it('leaves every other turn untouched', () => {
+    // Defaults false, so no existing call site changes.
+    expect(categoryInstructionsFor('acknowledgment', 'instagram')).toBe(
+      ACKNOWLEDGMENT_INSTRUCTIONS,
+    )
+    expect(
+      categoryInstructionsFor('acknowledgment', 'instagram', null, false),
+    ).toBe(ACKNOWLEDGMENT_INSTRUCTIONS)
+  })
+
+  it('beats the guest_arrived exception when both are somehow set', () => {
+    // Not reachable in production (a scan greeting is the first thing said to a
+    // guest and a warm close the last), but the order has to be decided rather
+    // than accidental, and the close is the more specific claim about this turn.
+    expect(
+      categoryInstructionsFor(
+        'guest_arrived',
+        'instagram',
+        { hadPriorConversation: true },
+        true,
+      ),
+    ).toBe(WARM_CLOSE_INSTRUCTIONS)
+  })
+
+  it('names no channel, so it needs no channel variant', () => {
+    // The scope guard this mirrors: the copy says nothing about how the guest is
+    // reaching us, so there is nothing to swap and both channels are identical.
+    expect(categoryInstructionsFor('acknowledgment', 'text', null, true)).toBe(
+      categoryInstructionsFor('acknowledgment', 'instagram', null, true),
+    )
+    for (const claim of [
+      'text',
+      'SMS',
+      'DM',
+      'number',
+      'Instagram',
+      'iMessage',
+    ]) {
+      expect(WARM_CLOSE_INSTRUCTIONS, claim).not.toContain(claim)
+    }
+  })
+
+  it("names no topic, so the venue's own voice rules carry them", () => {
+    for (const leaked of ['beans', 'specials', 'events', 'menu', 'coffee']) {
+      expect(WARM_CLOSE_INSTRUCTIONS, leaked).not.toContain(leaked)
+    }
+  })
+
+  it('models no em dash', () => {
+    expect(WARM_CLOSE_INSTRUCTIONS).not.toContain('—')
+    expect(WARM_CLOSE_INSTRUCTIONS).not.toContain('–')
   })
 })

@@ -84,6 +84,8 @@ export function buildCrisisSafetyResult(): GenerateMessageResult {
     // extra. Stated rather than omitted — the field is required for exactly
     // this reason.
     intentionQuestion: '',
+    // TAC-560: a fixed crisis reply is never the warm close.
+    closedTheConversation: false,
     intentionQuestionDuplicateStripped: false,
     attempts: 1,
     attemptScores: [0],
@@ -102,6 +104,8 @@ export function buildCrisisSafetyResult(): GenerateMessageResult {
         arrivalCapture: {},
         cancelsCommitmentId: '',
         intentionQuestion: '',
+        // TAC-560: a fixed crisis reply is never the warm close.
+        closedTheConversation: false,
       },
     ],
     systemPrompt: '',
