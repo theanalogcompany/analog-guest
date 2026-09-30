@@ -52,6 +52,9 @@
 // and that stays QA: Device per the ticket.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+// Derived from the live constant: a stale fixture literal ships green, and
+// nothing fails (see .claude/rules/prompt-versioning.md).
+import { PROMPT_VERSION } from '@/lib/ai/prompts/system-template'
 
 import type { GenerateMessageResult } from '@/lib/ai'
 import { createPendingRowsFake } from './testing/pending-rows-fake'
@@ -194,7 +197,7 @@ function generation(
     attemptHistory: [],
     systemPrompt: '',
     userPrompt: '',
-    promptVersion: 'v1.77.0',
+    promptVersion: PROMPT_VERSION,
     cacheReadTokens: 0,
     cacheWriteTokens: 0,
     dashViolationPersisted: false,

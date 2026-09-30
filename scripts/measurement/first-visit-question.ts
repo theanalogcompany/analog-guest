@@ -473,6 +473,7 @@ async function main(): Promise<void> {
           reasoning: 'tac558 measurement: category held fixed across arms',
           crisisSafety: false,
           correctsPendingReply: false,
+          followUpWorthy: false,
         },
       }
 

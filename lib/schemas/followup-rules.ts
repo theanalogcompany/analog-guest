@@ -18,6 +18,29 @@ export const FOLLOWUP_REASONS = [
 
 export type EngineFollowupReason = (typeof FOLLOWUP_REASONS)[number]
 
+/**
+ * TAC-386: every value the `followup_log.reason` CHECK accepts.
+ *
+ * A SUPERSET of FOLLOWUP_REASONS, and the distinction is the point. That
+ * constant means "reasons the daily engine can DETECT and dispatch", and the
+ * engine's gate, its detectors and its dedup switches are all exhaustive over
+ * it. This one means "reasons that can appear in the audit table", which also
+ * covers rows written by processors the daily engine knows nothing about.
+ *
+ * Keeping them separate is what lets an inquiry follow-up write its audit row,
+ * and so count toward `weekly_cap`, without being added to four exhaustive
+ * switches that have no branch to give it.
+ *
+ * MUST match migration 066's CHECK list exactly. That is asserted against the
+ * migration file itself in followup-rules.test.ts, not left to a comment.
+ */
+export const FOLLOWUP_LOG_REASONS = [
+  ...FOLLOWUP_REASONS,
+  'inquiry_followup',
+] as const
+
+export type FollowupLogReason = (typeof FOLLOWUP_LOG_REASONS)[number]
+
 // Time-of-day rendered as "HH:MM" (24-hour). Used by the quiet-hours window.
 // Validated as a literal string here so the JSONB column accepts the exact
 // shape the engine reads; conversion to a number-of-minutes-since-midnight
@@ -98,6 +121,21 @@ export const FollowupRulesSchema = z.object({
   // default below; followup-rules.test.ts pins that 028's own eleven values are
   // unchanged and asserts this key separately.
   warm_close_pause_minutes: z.number().int().positive().default(10),
+
+  // TAC-386: the per-venue kill switch for the inquiry follow-up, matching the
+  // three per-reason toggles above. Approved 2026-09-30 without a ruling asking
+  // for one: this is the most forward message the agent sends, and an operator
+  // should be able to switch it off for one venue without touching the others.
+  //
+  // It lives here for the reason warm_close_pause_minutes does, and inherits the
+  // same tension: this column has become the per-venue timing-and-outreach bag.
+  // Read by lib/followups/inquiry-followup-engine.ts, NOT by canSendFollowup,
+  // which this trigger never goes through.
+  //
+  // NOT IN MIGRATION 028's BACKFILL LITERAL, because it postdates it. Rows
+  // written before this key existed do not carry it and take the default;
+  // followup-rules.test.ts pins 028's own eleven values separately.
+  inquiry_followup_enabled: z.boolean().default(true),
 })
 
 export type FollowupRules = z.infer<typeof FollowupRulesSchema>
@@ -122,6 +160,7 @@ export const FOLLOWUP_RULES_DEFAULT: FollowupRules = {
   quiet_hours_end_local: '08:00',
   cron_hour_local: 10,
   warm_close_pause_minutes: 10,
+  inquiry_followup_enabled: true,
 }
 
 /**

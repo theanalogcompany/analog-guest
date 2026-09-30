@@ -170,6 +170,12 @@ export interface FollowupTrigger {
     // second that routes its send through dispatchReply rather than
     // scheduleAndSend.
     | 'warm_close'
+    // TAC-386: the guest asked something our answer helps them DO, and we are
+    // checking a few venue-hours later that it worked out. The THIRD reason
+    // allowed on an Instagram conversation (handle-followup.ts refuses every
+    // other), and the third that routes its send through dispatchReply rather
+    // than scheduleAndSend.
+    | 'inquiry_followup'
   // TAC-123: engine-aggregated secondary reasons for this run. The primary
   // already lives on `reason` above; this array carries the OTHER reasons that
   // also applied on this guest's tick, already mapped to the AI-side
@@ -224,6 +230,29 @@ export interface FollowupTrigger {
   warmClose?: {
     answersMessageId: string
   }
+  /**
+   * TAC-386: set only when `reason === 'inquiry_followup'`. Typed channel rather
+   * than metadata, for the reason every field above is: it drives rendering and
+   * routing, so the schema is structural.
+   *
+   * `question` is the guest's own words, stored when the row was armed.
+   * `answer` is what WE told them, resolved at DISPATCH from the outbound that
+   * replied to the question rather than stored alongside it, so an operator who
+   * edited the card is reflected instead of a stale copy. Both render verbatim:
+   * the message has to reference the specific thing they asked and what we
+   * suggested (ruled 2026-09-30), and no paraphrase survives the round trip.
+   *
+   * `answerMessageId` is OUR answer's row, written to reply_to_message_id. It
+   * names an OUTBOUND for TAC-560's reason: a send naming nothing is read by the
+   * Instagram reply check as answering everything before it, and the honest
+   * answer to "what does this follow" is our own answer, not the guest's
+   * question, which we already replied to three hours ago.
+   */
+  inquiryFollowup?: {
+    question: string
+    answer: string
+    answerMessageId: string
+  }
   triggeredAt: Date
   metadata?: Record<string, unknown>
 }
@@ -260,6 +289,9 @@ export interface Classification {
   // TAC-397: independent of category — see lib/ai/types.ts's
   // ClassifyMessageResult.correctsPendingReply for the full contract.
   correctsPendingReply: boolean
+  // TAC-386: independent of category — see lib/ai/types.ts's
+  // ClassifyMessageResult.followUpWorthy for the full contract.
+  followUpWorthy: boolean
   // Model id and token usage for the classify call, carried so the orchestrator
   // can price the `classify` Langfuse generation. Passed through unmodified from
   // ClassifyMessageResult — unlike `category`, these describe the call that was
@@ -294,6 +326,14 @@ export interface RuntimeContext {
    * so it reaches composePrompt rather than only the serializer.
    */
   warmClose: boolean
+  /**
+   * TAC-386: the question and our answer, on an inquiry-follow-up turn only.
+   * Null on every other turn. Reaches composePrompt rather than only the
+   * serializer, because like the warm close it does two things: it renders
+   * `## Following up on what they asked` AND replaces the category
+   * instructions, whose own text tells the model to check in on a past visit.
+   */
+  inquiryFollowup: { question: string; answer: string } | null
   // TAC-495: the conversation's channel. Set once by build-runtime-context.ts
   // via resolveConversationChannel, from the guest's identifiers, the inbound
   // message's channel and (TAC-469) the guest's last inbound channel. It picks

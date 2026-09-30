@@ -82,6 +82,23 @@ const ALLOWED_IMPORTERS = [
   // else, but it sits under app/ rather than inside the provider folder, so
   // the guard sees it and it is named here deliberately.
   join('app', 'api', 'webhooks', 'instagram', 'route.ts'),
+  // TAC-386. The inquiry follow-up's scheduler and its cron processor. Both
+  // import the WINDOW and nothing else: no send, no send target, no reply check.
+  //
+  // They are the first callers that genuinely need it rather than inheriting it.
+  // TAC-536 and TAC-560 both deliberately skip the window check, on the argument
+  // that they fire minutes after something the guest did so it cannot have shut.
+  // This one fires HOURS later, and up to a day later when the venue-hours roll
+  // pushes it into the next open period, so that argument does not hold: the
+  // scheduler refuses to arm a row whose moment would land past the window, and
+  // the processor resolves a row whose window shut while it waited.
+  //
+  // The alternative was to let dispatch-instagram-reply.ts refuse the send,
+  // which needs no entry here. Rejected because it cannot make the ARM-time
+  // decision at all, and because it spends a model call to learn something the
+  // stored timestamps already say.
+  join('lib', 'agent', 'schedule-inquiry-followup.ts'),
+  join('lib', 'followups', 'inquiry-followup-engine.ts'),
 ]
 
 function sourceFiles(): string[] {

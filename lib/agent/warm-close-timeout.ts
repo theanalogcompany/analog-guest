@@ -40,6 +40,8 @@ import {
   captureWarmCloseSent,
   captureWarmCloseSkipped,
 } from '@/lib/analytics/posthog'
+import { recordProactiveSend } from '@/lib/followups/inquiry-followup-store'
+import { isTooSoonAfterProactive } from '@/lib/followups/proactive-spacing'
 import { isQuietHour } from './followup-rules'
 import type { AgentResult } from './types'
 import { handleFollowup } from './handle-followup'
@@ -89,6 +91,13 @@ export type WarmCloseSkipReason =
   | 'card_pending'
   /** Not an Instagram conversation. */
   | 'not_instagram'
+  /**
+   * TAC-386: a proactive message reached this guest within the last hour, so
+   * the close waits rather than stacking on it. Transient; it comes round again
+   * inside the two-hour bound.
+   */
+  | 'too_soon_after_proactive'
+
   /** Another tick claimed it first. */
   | 'claim_lost'
   | 'guest_unreadable'
@@ -335,6 +344,14 @@ async function considerCandidate(
     return 'card_pending'
   }
 
+  // TAC-386: no two proactive messages within the hour (ruled 2026-09-30). This
+  // sits with `card_pending` below rather than with the permanent checks above
+  // because it is a DELAY, not a refusal: the close comes round again on a later
+  // tick inside its own two-hour bound.
+  if (isTooSoonAfterProactive(facts.data.lastProactiveSendAt, now)) {
+    return 'too_soon_after_proactive'
+  }
+
   // Claim last, immediately before generating. Everything above could have said
   // "never"; from here on the guest's one close is spent.
   const claim = await claimWarmClose(supabase, candidate.guestId, now)
@@ -387,6 +404,13 @@ async function considerCandidate(
       agentStatus: result.status,
     })
     return 'claim_lost'
+  }
+
+  // TAC-386: the spacing marker, so the other two proactive mechanisms can see
+  // this close. Only on a confirmed send: a `queued` card is an operator's
+  // decision and an operator can see the whole thread.
+  if (result.status === 'sent') {
+    await recordProactiveSend(supabase, candidate.guestId, now)
   }
 
   await captureWarmCloseSent({

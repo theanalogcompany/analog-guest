@@ -438,6 +438,11 @@ async function main(): Promise<void> {
           reasoning: 'tac567 measurement: category held fixed across arms',
           crisisSafety: false,
           correctsPendingReply: false,
+          // TAC-386 added this after this harness was written. False here: the
+          // follow-up block it gates is a different turn shape from a first-visit
+          // counter conversation, and rendering it would put a second authority on
+          // what to ask into a run measuring exactly that.
+          followUpWorthy: false,
         },
       }
 

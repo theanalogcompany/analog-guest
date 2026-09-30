@@ -19,6 +19,7 @@ import { RECOMMENDATION_REQUEST_INSTRUCTIONS } from './recommendation-request'
 import { REPLY_INSTRUCTIONS } from './reply'
 import { UNKNOWN_INSTRUCTIONS } from './unknown'
 import { WARM_CLOSE_INSTRUCTIONS } from './warm-close'
+import { INQUIRY_FOLLOWUP_INSTRUCTIONS } from './inquiry-followup'
 import { WELCOME_INSTRUCTIONS } from './welcome'
 
 // THE-228 added 4 new categories. Below the round-trip table makes the
@@ -977,5 +978,108 @@ describe('categoryInstructionsFor — warm close (TAC-560)', () => {
   it('models no em dash', () => {
     expect(WARM_CLOSE_INSTRUCTIONS).not.toContain('—')
     expect(WARM_CLOSE_INSTRUCTIONS).not.toContain('–')
+  })
+})
+
+// TAC-386: the THIRD per-turn exception. An inquiry follow-up stores
+// `category: 'follow_up'`, so it needs no new messages.category value and
+// therefore no migration against a high-stakes table, but that category's own
+// text is written for a message days after a VISIT.
+describe('categoryInstructionsFor — inquiry follow-up (TAC-386)', () => {
+  it('replaces the follow_up instructions rather than layering over them', () => {
+    const out = categoryInstructionsFor(
+      'follow_up',
+      'instagram',
+      null,
+      false,
+      true,
+    )
+    expect(out).toBe(INQUIRY_FOLLOWUP_INSTRUCTIONS)
+    // The specific premise ruling 11 forbids. The follow_up copy is written
+    // around a visit having happened; this turn knows only what the guest asked
+    // and what we said.
+    expect(out).not.toBe(
+      categoryInstructionsFor('follow_up', 'instagram', null, false, false),
+    )
+  })
+
+  it('leaves every other turn untouched', () => {
+    // Defaults false, so no existing call site changes.
+    const plain = categoryInstructionsFor('follow_up', 'instagram')
+    expect(categoryInstructionsFor('follow_up', 'instagram', null, false)).toBe(
+      plain,
+    )
+    expect(
+      categoryInstructionsFor('follow_up', 'instagram', null, false, false),
+    ).toBe(plain)
+  })
+
+  it('loses to the warm close when both are somehow set', () => {
+    // Not reachable: each is set only on its own trigger reason, and the
+    // processors will not let two proactive sends land together anyway. But the
+    // order has to be decided rather than accidental, and the warm close is
+    // checked first because it is the more specific claim about a turn where the
+    // guest sent nothing at all.
+    expect(
+      categoryInstructionsFor('follow_up', 'instagram', null, true, true),
+    ).toBe(WARM_CLOSE_INSTRUCTIONS)
+  })
+
+  it('names no channel, so it needs no channel variant', () => {
+    expect(
+      categoryInstructionsFor('follow_up', 'text', null, false, true),
+    ).toBe(categoryInstructionsFor('follow_up', 'instagram', null, false, true))
+    for (const claim of [
+      'text',
+      'SMS',
+      'DM',
+      'number',
+      'Instagram',
+      'iMessage',
+    ]) {
+      expect(INQUIRY_FOLLOWUP_INSTRUCTIONS, claim).not.toContain(claim)
+    }
+  })
+
+  it('names no topic and no example phrase', () => {
+    // Both arrive as DATA in the serializer's block, because they differ on
+    // every send. A worked example here would ship one venue's answer into
+    // every venue's prompt, and a quoted phrase would be copied verbatim.
+    for (const leaked of [
+      'parking',
+      'beans',
+      'brew',
+      'dog',
+      'menu',
+      'coffee',
+    ]) {
+      expect(INQUIRY_FOLLOWUP_INSTRUCTIONS, leaked).not.toContain(leaked)
+    }
+  })
+
+  // Ruled 2026-09-30: an earlier draft opened "Earlier today", false on every
+  // send that rolled to the next open period, which is most of them.
+  it('makes no claim about when the question was asked', () => {
+    for (const timing of [
+      'Earlier today',
+      'earlier today',
+      'this morning',
+      'hours ago',
+      'a few hours',
+    ]) {
+      expect(INQUIRY_FOLLOWUP_INSTRUCTIONS, timing).not.toContain(timing)
+    }
+    expect(INQUIRY_FOLLOWUP_INSTRUCTIONS).toContain('recently')
+  })
+
+  it('never asserts or asks about a visit', () => {
+    for (const visit of ['came in', 'came by', 'your visit', 'stopped by']) {
+      expect(INQUIRY_FOLLOWUP_INSTRUCTIONS, visit).not.toContain(visit)
+    }
+  })
+
+  it('models no em dash', () => {
+    expect(INQUIRY_FOLLOWUP_INSTRUCTIONS).not.toContain('—')
+    expect(INQUIRY_FOLLOWUP_INSTRUCTIONS).not.toContain('–')
   })
 })
