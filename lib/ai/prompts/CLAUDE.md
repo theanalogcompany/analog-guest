@@ -133,15 +133,32 @@ block-order test is the only thing that catches a move past it.
   greeting cron, and TAC-536's carry-forward reaches `visitConfirmedAt`, which goes to
   intention arming and never to the prompt. Full reasoning is the v1.75.0 header in
   `system-template.ts`.
-- **The RECOGNITION half of that rule works and the WARM half has never held, across four
-  measured runs.** Recognition went 0/20 in the control to 15/20 and 16/20 in the treatment,
-  bare labels 15/20 to 0/20. The warm half about the guest has been 9/20, 7/20 and 7/20
-  against a bar of 18, and **three separate prohibitions each displaced a phrase rather than
-  supplying the warmth**: banning the bare label produced "your usual" at 43%, banning the
-  well-wish produced "that one keeps ..." at 55%, and widening the length guide produced
-  "coming back to" at 40%. Same shape as TAC-334 (naming "good pick" produced "good call")
-  and TAC-525 (a narrow prohibition moved the fabrication). **Do not add a fourth
-  prohibition without new evidence.**
+- **SHIPPED AS MEASURED, and the warm half never met its bar.** Ruled 2026-09-30 after four
+  runs: ship as-is. Recognition went 0/20 and 4/20 in the control to 15/20 and 16/20 in the
+  treatment and bare labels 15/20 to 0/20, which is the deliverable. The warm half about the
+  guest scored 9/20, 7/20 and 7/20 against a bar of 18 and **shipped under its bar on
+  Jaipal's reading of the bodies**, not on a rate. Recorded that way deliberately: this rule
+  is not covered by a passing metric, so a later regression here will not announce itself.
+- **THE WARMTH JUDGE UNDER-COUNTS, and the disagreement is compositional rather than a
+  matter of degree.** Jaipal read 8 of 20 run-4 treatment replies as carrying real warmth
+  about the guest (freq-01, 02, 03, 08, 10, 12, 17, 19) where the judge scored 7, and the
+  two sets **overlap on only four**. The judge missed a whole shape: warmth phrased as being
+  glad about something the guest did ("glad you keep coming back to it", "glad it's yours",
+  "glad you're keeping it going"), which is exactly what ruling 3 asked for. So the 7/20
+  figure is a floor on a dimension this judge reads unreliably, and **do not re-measure this
+  dimension without fixing that first** — a sharper item-versus-pick pass was already needed
+  and landed, and this is the same weakness one axis over.
+- **Three prohibitions each DISPLACED a phrase rather than supplying the warmth**: banning
+  the bare label produced "your usual" at 43%, banning the well-wish produced "that one
+  keeps ..." at 55%, and widening the length guide produced "coming back to" at 40%. Same
+  shape as TAC-334 (naming "good pick" produced "good call") and TAC-525 (a narrow
+  prohibition moved the fabrication). **Do not add a fourth prohibition without new
+  evidence.**
+- **FOLLOW-UP, NOT FIXED: the count ban against the widened length guide.** The single count
+  breach ("three times and counting") is accepted for now and the guide stays as it is, so
+  **the count ban ships measured at 1/20 rather than 0/20**. Whoever picks this up should
+  know the two were measured separately and interact: the ban was clean at 11 median words
+  and broke at 15.
 - **The length guide was NOT the constraint, and that was measured rather than argued.**
   The obvious reading is that `## Length` mirrors a four-word message so the reply
   compresses and the model drops whichever half is not required. Le Mil's `lengthGuide` was
@@ -151,7 +168,9 @@ block-order test is the only thing that catches a move past it.
   second on a well-wish or an item detail**, so the model had the room and chose otherwise.
   **Do not count clauses with `splitIntoSentences`** — that is TAC-319's dispatch splitter
   and requires a capitalised opener after the terminal punctuation, so at a lowercase-writing
-  venue it returns 1 for every reply and is blind to the question.
+  venue it returns 1 for every reply and is blind to the question. The guide was RULED to
+  stay widened, so the two-sentence permission is live at Le Mil's and the count-ban
+  interaction above rides with it.
 - **Widening the length guide BROKE the count ban, which had been clean.** Count claims were
   0/20 at 11 median words and 1 genuine breach at 15 ("three times and counting"). More room
   is more room for a number, so R21's inline count ban and any future length change have to
