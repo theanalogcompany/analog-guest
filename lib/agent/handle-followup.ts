@@ -349,15 +349,13 @@ export async function handleFollowup(input: {
       correctsPendingReply: false,
     }
 
-    // Retrieve corpus
+    // Load the static voice pack (decision 0007; span name kept for
+    // Langfuse continuity)
     const retrieveSpan = trace.span('retrieve', { triggerReason: input.trigger.reason })
     try {
       ctx.corpus = await retrieveCorpusStage(ctx)
       retrieveSpan.end({
-        output: {
-          matchCount: ctx.corpus.length,
-          topSimilarity: ctx.corpus.length > 0 ? Math.max(...ctx.corpus.map((c) => c.similarity)) : 0,
-        },
+        output: { packSize: ctx.corpus.length },
         content: trace.captureContent ? buildCorpusContent(ctx.corpus) : undefined,
       })
       console.log('[agent] followup corpus retrieved', {

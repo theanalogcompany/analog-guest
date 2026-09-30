@@ -69,7 +69,7 @@ vi.mock('./alerts', () => ({
   capturePostHogEvent: vi.fn(),
 }))
 vi.mock('@/lib/rag', () => ({
-  retrieveContext: vi.fn(),
+  loadVoicePack: vi.fn(),
   retrieveKnowledgeContext: vi.fn(),
 }))
 vi.mock('@/lib/ai', () => ({
@@ -89,7 +89,6 @@ vi.mock('@/lib/analytics/posthog', () => ({
   captureCommitmentDedupCheckFailed: vi.fn(),
   captureCommitmentDeduped: vi.fn(),
   captureCommitmentEscalated: vi.fn(),
-  captureCorpusRetrievalBelowThreshold: vi.fn(),
   captureDashViolationPersisted: vi.fn(),
   captureDemoBypassedApprovalGate: vi.fn(),
   captureEmojiDirectiveViolated: vi.fn(),
@@ -101,7 +100,6 @@ vi.mock('@/lib/analytics/posthog', () => ({
   captureVoiceFidelityLow: vi.fn(),
   CLASSIFICATION_CONFIDENCE_LOW_THRESHOLD: 0.7,
   CLASSIFICATION_CONFIDENCE_REROUTE_THRESHOLD: 0.3,
-  CORPUS_TOP_SIMILARITY_LOW_THRESHOLD: 0.5,
   VOICE_FIDELITY_LOW_THRESHOLD: 0.5,
 }))
 

@@ -17,7 +17,7 @@ import {
 } from '@/lib/guests/context'
 import { sendCommitmentArrivalPush } from '@/lib/notifications/send-commitment-push'
 import { sendDraftFlaggedPush, shouldSendDraftFlaggedPush } from '@/lib/notifications/send'
-import { startAgentTrace, type AgentSpanUpdate } from '@/lib/observability'
+import { startAgentTrace } from '@/lib/observability'
 import { resolveCancellation } from '@/lib/schemas/guest-commitment'
 import { parseMessageChannel } from '@/lib/schemas/message-channel'
 import { capturePostHogEvent, fireRedAlert } from './alerts'
@@ -59,20 +59,11 @@ import {
   GENERATION_FAILED_REVIEW_REASON,
   KNOWLEDGE_GAP_WINDOW_MS,
   mayAutoSendAfterClassification,
-  type GroundingBackstopResult,
-  type MechanicOfferBackstopResult,
-  type CancellationBackstopResult,
-  type ClosedVenueArrivalBackstopResult,
-  type ProsePromiseBackstopResult,
   retrieveCorpusStage,
   retrieveKnowledgeWithContextStage,
   shouldRetrieveKnowledge,
-  verifyGroundingStage,
-  verifyMechanicOfferStage,
-  verifyCancellationClaimStage,
-  verifyClosedVenueArrivalStage,
-  verifyProsePromiseStage,
 } from './stages'
+import { runPostSendChecks } from './post-send-checks'
 import { buildContextQuery } from './retrieval-context'
 import {
   buildCorpusContent,
@@ -677,11 +668,12 @@ export async function handleInbound(
   //
   // What the await bought and what replaces it: the ordering guard against
   // the retry's OWN typing_on. That guard is weaker now and deliberately so.
-  // A retried run is at least loadInbound + COALESCE_SETTLE_MS + classify
-  // away from showing dots, where this is a call already in flight, so the
-  // race is overwhelmingly won — and losing it costs a retry's dots, not a
-  // reply. The ordering that still holds unconditionally is the one inside
-  // `stopTypingUnlessSent`: `off` never overtakes this turn's own `on`.
+  // A retried run is at least loadInbound + classify away from showing dots
+  // (the settle no longer adds margin at COALESCE_SETTLE_MS = 0), where this
+  // is a call already in flight, so the race is still overwhelmingly won —
+  // and losing it costs a retry's dots, not a reply. The ordering that still
+  // holds unconditionally is the one inside `stopTypingUnlessSent`: `off`
+  // never overtakes this turn's own `on`.
   waitUntil(stopTypingUnlessSent(turn, result))
   await closeCoalescedTurn(turn, agentRunId, coalesceDeps, result)
   return result
@@ -941,15 +933,16 @@ async function runInboundTurn(
     // guest first exist, and before buildRuntimeContext, which is the first
     // expensive step (a Voyage embed and retrieval).
     //
-    // Skipped entirely on an extension: we already settled, and a second
-    // 8-second wait for a message that has ALREADY arrived is pure latency.
+    // Skipped entirely on an extension: the turn already opened, and
+    // re-opening for a message that has ALREADY arrived is pure waste (and,
+    // when the settle constant is nonzero, a second wait on top).
     //
     // Keyed on extension depth, NOT on `turn.claim === null`. Those differ on
     // exactly one path and it is a real one: a run that failed open (the store
-    // was unreachable, so it holds no claim) would otherwise settle a second
-    // time on every extension — two 8s waits in one turn — and could LOSE the
-    // claim mid-turn on the retry, discarding a generation it had already
-    // paid for. Found in code review; the old comment was false for it.
+    // was unreachable, so it holds no claim) would otherwise re-open on every
+    // extension and could LOSE the claim mid-turn on the retry, discarding a
+    // generation it had already paid for. Found in code review; the old
+    // comment was false for it.
     let inbound = invoked
     if (entryExtensionDepth === 0) {
       const opened = await openCoalescedTurn(
@@ -1095,15 +1088,15 @@ async function runInboundTurn(
       return { status: 'failed', stage: 'context_build', error: errMsg }
     }
 
-    // TAC-540 part C: voice-corpus retrieval starts HERE, alongside
+    // TAC-540 part C: the voice-pack load starts HERE, alongside
     // classification, and is awaited at its old position further down.
     //
     // SAFE BECAUSE retrieveCorpusStage NEVER READS ctx.classification —
-    // checked line by line, not assumed. Its query is
-    // `ctx.currentMessage?.body` (TAC-420 AC 1), and everything else it
-    // touches (ctx.venue, ctx.guest, ctx.agentRunId) is set before this
-    // point. So the query it builds is identical whichever order the two run
-    // in, and classifyStage mutates nothing for it to race on.
+    // checked line by line, not assumed. Since decision 0007 it reads ONLY
+    // `ctx.venue.id` (the pack is static per venue; there is no query at
+    // all), which is set before this point. So its result is identical
+    // whichever order the two run in, and classifyStage mutates nothing for
+    // it to race on.
     //
     // NOT `Promise.allSettled` OVER THE PAIR, and that is the whole shape of
     // this change. Awaiting both together would make a classification failure
@@ -1117,11 +1110,10 @@ async function runInboundTurn(
     // no handler attached is an unhandled rejection that can take the process
     // down. Claiming it here means every return path below is free to ignore
     // it.
-    const retrieveSpan = trace.span(
-      'retrieve',
-      { queryLength: ctx.currentMessage?.body.length ?? 0 },
-      { query: ctx.currentMessage?.body ?? null },
-    )
+    // Span keeps its historical name so Langfuse dashboards line up across
+    // the decision-0007 boundary; since then it times a static pack load,
+    // not a query.
+    const retrieveSpan = trace.span('retrieve', { staticVoicePack: true })
     const retrievingCorpus = retrieveCorpusStage(ctx).then(
       (value) => ({ ok: true as const, value }),
       (error: unknown) => ({ ok: false as const, error }),
@@ -1166,10 +1158,10 @@ async function runInboundTurn(
     }
 
     // TAC-348: crisis-safety short-circuit. Fires immediately after
-    // classification, before retrieval or generation. retrieveCorpusStage
-    // fails CLOSED on the inbound path (throws below MIN_STRONG_MATCHES), and
-    // a crisis message has no reason to resemble venue voice-corpus
-    // exemplars, so this cannot wait until inside generateStage — silence on
+    // classification, before the voice pack is awaited or generation runs.
+    // retrieveCorpusStage fails CLOSED on the inbound path (throws on an
+    // empty pack or a load failure), so a crisis message at a venue with a
+    // broken corpus read cannot wait until inside generateStage — silence on
     // exactly the turn where silence is worst. Bypasses corpus/knowledge
     // retrieval, generateStage, guest-context capture, arrival-capture
     // dispatch, extractReportedOrder, intention recording, and — the
@@ -1340,26 +1332,23 @@ async function runInboundTurn(
         }),
     )
 
-    // Retrieve corpus. TAC-540: the call was STARTED above, next to
+    // Voice pack. TAC-540: the load was STARTED above, next to
     // classification; this is where its result is consumed, unchanged in
     // position, in outcome and in what it alerts on. A turn that returned
     // before here — a classification failure, the crisis short-circuit — has
-    // discarded it, which is the ticket's own ruling and costs one Voyage
-    // embed plus one RPC on those paths.
+    // discarded it, which is the ticket's own ruling and now costs one DB
+    // read on those paths (decision 0007 removed the Voyage embed and RPC).
     const corpusResult = await retrievingCorpus
     try {
       if (!corpusResult.ok) throw corpusResult.error
       ctx.corpus = corpusResult.value
       retrieveSpan.end({
-        output: {
-          matchCount: ctx.corpus.length,
-          topSimilarity: ctx.corpus.length > 0 ? Math.max(...ctx.corpus.map((c) => c.similarity)) : 0,
-        },
+        output: { packSize: ctx.corpus.length },
         content: trace.captureContent ? buildCorpusContent(ctx.corpus) : undefined,
       })
-      console.log('[agent] inbound corpus retrieved', {
+      console.log('[agent] inbound voice pack loaded', {
         agentRunId,
-        matchCount: ctx.corpus.length,
+        packSize: ctx.corpus.length,
       })
     } catch (e) {
       const errMsg = e instanceof Error ? e.message : String(e)
@@ -1702,322 +1691,34 @@ async function runInboundTurn(
       })
     }
 
-    // TAC-350: independent grounding backstop. Only ever calls the model when
-    // the generation itself claimed confidence (knowledgeGap=false) on an
-    // inbound, non-demo turn — see verifyGroundingStage for the full skip
-    // list. Runs BEFORE the approval gate because its finding feeds directly
-    // into the gate's own knowledge-gap-card handling (body blanking, clock
-    // arming, protected-card carve-out) via the isGapTurn union of both
-    // signals.
-    //
-    // TAC-355: verifyMechanicOfferStage runs alongside it via Promise.allSettled
-    // — both are independent Haiku calls with no dependency on each other, so
-    // running them sequentially would only add latency for a guest who's
-    // waiting. allSettled, not all: verifyGroundingStage and
-    // verifyMechanicOfferStage are both verified to never throw today (every
-    // call inside each — the AI-module call and the PostHog/Slack capture —
-    // is independently wrapped in its own try/catch and degrades to a safe
-    // return value on failure), but that invariant lives in OTHER files. If a
-    // future change to either ever violated it, Promise.all would let one
-    // stage's rejection silently discard the other stage's finding — on the
-    // one gate in this file required to fail closed, that is a fail-open by
-    // accident. allSettled means a hypothetical future throw degrades to
-    // exactly what that stage's own internal catch already returns for a
-    // degraded call, instead of losing the sibling stage's result too.
-    //
-    // TAC-540 part D: EACH CHECK NOW OWNS ITS OWN SPAN, OPENED AND CLOSED
-    // AROUND ITS OWN CALL. Before this, three spans were opened before the
-    // batch and closed after it, so every one of them recorded the MAXIMUM of
-    // the five and no check could be told apart from another (TAC-420 finding
-    // F1); the cancellation and closed-venue checks had no span at all.
-    // Measurement only — no check moves, no order changes, no failure
-    // handling changes, and the degrade-on-throw logic below is untouched.
-    //
-    // Each thunk ends its span on the rejection path too, then rethrows, so
-    // `allSettled` still sees the rejection and the existing degrades still
-    // apply. Without the rethrow a throwing stage would silently become a
-    // fulfilled `undefined`.
-    const gatedMechanicCount = ctx.mechanics.filter((m) => m.requiresOperatorApproval).length
-    // `ctx` and `gen` are narrowed in straight-line code but not inside a
-    // closure, because both are `let`. Aliased to consts so the thunks below
-    // see the narrowed types rather than a cast.
-    const verifyCtx = ctx
-    const generated = gen.result
-    const verifyStartedAt = Date.now()
-    /** Run one check inside its own span, timed on its own call alone. */
-    const timedCheck = async <T,>(
-      name: string,
-      input: Record<string, unknown>,
-      run: () => Promise<T>,
-      describe: (value: T) => AgentSpanUpdate,
-    ): Promise<T> => {
-      const span = trace.span(name, input)
-      const startedAt = Date.now()
-      try {
-        const value = await run()
-        const described = describe(value)
-        span.end({
-          ...described,
-          output: { ...(described.output as Record<string, unknown>), elapsedMs: Date.now() - startedAt },
-        })
-        return value
-      } catch (e) {
-        span.end({
-          level: 'ERROR',
-          statusMessage: e instanceof Error ? e.message : String(e),
-          output: { elapsedMs: Date.now() - startedAt },
-        })
-        throw e
-      }
-    }
-    const [
-      groundingSettled,
-      mechanicOfferSettled,
-      prosePromiseSettled,
-      cancellationSettled,
-      closedVenueArrivalSettled,
-    ] = await Promise.allSettled([
-      timedCheck(
-        'verify_grounding',
-        { knowledgeGap: generated.knowledgeGap },
-        () => verifyGroundingStage(verifyCtx, generated),
-        (value) => ({
-          output: {
-            ran: generated.knowledgeGap === false && verifyCtx.guest.isDemo !== true,
-            // TAC-367: `status` is the load-bearing field — it distinguishes
-            // a clean verdict from one that was never readable, which the old
-            // boolean pair could not. Both kept so existing trace queries
-            // don't break.
-            status: value.status,
-            hasUngroundedClaim: value.status === 'flagged',
-            claimCount: value.status === 'flagged' ? value.claims.length : 0,
-          },
-          content:
-            trace.captureContent
-              ? { ungroundedClaims: value.status === 'flagged' ? value.claims : [] }
-              : undefined,
-        }),
-      ),
-      timedCheck(
-        'verify_mechanic_offer',
-        { gatedMechanicCount },
-        () => verifyMechanicOfferStage(verifyCtx, generated),
-        (value) => ({ output: { status: value.status } }),
-      ),
-      // TAC-401: the prose-promise check joins this array rather than running
-      // after it (ruled 2026-09-21, ruling 2). It is a third independent
-      // Haiku call with no dependency on either sibling, and a guest is
-      // waiting on this turn, so running it in sequence would add its full
-      // latency to every inbound reply instead of overlapping it with calls
-      // already in flight.
-      // No input attributes, deliberately. The span's own `status` output
-      // already says whether the check ran and what it found, and every
-      // candidate attribute here either needs a helper from './stages' (which
-      // this file's tests mock with an explicit allow-list) or reads a
-      // GenerateMessageResult field the fixtures cast partially. Both turn a
-      // span label into a throw on the reply path.
-      timedCheck(
-        'verify_prose_promise',
-        {},
-        () => verifyProsePromiseStage(verifyCtx, generated),
-        (value) => ({
-          output: {
-            status: value.status,
-            namedCommitment: value.status === 'flagged' && value.commitment !== null,
-          },
-        }),
-      ),
-      timedCheck(
-        'verify_cancellation_claim',
-        {},
-        () => verifyCancellationClaimStage(verifyCtx, generated),
-        (value) => ({ output: { claim: value.claim, resolution: value.resolution.status } }),
-      ),
-      // TAC-363: fifth independent check. Skips without a model call unless
-      // the venue is positively closed, so it costs nothing during service.
-      timedCheck(
-        'verify_closed_venue_arrival',
-        {},
-        () => verifyClosedVenueArrivalStage(verifyCtx, generated),
-        (value) => ({ output: { status: value.status } }),
-      ),
-    ])
-    // The wall clock for all five checks together — what they actually cost
-    // the guest, since they overlap. Per-check durations live on each span's
-    // own `elapsedMs` (TAC-540); this is the number that answers "how long
-    // did the checks add to this reply".
-    const verifyElapsedMs = Date.now() - verifyStartedAt
-    if (groundingSettled.status === 'rejected') {
-      console.warn('[agent] verifyGroundingStage threw unexpectedly (degrading to skipped)', {
-        agentRunId,
-        error:
-          groundingSettled.reason instanceof Error
-            ? groundingSettled.reason.message
-            : String(groundingSettled.reason),
-      })
-    }
-    if (prosePromiseSettled.status === 'rejected') {
-      console.warn(
-        '[agent] verifyProsePromiseStage threw unexpectedly (degrading to check_failed)',
-        {
-          agentRunId,
-          error:
-            prosePromiseSettled.reason instanceof Error
-              ? prosePromiseSettled.reason.message
-              : String(prosePromiseSettled.reason),
-        },
-      )
-    }
-    if (cancellationSettled.status === 'rejected') {
-      console.warn(
-        '[agent] verifyCancellationClaimStage threw unexpectedly (degrading to check_failed)',
-        {
-          agentRunId,
-          error:
-            cancellationSettled.reason instanceof Error
-              ? cancellationSettled.reason.message
-              : String(cancellationSettled.reason),
-        },
-      )
-    }
-    if (mechanicOfferSettled.status === 'rejected') {
-      console.warn(
-        '[agent] verifyMechanicOfferStage threw unexpectedly (degrading to check_failed)',
-        {
-          agentRunId,
-          error:
-            mechanicOfferSettled.reason instanceof Error
-              ? mechanicOfferSettled.reason.message
-              : String(mechanicOfferSettled.reason),
-        },
-      )
-    }
-    // TAC-367: an unexpected THROW degrades to 'skipped', not to a
-    // fail-closed state.
-    //
-    // TAC-424 reconciles this with the new "fails CLOSED on every failure"
-    // framing, because the two arguments sit side by side and the old one
-    // reads as contradicted. It is not: that framing is about faults INSIDE
-    // verifyGroundingStage, which it now holds on. A throw that escapes the
-    // stage entirely is a bug in our own code, not evidence about the reply
-    // or about the provider, and the flood argument TAC-424 rejected for
-    // transient faults does still apply to it — a defect here would fire on
-    // every inbound at once, where a provider fault is at least self-limiting.
-    //
-    // Recorded plainly because it is the one remaining path where a reply
-    // reaches a guest with no grounding verdict: 'skipped' is a pass-through
-    // to send.
-    // The stage catches its own AI-call failures internally, so reaching here
-    // means something structurally unexpected happened in our own code — not
-    // evidence about the reply, and not the truncation case fail-closed was
-    // narrowed to. Degrading to the fail-closed state on an unknown bug would
-    // make any future throw here a silent fleet-wide queue flood.
-    const groundingBackstop: GroundingBackstopResult =
-      groundingSettled.status === 'fulfilled' ? groundingSettled.value : { status: 'skipped' }
-    const mechanicOfferBackstop: MechanicOfferBackstopResult =
-      mechanicOfferSettled.status === 'fulfilled'
-        ? mechanicOfferSettled.value
-        : { status: 'check_failed' }
-    // TAC-401: an unexpected THROW degrades to 'check_failed', matching the
-    // mechanic-offer stage above rather than grounding's 'skipped'. This check
-    // fails closed on every failure, and a throw in our own code is not a
-    // reason to make it the one exception.
-    const prosePromiseBackstop: ProsePromiseBackstopResult =
-      prosePromiseSettled.status === 'fulfilled'
-        ? prosePromiseSettled.value
-        : { status: 'check_failed' }
-    // TAC-513: an unexpected THROW degrades to check_failed, and the resolution
-    // is RECOMPUTED rather than assumed. `resolveCancellation` is pure, takes
-    // no I/O and cannot throw, so it gives the same answer here it gave inside
-    // the stage; assuming `{ status: 'none' }` instead would discard a
-    // resolvable id and hand the operator a card saying the check did not run,
-    // with no carrier behind text that tells the guest a comp is off. That is
-    // this ticket's own incident with an approval on it. Assuming `unresolved`
-    // is wrong in the other direction: on the common turn the field is '', and
-    // trigger 14 would then hold an ordinary reply under copy claiming it
-    // cancels something.
-    const cancellationBackstop: CancellationBackstopResult =
-      cancellationSettled.status === 'fulfilled'
-        ? cancellationSettled.value
-        : {
-            resolution: resolveCancellation(
-              gen.result.cancelsCommitmentId,
-              ctx.activeCommitments,
-            ),
-            claim: 'check_failed',
-          }
-
-    // TAC-540: the five spans are opened and closed inside their own thunks
-    // above, each around its own call, so nothing is ended here any more.
-    // A span ended twice is a span that reports the wrong window.
-    if (groundingBackstop.status === 'flagged') {
-      console.warn('[agent] inbound grounding backstop caught an unverified claim', {
-        agentRunId,
-        claimCount: groundingBackstop.claims.length,
-      })
-    }
-    // TAC-424: both no-verdict outcomes queue, and the log says which, because
-    // the operator card cannot (one trigger, one label).
-    if (groundingBackstop.status === 'truncated' || groundingBackstop.status === 'degraded') {
-      console.warn('[agent] inbound grounding backstop did not complete — queuing (fail closed)', {
-        agentRunId,
-        outcome: groundingBackstop.status,
-      })
-    }
-    if (mechanicOfferBackstop.status === 'flagged' || mechanicOfferBackstop.status === 'check_failed') {
-      console.warn('[agent] inbound mechanic-offer backstop fired', {
-        agentRunId,
-        status: mechanicOfferBackstop.status,
-      })
-    }
-    if (
-      prosePromiseBackstop.status === 'flagged' ||
-      prosePromiseBackstop.status === 'check_failed'
-    ) {
-      console.warn('[agent] inbound prose-promise backstop fired', {
-        agentRunId,
-        status: prosePromiseBackstop.status,
-        allChecksElapsedMs: verifyElapsedMs,
-      })
-    }
-
-    // TAC-212: approval-policy gate decides send vs. queue. Composable —
-    // 4 triggers (fidelity_below_auto_send_floor, model_flagged,
-    // comp_regex_backstop, previous_pending_held); any one queues.
-    // TAC-297: 5th trigger commitment_type_gated also lands here.
-    // TAC-350: 6th (independent) trigger knowledge_gap_backstop also lands
-    // here, fed by groundingBackstop above.
-    // TAC-355: 7th and 8th (self_talk_detected, mechanic_offer_backstop) also
-    // land here, the latter fed by mechanicOfferBackstop above.
-    // TAC-367: 9th (grounding_check_failed) also lands here, fed by the
-    // 'truncated' state of the same groundingBackstop result.
-    if (closedVenueArrivalSettled.status === 'rejected') {
-      console.warn(
-        '[agent] verifyClosedVenueArrivalStage threw unexpectedly (degrading to check_failed)',
-        {
-          agentRunId,
-          error:
-            closedVenueArrivalSettled.reason instanceof Error
-              ? closedVenueArrivalSettled.reason.message
-              : String(closedVenueArrivalSettled.reason),
-        },
-      )
-    }
-    // Degrades to check_failed, not skipped: this backstop fails CLOSED on
-    // every failure mode, and an unexpected throw is a failure mode.
-    const closedVenueArrivalBackstop: ClosedVenueArrivalBackstopResult =
-      closedVenueArrivalSettled.status === 'fulfilled'
-        ? closedVenueArrivalSettled.value
-        : { status: 'check_failed' }
-
+    // Decision 0003, rewritten 2026-09-29: the five post-generation LLM
+    // checks no longer run here. They run AFTER dispatch, off the guest's
+    // critical path, in runPostSendChecks (see the send branch below and
+    // ./post-send-checks.ts for the full contract). The gate keeps every
+    // DETERMINISTIC protection: fidelity floors, the model's own self-flag,
+    // the comp regex, commitment-type gating, unverified URLs, pending-slot
+    // rules, per-category policy, hold_all_outbound — and the two structural
+    // halves the deferred checks used to ride alongside:
+    //   - the PURE cancellation resolution below (no model call), so a draft
+    //     whose emission cancels a real commitment still queues (trigger 13)
+    //     and a dangling id still holds (trigger 16);
+    //   - the closed-venue EMISSION check, which the gate computes itself
+    //     from the generation and the venue's hours.
+    // The neutral literals are the gate's own documented defaults for
+    // "this check did not run" ('skipped' / null), passed explicitly because
+    // the cancellation slot must carry the live resolution rather than its
+    // default.
     const approval = await applyApprovalPolicyStage(
       ctx,
       gen.result,
-      groundingBackstop,
-      mechanicOfferBackstop,
-      prosePromiseBackstop,
-      cancellationBackstop,
-      closedVenueArrivalBackstop,
+      null,
+      { status: 'skipped' },
+      { status: 'skipped' },
+      {
+        resolution: resolveCancellation(gen.result.cancelsCommitmentId, ctx.activeCommitments),
+        claim: 'skipped',
+      },
+      { status: 'skipped' },
     )
     console.log('[agent] inbound approval decision', {
       agentRunId,
@@ -2445,6 +2146,21 @@ async function runInboundTurn(
         })
         if (dispatched.undelivered.cardId !== null) pushSendFailureCard(ctx, dispatched.undelivered.cardId)
       }
+      // Decision 0003 rewrite: the five post-generation checks run HERE, off
+      // the critical path, against the reply that just went out. waitUntil
+      // composes with the webhook's outer keep-alive window; the module never
+      // throws and flushes its own spans. Only the sent path runs them — a
+      // queued draft is already in front of an operator, and drop/silence
+      // sent nothing to check.
+      waitUntil(
+        runPostSendChecks({
+          ctx,
+          generation: gen.result,
+          agentRunId,
+          outboundMessageId,
+          trace,
+        }),
+      )
       sendSpan.end({
         output: {
           outboundMessageId,

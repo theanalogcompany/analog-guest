@@ -26,14 +26,6 @@ export type KnowledgeCorpusChunk = {
   secondaryTags: string[]
 }
 
-export type RetrieveContextInput = {
-  venueId: string
-  query: string
-  limit?: number
-  sourceTypeFilter?: string[]
-  minConfidence?: number
-}
-
 export type RetrieveKnowledgeContextInput = {
   venueId: string
   query: string

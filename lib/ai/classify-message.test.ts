@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 // Relative imports — vitest doesn't pick up Next's `@/*` alias under our setup.
-import { classifyMessage } from './classify-message'
+import { classifyMessage, MAX_CLASSIFIER_INPUT_CHARS } from './classify-message'
+import { CLASSIFY_JEV_PROMPT_VERSION } from './classify-message-jev'
 
 // Mock the AI SDK and the model client so no real Anthropic call goes out.
 const generateObjectMock = vi.fn()
@@ -733,5 +734,148 @@ describe('classifyMessage — correctsPendingReply pass-through (TAC-397)', () =
     expect(r.ok).toBe(true)
     if (!r.ok) return
     expect(r.data.correctsPendingReply).toBe(value)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Jev gate: classifyMessage tries Jev first when enabled and falls back to
+// Haiku on ANY Jev failure. The module flag constant ships false, so every
+// test here forces the gate through the injected second parameter - both
+// directions, per the openCoalescedTurn precedent the source cites.
+// classify-message-jev is deliberately NOT mocked: the real module runs
+// against an injected fetchImpl, so these tests cover the wiring end to end.
+// ---------------------------------------------------------------------------
+
+describe('classifyMessage — jev gate', () => {
+  const JEV_ENV = { JEV_API_KEY: 'apikey_' + 'a'.repeat(60) }
+
+  const JEV_OK_BODY = {
+    model: 'jev-1.13.0',
+    answers: {
+      category: {
+        type: 'choice',
+        choice: 'acknowledgment',
+        confidence: 0.85,
+        probabilities: { acknowledgment: 0.85, reply: 0.15 },
+      },
+      crisis: { type: 'noul', noul: 0.01 },
+      corrects_pending: { type: 'noul', noul: 0.05 },
+    },
+  }
+
+  // Snapshot the request body inside the mock (live-reference rule).
+  function jevFetch(status: number, captured?: { body?: string }) {
+    return vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
+      if (captured) captured.body = String(init?.body)
+      return new Response(JSON.stringify(JEV_OK_BODY), { status })
+    }) as unknown as typeof fetch
+  }
+
+  beforeEach(() => {
+    generateObjectMock.mockReset()
+    // Haiku-shaped result, distinguishable from the Jev one by category,
+    // reasoning AND promptVersion — a gate wired to the wrong arm cannot
+    // satisfy both arms' assertions.
+    generateObjectMock.mockResolvedValue({
+      object: {
+        category: 'reply',
+        classifierConfidence: 0.9,
+        reasoning: 'haiku-mock',
+        crisisSafety: false,
+        correctsPendingReply: false,
+      },
+    })
+  })
+
+  it('returns the Jev result and never calls Haiku when Jev succeeds', async () => {
+    const r = await classifyMessage(
+      { inboundBody: 'ok cool, thanks' },
+      { enabled: true, env: JEV_ENV, fetchImpl: jevFetch(200) },
+    )
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+    expect(r.data.promptVersion).toBe(CLASSIFY_JEV_PROMPT_VERSION)
+    expect(r.data.category).toBe('acknowledgment')
+    expect(generateObjectMock).not.toHaveBeenCalled()
+  })
+
+  it('falls back to Haiku when Jev returns a 500, and traces the fallback', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      const r = await classifyMessage(
+        { inboundBody: 'ok cool, thanks' },
+        { enabled: true, env: JEV_ENV, fetchImpl: jevFetch(500) },
+      )
+      expect(generateObjectMock).toHaveBeenCalledTimes(1)
+      expect(r.ok).toBe(true)
+      if (!r.ok) return
+      // The Haiku-shaped result, not the Jev one.
+      expect(r.data.category).toBe('reply')
+      expect(r.data.reasoning).toBe('haiku-mock')
+      expect(r.data.promptVersion).toBe('v1.70.0')
+      // The silent degrade carries its event and errorCode (errors-as-values rule).
+      expect(warnSpy).toHaveBeenCalledWith(
+        'classify-message: jev failed, falling back to haiku',
+        { event: 'jev_classification_fallback', errorCode: 'jev_http_500' },
+      )
+    } finally {
+      warnSpy.mockRestore()
+    }
+  })
+
+  it('never attempts fetch when enabled is false', async () => {
+    const fetchSpy = vi.fn(async () => {
+      throw new Error('fetch must not be called when the gate is off')
+    }) as unknown as typeof fetch
+    const r = await classifyMessage(
+      { inboundBody: 'ok cool, thanks' },
+      { enabled: false, env: JEV_ENV, fetchImpl: fetchSpy },
+    )
+    expect(fetchSpy).not.toHaveBeenCalled()
+    expect(generateObjectMock).toHaveBeenCalledTimes(1)
+    expect(r.ok).toBe(true)
+  })
+
+  it('attempts Jev when enabled is omitted (module flag is ON since 2026-09-29)', async () => {
+    // Reversed, not deleted, from "never attempts fetch when enabled is
+    // omitted (module flag ships false)": that test failed on purpose when
+    // JEV_CLASSIFICATION_ENABLED flipped, and this is the coverage decision
+    // it demanded - the omitted-flag default IS the live production path now.
+    // Jev succeeds here, so the Haiku arm must never be consulted; the two
+    // arms' fixtures are distinguishable by category and promptVersion.
+    const fetchSpy = jevFetch(200)
+    const r = await classifyMessage(
+      { inboundBody: 'ok cool, thanks' },
+      { env: JEV_ENV, fetchImpl: fetchSpy },
+    )
+    expect(fetchSpy).toHaveBeenCalledTimes(1)
+    expect(generateObjectMock).not.toHaveBeenCalled()
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+    expect(r.data.category).toBe('acknowledgment')
+    expect(r.data.promptVersion).toBe(CLASSIFY_JEV_PROMPT_VERSION)
+  })
+
+  it('sends Jev the SAME truncated inbound the Haiku prompt would use, plus the crisis-check block', async () => {
+    const captured: { body?: string } = {}
+    const longBody = 'a'.repeat(MAX_CLASSIFIER_INPUT_CHARS + 500)
+    const r = await classifyMessage(
+      { inboundBody: longBody },
+      { enabled: true, env: JEV_ENV, fetchImpl: jevFetch(200, captured) },
+    )
+    expect(r.ok).toBe(true)
+    expect(captured.body).toBeDefined()
+    const parsed = JSON.parse(captured.body!) as {
+      state: { inbound_message: string; inbound_message_full_for_crisis_check?: string }
+    }
+    // Identical inputs across both arms: the category-facing text is the
+    // truncated view, byte-for-byte what the Haiku prompt embeds.
+    expect(parsed.state.inbound_message).toBe(
+      'a'.repeat(MAX_CLASSIFIER_INPUT_CHARS) + ' [...truncated]',
+    )
+    expect(parsed.state.inbound_message).toMatch(/ \[\.\.\.truncated\]$/)
+    // And the crisis check still sees the fuller text (TAC-348's guarantee
+    // must survive the vendor swap).
+    expect(parsed.state.inbound_message_full_for_crisis_check).toBe(longBody)
   })
 })

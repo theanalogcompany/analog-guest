@@ -125,11 +125,13 @@ function liveNumber(name: string): number {
   return Number(m[1])
 }
 
+// STRONG_MATCH_SIMILARITY / MIN_STRONG_MATCHES left this list with decision
+// 0007 (voice is a static pack): the constants no longer exist in stages.ts
+// (liveNumber() would throw), and the CLAUDE.md rows quoting them were
+// removed in the same change.
 const FLOORS = [
   'SEND_FIDELITY_FLOOR',
   'AUTO_SEND_FIDELITY_FLOOR',
-  'STRONG_MATCH_SIMILARITY',
-  'MIN_STRONG_MATCHES',
   'KNOWLEDGE_RELEVANCE_FLOOR',
 ] as const
 
@@ -193,7 +195,9 @@ describe('documents quote the live floors', () => {
 
   it('finds floor rows to check', () => {
     // Both tables are currently found: root CLAUDE.md's and lib/agent/CLAUDE.md's.
-    expect(checked.length).toBeGreaterThanOrEqual(8)
+    // Was >= 8 when the two voice-retrieval floors existed (decision 0007
+    // removed them); three floors x two tables is the current shape.
+    expect(checked.length).toBeGreaterThanOrEqual(6)
     expect(new Set(checked.map((c) => c.path)).size).toBeGreaterThanOrEqual(2)
     for (const name of FLOORS) {
       expect(

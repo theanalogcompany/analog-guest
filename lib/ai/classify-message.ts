@@ -1,6 +1,12 @@
 import { generateObject } from 'ai'
 import { z } from 'zod'
 import { getClassificationModel } from './client'
+import {
+  classifyMessageViaJev,
+  JEV_CLASSIFICATION_ENABLED,
+  type JevClassifyState,
+  type JevDeps,
+} from './classify-message-jev'
 import { PROMPT_VERSION } from './prompts/system-template'
 import {
   formatTimeDelta,
@@ -29,7 +35,9 @@ export const MAX_CLASSIFIER_INPUT_CHARS = 1000
 // 4x the classification cap is well beyond any plausible real guest message.
 export const MAX_CRISIS_CHECK_INPUT_CHARS = 4000
 
-const ClassifiedMessageSchema = z.object({
+// Exported (by path, never via the barrel) for classify-message-jev.test.ts,
+// whose drift guard pins the Jev criteria keys against this enum's options.
+export const ClassifiedMessageSchema = z.object({
   category: z.enum([
     'reply',
     'new_question',
@@ -126,13 +134,15 @@ function formatClassifierRecentConversation(messages: readonly RecentMessage[]):
  * review. Optional persona/venueInfo provide context but the classifier does
  * not consume the RAG corpus.
  */
-export async function classifyMessage(
-  input: ClassifyMessageInput,
-): Promise<AIResult<ClassifyMessageResult>> {
-  if (typeof input.inboundBody !== 'string' || input.inboundBody.length === 0) {
-    return { ok: false, error: 'invalid_input' }
-  }
+/** The serialized pieces both classifier arms are built from. */
+interface ClassifierBlocks {
+  inboundForClassifier: string
+  contextSections: string[]
+  recentBlock: string | null
+  crisisCheckBody: string | null
+}
 
+function buildClassifierBlocks(input: ClassifyMessageInput): ClassifierBlocks {
   const inboundForClassifier =
     input.inboundBody.length > MAX_CLASSIFIER_INPUT_CHARS
       ? input.inboundBody.slice(0, MAX_CLASSIFIER_INPUT_CHARS) + ' [...truncated]'
@@ -145,25 +155,87 @@ export async function classifyMessage(
   if (input.persona) contextSections.push(personaToProse(input.persona, 'text'))
   if (input.venueInfo) contextSections.push(venueInfoToProse(input.venueInfo))
 
+  const recentBlock =
+    input.recentMessages && input.recentMessages.length > 0
+      ? formatClassifierRecentConversation(input.recentMessages)
+      : null
+  // TAC-348: see MAX_CRISIS_CHECK_INPUT_CHARS above. Only present when the
+  // body was actually truncated for the block above, so a normal-length
+  // message (the common case) sees no prompt change at all.
+  const crisisCheckBody =
+    input.inboundBody.length > MAX_CLASSIFIER_INPUT_CHARS
+      ? input.inboundBody.length > MAX_CRISIS_CHECK_INPUT_CHARS
+        ? input.inboundBody.slice(0, MAX_CRISIS_CHECK_INPUT_CHARS) + ' [...truncated]'
+        : input.inboundBody
+      : null
+
+  return { inboundForClassifier, contextSections, recentBlock, crisisCheckBody }
+}
+
+/**
+ * The Jev arm alone, NO Haiku fallback. Exported for the replay eval
+ * (`scripts/measurement/jev-classify-eval.ts`), which must see a Jev failure
+ * AS a failure - calling the gated `classifyMessage` instead would silently
+ * score Haiku's answer as Jev's. `classifyMessage`'s gated branch is this
+ * plus the fallback, so the two cannot drift on how the state is built.
+ */
+export async function classifyMessageJevArm(
+  input: ClassifyMessageInput,
+  deps: JevDeps = {},
+): Promise<AIResult<ClassifyMessageResult>> {
+  if (typeof input.inboundBody !== 'string' || input.inboundBody.length === 0) {
+    return { ok: false, error: 'invalid_input' }
+  }
+  const blocks = buildClassifierBlocks(input)
+  const state: JevClassifyState = { inbound_message: blocks.inboundForClassifier }
+  if (blocks.contextSections.length > 0) state.venue_context = blocks.contextSections.join('\n\n')
+  if (blocks.recentBlock !== null) state.recent_conversation = blocks.recentBlock
+  if (input.guestState) state.guest_relationship = input.guestState
+  if (blocks.crisisCheckBody !== null) {
+    state.inbound_message_full_for_crisis_check = blocks.crisisCheckBody
+  }
+  return classifyMessageViaJev(state, deps)
+}
+
+export async function classifyMessage(
+  input: ClassifyMessageInput,
+  // Tests force the gate BOTH ways (the openCoalescedTurn precedent), so the
+  // Haiku path stays covered while the flag is on and vice versa.
+  jev: JevDeps & { enabled?: boolean } = {},
+): Promise<AIResult<ClassifyMessageResult>> {
+  if (typeof input.inboundBody !== 'string' || input.inboundBody.length === 0) {
+    return { ok: false, error: 'invalid_input' }
+  }
+
+  // Jev first when enabled, Haiku on ANY Jev failure - the fallback direction
+  // is the whole design; see classify-message-jev.ts's header. Both arms are
+  // built from the same serialized blocks so they judge identical inputs.
+  if (jev.enabled ?? JEV_CLASSIFICATION_ENABLED) {
+    const viaJev = await classifyMessageJevArm(input, jev)
+    if (viaJev.ok) return viaJev
+    // A silent degrade needs a trace (errors-as-values rule). Structured so
+    // log search can count fallbacks per errorCode; carries no guest content.
+    console.warn('classify-message: jev failed, falling back to haiku', {
+      event: 'jev_classification_fallback',
+      errorCode: viaJev.errorCode ?? null,
+    })
+  }
+
+  const { inboundForClassifier, contextSections, recentBlock, crisisCheckBody } =
+    buildClassifierBlocks(input)
+
   const userPromptParts: string[] = []
   if (contextSections.length > 0) {
     userPromptParts.push(`Context about the venue:\n\n${contextSections.join('\n\n')}`)
   }
-  if (input.recentMessages && input.recentMessages.length > 0) {
-    userPromptParts.push(formatClassifierRecentConversation(input.recentMessages))
+  if (recentBlock !== null) {
+    userPromptParts.push(recentBlock)
   }
   if (input.guestState) {
     userPromptParts.push(`Guest relationship: ${input.guestState}`)
   }
   userPromptParts.push(`Inbound message from guest:\n"${inboundForClassifier}"`)
-  // TAC-348: see MAX_CRISIS_CHECK_INPUT_CHARS above. Only appended when the
-  // body was actually truncated for the block above, so a normal-length
-  // message (the common case) sees no prompt change at all.
-  if (input.inboundBody.length > MAX_CLASSIFIER_INPUT_CHARS) {
-    const crisisCheckBody =
-      input.inboundBody.length > MAX_CRISIS_CHECK_INPUT_CHARS
-        ? input.inboundBody.slice(0, MAX_CRISIS_CHECK_INPUT_CHARS) + ' [...truncated]'
-        : input.inboundBody
+  if (crisisCheckBody !== null) {
     userPromptParts.push(
       `Full message, untruncated (for the crisisSafety determination ONLY — the shortened version above is what informs category):\n"${crisisCheckBody}"`,
     )

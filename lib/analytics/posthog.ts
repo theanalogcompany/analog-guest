@@ -59,14 +59,6 @@
  *                   classifierConfidence, inboundLength, inboundBody,
  *                   autoRoutedToUnknown }
  *
- * - corpus_retrieval_below_threshold
- *     Fires when the best-match similarity is below 0.5 (looser bar than the
- *     fail-closed gate of 1 above 0.3). Catches "thin retrieval" runs that
- *     succeed structurally but lack venue-voice grounding.
- *     Properties: { agentRunId, venueId, guestId, totalMatches,
- *                   strongMatchCount, topSimilarity, inboundBody,
- *                   topMatchPreview }
- *
  * - agent_latency_high
  *     Fires when handleInbound or handleFollowup total elapsed > 10s.
  *     Skipped on the duplicate-skip return path (fast, not interesting).
@@ -167,7 +159,6 @@ export const CLASSIFICATION_CONFIDENCE_LOW_THRESHOLD = 0.7
 // `unknown` so the agent ships a holding response. Original pick is preserved
 // on the PostHog event payload for triage. Sits below the 0.7 LOW threshold.
 export const CLASSIFICATION_CONFIDENCE_REROUTE_THRESHOLD = 0.3
-export const CORPUS_TOP_SIMILARITY_LOW_THRESHOLD = 0.5
 export const AGENT_LATENCY_HIGH_THRESHOLD_MS = 10_000
 export const WEBHOOK_SILENCE_THRESHOLD_HOURS = 24
 
@@ -348,39 +339,10 @@ function formatClassificationLowConfidence(props: ClassificationLowConfidencePro
   return lines.join('\n')
 }
 
-export interface CorpusRetrievalBelowThresholdProps {
-  agentRunId: string
-  venueId: string
-  guestId: string
-  totalMatches: number
-  strongMatchCount: number
-  topSimilarity: number
-  inboundBody: string | null
-  topMatchPreview: string | null
-}
-
-export async function captureCorpusRetrievalBelowThreshold(
-  props: CorpusRetrievalBelowThresholdProps,
-): Promise<void> {
-  await capturePostHogEvent('corpus_retrieval_below_threshold', props.guestId, { ...props })
-  await postToSlack(formatCorpusRetrievalBelowThreshold(props))
-}
-
-function formatCorpusRetrievalBelowThreshold(props: CorpusRetrievalBelowThresholdProps): string {
-  const lines = [
-    `*Corpus retrieval thin* — top similarity \`${props.topSimilarity.toFixed(2)}\` (${props.strongMatchCount} strong matches above 0.3, ${props.totalMatches} total)`,
-    `venue: \`${props.venueId}\``,
-    `guest: \`${props.guestId}\``,
-    `run: \`${props.agentRunId}\``,
-  ]
-  if (props.inboundBody) {
-    lines.push(`inbound: "${truncate(props.inboundBody, SLACK_FIELD_TRUNCATE_CHARS)}"`)
-  }
-  if (props.topMatchPreview) {
-    lines.push(`top match preview: "${truncate(props.topMatchPreview, SLACK_FIELD_TRUNCATE_CHARS)}"`)
-  }
-  return lines.join('\n')
-}
+// `corpus_retrieval_below_threshold` (and CORPUS_TOP_SIMILARITY_LOW_THRESHOLD)
+// lived here until decision 0007 (2026-09-29): voice is a static per-venue
+// pack, so there is no similarity left to be thin. Historical PostHog rows
+// under that event name describe the retrieval era.
 
 // TAC-350: emitted from verifyGroundingStage (lib/agent/stages.ts) when the
 // independent grounding backstop catches an unverified claim in a reply the
@@ -423,15 +385,34 @@ export async function captureUnverifiedUrlHeld(props: UnverifiedUrlHeldProps): P
   await postToSlack(formatUnverifiedUrlHeld(props))
 }
 
+/**
+ * Decision 0003 (rewritten 2026-09-29): where the draft was when a
+ * post-generation check fired.
+ *
+ *   'held' — the check ran BEFORE the send (followups, the holding message)
+ *            and the draft queued or blocked as a result.
+ *   'sent' — the check ran AFTER dispatch on the inbound path; the reply had
+ *            already reached the guest and this event is the Slack forward
+ *            for an upstream fix, not a hold notice.
+ *
+ * REQUIRED on every check event rather than defaulted, so each producer has
+ * to state which claim it is making — a headline that misstates whether a
+ * guest saw the reply is worse than none (the TAC-424 lesson).
+ */
+export type CheckDisposition = 'held' | 'sent'
+
 export interface UngroundedClaimCaughtProps {
   agentRunId: string
   venueId: string
   guestId: string
   inboundBody: string
-  // The reply text that was caught — never sent to the guest (the approval
-  // gate blanks it before persisting), safe to log here for debugging.
+  // The reply text that was caught. Under disposition 'held' it was never
+  // sent (the approval gate blanks it before persisting); under 'sent' it
+  // already reached the guest and is logged so the claim can be fixed
+  // upstream.
   replyBody: string
   ungroundedClaims: string[]
+  disposition: CheckDisposition
 }
 
 export async function captureUngroundedClaimCaught(
@@ -498,6 +479,7 @@ export interface GroundingVerifierUnavailableProps {
   /** Provider/SDK error text. Never contains guest or venue content. */
   error: string
   errorCode?: string
+  disposition: CheckDisposition
 }
 
 export async function captureGroundingVerifierUnavailable(
@@ -517,9 +499,12 @@ function formatGroundingVerifierUnavailable(props: GroundingVerifierUnavailableP
   // if the posture is ever revisited, the headline must not have to be
   // rediscovered, and a formatter that cannot express "it proceeded" is how
   // the pre-TAC-424 line came to say the wrong thing for a whole ticket.
-  const headline = props.failedClosed
-    ? '*Grounding check did not complete* — no verdict, draft queued for review'
-    : '*Grounding check did not complete* — no verdict, reply proceeded ungated'
+  const headline =
+    props.disposition === 'sent'
+      ? '*Grounding check did not complete* — no verdict, and the reply was ALREADY SENT (post-send check)'
+      : props.failedClosed
+        ? '*Grounding check did not complete* — no verdict, draft queued for review'
+        : '*Grounding check did not complete* — no verdict, reply proceeded ungated'
   return [
     headline,
     `venue: \`${props.venueId}\``,
@@ -679,7 +664,9 @@ function formatUnverifiedUrlHeld(props: UnverifiedUrlHeldProps): string {
 function formatUngroundedClaimCaught(props: UngroundedClaimCaughtProps): string {
   const claimList = props.ungroundedClaims.map((c) => `"${truncate(c, SLACK_FIELD_TRUNCATE_CHARS)}"`).join(', ')
   const lines = [
-    `*Ungrounded claim caught* — reply never sent, queued for review`,
+    props.disposition === 'sent'
+      ? `*Ungrounded claim caught* — reply ALREADY SENT (post-send check); fix upstream`
+      : `*Ungrounded claim caught* — reply never sent, queued for review`,
     `venue: \`${props.venueId}\``,
     `guest: \`${props.guestId}\``,
     `run: \`${props.agentRunId}\``,
@@ -741,9 +728,10 @@ export interface ProsePromiseCaughtProps {
    * captureDraftRegenerated, captureAgentLatencyHigh.
    */
   guestInboundBody: string | null
-  // The reply text that was caught. Queued, never sent, and not blanked, so
-  // it is safe to log here on the same basis as the mechanic-offer event.
+  // The reply text that was caught. Under 'held' it queued unblanked; under
+  // 'sent' it already reached the guest.
   replyBody: string
+  disposition: CheckDisposition
 }
 
 export async function captureProsePromiseCaught(props: ProsePromiseCaughtProps): Promise<void> {
@@ -757,7 +745,9 @@ function formatProsePromiseCaught(props: ProsePromiseCaughtProps): string {
       ? 'not named by the check'
       : `${props.commitmentType}: ${props.commitmentDescription}`
   const lines = [
-    `*Promise caught with no commitment behind it* — queued for review`,
+    props.disposition === 'sent'
+      ? `*Promise caught with no commitment behind it* — reply ALREADY SENT (post-send check); the promise is live and untracked`
+      : `*Promise caught with no commitment behind it* — queued for review`,
     `venue: \`${props.venueId}\``,
     `guest: \`${props.guestId}\``,
     `run: \`${props.agentRunId}\``,
@@ -808,6 +798,7 @@ export interface ProsePromiseCheckUnavailableProps {
   retried: boolean
   error: string
   errorCode?: string
+  disposition: CheckDisposition
 }
 
 export async function captureProsePromiseCheckUnavailable(
@@ -819,7 +810,9 @@ export async function captureProsePromiseCheckUnavailable(
 
 function formatProsePromiseCheckUnavailable(props: ProsePromiseCheckUnavailableProps): string {
   const lines = [
-    `*Prose-promise check did not complete* — failed CLOSED, draft queued`,
+    props.disposition === 'sent'
+      ? `*Prose-promise check did not complete* — no verdict, and the reply was ALREADY SENT (post-send check)`
+      : `*Prose-promise check did not complete* — failed CLOSED, draft queued`,
     `venue: \`${props.venueId}\``,
     `guest: \`${props.guestId}\``,
     `run: \`${props.agentRunId}\``,
@@ -873,8 +866,10 @@ export interface CancellationClaimUnbackedProps {
    * found, and a future change to either should have to break both.
    */
   bodyClaimedIt: boolean
-  // The held reply. Never sent, so safe to log here.
+  // The flagged reply. Under 'held' it never sent; under 'sent' the guest
+  // has already read a cancellation the ledger does not carry.
   replyBody: string
+  disposition: CheckDisposition
 }
 
 export async function captureCancellationClaimUnbacked(
@@ -885,10 +880,12 @@ export async function captureCancellationClaimUnbacked(
 }
 
 function formatCancellationClaimUnbacked(props: CancellationClaimUnbackedProps): string {
+  const disposition =
+    props.disposition === 'sent' ? 'ALREADY SENT (post-send check)' : 'held, not sent'
   const lines = [
     props.bodyClaimedIt
-      ? `*Reply claimed a cancellation nothing carries* — held, not sent`
-      : `*Reply emitted a cancellation id that resolves to nothing* — held, not sent. The body does not read as claiming one.`,
+      ? `*Reply claimed a cancellation nothing carries* — ${disposition}`
+      : `*Reply emitted a cancellation id that resolves to nothing* — ${disposition}. The body does not read as claiming one.`,
     `venue: \`${props.venueId}\``,
     `guest: \`${props.guestId}\``,
     `run: \`${props.agentRunId}\``,
@@ -953,6 +950,7 @@ export interface CancellationCheckUnavailableProps {
   retried: boolean
   error: string
   errorCode?: string
+  disposition: CheckDisposition
 }
 
 export async function captureCancellationCheckUnavailable(
@@ -964,7 +962,9 @@ export async function captureCancellationCheckUnavailable(
 
 function formatCancellationCheckUnavailable(props: CancellationCheckUnavailableProps): string {
   const lines = [
-    `*Cancellation-claim check did not complete* — failed CLOSED, draft queued`,
+    props.disposition === 'sent'
+      ? `*Cancellation-claim check did not complete* — no verdict, and the reply was ALREADY SENT (post-send check)`
+      : `*Cancellation-claim check did not complete* — failed CLOSED, draft queued`,
     `venue: \`${props.venueId}\``,
     `guest: \`${props.guestId}\``,
     `run: \`${props.agentRunId}\``,
@@ -995,9 +995,10 @@ export interface ClosedVenueArrivalCaughtProps {
   venueId: string
   guestId: string
   source: 'structured' | 'text_backstop'
-  // The reply that was caught. It is queued for operator review rather than
-  // blanked, so it is already operator-visible and safe to log here.
+  // The reply that was caught. Under 'held' it queued unblanked (operator-
+  // visible anyway); under 'sent' it already reached the guest.
   replyBody: string
+  disposition: CheckDisposition
 }
 
 export async function captureClosedVenueArrivalCaught(
@@ -1009,7 +1010,9 @@ export async function captureClosedVenueArrivalCaught(
 
 function formatClosedVenueArrivalCaught(props: ClosedVenueArrivalCaughtProps): string {
   const lines = [
-    `*Arrival confirmed at a closed venue* — queued for review`,
+    props.disposition === 'sent'
+      ? `*Arrival confirmed at a closed venue* — reply ALREADY SENT (post-send check)`
+      : `*Arrival confirmed at a closed venue* — queued for review`,
     `venue: \`${props.venueId}\``,
     `guest: \`${props.guestId}\``,
     `run: \`${props.agentRunId}\``,
@@ -1024,9 +1027,11 @@ export interface MechanicOfferBackstopCaughtProps {
   venueId: string
   guestId: string
   mechanicId: string
-  // The reply text that was caught — still queued for operator review (not
-  // blanked, unlike the knowledge-gap backstop), safe to log here.
+  // The reply text that was caught. Under 'held' it queued unblanked (unlike
+  // the knowledge-gap backstop); under 'sent' the offer already reached the
+  // guest.
   replyBody: string
+  disposition: CheckDisposition
 }
 
 export async function captureMechanicOfferBackstopCaught(
@@ -1038,7 +1043,9 @@ export async function captureMechanicOfferBackstopCaught(
 
 function formatMechanicOfferBackstopCaught(props: MechanicOfferBackstopCaughtProps): string {
   const lines = [
-    `*Mechanic offer caught without approval* — queued for review`,
+    props.disposition === 'sent'
+      ? `*Mechanic offer caught without approval* — reply ALREADY SENT (post-send check); the offer is live`
+      : `*Mechanic offer caught without approval* — queued for review`,
     `venue: \`${props.venueId}\``,
     `guest: \`${props.guestId}\``,
     `run: \`${props.agentRunId}\``,

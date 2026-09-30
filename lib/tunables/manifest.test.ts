@@ -10,7 +10,7 @@ vi.mock('voyageai', () => ({
   VoyageAIClient: class {},
 }))
 
-import { SEND_FIDELITY_FLOOR, STRONG_MATCH_SIMILARITY } from '@/lib/agent/stages'
+import { SEND_FIDELITY_FLOOR } from '@/lib/agent/stages'
 import { SIMILARITY_FLOOR } from '@/lib/rag/retrieve'
 import { TUNABLES, type TunableCategory, type TunableType } from './manifest'
 
@@ -32,14 +32,15 @@ const VALID_TYPES: readonly TunableType[] = [
 ]
 
 describe('TUNABLES manifest', () => {
-  it('contains exactly 56 entries (locks the audit set)', () => {
+  it('contains exactly 48 entries (locks the audit set)', () => {
     // TAC-350 added knowledge_relevance_floor; TAC-367 added
-    // verify_grounding_max_output_tokens. The name of this test said 46 while
-    // it asserted 49 — fixed here rather than left as a fourth instance of
-    // the "test name is not evidence of what the test checks" pattern.
-    // TAC-380 added six intention entries. TAC-421 removed the four
-    // lib/agent/timing.ts entries with the module itself.
-    expect(TUNABLES.length).toBe(52)
+    // verify_grounding_max_output_tokens. TAC-380 added six intention
+    // entries. TAC-421 removed the four lib/agent/timing.ts entries with
+    // the module itself. Decision 0007 (voice is a static pack) removed
+    // corpus_top_similarity_low_threshold, corpus_retrieve_limit,
+    // min_strong_matches and strong_match_similarity with the retrieval
+    // mechanism they tuned.
+    expect(TUNABLES.length).toBe(48)
   })
 
   // Per-category counts catch silent rebalancing — a future writer adding to
@@ -57,15 +58,17 @@ describe('TUNABLES manifest', () => {
     }
     for (const t of TUNABLES) counts[t.category] += 1
     expect(counts).toEqual({
-      agent_runtime: 23,
+      // Decision 0007 removed corpus_top_similarity_low_threshold.
+      agent_runtime: 22,
       classification: 3,
       // TAC-421 took this from 11 to 7: the four lib/agent/timing.ts
       // constants went with the deleted module. The remaining seven are
       // followup + knowledge-gap windows, which are unrelated.
       timing: 7,
       recognition: 8,
-      // TAC-350 added knowledge_relevance_floor.
-      retrieval: 11,
+      // TAC-350 added knowledge_relevance_floor; decision 0007 removed
+      // corpus_retrieve_limit, min_strong_matches, strong_match_similarity.
+      retrieval: 8,
       mechanics: 0,
     })
   })
@@ -98,17 +101,21 @@ describe('TUNABLES manifest', () => {
     const fidelity = TUNABLES.find((t) => t.name === 'send_fidelity_floor')
     expect(fidelity?.value).toBe(SEND_FIDELITY_FLOOR)
 
-    const strong = TUNABLES.find((t) => t.name === 'strong_match_similarity')
-    expect(strong?.value).toBe(STRONG_MATCH_SIMILARITY)
-
     const floor = TUNABLES.find((t) => t.name === 'similarity_floor')
     expect(floor?.value).toBe(SIMILARITY_FLOOR)
   })
 
-  // Documented in the manifest header: STRONG_MATCH_SIMILARITY (agent gate)
-  // counts chunks the rag layer has already admitted, so it can never be lower
-  // than SIMILARITY_FLOOR (rag layer filter) without becoming meaningless.
-  it('preserves invariant: STRONG_MATCH_SIMILARITY >= SIMILARITY_FLOOR', () => {
-    expect(STRONG_MATCH_SIMILARITY).toBeGreaterThanOrEqual(SIMILARITY_FLOOR)
+  // Decision 0007: voice is a static pack, so the retrieval-era voice
+  // tunables must not quietly reappear under their old names.
+  it('carries no entry for the removed voice-retrieval mechanism', () => {
+    const retired = [
+      'corpus_top_similarity_low_threshold',
+      'corpus_retrieve_limit',
+      'min_strong_matches',
+      'strong_match_similarity',
+    ]
+    for (const name of retired) {
+      expect(TUNABLES.find((t) => t.name === name)).toBeUndefined()
+    }
   })
 })

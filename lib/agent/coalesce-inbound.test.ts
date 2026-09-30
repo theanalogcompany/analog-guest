@@ -22,7 +22,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 // testability".
 vi.mock('voyageai', () => ({ VoyageAIClient: class {} }))
 vi.mock('@/lib/rag', () => ({
-  retrieveContext: vi.fn(),
+  loadVoicePack: vi.fn(),
   retrieveKnowledgeContext: vi.fn(),
 }))
 
@@ -246,7 +246,6 @@ vi.mock('@/lib/analytics/posthog', () => ({
   captureIntentionPromptRaised: (...a: unknown[]) => captureIntentionPromptRaisedMock(...a),
   // Also consumed by the real ./stages, loaded via importActual below.
   captureClassificationLowConfidence: vi.fn(),
-  captureCorpusRetrievalBelowThreshold: vi.fn(),
   captureDashViolationPersisted: vi.fn(),
   captureDemoBypassedApprovalGate: vi.fn(),
   captureRegenerationTriggered: vi.fn(),
@@ -254,7 +253,6 @@ vi.mock('@/lib/analytics/posthog', () => ({
   captureGenerationTruncated: vi.fn(),
   CLASSIFICATION_CONFIDENCE_LOW_THRESHOLD: 0.7,
   CLASSIFICATION_CONFIDENCE_REROUTE_THRESHOLD: 0.3,
-  CORPUS_TOP_SIMILARITY_LOW_THRESHOLD: 0.5,
   VOICE_FIDELITY_LOW_THRESHOLD: 0.5,
 }))
 vi.mock('@/lib/notifications/send', () => ({
@@ -312,7 +310,7 @@ vi.mock('./trace-content', () => ({
 // The real fake, not a stub: the primary key it enforces IS the claim, and a
 // stub that answered "won" twice would make every assertion here vacuous.
 import { createTurnClaimsFake } from './testing/turn-claims-fake'
-import { COALESCE_SETTLE_MS, pickNewer, type CoalesceDeps } from './coalesce-turn'
+import { pickNewer, type CoalesceDeps } from './coalesce-turn'
 import { handleInbound } from './handle-inbound'
 
 const VENUE_ID = '00000000-0000-0000-0000-00000000000a'
@@ -473,7 +471,7 @@ const MSG_3 = '44444444-4444-4444-8444-444444444444'
 const T0 = new Date('2026-09-23T15:32:36.000Z')
 /** The incident's real gap: 7 seconds. */
 const T_PLUS_7S = new Date('2026-09-23T15:32:43.000Z')
-/** TAC-540's case: inside the old 8s settle, outside the new 3s one. */
+/** TAC-540's case: outside a 3s settle, so extension-caught. At settle=0 every gap is this case. */
 const T_PLUS_5S = new Date('2026-09-23T15:32:41.000Z')
 const T_PLUS_10M = new Date('2026-09-23T15:42:36.000Z')
 
@@ -732,8 +730,9 @@ describe('TAC-540 — the gap the shortened settle no longer catches', () => {
   /**
    * THE CASE THE TICKET NAMES: a second message five seconds behind the
    * first. At COALESCE_SETTLE_MS = 8_000 that landed inside the settle and
-   * the run adopted it before spending a model call; at 3_000 it does not,
-   * and the pre-dispatch extension check is what has to catch it instead.
+   * the run adopted it before spending a model call; at 3_000 it did not,
+   * and at the current 0 NO gap lands inside the settle — the pre-dispatch
+   * extension check is what catches every burst now.
    *
    * WHAT THIS TEST IS AND IS NOT, stated because the fixture cannot tell the
    * two constants apart and a docstring that implied otherwise would be this
@@ -745,14 +744,16 @@ describe('TAC-540 — the gap the shortened settle no longer catches', () => {
    * one reply covering both messages. The constant itself is pinned in
    * `coalesce-turn.test.ts`, and that pin is the only guard on its value.
    *
-   * The sequence this models, which is why the seeding is where it is:
+   * The sequence this models, which is why the seeding is where it is
+   * (times shown for the 3s era; at the current settle=0 A claims
+   * immediately and the shape is identical):
    *
-   *   t=0  MSG_1 arrives. Run A starts and settles.
-   *   t=3  A wakes, claims, looks for newer -> nothing yet.
-   *   t=5  MSG_2 arrives. Its own webhook starts run B, which settles.
+   *   t=0  MSG_1 arrives. Run A starts, settles if nonzero, claims, looks
+   *        for newer -> nothing yet.
+   *   t=5  MSG_2 arrives. Its own webhook starts run B.
    *        A is mid-generation when the row becomes visible.
    *   ...  A's pre-dispatch check finds MSG_2, adopts it, generates again.
-   *   t=8  B wakes, tries to claim, loses, and stands down.
+   *   t=5+ B tries to claim, loses, and stands down.
    *
    * So MSG_2 must appear AFTER A's post-claim look and BEFORE its extension
    * check, and B must start while A still holds the claim. Seeding inside the
@@ -1243,27 +1244,26 @@ describe('TAC-526 — replay: Le Mils, 2026-09-23', () => {
 
 describe('TAC-526 — the settle and the latency emit', () => {
   /**
-   * THE SETTLE HAD NO TEST AT ALL. Deleting the `await deps.sleep(...)` line
-   * outright passed the entire suite: the constant's VALUE was pinned, and
-   * nothing pinned that it was ever applied. It is mechanism (1) of three and
-   * the whole 8-second guest-facing cost of this feature, so a wrong unit, a
-   * dropped call or a swap for another constant all shipped green.
+   * THE SETTLE IS CURRENTLY ZERO (see COALESCE_SETTLE_MS's docstring for the
+   * measurement), and the `> 0` guard means the sleep is never invoked — so
+   * what this block pins is the shape that remains: no sleep anywhere on the
+   * path, the claim still taken exactly once, and the open block never
+   * re-entered on an extension. When the constant goes nonzero again, the
+   * pin test in coalesce-turn.test.ts fails and whoever moves it must
+   * restore the settle-application assertions this block carried before
+   * (history: a deleted `await deps.sleep(...)` once passed the entire
+   * suite because only the VALUE was pinned, never the application).
    */
-  it('waits COALESCE_SETTLE_MS once, BEFORE claiming', async () => {
+  it('does not sleep at settle=0, and still claims exactly once', async () => {
     sendSucceeds()
     const slept: number[] = []
     const { store, deps } = makeDeps({
-      sleep: async (ms: number) => {
-        // Captured relative to the claim so the ORDER is asserted, not just
-        // the call: settling after the claim would defeat the point entirely.
-        slept.push(ms)
-        expect(store.calls.insert).toBe(0)
-      },
+      sleep: async (ms: number) => void slept.push(ms),
     })
 
     await handleInbound(MSG_1, { coalescing: true, coalesceDeps: deps })
 
-    expect(slept).toEqual([COALESCE_SETTLE_MS])
+    expect(slept).toEqual([])
     expect(store.calls.insert).toBe(1)
   })
 
@@ -1278,14 +1278,15 @@ describe('TAC-526 — the settle and the latency emit', () => {
   })
 
   /**
-   * An extension re-enters the orchestrator, and settling again would wait out
-   * the window a second time for a message that has ALREADY arrived — pure
-   * latency, on the turn that is already the slowest.
+   * An extension re-enters the orchestrator, and re-opening the turn would
+   * re-claim (and, at a nonzero settle, wait the window out a second time)
+   * for a message that has ALREADY arrived. The claim count is what makes
+   * this falsifiable at settle=0: a re-entered open block would insert twice.
    */
-  it('does NOT settle again on an extension', async () => {
+  it('does NOT re-open the turn on an extension', async () => {
     sendSucceeds()
     const slept: number[] = []
-    const { deps } = makeDeps({ sleep: async (ms: number) => void slept.push(ms) })
+    const { store, deps } = makeDeps({ sleep: async (ms: number) => void slept.push(ms) })
     generateStageMock.mockImplementationOnce(async () => {
       seedInbox(
         { id: MSG_1, body: "nice i'll try that", createdAt: T0 },
@@ -1297,17 +1298,19 @@ describe('TAC-526 — the settle and the latency emit', () => {
     await handleInbound(MSG_1, { coalescing: true, coalesceDeps: deps })
 
     expect(generateStageMock).toHaveBeenCalledTimes(2)
-    expect(slept).toEqual([COALESCE_SETTLE_MS])
+    expect(slept).toEqual([])
+    expect(store.calls.insert).toBe(1)
   })
 
   /**
    * And not on an extension of a run that FAILED OPEN either. That is the one
-   * path where "we hold a claim" and "we already settled" disagree, and the
-   * guard used to key on the claim: an unclaimed run settled a second time on
-   * every extension, and could lose the claim mid-turn on the retry and
-   * discard a generation it had already paid for.
+   * path where "we hold a claim" and "we already opened" disagree, and the
+   * guard used to key on the claim: an unclaimed run re-opened on every
+   * extension, and could lose the claim mid-turn on the retry and discard a
+   * generation it had already paid for. The insert count is the falsifiable
+   * signal: a re-entered open block would attempt a second insert.
    */
-  it('does NOT settle again on an extension of an UNCLAIMED run', async () => {
+  it('does NOT re-open the turn on an extension of an UNCLAIMED run', async () => {
     sendSucceeds()
     const slept: number[] = []
     const { store, deps } = makeDeps({ sleep: async (ms: number) => void slept.push(ms) })
@@ -1322,7 +1325,8 @@ describe('TAC-526 — the settle and the latency emit', () => {
 
     await handleInbound(MSG_1, { coalescing: true, coalesceDeps: deps })
 
-    expect(slept).toEqual([COALESCE_SETTLE_MS])
+    expect(slept).toEqual([])
+    expect(store.calls.insert).toBe(1)
   })
 
   /**
