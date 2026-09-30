@@ -3216,6 +3216,12 @@ function triggerReasonToFollowupReason(
     // nothing to say about a conversation that went quiet ten minutes ago, and
     // naming a past visit is exactly what its own category instruction forbids.
     case 'warm_close':
+    // TAC-386: an inquiry follow-up renders `## Following up on what they asked`
+    // instead. The follow-up block's framing is "you visited N days ago", which
+    // is exactly the assertion ruling 11 bars this message from making: it knows
+    // what the guest asked and what we said, and nothing about whether they came
+    // in.
+    case 'inquiry_followup':
       return null
   }
 }
@@ -3567,6 +3573,9 @@ export function buildAiRuntime(
     // TAC-560: mapped straight through. Picks the `## Closing this conversation`
     // block and replaces the category instructions; see composePrompt.
     warmClose: ctx.warmClose,
+    // TAC-386: undefined rather than null on every other turn, matching how the
+    // optional RuntimeContext fields around it read.
+    inquiryFollowup: ctx.inquiryFollowup ?? undefined,
     // TAC-362: this message's emoji call. undefined for the policies that
     // don't vary (never, sparingly) — the serializer then renders no block.
     emojiDirective,

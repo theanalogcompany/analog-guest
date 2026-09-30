@@ -714,6 +714,40 @@ function formatWarmClose(): string {
   ].join('\n')
 }
 
+/**
+ * TAC-386: the inquiry follow-up's own block.
+ *
+ * Both strings render VERBATIM and in full. The one thing this message must do
+ * is reference the specific thing the guest asked and what we actually
+ * suggested, and a paraphrase of either loses exactly the detail that makes the
+ * check-in worth sending rather than generic.
+ *
+ * NO EXAMPLE PHRASE, and no analogy that reads as one: Jaipal's standing rule is
+ * that quoted examples get copied verbatim, and this is the most forward message
+ * the agent sends, so a template is the worst thing to hand it. The instruction
+ * describes the MOVE and leaves the words to the venue's own voice rules.
+ *
+ * "Recently" rather than a relative time (ruled 2026-09-30). A follow-up whose
+ * delay rolled to the next open period goes out the following morning, so
+ * "earlier today" would be false on most sends. The exact delta is deliberately
+ * not rendered either: the message does not need it, and a wrong one is worse
+ * than none.
+ *
+ * "we" throughout and no named speaker: outreach always comes from the shop.
+ * No em dash, per R3.
+ */
+function formatInquiryFollowup(
+  inquiry: NonNullable<RuntimeContext['inquiryFollowup']>,
+): string {
+  return [
+    '## Following up on what they asked',
+    'Recently they asked us something and we answered it. They have not been in touch since. This message checks that what we helped them with worked out.',
+    `What they asked: "${inquiry.question}"`,
+    `What we told them: "${inquiry.answer}"`,
+    'Refer to the specific thing they asked about and to what we actually suggested, in our own words. Do not ask whether they came in, and do not say or imply that we know whether they did, because we do not. Do not ask them to come in. This is the only message we send about it, so it needs no promise to stay in touch.',
+  ].join('\n')
+}
+
 function formatRightNow(today: NonNullable<RuntimeContext['today']>): string {
   // TAC-522: the calendar sits directly under the date so the two date facts
   // are together, and the status line stays last where TAC-301's
@@ -1789,6 +1823,11 @@ export function runtimeToProse(
   // full-order test in serializers.test.ts exists so moving it is deliberate.
   if (runtime.warmClose === true) {
     blocks.push(formatWarmClose())
+  }
+  // TAC-386: the same slot as the warm close above, and mutually exclusive with
+  // it in practice — each is set only on its own trigger reason.
+  if (runtime.inquiryFollowup) {
+    blocks.push(formatInquiryFollowup(runtime.inquiryFollowup))
   }
   // THE-232: Operator instruction block sits above runtime context
   // (mechanics, last visit, recent conversation) so Sonnet treats it as the

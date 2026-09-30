@@ -4337,3 +4337,103 @@ describe('formatActiveCommitments — the id also carries a cancellation (TAC-51
     )
   })
 })
+
+// TAC-386: the inquiry follow-up's block. Both halves of what happened arrive
+// here as data, because they differ on every send.
+describe('runtimeToProse — ## Following up on what they asked (TAC-386)', () => {
+  const INQUIRY = {
+    question: 'where do I park around there',
+    answer:
+      'Street parking on Polk is usually fine before 9. The lot behind the building is permit only.',
+  }
+
+  const render = (over: Record<string, unknown> = {}): string =>
+    runtimeToProse(
+      { mechanics: [], inquiryFollowup: INQUIRY, ...over },
+      'follow_up',
+      NOW,
+    )
+
+  /** Just this block, so a later block's wording cannot satisfy or trip a check. */
+  const block = (out: string): string => {
+    const start = out.indexOf('## Following up on what they asked')
+    expect(start).toBeGreaterThanOrEqual(0)
+    const rest = out.slice(start)
+    const next = rest.indexOf('\n## ')
+    return next === -1 ? rest : rest.slice(0, next)
+  }
+
+  it('renders only when the field is set', () => {
+    expect(runtimeToProse({ mechanics: [] }, 'follow_up', NOW)).not.toContain(
+      '## Following up on what they asked',
+    )
+    expect(render()).toContain('## Following up on what they asked')
+  })
+
+  it('carries the guest question VERBATIM', () => {
+    // The one thing the message must reference. A paraphrase loses exactly the
+    // detail that makes the check-in worth sending.
+    expect(block(render())).toContain(`"${INQUIRY.question}"`)
+  })
+
+  it('carries OUR ANSWER verbatim too, not just the question', () => {
+    // Ruled 2026-09-30: the follow-up references what they asked AND what we
+    // suggested. Before that ruling only the question was passed, so this is
+    // the assertion that would have failed on the earlier shape.
+    expect(block(render())).toContain(`"${INQUIRY.answer}"`)
+    expect(block(render())).toContain('What we told them:')
+  })
+
+  it('does not truncate a long answer', () => {
+    const long = `${'a really specific recommendation '.repeat(20)}end`
+    const out = block(render({ inquiryFollowup: { ...INQUIRY, answer: long } }))
+    expect(out).toContain(long)
+  })
+
+  it('tells the model not to ask or assert the visit', () => {
+    const out = block(render())
+    expect(out).toContain('Do not ask whether they came in')
+    expect(out).toContain('do not say or imply that we know whether they did')
+    expect(out).toContain('Do not ask them to come in')
+  })
+
+  it('uses timing-neutral wording', () => {
+    // Ruled 2026-09-30. "Earlier today" is false on every send that rolled to
+    // the next open period, and that is most of them.
+    const out = block(render())
+    expect(out).toContain('Recently they asked us something')
+    for (const timing of ['Earlier today', 'earlier today', 'this morning']) {
+      expect(out, timing).not.toContain(timing)
+    }
+  })
+
+  it('speaks as "we" and names no host', () => {
+    const out = block(render())
+    expect(out).toContain('we')
+    for (const name of ['Himanshu', 'Neha']) {
+      expect(out, name).not.toContain(name)
+    }
+  })
+
+  it('offers no example phrase for the model to copy', () => {
+    // Jaipal's standing rule. The block describes the MOVE; the words come from
+    // the venue's own voice rules. The only quoted strings in it are the two
+    // data fields.
+    const out = block(render())
+    const quoted = Array.from(out.matchAll(/"([^"]+)"/g)).map((m) => m[1])
+    expect(quoted).toEqual([INQUIRY.question, INQUIRY.answer])
+  })
+
+  it('models no em dash', () => {
+    const out = block(render())
+    expect(out).not.toContain('—')
+    expect(out).not.toContain('–')
+  })
+
+  it('renders no follow-up-context block alongside it', () => {
+    // triggerReasonToFollowupReason returns null for this reason, so the shared
+    // `## Follow-up context` machinery never fires. Its framing is "you visited
+    // N days ago", which is the assertion ruling 11 bars.
+    expect(render()).not.toContain('## Follow-up context')
+  })
+})

@@ -23,7 +23,12 @@
 
 import { createAdminClient } from '@/lib/db/admin'
 import type { RAGResult } from '@/lib/rag/types'
-import type { EngineFollowupReason } from '@/lib/schemas'
+import {
+  FOLLOWUP_LOG_REASONS,
+  FOLLOWUP_REASONS,
+  type EngineFollowupReason,
+  type FollowupLogReason,
+} from '@/lib/schemas'
 
 /**
  * Engine-side view of a single guest's followup_log signals, populated by
@@ -53,13 +58,13 @@ export function emptyFollowupGuestSignals(): FollowupGuestSignals {
 export interface FollowupClaimRow {
   venueId: string
   guestId: string
-  reason: EngineFollowupReason
+  reason: FollowupLogReason
   dedupKey: string
 }
 
 export interface FollowupClaim {
   id: string
-  reason: EngineFollowupReason
+  reason: FollowupLogReason
   dedupKey: string
 }
 
@@ -130,7 +135,11 @@ export async function claimFollowupLogRows(
   }
   const claimed: FollowupClaim[] = data.map((row) => ({
     id: row.id,
-    reason: row.reason as EngineFollowupReason,
+    // Narrowed, not cast, for the reason the history read below gives. This one
+    // echoes back rows the caller just inserted, so a surprise value should be
+    // impossible; `?? 'manual_task'` would be a lie about that, so an
+    // unrecognised value is loud instead.
+    reason: assertFollowupLogReason(row.reason),
     dedupKey: row.dedup_key,
   }))
   return { ok: true, claimed }
@@ -236,6 +245,31 @@ const MS_PER_DAY = 24 * 60 * 60 * 1000
  * `perk:` prefix on the per-reason history rows; the detector consumes
  * this Set to filter "newly eligible AND not announced."
  */
+/**
+ * Is this stored `followup_log.reason` one the daily engine detects?
+ *
+ * A real membership test over FOLLOWUP_REASONS rather than a type assertion, so
+ * a reason written by another processor cannot impersonate one.
+ */
+function isEngineFollowupReason(value: string): value is EngineFollowupReason {
+  return (FOLLOWUP_REASONS as readonly string[]).includes(value)
+}
+
+/**
+ * The reason on a row we just wrote, or a throw.
+ *
+ * Throwing is right here and skipping would not be: this reads back rows this
+ * process inserted a moment ago with reasons it chose itself, so a value outside
+ * the union means the code and the CHECK constraint have diverged. Returning a
+ * plausible default would hide exactly that.
+ */
+function assertFollowupLogReason(value: string): FollowupLogReason {
+  if (!(FOLLOWUP_LOG_REASONS as readonly string[]).includes(value)) {
+    throw new Error(`followup_log returned an unknown reason: ${value}`)
+  }
+  return value as FollowupLogReason
+}
+
 export async function loadFollowupSnapshotsForVenue(
   venueId: string,
   guestIds: readonly string[],
@@ -288,13 +322,29 @@ export async function loadFollowupSnapshotsForVenue(
     return snap
   }
 
+  // NO REASON FILTER, deliberately, and TAC-386 depends on it. Every row this
+  // venue has for these guests in the last 7 days counts toward `weekly_cap`,
+  // whatever wrote it, which is how an inquiry follow-up counts toward the cap
+  // without the cap having to know it exists.
   for (const row of weeklyResult.data ?? []) {
     ensure(row.guest_id).weeklyCount += 1
   }
 
   for (const row of historyResult.data ?? []) {
     const snap = ensure(row.guest_id)
-    const reason = row.reason as EngineFollowupReason
+    // TAC-386: NARROWED, not cast. `followup_log.reason` accepts more values than
+    // FOLLOWUP_REASONS holds — that constant means "reasons the daily engine can
+    // DETECT", and `'inquiry_followup'` is written by a different processor
+    // entirely. A bare `as EngineFollowupReason` would put a key in
+    // `lastByReason` that no detector can ever read, typed as though a detector
+    // could, which is the cast-that-cannot-fail this repo treats as a defect.
+    //
+    // Skipping is right rather than lossy: `lastByReason` exists only to answer
+    // the per-reason dedup windows of the reasons below, and this row's own
+    // once-only guarantee is a unique index on its own table. The weekly count
+    // above already saw it.
+    if (!isEngineFollowupReason(row.reason)) continue
+    const reason = row.reason
     const at = new Date(row.created_at)
     const existing = snap.lastByReason[reason]
     if (!existing || at.getTime() > existing.getTime()) {

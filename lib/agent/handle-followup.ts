@@ -154,7 +154,15 @@ function scanMessageIdOf(trigger: FollowupTrigger): string | null {
  * quiet after. The reply check compares timestamps and ids, not directions.
  */
 function answeredMessageIdOf(trigger: FollowupTrigger): string | null {
-  return trigger.warmClose?.answersMessageId ?? scanMessageIdOf(trigger)
+  return (
+    trigger.warmClose?.answersMessageId ??
+    // TAC-386 names OUR ANSWER's row, not the guest's question. The question was
+    // already answered hours ago and that outbound holds the reply link; a
+    // second outbound claiming the same inbound would make two rows answer one
+    // message. What this follows is our answer.
+    trigger.inquiryFollowup?.answerMessageId ??
+    scanMessageIdOf(trigger)
+  )
 }
 
 /**
@@ -180,6 +188,18 @@ function replyCheckFor(
   trigger: FollowupTrigger,
 ): { inboundMessageId: string } | 'exempt' {
   if (trigger.reason === 'warm_close') return 'exempt'
+  // TAC-386 IS EXEMPT TOO, and for a sharper version of the same reason. The
+  // check asks "has this guest's message already been answered", and for an
+  // inquiry follow-up the answer is YES BY CONSTRUCTION: our reply three hours
+  // ago is the thing this follow-up exists to check on. Handing it the question
+  // would refuse every send, and handing it our own answer's id would resolve to
+  // no inbound.
+  //
+  // What the check protects against is covered by the processor instead, and
+  // more directly: it skips the whole row if the guest has written anything since
+  // the question (ruling 5(b)), so there is never an unanswered message for this
+  // send to talk over.
+  if (trigger.reason === 'inquiry_followup') return 'exempt'
   const id = scanMessageIdOf(trigger)
   return id === null ? 'exempt' : { inboundMessageId: id }
 }
@@ -233,6 +253,17 @@ function triggerToCategory(
     // flag. See lib/ai/prompts/categories/warm-close.ts.
     case 'warm_close':
       return 'acknowledgment'
+    // TAC-386. `follow_up` and NOT a category of its own, for TAC-560's reason: a
+    // new messages.category value needs a CHECK widening on `messages`, which is
+    // a hard stop, and this does not need one. It IS a follow-up.
+    //
+    // But the category's own INSTRUCTIONS are wrong here, so composePrompt
+    // replaces them on this turn via the inquiryFollowup runtime field: they are
+    // written for a message days after a VISIT and tell the model to check in on
+    // it, which is the one thing ruling 11 forbids this message from doing. See
+    // lib/ai/prompts/categories/inquiry-followup.ts.
+    case 'inquiry_followup':
+      return 'follow_up'
   }
 }
 
@@ -393,11 +424,35 @@ export async function handleFollowup(input: {
     const isInstagramScanArrival =
       input.trigger.reason === 'instagram_scan_arrival'
     const isWarmClose = input.trigger.reason === 'warm_close'
-    const routesThroughDispatchReply = isInstagramScanArrival || isWarmClose
+    // TAC-386 carves out the THIRD, on the middle version of the same argument.
+    // It fires a few hours after the guest's OWN message, so the window is open
+    // unless the venue-hours roll pushed the send past it, and that case is
+    // skipped at arm time and re-checked at dispatch rather than assumed
+    // (lib/followups/inquiry-followup-timing.ts). The send still re-derives the
+    // window immediately before going out.
+    const isInquiryFollowup = input.trigger.reason === 'inquiry_followup'
+    const routesThroughDispatchReply =
+      isInstagramScanArrival || isWarmClose || isInquiryFollowup
     if (isWarmClose && ctx.conversationChannel !== 'instagram') {
       const reason = 'warm_close_is_instagram_only'
       console.warn(
         '[agent] warm close refused: not an Instagram conversation',
+        {
+          agentRunId,
+          guestId: ctx.guest.id,
+          channel: ctx.conversationChannel,
+        },
+      )
+      trace.update({ output: { status: 'refused', reason } })
+      return { status: 'refused', reason }
+    }
+    // The mirror of TAC-386's carve-out, for the reason the warm close has one:
+    // ruled 2026-09-30, this is Instagram only for now and the SMS arm is its own
+    // ticket, so a text conversation is refused here rather than routed.
+    if (isInquiryFollowup && ctx.conversationChannel !== 'instagram') {
+      const reason = 'inquiry_followup_is_instagram_only'
+      console.warn(
+        '[agent] inquiry follow-up refused: not an Instagram conversation',
         {
           agentRunId,
           guestId: ctx.guest.id,

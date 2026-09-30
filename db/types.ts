@@ -467,6 +467,7 @@ export type Database = {
           last_interaction_at: string | null
           last_name: string | null
           last_outbound_at: string | null
+          last_proactive_send_at: string | null
           last_visit_at: string | null
           last_visit_precision: string | null
           opted_out_at: string | null
@@ -497,6 +498,7 @@ export type Database = {
           last_interaction_at?: string | null
           last_name?: string | null
           last_outbound_at?: string | null
+          last_proactive_send_at?: string | null
           last_visit_at?: string | null
           last_visit_precision?: string | null
           opted_out_at?: string | null
@@ -527,6 +529,7 @@ export type Database = {
           last_interaction_at?: string | null
           last_name?: string | null
           last_outbound_at?: string | null
+          last_proactive_send_at?: string | null
           last_visit_at?: string | null
           last_visit_precision?: string | null
           opted_out_at?: string | null
@@ -662,6 +665,86 @@ export type Database = {
           },
           {
             foreignKeyName: "inbound_turn_outcomes_venue_id_fkey"
+            columns: ["venue_id"]
+            isOneToOne: false
+            referencedRelation: "venues"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      inquiry_followups: {
+        Row: {
+          asked_at: string
+          created_at: string
+          dispatched_at: string | null
+          dispatched_message_id: string | null
+          due_at: string
+          guest_id: string
+          id: string
+          question: string
+          skip_reason: string | null
+          source_message_id: string
+          status: string
+          updated_at: string
+          venue_id: string
+          window_closes_at: string
+        }
+        Insert: {
+          asked_at: string
+          created_at?: string
+          dispatched_at?: string | null
+          dispatched_message_id?: string | null
+          due_at: string
+          guest_id: string
+          id?: string
+          question: string
+          skip_reason?: string | null
+          source_message_id: string
+          status?: string
+          updated_at?: string
+          venue_id: string
+          window_closes_at: string
+        }
+        Update: {
+          asked_at?: string
+          created_at?: string
+          dispatched_at?: string | null
+          dispatched_message_id?: string | null
+          due_at?: string
+          guest_id?: string
+          id?: string
+          question?: string
+          skip_reason?: string | null
+          source_message_id?: string
+          status?: string
+          updated_at?: string
+          venue_id?: string
+          window_closes_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "inquiry_followups_dispatched_message_id_fkey"
+            columns: ["dispatched_message_id"]
+            isOneToOne: false
+            referencedRelation: "messages"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "inquiry_followups_guest_id_fkey"
+            columns: ["guest_id"]
+            isOneToOne: false
+            referencedRelation: "guests"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "inquiry_followups_source_message_id_fkey"
+            columns: ["source_message_id"]
+            isOneToOne: false
+            referencedRelation: "messages"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "inquiry_followups_venue_id_fkey"
             columns: ["venue_id"]
             isOneToOne: false
             referencedRelation: "venues"
@@ -1248,6 +1331,13 @@ export type Database = {
           {
             foreignKeyName: "messages_reply_to_message_id_fkey"
             columns: ["reply_to_message_id"]
+            isOneToOne: false
+            referencedRelation: "messages"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "messages_resolved_by_message_id_fkey"
+            columns: ["resolved_by_message_id"]
             isOneToOne: false
             referencedRelation: "messages"
             referencedColumns: ["id"]

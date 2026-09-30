@@ -274,6 +274,7 @@ function makeCtx(overrides: Partial<RuntimeContext>): RuntimeContext {
     followupTrigger: null,
     scanArrival: null,
     warmClose: false,
+    inquiryFollowup: null,
     conversationChannel: 'text' as const,
     pendingQuestion: null,
     recentMessages: [],
