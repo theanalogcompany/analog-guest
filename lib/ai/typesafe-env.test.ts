@@ -66,7 +66,9 @@ describe('checkTypesafeEnv — valid shapes', () => {
   })
 
   it('accepts a valid key wrapped in stray whitespace (env values carry trailing newlines)', () => {
-    expect(checkTypesafeEnv({ JEV_API_KEY: `  ${VALID_KEY}\n` })).toEqual({ ok: true })
+    expect(checkTypesafeEnv({ JEV_API_KEY: `  ${VALID_KEY}\n` })).toEqual({
+      ok: true,
+    })
   })
 })
 
@@ -76,7 +78,10 @@ describe('checkTypesafeEnv — never leaks key material', () => {
   it.each([
     ['wrong prefix', 'ZQXJVK_DISTINCTIVE_SECRET_FRAGMENT_' + 'z'.repeat(40)],
     ['too short', 'apikey_ZQXJVKSECRET'],
-    ['embedded whitespace', 'apikey_ZQXJVKSECRETHALF1 ZQXJVKSECRETHALF2aaaaaaaaaa'],
+    [
+      'embedded whitespace',
+      'apikey_ZQXJVKSECRETHALF1 ZQXJVKSECRETHALF2aaaaaaaaaa',
+    ],
     ['all defects at once', 'ZQXJVK SECRET'],
   ])('problem strings for a %s key never contain the value', (_label, key) => {
     const r = checkTypesafeEnv({ JEV_API_KEY: key })

@@ -58,7 +58,9 @@ export interface PostSendChecksArgs {
  * Never throws; never returns a verdict — the stages' own captures
  * (PostHog + Slack, disposition 'sent') are the entire output surface.
  */
-export async function runPostSendChecks(args: PostSendChecksArgs): Promise<void> {
+export async function runPostSendChecks(
+  args: PostSendChecksArgs,
+): Promise<void> {
   const { ctx, generation, agentRunId, outboundMessageId, trace } = args
   try {
     const startedAt = Date.now()
@@ -69,7 +71,11 @@ export async function runPostSendChecks(args: PostSendChecksArgs): Promise<void>
       run: () => Promise<T>,
       describe: (value: T) => AgentSpanUpdate,
     ): Promise<T> => {
-      const span = trace.span(name, { ...input, disposition: 'sent', outboundMessageId })
+      const span = trace.span(name, {
+        ...input,
+        disposition: 'sent',
+        outboundMessageId,
+      })
       const checkStartedAt = Date.now()
       try {
         const value = await run()
@@ -92,65 +98,80 @@ export async function runPostSendChecks(args: PostSendChecksArgs): Promise<void>
       }
     }
 
-    const gatedMechanicCount = ctx.mechanics.filter((m) => m.requiresOperatorApproval).length
+    const gatedMechanicCount = ctx.mechanics.filter(
+      (m) => m.requiresOperatorApproval,
+    ).length
     // allSettled, not all, for the same reason the pre-send batch used it
     // (TAC-355): a hypothetical throw in one stage must not discard a
     // sibling's finding. Post-send there is no verdict to degrade to — the
     // rejection handlers below only keep the console trail honest.
-    const [grounding, mechanicOffer, prosePromise, cancellation, closedVenueArrival] =
-      await Promise.allSettled([
-        timedCheck(
-          'verify_grounding',
-          { knowledgeGap: generation.knowledgeGap },
-          () => verifyGroundingStage(ctx, generation, 'sent'),
-          (value) => ({
-            output: {
-              ran: generation.knowledgeGap === false && ctx.guest.isDemo !== true,
-              status: value.status,
-              hasUngroundedClaim: value.status === 'flagged',
-              claimCount: value.status === 'flagged' ? value.claims.length : 0,
-            },
-            content: trace.captureContent
-              ? { ungroundedClaims: value.status === 'flagged' ? value.claims : [] }
-              : undefined,
-          }),
-        ),
-        timedCheck(
-          'verify_mechanic_offer',
-          { gatedMechanicCount },
-          () => verifyMechanicOfferStage(ctx, generation, 'sent'),
-          (value) => ({ output: { status: value.status } }),
-        ),
-        timedCheck(
-          'verify_prose_promise',
-          {},
-          () => verifyProsePromiseStage(ctx, generation, 'sent'),
-          (value) => ({
-            output: {
-              status: value.status,
-              namedCommitment: value.status === 'flagged' && value.commitment !== null,
-            },
-          }),
-        ),
-        timedCheck(
-          'verify_cancellation_claim',
-          {},
-          () => verifyCancellationClaimStage(ctx, generation, 'sent'),
-          (value) => ({ output: { claim: value.claim, resolution: value.resolution.status } }),
-        ),
-        timedCheck(
-          'verify_closed_venue_arrival',
-          {},
-          () => verifyClosedVenueArrivalStage(ctx, generation, 'sent'),
-          (value) => ({ output: { status: value.status } }),
-        ),
-      ])
+    const [
+      grounding,
+      mechanicOffer,
+      prosePromise,
+      cancellation,
+      closedVenueArrival,
+    ] = await Promise.allSettled([
+      timedCheck(
+        'verify_grounding',
+        { knowledgeGap: generation.knowledgeGap },
+        () => verifyGroundingStage(ctx, generation, 'sent'),
+        (value) => ({
+          output: {
+            ran: generation.knowledgeGap === false && ctx.guest.isDemo !== true,
+            status: value.status,
+            hasUngroundedClaim: value.status === 'flagged',
+            claimCount: value.status === 'flagged' ? value.claims.length : 0,
+          },
+          content: trace.captureContent
+            ? {
+                ungroundedClaims:
+                  value.status === 'flagged' ? value.claims : [],
+              }
+            : undefined,
+        }),
+      ),
+      timedCheck(
+        'verify_mechanic_offer',
+        { gatedMechanicCount },
+        () => verifyMechanicOfferStage(ctx, generation, 'sent'),
+        (value) => ({ output: { status: value.status } }),
+      ),
+      timedCheck(
+        'verify_prose_promise',
+        {},
+        () => verifyProsePromiseStage(ctx, generation, 'sent'),
+        (value) => ({
+          output: {
+            status: value.status,
+            namedCommitment:
+              value.status === 'flagged' && value.commitment !== null,
+          },
+        }),
+      ),
+      timedCheck(
+        'verify_cancellation_claim',
+        {},
+        () => verifyCancellationClaimStage(ctx, generation, 'sent'),
+        (value) => ({
+          output: { claim: value.claim, resolution: value.resolution.status },
+        }),
+      ),
+      timedCheck(
+        'verify_closed_venue_arrival',
+        {},
+        () => verifyClosedVenueArrivalStage(ctx, generation, 'sent'),
+        (value) => ({ output: { status: value.status } }),
+      ),
+    ])
 
     const statusOf = (
       settled: PromiseSettledResult<{ status: string } | { claim: string }>,
     ): string => {
       if (settled.status === 'rejected') return 'threw'
-      return 'status' in settled.value ? settled.value.status : settled.value.claim
+      return 'status' in settled.value
+        ? settled.value.status
+        : settled.value.claim
     }
     for (const [name, settled] of [
       ['verify_grounding', grounding],
@@ -164,7 +185,9 @@ export async function runPostSendChecks(args: PostSendChecksArgs): Promise<void>
           agentRunId,
           outboundMessageId,
           error:
-            settled.reason instanceof Error ? settled.reason.message : String(settled.reason),
+            settled.reason instanceof Error
+              ? settled.reason.message
+              : String(settled.reason),
         })
       }
     }

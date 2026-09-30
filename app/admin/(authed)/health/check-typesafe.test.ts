@@ -24,7 +24,10 @@ describe('checkTypesafe — not configured', () => {
 
 describe('checkTypesafe — misconfigured', () => {
   it('is bad on a malformed key and the detail starts with Misconfigured', () => {
-    const row = checkTypesafe({ JEV_API_KEY: 'sk_wrong_vendor_prefix_but_long_enough_aaaa' }, false)
+    const row = checkTypesafe(
+      { JEV_API_KEY: 'sk_wrong_vendor_prefix_but_long_enough_aaaa' },
+      false,
+    )
     expect(row.tone).toBe('bad')
     expect(row.detail).toMatch(/^Misconfigured/)
     // Names the var and the defect so the operator can act on it.
@@ -44,7 +47,9 @@ describe('checkTypesafe — key present, flag woven into the detail', () => {
   it('is good with the flag off and says Haiku is still the live classifier', () => {
     const row = checkTypesafe({ JEV_API_KEY: VALID_KEY }, false)
     expect(row.tone).toBe('good')
-    expect(row.detail).toBe('Key present — flag off, classification runs on Haiku')
+    expect(row.detail).toBe(
+      'Key present — flag off, classification runs on Haiku',
+    )
   })
 
   it('is good with the flag on, says Jev is ON, and is honest about what it cannot prove', () => {

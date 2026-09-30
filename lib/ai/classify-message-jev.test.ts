@@ -34,7 +34,10 @@ function jevBody(overrides?: {
         type: 'choice',
         choice: overrides?.choice ?? 'reply',
         confidence: 0.9,
-        probabilities: overrides?.probabilities ?? { reply: 0.9, new_question: 0.1 },
+        probabilities: overrides?.probabilities ?? {
+          reply: 0.9,
+          new_question: 0.1,
+        },
       },
       crisis: { type: 'noul', noul: overrides?.crisisNoul ?? 0.01 },
       corrects_pending: { type: 'noul', noul: overrides?.correctsNoul ?? 0.05 },
@@ -48,7 +51,10 @@ function fakeFetch(body: unknown, status = 200) {
 
 describe('classifyMessageViaJev — happy path', () => {
   it('maps a clean 200 into a ClassifyMessageResult', async () => {
-    const r = await classifyMessageViaJev(STATE, { env: ENV, fetchImpl: fakeFetch(jevBody()) })
+    const r = await classifyMessageViaJev(STATE, {
+      env: ENV,
+      fetchImpl: fakeFetch(jevBody()),
+    })
     expect(r.ok).toBe(true)
     if (!r.ok) return
     expect(r.data.category).toBe('reply')
@@ -141,7 +147,9 @@ describe('classifyMessageViaJev — failure paths, one errorCode each', () => {
   })
 
   it('returns jev_bad_response on an unparseable body', async () => {
-    const fetchImpl = vi.fn(async () => new Response('not json at all', { status: 200 }))
+    const fetchImpl = vi.fn(
+      async () => new Response('not json at all', { status: 200 }),
+    )
     const r = await classifyMessageViaJev(STATE, { env: ENV, fetchImpl })
     expect(r.ok).toBe(false)
     if (r.ok) return
@@ -151,7 +159,10 @@ describe('classifyMessageViaJev — failure paths, one errorCode each', () => {
   it('returns jev_bad_response on a schema-mismatched body', async () => {
     const r = await classifyMessageViaJev(STATE, {
       env: ENV,
-      fetchImpl: fakeFetch({ model: 'jev-1.13.0', answers: { category: { type: 'choice' } } }),
+      fetchImpl: fakeFetch({
+        model: 'jev-1.13.0',
+        answers: { category: { type: 'choice' } },
+      }),
     })
     expect(r.ok).toBe(false)
     if (r.ok) return
@@ -160,7 +171,9 @@ describe('classifyMessageViaJev — failure paths, one errorCode each', () => {
 
   it('returns jev_timeout when fetch rejects with a TimeoutError', async () => {
     const fetchImpl = vi.fn(async () => {
-      throw Object.assign(new Error('signal timed out'), { name: 'TimeoutError' })
+      throw Object.assign(new Error('signal timed out'), {
+        name: 'TimeoutError',
+      })
     })
     const r = await classifyMessageViaJev(STATE, { env: ENV, fetchImpl })
     expect(r.ok).toBe(false)
@@ -181,7 +194,12 @@ describe('classifyMessageViaJev — failure paths, one errorCode each', () => {
   it('returns jev_bad_category when the choice is outside the enum, not an unknown reply', async () => {
     const r = await classifyMessageViaJev(STATE, {
       env: ENV,
-      fetchImpl: fakeFetch(jevBody({ choice: 'welcome', probabilities: { welcome: 0.9, reply: 0.1 } })),
+      fetchImpl: fakeFetch(
+        jevBody({
+          choice: 'welcome',
+          probabilities: { welcome: 0.9, reply: 0.1 },
+        }),
+      ),
     })
     expect(r.ok).toBe(false)
     if (r.ok) return
@@ -193,15 +211,24 @@ describe('classifyMessageViaJev — failure paths, one errorCode each', () => {
 // recorded body string is immutable, so no live-reference trap here.
 async function captureRequest(state: JevClassifyState) {
   let captured: { url: string; init: RequestInit } | null = null
-  const fetchImpl = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
-    captured = { url: String(url), init: init ?? {} }
-    return new Response(JSON.stringify(jevBody()), { status: 200 })
+  const fetchImpl = vi.fn(
+    async (url: string | URL | Request, init?: RequestInit) => {
+      captured = { url: String(url), init: init ?? {} }
+      return new Response(JSON.stringify(jevBody()), { status: 200 })
+    },
+  )
+  const r = await classifyMessageViaJev(state, {
+    env: ENV,
+    fetchImpl: fetchImpl as typeof fetch,
   })
-  const r = await classifyMessageViaJev(state, { env: ENV, fetchImpl: fetchImpl as typeof fetch })
   expect(r.ok).toBe(true)
   expect(captured).not.toBeNull()
   const { url, init } = captured! as { url: string; init: RequestInit }
-  return { url, init, body: JSON.parse(String(init.body)) as Record<string, unknown> }
+  return {
+    url,
+    init,
+    body: JSON.parse(String(init.body)) as Record<string, unknown>,
+  }
 }
 
 describe('classifyMessageViaJev — request shape', () => {
@@ -210,14 +237,18 @@ describe('classifyMessageViaJev — request shape', () => {
     recent_conversation: '[guest, 5 minutes ago] hi',
     guest_relationship: 'regular',
     inbound_message: 'actually make that oat milk',
-    inbound_message_full_for_crisis_check: 'actually make that oat milk, full text',
+    inbound_message_full_for_crisis_check:
+      'actually make that oat milk, full text',
   }
 
   it('posts the jev-latest model, the three typed questions, and the state verbatim', async () => {
     const { url, body } = await captureRequest(FULL_STATE)
     expect(url).toBe(TYPESAFE_SYSTEMONE_URL)
     expect(body.model).toBe('jev-latest')
-    const questions = body.questions as Record<string, { type: string; criteria?: unknown }>
+    const questions = body.questions as Record<
+      string,
+      { type: string; criteria?: unknown }
+    >
     expect(questions.category.type).toBe('choice')
     expect(questions.category.criteria).toEqual(JEV_CATEGORY_CRITERIA)
     expect(questions.crisis.type).toBe('noul')
@@ -244,7 +275,10 @@ describe('classifyMessageViaJev — request shape', () => {
    */
   it('sends true/false criteria on the crisis noul carrying the prefer-true asymmetry (jev-v1.1.0)', async () => {
     const { body } = await captureRequest(STATE)
-    const questions = body.questions as Record<string, { criteria?: { true?: string; false?: string } }>
+    const questions = body.questions as Record<
+      string,
+      { criteria?: { true?: string; false?: string } }
+    >
     expect(questions.crisis.criteria?.true).toContain('genuinely ambiguous')
     expect(questions.crisis.criteria?.false).toContain(
       'only choose false when the innocuous reading is the only plausible one',
@@ -256,7 +290,9 @@ describe('classifyMessageViaJev — drift guard against the Haiku enum', () => {
   // The whole point of this file per the module header: the Jev criteria are
   // a PARALLEL COPY of the Haiku prompt's semantics, and this is what stops
   // the three lists drifting apart silently.
-  const haikuOptions = ClassifiedMessageSchema.shape.category.options.slice().sort()
+  const haikuOptions = ClassifiedMessageSchema.shape.category.options
+    .slice()
+    .sort()
 
   it('JEV_CATEGORY_CRITERIA keys exactly equal the Haiku schema enum options', () => {
     expect(Object.keys(JEV_CATEGORY_CRITERIA).sort()).toEqual(haikuOptions)
@@ -275,7 +311,12 @@ describe('classifyMessageViaJev — loyalty-language ban (product principle)', (
   // point of continuing" and singular 'point' is not program language. The
   // perk_inquiry criterion talks about perks and RECOGNITION, deliberately -
   // the Haiku prompt's 'recognition tiers' phrasing was not carried over.
-  const BANNED = [/\bpoints\b/i, /\brewards?\b/i, /\btiers?\b/i, /\bearn(s|ed|ing)?\b/i]
+  const BANNED = [
+    /\bpoints\b/i,
+    /\brewards?\b/i,
+    /\btiers?\b/i,
+    /\bearn(s|ed|ing)?\b/i,
+  ]
 
   it('no category criterion uses loyalty-program language', () => {
     const values = Object.values(JEV_CATEGORY_CRITERIA)

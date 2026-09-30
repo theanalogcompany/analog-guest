@@ -31,10 +31,14 @@ const verifyClosedVenueArrivalStageMock = vi.fn()
 // @/lib/rag → voyageai chain) out of the test process entirely.
 vi.mock('./stages', () => ({
   verifyGroundingStage: (...a: unknown[]) => verifyGroundingStageMock(...a),
-  verifyMechanicOfferStage: (...a: unknown[]) => verifyMechanicOfferStageMock(...a),
-  verifyProsePromiseStage: (...a: unknown[]) => verifyProsePromiseStageMock(...a),
-  verifyCancellationClaimStage: (...a: unknown[]) => verifyCancellationClaimStageMock(...a),
-  verifyClosedVenueArrivalStage: (...a: unknown[]) => verifyClosedVenueArrivalStageMock(...a),
+  verifyMechanicOfferStage: (...a: unknown[]) =>
+    verifyMechanicOfferStageMock(...a),
+  verifyProsePromiseStage: (...a: unknown[]) =>
+    verifyProsePromiseStageMock(...a),
+  verifyCancellationClaimStage: (...a: unknown[]) =>
+    verifyCancellationClaimStageMock(...a),
+  verifyClosedVenueArrivalStage: (...a: unknown[]) =>
+    verifyClosedVenueArrivalStageMock(...a),
 }))
 
 import { runPostSendChecks } from './post-send-checks'
@@ -67,7 +71,10 @@ function makeCtx(): RuntimeContext {
 }
 
 function makeGeneration(): GenerateMessageResult {
-  return { body: 'see you tomorrow', knowledgeGap: false } as GenerateMessageResult
+  return {
+    body: 'see you tomorrow',
+    knowledgeGap: false,
+  } as GenerateMessageResult
 }
 
 interface RecordedSpan {
@@ -85,7 +92,13 @@ function makeTrace() {
     span: vi.fn((name: string, input?: unknown) => {
       const end = vi.fn()
       spans.push({ name, input: input as Record<string, unknown>, end })
-      return { id: `span-${spans.length}`, end, update: vi.fn(), span: vi.fn(), generation: vi.fn() }
+      return {
+        id: `span-${spans.length}`,
+        end,
+        update: vi.fn(),
+        span: vi.fn(),
+        generation: vi.fn(),
+      }
     }),
     update: vi.fn(),
     flushAsync,
@@ -208,7 +221,10 @@ describe('runPostSendChecks — the trace', () => {
     for (const s of spans) {
       // The names are pinned so existing Langfuse queries keep matching; the
       // input fields are what keeps the two placements countable apart.
-      expect(s.input).toMatchObject({ disposition: 'sent', outboundMessageId: 'out-1' })
+      expect(s.input).toMatchObject({
+        disposition: 'sent',
+        outboundMessageId: 'out-1',
+      })
       expect(s.end).toHaveBeenCalledTimes(1)
     }
   })

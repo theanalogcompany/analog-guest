@@ -8,7 +8,8 @@ vi.mock('@/lib/db/admin', () => ({
   createAdminClient: () => ({
     from: (table: string) => ({
       select: (columns: string) => ({
-        eq: (column: string, value: string) => queryResultMock(table, columns, column, value),
+        eq: (column: string, value: string) =>
+          queryResultMock(table, columns, column, value),
       }),
     }),
   }),
@@ -36,8 +37,16 @@ function row(overrides: Partial<VoicePackRow> & { id: string }): VoicePackRow {
 describe('selectVoicePack — ordering', () => {
   it('puts operator_edit entries first regardless of recency', () => {
     const pack = selectVoicePack([
-      row({ id: 'a', source_type: 'sample_text', created_at: '2026-09-01T00:00:00Z' }),
-      row({ id: 'b', source_type: 'operator_edit', created_at: '2026-01-01T00:00:00Z' }),
+      row({
+        id: 'a',
+        source_type: 'sample_text',
+        created_at: '2026-09-01T00:00:00Z',
+      }),
+      row({
+        id: 'b',
+        source_type: 'operator_edit',
+        created_at: '2026-01-01T00:00:00Z',
+      }),
     ])
     expect(pack.map((c) => c.id)).toEqual(['b', 'a'])
   })
@@ -77,9 +86,21 @@ describe('selectVoicePack — exclusions and caps', () => {
   it('stops before an entry that would exceed the char budget', () => {
     const pack = selectVoicePack(
       [
-        row({ id: 'a', content: 'x'.repeat(60), created_at: '2026-03-01T00:00:00Z' }),
-        row({ id: 'b', content: 'x'.repeat(60), created_at: '2026-02-01T00:00:00Z' }),
-        row({ id: 'c', content: 'x'.repeat(60), created_at: '2026-01-01T00:00:00Z' }),
+        row({
+          id: 'a',
+          content: 'x'.repeat(60),
+          created_at: '2026-03-01T00:00:00Z',
+        }),
+        row({
+          id: 'b',
+          content: 'x'.repeat(60),
+          created_at: '2026-02-01T00:00:00Z',
+        }),
+        row({
+          id: 'c',
+          content: 'x'.repeat(60),
+          created_at: '2026-01-01T00:00:00Z',
+        }),
       ],
       VOICE_PACK_MAX_ENTRIES,
       130,
@@ -90,7 +111,11 @@ describe('selectVoicePack — exclusions and caps', () => {
   it('always admits the first entry even when it alone exceeds the budget', () => {
     // A venue whose single entry is oversized still gets a voice — a pack
     // emptied by its own budget would trip the inbound fail-closed throw.
-    const pack = selectVoicePack([row({ id: 'big', content: 'x'.repeat(500) })], 80, 100)
+    const pack = selectVoicePack(
+      [row({ id: 'big', content: 'x'.repeat(500) })],
+      80,
+      100,
+    )
     expect(pack.map((c) => c.id)).toEqual(['big'])
   })
 })
@@ -98,7 +123,12 @@ describe('selectVoicePack — exclusions and caps', () => {
 describe('selectVoicePack — chunk mapping', () => {
   it('maps rows to VoiceCorpusChunk with constant similarity 1', () => {
     const pack = selectVoicePack([
-      row({ id: 'a', content: 'hey!', source_type: 'operator_edit', confidence_score: 0.7 }),
+      row({
+        id: 'a',
+        content: 'hey!',
+        source_type: 'operator_edit',
+        confidence_score: 0.7,
+      }),
     ])
     expect(pack).toEqual([
       {
@@ -153,9 +183,16 @@ describe('loadVoicePack', () => {
   })
 
   it('returns the DB failure as a value, never throws', async () => {
-    queryResultMock.mockResolvedValueOnce({ data: null, error: { message: 'boom' } })
+    queryResultMock.mockResolvedValueOnce({
+      data: null,
+      error: { message: 'boom' },
+    })
     const r = await loadVoicePack({ venueId: 'v-1' })
-    expect(r).toEqual({ ok: false, error: 'boom', errorCode: 'db_query_failed' })
+    expect(r).toEqual({
+      ok: false,
+      error: 'boom',
+      errorCode: 'db_query_failed',
+    })
   })
 
   it('treats a null data payload as an empty pack', async () => {
