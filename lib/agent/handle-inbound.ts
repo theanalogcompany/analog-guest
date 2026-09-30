@@ -2739,6 +2739,27 @@ async function runInboundTurn(
       const stage: 'send' | 'persist' = errMsg.includes('persist failed')
         ? 'persist'
         : 'send'
+      // TAC-568: RELEASE HERE TOO, and this arm is the one that bites.
+      //
+      // The two returns above release on a dispatch that reported failure. A
+      // dispatch that THROWS took neither, so the marker stayed claimed for a
+      // close that never went out — and `failed` is a retrying status
+      // (shouldRetryTurn in coalesce-turn.ts), so the retry read `already_marked`
+      // and the guest could never be closed by any path. Permanently, on one
+      // transient send error.
+      //
+      // Safe on every throwing case, because scheduleAndSend only throws while
+      // NOTHING has been committed (`persistedIds.length === 0`); once a bubble
+      // is out it truncates instead. The close is the LAST bubble, so a throw
+      // always means it did not reach the guest. The release is CAS-scoped to
+      // the exact timestamp this turn wrote, so it cannot clear a marker the
+      // pause timer set in between.
+      //
+      // Not covered: a throw between claimWarmCloseForTurn and this `try`. That
+      // is two statements with no I/O, and `claimedWarmClose` is out of scope in
+      // the outer catch, so closing it would mean restructuring rather than
+      // adding a line. Stated rather than silently left.
+      await releaseClaimedWarmClose(claimedWarmClose, agentRunId)
       sendSpan.end({
         level: 'ERROR',
         statusMessage: errMsg,
