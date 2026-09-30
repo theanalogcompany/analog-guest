@@ -87,7 +87,6 @@ function candidate(over: Record<string, unknown> = {}) {
     messageId: 'm-out',
     sentAt: SENT_AT,
     body: 'glad it landed',
-    renderedIntentionCount: 0,
     ...over,
   }
 }
@@ -221,16 +220,38 @@ describe('processDueWarmCloses: every skip and defer (TAC-560)', () => {
     expect(fired.closed).toBe(1)
   })
 
-  it('DEFERS on a rendered getting-to-know-you question with no question mark', async () => {
-    // TAC-554 puts that question in its own last message, so the carrier is the
-    // signal and the body may read as a plain statement.
+  it('DEFERS on a raised getting-to-know-you question, which IS the last bubble', async () => {
+    // TAC-554 puts that question in its own last message and the candidate IS
+    // the newest row, so the body carries it. This is the case the deleted
+    // rendered-intentions arm was written for and could never actually see.
     store.loadWarmCloseCandidates.mockResolvedValue({
       ok: true,
-      data: [
-        candidate({ body: 'nice, glad it landed', renderedIntentionCount: 1 }),
-      ],
+      data: [candidate({ body: "what's your name, by the way?" })],
     })
     await expectSkip('not_yet')
+  })
+
+  // THE DOUBLED-PAUSE BUG (TAC-568), from the side that used to be wrong.
+  //
+  // This body is a plain statement on a turn where the intentions block
+  // rendered and the model raised nothing. Before the fix the candidate carried
+  // renderedIntentionCount: 1 and the floor doubled, so the close waited twenty
+  // minutes instead of ten. The clock below is 11 minutes — past the real floor,
+  // inside the doubled one — so restoring the old arm turns this red.
+  it('does NOT defer when the reply asked nothing, however much rendered', async () => {
+    store.loadWarmCloseCandidates.mockResolvedValue({
+      ok: true,
+      data: [candidate({ body: 'nice, glad it landed' })],
+    })
+    store.claimWarmClose.mockResolvedValue({ status: 'claimed' })
+    handleFollowupMock.mockResolvedValue({
+      status: 'sent',
+      outboundMessageId: 'm-close',
+    })
+    const fired = await processDueWarmCloses(
+      new Date(SENT_AT.getTime() + 11 * 60 * 1000),
+    )
+    expect(fired.closed).toBe(1)
   })
 
   it('too_late: past the two-hour bound', async () => {

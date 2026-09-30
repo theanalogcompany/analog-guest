@@ -9,6 +9,7 @@ import {
   WARM_CLOSE_MAX_AGE_MS,
   WARM_CLOSE_PAUSE_MINUTES_DEFAULT,
   WARM_CLOSE_QUESTION_FLOOR_MULTIPLIER,
+  closesFirstConversation,
   weAskedAQuestion,
 } from './warm-close'
 import { SPLIT_PROBABILITY } from './sentence-split'
@@ -67,25 +68,152 @@ describe('isWarmCloseTooLate (TAC-560)', () => {
   })
 })
 
-describe('weAskedAQuestion (TAC-560)', () => {
+describe('weAskedAQuestion (TAC-560, fixed by TAC-568)', () => {
   it('reads a question mark in our own last message', () => {
-    expect(weAskedAQuestion('glad you liked it. first time in?', 0)).toBe(true)
+    expect(weAskedAQuestion('glad you liked it. first time in?')).toBe(true)
   })
 
-  it('reads a rendered getting-to-know-you question with no question mark in the body', () => {
-    // TAC-554 guarantees the question is the last message whenever anything
-    // rendered, so the column is the stronger signal and does not depend on text.
-    expect(weAskedAQuestion('nice, glad it landed', 1)).toBe(true)
+  it('reads a raised getting-to-know-you question, which IS the last bubble', () => {
+    // TAC-554 guarantees a raised question its own final message, and the
+    // candidate body IS the newest row, so this is the shape the deleted
+    // rendered-intentions arm was supposed to catch and never could.
+    expect(weAskedAQuestion("what's your name, by the way?")).toBe(true)
   })
 
-  it('is false for an ordinary statement with nothing rendered', () => {
+  // THE DOUBLED-PAUSE BUG, and the reason this test exists at all.
+  //
+  // Before TAC-568 this call carried a second argument: how many intentions had
+  // been RENDERED into the draft's prompt. A non-zero count returned true on its
+  // own, so a turn where the intentions block rendered and the model raised
+  // nothing deferred the close by a full extra interval - twenty minutes of
+  // silence owed to a question that was never asked.
+  //
+  // There is no argument to pass any more, so the defect is unrepresentable
+  // rather than merely untriggered. What remains is the body.
+  it('does not defer when the reply asked nothing, however much rendered', () => {
+    expect(weAskedAQuestion('nice, glad it landed')).toBe(false)
+  })
+
+  it('is false for an ordinary statement', () => {
     expect(
-      weAskedAQuestion('the cortado is our house pour, glad it landed', 0),
+      weAskedAQuestion('the cortado is our house pour, glad it landed'),
     ).toBe(false)
   })
 
   it('is false on an empty body', () => {
-    expect(weAskedAQuestion('', 0)).toBe(false)
+    expect(weAskedAQuestion('')).toBe(false)
+  })
+})
+
+// TAC-568. The predicate both in-conversation paths turn on, driven directly
+// rather than only through the orchestrator.
+//
+// WHY A TRUTH TABLE RATHER THAN A FEW CASES: this function decides whether a
+// guest spends their one warm close, for ever. Every input combination is
+// therefore worth stating, and the two gates are asserted to beat BOTH arms
+// rather than just the one a single example would exercise.
+describe('closesFirstConversation (TAC-568)', () => {
+  const TEXT = 'if you ever need anything, we are always here to help'
+
+  const base = {
+    guestSignedOff: false,
+    agentSaidGoodbye: false,
+    nameJustStored: false,
+    isFirstConversation: true,
+    warmCloseText: TEXT,
+  }
+
+  describe('the goodbye arm', () => {
+    it('closes when the guest signed off AND the agent said goodbye', () => {
+      expect(
+        closesFirstConversation({
+          ...base,
+          guestSignedOff: true,
+          agentSaidGoodbye: true,
+        }),
+      ).toBe(true)
+    })
+
+    // The AND, from both sides. Either alone must not close: a false positive
+    // spends the close permanently, and the pause timer covers a false negative
+    // ten minutes later.
+    it('does not close on the sign-off alone', () => {
+      expect(closesFirstConversation({ ...base, guestSignedOff: true })).toBe(
+        false,
+      )
+    })
+
+    it('does not close on the self-report alone', () => {
+      expect(closesFirstConversation({ ...base, agentSaidGoodbye: true })).toBe(
+        false,
+      )
+    })
+  })
+
+  describe('the name arm', () => {
+    // The whole follow-on ruling in one assertion: no goodbye anywhere, and the
+    // conversation still closes, because the name landed.
+    it('closes on a stored name with no goodbye at all', () => {
+      expect(closesFirstConversation({ ...base, nameJustStored: true })).toBe(
+        true,
+      )
+    })
+
+    it('needs no partner signal, unlike the goodbye arm', () => {
+      expect(
+        closesFirstConversation({
+          ...base,
+          nameJustStored: true,
+          guestSignedOff: false,
+          agentSaidGoodbye: false,
+        }),
+      ).toBe(true)
+    })
+
+    it('does not close when no name was stored', () => {
+      expect(closesFirstConversation(base)).toBe(false)
+    })
+  })
+
+  // Both gates beat both arms. Asserted against each arm separately: a gate
+  // tested only against the goodbye arm would let a regression through on the
+  // name arm, which is now the path that actually fires in production.
+  describe('the gates beat both arms', () => {
+    const goodbye = { guestSignedOff: true, agentSaidGoodbye: true }
+    const named = { nameJustStored: true }
+
+    it.each([
+      ['goodbye', goodbye],
+      ['name', named],
+    ])('a later conversation does not close (%s arm)', (_label, arm) => {
+      expect(
+        closesFirstConversation({
+          ...base,
+          ...arm,
+          isFirstConversation: false,
+        }),
+      ).toBe(false)
+    })
+
+    it.each([
+      ['goodbye', goodbye],
+      ['name', named],
+    ])('an unconfigured venue does not close (%s arm)', (_label, arm) => {
+      expect(
+        closesFirstConversation({ ...base, ...arm, warmCloseText: '' }),
+      ).toBe(false)
+    })
+
+    // Whitespace is not a message. Checked here rather than at dispatch so the
+    // marker is never claimed for a bubble that would render empty.
+    it.each([
+      ['goodbye', goodbye],
+      ['name', named],
+    ])('a whitespace-only setting does not close (%s arm)', (_label, arm) => {
+      expect(
+        closesFirstConversation({ ...base, ...arm, warmCloseText: '   \n ' }),
+      ).toBe(false)
+    })
   })
 })
 

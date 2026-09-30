@@ -437,6 +437,10 @@ async function main(): Promise<void> {
         // are_they_local and their_rhythm can no longer appear in it. A re-run
         // after this ticket is not comparable to the runs recorded on TAC-558.
         isFirstConversation: true,
+        // TAC-568: this harness measures the FIRST-VISIT flow, which by
+        // definition runs before any warm close. `false` is what production
+        // sees on every turn it models.
+        warmCloseSent: false,
       })
 
       const derivedOpenKeys = derived.open.map((o) => o.key)

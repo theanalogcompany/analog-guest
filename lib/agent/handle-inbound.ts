@@ -1839,6 +1839,17 @@ async function runInboundTurn(
     // Empty contextUpdate short-circuits with no DB hit, no Langfuse span,
     // no log noise. Failures log + continue; context-write is diagnostic,
     // not load-bearing. Never blocks dispatch.
+    // TAC-568 follow-on: did THIS turn learn the guest's name?
+    //
+    // Declared here rather than inside the block below because the warm close
+    // reads it ~600 lines down, at the send. It is deliberately seeded from the
+    // guest as the turn STARTED: `nameOnRecordBefore` is what makes the flag
+    // mean "we just learned it" rather than "the model repeated one we already
+    // had", and it matches learn_name's own isSatisfied (`hasFirstName`), so
+    // the close fires on the turn the intention actually closes.
+    const nameOnRecordBefore = (ctx.guest.firstName ?? '').trim() !== ''
+    let nameJustStored = false
+
     if (!isEmptyContextUpdate(gen.result.contextUpdate)) {
       const contextWriteSpan = trace.span('context_write', {
         tool: 'update_guest_context',
@@ -1853,11 +1864,21 @@ async function runInboundTurn(
         now: ctx.recognition.computedAt,
       })
       if (writeResult.ok) {
+        // TAC-568 follow-on: the CLOSING SIGNAL IS THE COLUMN WRITE, not the
+        // model's proposed contextUpdate. identityColumnsChanged is
+        // updateGuestContext's own report of which identity columns the UPDATE
+        // actually carried, so a write that failed, or a patch that never
+        // mentioned first_name, leaves this false and sends no close. The pause
+        // timer still covers that guest inside its own window.
+        nameJustStored =
+          !nameOnRecordBefore &&
+          writeResult.data.identityColumnsChanged.includes('first_name')
         contextWriteSpan.end({ output: writeResult.data })
         console.log('[agent] inbound context written', {
           agentRunId,
           guestId: ctx.guest.id,
           updatedFields: writeResult.data,
+          nameJustStored,
         })
       } else {
         contextWriteSpan.end({
@@ -2445,6 +2466,11 @@ async function runInboundTurn(
     // normal untriggered send).
     // TAC-568: does this reply close the guest's first conversation?
     //
+    // TWO WAYS IN, both decided by closesFirstConversation: the guest said
+    // goodbye and we answered with one, or this turn learned their name. The
+    // second was added when are_they_new_here came off the first conversation,
+    // which left the name as the last thing a first visit gathers.
+    //
     // Decided BEFORE the send, and the marker is CLAIMED before the send too,
     // because the claim is what makes "once per guest, ever" a fact Postgres
     // enforces rather than an argument about ordering. This is the timer's own
@@ -2457,6 +2483,10 @@ async function runInboundTurn(
     const claimedWarmClose = closesFirstConversation({
       guestSignedOff: ctx.classification.category === SIGN_OFF_CATEGORY,
       agentSaidGoodbye: gen.result.closedTheConversation,
+      // TAC-568 follow-on: learning the name is the other closing moment, and
+      // since are_they_new_here came off the first conversation it is the
+      // ordinary one. Set above, from the identity-column write.
+      nameJustStored,
       isFirstConversation: ctx.firstConversation,
       warmCloseText: ctx.venue.warmCloseText,
     })

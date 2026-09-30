@@ -409,6 +409,10 @@ async function main(): Promise<void> {
         // a fresh scan, five turns inside one sitting. `control` restores
         // pre-ticket eligibility and drops the restraint paragraph.
         isFirstConversation: arm === 'after',
+        // TAC-568: both arms model the first-visit flow before any close, so
+        // this does not vary by arm. Holding it false keeps the arms differing
+        // in exactly one variable, which is what the control is for.
+        warmCloseSent: false,
       })
 
       const ctx: RuntimeContext = {

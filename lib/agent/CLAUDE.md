@@ -240,14 +240,25 @@ Two predicates must move together: `shouldRenderOpenIntentions` (render side) an
 classifier is offered intentions the prompt never showed, which closes goals the guest
 never saw. A cross-module test iterates every category for exactly this.
 
-### A first conversation asks three things only (TAC-567)
+### A first conversation asks two things, then the close (TAC-567/TAC-568)
 
-On a guest's FIRST conversation only `understand_order`, `learn_name` and
-`are_they_new_here` may be raised. The other five are suppressed. Ruled 2026-09-30 after a
-fresh scan asked four questions across three messages.
+On a guest's FIRST conversation only `understand_order` and `learn_name` may be raised, plus
+`are_they_new_here` **once `guests.warm_close_sent_at` is set**. The other five are suppressed
+outright. Ruled 2026-09-30 after a fresh scan asked four questions across three messages.
 
-`allowedOnFirstConversation` on the definition is the one declaration, so a new intention must
-answer it or fail `tsc`; nothing in `derive.ts` branches on a key. "First conversation" is
+**Learning the name is the first conversation's closing moment** - `closesFirstConversation`
+(`warm-close.ts`) sends the warm close on the turn that stores it.
+
+`onFirstConversation` on the definition is the one declaration - `'allowed' | 'suppressed' |
+'after_warm_close'` - so a new intention must answer it or fail `tsc`; nothing in `derive.ts`
+branches on a key, and its `switch` is over the closed union.
+
+**Why `are_they_new_here` is deferred rather than suppressed**, since the morning ruling
+removed it outright and the amendment put it back: it closes on `hasRepeatVisitsOnRecord`, so
+by the second visit the record already satisfies it. "Never on a first conversation" and
+"never at all" are the same sentence for this one intention. The turn that SENDS the close
+still sees `warmCloseSent: false`, because intentions are derived before the reply is
+generated - so it is the guest's next message that can raise it. "First conversation" is
 TAC-560's `isFirstConversation` (`warm-close.ts`), resolved once in `build-runtime-context`
 against the same `conversationWindowMs` the brake reads, anchored on
 `first_contacted_at ?? created_at`, and carried on `RuntimeContext.firstConversation`.

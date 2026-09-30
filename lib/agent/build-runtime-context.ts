@@ -181,7 +181,7 @@ export async function buildRuntimeContext(input: {
     supabase
       .from('guests')
       .select(
-        'id, phone_number, instagram_scoped_id, first_name, created_at, created_via, first_contacted_at, is_demo, context, last_visit_at',
+        'id, phone_number, instagram_scoped_id, first_name, created_at, created_via, first_contacted_at, is_demo, context, last_visit_at, warm_close_sent_at',
       )
       .eq('id', input.guestId)
       .single(),
@@ -775,9 +775,16 @@ export async function buildRuntimeContext(input: {
       rows: intentionRows,
       inboundTimes,
       inboundHistoryFrom,
-      // TAC-567: only understand_order, learn_name and are_they_new_here may be
-      // raised while this is true.
+      // TAC-567, amended by TAC-568: while this is true, only understand_order
+      // and learn_name may be raised — plus are_they_new_here once the warm
+      // close has gone out.
       isFirstConversation: firstConversation,
+      // TAC-568: the 'after_warm_close' policy's one input. Read straight off
+      // the guest row rather than re-derived, and it is null on every guest the
+      // close has not reached. The turn that SENDS the close still reads false
+      // here, because this runs before the reply is generated — see the field's
+      // docstring on DeriveOpenIntentionsInput.
+      warmCloseSent: guestRow.warm_close_sent_at !== null,
       // Ruling 1: one definition of "still in the same conversation" across
       // followups and intentions. Le Mil's carries no explicit
       // recent_conversation_hours, so it runs on the code default (48h), at

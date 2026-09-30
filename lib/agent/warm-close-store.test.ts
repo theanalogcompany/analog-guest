@@ -246,24 +246,38 @@ describe('loadWarmCloseCandidates (TAC-560)', () => {
     expect(!r.ok && r.error).toContain('provenance')
   })
 
-  it('counts rendered intentions off the carrier, and reads a missing one as none', async () => {
+  // TAC-568 deleted the rendered-intentions count from the candidate, so this
+  // asserts its ABSENCE rather than its value. `rendered_intentions` is written
+  // on bubble index 0 only and this loader reads the NEWEST row, so the column
+  // could never describe the message it was being read off.
+  it('carries no rendered-intention count, whatever the carrier holds', async () => {
     const withOne = queryRecorder({
       inquiry_followups: [ok([])],
       messages: [ok([row({ rendered_intentions: [{ key: 'learn_name' }] })])],
     })
     const a = await loadWarmCloseCandidates(withOne.client, VENUE, WINDOW_START)
-    expect(a.ok && a.data[0].renderedIntentionCount).toBe(1)
+    expect(a.ok).toBe(true)
+    expect(a.ok && a.data[0]).not.toHaveProperty('renderedIntentionCount')
+    // The body is the whole question signal now, so it still has to arrive.
+    expect(a.ok && typeof a.data[0].body).toBe('string')
+  })
 
-    const withNone = queryRecorder({
+  // The column is not SELECTed any more. Asserted on the query itself, because
+  // a candidate that merely ignores the field would pass the test above while
+  // the scan still paid for the column on every tick.
+  it('does not select rendered_intentions, and still selects what it reads', async () => {
+    const { client, queries } = queryRecorder({
       inquiry_followups: [ok([])],
-      messages: [ok([row({ rendered_intentions: null })])],
+      messages: [ok([row()])],
     })
-    const b = await loadWarmCloseCandidates(
-      withNone.client,
-      VENUE,
-      WINDOW_START,
-    )
-    expect(b.ok && b.data[0].renderedIntentionCount).toBe(0)
+    await loadWarmCloseCandidates(client, VENUE, WINDOW_START)
+    const [select] = callsNamed(queries[0], 'select')[0] as [string]
+    expect(select).not.toContain('rendered_intentions')
+    // The positive half, so this cannot pass by the select going missing
+    // entirely — the failure mode the venues test above was written against.
+    for (const column of ['id', 'guest_id', 'body', 'created_at']) {
+      expect(select).toContain(column)
+    }
   })
 })
 

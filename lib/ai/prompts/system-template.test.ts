@@ -32,8 +32,8 @@ import {
 // SYSTEM_TEMPLATE body changes.
 
 describe('PROMPT_VERSION', () => {
-  it('is v1.78.0 (the warm close is fixed text, not a generation)', () => {
-    expect(PROMPT_VERSION).toBe('v1.78.0')
+  it('is v1.79.0 (are_they_new_here waits for the warm close)', () => {
+    expect(PROMPT_VERSION).toBe('v1.79.0')
   })
 })
 
