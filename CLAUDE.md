@@ -40,6 +40,7 @@ otherwise. `@path` imports are **eager** and do not help.
 | `lib/operator/CLAUDE.md` | venue scope, queue Contract fields, card copy, dispatch |
 | `lib/guests/CLAUDE.md` | commitment CAS and dedup, guest context, visit precision |
 | `lib/notifications/CLAUDE.md` | APNs env validation, `PUSH_POLICY`, payload privacy, badges |
+| `lib/observability/CLAUDE.md` | the Langfuse wrapper, the span tree, and **where the latency and prompt-cache numbers already live** - read before answering any latency question |
 | `app/admin/CLAUDE.md` | route paths, loaders, write routes, brand tokens |
 | `scripts/CLAUDE.md` | onboarding pipeline, measurement harness convention, Drive auth |
 | `.github/CLAUDE.md` | what a CI session may run, and the known gaps in that allowlist |
@@ -121,9 +122,9 @@ a new top-level directory without asking.
 
 ## Workflow
 
-**Linear-first.** All work starts from a ticket. No ticket ID means ask for one before
-planning. Cross-repo work is two tickets, one per repo, linked - never one ticket carrying both
-repo labels.
+**Tickets are optional.** A ticket is not a precondition for planning or building; work can
+start without one. When one does exist, cross-repo work is two tickets, one per repo, linked -
+never one ticket carrying both repo labels.
 
 **Plan, review, build, review, commit.** Output a written plan first (scope, file paths,
 decomposition, sequence, patterns to reuse, edge cases, what you chose *not* to do, open
@@ -144,8 +145,9 @@ Neither tier proceeds on `[NEEDS-INPUT]` alone. A change to guest-facing copy sh
 wording **verbatim** in the plan and waits for approval of that wording.
 
 **Audit first.** Before writing code: this file, the nested `CLAUDE.md` for the directory,
-the neighbouring files, the migrations touching the relevant tables, and the existing tests.
-Cite specific paths in the plan. Do not infer architecture from filenames.
+the neighbouring files, the migrations touching the relevant tables, and the existing tests -
+the `describe` block covering the behaviour you touch, not whole test files. Cite specific
+paths in the plan. Do not infer architecture from filenames.
 
 **Comment protocol.** Every Linear comment opens with `**[FROM CLAUDE CODE]**` on its own
 line - Linear shows Jaipal as author of MCP-posted comments, so the prefix is the only
@@ -153,12 +155,12 @@ distinguisher. A clarifying question is `[NEEDS-INPUT]`, numbered, plus the `Nee
 label, status unchanged, then stop. Post flat, never threaded. `.claude/process.md` is
 canonical.
 
-**Claim a ticket before writing anything else.** Post `[CLAIM]`, edit it to `released` when
-handing back. Two sessions on one ticket has happened and a human cancelling the run was all
-that stopped it. A second local session works in its own `git worktree`, pushes by explicit
-refspec (`git push origin <branch>:<branch>`), and runs `git branch --show-current`
-immediately before its first commit - two sessions in one checkout share one HEAD, and commits
-have landed on the wrong branch that way.
+**Claim a ticket you are working from.** Post `[CLAIM]`, edit it to `released` when handing
+back. Not a gate on starting work - but two sessions on one ticket has happened, and a human
+cancelling the run was all that stopped it. A second local session works in its own
+`git worktree`, pushes by explicit refspec (`git push origin <branch>:<branch>`), and runs
+`git branch --show-current` immediately before its first commit - two sessions in one checkout
+share one HEAD, and commits have landed on the wrong branch that way.
 
 **Never just acknowledge.** If asked to remember or forget something, update memory. Do not
 reply "I'll remember that" without doing it.
@@ -188,7 +190,11 @@ command when the question is which variables exist.
 ### Git
 
 Branch protection on `main`; everything goes through a PR. CI must be green:
-`tsc --noEmit`, `npm run lint`, `npx vitest run`, `npm run build`.
+`tsc --noEmit`, `npm run lint`, `npx prettier --check .`, `npx jscpd` (the duplication
+gate; threshold in `.jscpd.json`, tests excluded), `npx vitest run`, `npm run build`.
+`.github/workflows/ci.yml` is the source of truth for this list - read it before claiming
+a change is verified, because this line has been stale before (prettier shipped in TAC-554
+and the list above missed it, and a branch failed CI on exactly that).
 
 Branch `<your-username>/<ticket>-short-description`, ticket id lowercase. Any single path
 segment works as the owner; `team/alex/<ticket>-x` and a bare `<ticket>-x` do not, because the
@@ -208,8 +214,11 @@ is refused outright. Branch each PR from `main` and take the conflict at merge t
 conflict is visible and recoverable, a destroyed PR object is not. Stack only when a PR
 genuinely cannot be reviewed without its parent, and budget a replacement PR.
 
-Pre-commit hook: `eslint --fix` on staged TS, `tsc --noEmit` project-wide, `vitest related`.
-Do not `--no-verify` without a reason. **In a `git worktree` the hook half-fails** on
+Pre-commit hook: lint-staged (`eslint --fix` + `prettier --write`) on staged files,
+`tsc --noEmit` project-wide, `vitest related`. Do not `--no-verify` without a reason - and
+when the hook cannot run (an environment floor, e.g. git under lint-staged's minimum), the
+manual substitute must mirror every step including lint-staged's prettier pass; skipping
+the step the hook could not reach is how a formatting failure reaches CI as news. **In a `git worktree` the hook half-fails** on
 `.git/index.lock` *after* those checks pass, and the commit still lands - check
 `git status --porcelain` and `git show --stat HEAD` rather than reading `[FAILED]` as a
 rejection.
@@ -277,10 +286,15 @@ should be added - fix the Node, never the guard. `tsc` is unaffected.
 
 Coverage is report-only and deliberately ungated (`npx vitest run --coverage`).
 
-Roughly 7,000 tests across roughly 300 files, as a smell test only. **Measure the real number,
-never estimate it, and never quote a recorded one** - an exact baseline in this file disagreed
-with `.claude/rules/testing-discipline.md`'s figures for the same day, and a number that
-precise is read as authoritative:
+Roughly 7,000 tests across roughly 300 files, as a smell test only. **Quote a count only when
+the number carries the claim, and then only from a run you executed in this session** - never
+an estimate, never a recorded one. An exact baseline in this file once disagreed with
+`.claude/rules/testing-discipline.md`'s figures for the same day, and a number that precise is
+read as authoritative. Most sessions need no count at all: vitest's summary line for your own
+run is the whole report.
+
+When the claim IS a delta ("added N", "none broke"), measure both sides in one session - the
+before in a throwaway worktree, the after in this checkout:
 
 ```
 git worktree add .worktrees/baseline origin/main
@@ -302,12 +316,14 @@ The live floors, all in `lib/agent/stages.ts`. A number quoted anywhere else may
 | --- | --- |
 | `SEND_FIDELITY_FLOOR` 0.4 | below this the draft is refused; nothing persists |
 | `AUTO_SEND_FIDELITY_FLOOR` 0.6 | 0.4 to 0.6 queues for an operator |
-| `STRONG_MATCH_SIMILARITY` 0.3 / `MIN_STRONG_MATCHES` 1 | voice retrieval, fails **closed** on inbound |
+| voice pack (`lib/rag/voice-pack.ts`) | static per venue, no similarity; empty pack fails **closed** on inbound (decision 0008) |
 | `KNOWLEDGE_RELEVANCE_FLOOR` 0.3 | knowledge retrieval, degrades **gracefully** |
-| `PROMPT_VERSION` v1.72.0 | bumping it is a repo-wide sweep - `.claude/rules/prompt-versioning.md` |
+| `PROMPT_VERSION` v1.77.0 | bumping it is a repo-wide sweep - `.claude/rules/prompt-versioning.md` |
 
-**23 approval triggers compose; any one queues the draft.** All five post-generation checks
-fail **closed** after one retry - treat a proposal to loosen one as a change to all five
+**23 approval triggers compose; any one queues the draft.** The five post-generation LLM
+checks run **post-send** on inbound (Slack forward on a finding, never a hold) and keep the
+fail-**closed**-after-one-retry posture on followups and the holding message - treat a
+posture change to one as a change to all five
 (`docs/decisions/0003-post-generation-checks-fail-closed.md`). `lib/agent/CLAUDE.md` has the
 trigger table and priority order.
 
@@ -326,7 +342,7 @@ generation rather than asked for in prose
 
 One line per purpose. Defaults and behaviour live with the code that reads them.
 
-**LLM** `ANTHROPIC_API_KEY` · **Embeddings** `VOYAGE_API_KEY` · **DB** `SUPABASE_SECRET_KEY`,
+**LLM** `ANTHROPIC_API_KEY` · **Jev classification** `JEV_API_KEY` · **Embeddings** `VOYAGE_API_KEY` · **DB** `SUPABASE_SECRET_KEY`,
 `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` · **Sendblue**
 `SENDBLUE_API_KEY_ID`, `SENDBLUE_API_SECRET_KEY`, `SENDBLUE_SIGNING_SECRET` · **Instagram**
 `META_VERIFY_TOKEN`, `INSTAGRAM_APP_SECRET`, `INSTAGRAM_APP_ID`, `INSTAGRAM_ACCESS_TOKEN`,

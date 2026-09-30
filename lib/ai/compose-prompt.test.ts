@@ -271,8 +271,11 @@ const SENDBLUE_R5 =
   "- Never refer guests to alternative channels for things the venue can answer. The guest is already in conversation with the venue. Don't tell them to email, call, DM Instagram, or \"ask next time you're in\" for information the agent should be able to answer. Exception: legitimate handoffs to systems we don't yet manage (e.g., \"for reservations, use Resy\" if Resy is the venue's booking system). Rule of thumb: if the agent has the data or can ask the operator for it, don't push the guest to another channel."
 const SENDBLUE_R32 =
   '- Never tell the guest to send a message, reach out, or get in touch as if that were a separate, future action. They are already texting you, right now, in this thread. If you have a question, ask it directly and expect the answer here. This is different from the alternative-channels rule above, which is about routing the guest elsewhere. Here the guest never left this thread. It also does not restrict inviting them to save this number or text again in the future for a different visit. That is a distinct, legitimate invitation.'
+// TAC-567 deleted the identity sentence ("say who they've reached") from both
+// channels' copy. Transcribed from the approved wording, never read back out of
+// the serializer.
 const SENDBLUE_OPENER =
-  "This is the guest's first message on this number, sent right after they scanned the sign at your pickup counter. They have just ordered and collected it. Say hello. If their message doesn't name a person, say who they've reached as well. Ask what they just got."
+  "This is the guest's first message on this number, sent right after they scanned the sign at your pickup counter. They have just ordered and collected it. Say hello. Ask what they just got."
 const FIRST_TOUCH_SIGNAL =
   "This is the guest's first message, sent after they scanned your venue's QR sign."
 const SENDBLUE_NAMED_PERSON =
@@ -309,7 +312,7 @@ const SENDBLUE_CASUAL_FORMALITY =
 const INSTAGRAM_CASUAL_FORMALITY =
   'casual — Use contractions; lowercase starts are fine; write the way you would message a friend.'
 const INSTAGRAM_OPENER =
-  "This is the guest's first message, sent right after they scanned the sign at your pickup counter. They have just ordered and collected it. Say hello. If their message doesn't name a person, say who they've reached as well. Ask what they just got."
+  "This is the guest's first message, sent right after they scanned the sign at your pickup counter. They have just ordered and collected it. Say hello. Ask what they just got."
 
 function firstTouchInput(
   overrides: Partial<GenerateMessageInput> = {},

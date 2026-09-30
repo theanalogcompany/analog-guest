@@ -275,6 +275,10 @@ export async function handleHoldingMessage(input: {
       crisisSafety: false,
       // TAC-397: no guest inbound on this path — see handle-followup.ts.
       correctsPendingReply: false,
+      // TAC-386: a holding message answers nothing yet, so there is nothing to
+      // check back on. The guest's original inbound is classified on its own
+      // turn and arms the follow-up there if it qualifies.
+      followUpWorthy: false,
     }
 
     // Knowledge corpus: SKIPPED, unconditionally (TAC-367). A holding message
@@ -322,8 +326,8 @@ export async function handleHoldingMessage(input: {
       ctx.corpus = await retrieveCorpusStage(ctx)
     } catch (e) {
       // Outbound path, so retrieveCorpusStage does NOT enforce the
-      // strong-match floor (THE-231) — a throw here means Voyage or the DB
-      // is down, not thin retrieval. No corpus means no voice, and a
+      // empty-pack throw (THE-231 grace, kept by decision 0008) — a throw
+      // here means the DB read failed. No pack means no voice, and a
       // voiceless holding message is exactly what the fallback is for.
       const errMsg = e instanceof Error ? e.message : String(e)
       logger.warn(
@@ -690,7 +694,11 @@ function buildFallbackGeneration(): GenerateMessageResult {
     // TAC-554: the fixed fallback holding line, with no generation behind
     // it, so there is no getting-to-know-you question to bubble.
     intentionQuestion: '',
+    // TAC-560: a holding message is never the warm close. It asserts nothing and closes nothing.
+    closedTheConversation: false,
     intentionQuestionDuplicateStripped: false,
+    // TAC-567: this path composes no question, so the gate never fired.
+    intentionQuestionDroppedForBodyQuestion: false,
     attempts: 0,
     attemptScores: [],
     attemptHistory: [],

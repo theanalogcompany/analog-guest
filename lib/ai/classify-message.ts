@@ -1,6 +1,12 @@
 import { generateObject } from 'ai'
 import { z } from 'zod'
 import { getClassificationModel } from './client'
+import {
+  classifyMessageViaJev,
+  JEV_CLASSIFICATION_ENABLED,
+  type JevClassifyState,
+  type JevDeps,
+} from './classify-message-jev'
 import { PROMPT_VERSION } from './prompts/system-template'
 import {
   formatTimeDelta,
@@ -34,7 +40,9 @@ export const MAX_CLASSIFIER_INPUT_CHARS = 1000
 // 4x the classification cap is well beyond any plausible real guest message.
 export const MAX_CRISIS_CHECK_INPUT_CHARS = 4000
 
-const ClassifiedMessageSchema = z.object({
+// Exported (by path, never via the barrel) for classify-message-jev.test.ts,
+// whose drift guard pins the Jev criteria keys against this enum's options.
+export const ClassifiedMessageSchema = z.object({
   category: z.enum([
     'reply',
     'new_question',
@@ -68,6 +76,17 @@ const ClassifiedMessageSchema = z.object({
   // is answering. It is what tells the approval gate to regenerate that reply
   // in place instead of giving this message its own card.
   correctsPendingReply: z.boolean(),
+  // TAC-386: independent of category, same shape and same reasoning as the two
+  // booleans above — one more field on the existing call, never `.optional()`,
+  // so no new model call and no new latency on the reply path.
+  //
+  // True when OUR ANSWER would help the guest do something afterwards, which is
+  // what makes checking back later hospitality rather than surveillance. The
+  // line it draws is ruled (2026-09-30) and drawn in the prompt below; the
+  // scheduler ALSO refuses the categories that must never be followed up
+  // (lib/agent/schedule-inquiry-followup.ts), because a prompt instruction
+  // nothing enforces is not a gate.
+  followUpWorthy: z.boolean(),
 })
 
 const CLASSIFY_SYSTEM_PROMPT = `You classify inbound text messages from guests of a hospitality venue (cafe, bakery, restaurant) into one of these categories:
@@ -96,6 +115,18 @@ Separately from category, set crisisSafety to true when the message expresses ei
 Set crisisSafety to false for everything else, including hyperbole and idiom that merely uses this language ("this coffee is to die for", "dying to try this place", "I'm dying laughing", "this latte is a matter of life and death"). When genuinely ambiguous between hyperbole and a real signal, prefer true — a false positive here costs one unnecessary safety message; a false negative costs missing a guest who needs help.
 
 Separately again, set correctsPendingReply. Recent conversation may include a venue line marked NOT SENT — a reply the venue has drafted but not yet approved. That marker also appears on replies the venue decided not to send; judge only against one that is waiting for the venue to approve it. Set correctsPendingReply to true only when this message clearly corrects, amends, or changes the question that NOT SENT reply is answering ("actually make that oat milk", "wait, I meant tomorrow", "sorry, I meant Friday not Thursday"). If more than one NOT SENT line appears, judge only against the most recent one. Set it to false for everything else, including a new and unrelated question, an acknowledgement, a reaction, and small talk — and false whenever there is no NOT SENT line at all. When genuinely unsure, prefer false: a wrongly-true value rewrites a reply the guest was waiting for, while a wrongly-false one only means they get a second, separate reply.
+
+Separately again, set followUpWorthy. Set it to true when our answer to this message would help the guest do something afterwards, so that checking later whether it worked out would be natural. Examples: where to park or how to find the place; which beans or bag to buy; how to brew something at home; whether they can bring a dog; what to order or try.
+
+Set followUpWorthy to false when there is nothing to have worked out. That includes: a pure fact with no action behind it (e.g. "what time do you close", "are you open Monday", "do you have wifi"); small talk or a passing comment (e.g. "love this neighborhood", "hope you have a good day"); a complaint or a report that something was wrong; and anything involving someone's safety or an emergency.
+
+Set followUpWorthy to false for anything an operator arranges rather than the venue simply answering: catering, a private event or renting out the space, taking a booking or reservation, and wholesale, press, hiring or partnership enquiries (e.g. "do you offer catering", "can I rent the space for a private event", "do you do wholesale for offices"). Asking whether there are PUBLIC events coming up is not one of these and does qualify (e.g. "do you have any events coming up").
+
+Set followUpWorthy to false when the guest says they are already arriving or on their way (e.g. "omw", "walking over", "heading in now", "can you get my order ready"), which is a different signal handled elsewhere.
+
+A question can be factual and still qualify, but only when the answer is something the guest then goes and does. Asking when you close is not. Asking how to get there is.
+
+Set followUpWorthy to false for everything else.
 
 Return your classification with a confidence score (DECIMAL between 0.0 and 1.0, NOT a 1-10 score) and a one-sentence reasoning. Be conservative with confidence. If the message is genuinely ambiguous, score lower so the operator can review it.
 
@@ -137,13 +168,15 @@ function formatClassifierRecentConversation(
  * review. Optional persona/venueInfo provide context but the classifier does
  * not consume the RAG corpus.
  */
-export async function classifyMessage(
-  input: ClassifyMessageInput,
-): Promise<AIResult<ClassifyMessageResult>> {
-  if (typeof input.inboundBody !== 'string' || input.inboundBody.length === 0) {
-    return { ok: false, error: 'invalid_input' }
-  }
+/** The serialized pieces both classifier arms are built from. */
+interface ClassifierBlocks {
+  inboundForClassifier: string
+  contextSections: string[]
+  recentBlock: string | null
+  crisisCheckBody: string | null
+}
 
+function buildClassifierBlocks(input: ClassifyMessageInput): ClassifierBlocks {
   const inboundForClassifier =
     input.inboundBody.length > MAX_CLASSIFIER_INPUT_CHARS
       ? input.inboundBody.slice(0, MAX_CLASSIFIER_INPUT_CHARS) +
@@ -157,30 +190,98 @@ export async function classifyMessage(
   if (input.persona) contextSections.push(personaToProse(input.persona, 'text'))
   if (input.venueInfo) contextSections.push(venueInfoToProse(input.venueInfo))
 
+  const recentBlock =
+    input.recentMessages && input.recentMessages.length > 0
+      ? formatClassifierRecentConversation(input.recentMessages)
+      : null
+  // TAC-348: see MAX_CRISIS_CHECK_INPUT_CHARS above. Only present when the
+  // body was actually truncated for the block above, so a normal-length
+  // message (the common case) sees no prompt change at all.
+  const crisisCheckBody =
+    input.inboundBody.length > MAX_CLASSIFIER_INPUT_CHARS
+      ? input.inboundBody.length > MAX_CRISIS_CHECK_INPUT_CHARS
+        ? input.inboundBody.slice(0, MAX_CRISIS_CHECK_INPUT_CHARS) +
+          ' [...truncated]'
+        : input.inboundBody
+      : null
+
+  return { inboundForClassifier, contextSections, recentBlock, crisisCheckBody }
+}
+
+/**
+ * The Jev arm alone, NO Haiku fallback. Exported for the replay eval
+ * (`scripts/measurement/jev-classify-eval.ts`), which must see a Jev failure
+ * AS a failure - calling the gated `classifyMessage` instead would silently
+ * score Haiku's answer as Jev's. `classifyMessage`'s gated branch is this
+ * plus the fallback, so the two cannot drift on how the state is built.
+ */
+export async function classifyMessageJevArm(
+  input: ClassifyMessageInput,
+  deps: JevDeps = {},
+): Promise<AIResult<ClassifyMessageResult>> {
+  if (typeof input.inboundBody !== 'string' || input.inboundBody.length === 0) {
+    return { ok: false, error: 'invalid_input' }
+  }
+  const blocks = buildClassifierBlocks(input)
+  const state: JevClassifyState = {
+    inbound_message: blocks.inboundForClassifier,
+  }
+  if (blocks.contextSections.length > 0)
+    state.venue_context = blocks.contextSections.join('\n\n')
+  if (blocks.recentBlock !== null)
+    state.recent_conversation = blocks.recentBlock
+  if (input.guestState) state.guest_relationship = input.guestState
+  if (blocks.crisisCheckBody !== null) {
+    state.inbound_message_full_for_crisis_check = blocks.crisisCheckBody
+  }
+  return classifyMessageViaJev(state, deps)
+}
+
+export async function classifyMessage(
+  input: ClassifyMessageInput,
+  // Tests force the gate BOTH ways (the openCoalescedTurn precedent), so the
+  // Haiku path stays covered while the flag is on and vice versa.
+  jev: JevDeps & { enabled?: boolean } = {},
+): Promise<AIResult<ClassifyMessageResult>> {
+  if (typeof input.inboundBody !== 'string' || input.inboundBody.length === 0) {
+    return { ok: false, error: 'invalid_input' }
+  }
+
+  // Jev first when enabled, Haiku on ANY Jev failure - the fallback direction
+  // is the whole design; see classify-message-jev.ts's header. Both arms are
+  // built from the same serialized blocks so they judge identical inputs.
+  if (jev.enabled ?? JEV_CLASSIFICATION_ENABLED) {
+    const viaJev = await classifyMessageJevArm(input, jev)
+    if (viaJev.ok) return viaJev
+    // A silent degrade needs a trace (errors-as-values rule). Structured so
+    // log search can count fallbacks per errorCode; carries no guest content.
+    console.warn('classify-message: jev failed, falling back to haiku', {
+      event: 'jev_classification_fallback',
+      errorCode: viaJev.errorCode ?? null,
+    })
+  }
+
+  const {
+    inboundForClassifier,
+    contextSections,
+    recentBlock,
+    crisisCheckBody,
+  } = buildClassifierBlocks(input)
+
   const userPromptParts: string[] = []
   if (contextSections.length > 0) {
     userPromptParts.push(
       `Context about the venue:\n\n${contextSections.join('\n\n')}`,
     )
   }
-  if (input.recentMessages && input.recentMessages.length > 0) {
-    userPromptParts.push(
-      formatClassifierRecentConversation(input.recentMessages),
-    )
+  if (recentBlock !== null) {
+    userPromptParts.push(recentBlock)
   }
   if (input.guestState) {
     userPromptParts.push(`Guest relationship: ${input.guestState}`)
   }
   userPromptParts.push(`Inbound message from guest:\n"${inboundForClassifier}"`)
-  // TAC-348: see MAX_CRISIS_CHECK_INPUT_CHARS above. Only appended when the
-  // body was actually truncated for the block above, so a normal-length
-  // message (the common case) sees no prompt change at all.
-  if (input.inboundBody.length > MAX_CLASSIFIER_INPUT_CHARS) {
-    const crisisCheckBody =
-      input.inboundBody.length > MAX_CRISIS_CHECK_INPUT_CHARS
-        ? input.inboundBody.slice(0, MAX_CRISIS_CHECK_INPUT_CHARS) +
-          ' [...truncated]'
-        : input.inboundBody
+  if (crisisCheckBody !== null) {
     userPromptParts.push(
       `Full message, untruncated (for the crisisSafety determination ONLY — the shortened version above is what informs category):\n"${crisisCheckBody}"`,
     )
@@ -189,7 +290,7 @@ export async function classifyMessage(
   const userPrompt = userPromptParts.join('\n\n')
 
   try {
-    const { object } = await generateObject({
+    const { object, usage, response } = await generateObject({
       model: getClassificationModel(),
       system: CLASSIFY_SYSTEM_PROMPT,
       prompt: userPrompt,
@@ -209,6 +310,22 @@ export async function classifyMessage(
         promptVersion: PROMPT_VERSION,
         crisisSafety: object.crisisSafety,
         correctsPendingReply: object.correctsPendingReply,
+        followUpWorthy: object.followUpWorthy,
+        // Returned so the orchestrator can price this call on the Langfuse
+        // `classify` generation. Read from the SDK result rather than from the
+        // model factory, because `response.modelId` is what the provider
+        // actually served — a factory default can drift from it silently.
+        modelId: response?.modelId,
+        // Passed through WHOLE, including inputTokenDetails: toAgentUsage needs
+        // the breakdown to separate uncached input from the two cache buckets,
+        // and picking fields apart here is how that gets silently dropped.
+        usage: {
+          inputTokens: usage?.inputTokens,
+          outputTokens: usage?.outputTokens,
+          totalTokens: usage?.totalTokens,
+          cachedInputTokens: usage?.cachedInputTokens,
+          inputTokenDetails: usage?.inputTokenDetails,
+        },
       },
     }
   } catch (e) {

@@ -1,14 +1,17 @@
-# 0005 - A guest's burst settles for 3 s before one run claims it
+# 0005 - The settle window is zero; the claim and the extension carry coalescing
 
-**Date:** 2026-09-23, revised 2026-09-26
-**Status:** accepted; the number is still open to evidence
+**Date:** 2026-09-23, revised 2026-09-26, settle set to zero 2026-09-29
+**Status:** accepted; the number is still open to evidence, and now has some
 
 ## Decision
 
-An inbound waits `COALESCE_SETTLE_MS` (**3 s**) before claiming its turn. Exactly one run per
-`(venue_id, guest_id)` may produce a reply, enforced by a primary key on
-`inbound_turn_claims`. The winner re-checks immediately before dispatch and adopts anything
-that arrived while it generated, bounded by `MAX_TURN_EXTENSIONS` (2).
+An inbound claims its turn immediately: `COALESCE_SETTLE_MS` is **0** (the constant and its
+`> 0` guard remain as the rollback lever). Exactly one run per `(venue_id, guest_id)` may
+produce a reply, enforced by a primary key on `inbound_turn_claims`. The winner adopts any
+already-inserted sibling right after claiming, re-checks immediately before dispatch, and
+adopts anything that arrived while it generated, bounded by `MAX_TURN_EXTENSIONS` (2). The
+pipeline itself is the fold window: every moment spent on classify/retrieve/generate is time
+in which the pre-dispatch check will still adopt a late fragment.
 
 ## Why
 
@@ -32,17 +35,23 @@ wins. An upsert would hand both runs a success.
 argument: the settle sits in front of **every** turn, bursty or not, and Instagram first-bubble
 p50 moved from ~16-18 s to ~23-25 s when it landed.
 
-Shortening it moves a burst between 3 and 8 seconds from the cheap path (caught by the settle)
-to the more expensive one (caught by the extension, one generation spent and discarded). **It
+Shortening it moves a burst from the cheap path (caught by the settle) to the more expensive
+one (caught by the extension, one generated-and-verified draft spent and discarded). **It
 cannot let a second reply out** - that is the claim's job, not the window's.
 
-The trade, costed at the measured 22% burst rate: no settle at all is ~5 s better in
-expectation, ~7 s worse per burst, and spends one wasted generation set per burst. So the
-window buys worst-case latency and model cost with expected latency.
+The 3 s cut was moved on an argument; the cut to zero was moved on a run.
+`scripts/measurement/coalesce-window.ts` (read-only against production, replaying candidate
+windows over real gaps) measured 30 days in 2026-09: 251 inbound, **4** bursts a 3 s settle
+would have folded, all Instagram, at one venue. The earlier "22% burst rate" figure from the
+incident window did not describe steady state. So the settle was paying 3 s on every turn to
+save roughly four discarded generation sets a month - and same-delivery Instagram siblings
+never needed it at all, because the webhook awaits the whole delivery's inserts before
+invoking any run and the winner's post-claim adoption folds them at zero cost.
 
-**The number was moved on an argument, not on a run.** `scripts/measurement/coalesce-window.ts`
-is read-only against production and replays candidate windows over real gaps; it is what should
-settle this properly.
+**If burst behaviour shifts, the lever is the one constant.** Extension-caught bursts are
+visible without re-running the harness: losers record `coalesced_into_turn` in
+`inbound_turn_outcomes`, and extension re-runs appear in Langfuse. A sustained rate of
+roughly one per day is the tripwire to re-run `coalesce-window.ts` and reconsider.
 
 ## What breaks if reversed
 

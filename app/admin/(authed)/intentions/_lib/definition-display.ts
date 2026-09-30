@@ -69,6 +69,8 @@ export function formatArmsOn(armsOn: IntentionArmsOn): string {
       return 'The newest open recommendation to the guest, from an earlier conversation. A newer one re-arms it'
     case 'recorded_order':
       return "The guest's newest recorded order, from an earlier conversation. A newer one re-arms it"
+    case 'first_recorded_order':
+      return "The guest's earliest recorded order, as soon as one exists. No wait for the conversation to end, and a later order never re-arms it"
   }
 }
 

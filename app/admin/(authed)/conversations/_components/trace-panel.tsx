@@ -111,8 +111,12 @@ function PanelChrome({ children }: { children: React.ReactNode }) {
   )
 }
 
-function formatLatency(seconds: number | undefined): string {
-  if (seconds === undefined || Number.isNaN(seconds)) return '—'
+// `null` joined `undefined` here with the Langfuse v5 read API, which types
+// trace latency as `number | null | undefined`. Both mean the same thing to
+// this panel — no duration recorded — and both render the em dash.
+function formatLatency(seconds: number | null | undefined): string {
+  if (seconds === undefined || seconds === null || Number.isNaN(seconds))
+    return '—'
   if (seconds < 1) return `${Math.round(seconds * 1000)}ms`
   return `${seconds.toFixed(2)}s`
 }

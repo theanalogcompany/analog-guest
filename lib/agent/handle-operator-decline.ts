@@ -32,7 +32,7 @@
 import { randomUUID } from 'node:crypto'
 
 import {
-  AGENT_LATENCY_HIGH_THRESHOLD_MS,
+  isAgentLatencyHigh,
   captureAgentLatencyHigh,
   captureDraftDropped,
   captureDraftQueued,
@@ -211,6 +211,9 @@ export async function handleOperatorDecline(input: {
       crisisSafety: false,
       // TAC-397: no guest inbound on this path — see handle-followup.ts.
       correctsPendingReply: false,
+      // TAC-386: a decline is the venue saying no, which is not help the guest
+      // then acts on.
+      followUpWorthy: false,
     }
 
     // Voice corpus — fail-CLOSED. A decline still needs to be in the venue's
@@ -623,7 +626,7 @@ export async function handleOperatorDecline(input: {
     return { status: 'failed', stage: 'context_build', error: errMsg }
   } finally {
     const totalElapsedMs = Date.now() - start
-    if (totalElapsedMs > AGENT_LATENCY_HIGH_THRESHOLD_MS) {
+    if (isAgentLatencyHigh('followup', totalElapsedMs)) {
       await captureAgentLatencyHigh({
         agentRunId,
         venueId: ctx?.venue.id ?? input.venueId,

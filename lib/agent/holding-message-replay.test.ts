@@ -52,6 +52,9 @@
 // and that stays QA: Device per the ticket.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+// Derived from the live constant: a stale fixture literal ships green, and
+// nothing fails (see .claude/rules/prompt-versioning.md).
+import { PROMPT_VERSION } from '@/lib/ai/prompts/system-template'
 
 import type { GenerateMessageResult } from '@/lib/ai'
 import { createPendingRowsFake } from './testing/pending-rows-fake'
@@ -69,7 +72,7 @@ vi.mock('./alerts', () => ({
   capturePostHogEvent: vi.fn(),
 }))
 vi.mock('@/lib/rag', () => ({
-  retrieveContext: vi.fn(),
+  loadVoicePack: vi.fn(),
   retrieveKnowledgeContext: vi.fn(),
 }))
 vi.mock('@/lib/ai', () => ({
@@ -89,7 +92,6 @@ vi.mock('@/lib/analytics/posthog', () => ({
   captureCommitmentDedupCheckFailed: vi.fn(),
   captureCommitmentDeduped: vi.fn(),
   captureCommitmentEscalated: vi.fn(),
-  captureCorpusRetrievalBelowThreshold: vi.fn(),
   captureDashViolationPersisted: vi.fn(),
   captureDemoBypassedApprovalGate: vi.fn(),
   captureEmojiDirectiveViolated: vi.fn(),
@@ -101,7 +103,6 @@ vi.mock('@/lib/analytics/posthog', () => ({
   captureVoiceFidelityLow: vi.fn(),
   CLASSIFICATION_CONFIDENCE_LOW_THRESHOLD: 0.7,
   CLASSIFICATION_CONFIDENCE_REROUTE_THRESHOLD: 0.3,
-  CORPUS_TOP_SIMILARITY_LOW_THRESHOLD: 0.5,
   VOICE_FIDELITY_LOW_THRESHOLD: 0.5,
 }))
 
@@ -186,13 +187,15 @@ function generation(
     arrivalCapture: {},
     cancelsCommitmentId: '',
     intentionQuestion: '',
+    closedTheConversation: false,
     intentionQuestionDuplicateStripped: false,
+    intentionQuestionDroppedForBodyQuestion: false,
     attempts: 1,
     attemptScores: [0.85],
     attemptHistory: [],
     systemPrompt: '',
     userPrompt: '',
-    promptVersion: 'v1.72.0',
+    promptVersion: PROMPT_VERSION,
     cacheReadTokens: 0,
     cacheWriteTokens: 0,
     dashViolationPersisted: false,
