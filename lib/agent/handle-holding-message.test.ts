@@ -142,8 +142,6 @@ function goodGeneration(body = 'still tracking that down for you') {
     status: 'success',
     result: {
       body,
-      voiceFidelity: 0.82,
-      reasoning: 'holding note',
       requiresOperatorApproval: false,
       approvalReason: '',
       complaintIntent: 'none',
@@ -152,7 +150,6 @@ function goodGeneration(body = 'still tracking that down for you') {
       commitment: {},
       arrivalCapture: {},
       attempts: 1,
-      attemptScores: [0.82],
       attemptHistory: [],
       systemPrompt: '',
       userPrompt: '',
@@ -291,13 +288,9 @@ describe('handleHoldingMessage (TAC-308)', () => {
     })
   })
 
-  it('retries generation once when the first attempt is refused', async () => {
+  it('retries generation once when the first attempt fails', async () => {
     generateStageMock
-      .mockResolvedValueOnce({
-        status: 'refused',
-        attemptScores: [0.2],
-        finalScore: 0.2,
-      })
+      .mockResolvedValueOnce({ status: 'failed', error: 'generation failed' })
       .mockResolvedValueOnce(goodGeneration())
     const r = await handleHoldingMessage({
       venueId: 'venue-1',
@@ -342,9 +335,8 @@ describe('handleHoldingMessage (TAC-308)', () => {
   // fixed line goes out rather than nothing.
   it('falls back to the plain line after two failed attempts', async () => {
     generateStageMock.mockResolvedValue({
-      status: 'refused',
-      attemptScores: [0.1],
-      finalScore: 0.1,
+      status: 'failed',
+      error: 'generation failed',
     })
     const r = await handleHoldingMessage({
       venueId: 'venue-1',
@@ -362,9 +354,8 @@ describe('handleHoldingMessage (TAC-308)', () => {
 
   it('alerts when the fallback fires, because that means the prompt is wrong', async () => {
     generateStageMock.mockResolvedValue({
-      status: 'refused',
-      attemptScores: [0.1],
-      finalScore: 0.1,
+      status: 'failed',
+      error: 'generation failed',
     })
     await handleHoldingMessage({
       venueId: 'venue-1',
@@ -377,33 +368,12 @@ describe('handleHoldingMessage (TAC-308)', () => {
     )
   })
 
-  // Honest zero: this row is not a voice sample and must never be mistaken
-  // for one in a fidelity aggregate or fed back as a corpus exemplar.
-  it('stamps the fallback with voiceFidelity 0', async () => {
-    generateStageMock.mockResolvedValue({
-      status: 'refused',
-      attemptScores: [0.1],
-      finalScore: 0.1,
-    })
-    await handleHoldingMessage({
-      venueId: 'venue-1',
-      guestId: 'guest-1',
-      pendingQuestion: QUESTION,
-      questionMessageId: QUESTION_MESSAGE_ID,
-    })
-    const sentGeneration = scheduleAndSendMock.mock.calls[0]?.[1] as {
-      voiceFidelity: number
-    }
-    expect(sentGeneration.voiceFidelity).toBe(0)
-  })
-
   // The fallback exists for a guest who has been waiting. It must not itself
   // be gateable into silence.
   it('does not run the fallback through the approval gate', async () => {
     generateStageMock.mockResolvedValue({
-      status: 'refused',
-      attemptScores: [0.1],
-      finalScore: 0.1,
+      status: 'failed',
+      error: 'generation failed',
     })
     await handleHoldingMessage({
       venueId: 'venue-1',
@@ -412,7 +382,7 @@ describe('handleHoldingMessage (TAC-308)', () => {
       questionMessageId: QUESTION_MESSAGE_ID,
     })
     // Two gate calls would mean an attempt was gated; zero means both
-    // generations refused upstream and the fallback went straight out.
+    // generations failed upstream and the fallback went straight out.
     expect(applyApprovalPolicyStageMock).not.toHaveBeenCalled()
     expect(scheduleAndSendMock).toHaveBeenCalledTimes(1)
   })
@@ -578,11 +548,10 @@ describe('handleHoldingMessage — grounding backstop (TAC-376)', () => {
 
   // The fallback bypasses generation and the gate entirely — grounding must
   // never be asked to check a body that was never generated.
-  it('does not run the grounding backstop when generation itself was refused', async () => {
+  it('does not run the grounding backstop when generation itself failed', async () => {
     generateStageMock.mockResolvedValue({
-      status: 'refused',
-      attemptScores: [0.1],
-      finalScore: 0.1,
+      status: 'failed',
+      error: 'generation failed',
     })
     await handleHoldingMessage({
       venueId: 'venue-1',

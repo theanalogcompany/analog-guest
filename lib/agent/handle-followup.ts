@@ -72,17 +72,12 @@ import { resolveCancellation } from '@/lib/schemas/guest-commitment'
  * should say for it, rather than inheriting a default that quietly misdescribes
  * this path.
  *
- * `voiceFidelity: 1` is the honest value and not a flattering one. The floors
- * exist to judge whether a MODEL matched the venue's voice; this text IS the
- * venue's voice, chosen by the venue, so there is nothing for the score to
- * measure and nothing a retry could improve. Same reason every self-flag below
- * is false: they report what a model did, and no model ran.
+ * Every self-flag below is false because they report what a model did, and no
+ * model ran.
  */
 function fixedWarmCloseGeneration(text: string): GenerateMessageResult {
   return {
     body: text,
-    voiceFidelity: 1,
-    reasoning: 'TAC-568: fixed per-venue warm close; no model call',
     unverifiedUrls: [],
     requiresOperatorApproval: false,
     approvalReason: '',
@@ -99,7 +94,6 @@ function fixedWarmCloseGeneration(text: string): GenerateMessageResult {
     intentionQuestionDuplicateStripped: false,
     intentionQuestionDroppedForBodyQuestion: false,
     attempts: 0,
-    attemptScores: [],
     attemptHistory: [],
     systemPrompt: '',
     userPrompt: '',
@@ -683,51 +677,18 @@ export async function handleFollowup(input: {
       })
       return { status: 'failed', stage: 'generation', error: gen.error }
     }
-    if (gen.status === 'refused') {
-      gen.attemptScores.forEach((score, i) => {
-        const attemptSpan = generateSpan.span(`generate.attempt_${i + 1}`, {
-          attempt: i + 1,
-        })
-        attemptSpan.end({ output: { voiceFidelity: score } })
-      })
-      generateSpan.end({
-        level: 'WARNING',
-        statusMessage: 'fidelity_loop_exhausted',
-        output: {
-          attemptScores: gen.attemptScores,
-          finalScore: gen.finalScore,
-        },
-      })
-      await fireRedAlert({
-        agentRunId,
-        venueId: ctx.venue.id,
-        guestId: ctx.guest.id,
-        kind: 'followup',
-        stage: 'generation',
-        errorMessage: 'fidelity_loop_exhausted',
-        extra: { attemptScores: gen.attemptScores, finalScore: gen.finalScore },
-      })
-      return {
-        status: 'refused',
-        reason: 'low_fidelity',
-        attemptScores: gen.attemptScores,
-      }
-    }
-    gen.result.attemptScores.forEach((score, i) => {
+    gen.result.attemptHistory.forEach((attempt, i) => {
       const attemptSpan = generateSpan.span(`generate.attempt_${i + 1}`, {
         attempt: i + 1,
       })
-      const attempt = gen.result.attemptHistory[i]
       attemptSpan.end({
-        output: { voiceFidelity: score },
-        content: attempt ? buildGenerateAttemptContent(attempt) : undefined,
+        output: { attempt: i + 1 },
+        content: buildGenerateAttemptContent(attempt),
       })
     })
     generateSpan.end({
       output: {
-        voiceFidelity: gen.result.voiceFidelity,
         attempts: gen.result.attempts,
-        attemptScores: gen.result.attemptScores,
         promptVersion: gen.result.promptVersion,
         bodyLength: gen.result.body.length,
       },
@@ -738,7 +699,6 @@ export async function handleFollowup(input: {
     generatedBody = gen.result.body
     console.log('[agent] followup generated', {
       agentRunId,
-      voiceFidelity: gen.result.voiceFidelity,
       attempts: gen.result.attempts,
     })
 
@@ -1078,7 +1038,6 @@ export async function handleFollowup(input: {
       primaryTrigger:
         approval.action === 'queue' ? approval.primaryTrigger : null,
       triggers: approval.action === 'queue' ? approval.triggers : [],
-      voiceFidelity: gen.result.voiceFidelity,
       modelRequiresApproval: gen.result.requiresOperatorApproval,
     })
     if (approval.action === 'queue') {
@@ -1215,7 +1174,6 @@ export async function handleFollowup(input: {
             triggers: approval.triggers,
             primaryTrigger: approval.primaryTrigger,
             priorReviewReason,
-            voiceFidelity: gen.result.voiceFidelity,
             modelRequiresApproval: gen.result.requiresOperatorApproval,
             modelApprovalReason: gen.result.approvalReason,
             compRegexMatchedPattern: approval.compMatchedPattern,
@@ -1231,7 +1189,6 @@ export async function handleFollowup(input: {
             guestId: ctx.guest.id,
             triggers: approval.triggers,
             primaryTrigger: approval.primaryTrigger,
-            voiceFidelity: gen.result.voiceFidelity,
             modelRequiresApproval: gen.result.requiresOperatorApproval,
             modelApprovalReason: gen.result.approvalReason,
             compRegexMatchedPattern: approval.compMatchedPattern,
@@ -1282,7 +1239,6 @@ export async function handleFollowup(input: {
             status: 'queued',
             outboundMessageId,
             primaryTrigger: approval.primaryTrigger,
-            voiceFidelity: gen.result.voiceFidelity,
             persistAction,
           },
           content: { outboundDraft: gen.result.body },
@@ -1452,16 +1408,13 @@ export async function handleFollowup(input: {
         recognitionState: ctx.recognition.state,
         recognitionScore: ctx.recognition.score,
         category,
-        voiceFidelity: gen.result.voiceFidelity,
         attempts: gen.result.attempts,
-        attemptScores: gen.result.attemptScores,
         matchCount: ctx.corpus.length,
       })
       trace.update({
         output: {
           status: 'sent',
           outboundMessageId,
-          voiceFidelity: gen.result.voiceFidelity,
         },
         content: { outboundDraft: gen.result.body },
       })

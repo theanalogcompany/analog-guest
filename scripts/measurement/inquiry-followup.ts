@@ -35,7 +35,6 @@ import {
   GeneratedMessageSchema,
   MAX_OUTPUT_TOKENS,
   replaceDashes,
-  VOICE_FIDELITY_INSTRUCTION,
 } from '@/lib/ai/generate-message'
 import { INQUIRY_FOLLOWUP_INSTRUCTIONS } from '@/lib/ai/prompts/categories/inquiry-followup'
 import { PROMPT_VERSION } from '@/lib/ai/prompts/system-template'
@@ -294,7 +293,7 @@ async function main(): Promise<void> {
   let rewrittenCount = 0
   for (const [index, c] of CASES.entries()) {
     const { composed } = index === 0 ? first : await composeFor(c)
-    const system = `${composed.systemPrompt}\n\n${VOICE_FIDELITY_INSTRUCTION}`
+    const system = composed.systemPrompt
 
     let body: string | null = null
     /**

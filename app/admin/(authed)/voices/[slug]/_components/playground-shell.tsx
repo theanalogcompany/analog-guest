@@ -33,9 +33,7 @@ interface PlaygroundShellProps {
 interface RegenerateResponse {
   success: boolean
   body?: string
-  voiceFidelity?: number
   attempts?: number
-  attemptScores?: number[]
   generatedAt?: string
   error?: string
   detail?: string
@@ -114,7 +112,6 @@ export function PlaygroundShell({
       const newAttempt: PlaygroundAttempt = {
         attemptId: makeAttemptId(),
         body: json.body,
-        voiceFidelity: json.voiceFidelity ?? 0,
         generatedAt: new Date(json.generatedAt ?? Date.now()),
       }
       setAttempts((prev) => [...prev, newAttempt])

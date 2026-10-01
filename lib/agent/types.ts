@@ -452,12 +452,13 @@ export type AgentResult =
       triggers: string[]
       primaryTrigger: string
     }
-  | { status: 'refused'; reason: string; attemptScores?: number[] }
+  | { status: 'refused'; reason: string }
   | { status: 'skipped_duplicate' }
   // A card in this draft's pending slot won, so the draft was discarded:
-  // nothing sent, nothing persisted. Distinct from 'refused' (the generation
-  // itself wasn't good enough) because the draft here was fine; it had nowhere
-  // to go. Reasons (see ApprovalDecision in stages.ts):
+  // nothing sent, nothing persisted. Distinct from 'refused' (a precondition
+  // on the turn itself failed — wrong channel, missing venue copy, an
+  // occupied manual-followup slot) because the draft here was fine; it had
+  // nowhere to go. Reasons (see ApprovalDecision in stages.ts):
   //   knowledge_gap_card_protected (TAC-308) a knowledge-gap card holds the slot
   //   obligation_slot_taken (TAC-394)        a different obligation holds it
   //   slot_occupied (TAC-394)                a manual followup, which never

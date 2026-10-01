@@ -100,10 +100,8 @@ vi.mock('@/lib/analytics/posthog', () => ({
   capturePostHogEvent: vi.fn(),
   captureRegenerationTriggered: vi.fn(),
   captureUngroundedClaimCaught: vi.fn(),
-  captureVoiceFidelityLow: vi.fn(),
   CLASSIFICATION_CONFIDENCE_LOW_THRESHOLD: 0.7,
   CLASSIFICATION_CONFIDENCE_REROUTE_THRESHOLD: 0.3,
-  VOICE_FIDELITY_LOW_THRESHOLD: 0.5,
 }))
 
 import { KNOWLEDGE_GAP_HOLDING_MESSAGE_ENABLED } from './knowledge-gap-timeout'
@@ -175,8 +173,6 @@ function generation(
 ): GenerateMessageResult {
   return {
     body: 'the drafted reply that the backstop caught',
-    voiceFidelity: 0.85,
-    reasoning: 'r',
     unverifiedUrls: [],
     requiresOperatorApproval: false,
     approvalReason: '',
@@ -191,7 +187,6 @@ function generation(
     intentionQuestionDuplicateStripped: false,
     intentionQuestionDroppedForBodyQuestion: false,
     attempts: 1,
-    attemptScores: [0.85],
     attemptHistory: [],
     systemPrompt: '',
     userPrompt: '',

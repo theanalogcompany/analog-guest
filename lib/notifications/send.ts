@@ -139,7 +139,6 @@ export const REASON_BY_REVIEW_REASON = {
   [APPROVAL_TRIGGERS.COMPLAINT_COMMITMENT_FLOOR]: 'promise on a complaint',
   // Never renders: PUSH_POLICY skips this trigger. Present so the map is total.
   [APPROVAL_TRIGGERS.PREVIOUS_PENDING_HELD]: 'needs review',
-  [APPROVAL_TRIGGERS.FIDELITY_BELOW_AUTO_SEND_FLOOR]: 'might not sound right',
   [APPROVAL_TRIGGERS.GROUNDING_CHECK_FAILED]: 'unverified, needs a look',
   // Never renders: it can never win primary, because it always co-fires below
   // GROUNDING_CHECK_FAILED. Present so the map is total.

@@ -382,7 +382,6 @@ export async function handleHoldingMessage(input: {
           outboundMessageId,
           attempt,
           usedFallback: false,
-          voiceFidelity: generated.voiceFidelity,
           body: generated.body,
         })
         return { status: 'sent', outboundMessageId, usedFallback: false }
@@ -411,10 +410,9 @@ export async function handleHoldingMessage(input: {
  * One generation attempt, gated. Returns the result when it's clean enough to
  * send, or null when this attempt should be retried / fall through.
  *
- * "Clean" means BOTH: generateStage didn't refuse (voice fidelity above
- * SEND_FIDELITY_FLOOR), and the approval gate returned `send`. A gate that
- * says `queue` or `drop` is a failure here, not a route — there is no slot to
- * queue into, because the knowledge-gap card owns it.
+ * "Clean" means generateStage succeeded AND the approval gate returned
+ * `send`. A gate that says `queue` or `drop` is a failure here, not a route —
+ * there is no slot to queue into, because the knowledge-gap card owns it.
  */
 async function tryGenerateHolding(
   ctx: RuntimeContext,
@@ -667,19 +665,12 @@ async function isOptedOut(guestId: string): Promise<boolean> {
 
 /**
  * Wrap FALLBACK_HOLDING_BODY in the GenerateMessageResult shape scheduleAndSend
- * persists from.
- *
- * voiceFidelity 0 is honest: nothing here was matched to the venue's voice.
- * It also reads correctly in the conversation viewer and in any fidelity
- * aggregate — this row genuinely is not a voice sample, and should never be
- * mistaken for one or fed back as a corpus exemplar.
+ * persists from. This row genuinely is not a voice sample, and should never
+ * be mistaken for one or fed back as a corpus exemplar.
  */
 function buildFallbackGeneration(): GenerateMessageResult {
   return {
     body: FALLBACK_HOLDING_BODY,
-    voiceFidelity: 0,
-    reasoning:
-      'TAC-308 plain fallback: generation attempts did not clear the gates',
     // TAC-509: FALLBACK_HOLDING_BODY is a fixed constant that asserts nothing
     // and carries no link.
     unverifiedUrls: [],
@@ -700,7 +691,6 @@ function buildFallbackGeneration(): GenerateMessageResult {
     // TAC-567: this path composes no question, so the gate never fired.
     intentionQuestionDroppedForBodyQuestion: false,
     attempts: 0,
-    attemptScores: [],
     attemptHistory: [],
     systemPrompt: '',
     userPrompt: '',

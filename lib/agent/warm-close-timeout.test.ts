@@ -471,7 +471,7 @@ describe('processDueWarmCloses: the claim release (TAC-560)', () => {
   it('releases the claim when the close was refused, so a later tick can retry', async () => {
     handleFollowupMock.mockResolvedValue({
       status: 'refused',
-      reason: 'low_fidelity',
+      reason: 'no_warm_close_text',
     })
     const r = await processDueWarmCloses(NOW)
     expect(r.closed).toBe(0)
@@ -489,8 +489,8 @@ describe('processDueWarmCloses: the claim release (TAC-560)', () => {
     handleFollowupMock.mockResolvedValue({
       status: 'queued',
       outboundMessageId: 'm-card',
-      triggers: ['fidelity_below_auto_send_floor'],
-      primaryTrigger: 'fidelity_below_auto_send_floor',
+      triggers: ['model_flagged'],
+      primaryTrigger: 'model_flagged',
     })
     await processDueWarmCloses(NOW)
     expect(store.releaseWarmCloseClaim).not.toHaveBeenCalled()

@@ -14,9 +14,8 @@
  *
  * The prompt is composed through the production path (buildRuntimeContext →
  * retrieveCorpusStage → retrieveKnowledgeWithContextStage → composePrompt,
- * volatile block suffixed with VOICE_FIDELITY_INSTRUCTION exactly as
- * generate-message.ts does), so the token shape is the live one, not a
- * synthetic approximation.
+ * blocks split exactly as generate-message.ts splits them), so the token
+ * shape is the live one, not a synthetic approximation.
  *
  * Cache isolation: every (model, schema) cell prepends its own nonce line
  * to the cacheable prefix, so no call can read the production cache entry
@@ -47,7 +46,6 @@ import { composePrompt } from '@/lib/ai/compose-prompt'
 import {
   GeneratedMessageSchema,
   MAX_OUTPUT_TOKENS,
-  VOICE_FIDELITY_INSTRUCTION,
 } from '@/lib/ai/generate-message'
 import { PROMPT_VERSION } from '@/lib/ai/prompts/system-template'
 import type {
@@ -70,15 +68,14 @@ import { createRunLog } from './run-log'
 const PROBE_BODY = 'what should i try next time im there'
 const PROBE_CATEGORY: MessageCategory = 'recommendation_request'
 
-// What a realistic slimming of the output schema could look like: the reply
-// and the two fields dispatch genuinely needs. Drops `reasoning`, the
-// capture/commitment emissions and the self-flags — this arm measures the
-// decode saving of fewer output tokens, not a shippable schema.
+// What a further slimming of the output schema could look like: the reply
+// and the one field dispatch genuinely needs. Drops the capture/commitment
+// emissions and the self-flags — this arm measures the decode saving of
+// fewer output tokens, not a shippable schema. (The v1.80.0 schema diet
+// already removed `reasoning` and `voiceFidelity` from the FULL schema, so
+// the full-vs-slim gap is now narrower than the pre-diet runs recorded.)
 const SLIM_SCHEMA = z.object({
   body: z.string().min(1),
-  voiceFidelity: z
-    .number()
-    .refine((n) => n >= 0 && n <= 1, { message: 'must be between 0 and 1' }),
   intentionQuestion: z.string(),
 })
 
@@ -186,8 +183,9 @@ async function main(): Promise<void> {
       runtime: buildAiRuntime(ctx),
       channel: 'instagram',
     })
-  // The exact production suffix join (generate-message.ts).
-  const volatileSystemBlock = `${volatileSystemSuffix}\n\n${VOICE_FIDELITY_INSTRUCTION}`
+  // The exact production volatile block (generate-message.ts): the suffix
+  // verbatim since the v1.80.0 schema diet removed the fidelity instruction.
+  const volatileSystemBlock = volatileSystemSuffix
 
   const log = createRunLog({
     name: 'generation-latency',
@@ -258,8 +256,9 @@ async function main(): Promise<void> {
             schema: SCHEMAS[schemaArm],
             maxOutputTokens: MAX_OUTPUT_TOKENS,
           })
-          for await (const _chunk of result.textStream) {
-            if (unit.ttftMs === null) unit.ttftMs = performance.now() - t0
+          for await (const chunk of result.textStream) {
+            if (chunk.length > 0 && unit.ttftMs === null)
+              unit.ttftMs = performance.now() - t0
           }
           unit.totalMs = performance.now() - t0
           const usage = await result.usage

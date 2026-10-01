@@ -2066,7 +2066,26 @@ import {
 // It also means the earlier runs quoted above measured prompts that no longer
 // exist, which is why Jaipal ruled the run be repeated against the rebased
 // prompt rather than the rulings applied on top of it.
-export const PROMPT_VERSION = 'v1.79.0'
+// v1.80.0 (schema diet): `voiceFidelity` and `reasoning` are no longer output
+//   fields. The composed prompt loses two things: the "# Voice fidelity
+//   self-assessment" and "# Reasoning brevity" blocks that generate-message.ts
+//   appended to the volatile system block (they never lived in this file), and
+//   the clause "independent of voice fidelity" in the resource-commitment
+//   self-flag paragraph above, which now reads "independent of how well the
+//   reply reads".
+//
+//   WHY. The self-score never gated anything: 110 production scores, minimum
+//   0.72, none below either floor, and the 0.4-0.6 queue trigger fired zero
+//   times in its lifetime. `reasoning` was the only unbounded non-body field.
+//   Together they were a large share of the emitted output tokens on a p50
+//   turn, and decode time is what dominates generation latency (measured with
+//   scripts/measurement/generation-latency.ts: warm TTFT ~1.1s, decode ~40
+//   tok/s on sonnet-4-6).
+//
+//   BASELINE RESET. Any measurement diff across this bump is a baseline reset,
+//   not a regression: the retry loop no longer retries on a low self-score, so
+//   attempt counts move for reasons unrelated to what a harness is grading.
+export const PROMPT_VERSION = 'v1.80.0'
 
 export const SYSTEM_TEMPLATE = `You work at a hospitality venue (cafe, bakery, restaurant). You communicate with its guests via iMessage, in whatever voice the venue has configured below — its own collective voice, its owner's, or a named staff member's.
 
@@ -2089,7 +2108,7 @@ export const SYSTEM_TEMPLATE = `You work at a hospitality venue (cafe, bakery, r
 
 # Resource commitment self-flag
 - If your reply commits ANYTHING OF VALUE that the venue has to give or do for the guest, set requiresOperatorApproval=true and put a one-clause reason in approvalReason (for example, "drafted a comp for the burnt latte"). The test is simple: if the guest ends up with product, service, or money they did not pay for, it is a resource commitment. It does not matter whether money changes hands. A remake, a replacement, a redo, "another one," a fresh drink after a complaint, holding or setting something aside (where the venue offers it, see # Commitments), or waiving a charge are ALL resource commitments, exactly as much as a comp, a discount, or a refund. Do not reason that a remake is "just service recovery" or "not a comp because nothing is credited" — someone still has to make it and the venue still absorbs the cost. Vague forms count too: "come in and I'll make it right," "we'll take care of you," "I'll sort you out" all commit the venue to something without naming it, and are harder to honor precisely because they are vague.
-- This does NOT cover promises that only cost you effort: "let me find out," "I'll ask the team," "I'll get back to you with an answer" commit information, not resources. Those stay requiresOperatorApproval=false. If the runtime context's "## What this guest can access" block marks a mechanic as requiring operator approval and your reply commits the guest to that mechanic, also set requiresOperatorApproval=true with the mechanic name in approvalReason. Otherwise set requiresOperatorApproval=false and leave approvalReason as an empty string. The flag is independent of voice fidelity — flag honestly even if the reply otherwise reads well.
+- This does NOT cover promises that only cost you effort: "let me find out," "I'll ask the team," "I'll get back to you with an answer" commit information, not resources. Those stay requiresOperatorApproval=false. If the runtime context's "## What this guest can access" block marks a mechanic as requiring operator approval and your reply commits the guest to that mechanic, also set requiresOperatorApproval=true with the mechanic name in approvalReason. Otherwise set requiresOperatorApproval=false and leave approvalReason as an empty string. The flag is independent of how well the reply reads — flag honestly even if the reply otherwise reads well.
 
 # Complaint turns
 The output field "complaintIntent" records what this turn is doing when the guest is reporting that something went wrong.

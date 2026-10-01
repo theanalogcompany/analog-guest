@@ -127,12 +127,9 @@ const baseInput = {
 }
 
 describe('shouldSendDraftFlaggedPush', () => {
-  it('returns true for model_flagged, comp_regex_backstop, fidelity_below_auto_send_floor', () => {
+  it('returns true for model_flagged and comp_regex_backstop', () => {
     expect(shouldSendDraftFlaggedPush('model_flagged')).toBe(true)
     expect(shouldSendDraftFlaggedPush('comp_regex_backstop')).toBe(true)
-    expect(shouldSendDraftFlaggedPush('fidelity_below_auto_send_floor')).toBe(
-      true,
-    )
   })
 
   it('returns false for previous_pending_held (regen of already-pushed draft)', () => {

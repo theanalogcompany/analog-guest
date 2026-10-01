@@ -65,7 +65,6 @@ import { composePrompt } from '@/lib/ai/compose-prompt'
 import {
   GeneratedMessageSchema,
   MAX_OUTPUT_TOKENS,
-  VOICE_FIDELITY_INSTRUCTION,
 } from '@/lib/ai/generate-message'
 import { getGenerationModel } from '@/lib/ai/client'
 import { firstTouchOpenerFor } from '@/lib/ai/prompts/serializers'
@@ -501,7 +500,7 @@ async function runOneArm(u: UnitInput, arm: Arm): Promise<void> {
     try {
       const { object } = await generateObject({
         model: getGenerationModel(),
-        system: `${u.composed.systemPrompt}\n\n${VOICE_FIDELITY_INSTRUCTION}`,
+        system: u.composed.systemPrompt,
         prompt: userPrompt,
         schema: GeneratedMessageSchema,
         maxOutputTokens: MAX_OUTPUT_TOKENS,

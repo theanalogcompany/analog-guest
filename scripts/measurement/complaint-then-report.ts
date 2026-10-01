@@ -61,7 +61,6 @@ import { composePrompt } from '@/lib/ai/compose-prompt'
 import {
   GeneratedMessageSchema,
   MAX_OUTPUT_TOKENS,
-  VOICE_FIDELITY_INSTRUCTION,
 } from '@/lib/ai/generate-message'
 import { COMP_COMPLAINT_INSTRUCTIONS } from '@/lib/ai/prompts/categories/comp-complaint'
 import { PROMPT_VERSION } from '@/lib/ai/prompts/system-template'
@@ -542,16 +541,9 @@ async function main() {
           process.exit(1)
         }
 
-        // VOICE_FIDELITY_INSTRUCTION is appended exactly as generateMessage
-        // appends it. composePrompt does NOT include it, and without it the
-        // model returns voiceFidelity on a 1-to-10 scale, which the schema's
-        // [0,1] refine rejects and generateObject reports as
-        // "response did not match schema". That is what 11 of 14 first-run
-        // generations hit, and four byte-identical re-asks could not fix it,
-        // because it was systematic rather than intermittent. The constant's
-        // own comment in generate-message.ts documents the failure; the
-        // harness simply was not sending it.
-        const system = `${composed}\n\n${VOICE_FIDELITY_INSTRUCTION}`
+        // v1.80.0 schema diet: the system prompt is composePrompt's output
+        // verbatim; the voice-fidelity instruction it used to append is gone.
+        const system = composed
 
         let body: string | null = null
         let commitment: { type?: string; description?: string } = {}

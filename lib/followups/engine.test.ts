@@ -615,8 +615,8 @@ describe('processDueFollowups — happy path (queued)', () => {
     vi.mocked(handleFollowup).mockResolvedValue({
       status: 'queued',
       outboundMessageId: 'msg-queued-1',
-      triggers: ['fidelity_below_auto_send_floor'],
-      primaryTrigger: 'fidelity_below_auto_send_floor',
+      triggers: ['model_flagged'],
+      primaryTrigger: 'model_flagged',
     })
     const result = await processDueFollowups(NOW)
     expect(finalizeFollowupLogClaim).toHaveBeenCalledWith(
@@ -711,8 +711,7 @@ describe('processDueFollowups — dispatch refused (release the claim)', () => {
   it('releases the claim and counts the failure (dedup not burned)', async () => {
     vi.mocked(handleFollowup).mockResolvedValue({
       status: 'refused',
-      reason: 'low_fidelity',
-      attemptScores: [0.2, 0.3],
+      reason: 'no_warm_close_text',
     })
     vi.mocked(releaseFollowupLogClaim).mockResolvedValue({
       ok: true,

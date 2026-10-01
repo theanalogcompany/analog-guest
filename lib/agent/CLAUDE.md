@@ -90,8 +90,6 @@ else as stale.
 
 | constant | value | meaning |
 | --- | --- | --- |
-| `SEND_FIDELITY_FLOOR` | 0.4 | below this the draft is refused outright, red alert, nothing persisted |
-| `AUTO_SEND_FIDELITY_FLOOR` | 0.6 | 0.4 to 0.6 queues for review |
 | `KNOWLEDGE_RELEVANCE_FLOOR` | 0.3 | knowledge retrieval degrades **gracefully** |
 | `KNOWLEDGE_RETRIEVE_LIMIT` | 4 | |
 | `VOICE_PACK_MAX_ENTRIES` / `VOICE_PACK_CHAR_BUDGET` (`lib/rag/voice-pack.ts`) | 80 / 12,000 | growth ceilings; every live corpus fits whole today |
@@ -108,7 +106,7 @@ reply.
 ## Approval gates
 
 `applyApprovalPolicyStage(ctx, generation, grounding?, mechanicOffer?, prosePromise?, ...)`
-returns `send`, `queue`, `drop`, or `silence`. **Twenty-three triggers compose; any one
+returns `send`, `queue`, `drop`, or `silence`. **Twenty-two triggers compose; any one
 queues.** The set is `APPROVAL_TRIGGERS`; check it against the constant, never against a
 list in prose.
 
@@ -122,7 +120,7 @@ prose_promise_backstop > prose_cancellation_backstop > unresolved_cancellation_i
 knowledge_gap_backstop > knowledge_gap > comp_regex_backstop > model_flagged >
 closed_venue_arrival_emitted > closed_venue_arrival_backstop > unverified_url >
 self_talk_detected > complaint_commitment_floor > previous_pending_held >
-fidelity_below_auto_send_floor > grounding_check_failed > grounding_check_degraded >
+grounding_check_failed > grounding_check_degraded >
 prose_promise_check_failed > prose_cancellation_check_failed >
 category_requires_approval > hold_all_outbound
 ```

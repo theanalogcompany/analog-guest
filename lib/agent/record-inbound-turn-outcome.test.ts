@@ -93,14 +93,17 @@ describe('ledgerEntryFor — every AgentResult status maps to a ledger entry', (
       outcome: 'skipped_duplicate',
       reason: null,
     },
+    // v1.80.0: no inbound path refuses any more (the fidelity floor is gone),
+    // but the deriver stays because the map is total over AgentResult. The
+    // reason column is null — the vocabulary has no refusal reasons — and the
+    // AgentResult's own reason rides in detail instead (asserted below).
     {
       result: {
         status: 'refused',
-        reason: 'low_fidelity',
-        attemptScores: [0.2],
+        reason: 'some_future_refusal',
       },
       outcome: 'refused',
-      reason: 'low_fidelity',
+      reason: null,
     },
     {
       result: {
@@ -162,6 +165,16 @@ describe('ledgerEntryFor — every AgentResult status maps to a ledger entry', (
     const entry = ledgerEntryFor(result)
     expect(entry.outcome).toBe(outcome)
     expect(entry.reason).toBe(reason)
+  })
+
+  // v1.80.0: the refused deriver carries the result's reason in detail, so a
+  // future refusal shows up in the data before it earns a vocabulary entry.
+  it("puts a refused result's reason into detail.refusedReason", () => {
+    const entry = ledgerEntryFor({
+      status: 'refused',
+      reason: 'some_future_refusal',
+    })
+    expect(entry.detail).toEqual({ refusedReason: 'some_future_refusal' })
   })
 
   /**
@@ -359,11 +372,11 @@ describe('recordInboundTurnOutcome — the row it writes', () => {
     await recordInboundTurnOutcome({
       inboundMessageId: INBOUND_ID,
       agentRunId: 'run-1',
-      result: { status: 'refused', reason: 'low_fidelity', attemptScores: [] },
+      result: { status: 'refused', reason: 'some_future_refusal' },
     })
     expect(insertedRow()).toMatchObject({
       outcome: 'refused',
-      reason: 'low_fidelity',
+      reason: null,
     })
   })
 })

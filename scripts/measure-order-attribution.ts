@@ -433,9 +433,7 @@ function buildInput(
 
 type GenerationOutcome = {
   attempt: number
-  generation:
-    | { ok: true; body: string; voiceFidelity: number }
-    | { ok: false; error: string }
+  generation: { ok: true; body: string } | { ok: false; error: string }
   // null only when generation itself failed, so verifyGrounding never ran.
   verify:
     | { ok: true; hasUngroundedClaim: boolean; ungroundedClaims: string[] }
@@ -482,11 +480,7 @@ async function runOneAttempt(
   if (!verifyResult.ok) {
     return {
       attempt,
-      generation: {
-        ok: true,
-        body: genResult.data.body,
-        voiceFidelity: genResult.data.voiceFidelity,
-      },
+      generation: { ok: true, body: genResult.data.body },
       verify: { ok: false, error: verifyResult.error },
       conflationShaped: false,
       matchedClaims: [],
@@ -496,11 +490,7 @@ async function runOneAttempt(
   const score = scoreConflationClaims(verifyResult.data.ungroundedClaims)
   return {
     attempt,
-    generation: {
-      ok: true,
-      body: genResult.data.body,
-      voiceFidelity: genResult.data.voiceFidelity,
-    },
+    generation: { ok: true, body: genResult.data.body },
     verify: {
       ok: true,
       hasUngroundedClaim: verifyResult.data.hasUngroundedClaim,

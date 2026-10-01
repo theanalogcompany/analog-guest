@@ -105,9 +105,8 @@ export function buildDeclineHint(commitmentDescription: string): string {
  *   - applyApprovalPolicyStage (operator's swipe-left IS the approval)
  *   - scheduleAndSend (NEVER called — persist-pending only)
  *
- * Returns AgentResult.queued on success, .refused on fidelity floor, .failed
- * on any pipeline failure. The route handler maps these to HTTP status codes
- * (200 / 422 / 502 respectively).
+ * Returns AgentResult.queued on success, .failed on any pipeline failure.
+ * The route handler maps these to HTTP status codes (200 / 502).
  *
  * Observability: root trace 'agent.operator_decline' so Langfuse can
  * distinguish this surface from inbound + followup. flushAsync runs in
@@ -310,51 +309,18 @@ export async function handleOperatorDecline(input: {
       })
       return { status: 'failed', stage: 'generation', error: gen.error }
     }
-    if (gen.status === 'refused') {
-      gen.attemptScores.forEach((score, i) => {
-        const attemptSpan = generateSpan.span(`generate.attempt_${i + 1}`, {
-          attempt: i + 1,
-        })
-        attemptSpan.end({ output: { voiceFidelity: score } })
-      })
-      generateSpan.end({
-        level: 'WARNING',
-        statusMessage: 'fidelity_loop_exhausted',
-        output: {
-          attemptScores: gen.attemptScores,
-          finalScore: gen.finalScore,
-        },
-      })
-      await fireRedAlert({
-        agentRunId,
-        venueId: ctx.venue.id,
-        guestId: ctx.guest.id,
-        kind: 'followup',
-        stage: 'generation',
-        errorMessage: 'fidelity_loop_exhausted',
-        extra: { attemptScores: gen.attemptScores, finalScore: gen.finalScore },
-      })
-      return {
-        status: 'refused',
-        reason: 'low_fidelity',
-        attemptScores: gen.attemptScores,
-      }
-    }
-    gen.result.attemptScores.forEach((score, i) => {
+    gen.result.attemptHistory.forEach((attempt, i) => {
       const attemptSpan = generateSpan.span(`generate.attempt_${i + 1}`, {
         attempt: i + 1,
       })
-      const attempt = gen.result.attemptHistory[i]
       attemptSpan.end({
-        output: { voiceFidelity: score },
-        content: attempt ? buildGenerateAttemptContent(attempt) : undefined,
+        output: { attempt: i + 1 },
+        content: buildGenerateAttemptContent(attempt),
       })
     })
     generateSpan.end({
       output: {
-        voiceFidelity: gen.result.voiceFidelity,
         attempts: gen.result.attempts,
-        attemptScores: gen.result.attemptScores,
         promptVersion: gen.result.promptVersion,
         bodyLength: gen.result.body.length,
       },
@@ -555,7 +521,6 @@ export async function handleOperatorDecline(input: {
           triggers: [OPERATOR_DECLINE_PRIMARY_TRIGGER],
           primaryTrigger: OPERATOR_DECLINE_PRIMARY_TRIGGER,
           priorReviewReason,
-          voiceFidelity: gen.result.voiceFidelity,
           modelRequiresApproval: gen.result.requiresOperatorApproval,
           modelApprovalReason: gen.result.approvalReason,
           compRegexMatchedPattern: null,
@@ -571,7 +536,6 @@ export async function handleOperatorDecline(input: {
           guestId: ctx.guest.id,
           triggers: [OPERATOR_DECLINE_PRIMARY_TRIGGER],
           primaryTrigger: OPERATOR_DECLINE_PRIMARY_TRIGGER,
-          voiceFidelity: gen.result.voiceFidelity,
           modelRequiresApproval: gen.result.requiresOperatorApproval,
           modelApprovalReason: gen.result.approvalReason,
           compRegexMatchedPattern: null,
@@ -589,7 +553,6 @@ export async function handleOperatorDecline(input: {
           status: 'queued',
           outboundMessageId,
           primaryTrigger: OPERATOR_DECLINE_PRIMARY_TRIGGER,
-          voiceFidelity: gen.result.voiceFidelity,
           persistAction,
         },
         content: { outboundDraft: gen.result.body },

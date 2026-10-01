@@ -27,17 +27,12 @@
  * - inbound_message_failed / followup_message_failed
  *     Existing failure events fired from fireRedAlert (lib/agent/alerts.ts).
  *
- * - voice_fidelity_low
- *     Fires when generateMessage returns a final fidelity below 0.5.
- *     Sits between SEND_FIDELITY_FLOOR (0.4, refusal) and the regen loop's
- *     MIN_VOICE_FIDELITY (0.7, loop-exit target).
- *     Properties: { agentRunId, venueId, guestId, voiceFidelity, attempts,
- *                   attemptScores, category, inboundBody, generatedBody }
- *
  * - regeneration_triggered
- *     Fires when generateMessage's internal loop made > 1 attempt.
- *     Properties: { agentRunId, venueId, guestId, attempts, attemptScores,
- *                   finalFidelity, inboundBody, finalGeneratedBody }
+ *     Fires when generateMessage's internal loop made > 1 attempt (self-talk
+ *     or unverified-link retry; fidelity retries left with the v1.80.0
+ *     schema diet, as did the voice_fidelity_low event).
+ *     Properties: { agentRunId, venueId, guestId, attempts, inboundBody,
+ *                   finalGeneratedBody }
  *
  * - dash_violation_persisted
  *     Fires when generateMessage exhausted MAX_ATTEMPTS regenerations and
@@ -45,8 +40,7 @@
  *     regex check (THE-225) is a deterministic backstop on top of the R3
  *     voice rule; persisted failures ship anyway and surface here.
  *     Properties: { agentRunId, venueId, guestId, category, attempts,
- *                   attemptScores, finalFidelity, inboundBody,
- *                   finalGeneratedBody }
+ *                   inboundBody, finalGeneratedBody }
  *
  * - classification_low_confidence
  *     Fires when classifierConfidence < 0.7. The `category` field carries the
@@ -74,7 +68,7 @@
  *     financial-commitment case, and demo mode disabling the backstop
  *     should be loud.
  *     Properties: { agentRunId, venueId, guestId, wouldHaveQueuedTriggers,
- *                   voiceFidelity, generatedBody }
+ *                   generatedBody }
  *
  * - grounding_verifier_unavailable
  *     TAC-367, widened by TAC-424. Fires from verifyGroundingStage
@@ -155,7 +149,6 @@ export async function capturePostHogEvent(
 // Thresholds
 // ---------------------------------------------------------------------------
 
-export const VOICE_FIDELITY_LOW_THRESHOLD = 0.5
 export const CLASSIFICATION_CONFIDENCE_LOW_THRESHOLD = 0.7
 // Below this confidence, classifyStage rewrites the returned category to
 // `unknown` so the agent ships a holding response. Original pick is preserved
@@ -215,52 +208,11 @@ export function isAgentLatencyHigh(
 // Named-event helpers
 // ---------------------------------------------------------------------------
 
-export interface VoiceFidelityLowProps {
-  agentRunId: string
-  venueId: string
-  guestId: string
-  voiceFidelity: number
-  attempts: number
-  attemptScores: number[]
-  category: string
-  inboundBody: string | null
-  generatedBody: string
-}
-
-export async function captureVoiceFidelityLow(
-  props: VoiceFidelityLowProps,
-): Promise<void> {
-  await capturePostHogEvent('voice_fidelity_low', props.guestId, { ...props })
-  await postToSlack(formatVoiceFidelityLow(props))
-}
-
-function formatVoiceFidelityLow(props: VoiceFidelityLowProps): string {
-  const scores = props.attemptScores.map((s) => s.toFixed(2)).join(', ')
-  const lines = [
-    `*Voice fidelity low* — score \`${props.voiceFidelity.toFixed(2)}\` (${props.attempts} attempt${props.attempts === 1 ? '' : 's'}: ${scores})`,
-    `venue: \`${props.venueId}\``,
-    `guest: \`${props.guestId}\``,
-    `run: \`${props.agentRunId}\``,
-    `category: \`${props.category}\``,
-  ]
-  if (props.inboundBody) {
-    lines.push(
-      `inbound: "${truncate(props.inboundBody, SLACK_FIELD_TRUNCATE_CHARS)}"`,
-    )
-  }
-  lines.push(
-    `generated: "${truncate(props.generatedBody, SLACK_FIELD_TRUNCATE_CHARS)}"`,
-  )
-  return lines.join('\n')
-}
-
 export interface RegenerationTriggeredProps {
   agentRunId: string
   venueId: string
   guestId: string
   attempts: number
-  attemptScores: number[]
-  finalFidelity: number
   inboundBody: string | null
   finalGeneratedBody: string
 }
@@ -277,9 +229,8 @@ export async function captureRegenerationTriggered(
 function formatRegenerationTriggered(
   props: RegenerationTriggeredProps,
 ): string {
-  const scores = props.attemptScores.map((s) => s.toFixed(2)).join(', ')
   const lines = [
-    `*Regeneration triggered* — ${props.attempts} attempts, final fidelity \`${props.finalFidelity.toFixed(2)}\` (scores: ${scores})`,
+    `*Regeneration triggered* — ${props.attempts} attempts`,
     `venue: \`${props.venueId}\``,
     `guest: \`${props.guestId}\``,
     `run: \`${props.agentRunId}\``,
@@ -329,15 +280,13 @@ export async function captureEmojiDirectiveViolated(
 // MAX_ATTEMPTS exhaust without a clean reply, we ship the final body anyway
 // (refusing on punctuation would be worse than violating it) and emit this
 // event so the failure is visible in the silent-failure surfaces alongside
-// voice_fidelity_low / regeneration_triggered.
+// regeneration_triggered.
 export interface DashViolationPersistedProps {
   agentRunId: string
   venueId: string
   guestId: string
   category: string
   attempts: number
-  attemptScores: number[]
-  finalFidelity: number
   inboundBody: string | null
   finalGeneratedBody: string
 }
@@ -354,9 +303,8 @@ export async function captureDashViolationPersisted(
 function formatDashViolationPersisted(
   props: DashViolationPersistedProps,
 ): string {
-  const scores = props.attemptScores.map((s) => s.toFixed(2)).join(', ')
   const lines = [
-    `*Dash violation persisted* — shipped after ${props.attempts} attempts (scores: ${scores}), final fidelity \`${props.finalFidelity.toFixed(2)}\``,
+    `*Dash violation persisted* — shipped after ${props.attempts} attempts`,
     `venue: \`${props.venueId}\``,
     `guest: \`${props.guestId}\``,
     `run: \`${props.agentRunId}\``,
@@ -1229,8 +1177,8 @@ export async function captureAgentLatencyHigh(
 // approval-policy gate (applyApprovalPolicyStage in lib/agent/stages.ts)
 // routes the draft to the operator queue instead of dispatching. Slack
 // relay yes — pilot ops needs visibility into which drafts are landing in
-// the queue and why. Mirrors the voice_fidelity_low / dash_violation_persisted
-// shape (agentRunId + venue/guest IDs + the per-trigger metadata).
+// the queue and why. Mirrors the dash_violation_persisted shape
+// (agentRunId + venue/guest IDs + the per-trigger metadata).
 export interface DraftQueuedProps {
   agentRunId: string
   venueId: string
@@ -1242,7 +1190,6 @@ export interface DraftQueuedProps {
   // Also persisted on messages.review_reason — what the operator sees first
   // in the queue UI.
   primaryTrigger: string
-  voiceFidelity: number
   modelRequiresApproval: boolean
   // Empty string when the model didn't set the flag. We don't bother
   // null-coercing because the model returns "" by contract.
@@ -1279,7 +1226,7 @@ function formatDraftQueued(props: DraftQueuedProps): string {
     `venue: \`${props.venueId}\``,
     `guest: \`${props.guestId}\``,
     `run: \`${props.agentRunId}\``,
-    `category: \`${props.category}\` · fidelity: \`${props.voiceFidelity.toFixed(2)}\``,
+    `category: \`${props.category}\``,
     `slot: \`${props.slot}\`${props.otherSlotOccupied ? ' · second card for this guest' : ''}`,
   ]
   if (props.modelRequiresApproval && props.modelApprovalReason.length > 0) {
@@ -1323,7 +1270,6 @@ export interface DraftRegeneratedProps {
   triggers: string[]
   primaryTrigger: string
   priorReviewReason: string | null
-  voiceFidelity: number
   modelRequiresApproval: boolean
   modelApprovalReason: string
   compRegexMatchedPattern: string | null
@@ -1352,7 +1298,7 @@ function formatDraftRegenerated(props: DraftRegeneratedProps): string {
     `guest: \`${props.guestId}\``,
     `run: \`${props.agentRunId}\``,
     `draft: \`${props.originalDraftId}\``,
-    `category: \`${props.category}\` · fidelity: \`${props.voiceFidelity.toFixed(2)}\``,
+    `category: \`${props.category}\``,
   ]
   if (props.modelRequiresApproval && props.modelApprovalReason.length > 0) {
     lines.push(
@@ -1381,9 +1327,8 @@ function formatDraftRegenerated(props: DraftRegeneratedProps): string {
 // Slack relay is CONDITIONAL (TAC-284 risk-1 decision): only when
 // 'comp_regex_backstop' is among the would-have-queued triggers. The comp
 // backstop exists to catch irreversible financial commitments; demo mode
-// disabling it should be loud in Slack. Fidelity-band / model-flagged-only
-// bypasses stay PostHog-only so Slack doesn't drown in routine demo traffic
-// (every mid-fidelity demo reply trips the fidelity band).
+// disabling it should be loud in Slack. Model-flagged-only bypasses stay
+// PostHog-only so Slack doesn't drown in routine demo traffic.
 //
 // TAC-307 adds a SECOND relay condition: an approval hold a human explicitly
 // chose for this venue (a ticked category, or the master switch) that the
@@ -1402,7 +1347,6 @@ export interface DemoBypassedApprovalGateProps {
   // event when at least one trigger fired. Values are APPROVAL_TRIGGERS
   // codes from lib/agent/stages.ts.
   wouldHaveQueuedTriggers: string[]
-  voiceFidelity: number
   generatedBody: string
   // TAC-307. True when CATEGORY_REQUIRES_APPROVAL fired from a policy entry a
   // human set for this venue, rather than from the fleet-wide code default.
@@ -1456,7 +1400,6 @@ function formatDemoBypassedApprovalGate(
     `venue: \`${props.venueId}\``,
     `guest: \`${props.guestId}\``,
     `run: \`${props.agentRunId}\``,
-    `fidelity: \`${props.voiceFidelity.toFixed(2)}\``,
     `generated: "${truncate(props.generatedBody, SLACK_FIELD_TRUNCATE_CHARS)}"`,
   ].join('\n')
 }

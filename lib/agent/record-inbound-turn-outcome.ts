@@ -135,12 +135,14 @@ const LEDGER_DERIVERS: LedgerDerivers = {
   }),
   refused: (r) => ({
     outcome: 'refused',
-    reason: 'low_fidelity',
+    // No inbound path produces 'refused' since the v1.80.0 schema diet
+    // removed the fidelity floor ('low_fidelity' in the vocabulary is
+    // historical rows only). The deriver stays because the map is total over
+    // AgentResult; detail carries whatever reason a future refusal names, so
+    // it shows up in the data before it shows up in the vocabulary.
+    reason: null,
     outboundMessageId: null,
-    // `reason` on AgentResult.refused is 'low_fidelity' today and is the only
-    // value generateStage produces; recorded in detail so a second refusal
-    // reason shows up in the data before it shows up in the vocabulary.
-    detail: { refusedReason: r.reason, attemptScores: r.attemptScores ?? null },
+    detail: { refusedReason: r.reason },
   }),
   skipped_duplicate: () => ({
     outcome: 'skipped_duplicate',

@@ -116,7 +116,6 @@ describe('captureDemoBypassedApprovalGate — conditional Slack relay (TAC-284)'
       venueId: 'v-1',
       guestId: 'g-1',
       wouldHaveQueuedTriggers: ['comp_regex_backstop', 'model_flagged'],
-      voiceFidelity: 0.82,
       generatedBody: "anyway, that one's on us today",
     })
     expect(postToSlackMock).toHaveBeenCalledTimes(1)
@@ -125,25 +124,12 @@ describe('captureDemoBypassedApprovalGate — conditional Slack relay (TAC-284)'
     expect(text).toContain('`comp_regex_backstop`')
   })
 
-  it('does NOT Slack-relay for a fidelity-band-only bypass', async () => {
-    await captureDemoBypassedApprovalGate({
-      agentRunId: 'run-1',
-      venueId: 'v-1',
-      guestId: 'g-1',
-      wouldHaveQueuedTriggers: ['fidelity_below_auto_send_floor'],
-      voiceFidelity: 0.45,
-      generatedBody: 'sure, see you then',
-    })
-    expect(postToSlackMock).not.toHaveBeenCalled()
-  })
-
   it('does NOT Slack-relay for a model-flagged-only bypass', async () => {
     await captureDemoBypassedApprovalGate({
       agentRunId: 'run-1',
       venueId: 'v-1',
       guestId: 'g-1',
       wouldHaveQueuedTriggers: ['model_flagged'],
-      voiceFidelity: 0.9,
       generatedBody: 'happy to set that aside for you',
     })
     expect(postToSlackMock).not.toHaveBeenCalled()
@@ -154,8 +140,7 @@ describe('captureDemoBypassedApprovalGate — conditional Slack relay (TAC-284)'
       agentRunId: 'run-1',
       venueId: 'v-1',
       guestId: 'g-1',
-      wouldHaveQueuedTriggers: ['fidelity_below_auto_send_floor'],
-      voiceFidelity: 0.45,
+      wouldHaveQueuedTriggers: ['model_flagged'],
       generatedBody: 'sure, see you then',
     })
     expect(captureMock).toHaveBeenCalledTimes(1)
@@ -164,9 +149,7 @@ describe('captureDemoBypassedApprovalGate — conditional Slack relay (TAC-284)'
       properties: { wouldHaveQueuedTriggers: string[] }
     }
     expect(args.event).toBe('demo_bypassed_approval_gate')
-    expect(args.properties.wouldHaveQueuedTriggers).toEqual([
-      'fidelity_below_auto_send_floor',
-    ])
+    expect(args.properties.wouldHaveQueuedTriggers).toEqual(['model_flagged'])
   })
 })
 

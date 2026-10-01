@@ -474,7 +474,6 @@ async function main(): Promise<void> {
     duplicateInAnswer: boolean
     /** The guard FIRED and edited the answer. Reported, not silent. */
     duplicateGuardFired: boolean
-    voiceFidelity: number | null
     calls: number
     /** Non-null makes this unit INVALID: it can meet no expectation. */
     error: string | null
@@ -562,7 +561,6 @@ async function main(): Promise<void> {
         judgeEarlier: [],
         duplicateInAnswer: false,
         duplicateGuardFired: false,
-        voiceFidelity: null,
         calls: 0,
         error: null,
       }
@@ -617,7 +615,6 @@ async function main(): Promise<void> {
         } else {
           row.calls = gen.data.attempts
           row.body = gen.data.body
-          row.voiceFidelity = gen.data.voiceFidelity
           // The tail only ever reaches dispatch when the block rendered — the
           // same gate handle-inbound applies. A question emitted on a turn
           // where nothing rendered is folded into the body, never bubbled.
@@ -783,7 +780,7 @@ async function main(): Promise<void> {
   console.log(`${'='.repeat(72)}`)
   for (const r of valid) {
     console.log(
-      `\n--- ${r.channel} ${r.scenarioId} [${r.intention}] flip=${r.flip.toFixed(3)} fidelity=${r.voiceFidelity ?? '-'}`,
+      `\n--- ${r.channel} ${r.scenarioId} [${r.intention}] flip=${r.flip.toFixed(3)}`,
     )
     console.log(`    guest: ${r.inbound}`)
     r.bubbles.forEach((b, i) =>

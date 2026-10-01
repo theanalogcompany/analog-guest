@@ -121,7 +121,7 @@ vi.mock('@/lib/ai', () => ({
   classifyMessage: (...args: unknown[]) => classifyMessageMock(...args),
   // generateMessage is referenced at module load by stages.ts; stub so the
   // import doesn't pull in real SDK init. TAC-309 gave it a named handle so
-  // the fidelity-exemption tests can drive generateStage directly.
+  // tests can drive generateStage directly.
   generateMessage: (...args: unknown[]) => generateMessageMock(...args),
   // TAC-350: the grounding backstop's model call.
   verifyGrounding: (...args: unknown[]) => verifyGroundingMock(...args),
@@ -166,7 +166,6 @@ vi.mock('@/lib/analytics/posthog', () => ({
     captureCancellationCheckUnavailableMock(...args),
   captureProsePromiseCheckUnavailable: (...args: unknown[]) =>
     captureProsePromiseCheckUnavailableMock(...args),
-  captureVoiceFidelityLow: vi.fn(),
   // TAC-301: the invalid-timezone test reaches fireRedAlert (lib/agent/alerts.ts),
   // which calls this directly. Without the stub it throws as an UNHANDLED
   // REJECTION rather than a test failure — `vitest run` still prints "passed"
@@ -175,7 +174,6 @@ vi.mock('@/lib/analytics/posthog', () => ({
   capturePostHogEvent: vi.fn(),
   CLASSIFICATION_CONFIDENCE_LOW_THRESHOLD: 0.7,
   CLASSIFICATION_CONFIDENCE_REROUTE_THRESHOLD: 0.3,
-  VOICE_FIDELITY_LOW_THRESHOLD: 0.5,
 }))
 
 // Minimal RuntimeContext factory. retrieveCorpusStage only reads venue.id,
@@ -999,8 +997,6 @@ function makeGenerationResult(
 ): GenerateMessageResult {
   return {
     body: 'yeah, oat and almond.',
-    voiceFidelity: 0.85,
-    reasoning: 'matches the venue voice',
     // TAC-509: the clean default. A test that needs the trigger overrides it.
     unverifiedUrls: [],
     requiresOperatorApproval: false,
@@ -1008,9 +1004,9 @@ function makeGenerationResult(
     complaintIntent: 'none' as const,
     knowledgeGap: false,
     // TAC-296 / TAC-297: required schema fields. The no-op shapes are `{}`.
-    // Stages tests for legacy triggers (fidelity / model_flagged / regex /
-    // pending) override `commitment` to exercise the COMMITMENT_TYPE_GATED
-    // trigger; leave the default at no-op here.
+    // Stages tests for legacy triggers (model_flagged / regex / pending)
+    // override `commitment` to exercise the COMMITMENT_TYPE_GATED trigger;
+    // leave the default at no-op here.
     contextUpdate: {},
     commitment: {},
     arrivalCapture: {},
@@ -1020,7 +1016,6 @@ function makeGenerationResult(
     intentionQuestionDuplicateStripped: false,
     intentionQuestionDroppedForBodyQuestion: false,
     attempts: 1,
-    attemptScores: [0.85],
     attemptHistory: [],
     systemPrompt: '',
     userPrompt: '',
@@ -1045,35 +1040,18 @@ describe('applyApprovalPolicyStage (TAC-212)', () => {
     vi.restoreAllMocks()
   })
 
-  it('returns action=send when fidelity >= 0.6, no model flag, no comp match, no prior pending', async () => {
+  it('returns action=send when no model flag, no comp match, no prior pending', async () => {
     const decision = await applyApprovalPolicyStage(
       makeCtx({}),
-      makeGenerationResult({ voiceFidelity: 0.8 }),
+      makeGenerationResult(),
     )
     expect(decision.action).toBe('send')
-  })
-
-  it('queues with fidelity_below_auto_send_floor when fidelity in [0.4, 0.6)', async () => {
-    const decision = await applyApprovalPolicyStage(
-      makeCtx({}),
-      makeGenerationResult({ voiceFidelity: 0.45 }),
-    )
-    expect(decision.action).toBe('queue')
-    if (decision.action !== 'queue') return
-    expect(decision.triggers).toEqual([
-      APPROVAL_TRIGGERS.FIDELITY_BELOW_AUTO_SEND_FLOOR,
-    ])
-    expect(decision.primaryTrigger).toBe(
-      APPROVAL_TRIGGERS.FIDELITY_BELOW_AUTO_SEND_FLOOR,
-    )
-    expect(decision.compMatchedPattern).toBeNull()
   })
 
   it('queues with model_flagged when the model self-flags', async () => {
     const decision = await applyApprovalPolicyStage(
       makeCtx({}),
       makeGenerationResult({
-        voiceFidelity: 0.85,
         requiresOperatorApproval: true,
         approvalReason: 'drafted a comp for the burnt latte',
       }),
@@ -1088,7 +1066,6 @@ describe('applyApprovalPolicyStage (TAC-212)', () => {
     const decision = await applyApprovalPolicyStage(
       makeCtx({}),
       makeGenerationResult({
-        voiceFidelity: 0.85,
         body: "anyway, that one's on us today",
         requiresOperatorApproval: false,
       }),
@@ -1104,7 +1081,6 @@ describe('applyApprovalPolicyStage (TAC-212)', () => {
     const decision = await applyApprovalPolicyStage(
       makeCtx({}),
       makeGenerationResult({
-        voiceFidelity: 0.85,
         body: 'no charge for this round',
         requiresOperatorApproval: true,
         approvalReason: 'comp for unhappy guest',
@@ -1127,7 +1103,7 @@ describe('applyApprovalPolicyStage (TAC-212)', () => {
     })
     const decision = await applyApprovalPolicyStage(
       makeCtx(correctingCtx()),
-      makeGenerationResult({ voiceFidelity: 0.85 }),
+      makeGenerationResult(),
     )
     expect(decision.action).toBe('queue')
     if (decision.action !== 'queue') return
@@ -1145,18 +1121,18 @@ describe('applyApprovalPolicyStage (TAC-212)', () => {
     const decision = await applyApprovalPolicyStage(
       makeCtx({}),
       makeGenerationResult({
-        voiceFidelity: 0.45, // Low fidelity → queue, but no sticky-pending trigger.
+        // Model self-flag → queue, but no sticky-pending trigger.
+        requiresOperatorApproval: true,
+        approvalReason: 'unsure',
       }),
     )
     expect(decision.action).toBe('queue')
     if (decision.action !== 'queue') return
-    expect(decision.triggers).toEqual([
-      APPROVAL_TRIGGERS.FIDELITY_BELOW_AUTO_SEND_FLOOR,
-    ])
+    expect(decision.triggers).toEqual([APPROVAL_TRIGGERS.MODEL_FLAGGED])
     expect(decision.existingPendingDraftId).toBeNull()
   })
 
-  it('composes all four triggers when every condition fires', async () => {
+  it('composes all three triggers when every condition fires', async () => {
     pendingDraftMaybeSingleMock.mockResolvedValueOnce({
       data: { id: 'existing-pending-id', body: 'earlier draft body' },
       error: null,
@@ -1164,7 +1140,6 @@ describe('applyApprovalPolicyStage (TAC-212)', () => {
     const decision = await applyApprovalPolicyStage(
       makeCtx(correctingCtx()),
       makeGenerationResult({
-        voiceFidelity: 0.45,
         body: "the next round's on the house",
         requiresOperatorApproval: true,
         approvalReason: 'comp',
@@ -1172,10 +1147,7 @@ describe('applyApprovalPolicyStage (TAC-212)', () => {
     )
     expect(decision.action).toBe('queue')
     if (decision.action !== 'queue') return
-    expect(decision.triggers).toHaveLength(4)
-    expect(decision.triggers).toContain(
-      APPROVAL_TRIGGERS.FIDELITY_BELOW_AUTO_SEND_FLOOR,
-    )
+    expect(decision.triggers).toHaveLength(3)
     expect(decision.triggers).toContain(APPROVAL_TRIGGERS.MODEL_FLAGGED)
     expect(decision.triggers).toContain(APPROVAL_TRIGGERS.COMP_REGEX_BACKSTOP)
     expect(decision.triggers).toContain(APPROVAL_TRIGGERS.PREVIOUS_PENDING_HELD)
@@ -1192,7 +1164,7 @@ describe('applyApprovalPolicyStage (TAC-212)', () => {
     })
     const decision = await applyApprovalPolicyStage(
       makeCtx({}),
-      makeGenerationResult({ voiceFidelity: 0.85 }),
+      makeGenerationResult(),
     )
     // Clean draft + DB read failed → action=send (no triggers fired). The
     // previous_pending_held check is fail-open by design.
@@ -1207,7 +1179,7 @@ describe('applyApprovalPolicyStage (TAC-212)', () => {
     )
     const decision = await applyApprovalPolicyStage(
       makeCtx({}),
-      makeGenerationResult({ voiceFidelity: 0.85 }),
+      makeGenerationResult(),
     )
     expect(decision.action).toBe('send')
     expect(warnSpy).toHaveBeenCalled()
@@ -1261,7 +1233,7 @@ describe('applyApprovalPolicyStage — hold_all_outbound (TAC-XXX)', () => {
   it('queues a clean high-fidelity message at a hold venue (the new behavior)', async () => {
     const decision = await applyApprovalPolicyStage(
       holdVenueCtx({ classification: classification('follow_up') }),
-      makeGenerationResult({ voiceFidelity: 0.85 }),
+      makeGenerationResult(),
     )
     expect(decision.action).toBe('queue')
     if (decision.action !== 'queue') return
@@ -1272,7 +1244,7 @@ describe('applyApprovalPolicyStage — hold_all_outbound (TAC-XXX)', () => {
   it('queues proactive sends when classification is null (no inbound on the followup path)', async () => {
     const decision = await applyApprovalPolicyStage(
       holdVenueCtx({ classification: null }),
-      makeGenerationResult({ voiceFidelity: 0.85 }),
+      makeGenerationResult(),
     )
     expect(decision.action).toBe('queue')
     if (decision.action !== 'queue') return
@@ -1282,7 +1254,7 @@ describe('applyApprovalPolicyStage — hold_all_outbound (TAC-XXX)', () => {
   it('does NOT hold an opt_out compliance reply — it sends immediately', async () => {
     const decision = await applyApprovalPolicyStage(
       holdVenueCtx({ classification: classification('opt_out') }),
-      makeGenerationResult({ voiceFidelity: 0.85 }),
+      makeGenerationResult(),
     )
     expect(decision.action).toBe('send')
   })
@@ -1290,7 +1262,7 @@ describe('applyApprovalPolicyStage — hold_all_outbound (TAC-XXX)', () => {
   it('still sends a clean message at a non-hold venue (regression guard)', async () => {
     const decision = await applyApprovalPolicyStage(
       makeCtx({ classification: classification('follow_up') }),
-      makeGenerationResult({ voiceFidelity: 0.85 }),
+      makeGenerationResult(),
     )
     expect(decision.action).toBe('send')
   })
@@ -1299,7 +1271,6 @@ describe('applyApprovalPolicyStage — hold_all_outbound (TAC-XXX)', () => {
     const decision = await applyApprovalPolicyStage(
       holdVenueCtx({ classification: classification('reply') }),
       makeGenerationResult({
-        voiceFidelity: 0.85,
         body: "that one's on us today",
       }),
     )
@@ -1316,7 +1287,6 @@ describe('applyApprovalPolicyStage — hold_all_outbound (TAC-XXX)', () => {
     const decision = await applyApprovalPolicyStage(
       holdVenueCtx({ classification: classification('opt_out') }),
       makeGenerationResult({
-        voiceFidelity: 0.85,
         body: 'no charge for this round',
       }),
     )
@@ -1342,7 +1312,7 @@ describe('applyApprovalPolicyStage — hold_all_outbound (TAC-XXX)', () => {
           channel: 'text',
         } as RuntimeContext['currentMessage'],
       }),
-      makeGenerationResult({ voiceFidelity: 0.85 }),
+      makeGenerationResult(),
     )
     expect(decision.action).toBe('queue')
     if (decision.action !== 'queue') return
@@ -1361,7 +1331,7 @@ describe('applyApprovalPolicyStage — hold_all_outbound (TAC-XXX)', () => {
           isDemo: true,
         } as RuntimeContext['guest'],
       }),
-      makeGenerationResult({ voiceFidelity: 0.85 }),
+      makeGenerationResult(),
     )
     expect(decision.action).toBe('send')
     if (decision.action !== 'send') return
@@ -1410,7 +1380,7 @@ describe('applyApprovalPolicyStage — demo bypass (TAC-284)', () => {
   }
 
   it('short-circuits to send (reason=demo_bypass) when every trigger would have fired', async () => {
-    // fidelity band + model flag + comp regex + sticky pending — all four.
+    // model flag + comp regex + sticky pending — all three.
     pendingDraftMaybeSingleMock.mockResolvedValueOnce({
       data: { id: 'existing-pending-id', body: 'earlier draft body' },
       error: null,
@@ -1418,7 +1388,6 @@ describe('applyApprovalPolicyStage — demo bypass (TAC-284)', () => {
     const decision = await applyApprovalPolicyStage(
       demoCtx(),
       makeGenerationResult({
-        voiceFidelity: 0.45,
         body: "the next round's on the house",
         requiresOperatorApproval: true,
         approvalReason: 'comp',
@@ -1437,7 +1406,6 @@ describe('applyApprovalPolicyStage — demo bypass (TAC-284)', () => {
     await applyApprovalPolicyStage(
       demoCtx(),
       makeGenerationResult({
-        voiceFidelity: 0.45,
         body: "the next round's on the house",
         requiresOperatorApproval: true,
         approvalReason: 'comp',
@@ -1449,13 +1417,9 @@ describe('applyApprovalPolicyStage — demo bypass (TAC-284)', () => {
       venueId: string
       guestId: string
       wouldHaveQueuedTriggers: string[]
-      voiceFidelity: number
       generatedBody: string
     }
-    expect(payload.wouldHaveQueuedTriggers).toHaveLength(4)
-    expect(payload.wouldHaveQueuedTriggers).toContain(
-      APPROVAL_TRIGGERS.FIDELITY_BELOW_AUTO_SEND_FLOOR,
-    )
+    expect(payload.wouldHaveQueuedTriggers).toHaveLength(3)
     expect(payload.wouldHaveQueuedTriggers).toContain(
       APPROVAL_TRIGGERS.MODEL_FLAGGED,
     )
@@ -1468,7 +1432,6 @@ describe('applyApprovalPolicyStage — demo bypass (TAC-284)', () => {
     expect(payload.agentRunId).toBe('run-1')
     expect(payload.venueId).toBe('venue-1')
     expect(payload.guestId).toBe('guest-1')
-    expect(payload.voiceFidelity).toBe(0.45)
     expect(payload.generatedBody).toBe("the next round's on the house")
   })
 
@@ -1476,7 +1439,6 @@ describe('applyApprovalPolicyStage — demo bypass (TAC-284)', () => {
     const decision = await applyApprovalPolicyStage(
       demoCtx(),
       makeGenerationResult({
-        voiceFidelity: 0.85,
         body: "anyway, that one's on us today",
         requiresOperatorApproval: false,
       }),
@@ -1494,7 +1456,7 @@ describe('applyApprovalPolicyStage — demo bypass (TAC-284)', () => {
   it('does NOT fire the event for a clean demo reply that would have auto-sent anyway', async () => {
     const decision = await applyApprovalPolicyStage(
       demoCtx(),
-      makeGenerationResult({ voiceFidelity: 0.85 }),
+      makeGenerationResult(),
     )
     expect(decision.action).toBe('send')
     if (decision.action !== 'send') return
@@ -1527,7 +1489,6 @@ describe('applyApprovalPolicyStage — demo bypass (TAC-284)', () => {
       const decision = await applyApprovalPolicyStage(
         ctx,
         makeGenerationResult({
-          voiceFidelity: 0.45,
           body: "the next round's on the house",
           requiresOperatorApproval: true,
           approvalReason: 'comp',
@@ -1550,12 +1511,11 @@ describe('applyApprovalPolicyStage — demo bypass (TAC-284)', () => {
           firstName: 'Sam',
           isDemo: false,
         } as RuntimeContext['guest'],
-        // TAC-397: previous_pending_held is one of the four, so the turn has
+        // TAC-397: previous_pending_held is one of the three, so the turn has
         // to be a correction for the set to be complete.
         ...correctingCtx(),
       }),
       makeGenerationResult({
-        voiceFidelity: 0.45,
         body: "the next round's on the house",
         requiresOperatorApproval: true,
         approvalReason: 'comp',
@@ -1563,7 +1523,7 @@ describe('applyApprovalPolicyStage — demo bypass (TAC-284)', () => {
     )
     expect(decision.action).toBe('queue')
     if (decision.action !== 'queue') return
-    expect(decision.triggers).toHaveLength(4)
+    expect(decision.triggers).toHaveLength(3)
   })
 })
 
@@ -2258,15 +2218,15 @@ describe('applyApprovalPolicyStage — complaint_commitment_floor (v1.23.0)', ()
   }
 
   // THE INCIDENT. Every field here is what production actually produced:
-  // body verbatim, voiceFidelity 0.72, requiresOperatorApproval false,
-  // commitment {} — the model reported no commitment and no need for
-  // approval, and the draft auto-sent with review_reason NULL.
+  // body verbatim, requiresOperatorApproval false, commitment {} — the model
+  // reported no commitment and no need for approval, and the draft auto-sent
+  // with review_reason NULL. (It also scored voiceFidelity 0.72, back when
+  // that field existed — above the queue band, so the score held nothing.)
   it('queues the exact draft that shipped unreviewed on 2026-08-07', async () => {
     const decision = await applyApprovalPolicyStage(
       complaintCtx(),
       makeGenerationResult({
         body: "Matcha can be tricky to dial in. Come by and I'll have another made for you.",
-        voiceFidelity: 0.72,
         requiresOperatorApproval: false,
         commitment: {},
       }),
@@ -2298,7 +2258,6 @@ describe('applyApprovalPolicyStage — complaint_commitment_floor (v1.23.0)', ()
       complaintCtx(),
       makeGenerationResult({
         body: "come in and I'll make it right",
-        voiceFidelity: 0.95,
         requiresOperatorApproval: false,
         commitment: {},
       }),
@@ -2317,7 +2276,6 @@ describe('applyApprovalPolicyStage — complaint_commitment_floor (v1.23.0)', ()
       complaintCtx(),
       makeGenerationResult({
         body: 'What was off with it? I want to make sure I understand before we figure out next steps.',
-        voiceFidelity: 0.82,
         complaintIntent: 'clarifying',
       }),
     )
@@ -2329,7 +2287,6 @@ describe('applyApprovalPolicyStage — complaint_commitment_floor (v1.23.0)', ()
       complaintCtx(),
       makeGenerationResult({
         body: 'What was off with it? I want to make sure I understand before we figure out next steps.',
-        voiceFidelity: 0.82,
         complaintIntent: 'resolving',
       }),
     )
@@ -2357,7 +2314,7 @@ describe('applyApprovalPolicyStage — complaint_commitment_floor (v1.23.0)', ()
     ]) {
       const decision = await applyApprovalPolicyStage(
         refusalCtx,
-        makeGenerationResult({ body, voiceFidelity: 0.82 }),
+        makeGenerationResult({ body }),
       )
       expect(decision.action, `should auto-send: ${body}`).toBe('send')
     }
@@ -2492,7 +2449,6 @@ describe('applyApprovalPolicyStage — knowledge_gap trigger (TAC-308)', () => {
       inboundCtx(),
       makeGenerationResult({
         knowledgeGap: true,
-        voiceFidelity: 0.45,
         requiresOperatorApproval: true,
         approvalReason: 'unsure',
       }),
@@ -2665,7 +2621,11 @@ describe('applyApprovalPolicyStage — knowledge_gap_backstop trigger (TAC-350)'
   it('yields the primary label to a concrete co-firing trigger', async () => {
     const decision = await applyApprovalPolicyStage(
       inboundCtx(),
-      makeGenerationResult({ knowledgeGap: false, voiceFidelity: 0.45 }),
+      makeGenerationResult({
+        knowledgeGap: false,
+        requiresOperatorApproval: true,
+        approvalReason: 'unsure',
+      }),
       { status: 'truncated' as const },
     )
     expect(decision.action).toBe('queue')
@@ -2673,9 +2633,7 @@ describe('applyApprovalPolicyStage — knowledge_gap_backstop trigger (TAC-350)'
     expect(decision.triggers).toContain(
       APPROVAL_TRIGGERS.GROUNDING_CHECK_FAILED,
     )
-    expect(decision.primaryTrigger).toBe(
-      APPROVAL_TRIGGERS.FIDELITY_BELOW_AUTO_SEND_FLOOR,
-    )
+    expect(decision.primaryTrigger).toBe(APPROVAL_TRIGGERS.MODEL_FLAGGED)
   })
 
   // TAC-367 REGRESSION GUARD (code review, MAJOR). Excluding `truncated` from
@@ -2906,7 +2864,8 @@ describe('applyApprovalPolicyStage — knowledge_gap_backstop trigger (TAC-350)'
         inboundCtx(),
         makeGenerationResult({
           knowledgeGap: status === 'skipped',
-          voiceFidelity: 0.5,
+          requiresOperatorApproval: true,
+          approvalReason: 'unsure',
         }),
         { status },
       )
@@ -2998,10 +2957,14 @@ describe('applyApprovalPolicyStage — knowledge_gap_backstop trigger (TAC-350)'
     expect(decision.blankBody).toBe(false)
   })
 
-  it('outranks fidelity_below_auto_send_floor for the operator label', async () => {
+  it('outranks model_flagged for the operator label', async () => {
     const decision = await applyApprovalPolicyStage(
       inboundCtx(),
-      makeGenerationResult({ knowledgeGap: false, voiceFidelity: 0.45 }),
+      makeGenerationResult({
+        knowledgeGap: false,
+        requiresOperatorApproval: true,
+        approvalReason: 'unsure',
+      }),
       { status: 'flagged' as const, claims: ['invents a fact'] },
     )
     expect(decision.action).toBe('queue')
@@ -4144,7 +4107,7 @@ describe('applyApprovalPolicyStage — knowledge-gap card protection (TAC-308)',
     })
     const decision = await applyApprovalPolicyStage(
       inboundCtx(),
-      makeGenerationResult({ knowledgeGap: false, voiceFidelity: 0.9 }),
+      makeGenerationResult({ knowledgeGap: false }),
     )
     expect(decision.action).toBe('send')
   })
@@ -4166,7 +4129,11 @@ describe('applyApprovalPolicyStage — knowledge-gap card protection (TAC-308)',
     })
     const decision = await applyApprovalPolicyStage(
       inboundCtx(),
-      makeGenerationResult({ knowledgeGap: false, voiceFidelity: 0.45 }),
+      makeGenerationResult({
+        knowledgeGap: false,
+        requiresOperatorApproval: true,
+        approvalReason: 'unsure',
+      }),
     )
     expect(decision.action).toBe('queue')
     if (decision.action !== 'queue') return
@@ -4257,7 +4224,7 @@ describe('applyApprovalPolicyStage — knowledge-gap card protection (TAC-308)',
     })
     const decision = await applyApprovalPolicyStage(
       inboundCtx(),
-      makeGenerationResult({ knowledgeGap: false, voiceFidelity: 0.9 }),
+      makeGenerationResult({ knowledgeGap: false }),
     )
     expect(decision.action).toBe('send')
   })
@@ -4278,7 +4245,7 @@ describe('applyApprovalPolicyStage — knowledge-gap card protection (TAC-308)',
     })
     const decision = await applyApprovalPolicyStage(
       inboundCtx(),
-      makeGenerationResult({ knowledgeGap: false, voiceFidelity: 0.9 }),
+      makeGenerationResult({ knowledgeGap: false }),
     )
     expect(decision.action).toBe('send')
   })
@@ -4297,7 +4264,7 @@ describe('applyApprovalPolicyStage — knowledge-gap card protection (TAC-308)',
     })
     const decision = await applyApprovalPolicyStage(
       inboundCtx(true),
-      makeGenerationResult({ knowledgeGap: false, voiceFidelity: 0.9 }),
+      makeGenerationResult({ knowledgeGap: false }),
     )
     expect(decision.action).toBe('queue')
     if (decision.action !== 'queue') return
@@ -4400,7 +4367,11 @@ describe('applyApprovalPolicyStage — blankBody (TAC-309)', () => {
   it('leaves blankBody false for every other trigger', async () => {
     const decision = await applyApprovalPolicyStage(
       inboundCtx(),
-      makeGenerationResult({ knowledgeGap: false, voiceFidelity: 0.45 }),
+      makeGenerationResult({
+        knowledgeGap: false,
+        requiresOperatorApproval: true,
+        approvalReason: 'unsure',
+      }),
     )
     expect(decision.action).toBe('queue')
     if (decision.action !== 'queue') return
@@ -4437,7 +4408,7 @@ describe('generateStage — hands the conversation channel to generateMessage (T
     async (channel) => {
       generateMessageMock.mockResolvedValue({
         ok: true,
-        data: makeGenerationResult({ voiceFidelity: 0.8 }),
+        data: makeGenerationResult(),
       })
       await generateStage(
         makeCtx({ corpus: [], conversationChannel: channel }),
@@ -4448,98 +4419,6 @@ describe('generateStage — hands the conversation channel to generateMessage (T
       )
     },
   )
-})
-
-describe('generateStage — fidelity floor exemption on knowledge gaps (TAC-309)', () => {
-  const inbound = {
-    id: 'inbound-1',
-    body: 'what grade is the matcha?',
-    providerMessageId: 'p1',
-    receivedAt: new Date(),
-    channel: 'text' as const,
-    referralSource: null,
-  }
-  const subFloorGap = () => ({
-    ok: true,
-    data: makeGenerationResult({ voiceFidelity: 0.2, knowledgeGap: true }),
-  })
-
-  // THE SILENT-DROP DOOR THIS CLOSES: the refused branch in handle-inbound
-  // returns with NO card, so a low-fidelity gap turn produced silence — the
-  // guest got nothing and no operator learned they'd asked. Gating card
-  // creation on the voice quality of a body TAC-309 then discards is
-  // incoherent; nothing on this path reaches the guest.
-  it('does NOT refuse a sub-floor body on an inbound knowledge-gap turn', async () => {
-    generateMessageMock.mockResolvedValue(subFloorGap())
-    const out = await generateStage(
-      makeCtx({ corpus: [], currentMessage: inbound }),
-      'new_question',
-    )
-    expect(out.status).toBe('success')
-  })
-
-  // THE SAFETY PROPERTY, not the mechanism. The exemption is only sound
-  // where the turn is guaranteed to be queued. These two are the paths where
-  // it isn't, and where the text WOULD reach a guest — unblanked, because
-  // blanking is also the gate's job. Asserting them here is what stops the
-  // exemption widening back out by accident.
-  it('STILL refuses on the outbound path — a manual followup skips the gate entirely', async () => {
-    generateMessageMock.mockResolvedValue(subFloorGap())
-    const out = await generateStage(
-      makeCtx({
-        corpus: [],
-        currentMessage: null,
-        followupTrigger: { reason: 'manual', triggeredAt: new Date() },
-      }),
-      'manual',
-    )
-    expect(out.status).toBe('refused')
-  })
-
-  it('STILL refuses for a demo guest — TAC-284 bypasses the gate unconditionally', async () => {
-    generateMessageMock.mockResolvedValue(subFloorGap())
-    const out = await generateStage(
-      makeCtx({
-        corpus: [],
-        currentMessage: inbound,
-        guest: {
-          id: 'guest-1',
-          firstName: 'Sam',
-          isDemo: true,
-        } as RuntimeContext['guest'],
-      }),
-      'new_question',
-    )
-    expect(out.status).toBe('refused')
-  })
-
-  // The floor still protects every path where text actually reaches a guest.
-  it('still refuses a sub-floor body when knowledgeGap is false', async () => {
-    generateMessageMock.mockResolvedValue({
-      ok: true,
-      data: makeGenerationResult({ voiceFidelity: 0.2, knowledgeGap: false }),
-    })
-    const out = await generateStage(
-      makeCtx({ corpus: [], currentMessage: inbound }),
-      'new_question',
-    )
-    expect(out.status).toBe('refused')
-  })
-
-  it('leaves above-floor behavior unchanged either way', async () => {
-    generateMessageMock.mockResolvedValue({
-      ok: true,
-      data: makeGenerationResult({ voiceFidelity: 0.9, knowledgeGap: true }),
-    })
-    expect(
-      (
-        await generateStage(
-          makeCtx({ corpus: [], currentMessage: inbound }),
-          'new_question',
-        )
-      ).status,
-    ).toBe('success')
-  })
 })
 
 describe('knowledgeGapWillQueue (TAC-309)', () => {
@@ -4597,7 +4476,6 @@ describe('applyApprovalPolicyStage — policy subordination (TAC-307)', () => {
 
   const CLARIFYING = {
     body: 'What was off with it? I want to understand before we figure out next steps.',
-    voiceFidelity: 0.82,
     complaintIntent: 'clarifying' as const,
   }
 
@@ -4640,7 +4518,7 @@ describe('applyApprovalPolicyStage — policy subordination (TAC-307)', () => {
         { default: 'operator_approval', perCategory: {} },
         'casual_chatter',
       ),
-      makeGenerationResult({ body: 'ha, fair enough', voiceFidelity: 0.95 }),
+      makeGenerationResult({ body: 'ha, fair enough' }),
     )
     expect(decision.action).toBe('queue')
     if (decision.action !== 'queue') return
@@ -4657,7 +4535,6 @@ describe('applyApprovalPolicyStage — policy subordination (TAC-307)', () => {
       ),
       makeGenerationResult({
         body: "You're unsubscribed. No more texts.",
-        voiceFidelity: 0.95,
       }),
     )
     expect(decision.action).toBe('send')
@@ -4671,7 +4548,6 @@ describe('applyApprovalPolicyStage — policy subordination (TAC-307)', () => {
       ),
       makeGenerationResult({
         body: "You're unsubscribed. No more texts.",
-        voiceFidelity: 0.95,
       }),
     )
     expect(decision.action).toBe('send')
@@ -4686,7 +4562,7 @@ describe('applyApprovalPolicyStage — policy subordination (TAC-307)', () => {
         },
         'casual_chatter',
       ),
-      makeGenerationResult({ body: 'ha, fair enough', voiceFidelity: 0.95 }),
+      makeGenerationResult({ body: 'ha, fair enough' }),
     )
     expect(decision.action).toBe('send')
   })
@@ -4714,7 +4590,7 @@ describe('manual followups never regenerate over a card (TAC-307, TAC-394)', () 
   it('does not fire previous_pending_held for a manual followup', async () => {
     const decision = await applyApprovalPolicyStage(
       manualCtx(),
-      makeGenerationResult({ body: 'checking in', voiceFidelity: 0.95 }),
+      makeGenerationResult({ body: 'checking in' }),
     )
     expect(decision.action).toBe('send')
   })
@@ -4724,7 +4600,7 @@ describe('manual followups never regenerate over a card (TAC-307, TAC-394)', () 
     // holds the Follow Up button's draft too.
     const decision = await applyApprovalPolicyStage(
       manualCtx({ default: 'operator_approval', perCategory: {} }),
-      makeGenerationResult({ body: 'checking in', voiceFidelity: 0.95 }),
+      makeGenerationResult({ body: 'checking in' }),
     )
     expect(decision.action).toBe('queue')
     if (decision.action !== 'queue') return
@@ -4743,7 +4619,7 @@ describe('manual followups never regenerate over a card (TAC-307, TAC-394)', () 
           triggeredAt: new Date(),
         } as RuntimeContext['followupTrigger'],
       }),
-      makeGenerationResult({ body: 'checking in', voiceFidelity: 0.95 }),
+      makeGenerationResult({ body: 'checking in' }),
     )
     // The pending-slot read resolves no rows in this fixture, so the assertion
     // that matters is that the lookup was not short-circuited by the manual
@@ -4770,7 +4646,7 @@ describe('manual followups never regenerate over a card (TAC-307, TAC-394)', () 
     })
     const decision = await applyApprovalPolicyStage(
       manualCtx({ default: 'operator_approval', perCategory: {} }),
-      makeGenerationResult({ body: 'checking in', voiceFidelity: 0.95 }),
+      makeGenerationResult({ body: 'checking in' }),
     )
     expect(decision).toEqual({
       action: 'drop',
@@ -4789,7 +4665,7 @@ describe('manual followups never regenerate over a card (TAC-307, TAC-394)', () 
     })
     const decision = await applyApprovalPolicyStage(
       manualCtx(),
-      makeGenerationResult({ body: 'checking in', voiceFidelity: 0.95 }),
+      makeGenerationResult({ body: 'checking in' }),
     )
     expect(decision).toEqual({ action: 'send' })
   })
@@ -4985,7 +4861,11 @@ describe('applyApprovalPolicyStage — ungroundedClaims (TAC-364)', () => {
   it('is [] — the check RAN and found nothing — on clean', async () => {
     const decision = await applyApprovalPolicyStage(
       inboundCtx(),
-      makeGenerationResult({ knowledgeGap: false, voiceFidelity: 0.5 }),
+      makeGenerationResult({
+        knowledgeGap: false,
+        requiresOperatorApproval: true,
+        approvalReason: 'unsure',
+      }),
       { status: 'clean' as const },
     )
     expect(decision.action).toBe('queue')
@@ -5061,7 +4941,11 @@ describe('applyApprovalPolicyStage — ungroundedClaims (TAC-364)', () => {
     ) => {
       const decision = await applyApprovalPolicyStage(
         inboundCtx(),
-        makeGenerationResult({ knowledgeGap, voiceFidelity: 0.5 }),
+        makeGenerationResult({
+          knowledgeGap,
+          requiresOperatorApproval: true,
+          approvalReason: 'unsure',
+        }),
         grounding,
       )
       if (decision.action !== 'queue') throw new Error('expected queue')
@@ -5124,7 +5008,11 @@ describe('applyApprovalPolicyStage — ungroundedClaims (TAC-364)', () => {
     // ruling in one assertion.
     const ran = await applyApprovalPolicyStage(
       inboundCtx(),
-      makeGenerationResult({ knowledgeGap: false, voiceFidelity: 0.5 }),
+      makeGenerationResult({
+        knowledgeGap: false,
+        requiresOperatorApproval: true,
+        approvalReason: 'unsure',
+      }),
       { status: 'clean' as const },
     )
     const neverRan = await applyApprovalPolicyStage(
@@ -6512,13 +6400,6 @@ describe('applyApprovalPolicyStage — cancellations (TAC-513)', () => {
     expect(decision.pendingCancellation).toEqual({ commitmentId: TONIC.id })
   })
 
-  it('queues a carried cancellation even on a perfect-fidelity, otherwise clean draft', async () => {
-    // "whatever else is true": there is no fidelity score and no venue policy
-    // that makes taking something back auto-sendable.
-    const decision = await gate(RESOLVED, { voiceFidelity: 0.99 })
-    expect(decision.action).toBe('queue')
-  })
-
   it('queues a claimed cancellation nothing carries, with NO carrier', async () => {
     // The incident. Never mints one: cancelling from a second reading of prose
     // is destructive where TAC-401's minting is protective.
@@ -6676,8 +6557,8 @@ describe('applyApprovalPolicyStage — cancellations (TAC-513)', () => {
     // showed otherwise. commitment_type_gated is pushed at trigger 5 and the
     // cancellation at trigger 13, so `pickPrimaryTrigger`'s `triggers[0]`
     // fallback happens to give the same answer and this test survives. The
-    // ranking IS pinned, by the fidelity co-fire below, where the fallback
-    // would give the wrong one. Both tests are needed and neither is
+    // ranking IS pinned, by the model_flagged co-fire below, where the
+    // fallback would give the wrong one. Both tests are needed and neither is
     // redundant; only the claim about this one was wrong.
     const decision = await gate(RESOLVED, {
       commitment: { type: 'comp', description: 'a pastry' },
@@ -6694,21 +6575,29 @@ describe('applyApprovalPolicyStage — cancellations (TAC-513)', () => {
   })
 
   it('ranks a carried cancellation ABOVE every softer co-firing signal', async () => {
-    const decision = await gate(RESOLVED, { voiceFidelity: 0.5 })
+    // model_flagged is pushed into the triggers array FIRST, so
+    // pickPrimaryTrigger's triggers[0] fallback would answer model_flagged
+    // here — this is the co-fire that pins the real ranking.
+    const decision = await gate(RESOLVED, {
+      requiresOperatorApproval: true,
+      approvalReason: 'unsure',
+    })
     expect(decision.action).toBe('queue')
     if (decision.action !== 'queue') return
-    expect(decision.triggers).toContain(
-      APPROVAL_TRIGGERS.FIDELITY_BELOW_AUTO_SEND_FLOOR,
-    )
+    expect(decision.triggers).toContain(APPROVAL_TRIGGERS.MODEL_FLAGGED)
     expect(decision.primaryTrigger).toBe(
       APPROVAL_TRIGGERS.COMMITMENT_CANCELLATION_GATED,
     )
   })
 
-  it('ranks the unbacked claim above fidelity, below the promise backstop', async () => {
+  it('ranks the unbacked claim above the model self-flag, below the promise backstop', async () => {
     const decision = await applyApprovalPolicyStage(
       makeCtx({ activeCommitments: [TONIC] }),
-      makeGenerationResult({ body: 'the comp is off', voiceFidelity: 0.5 }),
+      makeGenerationResult({
+        body: 'the comp is off',
+        requiresOperatorApproval: true,
+        approvalReason: 'unsure',
+      }),
       { status: 'skipped' },
       { status: 'skipped' },
       { status: 'flagged', commitment: null },
@@ -6976,7 +6865,7 @@ describe('closed-venue arrival (TAC-363)', () => {
       // reason, which is TAC-364's exact defect class.
       const d = await applyApprovalPolicyStage(
         ctxAt(AFTER_CLOSE),
-        makeGenerationResult({ voiceFidelity: 0.45 }),
+        makeGenerationResult({ unverifiedUrls: ['https://lemils.com/menu'] }),
         null,
         { status: 'skipped' },
         { status: 'skipped' },
@@ -6988,7 +6877,7 @@ describe('closed-venue arrival (TAC-363)', () => {
       expect(d.triggers).toEqual(
         expect.arrayContaining([
           'closed_venue_arrival_backstop',
-          'fidelity_below_auto_send_floor',
+          'unverified_url',
         ]),
       )
       expect(d.primaryTrigger).toBe('closed_venue_arrival_backstop')
