@@ -11,12 +11,6 @@ import type {
   VenueInfo,
 } from '@/lib/schemas'
 
-// Naming asymmetry: this module returns voiceFidelity (camelCase). It persists
-// to messages.confidence_score (snake_case) at the DB write boundary. The
-// caller maps between the two names when writing the row.
-// TODO: rename messages.confidence_score → messages.voice_fidelity in a future
-// migration to align with this module's naming.
-
 // THE-228 added comp_complaint / mechanic_request / recommendation_request /
 // casual_chatter to the inbound classifier surface. Migration 011 widens the
 // messages.category check constraint to match. v1.10.0 adds perk_inquiry +
@@ -514,8 +508,6 @@ export type ComplaintIntent = 'clarifying' | 'resolving' | 'none'
 
 export type GenerateMessageAttempt = {
   body: string
-  voiceFidelity: number
-  reasoning: string
   // TAC-212: model self-flag from the structured output. Surfaced per-attempt
   // for trace observability so trace viewers can see whether different attempts
   // produced different flag values.
@@ -561,8 +553,6 @@ export type GenerateMessageAttempt = {
 
 export type GenerateMessageResult = {
   body: string
-  voiceFidelity: number
-  reasoning: string
   // TAC-212: final-attempt model self-flag. Consumed by
   // applyApprovalPolicyStage to decide whether the model_flagged trigger
   // fires. approvalReason carries a one-clause rationale; empty string when
@@ -655,14 +645,10 @@ export type GenerateMessageResult = {
    */
   intentionQuestionDroppedForBodyQuestion: boolean
   attempts: number
-  // Each attempt's voiceFidelity score, in attempt order. Length === attempts.
-  // Loop exits early on the first attempt that crosses MIN_VOICE_FIDELITY, so
-  // a length-1 array means the first attempt was good enough.
-  attemptScores: number[]
-  // Per-attempt body + voiceFidelity + reasoning, in attempt order. Surfaced
-  // for trace observability (THE-216) so each `generate.attempt_N` span can
-  // carry the actual text Sonnet returned, not just the score. Length matches
-  // attemptScores. The final entry's body equals the top-level `body` field.
+  // Per-attempt body + flags, in attempt order. Surfaced for trace
+  // observability (THE-216) so each `generate.attempt_N` span can carry the
+  // actual text Sonnet returned. Length === attempts. The final entry's body
+  // equals the top-level `body` field.
   attemptHistory: GenerateMessageAttempt[]
   // The full system + user prompt sent to the model (THE-216). The system
   // prompt is invariant across attempts. The userPrompt here is the *parent*

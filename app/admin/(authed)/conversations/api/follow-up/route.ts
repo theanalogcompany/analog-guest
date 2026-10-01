@@ -224,8 +224,7 @@ export async function POST(request: Request): Promise<NextResponse> {
     return NextResponse.json(
       {
         error: 'refused',
-        detail: 'voice fidelity below send floor; operator can retry',
-        attemptScores: result.attemptScores,
+        detail: result.reason,
       },
       { status: 422 },
     )

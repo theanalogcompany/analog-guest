@@ -116,6 +116,12 @@ export const INBOUND_TURN_REASONS = [
   'message_insert_failed',
 
   // ---- outcome 'refused' ----
+  /**
+   * HISTORICAL. The fidelity send floor was retired in the v1.80.0 schema
+   * diet; no code writes this value any more. It stays because the DB CHECK
+   * constraint lists it, rows carrying it exist, and the vocabulary test
+   * pins this array against the migration's list.
+   */
   'low_fidelity',
 
   // ---- outcome 'dropped' (SlotDropReason, lib/agent/pending-slots.ts) ----

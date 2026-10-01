@@ -48,7 +48,6 @@ function graded(
       expectedBehavior: '',
       outcome: 'sent',
       replyBody: 'Yep, oat milk is available.',
-      voiceFidelity: 0.85,
       route: 'send',
       triggers: [],
       primaryTrigger: null,
@@ -108,13 +107,16 @@ describe('buildOwnerReviewRows', () => {
     expect(dataRow[idx('generated_message')]).toBe(
       'Yep, oat milk is available.',
     )
-    expect(dataRow[idx('voice_fidelity')]).toBe('0.85')
   })
 
-  it('renders a null voice_fidelity as an empty cell, not "null"', () => {
-    const g = graded({ result: { ...graded().result, voiceFidelity: null } })
-    const rows = buildOwnerReviewRows([g], '2026-09-11T18:42:00.000Z')
+  // v1.80.0 schema diet: the score is gone, but the voice_fidelity header is
+  // a locked contract with live 08-sheets, so the column survives and every
+  // cell is blank. Asserted deliberately: a value reappearing here means
+  // someone re-plumbed a score this pipeline no longer has.
+  it('keeps the voice_fidelity column and renders it blank', () => {
+    const rows = buildOwnerReviewRows([graded()], '2026-09-11T18:42:00.000Z')
     const idx = SHEET_HEADERS.indexOf('voice_fidelity')
+    expect(idx).toBeGreaterThanOrEqual(0)
     expect(rows[1][idx]).toBe('')
   })
 })

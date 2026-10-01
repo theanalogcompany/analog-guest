@@ -351,7 +351,6 @@ async function persistGenerationFailureCard(
       guestId: ctx.guest.id,
       triggers: [GENERATION_FAILED_REVIEW_REASON],
       primaryTrigger: GENERATION_FAILED_REVIEW_REASON,
-      voiceFidelity: 0,
       modelRequiresApproval: false,
       modelApprovalReason: '',
       compRegexMatchedPattern: null,
@@ -423,8 +422,6 @@ async function persistGenerationFailureCard(
 function buildGenerationFailureGeneration(): GenerateMessageResult {
   return {
     body: '(generation failed)',
-    voiceFidelity: 0,
-    reasoning: 'TAC-309: generation failed twice; carded for operator answer',
     // TAC-509: the card is blank, so there is no body to hold a link. Empty
     // also keeps UNVERIFIED_URL out of the crash card's trigger set, which is
     // right: nothing was checked because nothing was generated.
@@ -446,7 +443,6 @@ function buildGenerationFailureGeneration(): GenerateMessageResult {
     // TAC-567: this path composes no question, so the gate never fired.
     intentionQuestionDroppedForBodyQuestion: false,
     attempts: 2,
-    attemptScores: [],
     attemptHistory: [],
     systemPrompt: '',
     userPrompt: '',
@@ -733,9 +729,7 @@ function startTyping(turn: InboundTurnState, ctx: RuntimeContext): void {
  *
  * Every stage failure fails closed: the guest sees nothing, a PostHog event
  * + Slack alert fire with the agentRunId + stage, and an AgentResult.failed
- * is returned. Soft-refusals from generateStage (final fidelity below the
- * 0.4 send floor) return AgentResult.refused with attemptScores so callers
- * can debug the loop. Successes return AgentResult.sent with the outbound
+ * is returned. Successes return AgentResult.sent with the outbound
  * message ID and emit an inbound_message_handled PostHog event.
  *
  * Catastrophic / unhandled throws are caught at the top, alerted under
@@ -1736,58 +1730,18 @@ async function runInboundTurn(
       }
       return { status: 'failed', stage: 'generation', error: gen.error }
     }
-    if (gen.status === 'refused') {
-      // Synthesize per-attempt sub-spans from attemptScores. No real per-attempt
-      // timing — see follow-up ticket THE-215. The sub-spans are still useful
-      // because they enumerate the regen loop attempts in the trace UI.
-      // Refused-path note: lib/ai's generateStage doesn't surface attemptHistory
-      // on refusal (the AgentResult shape only carries scores). Per-attempt
-      // body content lives only on the success path; THE-215 will fix this
-      // when threading the trace into the regen loop directly.
-      gen.attemptScores.forEach((score, i) => {
-        const attemptSpan = generateSpan.span(`generate.attempt_${i + 1}`, {
-          attempt: i + 1,
-        })
-        attemptSpan.end({ output: { voiceFidelity: score } })
-      })
-      generateSpan.end({
-        level: 'WARNING',
-        statusMessage: 'fidelity_loop_exhausted',
-        output: {
-          attemptScores: gen.attemptScores,
-          finalScore: gen.finalScore,
-        },
-      })
-      await fireRedAlert({
-        agentRunId,
-        venueId: ctx.venue.id,
-        guestId: ctx.guest.id,
-        kind: 'inbound',
-        stage: 'generation',
-        errorMessage: 'fidelity_loop_exhausted',
-        extra: { attemptScores: gen.attemptScores, finalScore: gen.finalScore },
-      })
-      return {
-        status: 'refused',
-        reason: 'low_fidelity',
-        attemptScores: gen.attemptScores,
-      }
-    }
-    gen.result.attemptScores.forEach((score, i) => {
+    gen.result.attemptHistory.forEach((attempt, i) => {
       const attemptSpan = generateSpan.span(`generate.attempt_${i + 1}`, {
         attempt: i + 1,
       })
-      const attempt = gen.result.attemptHistory[i]
       attemptSpan.end({
-        output: { voiceFidelity: score },
-        content: attempt ? buildGenerateAttemptContent(attempt) : undefined,
+        output: { attempt: i + 1 },
+        content: buildGenerateAttemptContent(attempt),
       })
     })
     generateSpan.end({
       output: {
-        voiceFidelity: gen.result.voiceFidelity,
         attempts: gen.result.attempts,
-        attemptScores: gen.result.attemptScores,
         promptVersion: gen.result.promptVersion,
         // Prompt-cache accounting. This span is the ONLY surface the cache is
         // visible on: a hit and a fast uncached call have identical latency,
@@ -1811,7 +1765,6 @@ async function runInboundTurn(
     generatedBody = gen.result.body
     console.log('[agent] inbound generated', {
       agentRunId,
-      voiceFidelity: gen.result.voiceFidelity,
       attempts: gen.result.attempts,
     })
 
@@ -2064,7 +2017,6 @@ async function runInboundTurn(
       primaryTrigger:
         approval.action === 'queue' ? approval.primaryTrigger : null,
       triggers: approval.action === 'queue' ? approval.triggers : [],
-      voiceFidelity: gen.result.voiceFidelity,
       modelRequiresApproval: gen.result.requiresOperatorApproval,
     })
 
@@ -2334,7 +2286,6 @@ async function runInboundTurn(
             triggers: approval.triggers,
             primaryTrigger: approval.primaryTrigger,
             priorReviewReason,
-            voiceFidelity: gen.result.voiceFidelity,
             modelRequiresApproval: gen.result.requiresOperatorApproval,
             modelApprovalReason: gen.result.approvalReason,
             compRegexMatchedPattern: approval.compMatchedPattern,
@@ -2354,7 +2305,6 @@ async function runInboundTurn(
             guestId: ctx.guest.id,
             triggers: approval.triggers,
             primaryTrigger: approval.primaryTrigger,
-            voiceFidelity: gen.result.voiceFidelity,
             modelRequiresApproval: gen.result.requiresOperatorApproval,
             modelApprovalReason: gen.result.approvalReason,
             compRegexMatchedPattern: approval.compMatchedPattern,
@@ -2373,9 +2323,9 @@ async function runInboundTurn(
         // TAC-207: fire APNs push to every operator whose allowlist covers
         // this venue. waitUntil composes with the webhook's outer keep-alive
         // window — push never blocks the agent's return. Helper filters
-        // primaryTrigger internally (model_flagged / comp_regex_backstop /
-        // fidelity_below_auto_send_floor fire; previous_pending_held skips)
-        // and is `never throws` so the .catch is defensive belt-and-braces.
+        // primaryTrigger internally (model_flagged / comp_regex_backstop
+        // fire; previous_pending_held skips) and is `never throws` so the
+        // .catch is defensive belt-and-braces.
         if (shouldSendDraftFlaggedPush(approval.primaryTrigger)) {
           waitUntil(
             sendDraftFlaggedPush({
@@ -2402,7 +2352,6 @@ async function runInboundTurn(
             status: 'queued',
             outboundMessageId,
             primaryTrigger: approval.primaryTrigger,
-            voiceFidelity: gen.result.voiceFidelity,
             persistAction,
           },
           content: { outboundDraft: gen.result.body },
@@ -2730,16 +2679,13 @@ async function runInboundTurn(
         recognitionState: ctx.recognition.state,
         recognitionScore: ctx.recognition.score,
         category: ctx.classification.category,
-        voiceFidelity: gen.result.voiceFidelity,
         attempts: gen.result.attempts,
-        attemptScores: gen.result.attemptScores,
         matchCount: ctx.corpus.length,
       })
       trace.update({
         output: {
           status: 'sent',
           outboundMessageId,
-          voiceFidelity: gen.result.voiceFidelity,
         },
         content: { outboundDraft: gen.result.body },
       })

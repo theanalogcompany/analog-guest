@@ -302,11 +302,9 @@ vi.mock('@/lib/analytics/posthog', () => ({
   captureDashViolationPersisted: vi.fn(),
   captureDemoBypassedApprovalGate: vi.fn(),
   captureRegenerationTriggered: vi.fn(),
-  captureVoiceFidelityLow: vi.fn(),
   captureGenerationTruncated: vi.fn(),
   CLASSIFICATION_CONFIDENCE_LOW_THRESHOLD: 0.7,
   CLASSIFICATION_CONFIDENCE_REROUTE_THRESHOLD: 0.3,
-  VOICE_FIDELITY_LOW_THRESHOLD: 0.5,
 }))
 vi.mock('@/lib/notifications/send', () => ({
   sendDraftFlaggedPush: (...a: unknown[]) => sendDraftFlaggedPushMock(...a),
@@ -1026,8 +1024,6 @@ describe('handleInbound: a draft with nowhere to go (TAC-394)', () => {
 function successResult() {
   return {
     body: 'sure thing',
-    voiceFidelity: 0.9,
-    reasoning: 'r',
     requiresOperatorApproval: false,
     approvalReason: '',
     complaintIntent: 'none',
@@ -1044,7 +1040,6 @@ function successResult() {
     // the ordinary turn; a test that means to exercise the close overrides it.
     closedTheConversation: false,
     attempts: 1,
-    attemptScores: [0.9],
     attemptHistory: [],
     systemPrompt: '',
     userPrompt: '',
@@ -2020,8 +2015,8 @@ describe('handleInbound — deferred post-generation checks (decision 0003 rewri
     })
     applyApprovalPolicyStageMock.mockResolvedValue({
       action: 'queue',
-      triggers: [APPROVAL_TRIGGERS.FIDELITY_BELOW_AUTO_SEND_FLOOR],
-      primaryTrigger: APPROVAL_TRIGGERS.FIDELITY_BELOW_AUTO_SEND_FLOOR,
+      triggers: [APPROVAL_TRIGGERS.MODEL_FLAGGED],
+      primaryTrigger: APPROVAL_TRIGGERS.MODEL_FLAGGED,
       compMatchedPattern: null,
       ungroundedClaims: null,
       existingPendingDraftId: null,
@@ -2799,22 +2794,6 @@ describe('handleInbound — records the turn outcome (TAC-523)', () => {
     expect(lastRecordedCall().agentRunId).toBe(alerted.agentRunId)
   })
 
-  it('hands over a REFUSED result — the voice-fidelity floor, known path 1', async () => {
-    generateStageMock.mockResolvedValue({
-      status: 'refused',
-      attemptScores: [0.31, 0.28],
-      finalScore: 0.28,
-    })
-
-    const r = await handleInbound(INBOUND_ID)
-
-    expect(r).toMatchObject({ status: 'refused', reason: 'low_fidelity' })
-    expect(lastRecordedCall().result).toMatchObject({
-      status: 'refused',
-      reason: 'low_fidelity',
-    })
-  })
-
   it('hands over a FAILED result — the fail-closed corpus retrieval, known path 2', async () => {
     retrieveCorpusStageMock.mockRejectedValue(new Error('empty_voice_pack'))
 
@@ -3349,16 +3328,6 @@ describe('TAC-540 — typing dots on the auto-send path', () => {
    */
   it.each([
     [
-      'refused (below the fidelity floor)',
-      () => {
-        generateStageMock.mockResolvedValue({
-          status: 'refused',
-          attemptScores: [0.2],
-          finalScore: 0.2,
-        })
-      },
-    ],
-    [
       'failed in generation, with no card',
       () => {
         generateStageMock.mockResolvedValue({ status: 'failed', error: 'boom' })
@@ -3745,18 +3714,15 @@ describe('TAC-540 — a sender action can never change the reply', () => {
    * re-awaiting the exit passed all 132 tests.
    */
   it('returns without waiting for typing_off, so the retry is not held behind it', async () => {
-    generateStageMock.mockResolvedValue({
-      status: 'refused',
-      attemptScores: [0.1],
-      finalScore: 0.1,
-    })
+    generateStageMock.mockResolvedValue({ status: 'failed', error: 'boom' })
+    loadPendingRowsBySlotMock.mockRejectedValue(new Error('no card for you'))
     signalTypingMock.mockImplementation(async (_t: unknown, signal: string) =>
       signal === 'off' ? new Promise(() => {}) : { status: 'sent' },
     )
 
     const r = await handleInbound(INBOUND_ID)
 
-    expect(r).toMatchObject({ status: 'refused' })
+    expect(r).toMatchObject({ status: 'failed' })
   }, 2000)
 
   /**
@@ -3827,11 +3793,12 @@ describe('TAC-540 — a sender action can never change the reply', () => {
     })
     // Fail the turn right after the first typing_on is issued, so the exit is
     // reached while that POST is still open.
+    loadPendingRowsBySlotMock.mockRejectedValue(new Error('no card for you'))
     generateStageMock.mockImplementation(async () => {
       // The typing_on is in flight by now; let it finish only once the turn
       // has had the chance to reach its exit.
       setTimeout(() => releaseOn?.(), 20)
-      return { status: 'refused', attemptScores: [0.1], finalScore: 0.1 }
+      return { status: 'failed', error: 'boom' }
     })
 
     const r = await handleInbound(INBOUND_ID)
@@ -3842,7 +3809,7 @@ describe('TAC-540 — a sender action can never change the reply', () => {
       expect(completed).toContain('off')
     })
 
-    expect(r).toMatchObject({ status: 'refused' })
+    expect(r).toMatchObject({ status: 'failed' })
     // The `on` completed FIRST. Without the in-flight await inside
     // stopTypingUnlessSent, `off` is pushed while the `on` promise is still
     // pending and this order is reversed.

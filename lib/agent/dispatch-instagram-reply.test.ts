@@ -137,8 +137,6 @@ function generation(
 ): GenerateMessageResult {
   return {
     body,
-    voiceFidelity: 0.8,
-    reasoning: 'r',
     unverifiedUrls: [],
     requiresOperatorApproval: false,
     approvalReason: '',
@@ -153,7 +151,6 @@ function generation(
     intentionQuestionDuplicateStripped: false,
     intentionQuestionDroppedForBodyQuestion: false,
     attempts: 1,
-    attemptScores: [0.8],
     attemptHistory: [],
     systemPrompt: '',
     userPrompt: '',

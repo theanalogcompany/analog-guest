@@ -617,7 +617,7 @@ describe('POST /admin/conversations/api/follow-up', () => {
     expect(body.error).toBeUndefined()
   })
 
-  it('returns 422 when handleFollowup refuses on low fidelity', async () => {
+  it('returns 422 when handleFollowup refuses', async () => {
     vi.mocked(createServerClient).mockResolvedValue(
       makeSessionMock({ user: { id: 'auth-user-1' } }) as never,
     )
@@ -633,8 +633,7 @@ describe('POST /admin/conversations/api/follow-up', () => {
     )
     vi.mocked(handleFollowup).mockResolvedValue({
       status: 'refused',
-      reason: 'low_fidelity',
-      attemptScores: [0.32, 0.31, 0.3],
+      reason: 'no_warm_close_text',
     })
 
     const res = await POST(
@@ -643,7 +642,7 @@ describe('POST /admin/conversations/api/follow-up', () => {
     expect(res.status).toBe(422)
     const body = await res.json()
     expect(body.error).toBe('refused')
-    expect(body.attemptScores).toEqual([0.32, 0.31, 0.3])
+    expect(body.detail).toBe('no_warm_close_text')
   })
 
   it('returns 502 when handleFollowup fails at a stage', async () => {

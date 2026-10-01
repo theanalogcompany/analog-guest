@@ -32,8 +32,8 @@ import {
 // SYSTEM_TEMPLATE body changes.
 
 describe('PROMPT_VERSION', () => {
-  it('is v1.79.0 (are_they_new_here waits for the warm close)', () => {
-    expect(PROMPT_VERSION).toBe('v1.79.0')
+  it('is v1.80.0 (voiceFidelity and reasoning left the output schema)', () => {
+    expect(PROMPT_VERSION).toBe('v1.80.0')
   })
 })
 
@@ -636,8 +636,11 @@ describe('SYSTEM_TEMPLATE — Resource commitment self-flag (TAC-212, v1.14.0)',
     expect(SYSTEM_TEMPLATE).toContain('leave approvalReason as an empty string')
   })
 
-  it('decouples the flag from voice fidelity', () => {
-    expect(SYSTEM_TEMPLATE).toContain('independent of voice fidelity')
+  it('decouples the flag from how well the reply reads, with no voice-fidelity reference', () => {
+    expect(SYSTEM_TEMPLATE).toContain(
+      'The flag is independent of how well the reply reads — flag honestly even if the reply otherwise reads well.',
+    )
+    expect(SYSTEM_TEMPLATE).not.toContain('voice fidelity')
   })
 })
 

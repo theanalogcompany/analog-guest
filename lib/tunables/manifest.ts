@@ -20,24 +20,17 @@ import {
   UNDERSTAND_ORDER_WINDOW_DAYS,
 } from '@/lib/agent/intentions/definitions'
 import {
-  AUTO_SEND_FIDELITY_FLOOR,
   KNOWLEDGE_GAP_WINDOW_MS,
   KNOWLEDGE_RELEVANCE_FLOOR,
   KNOWLEDGE_RETRIEVE_LIMIT,
-  SEND_FIDELITY_FLOOR,
 } from '@/lib/agent/stages'
 import { MAX_CLASSIFIER_INPUT_CHARS } from '@/lib/ai/classify-message'
-import {
-  MAX_ATTEMPTS,
-  MAX_OUTPUT_TOKENS,
-  MIN_VOICE_FIDELITY,
-} from '@/lib/ai/generate-message'
+import { MAX_ATTEMPTS, MAX_OUTPUT_TOKENS } from '@/lib/ai/generate-message'
 import { VERIFY_GROUNDING_MAX_OUTPUT_TOKENS } from '@/lib/ai/verify-grounding'
 import {
   AGENT_LATENCY_HIGH_THRESHOLD_MS,
   CLASSIFICATION_CONFIDENCE_LOW_THRESHOLD,
   CLASSIFICATION_CONFIDENCE_REROUTE_THRESHOLD,
-  VOICE_FIDELITY_LOW_THRESHOLD,
   WEBHOOK_SILENCE_THRESHOLD_HOURS,
 } from '@/lib/analytics/posthog'
 import {
@@ -137,7 +130,7 @@ export const TUNABLES = [
     category: 'agent_runtime',
     source: 'lib/ai/generate-message.ts',
     description:
-      'Maximum regeneration attempts before settling on the highest-fidelity result.',
+      'Maximum regeneration attempts on a self-talk or unverified-link violation; the last attempt ships or queues.',
   },
   {
     name: 'max_history_days',
@@ -158,34 +151,6 @@ export const TUNABLES = [
       'Cap on recent RESPONSES loaded into runtime context. TAC-313: a split reply occupies one slot however many message rows it was dispatched as.',
   },
   {
-    name: 'min_voice_fidelity',
-    value: MIN_VOICE_FIDELITY,
-    type: 'number',
-    category: 'agent_runtime',
-    source: 'lib/ai/generate-message.ts',
-    description:
-      'Voice fidelity target for the regeneration loop; below, regenerate; above, ship.',
-  },
-  {
-    name: 'send_fidelity_floor',
-    value: SEND_FIDELITY_FLOOR,
-    type: 'number',
-    category: 'agent_runtime',
-    source: 'lib/agent/stages.ts',
-    description:
-      'Voice fidelity below this refuses to send and fires a red alert.',
-  },
-  {
-    name: 'auto_send_fidelity_floor',
-    value: AUTO_SEND_FIDELITY_FLOOR,
-    type: 'number',
-    category: 'agent_runtime',
-    source: 'lib/agent/stages.ts',
-    description:
-      'Voice fidelity below this (but at or above send_fidelity_floor) queues the draft for operator review instead of auto-sending. Above auto-sends if no other approval trigger fires.',
-    relatedTickets: ['TAC-212'],
-  },
-  {
     name: 'comp_backstop_pattern_count',
     value: COMP_PATTERNS.length,
     type: 'number',
@@ -194,15 +159,6 @@ export const TUNABLES = [
     description:
       'Number of regex patterns in the deterministic comp backstop. Operator-action-anchored phrasings; iterated as a routine PR when false-positive / false-negative counts move.',
     relatedTickets: ['TAC-212'],
-  },
-  {
-    name: 'voice_fidelity_low_threshold',
-    value: VOICE_FIDELITY_LOW_THRESHOLD,
-    type: 'number',
-    category: 'agent_runtime',
-    source: 'lib/analytics/posthog.ts',
-    description:
-      'Voice fidelity below this fires a low-fidelity alert (sits between send floor and regen target).',
   },
   {
     name: 'webhook_silence_threshold_hours',
@@ -579,7 +535,7 @@ export const TUNABLES = [
     category: 'agent_runtime',
     source: 'lib/ai/generate-message.ts',
     description:
-      "Output-token ceiling for one generation attempt. Raised 500 -> 1500 in TAC-309: the emission serializes body/voiceFidelity/reasoning first and knowledgeGap/contextUpdate/commitment/arrivalCapture last, so exhausting the budget truncates mid-JSON and the whole object fails to parse as a generic 'could not parse the response'. Every ticket since TAC-296 has appended a required field to that tail. Watch generation_truncated in PostHog.",
+      "Output-token ceiling for one generation attempt. Raised 500 -> 1500 in TAC-309: the emission serializes body first and knowledgeGap/contextUpdate/commitment/arrivalCapture last, so exhausting the budget truncates mid-JSON and the whole object fails to parse as a generic 'could not parse the response'. Every ticket since TAC-296 has appended a required field to that tail. Watch generation_truncated in PostHog.",
     relatedTickets: ['TAC-309'],
   },
   {

@@ -407,8 +407,6 @@ describe('regenerateWithCritique — happy path', () => {
       ok: true,
       data: {
         body: "yeah. oat's on.",
-        voiceFidelity: 0.85,
-        reasoning: 'good',
         unverifiedUrls: [],
         requiresOperatorApproval: false,
         approvalReason: '',
@@ -423,7 +421,6 @@ describe('regenerateWithCritique — happy path', () => {
         intentionQuestionDuplicateStripped: false,
         intentionQuestionDroppedForBodyQuestion: false,
         attempts: 1,
-        attemptScores: [0.85],
         attemptHistory: [],
         systemPrompt: '',
         // TAC-301 part 1.5: non-empty on purpose. Every fixture in this file
@@ -593,7 +590,7 @@ describe('regenerateWithCritique — happy path', () => {
     expect(call.guestState).toBe('returning')
   })
 
-  it('returns the slim projection (body, fidelity, attempts, attemptScores)', async () => {
+  it('returns the slim projection (body, attempts, generatedAt)', async () => {
     const r = await regenerateWithCritique({
       venueId: VENUE_ID,
       originalMessageId: OUTBOUND_ID,
@@ -602,9 +599,7 @@ describe('regenerateWithCritique — happy path', () => {
     expect(r.ok).toBe(true)
     if (!r.ok) return
     expect(r.data.body).toBe("yeah. oat's on.")
-    expect(r.data.voiceFidelity).toBe(0.85)
     expect(r.data.attempts).toBe(1)
-    expect(r.data.attemptScores).toEqual([0.85])
     expect(r.data.generatedAt).toBeInstanceOf(Date)
   })
 
@@ -776,8 +771,6 @@ describe('regenerateWithCritique — happy path', () => {
       ok: true,
       data: {
         body: 'not sure, let me check',
-        voiceFidelity: 0.85,
-        reasoning: 'good',
         unverifiedUrls: [],
         requiresOperatorApproval: false,
         approvalReason: '',
@@ -792,7 +785,6 @@ describe('regenerateWithCritique — happy path', () => {
         intentionQuestionDuplicateStripped: false,
         intentionQuestionDroppedForBodyQuestion: false,
         attempts: 1,
-        attemptScores: [0.85],
         attemptHistory: [],
         systemPrompt: '',
         userPrompt: '',
@@ -966,10 +958,7 @@ describe('regenerateWithCritique — knowledge retrieval delegates to stages.ts 
       ok: true,
       data: {
         body: 'b',
-        voiceFidelity: 0.9,
-        reasoning: 'r',
         promptVersion: 'v1.8.0',
-        attemptScores: [0.9],
         knowledgeGap: false,
         requiresOperatorApproval: false,
         approvalReason: '',

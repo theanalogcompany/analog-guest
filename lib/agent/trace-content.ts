@@ -152,8 +152,6 @@ export function buildGenerateContent(
 
 export type GenerateAttemptContent = {
   body: string
-  voiceFidelity: number
-  reasoning: string
   // Present only when the regen loop appended explicit feedback to the parent
   // user prompt for this attempt (THE-225 dash-rewrite directive). Operators
   // reviewing a regen run see exactly what Sonnet was asked to fix.
@@ -169,8 +167,6 @@ export function buildGenerateAttemptContent(
 ): GenerateAttemptContent {
   return {
     body: attempt.body,
-    voiceFidelity: attempt.voiceFidelity,
-    reasoning: attempt.reasoning,
     ...(attempt.userPromptOverride !== undefined
       ? { userPromptOverride: attempt.userPromptOverride }
       : {}),

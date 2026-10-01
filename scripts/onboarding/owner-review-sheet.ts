@@ -26,7 +26,10 @@ export function buildOwnerReviewRows(
       g.scenario.scenario,
       g.scenario.inbound_message,
       g.result.replyBody ?? '',
-      g.result.voiceFidelity !== null ? g.result.voiceFidelity.toFixed(2) : '',
+      // voice_fidelity column: header is a locked contract with live
+      // 08-sheets, so the column survives the v1.80.0 schema diet; the
+      // score itself no longer exists, so the cell is blank.
+      '',
       '', // verdict — owner fills in during Phase 5 review
       '', // edited_message — owner fills in only when editing
       '', // comment — owner adds rule:/expected_failure: prefixed notes
