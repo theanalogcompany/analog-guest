@@ -39,7 +39,7 @@ jobs:
       CRON_SECRET: ci-mock
       TEST_VENUE_ID: ci-mock
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-node@v4
         with:
           # .nvmrc is the single source of truth, read here so CI and local
