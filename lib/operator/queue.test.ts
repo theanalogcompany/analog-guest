@@ -524,7 +524,12 @@ describe('listPendingQueue', () => {
         'closed_venue_arrival_backstop',
         "You're closed and this may read as 'come on over'. Check it before sending.",
       ],
-      ['fidelity_below_auto_send_floor', "This doesn't sound enough like you."],
+      // v1.80.0 schema diet retired the fidelity trigger, and the label map is
+      // total over ApprovalTrigger, so its entry left with it. Historical rows
+      // still carry this review_reason and now take the fallback — asserted
+      // here deliberately so the retirement is a recorded decision, not an
+      // accident a future reader has to re-derive.
+      ['fidelity_below_auto_send_floor', 'Needs review'],
       // TAC-364, new: the crash card's own reason. Until now it borrowed
       // knowledge_gap's, which claimed the guest had asked something
       // unanswerable when in fact the generator fell over.
@@ -759,7 +764,9 @@ describe('listPendingQueue', () => {
       if (result.ok) {
         const d = result.drafts[0]!
         expect(d.reviewTriggerLabels).toEqual([
-          "This doesn't sound enough like you.",
+          // Retired code (v1.80.0 schema diet) — historical rows take the
+          // fallback, same as an unrecognized one.
+          'Needs review',
           'This commits you to something. Your call.',
           // Unrecognized code still renders something rather than leaking a
           // raw identifier at an operator.
@@ -772,10 +779,7 @@ describe('listPendingQueue', () => {
         expect(
           d.reviewTriggers.map((code, i) => [code, d.reviewTriggerLabels[i]]),
         ).toEqual([
-          [
-            'fidelity_below_auto_send_floor',
-            "This doesn't sound enough like you.",
-          ],
+          ['fidelity_below_auto_send_floor', 'Needs review'],
           [
             'commitment_type_gated',
             'This commits you to something. Your call.',

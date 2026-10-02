@@ -1134,11 +1134,7 @@ describe('shouldRetryTurn — the bound, and which outcomes earn a second attemp
       false,
     ],
     ['skipped_duplicate', { status: 'skipped_duplicate' }, false],
-    [
-      'refused',
-      { status: 'refused', reason: 'low_fidelity', attemptScores: [0.1] },
-      true,
-    ],
+    ['refused', { status: 'refused', reason: 'some_future_refusal' }, true],
     // A draft that lost a slot loses it again: the card that took the slot is
     // still there, so a retry is a guaranteed-useless second generation.
     [

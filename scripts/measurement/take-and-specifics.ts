@@ -52,7 +52,6 @@ import { composePrompt } from '@/lib/ai/compose-prompt'
 import {
   GeneratedMessageSchema,
   MAX_OUTPUT_TOKENS,
-  VOICE_FIDELITY_INSTRUCTION,
 } from '@/lib/ai/generate-message'
 import { PROMPT_VERSION } from '@/lib/ai/prompts/system-template'
 import { createAdminClient } from '@/lib/db/admin'
@@ -415,7 +414,7 @@ async function main() {
           }
 
           if (error === null) {
-            const system = `${systemBody}\n\n${VOICE_FIDELITY_INSTRUCTION}`
+            const system = systemBody
             // A BOUNDED RE-ASK on a schema failure, byte-identical prompt every
             // attempt. Not the regen loop: no feedback, no sticky constraints. It
             // absorbs the voiceFidelity-scale failure that hit 11 of the TAC-513

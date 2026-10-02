@@ -46,7 +46,7 @@ import { Textarea } from '@/components/ui/textarea'
 //         sending it. Still a success — the draft exists and is in the queue.
 //   409 → { error: 'dropped', reason, detail }          — a card for this guest already
 //         holds the slot; detail says which card to decide first (TAC-394)
-//   422 → { error: 'refused', detail, attemptScores }   — voice fidelity floor
+//   422 → { error: 'refused', detail }                  — pipeline refusal
 //   429 → { error: 'rate limited', detail }             — 1/5min rate limit
 //   403 → { error: 'guest opted out' | 'venue not allowed' }
 //   404 → { error: 'guest not found at venue' }
@@ -67,7 +67,6 @@ interface ApiErrorBody {
   error?: string
   detail?: string
   stage?: string
-  attemptScores?: number[]
 }
 
 export function FollowUpButton({ venueId, guestId }: FollowUpButtonProps) {

@@ -58,15 +58,6 @@ export const CRISIS_SAFETY_REVIEW_REASON = 'crisis_safety_reply'
 export function buildCrisisSafetyResult(): GenerateMessageResult {
   return {
     body: CRISIS_SAFETY_REPLY_BODY,
-    // 0, not a high score: this text was never matched to the venue's
-    // voice, so a high fidelity value would misrepresent it in any fidelity
-    // aggregate or dashboard. Mirrors buildFallbackGeneration's identical
-    // reasoning in handle-holding-message.ts — "this row genuinely is not a
-    // voice sample, and should never be mistaken for one or fed back as a
-    // corpus exemplar."
-    voiceFidelity: 0,
-    reasoning:
-      'TAC-348: crisis-safety signal detected; fixed reply, not generated',
     // TAC-509: the fixed crisis body is a hardcoded constant with no link in
     // it, so there is nothing to verify. Never derived here, because this
     // path deliberately never generates.
@@ -90,13 +81,9 @@ export function buildCrisisSafetyResult(): GenerateMessageResult {
     // TAC-567: this path composes no question, so the gate never fired.
     intentionQuestionDroppedForBodyQuestion: false,
     attempts: 1,
-    attemptScores: [0],
     attemptHistory: [
       {
         body: CRISIS_SAFETY_REPLY_BODY,
-        voiceFidelity: 0,
-        reasoning:
-          'TAC-348: crisis-safety signal detected; fixed reply, not generated',
         requiresOperatorApproval: false,
         approvalReason: '',
         complaintIntent: 'none',

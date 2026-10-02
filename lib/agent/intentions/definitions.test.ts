@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   EVENT_ARMED_WINDOW_DAYS,
   FIRST_CONTACT_WINDOW_DAYS,
+  type FirstConversationPolicy,
   INTENTION_DEFINITION_BY_KEY,
   INTENTION_DEFINITIONS,
   INTENTION_KEYS,
@@ -411,66 +412,101 @@ describe('INTENTION_DEFINITIONS — rule interactions', () => {
   })
 })
 
-// TAC-567, ruled by Jaipal 2026-09-30: a guest's FIRST conversation asks exactly
-// three things, and nothing else.
+// TAC-567, ruled by Jaipal 2026-09-30 and amended the same day by TAC-568: what
+// a guest's FIRST conversation may ask, and when.
 //
 // THE EXPECTATION IS A LITERAL TRANSCRIBED FROM THE RULING, never read back out
 // of the definitions, for the reason stated at the top of this file. Written as
-// an exhaustive record keyed by IntentionKey rather than as two arrays, so adding
-// an intention fails `tsc` here until someone decides which side it is on - the
+// an exhaustive record keyed by IntentionKey rather than as arrays, so adding an
+// intention fails `tsc` here until someone decides which side it is on - the
 // same totality argument as the source map's own `satisfies`.
-const ALLOWED_ON_FIRST_CONVERSATION = {
+const ON_FIRST_CONVERSATION = {
   // The reason the guest scanned at all.
-  understand_order: true,
-  // The question the ruled flow ends on.
-  are_they_new_here: true,
-  // The one thing it is natural to ask for on a first hello.
-  learn_name: true,
-  got_the_recommendation: false,
-  did_they_like_it: false,
-  are_they_local: false,
-  their_rhythm: false,
-  why_theyre_here: false,
-} satisfies Record<IntentionKey, boolean>
+  understand_order: 'allowed',
+  // The one thing it is natural to ask for on a first hello, and since TAC-568
+  // the moment the first conversation closes on.
+  learn_name: 'allowed',
+  // TAC-568's amendment. NOT 'suppressed': removing it from the first
+  // conversation entirely would mean never asking it at all, because it closes
+  // on hasRepeatVisitsOnRecord and the second visit already satisfies it.
+  are_they_new_here: 'after_warm_close',
+  got_the_recommendation: 'suppressed',
+  did_they_like_it: 'suppressed',
+  are_they_local: 'suppressed',
+  their_rhythm: 'suppressed',
+  why_theyre_here: 'suppressed',
+} satisfies Record<IntentionKey, FirstConversationPolicy>
 
-describe('allowedOnFirstConversation (TAC-567)', () => {
+describe('onFirstConversation (TAC-567, amended by TAC-568)', () => {
   it.each(INTENTION_KEYS)('%s matches the ruling', (key) => {
-    expect(INTENTION_DEFINITION_BY_KEY[key].allowedOnFirstConversation).toBe(
-      ALLOWED_ON_FIRST_CONVERSATION[key],
+    expect(INTENTION_DEFINITION_BY_KEY[key].onFirstConversation).toBe(
+      ON_FIRST_CONVERSATION[key],
     )
   })
 
   // The counts are asserted separately from the per-key table on purpose. The
-  // table catches a flipped flag; this catches a flag flipped on one intention
+  // table catches a flipped policy; this catches one flipped on one intention
   // and compensated on another, which the table would report as two failures and
   // a careless fix could turn into one.
-  it('allows exactly three and suppresses exactly five', () => {
-    const allowed = INTENTION_DEFINITIONS.filter(
-      (d) => d.allowedOnFirstConversation,
-    ).map((d) => d.key)
-    expect(allowed).toEqual([
-      'understand_order',
-      'are_they_new_here',
-      'learn_name',
-    ])
-    expect(INTENTION_DEFINITIONS.length - allowed.length).toBe(5)
+  it('allows exactly two outright, defers one, and suppresses five', () => {
+    const by = (p: FirstConversationPolicy) =>
+      INTENTION_DEFINITIONS.filter((d) => d.onFirstConversation === p).map(
+        (d) => d.key,
+      )
+    expect(by('allowed')).toEqual(['understand_order', 'learn_name'])
+    expect(by('after_warm_close')).toEqual(['are_they_new_here'])
+    expect(by('suppressed')).toHaveLength(5)
+    // Totality, stated rather than assumed: every intention carries one of the
+    // three, so the three counts have to add back to the whole set.
+    expect(
+      by('allowed').length +
+        by('after_warm_close').length +
+        by('suppressed').length,
+    ).toBe(INTENTION_DEFINITIONS.length)
   })
 
-  // WHAT THIS RULES OUT, and it is the reason the flag lives on the definition
-  // rather than being inferred. The three allowed intentions share no arming kind
-  // and no gate kind, and two of their arming kinds also appear among the
-  // suppressed five, so there is no structural property this could be read off.
-  // A future reader looking for one should find this test instead.
+  // TAC-568's amendment, asserted on its own because this one policy is what the
+  // ruled first-visit flow turns on, and because it was 'suppressed' for about
+  // half an hour. Either wrong value is a real regression with a real symptom:
+  // 'allowed' brings back the visit that stalls on "nice to meet you",
+  // 'suppressed' means the question is never asked at all.
+  it('defers are_they_new_here to after the warm close, rather than dropping it', () => {
+    const def = INTENTION_DEFINITION_BY_KEY.are_they_new_here
+    expect(def.onFirstConversation).toBe('after_warm_close')
+    // Still fully defined, still armed the same way, still expiring the same
+    // way: deferral is about WHEN inside one conversation, not about retiring it.
+    expect(def.armsOn.kind).toBe('first_recorded_order')
+    expect(def.promptLine.length).toBeGreaterThan(0)
+    expect(def.expiresAfterMs).toBeGreaterThan(0)
+  })
+
+  // THE REASON THE AMENDMENT EXISTS, pinned as a property rather than left in a
+  // comment. are_they_new_here closes on hasRepeatVisitsOnRecord, so a guest on
+  // their second visit already satisfies it. That is what makes "not on a first
+  // conversation" and "never" the same sentence for this intention - and it is
+  // a fact about its own isSatisfied, so it is checked there.
+  it('is satisfied by a repeat visit, which is why deferring beats suppressing', () => {
+    const def = INTENTION_DEFINITION_BY_KEY.are_they_new_here
+    expect(
+      def.isSatisfied({ ...NO_FACTS, hasRepeatVisitsOnRecord: true }),
+    ).toBe(true)
+  })
+
+  // WHAT THIS RULES OUT, and it is the reason the policy lives on the definition
+  // rather than being inferred. The two unconditionally-allowed intentions share
+  // no arming kind, and one of those kinds also appears among the suppressed, so
+  // there is no structural property this could be read off. A future reader
+  // looking for one should find this test instead.
   it('is not inferable from armsOn or from the gate', () => {
     const allowedArmings = new Set(
-      INTENTION_DEFINITIONS.filter((d) => d.allowedOnFirstConversation).map(
-        (d) => d.armsOn.kind,
-      ),
+      INTENTION_DEFINITIONS.filter(
+        (d) => d.onFirstConversation === 'allowed',
+      ).map((d) => d.armsOn.kind),
     )
     const suppressedArmings = new Set(
-      INTENTION_DEFINITIONS.filter((d) => !d.allowedOnFirstConversation).map(
-        (d) => d.armsOn.kind,
-      ),
+      INTENTION_DEFINITIONS.filter(
+        (d) => d.onFirstConversation === 'suppressed',
+      ).map((d) => d.armsOn.kind),
     )
     const shared = [...allowedArmings].filter((k) => suppressedArmings.has(k))
     expect(shared.length).toBeGreaterThan(0)

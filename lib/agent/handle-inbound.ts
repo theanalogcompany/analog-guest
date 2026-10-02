@@ -351,7 +351,6 @@ async function persistGenerationFailureCard(
       guestId: ctx.guest.id,
       triggers: [GENERATION_FAILED_REVIEW_REASON],
       primaryTrigger: GENERATION_FAILED_REVIEW_REASON,
-      voiceFidelity: 0,
       modelRequiresApproval: false,
       modelApprovalReason: '',
       compRegexMatchedPattern: null,
@@ -423,8 +422,6 @@ async function persistGenerationFailureCard(
 function buildGenerationFailureGeneration(): GenerateMessageResult {
   return {
     body: '(generation failed)',
-    voiceFidelity: 0,
-    reasoning: 'TAC-309: generation failed twice; carded for operator answer',
     // TAC-509: the card is blank, so there is no body to hold a link. Empty
     // also keeps UNVERIFIED_URL out of the crash card's trigger set, which is
     // right: nothing was checked because nothing was generated.
@@ -446,7 +443,6 @@ function buildGenerationFailureGeneration(): GenerateMessageResult {
     // TAC-567: this path composes no question, so the gate never fired.
     intentionQuestionDroppedForBodyQuestion: false,
     attempts: 2,
-    attemptScores: [],
     attemptHistory: [],
     systemPrompt: '',
     userPrompt: '',
@@ -492,8 +488,10 @@ interface ClaimedWarmClose {
  *
  * FAILS CLOSED. A marker write that errors returns null, so the bubble is NOT
  * appended. The alternative — sending on an unknown marker state — is the one
- * outcome this mechanism is built to avoid, and the pause timer will try again
- * inside its own window.
+ * outcome this mechanism is built to avoid. For an Instagram scan guest the
+ * pause timer will try again inside its own window; for an SMS or non-scan
+ * guest there is no second attempt, and failing closed is still right, because
+ * a duplicated close is worse than a missing one (TAC-569).
  */
 async function claimWarmCloseForTurn(
   ctx: RuntimeContext,
@@ -732,9 +730,7 @@ function startTyping(turn: InboundTurnState, ctx: RuntimeContext): void {
  *
  * Every stage failure fails closed: the guest sees nothing, a PostHog event
  * + Slack alert fire with the agentRunId + stage, and an AgentResult.failed
- * is returned. Soft-refusals from generateStage (final fidelity below the
- * 0.4 send floor) return AgentResult.refused with attemptScores so callers
- * can debug the loop. Successes return AgentResult.sent with the outbound
+ * is returned. Successes return AgentResult.sent with the outbound
  * message ID and emit an inbound_message_handled PostHog event.
  *
  * Catastrophic / unhandled throws are caught at the top, alerted under
@@ -1735,58 +1731,18 @@ async function runInboundTurn(
       }
       return { status: 'failed', stage: 'generation', error: gen.error }
     }
-    if (gen.status === 'refused') {
-      // Synthesize per-attempt sub-spans from attemptScores. No real per-attempt
-      // timing — see follow-up ticket THE-215. The sub-spans are still useful
-      // because they enumerate the regen loop attempts in the trace UI.
-      // Refused-path note: lib/ai's generateStage doesn't surface attemptHistory
-      // on refusal (the AgentResult shape only carries scores). Per-attempt
-      // body content lives only on the success path; THE-215 will fix this
-      // when threading the trace into the regen loop directly.
-      gen.attemptScores.forEach((score, i) => {
-        const attemptSpan = generateSpan.span(`generate.attempt_${i + 1}`, {
-          attempt: i + 1,
-        })
-        attemptSpan.end({ output: { voiceFidelity: score } })
-      })
-      generateSpan.end({
-        level: 'WARNING',
-        statusMessage: 'fidelity_loop_exhausted',
-        output: {
-          attemptScores: gen.attemptScores,
-          finalScore: gen.finalScore,
-        },
-      })
-      await fireRedAlert({
-        agentRunId,
-        venueId: ctx.venue.id,
-        guestId: ctx.guest.id,
-        kind: 'inbound',
-        stage: 'generation',
-        errorMessage: 'fidelity_loop_exhausted',
-        extra: { attemptScores: gen.attemptScores, finalScore: gen.finalScore },
-      })
-      return {
-        status: 'refused',
-        reason: 'low_fidelity',
-        attemptScores: gen.attemptScores,
-      }
-    }
-    gen.result.attemptScores.forEach((score, i) => {
+    gen.result.attemptHistory.forEach((attempt, i) => {
       const attemptSpan = generateSpan.span(`generate.attempt_${i + 1}`, {
         attempt: i + 1,
       })
-      const attempt = gen.result.attemptHistory[i]
       attemptSpan.end({
-        output: { voiceFidelity: score },
-        content: attempt ? buildGenerateAttemptContent(attempt) : undefined,
+        output: { attempt: i + 1 },
+        content: buildGenerateAttemptContent(attempt),
       })
     })
     generateSpan.end({
       output: {
-        voiceFidelity: gen.result.voiceFidelity,
         attempts: gen.result.attempts,
-        attemptScores: gen.result.attemptScores,
         promptVersion: gen.result.promptVersion,
         // Prompt-cache accounting. This span is the ONLY surface the cache is
         // visible on: a hit and a fast uncached call have identical latency,
@@ -1810,7 +1766,6 @@ async function runInboundTurn(
     generatedBody = gen.result.body
     console.log('[agent] inbound generated', {
       agentRunId,
-      voiceFidelity: gen.result.voiceFidelity,
       attempts: gen.result.attempts,
     })
 
@@ -1840,6 +1795,17 @@ async function runInboundTurn(
     // Empty contextUpdate short-circuits with no DB hit, no Langfuse span,
     // no log noise. Failures log + continue; context-write is diagnostic,
     // not load-bearing. Never blocks dispatch.
+    // TAC-568 follow-on: did THIS turn learn the guest's name?
+    //
+    // Declared here rather than inside the block below because the warm close
+    // reads it ~600 lines down, at the send. It is deliberately seeded from the
+    // guest as the turn STARTED: `nameOnRecordBefore` is what makes the flag
+    // mean "we just learned it" rather than "the model repeated one we already
+    // had", and it matches learn_name's own isSatisfied (`hasFirstName`), so
+    // the close fires on the turn the intention actually closes.
+    const nameOnRecordBefore = (ctx.guest.firstName ?? '').trim() !== ''
+    let nameJustStored = false
+
     if (!isEmptyContextUpdate(gen.result.contextUpdate)) {
       const contextWriteSpan = trace.span('context_write', {
         tool: 'update_guest_context',
@@ -1854,11 +1820,29 @@ async function runInboundTurn(
         now: ctx.recognition.computedAt,
       })
       if (writeResult.ok) {
+        // TAC-568 follow-on: the closing signal is the COLUMN WRITE.
+        // identityColumnsChanged is updateGuestContext's own report of which
+        // identity columns the UPDATE actually carried, so a write that failed,
+        // or a patch that never mentioned first_name, leaves this false and
+        // sends no close.
+        //
+        // That is narrower than "a verified name": WHAT was written still came
+        // from the model's contextUpdate. See closesFirstConversation's own
+        // docstring, which states the bound rather than claiming a guarantee.
+        //
+        // A miss here costs nothing for an Instagram scan guest, whom the pause
+        // timer still covers inside its own window, and is PERMANENT for anyone
+        // else — the timer gates on qr_scan and Instagram, this path does not.
+        // TAC-569.
+        nameJustStored =
+          !nameOnRecordBefore &&
+          writeResult.data.identityColumnsChanged.includes('first_name')
         contextWriteSpan.end({ output: writeResult.data })
         console.log('[agent] inbound context written', {
           agentRunId,
           guestId: ctx.guest.id,
           updatedFields: writeResult.data,
+          nameJustStored,
         })
       } else {
         contextWriteSpan.end({
@@ -2033,7 +2017,6 @@ async function runInboundTurn(
       primaryTrigger:
         approval.action === 'queue' ? approval.primaryTrigger : null,
       triggers: approval.action === 'queue' ? approval.triggers : [],
-      voiceFidelity: gen.result.voiceFidelity,
       modelRequiresApproval: gen.result.requiresOperatorApproval,
     })
 
@@ -2302,7 +2285,6 @@ async function runInboundTurn(
             triggers: approval.triggers,
             primaryTrigger: approval.primaryTrigger,
             priorReviewReason,
-            voiceFidelity: gen.result.voiceFidelity,
             modelRequiresApproval: gen.result.requiresOperatorApproval,
             modelApprovalReason: gen.result.approvalReason,
             compRegexMatchedPattern: approval.compMatchedPattern,
@@ -2322,7 +2304,6 @@ async function runInboundTurn(
             guestId: ctx.guest.id,
             triggers: approval.triggers,
             primaryTrigger: approval.primaryTrigger,
-            voiceFidelity: gen.result.voiceFidelity,
             modelRequiresApproval: gen.result.requiresOperatorApproval,
             modelApprovalReason: gen.result.approvalReason,
             compRegexMatchedPattern: approval.compMatchedPattern,
@@ -2341,9 +2322,9 @@ async function runInboundTurn(
         // TAC-207: fire APNs push to every operator whose allowlist covers
         // this venue. waitUntil composes with the webhook's outer keep-alive
         // window — push never blocks the agent's return. Helper filters
-        // primaryTrigger internally (model_flagged / comp_regex_backstop /
-        // fidelity_below_auto_send_floor fire; previous_pending_held skips)
-        // and is `never throws` so the .catch is defensive belt-and-braces.
+        // primaryTrigger internally (model_flagged / comp_regex_backstop
+        // fire; previous_pending_held skips) and is `never throws` so the
+        // .catch is defensive belt-and-braces.
         if (shouldSendDraftFlaggedPush(approval.primaryTrigger)) {
           waitUntil(
             sendDraftFlaggedPush({
@@ -2370,7 +2351,6 @@ async function runInboundTurn(
             status: 'queued',
             outboundMessageId,
             primaryTrigger: approval.primaryTrigger,
-            voiceFidelity: gen.result.voiceFidelity,
             persistAction,
           },
           content: { outboundDraft: gen.result.body },
@@ -2444,6 +2424,11 @@ async function runInboundTurn(
     // normal untriggered send).
     // TAC-568: does this reply close the guest's first conversation?
     //
+    // TWO WAYS IN, both decided by closesFirstConversation: the guest said
+    // goodbye and we answered with one, or this turn learned their name. The
+    // second was added when are_they_new_here came off the first conversation,
+    // which left the name as the last thing a first visit gathers.
+    //
     // Decided BEFORE the send, and the marker is CLAIMED before the send too,
     // because the claim is what makes "once per guest, ever" a fact Postgres
     // enforces rather than an argument about ordering. This is the timer's own
@@ -2456,6 +2441,10 @@ async function runInboundTurn(
     const claimedWarmClose = closesFirstConversation({
       guestSignedOff: ctx.classification.category === SIGN_OFF_CATEGORY,
       agentSaidGoodbye: gen.result.closedTheConversation,
+      // TAC-568 follow-on: learning the name is the other closing moment, and
+      // since are_they_new_here came off the first conversation it is the
+      // ordinary one. Set above, from the identity-column write.
+      nameJustStored,
       isFirstConversation: ctx.firstConversation,
       warmCloseText: ctx.venue.warmCloseText,
     })
@@ -2495,8 +2484,9 @@ async function runInboundTurn(
         trace.update({ output: { status: dispatched.kind } })
         // TAC-568: nothing reached the guest, so the close did not happen. Give
         // the marker back rather than spending this guest's one close on a
-        // message they never saw; the pause timer can still close them inside
-        // its own two-hour window.
+        // message they never saw. An Instagram scan guest then gets the timer's
+        // own two-hour window; on SMS this turn was the only chance, which is
+        // the more reason to release rather than keep a claim nothing spent.
         await releaseClaimedWarmClose(claimedWarmClose, agentRunId)
         return undeliveredAgentResult(ctx, dispatched)
       }
@@ -2688,16 +2678,13 @@ async function runInboundTurn(
         recognitionState: ctx.recognition.state,
         recognitionScore: ctx.recognition.score,
         category: ctx.classification.category,
-        voiceFidelity: gen.result.voiceFidelity,
         attempts: gen.result.attempts,
-        attemptScores: gen.result.attemptScores,
         matchCount: ctx.corpus.length,
       })
       trace.update({
         output: {
           status: 'sent',
           outboundMessageId,
-          voiceFidelity: gen.result.voiceFidelity,
         },
         content: { outboundDraft: gen.result.body },
       })
@@ -2708,6 +2695,27 @@ async function runInboundTurn(
       const stage: 'send' | 'persist' = errMsg.includes('persist failed')
         ? 'persist'
         : 'send'
+      // TAC-568: RELEASE HERE TOO, and this arm is the one that bites.
+      //
+      // The two returns above release on a dispatch that reported failure. A
+      // dispatch that THROWS took neither, so the marker stayed claimed for a
+      // close that never went out — and `failed` is a retrying status
+      // (shouldRetryTurn in coalesce-turn.ts), so the retry read `already_marked`
+      // and the guest could never be closed by any path. Permanently, on one
+      // transient send error.
+      //
+      // Safe on every throwing case, because scheduleAndSend only throws while
+      // NOTHING has been committed (`persistedIds.length === 0`); once a bubble
+      // is out it truncates instead. The close is the LAST bubble, so a throw
+      // always means it did not reach the guest. The release is CAS-scoped to
+      // the exact timestamp this turn wrote, so it cannot clear a marker the
+      // pause timer set in between.
+      //
+      // Not covered: a throw between claimWarmCloseForTurn and this `try`. That
+      // is two statements with no I/O, and `claimedWarmClose` is out of scope in
+      // the outer catch, so closing it would mean restructuring rather than
+      // adding a line. Stated rather than silently left.
+      await releaseClaimedWarmClose(claimedWarmClose, agentRunId)
       sendSpan.end({
         level: 'ERROR',
         statusMessage: errMsg,

@@ -646,8 +646,11 @@ describe('SYSTEM_TEMPLATE — Resource commitment self-flag (TAC-212, v1.14.0)',
     expect(SYSTEM_TEMPLATE).toContain('leave approvalReason as an empty string')
   })
 
-  it('decouples the flag from voice fidelity', () => {
-    expect(SYSTEM_TEMPLATE).toContain('independent of voice fidelity')
+  it('decouples the flag from how well the reply reads, with no voice-fidelity reference', () => {
+    expect(SYSTEM_TEMPLATE).toContain(
+      'The flag is independent of how well the reply reads — flag honestly even if the reply otherwise reads well.',
+    )
+    expect(SYSTEM_TEMPLATE).not.toContain('voice fidelity')
   })
 })
 

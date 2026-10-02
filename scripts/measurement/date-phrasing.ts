@@ -426,10 +426,6 @@ async function main(): Promise<void> {
         conversationChannel: ctx.conversationChannel,
         status: generated.status,
         body,
-        voiceFidelity:
-          generated.status === 'success'
-            ? generated.result.voiceFidelity
-            : null,
         attempts:
           generated.status === 'success' ? generated.result.attempts : null,
         counts,

@@ -10,7 +10,7 @@ vi.mock('voyageai', () => ({
   VoyageAIClient: class {},
 }))
 
-import { SEND_FIDELITY_FLOOR } from '@/lib/agent/stages'
+import { KNOWLEDGE_RELEVANCE_FLOOR } from '@/lib/agent/stages'
 import { SIMILARITY_FLOOR } from '@/lib/rag/retrieve'
 import { TUNABLES, type TunableCategory, type TunableType } from './manifest'
 
@@ -49,7 +49,12 @@ describe('TUNABLES manifest', () => {
     // in a test name is a claim nothing enforces. Keep the two in sync by
     // editing them together, and treat a mismatch as the signal that someone
     // updated the assertion a failing run pointed at and nothing else.
-    expect(TUNABLES.length).toBe(48)
+    //
+    // v1.80.0 schema diet removed the four voice-fidelity entries
+    // (min_voice_fidelity, send_fidelity_floor, auto_send_fidelity_floor,
+    // voice_fidelity_low_threshold) with the score itself (-4), and the
+    // grounding verifier's verify_grounding_max_output_tokens went with it (-1).
+    expect(TUNABLES.length).toBe(44)
   })
 
   // Per-category counts catch silent rebalancing — a future writer adding to
@@ -68,8 +73,9 @@ describe('TUNABLES manifest', () => {
     for (const t of TUNABLES) counts[t.category] += 1
     expect(counts).toEqual({
       // 24 with the per-kind latency split, minus corpus_top_similarity_low_threshold
-      // (decision 0008).
-      agent_runtime: 22,
+      // (decision 0008), minus the four voice-fidelity entries (v1.80.0
+      // schema diet) and verify_grounding_max_output_tokens.
+      agent_runtime: 18,
       classification: 3,
       // TAC-421 took this from 11 to 7: the four lib/agent/timing.ts
       // constants went with the deleted module. The remaining seven are
@@ -108,8 +114,10 @@ describe('TUNABLES manifest', () => {
   })
 
   it('values match the imported source constants for spot-checked entries', () => {
-    const fidelity = TUNABLES.find((t) => t.name === 'send_fidelity_floor')
-    expect(fidelity?.value).toBe(SEND_FIDELITY_FLOOR)
+    const relevance = TUNABLES.find(
+      (t) => t.name === 'knowledge_relevance_floor',
+    )
+    expect(relevance?.value).toBe(KNOWLEDGE_RELEVANCE_FLOOR)
 
     const floor = TUNABLES.find((t) => t.name === 'similarity_floor')
     expect(floor?.value).toBe(SIMILARITY_FLOOR)
@@ -123,6 +131,21 @@ describe('TUNABLES manifest', () => {
       'corpus_retrieve_limit',
       'min_strong_matches',
       'strong_match_similarity',
+    ]
+    for (const name of retired) {
+      expect(TUNABLES.find((t) => t.name === name)).toBeUndefined()
+    }
+  })
+
+  // v1.80.0 schema diet: the model no longer scores its own fidelity, so the
+  // knobs that read that score must not quietly reappear under their old
+  // names.
+  it('carries no entry for the removed voice-fidelity mechanism', () => {
+    const retired = [
+      'min_voice_fidelity',
+      'send_fidelity_floor',
+      'auto_send_fidelity_floor',
+      'voice_fidelity_low_threshold',
     ]
     for (const name of retired) {
       expect(TUNABLES.find((t) => t.name === name)).toBeUndefined()

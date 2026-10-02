@@ -42,12 +42,6 @@ describe('buildCrisisSafetyResult (TAC-348)', () => {
     expect(result.body).toBe(CRISIS_SAFETY_REPLY_BODY)
   })
 
-  it('stamps voiceFidelity=0, not a high score — this text was never matched to the venue voice (mirrors buildFallbackGeneration)', () => {
-    expect(result.voiceFidelity).toBe(0)
-    expect(result.attemptScores).toEqual([0])
-    expect(result.attemptHistory[0].voiceFidelity).toBe(0)
-  })
-
   it('never flags operator approval — the approval gate is bypassed entirely, not suppressed', () => {
     expect(result.requiresOperatorApproval).toBe(false)
     expect(result.approvalReason).toBe('')

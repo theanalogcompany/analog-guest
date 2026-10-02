@@ -300,10 +300,7 @@ async function considerCandidate(
   // Cheapest first, and both are pure.
   if (isWarmCloseTooLate(candidate.sentAt, now)) return 'too_late'
 
-  const askedQuestion = weAskedAQuestion(
-    candidate.body,
-    candidate.renderedIntentionCount,
-  )
+  const askedQuestion = weAskedAQuestion(candidate.body)
   const floorMs = warmCloseFloorMs(gate.pauseMs, askedQuestion)
   if (!isWarmCloseDue(candidate.sentAt, now, floorMs)) return 'not_yet'
 

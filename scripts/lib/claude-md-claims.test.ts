@@ -144,14 +144,11 @@ function liveNumber(name: string): number {
 }
 
 // STRONG_MATCH_SIMILARITY / MIN_STRONG_MATCHES left this list with decision
-// 0007 (voice is a static pack): the constants no longer exist in stages.ts
-// (liveNumber() would throw), and the CLAUDE.md rows quoting them were
-// removed in the same change.
-const FLOORS = [
-  'SEND_FIDELITY_FLOOR',
-  'AUTO_SEND_FIDELITY_FLOOR',
-  'KNOWLEDGE_RELEVANCE_FLOOR',
-] as const
+// 0007 (voice is a static pack), and SEND_FIDELITY_FLOOR / AUTO_SEND_FIDELITY_FLOOR
+// with the v1.80.0 schema diet (voiceFidelity left the output): the constants no
+// longer exist in stages.ts (liveNumber() would throw), and the CLAUDE.md rows
+// quoting them were removed in the same change.
+const FLOORS = ['KNOWLEDGE_RELEVANCE_FLOOR'] as const
 
 const liveFloors = new Map<string, number>(
   FLOORS.map((name) => [name, liveNumber(name)]),
@@ -224,9 +221,9 @@ describe('documents quote the live floors', () => {
 
   it('finds floor rows to check', () => {
     // Both tables are currently found: root CLAUDE.md's and lib/agent/CLAUDE.md's.
-    // Was >= 8 when the two voice-retrieval floors existed (decision 0008
-    // removed them); three floors x two tables is the current shape.
-    expect(checked.length).toBeGreaterThanOrEqual(6)
+    // Was >= 8 with the two voice-retrieval floors (decision 0008) and >= 6 with
+    // the two fidelity floors (v1.80.0); one floor x two tables is the current shape.
+    expect(checked.length).toBeGreaterThanOrEqual(2)
     expect(new Set(checked.map((c) => c.path)).size).toBeGreaterThanOrEqual(2)
     for (const name of FLOORS) {
       expect(

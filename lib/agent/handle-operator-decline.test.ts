@@ -703,27 +703,6 @@ describe('handleOperatorDecline', () => {
     expect(captureDraftQueuedMock).not.toHaveBeenCalled()
   })
 
-  it('returns refused when generation refuses (low fidelity loop exhausted)', async () => {
-    generateStageMock.mockResolvedValueOnce({
-      status: 'refused',
-      attemptScores: [0.32, 0.34, 0.36],
-      finalScore: 0.36,
-    })
-
-    const result = await handleOperatorDecline({
-      venueId: VENUE_ID,
-      guestId: GUEST_ID,
-      commitmentId: COMMITMENT_ID,
-      commitmentDescription: 'olive cake',
-    })
-
-    expect(result.status).toBe('refused')
-    if (result.status === 'refused') {
-      expect(result.reason).toBe('low_fidelity')
-    }
-    expect(persistOrRegenQueuedDraftMock).not.toHaveBeenCalled()
-  })
-
   it('returns failed when generation fails', async () => {
     generateStageMock.mockResolvedValueOnce({
       status: 'failed',

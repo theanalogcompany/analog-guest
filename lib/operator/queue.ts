@@ -352,10 +352,6 @@ const REVIEW_REASON_LABELS: Record<
   // the two cards, and it is honest about which one this is.
   closed_venue_arrival_backstop:
     "You're closed and this may read as 'come on over'. Check it before sending.",
-  // "like you" — the venue's voice is the thing being matched, and the
-  // operator is the one who knows what it sounds like. Never "low fidelity
-  // score", which is our vocabulary, not theirs.
-  fidelity_below_auto_send_floor: "This doesn't sound enough like you.",
   // TAC-364, new. Generation crashed twice and the card is blank. Until now
   // this said "a guest asked something I don't have an answer for", which was
   // false — the guest may have asked something perfectly answerable.

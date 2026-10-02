@@ -69,7 +69,6 @@ import { composePrompt } from '@/lib/ai/compose-prompt'
 import {
   GeneratedMessageSchema,
   MAX_OUTPUT_TOKENS,
-  VOICE_FIDELITY_INSTRUCTION,
 } from '@/lib/ai/generate-message'
 import { PROMPT_VERSION } from '@/lib/ai/prompts/system-template'
 import { createAdminClient } from '@/lib/db/admin'
@@ -434,12 +433,10 @@ async function main(): Promise<void> {
             }
 
             if (error === null) {
-              // VOICE_FIDELITY_INSTRUCTION is appended exactly as
-              // generateMessage appends it. composePrompt does not include it,
-              // and without it the model answers voiceFidelity on a 1-to-10
-              // scale that the schema's [0,1] refine rejects, which the TAC-513
-              // harness hit on 11 of its first 14 generations.
-              const system = `${systemBody}\n\n${VOICE_FIDELITY_INSTRUCTION}`
+              // v1.80.0 schema diet: the system prompt is composePrompt's
+              // output verbatim; the voice-fidelity instruction it used to
+              // append is gone.
+              const system = systemBody
 
               // A BOUNDED RE-ASK on a schema failure, with a BYTE-IDENTICAL
               // prompt every attempt. This is not the regen loop: no feedback,

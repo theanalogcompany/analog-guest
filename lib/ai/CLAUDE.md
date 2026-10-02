@@ -6,7 +6,7 @@ Loads only when you work in this directory. Prompt **copy** rules live in
 ## Call shape
 
 `generateObject` from the Vercel AI SDK with a Zod schema. Production model
-`claude-sonnet-4-6`. Temperature 0.7 for generation (phrasing variety), 0.2-0.3 for
+`claude-sonnet-4-6`. Generation sets no temperature (the provider default applies), 0.2-0.3 for
 anything analytical or idempotent.
 
 Every module here returns `AIResult<T>` (`{ok: true, data} | {ok: false, error}`). Throw
@@ -135,6 +135,13 @@ than check outcomes:
 24-optional cap. `body` remains the complete reply, so every backstop still reads the
 question; the field rides along as its exact tail for dispatch to peel off. See
 `lib/agent/CLAUDE.md` and `docs/decisions/0007-intention-question-is-its-own-bubble.md`.
+
+The generation schema is `{body, intentionQuestion, ...flags}` and nothing else for prose:
+`reasoning` and `voiceFidelity` left in v1.80.0. Output tokens dominate latency (decode is
+about 40 tok/s), and the self-scored fidelity never gated anything (110 production scores,
+minimum 0.72, floors 0.4 and 0.6). `messages.voice_fidelity` stays as a nullable column that
+new writes leave empty. Do not add a self-assessment field back without a gate that has
+fired at least once.
 
 Known limit: the loop returns the **last** attempt, not the best one.
 

@@ -222,11 +222,10 @@ describe('POST /api/operator/commitments/[id]/draft-decline', () => {
   })
 
   describe('422', () => {
-    it("returns {error: 'refused'} when handleOperatorDecline reports refused (low fidelity)", async () => {
+    it("returns {error: 'refused'} when handleOperatorDecline reports refused", async () => {
       handleDeclineMock.mockResolvedValueOnce({
         status: 'refused',
-        reason: 'low_fidelity',
-        attemptScores: [0.32, 0.35, 0.38],
+        reason: 'some_future_refusal',
       })
       const res = await POST(makeRequest(), params())
       expect(res.status).toBe(422)

@@ -241,8 +241,6 @@ function makeCtx(overrides: Partial<RuntimeContext> = {}): RuntimeContext {
 function makeGeneration(): GenerateMessageResult {
   return {
     body: 'regenerated draft body',
-    voiceFidelity: 0.78,
-    reasoning: 'matches venue voice',
     unverifiedUrls: [],
     requiresOperatorApproval: false,
     approvalReason: '',
@@ -257,7 +255,6 @@ function makeGeneration(): GenerateMessageResult {
     intentionQuestionDuplicateStripped: false,
     intentionQuestionDroppedForBodyQuestion: false,
     attempts: 1,
-    attemptScores: [0.78],
     attemptHistory: [],
     systemPrompt: '',
     userPrompt: '',
@@ -288,7 +285,7 @@ describe('persistOrRegenQueuedDraft (TAC-264)', () => {
     const result = await persistOrRegenQueuedDraft(
       makeCtx(),
       makeGeneration(),
-      'fidelity_below_auto_send_floor',
+      'model_flagged',
       null,
     )
 
@@ -303,7 +300,7 @@ describe('persistOrRegenQueuedDraft (TAC-264)', () => {
     expect(scenario.inserts[0]).toMatchObject({
       status: 'pending_review',
       review_state: 'pending',
-      review_reason: 'fidelity_below_auto_send_floor',
+      review_reason: 'model_flagged',
       body: 'regenerated draft body',
     })
     expect(fireRedAlertMock).not.toHaveBeenCalled()
@@ -340,7 +337,9 @@ describe('persistOrRegenQueuedDraft (TAC-264)', () => {
     const updPayload = scenario.updates[0].payload
     expect(updPayload).toMatchObject({
       body: 'regenerated draft body',
-      voice_fidelity: 0.78,
+      // v1.80.0 schema diet: a regen explicitly nulls any pre-diet score, so
+      // an old number cannot claim to describe the new body.
+      voice_fidelity: null,
       prompt_version: 'v1.16.0',
       category: 'reply',
       reply_to_message_id: 'inbound-1',
@@ -380,7 +379,7 @@ describe('persistOrRegenQueuedDraft (TAC-264)', () => {
     const result = await persistOrRegenQueuedDraft(
       makeCtx(),
       makeGeneration(),
-      'fidelity_below_auto_send_floor',
+      'model_flagged',
       null,
     )
 
@@ -423,7 +422,7 @@ describe('persistOrRegenQueuedDraft (TAC-264)', () => {
     const result = await persistOrRegenQueuedDraft(
       makeCtx(),
       makeGeneration(),
-      'fidelity_below_auto_send_floor',
+      'model_flagged',
       null,
       { callerPolicy: 'regen', conversationDisposition: 'correction' },
     )
@@ -455,7 +454,7 @@ describe('persistOrRegenQueuedDraft (TAC-264)', () => {
     const result = await persistOrRegenQueuedDraft(
       makeCtx(),
       makeGeneration(),
-      'fidelity_below_auto_send_floor',
+      'model_flagged',
       null,
       { callerPolicy: 'regen', conversationDisposition: 'own_card' },
     )
@@ -581,7 +580,7 @@ describe('persistOrRegenQueuedDraft (TAC-264)', () => {
     const result = await persistOrRegenQueuedDraft(
       makeCtx(),
       makeGeneration(),
-      'fidelity_below_auto_send_floor',
+      'model_flagged',
       null,
     )
 
@@ -792,9 +791,12 @@ describe('persistOrRegenQueuedDraft — blankBody (TAC-309)', () => {
     expect(scenario.inserts[0]?.body).not.toContain('regenerated draft body')
   })
 
-  // A blank card carrying 0.78 would be claiming a voice score for text that
-  // does not exist.
-  it('nulls voice_fidelity alongside the body', async () => {
+  // v1.80.0 schema diet: no INSERT writes voice_fidelity at all any more —
+  // the score is gone, and the column survives only for historical rows.
+  // Asserted here (the blank-card case) because this is where a stale 0.78
+  // would have been most misleading: a voice score for text that does not
+  // exist.
+  it('writes no voice_fidelity on INSERT', async () => {
     scenario.insertResponses.push({ data: { id: 'gap-card' }, error: null })
     await persistOrRegenQueuedDraft(
       makeCtx(),
@@ -805,7 +807,7 @@ describe('persistOrRegenQueuedDraft — blankBody (TAC-309)', () => {
         blankBody: true,
       },
     )
-    expect(scenario.inserts[0]?.voice_fidelity).toBeNull()
+    expect(scenario.inserts[0]).not.toHaveProperty('voice_fidelity')
   })
 
   // A second unanswerable question refreshes the card in place; it must be
@@ -841,7 +843,7 @@ describe('persistOrRegenQueuedDraft — blankBody (TAC-309)', () => {
       {},
     )
     expect(scenario.inserts[0]?.body).toBe('regenerated draft body')
-    expect(scenario.inserts[0]?.voice_fidelity).toBe(0.78)
+    expect(scenario.inserts[0]).not.toHaveProperty('voice_fidelity')
   })
 })
 
@@ -1368,19 +1370,13 @@ describe('persistOrRegenQueuedDraft — TAC-364 review detail', () => {
       'commitment_type_gated',
       null,
       {
-        reviewTriggers: [
-          'fidelity_below_auto_send_floor',
-          'commitment_type_gated',
-        ],
+        reviewTriggers: ['model_flagged', 'commitment_type_gated'],
       },
     )
 
     expect(scenario.inserts[0]).toMatchObject({
       review_reason: 'commitment_type_gated',
-      review_triggers: [
-        'fidelity_below_auto_send_floor',
-        'commitment_type_gated',
-      ],
+      review_triggers: ['model_flagged', 'commitment_type_gated'],
     })
   })
 

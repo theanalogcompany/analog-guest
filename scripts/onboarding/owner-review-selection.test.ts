@@ -54,7 +54,6 @@ function graded(
       expectedBehavior: '',
       outcome: 'sent',
       replyBody: 'a reply',
-      voiceFidelity: 0.85,
       route: 'send',
       triggers: [],
       primaryTrigger: null,

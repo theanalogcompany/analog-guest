@@ -13,7 +13,6 @@ import {
   generateMessage,
   replaceDashes,
   stripTrailingDuplicate,
-  VOICE_FIDELITY_INSTRUCTION,
 } from './generate-message'
 import type { GenerateMessageInput } from './types'
 
@@ -131,8 +130,6 @@ function makeInput(): GenerateMessageInput {
 function queueResponses(
   ...objs: Array<{
     body: string
-    voiceFidelity: number
-    reasoning: string
     requiresOperatorApproval?: boolean
     approvalReason?: string
     contextUpdate?: { structured?: unknown; observation?: string }
@@ -168,8 +165,6 @@ describe('generateMessage — dash regex check (THE-225)', () => {
   it('passes through a clean body on the first attempt', async () => {
     queueResponses({
       body: 'we close at 11. come by anytime.',
-      voiceFidelity: 0.85,
-      reasoning: 'matches venue voice',
     })
 
     const r = await generateMessage(makeInput())
@@ -186,8 +181,6 @@ describe('generateMessage — dash regex check (THE-225)', () => {
   it('substitutes an em dash in place, spending no extra attempt', async () => {
     queueResponses({
       body: 'we close at 11 — come by anytime',
-      voiceFidelity: 0.9,
-      reasoning: 'first try',
     })
 
     const r = await generateMessage(makeInput())
@@ -206,8 +199,6 @@ describe('generateMessage — dash regex check (THE-225)', () => {
   it('substitutes an en dash in place, spending no extra attempt', async () => {
     queueResponses({
       body: "iced isn't on the menu – only hot",
-      voiceFidelity: 0.9,
-      reasoning: 'first try',
     })
 
     const r = await generateMessage(makeInput())
@@ -221,8 +212,6 @@ describe('generateMessage — dash regex check (THE-225)', () => {
   it('substitutes an unspaced dash to the same shape as a spaced one', async () => {
     queueResponses({
       body: 'dandelion root—in tonic',
-      voiceFidelity: 0.9,
-      reasoning: 'first try',
     })
 
     const r = await generateMessage(makeInput())
@@ -234,8 +223,6 @@ describe('generateMessage — dash regex check (THE-225)', () => {
   it('leaves no trailing comma when the dash ends the body', async () => {
     queueResponses({
       body: 'we close at 11 —',
-      voiceFidelity: 0.9,
-      reasoning: 'first try',
     })
 
     const r = await generateMessage(makeInput())
@@ -247,8 +234,6 @@ describe('generateMessage — dash regex check (THE-225)', () => {
   it('does not double the comma when a dash follows existing comma punctuation', async () => {
     queueResponses({
       body: 'sure, — we close at 11',
-      voiceFidelity: 0.9,
-      reasoning: 'first try',
     })
 
     const r = await generateMessage(makeInput())
@@ -257,73 +242,19 @@ describe('generateMessage — dash regex check (THE-225)', () => {
     expect(r.data.body).toBe('sure, we close at 11')
   })
 
-  it('still regenerates on low fidelity even when a dash was substituted', async () => {
-    // The substitution removes the dash as a REASON to retry; it must not
-    // suppress a retry the other checks would have caused anyway.
-    queueResponses(
-      {
-        body: 'sure thing — yeah',
-        voiceFidelity: 0.4,
-        reasoning: 'too generic',
-      },
-      {
-        body: 'yeah, of course',
-        voiceFidelity: 0.85,
-        reasoning: 'better',
-      },
-    )
-
-    const r = await generateMessage(makeInput())
-    expect(r.ok).toBe(true)
-    if (!r.ok) return
-    expect(r.data.attempts).toBe(2)
-    // Attempt 1's recorded body is the substituted one, not the raw model text.
-    expect(r.data.attemptHistory[0].body).toBe('sure thing, yeah')
-    expect(r.data.body).toBe('yeah, of course')
-  })
-
-  it('does NOT include dash feedback when fidelity-only retry happens', async () => {
-    // First attempt: clean text, low fidelity → retry on fidelity grounds, no
-    // dash directive should be appended for the second attempt.
-    queueResponses(
-      {
-        body: 'sure thing',
-        voiceFidelity: 0.4,
-        reasoning: 'too generic',
-      },
-      {
-        body: 'yeah, of course',
-        voiceFidelity: 0.85,
-        reasoning: 'better',
-      },
-    )
-
-    const r = await generateMessage(makeInput())
-    expect(r.ok).toBe(true)
-    if (!r.ok) return
-
-    expect(r.data.attempts).toBe(2)
-    expect(r.data.dashViolationPersisted).toBe(false)
-    // Second attempt's prompt should equal the parent prompt (no dash
-    // directive carried forward) — assert by checking the directive is
-    // absent and that no override was recorded on the second attempt.
-    const secondCallPrompt = userPromptOnCall(1)
-    expect(secondCallPrompt).not.toContain('do not use a dash character')
-    expect(r.data.attemptHistory[1].userPromptOverride).toBeUndefined()
-  })
-
   it('never lets a dash persist, however many attempts the other checks cost', async () => {
     // REPLACES 'ships final body anyway when MAX_ATTEMPTS exhausted with
     // persistent dash'. A persistent dash is no longer reachable: every
     // attempt's body is substituted as it arrives, so the loop can run to
     // MAX_ATTEMPTS for OTHER reasons and still ship a dash-free body.
     //
-    // All three attempts here come back with a dash AND low fidelity, so
-    // fidelity is what drives the loop to exhaustion.
+    // All three attempts here come back with a dash AND self-talk, so
+    // self-talk is what drives the loop to exhaustion (v1.80.0: the fidelity
+    // score that used to do this job is gone).
     queueResponses(
-      { body: 'a — b', voiceFidelity: 0.4, reasoning: '1' },
-      { body: 'c — d', voiceFidelity: 0.4, reasoning: '2' },
-      { body: 'e — f', voiceFidelity: 0.4, reasoning: '3' },
+      { body: 'as an AI a — b' },
+      { body: 'as an AI c — d' },
+      { body: 'as an AI e — f' },
     )
 
     const r = await generateMessage(makeInput())
@@ -331,13 +262,13 @@ describe('generateMessage — dash regex check (THE-225)', () => {
     if (!r.ok) return
 
     expect(r.data.attempts).toBe(3)
-    expect(r.data.body).toBe('e, f')
+    expect(r.data.body).toBe('as an AI e, f')
     expect(r.data.dashViolationPersisted).toBe(false)
     // Every recorded attempt is substituted, not just the shipped one.
     expect(r.data.attemptHistory.map((a) => a.body)).toEqual([
-      'a, b',
-      'c, d',
-      'e, f',
+      'as an AI a, b',
+      'as an AI c, d',
+      'as an AI e, f',
     ])
   })
 
@@ -346,10 +277,11 @@ describe('generateMessage — dash regex check (THE-225)', () => {
     // mechanism it pinned is still live and still tested — by the self-talk
     // and unverified-URL cases below, which remain regeneration-driven. The
     // dash is simply no longer one of its inputs, so it must never appear.
+    // Self-talk keeps the loop running here; the dashes ride along.
     queueResponses(
-      { body: 'a — b', voiceFidelity: 0.4, reasoning: '1' },
-      { body: 'a b', voiceFidelity: 0.5, reasoning: '2' },
-      { body: 'a, b', voiceFidelity: 0.85, reasoning: '3' },
+      { body: 'as an AI a — b' },
+      { body: 'as an AI a b' },
+      { body: 'a, b' },
     )
 
     const r = await generateMessage(makeInput())
@@ -373,9 +305,9 @@ describe('generateMessage — dash regex check (THE-225)', () => {
     // describes — which, once sticky, is every attempt after the first one it
     // appears in. So the wording is part of the mechanism, not presentation.
     queueResponses(
-      { body: 'a — b', voiceFidelity: 0.4, reasoning: '1' },
-      { body: 'a b', voiceFidelity: 0.5, reasoning: '2' },
-      { body: 'a, b', voiceFidelity: 0.85, reasoning: '3' },
+      { body: 'as an AI a — b' },
+      { body: 'as an AI a b' },
+      { body: 'a, b' },
     )
     await generateMessage(makeInput())
     for (const call of generateObjectMock.mock.calls) {
@@ -401,8 +333,6 @@ describe('generateMessage — self-talk check (TAC-355)', () => {
   it('passes through a clean body on the first attempt', async () => {
     queueResponses({
       body: 'we close at 11. come by anytime.',
-      voiceFidelity: 0.85,
-      reasoning: 'matches venue voice',
     })
 
     const r = await generateMessage(makeInput())
@@ -413,18 +343,14 @@ describe('generateMessage — self-talk check (TAC-355)', () => {
     expect(r.data.selfTalkViolationPersisted).toBe(false)
   })
 
-  it('regenerates when a body contains self-talk and passes fidelity', async () => {
+  it('regenerates when a body contains self-talk', async () => {
     // The literal TAC-355 failing reply shape (le-mils-coffee-010).
     queueResponses(
       {
         body: 'made with chicory and dandelion root — actually wait, no dashes. chicory and dandelion root extract.',
-        voiceFidelity: 0.9,
-        reasoning: 'first try',
       },
       {
         body: 'made with chicory and dandelion root extract.',
-        voiceFidelity: 0.88,
-        reasoning: 'rewritten',
       },
     )
 
@@ -440,32 +366,15 @@ describe('generateMessage — self-talk check (TAC-355)', () => {
     expect(secondCallPrompt).toContain('any reference to your own instructions')
   })
 
-  it('does NOT include self-talk feedback when fidelity-only retry happens', async () => {
-    queueResponses(
-      { body: 'sure thing', voiceFidelity: 0.4, reasoning: 'too generic' },
-      { body: 'yeah, of course', voiceFidelity: 0.85, reasoning: 'better' },
-    )
-
-    const r = await generateMessage(makeInput())
-    expect(r.ok).toBe(true)
-    if (!r.ok) return
-
-    expect(r.data.selfTalkViolationPersisted).toBe(false)
-    const secondCallPrompt = userPromptOnCall(1)
-    expect(secondCallPrompt).not.toContain(
-      'any reference to your own instructions',
-    )
-  })
-
   it('MUST NOT ship silently — persists selfTalkViolationPersisted=true when MAX_ATTEMPTS exhausted', async () => {
     // All three attempts leak self-talk. generateMessage itself still
     // returns the final body (it never refuses) — the "never send" behavior
     // this ticket requires is enforced one layer up, by
     // lib/agent/stages.ts's SELF_TALK_DETECTED trigger reading this flag.
     queueResponses(
-      { body: 'as an AI I should say a', voiceFidelity: 0.85, reasoning: '1' },
-      { body: 'as an AI I should say b', voiceFidelity: 0.86, reasoning: '2' },
-      { body: 'as an AI I should say c', voiceFidelity: 0.87, reasoning: '3' },
+      { body: 'as an AI I should say a' },
+      { body: 'as an AI I should say b' },
+      { body: 'as an AI I should say c' },
     )
 
     const r = await generateMessage(makeInput())
@@ -485,13 +394,9 @@ describe('generateMessage — self-talk check (TAC-355)', () => {
     queueResponses(
       {
         body: 'chicory — actually wait, no dashes',
-        voiceFidelity: 0.9,
-        reasoning: 'first try',
       },
       {
         body: 'chicory, nutmeg, and dandelion root extract',
-        voiceFidelity: 0.88,
-        reasoning: 'rewritten',
       },
     )
 
@@ -543,13 +448,13 @@ describe('generateMessage — basic shape', () => {
   })
 
   it('accepts a null channel', async () => {
-    queueResponses({ body: 'hi', voiceFidelity: 0.9, reasoning: 'ok' })
+    queueResponses({ body: 'hi' })
     const r = await generateMessage({ ...makeInput(), channel: null })
     expect(r.ok).toBe(true)
   })
 
   it('exposes promptVersion v1.81.0 on a successful result', async () => {
-    queueResponses({ body: 'hi', voiceFidelity: 0.9, reasoning: 'ok' })
+    queueResponses({ body: 'hi' })
     const r = await generateMessage(makeInput())
     expect(r.ok).toBe(true)
     if (!r.ok) return
@@ -569,8 +474,6 @@ describe('generateMessage — operator-approval self-flag (TAC-212)', () => {
   it('threads requiresOperatorApproval=true + approvalReason through to the result', async () => {
     queueResponses({
       body: "anyway, that one's on us",
-      voiceFidelity: 0.9,
-      reasoning: 'comp for the burnt latte',
       requiresOperatorApproval: true,
       approvalReason: 'drafted a comp for the burnt latte',
     })
@@ -584,8 +487,6 @@ describe('generateMessage — operator-approval self-flag (TAC-212)', () => {
   it('defaults to requiresOperatorApproval=false + empty approvalReason on benign drafts', async () => {
     queueResponses({
       body: 'yeah, oat and almond.',
-      voiceFidelity: 0.9,
-      reasoning: 'simple yes/no answer',
     })
     const r = await generateMessage(makeInput())
     expect(r.ok).toBe(true)
@@ -595,18 +496,16 @@ describe('generateMessage — operator-approval self-flag (TAC-212)', () => {
   })
 
   it('carries the per-attempt flag values through attemptHistory', async () => {
+    // Attempt 1's self-talk is what buys the second attempt (v1.80.0: the
+    // fidelity score that used to drive this retry is gone).
     queueResponses(
       {
-        body: 'first try',
-        voiceFidelity: 0.5,
-        reasoning: 'low fidelity',
+        body: 'as an AI, first try',
         requiresOperatorApproval: false,
         approvalReason: '',
       },
       {
         body: 'second try with a comp',
-        voiceFidelity: 0.85,
-        reasoning: 'comp added',
         requiresOperatorApproval: true,
         approvalReason: 'drafted a complimentary refill',
       },
@@ -643,8 +542,6 @@ describe('generateMessage — emojiDirectiveViolated (TAC-362)', () => {
   it("flags a body that carries an emoji on a 'none' turn", async () => {
     queueResponses({
       body: 'we close at 3 😊',
-      voiceFidelity: 0.85,
-      reasoning: 'clean',
     })
     const r = await generateMessage(inputWithDirective('none'))
     expect(r.ok).toBe(true)
@@ -659,8 +556,6 @@ describe('generateMessage — emojiDirectiveViolated (TAC-362)', () => {
   it("does not flag a clean body on a 'none' turn", async () => {
     queueResponses({
       body: 'we close at 3',
-      voiceFidelity: 0.85,
-      reasoning: 'clean',
     })
     const r = await generateMessage(inputWithDirective('none'))
     expect(r.ok).toBe(true)
@@ -674,8 +569,6 @@ describe('generateMessage — emojiDirectiveViolated (TAC-362)', () => {
   it("never flags on an 'allowed' turn, emoji or not", async () => {
     queueResponses({
       body: 'we close at 3 😊',
-      voiceFidelity: 0.85,
-      reasoning: 'clean',
     })
     const withEmoji = await generateMessage(inputWithDirective('allowed'))
     expect(withEmoji.ok).toBe(true)
@@ -686,8 +579,6 @@ describe('generateMessage — emojiDirectiveViolated (TAC-362)', () => {
   it('never flags when no directive was issued', async () => {
     queueResponses({
       body: 'we close at 3 😊',
-      voiceFidelity: 0.85,
-      reasoning: 'clean',
     })
     const r = await generateMessage(inputWithDirective(undefined))
     expect(r.ok).toBe(true)
@@ -699,19 +590,16 @@ describe('generateMessage — emojiDirectiveViolated (TAC-362)', () => {
   // every attempt shares the same directive — a flip re-drawn per attempt
   // would let a retry silently change the rules mid-message.
   it('applies one directive across every regen attempt', async () => {
-    // Low fidelity on attempt 1 is what drives the retry here. It used to be a
-    // dash, which no longer costs an attempt — the directive this test is
-    // about is unaffected either way, it just needs the loop to run twice.
+    // Self-talk on attempt 1 is what drives the retry here. It used to be low
+    // fidelity (and before that a dash), neither of which costs an attempt any
+    // more — the directive this test is about is unaffected either way, it
+    // just needs the loop to run twice.
     queueResponses(
       {
-        body: 'we close at 11, come by 😊',
-        voiceFidelity: 0.4,
-        reasoning: 'too generic',
+        body: 'as an AI, we close at 11, come by 😊',
       },
       {
         body: 'we close at 11. come by 😊',
-        voiceFidelity: 0.88,
-        reasoning: 'better',
       },
     )
     const r = await generateMessage(inputWithDirective('none'))
@@ -744,8 +632,6 @@ describe('generateMessage — unverified URL check (TAC-509)', () => {
   it('sends a listed link unchanged, in one attempt', async () => {
     queueResponses({
       body: `Grab it at ${LISTED}`,
-      voiceFidelity: 0.9,
-      reasoning: 'r',
     })
     const r = await generateMessage(
       inputWithLinks([{ label: 'Budan beans', url: LISTED }]),
@@ -760,8 +646,8 @@ describe('generateMessage — unverified URL check (TAC-509)', () => {
   it('regenerates on a one-character variant and clears when the retry is right', async () => {
     const off = 'https://lemils.com/products/le-mils-budan-bolds'
     queueResponses(
-      { body: `Grab it at ${off}`, voiceFidelity: 0.9, reasoning: 'r' },
-      { body: `Grab it at ${LISTED}`, voiceFidelity: 0.9, reasoning: 'r' },
+      { body: `Grab it at ${off}` },
+      { body: `Grab it at ${LISTED}` },
     )
     const r = await generateMessage(
       inputWithLinks([{ label: 'Budan beans', url: LISTED }]),
@@ -775,11 +661,9 @@ describe('generateMessage — unverified URL check (TAC-509)', () => {
   it('quotes the offending link back in the regen feedback', async () => {
     const off = 'https://lemils.com/products/nope'
     queueResponses(
-      { body: `Try ${off}`, voiceFidelity: 0.9, reasoning: 'r' },
+      { body: `Try ${off}` },
       {
         body: 'Come by and ask at the counter.',
-        voiceFidelity: 0.9,
-        reasoning: 'r',
       },
     )
     await generateMessage(
@@ -793,9 +677,9 @@ describe('generateMessage — unverified URL check (TAC-509)', () => {
   it('MUST NOT ship silently — persists unverifiedUrls when MAX_ATTEMPTS is exhausted', async () => {
     const off = 'https://lemils.com/products/invented'
     queueResponses(
-      { body: `Try ${off}`, voiceFidelity: 0.9, reasoning: 'r' },
-      { body: `Try ${off}`, voiceFidelity: 0.9, reasoning: 'r' },
-      { body: `Try ${off}`, voiceFidelity: 0.9, reasoning: 'r' },
+      { body: `Try ${off}` },
+      { body: `Try ${off}` },
+      { body: `Try ${off}` },
     )
     const r = await generateMessage(
       inputWithLinks([{ label: 'Budan beans', url: LISTED }]),
@@ -811,9 +695,9 @@ describe('generateMessage — unverified URL check (TAC-509)', () => {
     // earns it nothing.
     const fromKnowledge = 'https://lemils.com/blogs/blog/so-whats-chicory'
     queueResponses(
-      { body: `Read ${fromKnowledge}`, voiceFidelity: 0.9, reasoning: 'r' },
-      { body: `Read ${fromKnowledge}`, voiceFidelity: 0.9, reasoning: 'r' },
-      { body: `Read ${fromKnowledge}`, voiceFidelity: 0.9, reasoning: 'r' },
+      { body: `Read ${fromKnowledge}` },
+      { body: `Read ${fromKnowledge}` },
+      { body: `Read ${fromKnowledge}` },
     )
     const input: GenerateMessageInput = {
       ...inputWithLinks([{ label: 'Budan beans', url: LISTED }]),
@@ -836,9 +720,9 @@ describe('generateMessage — unverified URL check (TAC-509)', () => {
   it('holds any link when the list is empty, and when it is missing entirely', async () => {
     for (const links of [[], undefined]) {
       queueResponses(
-        { body: `Try ${LISTED}`, voiceFidelity: 0.9, reasoning: 'r' },
-        { body: `Try ${LISTED}`, voiceFidelity: 0.9, reasoning: 'r' },
-        { body: `Try ${LISTED}`, voiceFidelity: 0.9, reasoning: 'r' },
+        { body: `Try ${LISTED}` },
+        { body: `Try ${LISTED}` },
+        { body: `Try ${LISTED}` },
       )
       const r = await generateMessage(inputWithLinks(links))
       expect(r.ok).toBe(true)
@@ -850,8 +734,6 @@ describe('generateMessage — unverified URL check (TAC-509)', () => {
   it('never fires on a bare domain, even with no list', async () => {
     queueResponses({
       body: 'You can order on lemils.com any time.',
-      voiceFidelity: 0.9,
-      reasoning: 'r',
     })
     const r = await generateMessage(inputWithLinks(undefined))
     expect(r.ok).toBe(true)
@@ -874,9 +756,9 @@ describe('generateMessage — unverified URL check (TAC-509)', () => {
     // Attempt 3: same link, still wrong.
     const off = 'https://lemils.com/products/invented'
     queueResponses(
-      { body: `Try ${off} — it is great.`, voiceFidelity: 0.9, reasoning: '1' },
-      { body: `Try ${off}, it is great.`, voiceFidelity: 0.9, reasoning: '2' },
-      { body: `Try ${off}, it is great.`, voiceFidelity: 0.9, reasoning: '3' },
+      { body: `Try ${off} — it is great.` },
+      { body: `Try ${off}, it is great.` },
+      { body: `Try ${off}, it is great.` },
     )
     const r = await generateMessage(
       inputWithLinks([{ label: 'Budan beans', url: LISTED }]),
@@ -903,9 +785,9 @@ describe('generateMessage — unverified URL check (TAC-509)', () => {
     const first = 'https://lemils.com/products/invented-one'
     const second = 'https://lemils.com/products/invented-two'
     queueResponses(
-      { body: `Try ${first}`, voiceFidelity: 0.9, reasoning: '1' },
-      { body: `Try ${second}`, voiceFidelity: 0.9, reasoning: '2' },
-      { body: `Try ${second}`, voiceFidelity: 0.9, reasoning: '3' },
+      { body: `Try ${first}` },
+      { body: `Try ${second}` },
+      { body: `Try ${second}` },
     )
     await generateMessage(
       inputWithLinks([{ label: 'Budan beans', url: LISTED }]),
@@ -920,13 +802,9 @@ describe('generateMessage — unverified URL check (TAC-509)', () => {
     queueResponses(
       {
         body: `Try ${off} — actually wait, no dashes.`,
-        voiceFidelity: 0.9,
-        reasoning: 'r',
       },
       {
         body: 'Come by and ask at the counter.',
-        voiceFidelity: 0.9,
-        reasoning: 'r',
       },
     )
     await generateMessage(
@@ -943,8 +821,6 @@ describe('generateMessage — unverified URL check (TAC-509)', () => {
   it('reconciles a single trailing slash against the stored list', async () => {
     queueResponses({
       body: 'see https://lemils.com',
-      voiceFidelity: 0.9,
-      reasoning: 'r',
     })
     const r = await generateMessage(
       inputWithLinks([{ label: 'Homepage', url: 'https://lemils.com/' }]),
@@ -966,11 +842,9 @@ describe('generateMessage — the regen loop has no groundedness check (TAC-501)
   })
 
   // The live incident (2026-09-20): a guest asked "can i just call you
-  // instead?" at a venue with no phone number configured. Attempt 1 scored
-  // 0.62 — below MIN_VOICE_FIDELITY (0.7) — and answered without inventing
-  // anything. That score alone triggered a retry. Attempt 2 scored 0.72 and
-  // invented a phone number the first attempt never mentioned:
-  // attemptScores: [0.62, 0.72] is the model's own recorded trace.
+  // instead?" at a venue with no phone number configured. The retry (then
+  // driven by the since-removed fidelity score) invented a phone number the
+  // first attempt never mentioned.
   //
   // Ruled 2026-09-21 (question 1: B): this loop stays exactly as it is —
   // the grounding check on the FINAL body (lib/agent/stages.ts's
@@ -979,50 +853,32 @@ describe('generateMessage — the regen loop has no groundedness check (TAC-501)
   // documents the behavior the ruling accepted rather than proposing to fix
   // it: nothing inside the loop compares a retry's claims against the
   // attempt it replaced, because there is no such check to trip. The retry
-  // is judged on fidelity, dash, self-talk and unverified-link checks only —
-  // none of them can see a fact the first attempt never made, because none
-  // of them look at the first attempt's body at all once a new one exists.
+  // is judged on the self-talk and unverified-link checks only — neither can
+  // see a fact the first attempt never made, because neither looks at the
+  // first attempt's body at all once a new one exists. (v1.80.0: self-talk
+  // is the retry driver here, since the fidelity score is gone.)
   it('accepts a regen that introduces a fact absent from the first attempt, when nothing else flags it', async () => {
     const firstAttempt =
-      "I don't always catch calls right away, what's on your mind?"
+      "actually wait, I don't always catch calls right away, what's on your mind?"
     const secondAttempt =
       "yeah, here's the number: 415-735-5428. though I'll be honest, I don't always catch calls right away. what's on your mind?"
-    queueResponses(
-      {
-        body: firstAttempt,
-        voiceFidelity: 0.62,
-        reasoning: 'too generic, below the regen floor',
-      },
-      {
-        body: secondAttempt,
-        voiceFidelity: 0.72,
-        reasoning: 'more specific and direct',
-      },
-    )
+    queueResponses({ body: firstAttempt }, { body: secondAttempt })
 
     const r = await generateMessage(makeInput())
     expect(r.ok).toBe(true)
     if (!r.ok) return
 
     expect(r.data.attempts).toBe(2)
-    expect(r.data.attemptScores).toEqual([0.62, 0.72])
     // The regen ships as-is: nothing intercepts the fact the second attempt
     // introduced.
     expect(r.data.body).toBe(secondAttempt)
 
-    // Confirms WHY nothing intercepted it: the retry was fidelity-only.
-    // None of the three checks that DO compose regen feedback (dash,
-    // self-talk, unverified link) ever fired, so the second call carried no
-    // instruction of any kind — the model was never told what the first
-    // attempt said, let alone asked to stay consistent with it.
+    // Confirms WHY nothing intercepted it: the retry feedback is a standing
+    // self-talk rule. The model was never told what the first attempt said,
+    // let alone asked to stay consistent with it.
     const secondCallPrompt = userPromptOnCall(1)
-    expect(secondCallPrompt).not.toContain('do not use a dash character')
-    expect(secondCallPrompt).not.toContain(
-      'any reference to your own instructions',
-    )
-    expect(secondCallPrompt).not.toContain('is not a link')
-    expect(secondCallPrompt).not.toContain('are not links')
-    expect(r.data.attemptHistory[1].userPromptOverride).toBeUndefined()
+    expect(secondCallPrompt).toContain('any reference to your own instructions')
+    expect(secondCallPrompt).not.toContain(firstAttempt)
   })
 })
 
@@ -1041,8 +897,6 @@ describe('generateMessage — prompt cache breakpoint', () => {
     // from it, the traces stop describing the request that was made.
     queueResponses({
       body: 'we close at 11',
-      voiceFidelity: 0.9,
-      reasoning: 'r',
     })
     return generateMessage(makeInput()).then((r) => {
       expect(r.ok).toBe(true)
@@ -1058,8 +912,6 @@ describe('generateMessage — prompt cache breakpoint', () => {
   it('marks the first system block ephemeral and leaves the second unmarked', async () => {
     queueResponses({
       body: 'we close at 11',
-      voiceFidelity: 0.9,
-      reasoning: 'r',
     })
     await generateMessage(makeInput())
 
@@ -1082,8 +934,6 @@ describe('generateMessage — prompt cache breakpoint', () => {
     // that budget gets silently consumed.
     queueResponses({
       body: 'we close at 11',
-      voiceFidelity: 0.9,
-      reasoning: 'r',
     })
     await generateMessage(makeInput())
 
@@ -1099,16 +949,11 @@ describe('generateMessage — prompt cache breakpoint', () => {
     // turn. If a retry rebuilt the prefix differently, attempt 2 would miss
     // the entry attempt 1 just wrote — the regen path is exactly where
     // caching should pay the most.
-    // A self-talk retry, because that is the case where the user turn DOES
-    // change: a fidelity-only retry appends no feedback and re-sends a
-    // byte-identical request (see regenFeedback staying null in the loop).
+    // A self-talk retry: every retry carries feedback now (v1.80.0 removed
+    // the feedback-less fidelity retry), so the user turn always changes.
     queueResponses(
-      {
-        body: 'sure thing, as an AI I should say',
-        voiceFidelity: 0.9,
-        reasoning: 'self-talk',
-      },
-      { body: 'yeah, of course', voiceFidelity: 0.9, reasoning: 'better' },
+      { body: 'sure thing, as an AI I should say' },
+      { body: 'yeah, of course' },
     )
     const r = await generateMessage(makeInput())
     expect(r.ok).toBe(true)
@@ -1125,22 +970,27 @@ describe('generateMessage — prompt cache breakpoint', () => {
     expect(userPromptOnCall(1)).not.toBe(userPromptOnCall(0))
   })
 
-  it('keeps the voice-fidelity instruction last, where it has always been', async () => {
-    // THE-160's instruction is appended after the category block. Moving it
-    // into the cached prefix would be a silent prompt change, so its position
-    // is pinned rather than left to the reader of the composition code.
-    queueResponses({
-      body: 'we close at 11',
-      voiceFidelity: 0.9,
-      reasoning: 'r',
-    })
+  it('carries no voice-fidelity instruction in either system block (v1.80.0)', async () => {
+    // THE REVERSAL of 'keeps the voice-fidelity instruction last'. The
+    // v1.80.0 schema diet removed the voiceFidelity output field and the
+    // instruction that asked for it, so the volatile block is now
+    // composePrompt's suffix verbatim. Asserted as a deliberate absence: the
+    // instruction reappearing in EITHER block would mean someone re-plumbed
+    // the score without reopening the schema-diet decision.
+    queueResponses({ body: 'we close at 11' })
     const r = await generateMessage(makeInput())
     expect(r.ok).toBe(true)
     if (!r.ok) return
 
-    const [stable, volatile] = systemBlocksOnCall(0)
-    expect(volatile.content.endsWith(VOICE_FIDELITY_INSTRUCTION)).toBe(true)
-    expect(stable.content).not.toContain(VOICE_FIDELITY_INSTRUCTION)
+    // 'voiceFidelity' is the schema field the instruction asked for and
+    // 'Voice fidelity' opened the instruction itself. (The lowercase prose
+    // phrase "voice fidelity" still appears once in the TAC-212 approval-flag
+    // paragraph of the template; that copy is swept with PROMPT_VERSION, not
+    // here.)
+    for (const block of systemBlocksOnCall(0)) {
+      expect(block.content).not.toContain('voiceFidelity')
+      expect(block.content).not.toContain('Voice fidelity')
+    }
   })
 })
 
@@ -1418,8 +1268,6 @@ describe('generateMessage — intentionQuestion (TAC-554)', () => {
   it('composes the question onto the body and carries it on the result', async () => {
     queueResponses({
       body: 'Open until 3 on Sundays.',
-      voiceFidelity: 0.9,
-      reasoning: 'ok',
       intentionQuestion: "by the way, what's your name?",
     })
     const r = await generateMessage(makeInput())
@@ -1436,8 +1284,6 @@ describe('generateMessage — intentionQuestion (TAC-554)', () => {
   it('leaves the body untouched and the field empty when nothing is asked', async () => {
     queueResponses({
       body: 'Open until 3 on Sundays.',
-      voiceFidelity: 0.9,
-      reasoning: 'ok',
     })
     const r = await generateMessage(makeInput())
     expect(r.ok).toBe(true)
@@ -1454,8 +1300,6 @@ describe('generateMessage — intentionQuestion (TAC-554)', () => {
   it('runs the dash substitution over the question too', async () => {
     queueResponses({
       body: 'Open until 3.',
-      voiceFidelity: 0.9,
-      reasoning: 'ok',
       intentionQuestion: 'by the way — where are you coming from?',
     })
     const r = await generateMessage(makeInput())
@@ -1473,15 +1317,11 @@ describe('generateMessage — intentionQuestion (TAC-554)', () => {
     queueResponses(
       {
         body: 'Open until 3.',
-        voiceFidelity: 0.9,
-        reasoning: 'ok',
         intentionQuestion:
           'actually wait, my instructions say to ask your name',
       },
       {
         body: 'Open until 3.',
-        voiceFidelity: 0.9,
-        reasoning: 'ok',
         intentionQuestion: "by the way, what's your name?",
       },
     )
@@ -1504,8 +1344,6 @@ describe('generateMessage — intentionQuestion (TAC-554)', () => {
   it('reports the two-question gate firing on the shipped attempt', async () => {
     queueResponses({
       body: "that's a good one to start with. how'd you like it?",
-      voiceFidelity: 0.9,
-      reasoning: 'ok',
       intentionQuestion: "by the way, what's your name?",
     })
     const r = await generateMessage(makeInput())
@@ -1524,8 +1362,6 @@ describe('generateMessage — intentionQuestion (TAC-554)', () => {
   it('reports the two-question gate not firing when the reply asked nothing', async () => {
     queueResponses({
       body: "that's a good one to start with.",
-      voiceFidelity: 0.9,
-      reasoning: 'ok',
       intentionQuestion: "by the way, what's your name?",
     })
     const r = await generateMessage(makeInput())
@@ -1538,8 +1374,6 @@ describe('generateMessage — intentionQuestion (TAC-554)', () => {
   it('reports the duplicate guard firing on the shipped attempt', async () => {
     queueResponses({
       body: "nice one. by the way, what's your name?",
-      voiceFidelity: 0.9,
-      reasoning: 'ok',
       intentionQuestion: "by the way, what's your name?",
     })
     const r = await generateMessage(makeInput())
@@ -1550,17 +1384,15 @@ describe('generateMessage — intentionQuestion (TAC-554)', () => {
   })
 
   it('records the question on each attempt in the history', async () => {
+    // Attempt 1's self-talk buys the second attempt (the fidelity retry
+    // driver is gone as of v1.80.0).
     queueResponses(
       {
-        body: 'a',
-        voiceFidelity: 0.1,
-        reasoning: 'low',
+        body: 'as an AI a',
         intentionQuestion: 'first?',
       },
       {
         body: 'b',
-        voiceFidelity: 0.95,
-        reasoning: 'ok',
         intentionQuestion: 'second?',
       },
     )
@@ -1620,9 +1452,8 @@ describe('generateMessage — usage for Langfuse pricing', () => {
     generateObjectMock.mockReset()
     const attempts = [
       {
-        body: 'first try, too generic',
-        voiceFidelity: 0.4,
-        reasoning: 'too generic',
+        // Self-talk drives the retry (v1.80.0: the fidelity score is gone).
+        body: 'as an AI, first try',
         usage: {
           inputTokens: 10_000,
           outputTokens: 100,
@@ -1634,8 +1465,6 @@ describe('generateMessage — usage for Langfuse pricing', () => {
       },
       {
         body: 'second try, better',
-        voiceFidelity: 0.85,
-        reasoning: 'better',
         usage: {
           inputTokens: 10_050,
           outputTokens: 120,
@@ -1650,8 +1479,6 @@ describe('generateMessage — usage for Langfuse pricing', () => {
       generateObjectMock.mockResolvedValueOnce({
         object: {
           body: a.body,
-          voiceFidelity: a.voiceFidelity,
-          reasoning: a.reasoning,
           requiresOperatorApproval: false,
           approvalReason: '',
           contextUpdate: {},
@@ -1770,11 +1597,8 @@ describe('generateMessage - history as chat turns', () => {
   })
 
   it('sends past messages as user/assistant turns between the system blocks and the final user message, on every attempt', async () => {
-    // The dash makes the loop run a second attempt; the turns must be there too.
-    queueResponses(
-      { body: 'a — b', voiceFidelity: 0.4, reasoning: '1' },
-      { body: 'a, b', voiceFidelity: 0.85, reasoning: '2' },
-    )
+    // Self-talk makes the loop run a second attempt; the turns must be there too.
+    queueResponses({ body: 'actually wait, no dashes here' }, { body: 'a, b' })
     const r = await generateMessage(withHistory())
     expect(r.ok).toBe(true)
     expect(generateObjectMock.mock.calls.length).toBe(2)
@@ -1795,8 +1619,8 @@ describe('generateMessage - history as chat turns', () => {
     }
   })
 
-  it('hands back the transcript the grounding verifier reads', async () => {
-    queueResponses({ body: 'ok', voiceFidelity: 0.85, reasoning: 'r' })
+  it('hands back the transcript as its own field for the trace', async () => {
+    queueResponses({ body: 'ok' })
     const r = await generateMessage(withHistory())
     expect(r.ok).toBe(true)
     if (!r.ok) return
@@ -1807,7 +1631,7 @@ describe('generateMessage - history as chat turns', () => {
   })
 
   it('sends no history turns, and an empty transcript, when there is no history', async () => {
-    queueResponses({ body: 'ok', voiceFidelity: 0.85, reasoning: 'r' })
+    queueResponses({ body: 'ok' })
     const r = await generateMessage(makeInput())
     expect(r.ok).toBe(true)
     if (!r.ok) return

@@ -363,9 +363,10 @@ export interface RuntimeContext {
    * carried rather than re-derived so the intention derivation and the prompt
    * cannot disagree about which turn is a first conversation.
    *
-   * Two readers: deriveOpenIntentions suppresses every intention whose
-   * definition says allowedOnFirstConversation is false, and the serializer
-   * renders the first-conversation restraint into the intentions block.
+   * Three readers: deriveOpenIntentions applies each intention's
+   * `onFirstConversation` policy; the serializer renders the first-conversation
+   * restraint into the intentions block; and closesFirstConversation (TAC-568)
+   * gates the warm close on it.
    *
    * IT IS TRUE ON A PROACTIVE TURN TOO, AND THAT IS NOT WHAT MAKES IT SAFE. This
    * is clock-derived and computed unconditionally, so a cron follow-up, a holding
@@ -451,12 +452,13 @@ export type AgentResult =
       triggers: string[]
       primaryTrigger: string
     }
-  | { status: 'refused'; reason: string; attemptScores?: number[] }
+  | { status: 'refused'; reason: string }
   | { status: 'skipped_duplicate' }
   // A card in this draft's pending slot won, so the draft was discarded:
-  // nothing sent, nothing persisted. Distinct from 'refused' (the generation
-  // itself wasn't good enough) because the draft here was fine; it had nowhere
-  // to go. Reasons (see ApprovalDecision in stages.ts):
+  // nothing sent, nothing persisted. Distinct from 'refused' (a precondition
+  // on the turn itself failed — wrong channel, missing venue copy, an
+  // occupied manual-followup slot) because the draft here was fine; it had
+  // nowhere to go. Reasons (see ApprovalDecision in stages.ts):
   //   knowledge_gap_card_protected (TAC-308) a knowledge-gap card holds the slot
   //   obligation_slot_taken (TAC-394)        a different obligation holds it
   //   slot_occupied (TAC-394)                a manual followup, which never

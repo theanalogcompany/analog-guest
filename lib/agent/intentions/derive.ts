@@ -319,10 +319,26 @@ export interface DeriveOpenIntentionsInput {
    * conversationWindowMs is hoisted onto RuntimeContext: one derivation, read in
    * several places, never re-derived.
    *
-   * True suppresses every intention whose definition says
-   * allowedOnFirstConversation is false. See isSuppressedOnFirstConversation.
+   * True suppresses every intention whose definition says `onFirstConversation`
+   * is 'suppressed', and every 'after_warm_close' one until warmCloseSent. See
+   * isSuppressedOnFirstConversation.
    */
   isFirstConversation: boolean
+  /**
+   * TAC-568: has this guest's warm close already gone out
+   * (`guests.warm_close_sent_at` is not null)?
+   *
+   * Resolved by the caller, like isFirstConversation, and read ONLY through the
+   * 'after_warm_close' policy. Outside a first conversation it changes nothing.
+   *
+   * THE TURN THAT SENDS THE CLOSE STILL SEES `false`, AND THAT IS THE POINT
+   * RATHER THAN A RACE. Intentions are derived during context-build, before the
+   * reply is generated or the marker claimed, so the closing turn itself cannot
+   * raise an 'after_warm_close' intention — it is the turn the close ends. The
+   * guest's NEXT message is the first that sees `true`, which is exactly the
+   * ruled behaviour: available if they keep chatting after the close.
+   */
+  warmCloseSent: boolean
 }
 
 export interface DeriveOpenIntentionsResult {
@@ -560,8 +576,10 @@ function gateOpen(
  * renderableIntentions against shouldRenderOpenIntentions below.
  *
  * Reads the definition, never the key: adding an intention means answering
- * allowedOnFirstConversation on its definition, and `satisfies Record<...>`
- * makes omitting it fail `tsc`. Nothing here branches on which intention it is.
+ * `onFirstConversation` on its definition, and `satisfies Record<...>` makes
+ * omitting it fail `tsc`. Nothing here branches on which intention it is — the
+ * `switch` below is over the POLICY, which is a closed union, so a fourth state
+ * added later fails `tsc` here rather than silently falling through to allowed.
  *
  * NOT EXPORTED. Both call sites are in this file and the behaviour is covered
  * through deriveOpenIntentions, which is the path production takes; an export
@@ -570,11 +588,18 @@ function gateOpen(
 function isSuppressedOnFirstConversation(
   key: IntentionKey,
   isFirstConversation: boolean,
+  warmCloseSent: boolean,
 ): boolean {
-  return (
-    isFirstConversation &&
-    !INTENTION_DEFINITION_BY_KEY[key].allowedOnFirstConversation
-  )
+  if (!isFirstConversation) return false
+  const policy = INTENTION_DEFINITION_BY_KEY[key].onFirstConversation
+  switch (policy) {
+    case 'allowed':
+      return false
+    case 'suppressed':
+      return true
+    case 'after_warm_close':
+      return !warmCloseSent
+  }
 }
 
 /**
@@ -646,7 +671,13 @@ export function deriveOpenIntentions(
     // eligible_at row during the first conversation and its window does not
     // start ticking on a question nobody may ask. It arms fresh on the second.
     // The open-set filter below is what actually guarantees it never renders.
-    if (isSuppressedOnFirstConversation(def.key, input.isFirstConversation))
+    if (
+      isSuppressedOnFirstConversation(
+        def.key,
+        input.isFirstConversation,
+        input.warmCloseSent,
+      )
+    )
       continue
     const existing = entries.get(def.key)
     // Sticky unless this intention re-arms: an existing row decides.
@@ -721,7 +752,11 @@ export function deriveOpenIntentions(
             // guest mid-first-conversation when this shipped has rows for
             // intentions the ruling now suppresses, and only this filter sees
             // them.
-            !isSuppressedOnFirstConversation(o.key, input.isFirstConversation),
+            !isSuppressedOnFirstConversation(
+              o.key,
+              input.isFirstConversation,
+              input.warmCloseSent,
+            ),
         ),
     newlyEligible,
     brakeEngaged,

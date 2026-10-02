@@ -64,10 +64,8 @@ vi.mock('@/lib/analytics/posthog', () => ({
   captureMechanicOfferBackstopCaught: vi.fn(),
   capturePostHogEvent: vi.fn(),
   captureRegenerationTriggered: vi.fn(),
-  captureVoiceFidelityLow: vi.fn(),
   CLASSIFICATION_CONFIDENCE_LOW_THRESHOLD: 0.7,
   CLASSIFICATION_CONFIDENCE_REROUTE_THRESHOLD: 0.3,
-  VOICE_FIDELITY_LOW_THRESHOLD: 0.5,
 }))
 
 import { findPendingQuestion } from './pending-question'
@@ -163,8 +161,6 @@ function generation(
 ): GenerateMessageResult {
   return {
     body: 'a reply',
-    voiceFidelity: 0.85,
-    reasoning: 'r',
     unverifiedUrls: [],
     requiresOperatorApproval: false,
     approvalReason: '',
@@ -179,7 +175,6 @@ function generation(
     intentionQuestionDuplicateStripped: false,
     intentionQuestionDroppedForBodyQuestion: false,
     attempts: 1,
-    attemptScores: [0.85],
     attemptHistory: [],
     systemPrompt: '',
     userPrompt: '',
@@ -926,10 +921,15 @@ describe('a prose promise becomes a tracked commitment on the card (TAC-401)', (
   it('054: the draft lands in the obligation slot, beside a conversation card', async () => {
     const fake = useFake('054')
 
-    // A plain held reply takes the conversation slot first.
+    // A plain held reply takes the conversation slot first (the model's own
+    // self-flag is what queues it, now that the fidelity band is gone).
     const conversationTurn = await runTurn(
       ctxFor({ category: 'new_question' }),
-      generation({ body: 'we open at 7', voiceFidelity: 0.5 }),
+      generation({
+        body: 'we open at 7',
+        requiresOperatorApproval: true,
+        approvalReason: 'unsure about the hours',
+      }),
     )
     expect(conversationTurn.persisted).toMatchObject({ action: 'inserted' })
 

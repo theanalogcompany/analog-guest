@@ -12,7 +12,6 @@ import { useMemo } from 'react'
 export interface PlaygroundAttempt {
   attemptId: string
   body: string
-  voiceFidelity: number
   generatedAt: Date
 }
 
@@ -70,7 +69,7 @@ export function AttemptsStack({
               {a.isSelected ? ' · selected' : ''}
             </span>
             <span className="text-[10.5px] text-ink-faint tabular-nums">
-              {formatTime(a.generatedAt)} · {a.voiceFidelity.toFixed(2)}
+              {formatTime(a.generatedAt)}
             </span>
           </div>
           <div className="text-[13px] text-ink leading-snug">{a.body}</div>

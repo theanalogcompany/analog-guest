@@ -68,7 +68,6 @@ import { composePrompt } from '@/lib/ai/compose-prompt'
 import {
   GeneratedMessageSchema,
   MAX_OUTPUT_TOKENS,
-  VOICE_FIDELITY_INSTRUCTION,
 } from '@/lib/ai/generate-message'
 import { getGenerationModel } from '@/lib/ai/client'
 import { PROMPT_VERSION } from '@/lib/ai/prompts/system-template'
@@ -223,7 +222,7 @@ async function generate(prepared: Prepared): Promise<string> {
   const result = await generateObject({
     model: getGenerationModel(),
     schema: GeneratedMessageSchema,
-    system: `${prepared.composed.systemPrompt}\n\n${VOICE_FIDELITY_INSTRUCTION}`,
+    system: prepared.composed.systemPrompt,
     messages: [
       ...prepared.composed.historyTurns,
       { role: 'user', content: prepared.composed.userPrompt },

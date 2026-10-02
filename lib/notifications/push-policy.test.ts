@@ -76,17 +76,14 @@ describe('shouldSendDraftFlaggedPush', () => {
     ).toBe(true)
   })
 
-  it('pushes the three original TAC-207 triggers', () => {
+  // v1.80.0: fidelity_below_auto_send_floor was the third original TAC-207
+  // trigger; it left with the fidelity floors.
+  it('pushes the surviving original TAC-207 triggers', () => {
     expect(shouldSendDraftFlaggedPush(APPROVAL_TRIGGERS.MODEL_FLAGGED)).toBe(
       true,
     )
     expect(
       shouldSendDraftFlaggedPush(APPROVAL_TRIGGERS.COMP_REGEX_BACKSTOP),
-    ).toBe(true)
-    expect(
-      shouldSendDraftFlaggedPush(
-        APPROVAL_TRIGGERS.FIDELITY_BELOW_AUTO_SEND_FLOOR,
-      ),
     ).toBe(true)
   })
 

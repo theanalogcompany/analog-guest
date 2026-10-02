@@ -117,19 +117,14 @@ export interface PersistQueuedDraftOptions {
    * wrote.
    *
    * The discard happens HERE rather than at generation because the generation
-   * genuinely needs real text: `body: z.string().min(1)` is still required,
-   * the dash regex operates on it, and `voiceFidelity` is self-assessed
-   * against it. Blanking at the persist boundary means the discarded guess
-   * never reaches the database, is never stashed on the row, and is never
-   * surfaced to the operator as a hint — which is the whole point. TAC-308
-   * prefilled these cards and the first live one read "Not sure on the
-   * specific matcha we source. I can find out if that matters for your
-   * order." A visible guess is something you swipe, not something you replace.
-   *
-   * `voice_fidelity` is nulled alongside it. A blank card carrying 0.85 would
-   * be claiming a voice score for text that doesn't exist. (Distinct from the
-   * TAC-308 holding-message fallback, which persists 0 because there the body
-   * IS what shipped.)
+   * genuinely needs real text: `body: z.string().min(1)` is still required
+   * and the dash regex operates on it. Blanking at the persist boundary means
+   * the discarded guess never reaches the database, is never stashed on the
+   * row, and is never surfaced to the operator as a hint — which is the whole
+   * point. TAC-308 prefilled these cards and the first live one read "Not
+   * sure on the specific matcha we source. I can find out if that matters for
+   * your order." A visible guess is something you swipe, not something you
+   * replace.
    */
   blankBody?: boolean
   /**
@@ -314,7 +309,9 @@ export function buildOutboundInsert(
     // bubble's own text. Between them, no delimiter ever reaches the database.
     body: collapseToSingleMessage(generation.body),
     generated_by: 'llm',
-    voice_fidelity: generation.voiceFidelity,
+    // voice_fidelity is no longer written (v1.80.0 schema diet): the model's
+    // self-score never gated anything and the column stays nullable for the
+    // historical rows that carry one.
     prompt_version: generation.promptVersion,
     reply_to_message_id: ctx.currentMessage?.id ?? null,
     langfuse_trace_id: ctx.trace.id || null,
@@ -1271,7 +1268,6 @@ async function tryQueueInsert(
           ...(options.blankBody === true
             ? {
                 body: '',
-                voice_fidelity: null,
                 pending_commitment: null,
                 rendered_intentions: null,
               }
@@ -1363,7 +1359,9 @@ async function tryRegenUpdate(
       // TAC-313: same strip as the INSERT path in buildOutboundInsert — a
       // regenerated draft is still a card an operator approves verbatim.
       body: blank ? '' : collapseToSingleMessage(generation.body),
-      voice_fidelity: blank ? null : generation.voiceFidelity,
+      // v1.80.0 schema diet: no new score exists, and a pre-diet row's old
+      // score would otherwise be claiming to describe this regen's new body.
+      voice_fidelity: null,
       prompt_version: generation.promptVersion,
       category: ctx.classification?.category ?? null,
       langfuse_trace_id: ctx.trace.id || null,

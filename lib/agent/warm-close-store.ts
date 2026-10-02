@@ -53,7 +53,9 @@ export interface WarmCloseVenue {
  *
  * `body` is the LAST bubble of the response, not the whole response: TAC-554
  * puts a getting-to-know-you question in its own final message, so that is where
- * a question would be.
+ * a question would be. It is therefore the WHOLE question signal — see
+ * weAskedAQuestion, which TAC-568 reduced to reading this one field after the
+ * rendered-intentions arm proved unable to fire correctly in either direction.
  */
 export interface WarmCloseCandidate {
   venueId: string
@@ -62,7 +64,6 @@ export interface WarmCloseCandidate {
   messageId: string
   sentAt: Date
   body: string
-  renderedIntentionCount: number
 }
 
 /** The guest facts every check needs, in one read. */
@@ -152,7 +153,7 @@ export async function loadWarmCloseCandidates(
   const { data, error } = await supabase
     .from('messages')
     .select(
-      'id, guest_id, direction, status, review_state, body, created_at, generation_id, rendered_intentions',
+      'id, guest_id, direction, status, review_state, body, created_at, generation_id',
     )
     .eq('venue_id', venueId)
     .eq('channel', 'instagram')
@@ -222,23 +223,9 @@ export async function loadWarmCloseCandidates(
       messageId: row.id,
       sentAt,
       body: typeof row.body === 'string' ? row.body : '',
-      renderedIntentionCount: countRenderedIntentions(row.rendered_intentions),
     })
   }
   return { ok: true, data: candidates }
-}
-
-/**
- * How many getting-to-know-you intentions the draft that produced this row
- * rendered. Zero on every row that predates TAC-385 or rendered none.
- *
- * Shape-tolerant on purpose: this decides a ten-minute deferral, and an
- * unparseable carrier should read as "no question" rather than throw inside a
- * cron tick.
- */
-function countRenderedIntentions(raw: unknown): number {
-  if (Array.isArray(raw)) return raw.length
-  return 0
 }
 
 /** Every guest fact the checks need, in one round trip. */

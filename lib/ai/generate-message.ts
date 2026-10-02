@@ -22,7 +22,6 @@ import type {
   GenerateMessageResult,
 } from './types'
 
-export const MIN_VOICE_FIDELITY = 0.7
 export const MAX_ATTEMPTS = 3
 
 /**
@@ -36,10 +35,10 @@ export const MAX_ATTEMPTS = 3
  *                                response" — at the observed ~33 tok/s that
  *                                is ~450 tokens, i.e. the old 500 cap
  *
- * The object serializes `body`, `voiceFidelity`, `reasoning` FIRST and
- * `knowledgeGap` / `contextUpdate` / `commitment` / `arrivalCapture` LAST, so
- * running out of budget truncates mid-JSON and the whole emission fails to
- * parse. `reasoning` is the only unbounded field and it sits third.
+ * The object serializes `body` FIRST and `knowledgeGap` / `contextUpdate` /
+ * `commitment` / `arrivalCapture` LAST, so running out of budget truncates
+ * mid-JSON and the whole emission fails to parse. (`reasoning`, the only
+ * unbounded non-body field, was removed in the v1.80.0 schema diet.)
  *
  * The correlation that makes this worse than it looks: the model reasons
  * LONGEST on questions it can't answer cleanly, which is exactly the
@@ -162,38 +161,18 @@ function unverifiedUrlConstraint(urls: readonly string[]): string {
   return `Constraint: ${quoted} ${isAre} the venue has approved, and must not appear in your reply. Use only a link from the "## Links" section, copied exactly as written there, or no link at all. Do not guess a web address and do not build one from a pattern.`
 }
 
-// THE-160: pin the voiceFidelity scale unambiguously in the prompt. The Zod
-// schema uses .refine() (per THE-157) so .min/.max don't get serialized into
-// JSON Schema; without this instruction Sonnet defaults to a 1–10 confidence
-// scale and returns e.g. 9 instead of 0.9, which then fails the [0,1] refine
-// check and rejects the entire structured-output response.
-export const VOICE_FIDELITY_INSTRUCTION = `# Voice fidelity self-assessment (output field)
-voiceFidelity: a DECIMAL number between 0.0 and 1.0 (NOT a 1-10 score).
-  0.0 = does not match the venue's voice at all
-  0.5 = generic but acceptable, lacks distinctive voice markers
-  0.7 = good match, voice is recognizable
-  0.9 = excellent match, captures distinctive phrases and tone
-  1.0 = indistinguishable from how the operator would write
-
-# Reasoning brevity (output field)
-reasoning: at most two short sentences. It is a debugging note, not a
-  deliberation. Do not restate the guest's message, do not enumerate the
-  options you considered, and do not explain fields you left empty.`
-
 // Exported for the TAC-300 CI guardrail in lib/ai/schema-budget.test.ts —
 // the test walks this schema's tree counting ZodOptional wrappers and fails
 // CI if the count breaches OPTIONAL_FIELD_BUDGET. No other call sites; the
 // generation pipeline uses the schema directly via the `schema:` arg below.
 export const GeneratedMessageSchema = z.object({
   body: z.string().min(1),
-  // .refine() instead of .min(0).max(1) — Anthropic's structured-output
-  // validator rejects `minimum`/`maximum` constraints on JSON Schema number
-  // types. Refine runs as a post-parse predicate and isn't serialized into
-  // the schema sent to the model. See THE-157.
-  voiceFidelity: z
-    .number()
-    .refine((n) => n >= 0 && n <= 1, { message: 'must be between 0 and 1' }),
-  reasoning: z.string(),
+  // v1.80.0 schema diet: `voiceFidelity` and `reasoning` used to sit here.
+  // The fidelity self-score never gated anything in practice (110 production
+  // scores, min 0.72, zero below either floor; the trigger queued 0 drafts
+  // ever) and `reasoning` was the only unbounded non-body field — together
+  // they were ~40% of the emitted output tokens on a p50 turn. Removing them
+  // is a latency cut, not a behaviour change.
   // TAC-212: model self-flag for resource commitments (comps, refunds,
   // mechanic commitments where the runtime context marked the mechanic
   // requires_operator_approval=true). When true, the approval-policy gate
@@ -485,14 +464,13 @@ export function composeReplyWithIntention(
 }
 
 /**
- * Generate an outbound message in the venue's voice with a self-assessed
- * voice-fidelity score.
+ * Generate an outbound message in the venue's voice.
  *
- * Calls the model up to MAX_ATTEMPTS (3) times, returning the first attempt
- * that scores >= MIN_VOICE_FIDELITY (0.7). If no attempt clears the threshold,
- * returns the final attempt regardless. Callers should still consult
- * voiceFidelity on the result, since the loop may terminate without crossing
- * threshold and the caller may want to flag the message for operator review.
+ * Calls the model up to MAX_ATTEMPTS (3) times, retrying only on a self-talk
+ * or unverified-link violation, and returns the last attempt. (Through
+ * v1.79.0 a voice-fidelity self-score below 0.7 also retried; the score was
+ * removed in the v1.80.0 schema diet because it never gated anything in
+ * production — see GeneratedMessageSchema.)
  *
  * Pure transformer. No DB writes. The caller is responsible for persisting
  * the message.
@@ -536,12 +514,11 @@ export async function generateMessage(
     historyTurns,
     conversationTranscript,
   } = composePrompt(input)
-  const augmentedSystemPrompt = `${systemPrompt}\n\n${VOICE_FIDELITY_INSTRUCTION}`
-  // Same bytes as augmentedSystemPrompt, split at the stability boundary so a
-  // cache breakpoint can sit between them. The voice-fidelity instruction
-  // stays where it has always been — last, after the category block — so the
-  // rendered content is unchanged; only the block count is.
-  const volatileSystemBlock = `${volatileSystemSuffix}\n\n${VOICE_FIDELITY_INSTRUCTION}`
+  // Same bytes as systemPrompt, split at the stability boundary so a cache
+  // breakpoint can sit between them. (Through v1.79.0 a voice-fidelity
+  // instruction was suffixed here; the v1.80.0 schema diet removed the field
+  // and the instruction with it.)
+  const volatileSystemBlock = volatileSystemSuffix
 
   // Hoisted out of the try so the catch's diagnostic log can include which
   // attempt was in-flight when generateObject threw.
@@ -550,8 +527,6 @@ export async function generateMessage(
   try {
     let lastResult: {
       body: string
-      voiceFidelity: number
-      reasoning: string
       requiresOperatorApproval: boolean
       approvalReason: string
       complaintIntent: z.infer<typeof GeneratedMessageSchema>['complaintIntent']
@@ -566,7 +541,6 @@ export async function generateMessage(
       intentionQuestion: string
       closedTheConversation: boolean
     } | null = null
-    const attemptScores: number[] = []
     const attemptHistory: GenerateMessageAttempt[] = []
     // THE-225, made STICKY by the TAC-509 follow-up (ruled 2026-09-21).
     //
@@ -737,11 +711,8 @@ export async function generateMessage(
       lastResult = object
       duplicateStripped = composed.duplicateStripped
       droppedForBodyQuestion = composed.droppedForBodyQuestion
-      attemptScores.push(object.voiceFidelity)
       attemptHistory.push({
         body: object.body,
-        voiceFidelity: object.voiceFidelity,
-        reasoning: object.reasoning,
         requiresOperatorApproval: object.requiresOperatorApproval,
         approvalReason: object.approvalReason,
         complaintIntent: object.complaintIntent,
@@ -762,8 +733,7 @@ export async function generateMessage(
       // fix. The two checks below still gate the loop.
       const hasSelfTalk = matchSelfTalk(object.body).matched
       const badUrls = findUnverifiedUrls(object.body, allowedUrls)
-      const fidelityPass = object.voiceFidelity >= MIN_VOICE_FIDELITY
-      if (fidelityPass && !hasSelfTalk && badUrls.length === 0) break
+      if (!hasSelfTalk && badUrls.length === 0) break
       // Accumulate, never reset. Both compose (a body can trip more than
       // one at once — the motivating incident tripped two) rather than one
       // winning over the other, and each stays set for the rest of the call.
@@ -776,8 +746,8 @@ export async function generateMessage(
       if (unverifiedUrlsSeen.length > 0) {
         feedbackParts.push(unverifiedUrlConstraint(unverifiedUrlsSeen))
       }
-      // feedbackParts is non-empty here whenever any check has ever fired, so
-      // this only stays null while every failure so far has been fidelity.
+      // Reaching this line means a check fired this attempt, so feedbackParts
+      // is non-empty by construction; the guard is belt only.
       regenFeedback =
         feedbackParts.length > 0 ? feedbackParts.join('\n\n') : null
     }
@@ -794,8 +764,6 @@ export async function generateMessage(
       ok: true,
       data: {
         body: lastResult.body,
-        voiceFidelity: lastResult.voiceFidelity,
-        reasoning: lastResult.reasoning,
         // TAC-212: model self-flag for the approval-policy gate. Carries
         // through to applyApprovalPolicyStage and is recorded on the
         // draft_queued PostHog event when the gate queues.
@@ -840,12 +808,8 @@ export async function generateMessage(
         // text, so its firing rate has to be countable rather than inferred.
         intentionQuestionDroppedForBodyQuestion: droppedForBodyQuestion,
         attempts,
-        attemptScores,
         attemptHistory,
-        // System prompt sent to the model is the augmented one — what THE-160's
-        // voice-fidelity instruction tacks on is part of what the model saw,
-        // so the trace should match.
-        systemPrompt: augmentedSystemPrompt,
+        systemPrompt,
         userPrompt,
         conversation: conversationTranscript,
         promptVersion: PROMPT_VERSION,

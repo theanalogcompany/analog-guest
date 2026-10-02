@@ -236,6 +236,26 @@ export interface IntentionSatisfactionFacts {
   hasVenueHistoryOnFile: boolean
 }
 
+/**
+ * When an intention may be raised during a guest's first conversation.
+ *
+ * `'after_warm_close'` exists for exactly one intention today
+ * (are_they_new_here) and is deliberately a NAMED STATE rather than a boolean
+ * plus a special case in derive.ts: the whole discipline of this file is that a
+ * definition declares its own behaviour and nothing branches on a key.
+ */
+export type FirstConversationPolicy =
+  /** Raisable from the guest's very first message. */
+  | 'allowed'
+  /** Never on a first conversation; arrives intact on the second. */
+  | 'suppressed'
+  /**
+   * Not until `guests.warm_close_sent_at` is set, then raisable inside the SAME
+   * first conversation. The close is the ruled flow's end point, so this is
+   * "only once we have stopped asking for things".
+   */
+  | 'after_warm_close'
+
 export interface IntentionDefinition {
   key: IntentionKey
   /**
@@ -247,32 +267,53 @@ export interface IntentionDefinition {
   armsOn: IntentionArmsOn
   gate: IntentionGate
   /**
-   * TAC-567: may this intention be raised during the guest's FIRST
-   * conversation?
+   * TAC-567, amended twice by TAC-568: may this intention be raised during the
+   * guest's FIRST conversation, and when?
    *
-   * Jaipal ruled (2026-09-30) that a first conversation asks exactly three
-   * things: what they got (understand_order), their name (learn_name), and
-   * whether they are new here (are_they_new_here). A fresh scan that asked
-   * four questions across three messages read as an interview, and the
-   * relationship is meant to build over visits rather than in one sitting.
+   * THREE STATES, NOT A BOOLEAN, and the third is the whole reason this stopped
+   * being one. The ruling history is worth carrying because both amendments
+   * landed on 2026-09-30 and the second reverses half of the first:
    *
-   * DECLARED PER INTENTION, NEVER INFERRED FROM `armsOn` OR `priority`. The
-   * three allowed ones share no arming kind (visit_confirmed, first_contact,
-   * first_recorded_order) and the five suppressed ones cover two of those same
-   * kinds, so there is no structural property to read this off. Nothing in
+   *   TAC-567 allowed three intentions on a first conversation
+   *   (understand_order, learn_name, are_they_new_here), after a fresh scan
+   *   asked four questions across three messages and read as an interview.
+   *
+   *   TAC-568's morning ruling removed are_they_new_here outright: armed and
+   *   open, the model declined to raise it, and the visit stalled with no
+   *   close. A conversation that ENDS on an optional question ends on whether
+   *   the model felt like asking it.
+   *
+   *   TAC-568's amendment put it back CONDITIONALLY, and the argument is one
+   *   removing it entirely could not answer: are_they_new_here closes on
+   *   `hasRepeatVisitsOnRecord`, so by the guest's second visit the record
+   *   already shows 2+ visits and the intention is satisfied before it is ever
+   *   eligible. "Never on a first conversation" therefore meant "never at all"
+   *   — a defined intention with no reachable moment. It is now allowed on a
+   *   first conversation ONCE THE WARM CLOSE HAS BEEN SENT, which is the point
+   *   the ruled flow has finished its two questions and anything further is the
+   *   guest choosing to keep talking.
+   *
+   * DECLARED PER INTENTION, NEVER INFERRED FROM `armsOn` OR `priority`. The two
+   * unconditionally-allowed ones share no arming kind (visit_confirmed,
+   * first_contact), and `first_contact` also arms three of the five suppressed
+   * ones, so there is no structural property to read this off. Nothing in
    * derive.ts branches on an intention's key; it reads this field.
+   * definitions.test.ts asserts that overlap rather than asserting the claim,
+   * so it cannot go stale silently.
    *
-   * `false` SUPPRESSES RATHER THAN CLOSES, in two places (deriveOpenIntentions):
-   * the arming loop skips it, so no eligible_at row is written and its window
-   * does not start ticking unraised; and the open set is filtered, which is the
-   * actual guarantee because it also covers a row that already exists, since
+   * SUPPRESSION IS NOT CLOSURE, and it is applied in two places
+   * (deriveOpenIntentions): the arming loop skips a suppressed intention, so no
+   * eligible_at row is written and its window does not start ticking on a
+   * question nobody may ask; and the open set is filtered, which is the actual
+   * guarantee because it also covers a row that already exists, since
    * first-contact eligibility is sticky and the gate is never re-checked. The
-   * intention arrives intact on the guest's second conversation.
+   * intention arrives intact later.
    *
    * "First conversation" is TAC-560's one definition, isFirstConversation in
-   * lib/agent/warm-close.ts, resolved by the caller and passed in.
+   * lib/agent/warm-close.ts, resolved by the caller and passed in. The warm
+   * close fact is `guests.warm_close_sent_at`, likewise resolved by the caller.
    */
-  allowedOnFirstConversation: boolean
+  onFirstConversation: FirstConversationPolicy
   /**
    * Rendered verbatim as one line in the "## What you're hoping to get to"
    * block. Phrased as a state Sana is in ("you don't know...") rather than an
@@ -338,9 +379,9 @@ const DEFINITIONS = {
     priority: 10,
     armsOn: { kind: 'visit_confirmed' },
     gate: { kind: 'none' },
-    // TAC-567: one of the three a first conversation may ask. It is the reason
-    // the guest scanned at all, and the opener asks it outright.
-    allowedOnFirstConversation: true,
+    // TAC-567: one of the two a first conversation asks unconditionally. It is
+    // the reason the guest scanned at all, and the opener asks it outright.
+    onFirstConversation: 'allowed',
     promptLine: "You haven't heard what this guest ordered yet.",
     // Deliberately says nothing about how the drink or food WAS: that belongs
     // to did_they_like_it. Left in, a "how was your drink?" send would close
@@ -375,9 +416,26 @@ const DEFINITIONS = {
       defaultMinReplies: 3,
       firstMessageMinReplies: 3,
     },
-    // TAC-567: one of the three. This is the question the ruled first-visit
-    // flow ends on, before the warm close.
-    allowedOnFirstConversation: true,
+    // TAC-568: AFTER THE WARM CLOSE, on a first conversation.
+    //
+    // TAC-567 put this on the first conversation because the ruled flow was
+    // meant to END on it. The device test showed the opposite: armed and open,
+    // the model declined to raise it, and the visit stalled on "nice to meet
+    // you" with no close. A first conversation cannot END on an optional
+    // question.
+    //
+    // The morning ruling removed it outright; the amendment the same day put it
+    // back conditionally, because removing it meant it would never be asked AT
+    // ALL. isSatisfied closes this on hasRepeatVisitsOnRecord, so by the second
+    // visit the record shows 2+ visits and the intention is already satisfied —
+    // "not on a first conversation" and "never" are the same sentence for this
+    // one intention. That is exactly the trap of reading a suppression rule off
+    // a general principle instead of this intention's own closure.
+    //
+    // So: not while the flow is still asking its two questions, and available
+    // once the close has gone out and the guest is choosing to keep talking.
+    // Jaipal saw it arise naturally there in a device test.
+    onFirstConversation: 'after_warm_close',
     // Ruled verbatim by Jaipal, 2026-09-29. THIS IS THE ORIGINAL WORDING, ruled
     // back after a second one was tried and measured worse. Read the history
     // before rewording it, because the obvious fix has been tried.
@@ -439,7 +497,7 @@ const DEFINITIONS = {
     gate: { kind: 'conversational', defaultMinReplies: 3 },
     // TAC-567: not on a first visit. A suggestion made in that first sitting is
     // not something to follow up inside it.
-    allowedOnFirstConversation: false,
+    onFirstConversation: 'suppressed',
     promptLine:
       "You suggested something to this guest and haven't heard whether they tried it.",
     classifierDescription:
@@ -460,7 +518,7 @@ const DEFINITIONS = {
     // TAC-567: not on a first visit. "how'd you like it?" is the exact fourth
     // question the ruled flow deletes; the device transcript shows the agent
     // inventing it in the body on turn 2.
-    allowedOnFirstConversation: false,
+    onFirstConversation: 'suppressed',
     promptLine:
       'You know what this guest ordered, but not whether they liked it.',
     classifierDescription:
@@ -479,9 +537,16 @@ const DEFINITIONS = {
       defaultMinReplies: 3,
       firstMessageMinReplies: 0,
     },
-    // TAC-567: one of the three. A name is the one thing it is natural to ask
-    // for on a first hello, which is also why it alone waives the reply count.
-    allowedOnFirstConversation: true,
+    // TAC-567: one of the two asked unconditionally, and since TAC-568 the LAST
+    // one. A name is the one thing it is natural to ask for on a first hello,
+    // which is also why it alone waives the reply count.
+    //
+    // It is now also the first conversation's CLOSING MOMENT: the turn that
+    // stores a name is the turn the warm close rides on (closesFirstConversation
+    // in lib/agent/warm-close.ts). Nothing here enforces that — the close reads
+    // the guests row, not this definition — but a future change that stops this
+    // intention closing on a stored name would take the close with it.
+    onFirstConversation: 'allowed',
     // TAC-541 ruling 3. THE SHAPE IS PART OF THE LINE, and the generic
     // restraint paragraph is what made that necessary: "one short question on
     // the end is fine" is true of every intention here, and on a name it
@@ -518,7 +583,7 @@ const DEFINITIONS = {
       firstMessageMinReplies: 5,
     },
     // TAC-567: not on a first visit.
-    allowedOnFirstConversation: false,
+    onFirstConversation: 'suppressed',
     promptLine: "You don't know whether this guest lives or works nearby.",
     classifierDescription:
       "asks whether the guest lives or works nearby, or where they're coming from",
@@ -537,7 +602,7 @@ const DEFINITIONS = {
       firstMessageMinReplies: 8,
     },
     // TAC-567: not on a first visit.
-    allowedOnFirstConversation: false,
+    onFirstConversation: 'suppressed',
     // TIME OF DAY, never frequency (TAC-380 ruling 2). R23 bans stating or
     // implying how often a guest visits, and the real trip is the turn AFTER
     // the question — "since you're in most mornings" — when the model uses the
@@ -562,7 +627,7 @@ const DEFINITIONS = {
       firstMessageMinReplies: 11,
     },
     // TAC-567: not on a first visit.
-    allowedOnFirstConversation: false,
+    onFirstConversation: 'suppressed',
     promptLine: "You don't know what brings this guest in.",
     classifierDescription:
       'asks what brings the guest in, or what they come in for',

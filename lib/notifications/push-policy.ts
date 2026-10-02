@@ -58,9 +58,6 @@ export type PushDecision = 'push' | 'skip'
  * push-policy.test.ts is belt-and-braces, not the primary guard.
  */
 const PUSH_POLICY = {
-  // Voice fidelity in the [0.4, 0.6) band. Soft signal, still needs eyes.
-  [APPROVAL_TRIGGERS.FIDELITY_BELOW_AUTO_SEND_FLOOR]: 'push',
-
   // Model self-flagged a resource commitment.
   [APPROVAL_TRIGGERS.MODEL_FLAGGED]: 'push',
 

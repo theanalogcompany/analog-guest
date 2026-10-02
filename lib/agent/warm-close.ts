@@ -120,29 +120,49 @@ export function isWarmCloseTooLate(
 /**
  * Did our own last message ask the guest something?
  *
- * TWO SIGNALS, ORed, and the OR is the point. Either alone leaves a real gap:
+ * ONE SIGNAL, the sent body. TAC-568 removed a second arm that counted the
+ * intentions RENDERED into the draft's prompt, and the removal is a bug fix
+ * rather than a simplification — that arm could not fire correctly in either
+ * direction, for two structural reasons that only bite together:
  *
- *   looksLikeQuestion  catches the ordinary case. Our outbound copy always
- *                      carries a question mark (Le Mil's rule 25: "Never drop a
- *                      question mark"), so on this population its recall is
- *                      near-total.
- *   renderedIntentions catches TAC-554's getting-to-know-you question, which is
- *                      GUARANTEED to be the last message of the response when
- *                      anything rendered. A column, not a judgement about text.
+ *   `messages.rendered_intentions` is written on BUBBLE INDEX 0 ONLY
+ *   (schedule-and-send.ts), deliberately, so that counting non-null rows counts
+ *   RESPONSES rather than bubbles.
+ *
+ *   The candidate scan folds to the NEWEST row per guest, which is the LAST
+ *   bubble.
+ *
+ * So on any multi-bubble response — the only shape that ever carries a raised
+ * getting-to-know-you question, since TAC-554 guarantees the question its own
+ * final bubble — the count read here was always 0 and the arm never fired on
+ * the case it was written for. The only shape where it COULD fire was a
+ * single-bubble response, where index 0 is also the last row, and there a
+ * non-zero count means intentions RENDERED INTO THE PROMPT while the model
+ * raised nothing. That is the doubled-pause bug: twenty minutes of silence
+ * deferring to a question that was never asked.
+ *
+ * WHAT COVERS THE REAL CASE IS THE BODY, and it does so by construction. A
+ * raised question IS the last bubble (docs/decisions/0007), and the candidate's
+ * body IS the last bubble, so "the sent body asks one" and "intentionQuestion
+ * was non-empty" are the same test at this call site. Our outbound copy always
+ * carries a question mark (Le Mil's rule 25: "Never drop a question mark"), so
+ * looksLikeQuestion's recall on this population is near-total.
  *
  * THE RISK DIRECTION IS THE OPPOSITE OF TAC-484'S, and that is worth saying
- * plainly because it is the same function being reused. There, on a guest's
+ * plainly because it is the same predicate being reused. There, on a guest's
  * inbound, a false positive invented an outstanding question, so
  * looksLikeQuestion is deliberately precision-biased. Here a MISS is the
- * expensive direction: it closes over our own unanswered question. So this
- * wrapper widens rather than narrows, and the cost of a false positive is ten
- * extra minutes of silence.
+ * expensive direction: it closes over our own unanswered question. The cost of
+ * a false positive is ten extra minutes of silence, which is why the surviving
+ * arm is the permissive one.
+ *
+ * KNOWN LIMIT, stated rather than discovered: a question asked in a NON-FINAL
+ * bubble is not seen, because this reads the last bubble alone. That is not a
+ * regression — the removed arm read 0 on exactly those responses too — and
+ * folding the whole response by `generation_id` is the fix if it ever matters.
+ * Ruled out of scope 2026-09-30; the body arm covers the real case.
  */
-export function weAskedAQuestion(
-  lastOutboundBody: string,
-  renderedIntentionCount: number,
-): boolean {
-  if (renderedIntentionCount > 0) return true
+export function weAskedAQuestion(lastOutboundBody: string): boolean {
   return looksLikeQuestion(lastOutboundBody)
 }
 
@@ -192,12 +212,17 @@ export const NEVER_SPLIT_RNG = (): number => 1
 /**
  * Is THIS reply the one that closes the guest's first conversation?
  *
- * TAC-568. The goodbye path's whole decision, pure, so the boundary is drivable
- * without a database or a model.
+ * TAC-568. Both in-conversation paths' whole decision, pure, so every boundary
+ * is drivable without a database or a model.
  *
- * TWO SIGNALS, ANDed, and the AND is the point. They answer the two halves of
- * the ruling's own sentence ("the guest signed off AND the agent answered with a
- * goodbye"), and both already existed for TAC-560:
+ * TWO WAYS TO CLOSE, ORed at the top level, each gated by the same two
+ * preconditions. A first conversation ends either because the guest said
+ * goodbye, or because we just learned their name — and after the TAC-568
+ * follow-on the second is the ordinary case, not the exception.
+ *
+ * WAY ONE: THE GOODBYE. TWO SIGNALS, ANDed, and the AND is the point. They
+ * answer the two halves of the ruling's own sentence ("the guest signed off AND
+ * the agent answered with a goodbye"), and both already existed for TAC-560:
  *
  *   guestSignedOff   the inbound classified `acknowledgment`. This is the timer's
  *                    own belt (loadLastInboundCategory), read off the current
@@ -206,21 +231,61 @@ export const NEVER_SPLIT_RNG = (): number => 1
  *                    v1.78.0 from "this reply IS the warm close" to "this reply
  *                    says goodbye" — the old meaning dies with Le Mil's rule 15.
  *
+ * WAY TWO: THE NAME (TAC-568 follow-on, ruled 2026-09-30). Learning the guest's
+ * name IS the closing moment of a first conversation. The device test that
+ * prompted this ruling never reached a goodbye at all: the visit stalled on "jp,
+ * nice to meet you" because the one remaining question was optional and the
+ * model declined to raise it. So the close now rides on something that either
+ * happened or did not.
+ *
+ * `nameJustStored` IS A COLUMN WRITE, AND THAT IS NOT THE SAME AS A VERIFIED
+ * NAME. Stated precisely because the first version of this comment claimed the
+ * arm "never asks the model anything", and that was false.
+ *
+ * The caller builds it from updateGuestContext's `identityColumnsChanged` — the
+ * `first_name` column actually written on this turn — ANDed with the guest
+ * having had no name before it. What that buys is real but narrow: the write
+ * happened, and it happened once. WHAT TO WRITE still came from the model, via
+ * `contextUpdate.structured.guest_details.first_name` (lib/guests/context.ts),
+ * with nothing between the model and this marker checking that the guest said a
+ * name at all. So a fabrication spends the guest's one close, permanently, on
+ * what is now the ordinary path — the same failure class TAC-350 records (8 of 8
+ * fabrications self-reported clean) and the reason "way one" is ANDed with
+ * something structural.
+ *
+ * `nameOnRecordBefore` BOUNDS THE DAMAGE RATHER THAN PREVENTING IT: at most one
+ * wrong close per guest, never a repeat. That is the honest claim.
+ *
+ * Verifying the name against the inbound body was proposed and deliberately NOT
+ * taken (2026-09-30) — it is a design change with its own cost, since the
+ * extractor normalises nicknames and casing. TAC-569 carries it.
+ *
+ * Requiring "no name before" is what makes it LEARNING a name rather than
+ * re-asserting one. It is CLOSE TO learn_name's own isSatisfied (`hasFirstName`)
+ * but not identical: that one trim-checks and this one does not, so a blank
+ * `first_name` fires the close while leaving the intention open. Also TAC-569.
+ *
  * THE RISK DIRECTION IS THE OPPOSITE OF weAskedAQuestion'S, which is why this
  * narrows where that one widens. A FALSE POSITIVE is the expensive direction
  * here: it spends the guest's one close, for ever, on a turn that was not
- * closing anything. A false negative costs nothing at all, because the pause
- * timer is still running and sends the same text ten minutes later. So the
- * cheap mistake is missing, and the AND buys that.
+ * closing anything.
+ *
+ * A false negative is the cheap mistake FOR THE POPULATION THE TIMER SERVES —
+ * and only for that one. The pause timer gates on `created_via = 'qr_scan'` and
+ * an Instagram identifier (warm-close-timeout.ts), while this predicate
+ * deliberately checks neither, so an SMS or non-scan guest has NO backup: a miss
+ * here is permanent for them. The narrowing above is still right, because a
+ * wrong close is worse than a missing one either way, but "the timer will catch
+ * it" is true of Instagram scan guests and false of everyone else. TAC-569.
  *
  * Self-report is not trusted alone, on this repo's record (TAC-350: 8 of 8
  * fabrications self-reported clean) — which is the second reason it is ANDed
  * with something structural rather than read on its own.
  *
  * NO qr_scan CHECK AND NO CHANNEL CHECK, unlike the timer. Ruling 5: the pause
- * path stays scan-only, the goodbye path is any first conversation. The close
- * happens on SMS too, and the marker has always meant "this guest has been
- * closed", not "the timer ran".
+ * path stays scan-only, the in-conversation paths are any first conversation.
+ * The close happens on SMS too, and the marker has always meant "this guest has
+ * been closed", not "the timer ran".
  *
  * `warmCloseText` empty means the venue has no close configured, and no path
  * sends one. Checked here rather than at dispatch so the claim is never taken
@@ -229,11 +294,18 @@ export const NEVER_SPLIT_RNG = (): number => 1
 export function closesFirstConversation(input: {
   guestSignedOff: boolean
   agentSaidGoodbye: boolean
+  /**
+   * This turn wrote `guests.first_name` for a guest who had none. Built from
+   * updateGuestContext's identityColumnsChanged, never from the model's
+   * proposed contextUpdate — see the note above.
+   */
+  nameJustStored: boolean
   isFirstConversation: boolean
   warmCloseText: string
 }): boolean {
   if (input.warmCloseText.trim() === '') return false
   if (!input.isFirstConversation) return false
+  if (input.nameJustStored) return true
   return input.guestSignedOff && input.agentSaidGoodbye
 }
 

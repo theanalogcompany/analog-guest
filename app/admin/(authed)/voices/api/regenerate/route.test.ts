@@ -35,14 +35,12 @@ beforeEach(() => {
 })
 
 describe('POST /admin/voices/api/regenerate', () => {
-  it('200 + body+fidelity on happy path', async () => {
+  it('200 + body on happy path', async () => {
     vi.mocked(regenerateWithCritique).mockResolvedValue({
       ok: true,
       data: {
         body: 'yeah. oat is on.',
-        voiceFidelity: 0.85,
         attempts: 1,
-        attemptScores: [0.85],
         generatedAt: new Date('2026-05-08T10:00:00.000Z'),
         knowledgeGap: false,
         selfTalkViolationPersisted: false,
@@ -67,7 +65,6 @@ describe('POST /admin/voices/api/regenerate', () => {
     expect(json).toMatchObject({
       success: true,
       body: 'yeah. oat is on.',
-      voiceFidelity: 0.85,
       attempts: 1,
       knowledgeGap: false,
     })
@@ -85,9 +82,7 @@ describe('POST /admin/voices/api/regenerate', () => {
       ok: true,
       data: {
         body: 'since your friend came in, something special is on us',
-        voiceFidelity: 0.85,
         attempts: 1,
-        attemptScores: [0.85],
         generatedAt: new Date('2026-05-08T10:00:00.000Z'),
         knowledgeGap: false,
         selfTalkViolationPersisted: false,

@@ -18,16 +18,30 @@
 // is the expensive defect, and a printed PASS is exactly such a claim.
 
 /**
- * The three intentions a first conversation may raise (TAC-567). Kept as a
- * literal transcribed from the ruling rather than read off
- * allowedOnFirstConversation, because a scorer that derives its expectation from
- * the code under test can only confirm that code equals itself.
+ * The intentions a first conversation may raise BEFORE the warm close
+ * (TAC-567, amended by TAC-568). Kept as a literal transcribed from the ruling
+ * rather than read off `onFirstConversation`, because a scorer that derives its
+ * expectation from the code under test can only confirm that code equals itself.
+ *
+ * TAC-568 MOVED are_they_new_here OUT OF THIS SET, and it is named here rather
+ * than silently deleted: a run scored before 2026-09-30 counted it as allowed,
+ * so a figure carried across that date is comparing two different bars.
+ *
+ * WHY THE PRE-CLOSE SET IS THE RIGHT BAR HERE, rather than a limitation being
+ * papered over: `are_they_new_here` is `'after_warm_close'`, so it IS allowed on
+ * a first conversation once `guests.warm_close_sent_at` is set. Both harnesses
+ * that feed this scorer pass `warmCloseSent: false` — they model the opening
+ * flow, which is the thing this measurement is about — so no turn they generate
+ * can legitimately raise it. That input is pinned by a source-level guard in
+ * this file's test, because it is what makes this constant correct rather than
+ * merely conservative.
+ *
+ * KNOWN LIMIT, stated rather than discovered: point this scorer at a transcript
+ * that continues PAST the close and it will report are_they_new_here as
+ * off-target when the ruling now allows it. Teaching it the close is a
+ * follow-up, not tonight's work.
  */
-export const ALLOWED_KEYS = [
-  'understand_order',
-  'learn_name',
-  'are_they_new_here',
-] as const
+export const ALLOWED_KEYS = ['understand_order', 'learn_name'] as const
 
 export type AllowedKey = (typeof ALLOWED_KEYS)[number]
 
@@ -206,7 +220,7 @@ export interface TurnVerdict {
   questionCount: number
   /** Bar 2. */
   twoQuestions: boolean
-  /** Bar 1: attributed keys outside the ruled three. */
+  /** Bar 1: attributed keys outside the ruled two. */
   offTargetKeys: string[]
   /**
    * The BODY asked a question and the full ballot attributed it to nothing at all.
@@ -252,7 +266,7 @@ export interface ConversationVerdict {
   questionCount: number
   /** Bar 2: how many turns carried more than one question. */
   twoQuestionTurns: number
-  /** Bar 1: attributed keys outside the ruled three, deduped. */
+  /** Bar 1: attributed keys outside the ruled two, deduped. */
   offTargetKeys: string[]
   /** Every key either judge attributed a question to, deduped. Feeds the floor. */
   askedKeys: string[]
@@ -327,7 +341,7 @@ export function scoreConversation(
  *
  * THE ORDER QUESTION IS THE RIGHT THING TO FLOOR. The opener scripts it outright,
  * so it is the one question a first-touch turn should essentially always carry.
- * The other two are deliberately NOT floored: the restraint paragraph's default is
+ * The other is deliberately NOT floored: the restraint paragraph's default is
  * not to ask, and 3 of 15 conversations legitimately ended with only the order
  * question when the guest went quiet. Flooring those would fail the arm for
  * behaviour the ruling permits.

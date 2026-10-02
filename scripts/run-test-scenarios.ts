@@ -499,10 +499,9 @@ async function main(): Promise<void> {
       route: g.result.route ?? '',
       primaryTrigger: g.result.primaryTrigger ?? '',
       allTriggers: (g.result.triggers ?? []).join(', '),
-      voiceFidelity:
-        g.result.voiceFidelity !== null
-          ? g.result.voiceFidelity.toFixed(2)
-          : '',
+      // Column survives the v1.80.0 schema diet (locked sheet shape); the
+      // score itself no longer exists.
+      voiceFidelity: '',
       replyBody: g.result.replyBody ?? '',
       knowledgeVerdict: g.llmGrade.knowledgeVerdict,
       knowledgeReason: g.llmGrade.knowledgeReason,
@@ -651,8 +650,6 @@ function printReport(input: {
       console.log(
         '  (production would BLANK this body before persisting — TAC-309 knowledge_gap)',
       )
-    if (r.voiceFidelity !== null)
-      console.log(`  voice_fidelity: ${r.voiceFidelity.toFixed(2)}`)
     if (r.replyBody !== null) console.log(`  reply: ${r.replyBody}`)
     if (r.errorMessage !== null) console.log(`  error: ${r.errorMessage}`)
     if (r.expectedRoute !== 'unknown')

@@ -355,6 +355,14 @@ async function main(): Promise<void> {
     const prompted: PromptedIntentionRow[] = []
     const turnRecords: TurnRecord[] = []
     let controlEverFiltered = false
+    // TAC-568: THE TREATMENT ARM'S INTEGRITY CHECK, and it exists because its
+    // absence already cost a run. The control arm has always had one
+    // (controlEverFiltered): if its filter never removed anything, the arm did
+    // not differ from the treatment and the conversation says nothing. The
+    // treatment arm had none, so a configuration that made the target
+    // structurally impossible read as "the model never raised it" rather than
+    // as a broken harness.
+    let targetEverOpen = false
 
     const plan: {
       stage: TurnStage
@@ -430,13 +438,30 @@ async function main(): Promise<void> {
         inboundHistoryFrom: new Date(startedAt.getTime() - 14 * MS_PER_DAY),
         // TAC-567: true, because every conversation this harness generates IS a
         // first one (a fresh qr_scan guest, four turns inside one sitting). That
-        // is the production value, and it now suppresses the five intentions the
-        // 2026-09-30 ruling holds back on a first visit. are_they_new_here, this
-        // harness's target, is one of the three still allowed, so the metric it
-        // measures is unchanged - but the off-target denominator is, because
-        // are_they_local and their_rhythm can no longer appear in it. A re-run
-        // after this ticket is not comparable to the runs recorded on TAC-558.
+        // is the production value, and it suppresses the intentions the
+        // 2026-09-30 ruling holds back on a first visit - so the off-target
+        // denominator changed, because are_they_local and their_rhythm can no
+        // longer appear in it. A re-run after that ticket is not comparable to
+        // the runs recorded on TAC-558.
         isFirstConversation: true,
+        // TAC-568, and THIS PAIRING IS WHAT MAKES THE HARNESS MEASURE ANYTHING.
+        //
+        // are_they_new_here is TARGET_KEY: the whole point of this harness. Its
+        // policy is 'after_warm_close', so `isFirstConversation: true` with
+        // `warmCloseSent: false` suppresses it in BOTH the arming loop and the
+        // open-set filter, and `derived.open` can never contain the target on
+        // any turn, in either arm. The harness would then report a clean zero
+        // for the treatment arm - indistinguishable from a real voice
+        // regression, which is the worst shape a measurement can take.
+        //
+        // `true` models the turn the ruling actually made the question
+        // available on: the guest kept talking after the close. That is the
+        // only first-conversation state in which production can raise it, so it
+        // is the only one worth measuring.
+        //
+        // The integrity guard below is the belt: if the target is never open,
+        // the run is invalid rather than zero.
+        warmCloseSent: true,
       })
 
       const derivedOpenKeys = derived.open.map((o) => o.key)
@@ -448,6 +473,9 @@ async function main(): Promise<void> {
       const filteredOutByControl =
         arm === 'control' && derivedOpenKeys.includes(TARGET_KEY)
       if (filteredOutByControl) controlEverFiltered = true
+      // Recorded BEFORE the control arm's edit, so it says whether the
+      // derivation produced the target at all - not whether this arm kept it.
+      if (derivedOpenKeys.includes(TARGET_KEY)) targetEverOpen = true
 
       const ctx: RuntimeContext = {
         ...baseCtx,
@@ -707,6 +735,13 @@ async function main(): Promise<void> {
     if (arm === 'control' && !controlEverFiltered) {
       row.verdict = { ...row.verdict, invalid: true }
       row.invalidReason = 'control filter removed nothing'
+    }
+    // TAC-568: the treatment arm's equivalent. A conversation in which the
+    // target was never even OPEN cannot report anything about whether the model
+    // raises it, so it must not land in the denominator as a zero.
+    if (arm === 'after' && !targetEverOpen) {
+      row.verdict = { ...row.verdict, invalid: true }
+      row.invalidReason = 'target never open'
     }
 
     rows.push(row)

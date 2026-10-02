@@ -278,11 +278,9 @@ vi.mock('@/lib/analytics/posthog', () => ({
   captureDashViolationPersisted: vi.fn(),
   captureDemoBypassedApprovalGate: vi.fn(),
   captureRegenerationTriggered: vi.fn(),
-  captureVoiceFidelityLow: vi.fn(),
   captureGenerationTruncated: vi.fn(),
   CLASSIFICATION_CONFIDENCE_LOW_THRESHOLD: 0.7,
   CLASSIFICATION_CONFIDENCE_REROUTE_THRESHOLD: 0.3,
-  VOICE_FIDELITY_LOW_THRESHOLD: 0.5,
 }))
 vi.mock('@/lib/notifications/send', () => ({
   sendDraftFlaggedPush: (...a: unknown[]) => sendDraftFlaggedPushMock(...a),
@@ -1677,35 +1675,6 @@ describe('TAC-526 — the winner failing gets exactly one more attempt', () => {
     })
     await new Promise((r) => setTimeout(r, 30))
     expect(buildRuntimeContextMock).toHaveBeenCalledTimes(2)
-  })
-
-  it('retries after the turn REFUSED: the guest got nothing either way', async () => {
-    const { deps } = makeDeps()
-    // Self-limiting for the same reason `failFirst` is: an unconditional
-    // refusal makes the unbounded mutant crash the worker instead of failing.
-    let refusals = 0
-    generateStageMock.mockImplementation(async () => {
-      refusals += 1
-      if (refusals > 6) return { status: 'success', result: successResult() }
-      return { status: 'refused', reason: 'low_fidelity', attemptScores: [0.2] }
-    })
-    applyApprovalPolicyStageMock.mockResolvedValue({ action: 'send' })
-    scheduleAndSendMock.mockResolvedValue({
-      outboundMessageId: 'sent-1',
-      providerMessageId: 'p',
-    })
-
-    const result = await handleInbound(MSG_1, {
-      coalescing: true,
-      coalesceDeps: deps,
-    })
-
-    expect(result).toMatchObject({ status: 'refused' })
-    await vi.waitFor(() => {
-      expect(refusals).toBe(2)
-    })
-    await new Promise((r) => setTimeout(r, 30))
-    expect(refusals).toBe(2)
   })
 
   /**

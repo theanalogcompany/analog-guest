@@ -65,9 +65,7 @@ export async function POST(request: Request): Promise<NextResponse> {
   return NextResponse.json({
     success: true,
     body: result.data.body,
-    voiceFidelity: result.data.voiceFidelity,
     attempts: result.data.attempts,
-    attemptScores: result.data.attemptScores,
     generatedAt: result.data.generatedAt.toISOString(),
     // TAC-350: advisory grounding signals — the Voices playground can flag
     // these to the operator, but nothing on this path gates or blanks

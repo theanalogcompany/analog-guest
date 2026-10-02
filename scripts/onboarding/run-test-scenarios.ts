@@ -367,17 +367,13 @@ function buildEngagementEventsForState(
 // ---------------------------------------------------------------------------
 
 /**
- * Terminal outcome of one scenario run. 'refused' and 'failed' are both
- * RESULTS, not runner errors — a generateStage voice-fidelity refusal is
- * exactly the kind of thing this harness exists to surface, and a real
- * production stage throw (e.g. retrieveCorpusStage's insufficient-corpus
- * gate) is faithfully-reproduced production behavior, not a bug in this
- * script. Per the Stage 2 authorization: "A generateStage refusal (voice
- * fidelity below the floor) is recorded as its own outcome and graded, not
- * treated as a runner error."
+ * Terminal outcome of one scenario run. 'failed' is a RESULT, not a runner
+ * error — a real production stage throw (e.g. retrieveCorpusStage's
+ * insufficient-corpus gate) is faithfully-reproduced production behavior,
+ * not a bug in this script. ('refused' was a member until the v1.80.0
+ * schema diet retired generateStage's voice-fidelity refusal.)
  */
-export type ScenarioOutcome =
-  'sent' | 'queued' | 'dropped' | 'refused' | 'failed'
+export type ScenarioOutcome = 'sent' | 'queued' | 'dropped' | 'failed'
 
 export interface RetrievedKnowledgeChunk {
   text: string
@@ -413,7 +409,6 @@ export interface ScenarioResult {
   expectedBehavior: string
   outcome: ScenarioOutcome
   replyBody: string | null
-  voiceFidelity: number | null
   route: 'send' | 'queue' | 'drop' | null
   triggers: string[] | null
   primaryTrigger: string | null
@@ -468,7 +463,6 @@ export async function runScenario(
   }
   const empty = {
     replyBody: null,
-    voiceFidelity: null,
     route: null,
     triggers: null,
     primaryTrigger: null,
@@ -514,7 +508,6 @@ export async function runScenario(
         ...base,
         outcome: 'sent',
         replyBody: result.body,
-        voiceFidelity: result.voiceFidelity,
         route: 'send',
         triggers: [],
         primaryTrigger: CRISIS_SAFETY_REVIEW_REASON,
@@ -551,17 +544,6 @@ export async function runScenario(
         ...empty,
         outcome: 'failed',
         errorMessage: outcome.error,
-        elapsedMs,
-        retrievedVoiceExamples,
-        retrievedKnowledge,
-      }
-    }
-    if (outcome.status === 'refused') {
-      return {
-        ...base,
-        ...empty,
-        outcome: 'refused',
-        voiceFidelity: outcome.finalScore,
         elapsedMs,
         retrievedVoiceExamples,
         retrievedKnowledge,
@@ -606,7 +588,6 @@ export async function runScenario(
         ...base,
         outcome: 'sent',
         replyBody: generated.body,
-        voiceFidelity: generated.voiceFidelity,
         route: 'send',
         triggers: [],
         primaryTrigger: decision.reason ?? null,
@@ -622,7 +603,6 @@ export async function runScenario(
         ...base,
         outcome: 'queued',
         replyBody: generated.body,
-        voiceFidelity: generated.voiceFidelity,
         route: 'queue',
         triggers: decision.triggers,
         primaryTrigger: decision.primaryTrigger,
@@ -648,7 +628,6 @@ export async function runScenario(
         ...base,
         outcome: 'dropped',
         replyBody: generated.body,
-        voiceFidelity: generated.voiceFidelity,
         route: 'drop',
         triggers: [],
         primaryTrigger: 'silenced_no_answer_needed',
@@ -664,7 +643,6 @@ export async function runScenario(
       ...base,
       outcome: 'dropped',
       replyBody: generated.body,
-      voiceFidelity: generated.voiceFidelity,
       route: 'drop',
       triggers: decision.triggers,
       primaryTrigger: decision.reason,

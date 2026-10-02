@@ -230,21 +230,12 @@ async function main(): Promise<void> {
           category: classification.category,
           status: generated.status,
           body,
-          voiceFidelity:
-            generated.status === 'success'
-              ? generated.result.voiceFidelity
-              : null,
           // The first run could not say why `regeneration_triggered` fired so
-          // often, because it recorded neither of these. attempts > 1 IS that
-          // event; attemptScores shows whether the first draft was under the
-          // 0.7 regen floor or whether something else (a dash, self-talk)
-          // forced the retry.
+          // often, because it recorded attempts nowhere. attempts > 1 IS that
+          // event; since the v1.80.0 schema diet a retry only ever means a
+          // dash, self-talk or unverified-link violation.
           attempts:
             generated.status === 'success' ? generated.result.attempts : null,
-          attemptScores:
-            generated.status === 'success'
-              ? generated.result.attemptScores
-              : null,
           phoneClaims: matches.filter((m) => m.kind === 'phone_claim'),
           instagramIdioms: matches.filter((m) => m.kind === 'instagram_idiom'),
         })

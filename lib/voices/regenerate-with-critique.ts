@@ -64,9 +64,7 @@ export interface RegenerateWithCritiqueInput {
 
 export interface RegenerateWithCritiqueResult {
   body: string
-  voiceFidelity: number
   attempts: number
-  attemptScores: number[]
   generatedAt: Date
   // TAC-350: the model's own self-report, surfaced here for the first time
   // (generateMessage already computed it; this path just wasn't reading it).
@@ -490,9 +488,7 @@ export async function regenerateWithCritique(
     ok: true,
     data: {
       body: gen.data.body,
-      voiceFidelity: gen.data.voiceFidelity,
       attempts: gen.data.attempts,
-      attemptScores: gen.data.attemptScores,
       generatedAt: new Date(),
       knowledgeGap: gen.data.knowledgeGap,
       selfTalkViolationPersisted: gen.data.selfTalkViolationPersisted,

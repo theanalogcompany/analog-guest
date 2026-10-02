@@ -12,10 +12,8 @@ import {
   captureProsePromiseCheckUnavailable,
   captureRegenerationTriggered,
   captureUnverifiedUrlHeld,
-  captureVoiceFidelityLow,
   CLASSIFICATION_CONFIDENCE_LOW_THRESHOLD,
   CLASSIFICATION_CONFIDENCE_REROUTE_THRESHOLD,
-  VOICE_FIDELITY_LOW_THRESHOLD,
   type CheckDisposition,
 } from '@/lib/analytics/posthog'
 import {
@@ -107,12 +105,14 @@ import type { MessageCategory } from '@/lib/ai'
 // (lib/rag/voice-pack.ts), not a similarity retrieval, so there is no match
 // to score. The inbound fail-closed direction survives as the empty-pack
 // throw in retrieveCorpusStage below.
-export const SEND_FIDELITY_FLOOR = 0.4
-// TAC-212: voice fidelity below this queues the draft for operator review;
-// above auto-sends (subject to the rest of applyApprovalPolicyStage).
-// Sits above SEND_FIDELITY_FLOOR — < 0.4 still refuses, 0.4..0.6 queues,
-// >= 0.6 evaluates the resource-commitment + sticky-pending triggers.
-export const AUTO_SEND_FIDELITY_FLOOR = 0.6
+//
+// SEND_FIDELITY_FLOOR (0.4) and AUTO_SEND_FIDELITY_FLOOR (0.6) also lived
+// here until the v1.80.0 schema diet. Both gated on the model's voiceFidelity
+// self-score, and neither ever fired in production: across 110 scored sends
+// the minimum was 0.72, the refuse branch never ran, and the
+// fidelity_below_auto_send_floor trigger queued zero drafts. The score and
+// both floors were removed together ("distrust any gate whose true-positive
+// history you cannot produce").
 export const KNOWLEDGE_RETRIEVE_LIMIT = 4
 
 /**
@@ -202,7 +202,6 @@ export const KNOWLEDGE_GAP_WINDOW_MS = 5 * 60 * 1000
  * literal strings without copy-paste drift.
  */
 export const APPROVAL_TRIGGERS = {
-  FIDELITY_BELOW_AUTO_SEND_FLOOR: 'fidelity_below_auto_send_floor',
   MODEL_FLAGGED: 'model_flagged',
   COMP_REGEX_BACKSTOP: 'comp_regex_backstop',
   PREVIOUS_PENDING_HELD: 'previous_pending_held',
@@ -560,11 +559,11 @@ export const PRIMARY_TRIGGER_PRIORITY = [
   // promise still fires a push rather than being treated as a silent re-draft.
   APPROVAL_TRIGGERS.COMPLAINT_COMMITMENT_FLOOR,
   APPROVAL_TRIGGERS.PREVIOUS_PENDING_HELD,
-  APPROVAL_TRIGGERS.FIDELITY_BELOW_AUTO_SEND_FLOOR,
-  // TAC-401: it reports an ABSENCE of information about the reply, so any
-  // trigger naming something concrete is the more useful operator label, and
-  // it still ranks above the two venue-wide policy signals because it is at least
-  // specific to this message.
+  // TAC-401: ranked below every trigger that names something about this draft.
+  // It reports an ABSENCE of information about the reply ("we could not check"),
+  // so any trigger naming something concrete is the more useful operator label,
+  // and it still ranks above the two venue-wide policy signals because it is at
+  // least specific to this message.
   APPROVAL_TRIGGERS.PROSE_PROMISE_CHECK_FAILED,
   // TAC-513: beside its sibling, and low for the same reason
   // the other check-failed trigger: it reports an ABSENCE of signal, so any
@@ -585,32 +584,25 @@ export const PRIMARY_TRIGGER_PRIORITY = [
 /**
  * TAC-309: will a knowledge-gap emission on THIS run actually be queued?
  *
- * The single source of truth for the knowledge-gap safety property, because
- * two places need it and they must not drift:
+ * The single source of truth for the knowledge-gap safety property, consumed
+ * by `applyApprovalPolicyStage` to decide whether the KNOWLEDGE_GAP trigger
+ * fires (and therefore whether the body is blanked and a clock armed).
  *
- *   1. `applyApprovalPolicyStage` — whether the KNOWLEDGE_GAP trigger fires
- *      (and therefore whether the body is blanked and a clock armed).
- *   2. `generateStage` — whether the run is exempt from SEND_FIDELITY_FLOOR.
- *
- * (2) is only safe because of (1). The exemption's whole justification is
- * "nothing reaches the guest on this turn, and the scored body is discarded
- * anyway." That holds ONLY when the turn is genuinely queued. Keying the
- * exemption on `knowledgeGap` alone broke it in two directions:
+ * Not `knowledgeGap` alone, in two directions it would get wrong:
  *
  *   - OUTBOUND runs. The trigger requires `currentMessage !== null`, but a
  *     manual followup (Command Center "Follow Up") skips the approval gate
- *     entirely and dispatches. A model emitting knowledgeGap=true at
- *     voiceFidelity 0.2 would have shipped that text to a real guest,
- *     unblanked. Reachable, not theoretical: the `## Unanswered question`
- *     block renders on followups too, and its `acknowledged` copy explicitly
- *     tells the model to set knowledgeGap again.
+ *     entirely and dispatches — a knowledgeGap=true emission there would
+ *     reach a real guest unblanked. Reachable, not theoretical: the
+ *     `## Unanswered question` block renders on followups too, and its
+ *     `acknowledged` copy explicitly tells the model to set knowledgeGap
+ *     again.
  *   - DEMO guests. TAC-284's bypass returns `action:'send'` unconditionally,
- *     so the gate's queue decision never happens. The fidelity floor used to
- *     be the last thing standing there.
+ *     so the gate's queue decision never happens.
  *
- * Same shape as `willBeReviewed` in buildAiRuntime, and the same reasoning:
- * a relaxation is only safe when something downstream is guaranteed to catch
- * it.
+ * (Until the v1.80.0 schema diet this predicate had a second consumer:
+ * generateStage used it to exempt queued turns from SEND_FIDELITY_FLOOR.
+ * The floor is gone; the queue/blank/clock decision remains.)
  */
 export function knowledgeGapWillQueue(
   ctx: Pick<RuntimeContext, 'currentMessage' | 'guest'>,
@@ -908,21 +900,17 @@ export async function retrieveKnowledgeWithContextStage(
 
 export type GenerateOutcome =
   | { status: 'success'; result: GenerateMessageResult }
-  | { status: 'refused'; attemptScores: number[]; finalScore: number }
   | { status: 'failed'; error: string; errorCode?: string }
 
 /**
- * Internal: call lib/ai's generateMessage and apply the orchestrator's
- * send-floor.
+ * Internal: call lib/ai's generateMessage and emit the generation-stage
+ * observability events.
  *
- * lib/ai's internal regeneration loop uses 0.7 as its loop-exit threshold
- * (it tries up to 3 times to cross 0.7). This stage applies a separate
- * orchestrator-level rule on the final returned voiceFidelity:
- *   < SEND_FIDELITY_FLOOR (0.4) → 'refused' (don't send; alert)
- *   >= 0.4                       → 'success' (send, even if below 0.7)
- *
- * The two thresholds answer different questions: 0.7 is "good enough to stop
- * trying"; 0.4 is "good enough to send to a human".
+ * Through v1.79.0 this stage also refused drafts whose voiceFidelity
+ * self-score fell below SEND_FIDELITY_FLOOR (0.4). The v1.80.0 schema diet
+ * removed the score and the floor with it: the refuse branch never ran in
+ * production (110 scored sends, minimum 0.72), so 'refused' left
+ * GenerateOutcome in the same change.
  */
 export async function generateStage(
   ctx: RuntimeContext,
@@ -971,29 +959,12 @@ export async function generateStage(
   })
   if (!r.ok) return { status: 'failed', error: r.error, errorCode: r.errorCode }
 
-  // Observability events: emit before the floor-check return so they fire
-  // for both refused (< 0.4) and below-0.5-but-above-0.4 sends.
-  if (r.data.voiceFidelity < VOICE_FIDELITY_LOW_THRESHOLD) {
-    await captureVoiceFidelityLow({
-      agentRunId: ctx.agentRunId,
-      venueId: ctx.venue.id,
-      guestId: ctx.guest.id,
-      voiceFidelity: r.data.voiceFidelity,
-      attempts: r.data.attempts,
-      attemptScores: r.data.attemptScores,
-      category,
-      inboundBody: ctx.currentMessage?.body ?? null,
-      generatedBody: r.data.body,
-    })
-  }
   if (r.data.attempts > 1) {
     await captureRegenerationTriggered({
       agentRunId: ctx.agentRunId,
       venueId: ctx.venue.id,
       guestId: ctx.guest.id,
       attempts: r.data.attempts,
-      attemptScores: r.data.attemptScores,
-      finalFidelity: r.data.voiceFidelity,
       inboundBody: ctx.currentMessage?.body ?? null,
       finalGeneratedBody: r.data.body,
     })
@@ -1009,8 +980,6 @@ export async function generateStage(
       guestId: ctx.guest.id,
       category,
       attempts: r.data.attempts,
-      attemptScores: r.data.attemptScores,
-      finalFidelity: r.data.voiceFidelity,
       inboundBody: ctx.currentMessage?.body ?? null,
       finalGeneratedBody: r.data.body,
     })
@@ -1030,35 +999,6 @@ export async function generateStage(
     })
   }
 
-  // TAC-309: a knowledge-gap turn is exempt from the send floor.
-  //
-  // The floor exists to stop a poorly-voiced message reaching a guest. On a
-  // knowledge-gap turn NOTHING reaches the guest — the draft is queued, and
-  // TAC-309 discards its body before persisting, so the text being scored is
-  // thrown away. Refusing here would gate CARD CREATION on the voice quality
-  // of a body that never exists, and the result is silence: the refused
-  // branch returns without a card, so the guest gets nothing and no operator
-  // learns they asked. That is the third silent-drop door, alongside the
-  // generation crash this ticket also closes.
-  //
-  // The holding message stays fidelity-gated (handle-holding-message.ts runs
-  // the real gates). That one does reach the guest, and on this path it is
-  // the only text that does.
-  //
-  // knowledgeGapWillQueue, not `knowledgeGap` alone: the exemption is only
-  // sound when the turn is genuinely queued. Manual followups skip the gate
-  // and demo guests bypass it, and in both cases the body WOULD reach a
-  // guest — unblanked, since blanking is also the gate's job.
-  if (
-    r.data.voiceFidelity < SEND_FIDELITY_FLOOR &&
-    !knowledgeGapWillQueue(ctx, r.data.knowledgeGap)
-  ) {
-    return {
-      status: 'refused',
-      attemptScores: r.data.attemptScores,
-      finalScore: r.data.voiceFidelity,
-    }
-  }
   return { status: 'success', result: r.data }
 }
 
@@ -1878,11 +1818,9 @@ export async function applyApprovalPolicyStage(
 ): Promise<ApprovalDecision> {
   const triggers: string[] = []
 
-  // Trigger 1: voice fidelity in the 0.4–0.6 band → queue.
-  // (< 0.4 already refused by generateStage upstream; >= 0.6 passes here.)
-  if (generation.voiceFidelity < AUTO_SEND_FIDELITY_FLOOR) {
-    triggers.push(APPROVAL_TRIGGERS.FIDELITY_BELOW_AUTO_SEND_FLOOR)
-  }
+  // (Trigger 1 was the 0.4–0.6 voice-fidelity band until the v1.80.0 schema
+  // diet; it queued zero drafts in its lifetime. The numbering below is
+  // historical and kept so the trigger comments stay greppable by ticket.)
 
   // Trigger 2: model self-flagged a resource commitment via the structured
   // output's requiresOperatorApproval field.
@@ -2382,7 +2320,6 @@ export async function applyApprovalPolicyStage(
         venueId: ctx.venue.id,
         guestId: ctx.guest.id,
         wouldHaveQueuedTriggers: triggers,
-        voiceFidelity: generation.voiceFidelity,
         generatedBody: generation.body,
         // TAC-307: distinguishes a hold this venue actually chose from the
         // fleet-wide comp_complaint code default. Drives the Slack relay —

@@ -1780,7 +1780,8 @@ import {
 //   THE OTHER TWO HALVES ARE NOT PROMPT TEXT, deliberately, and this entry says
 //   so because the wording alone reads like the whole fix. Eligibility is
 //   suppressed in lib/agent/intentions (allowedOnFirstConversation on the
-//   definition, applied twice in deriveOpenIntentions), and the never-two-
+//   definition, renamed onFirstConversation and widened to three states by
+//   v1.79.0, applied twice in deriveOpenIntentions), and the never-two-
 //   questions rule is a code gate in composeReplyWithIntention that drops the
 //   bubble when the reply already asked something. Prompt wording could not
 //   reach either: the TAC-554 lesson, one layer on.
@@ -1863,6 +1864,32 @@ import {
 // signed off and forbids naming anything new, both false when the guest sent
 // nothing. Handing the model a false premise as fact is the TAC-484 / TAC-502
 // failure class. See lib/ai/prompts/categories/warm-close.ts.
+// v1.79.0 (TAC-568 follow-on): NO TEMPLATE TEXT CHANGED, and the bump is
+//   deliberate anyway. `are_they_new_here` is no longer raisable from the start
+//   of a first conversation (`onFirstConversation: 'after_warm_close'` on its
+//   definition), so the "## What you're hoping to get to" block renders one
+//   fewer line on a first conversation until the warm close has gone out. The
+//   composed prompt a first visit sees is therefore not the same document,
+//   which is what this constant versions — it is not a version of this FILE.
+//
+//   DEFERRED, NOT REMOVED, and the distinction is the whole amendment. The
+//   first version of this ruling suppressed the intention outright; it closes on
+//   hasRepeatVisitsOnRecord, so by the second visit it is already satisfied and
+//   "not on a first conversation" would have meant "never".
+//
+//   RECORDED BECAUSE THE NEXT READER WILL LOOK FOR A DIFF HERE AND FIND NONE.
+//   A bump with no textual change looks like a mistake; the alternative, not
+//   bumping, silently pools two different first-visit prompts under one version
+//   in every trace and every measurement run. The measurement harnesses group
+//   by this string, so leaving it would make the before and after of this
+//   ruling indistinguishable in exactly the runs that exist to tell them apart.
+//
+//   FIRST_CONVERSATION_RESTRAINT is untouched and still says "the only question
+//   this turn is the one listed above" — true whether two lines are listed or
+//   three, which is why it names no count and needed no edit. That is also what
+//   makes the post-close turn safe: one more line renders, and the restraint
+//   still allows exactly one question.
+//
 // v1.78.0 (TAC-568): the # Conversation close self-report block changes MEANING,
 // and the `## Closing this conversation` user-prompt block and the warm-close
 // category instructions are DELETED. No voice rule changes.
@@ -2040,6 +2067,26 @@ import {
 // exist, which is why Jaipal ruled the run be repeated against the rebased
 // prompt rather than the rulings applied on top of it.
 //
+// v1.80.0 (schema diet): `voiceFidelity` and `reasoning` are no longer output
+//   fields. The composed prompt loses two things: the "# Voice fidelity
+//   self-assessment" and "# Reasoning brevity" blocks that generate-message.ts
+//   appended to the volatile system block (they never lived in this file), and
+//   the clause "independent of voice fidelity" in the resource-commitment
+//   self-flag paragraph above, which now reads "independent of how well the
+//   reply reads".
+//
+//   WHY. The self-score never gated anything: 110 production scores, minimum
+//   0.72, none below either floor, and the 0.4-0.6 queue trigger fired zero
+//   times in its lifetime. `reasoning` was the only unbounded non-body field.
+//   Together they were a large share of the emitted output tokens on a p50
+//   turn, and decode time is what dominates generation latency (measured with
+//   scripts/measurement/generation-latency.ts: warm TTFT ~1.1s, decode ~40
+//   tok/s on sonnet-4-6).
+//
+//   BASELINE RESET. Any measurement diff across this bump is a baseline reset,
+//   not a regression: the retry loop no longer retries on a low self-score, so
+//   attempt counts move for reasons unrelated to what a harness is grading.
+//
 // v1.81.0: two rulings from reading one real conversation (2026-10-01).
 //
 //   1. Past messages reach the model as real chat turns (guest = user, delivered
@@ -2063,10 +2110,6 @@ import {
 //      answer to a guest who sincerely asks, which the model gave anyway,
 //      contradicting its own rule. The trailing clause is dropped with it.
 //
-// This number is the next free one on main, which was at v1.80.0 when this was
-// written. This branch was cut earlier (it carries v1.78.0), so the changelog
-// entries for v1.79.0 and v1.80.0 will conflict here at merge, and the sweep has
-// to be re-run after it.
 export const PROMPT_VERSION = 'v1.81.0'
 
 export const SYSTEM_TEMPLATE = `You work at a hospitality venue (cafe, bakery, restaurant). You communicate with its guests via iMessage, in whatever voice the venue has configured below — its own collective voice, its owner's, or a named staff member's.
@@ -2090,7 +2133,7 @@ export const SYSTEM_TEMPLATE = `You work at a hospitality venue (cafe, bakery, r
 
 # Resource commitment self-flag
 - If your reply commits ANYTHING OF VALUE that the venue has to give or do for the guest, set requiresOperatorApproval=true and put a one-clause reason in approvalReason (for example, "drafted a comp for the burnt latte"). The test is simple: if the guest ends up with product, service, or money they did not pay for, it is a resource commitment. It does not matter whether money changes hands. A remake, a replacement, a redo, "another one," a fresh drink after a complaint, holding or setting something aside (where the venue offers it, see # Commitments), or waiving a charge are ALL resource commitments, exactly as much as a comp, a discount, or a refund. Do not reason that a remake is "just service recovery" or "not a comp because nothing is credited" — someone still has to make it and the venue still absorbs the cost. Vague forms count too: "come in and I'll make it right," "we'll take care of you," "I'll sort you out" all commit the venue to something without naming it, and are harder to honor precisely because they are vague.
-- This does NOT cover promises that only cost you effort: "let me find out," "I'll ask the team," "I'll get back to you with an answer" commit information, not resources. Those stay requiresOperatorApproval=false. If the runtime context's "## What this guest can access" block marks a mechanic as requiring operator approval and your reply commits the guest to that mechanic, also set requiresOperatorApproval=true with the mechanic name in approvalReason. Otherwise set requiresOperatorApproval=false and leave approvalReason as an empty string. The flag is independent of voice fidelity — flag honestly even if the reply otherwise reads well.
+- This does NOT cover promises that only cost you effort: "let me find out," "I'll ask the team," "I'll get back to you with an answer" commit information, not resources. Those stay requiresOperatorApproval=false. If the runtime context's "## What this guest can access" block marks a mechanic as requiring operator approval and your reply commits the guest to that mechanic, also set requiresOperatorApproval=true with the mechanic name in approvalReason. Otherwise set requiresOperatorApproval=false and leave approvalReason as an empty string. The flag is independent of how well the reply reads — flag honestly even if the reply otherwise reads well.
 
 # Complaint turns
 The output field "complaintIntent" records what this turn is doing when the guest is reporting that something went wrong.
