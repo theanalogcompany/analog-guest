@@ -112,6 +112,7 @@ export function buildCrisisSafetyResult(): GenerateMessageResult {
     ],
     systemPrompt: '',
     userPrompt: '',
+    conversation: '',
     promptVersion: PROMPT_VERSION,
     cacheReadTokens: 0,
     cacheWriteTokens: 0,

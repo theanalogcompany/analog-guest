@@ -39,7 +39,6 @@ import {
   classifyMessage,
   generateMessage,
   type KnowledgeCorpusChunk as AiKnowledgeCorpusChunk,
-  verifyGrounding,
   verifyMechanicOffer,
   verifyProsePromise,
   type VoiceCorpusChunk as AiVoiceCorpusChunk,
@@ -72,21 +71,6 @@ export interface RegenerateWithCritiqueResult {
   // TAC-350: the model's own self-report, surfaced here for the first time
   // (generateMessage already computed it; this path just wasn't reading it).
   knowledgeGap: boolean
-  // TAC-350: independent grounding backstop, same underlying check
-  // (lib/ai/verify-grounding.ts) as lib/agent/stages.ts's
-  // verifyGroundingStage, but ADVISORY here rather than gating and with a
-  // NARROWER skip condition — this path only checks knowledgeGap, not
-  // currentMessage-null or isDemo (verifyGroundingStage's other two skips),
-  // because a regen always has a real triggering inbound and there's no
-  // send/queue decision here to protect a demo guest from. A demo guest's
-  // regen does still pay for the extra Haiku call; accepted, since regen is
-  // an operator-initiated, low-volume action, not live guest traffic. There
-  // is no send/queue decision on the regen path to gate — the operator
-  // reviews the raw attempt directly — so this is a signal for the Voices
-  // UI to surface, not a trigger. false when the check didn't run (gap
-  // already self-reported) or ran and found nothing.
-  hasUngroundedClaim: boolean
-  ungroundedClaims: string[]
   // TAC-355: final-attempt self-talk flag, surfaced here for the first time
   // (generateMessage already computes it via the shared regen loop; this
   // path just wasn't reading it — same situation knowledgeGap was in before
@@ -433,75 +417,6 @@ export async function regenerateWithCritique(
     return { ok: false, errorCode: 'generate_failed', error: gen.error }
   }
 
-  // 8. TAC-350: independent grounding backstop — only spend the extra Haiku
-  // call when the model didn't already self-report a gap (see
-  // RegenerateWithCritiqueResult's own comment for how this narrows
-  // verifyGroundingStage's full skip condition). No PostHog event here
-  // (analytics isolation, see this file's header comment) — the operator is
-  // staring at the screen and IS the observability surface for regen, same
-  // reasoning the route's own header gives for skipping PostHog/Langfuse
-  // entirely on this path.
-  let hasUngroundedClaim = false
-  let ungroundedClaims: string[] = []
-  if (!gen.data.knowledgeGap) {
-    const verify = await verifyGrounding({
-      inboundBody: load.data.inbound.body,
-      replyBody: gen.data.body,
-      venueInfo: ctx.venue.venueInfo,
-      knowledgeChunks,
-      // TAC-376: this path always has a real inbound (load.data.inbound.body
-      // above, the triggering message the regen is pinned to) — never
-      // proactive.
-      isProactive: false,
-      // TAC-301 part 1.5: mirrored from verifyGroundingStage per this file's
-      // standing obligation to track stages.ts's gating. Without it the regen
-      // path shows the operator a false "ungrounded claim" warning on any
-      // reply grounded in a runtime block — and on THIS path the critique
-      // loop is where an operator decides what good looks like, so a
-      // spurious warning actively teaches the wrong lesson.
-      runtimeContext: gen.data.userPrompt,
-      // TAC-502: mirrored from verifyGroundingStage, same standing obligation
-      // this file's header carries. Without it the playground shows the
-      // operator a false "ungrounded claim" warning on any reply that names
-      // the medium the guest is on — and this is the one screen where an
-      // operator decides what good looks like, so a spurious warning here
-      // teaches the wrong lesson about a reply that was correct.
-      conversationChannel: ctx.conversationChannel,
-    })
-    // TAC-367 was deliberately NOT mirrored here, and that is a decision
-    // rather than an oversight. The mirror obligation in this file's header
-    // is about GATING and retrieval semantics; TAC-367 changes a gate
-    // (truncation now queues via GROUNDING_CHECK_FAILED) and there is no
-    // gate on this path at all — the operator reads the raw attempt. The
-    // raised maxOutputTokens is inherited for free.
-    //
-    // The residual, recorded because the next person will otherwise re-derive
-    // it: a TRUNCATED verdict lands in the `else` below and is surfaced to
-    // the operator as hasUngroundedClaim=false, i.e. indistinguishable from
-    // clean. So the playground can no longer reproduce production for that
-    // case — the same direction of drift TAC-366 documents, where regen
-    // HID production behaviour from anyone reproducing it here. The honest
-    // fix is an advisory `groundingCheckUnavailable` alongside the existing
-    // advisory trio; it needs its own ticket, not a silent widening here.
-    //
-    // TAC-424 WIDENED that residual in the same direction, which is worth
-    // knowing before reproducing a held draft here. A TRANSIENT fault now
-    // holds the draft in production and is recorded as `degraded`; on this
-    // path it still lands in the same `else` and reads as clean. And this
-    // call does NOT retry, where production does — so a fault that production
-    // would have recovered from can surface here as a difference in the
-    // generated text with no indication why. Two behaviours to reproduce by
-    // hand rather than one.
-    if (verify.ok) {
-      hasUngroundedClaim = verify.data.hasUngroundedClaim
-      ungroundedClaims = verify.data.ungroundedClaims
-    } else {
-      logger.warn(
-        `[voices/regen] grounding backstop degraded for venue=${input.venueId}: ${verify.error}`,
-      )
-    }
-  }
-
   // 9. TAC-355: independent mechanic-offer backstop, advisory only. No skip
   // on requiresOperatorApproval/commitment.type (see the type's own comment
   // for why) — only "nothing gated eligible this turn" and demo guest, same
@@ -555,9 +470,9 @@ export async function regenerateWithCritique(
   if (ctx.guest.isDemo !== true && gen.data.body.trim().length > 0) {
     const promiseCheck = await verifyProsePromise({
       replyBody: gen.data.body,
-      // TAC-527: the same inbound the grounding check above is given. This
-      // path always has one — it regenerates a reply to a specific guest
-      // message — so unlike the proactive orchestrator paths it is never null.
+      // TAC-527: this path always has an inbound — it regenerates a reply to a
+      // specific guest message — so unlike the proactive orchestrator paths it
+      // is never null.
       guestInboundBody: load.data.inbound.body,
     })
     if (promiseCheck.ok) {
@@ -580,8 +495,6 @@ export async function regenerateWithCritique(
       attemptScores: gen.data.attemptScores,
       generatedAt: new Date(),
       knowledgeGap: gen.data.knowledgeGap,
-      hasUngroundedClaim,
-      ungroundedClaims,
       selfTalkViolationPersisted: gen.data.selfTalkViolationPersisted,
       emojiDirective: runtime.emojiDirective,
       emojiDirectiveViolated: gen.data.emojiDirectiveViolated,

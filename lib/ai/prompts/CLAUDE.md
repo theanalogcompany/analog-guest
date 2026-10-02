@@ -88,6 +88,14 @@ send on `conversationChannel`.**
 
 ## Serializers
 
+**Past messages are chat turns, not a block** (v1.81.0). `splitHistory` maps guest messages to
+`user` turns and delivered venue messages to `assistant` turns, merging same-role runs so roles
+alternate, and `generateMessage` sends them between the system blocks and the final user
+message. A draft the guest never received is never an assistant turn; it renders in the user
+prompt under `## Drafts the guest has not received`. There is no timing block, and a venue
+message before the guest's first one in the window is left out. A harness that calls `generateObject` itself must send `historyTurns` too, or it
+silently measures a conversation with no history.
+
 `serializers.ts` renders the user prompt. Block order is asserted whole in
 `serializers.test.ts` - a substring assertion answers "is this fact present", only an exact
 block answers "is this block what we think it is". A whole new line entered `## Right now`

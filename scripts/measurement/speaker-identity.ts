@@ -75,7 +75,6 @@ import { PROMPT_VERSION } from '@/lib/ai/prompts/system-template'
 import { INTENTION_DEFINITION_BY_KEY } from '@/lib/agent/intentions/definitions'
 import type { RecentMessage } from '@/lib/agent/types'
 import { classifyIntentionPrompts } from '@/lib/ai/classify-intention-prompts'
-import { verifyGrounding } from '@/lib/ai/verify-grounding'
 import { startAgentTrace } from '@/lib/observability/langfuse'
 import { createRunLog } from './run-log'
 import { classifySpeakerIdentity } from './speaker-identity-language'
@@ -173,7 +172,7 @@ function parseArgs(argv: readonly string[]): Args {
 }
 
 interface Prepared {
-  composed: { systemPrompt: string; userPrompt: string }
+  composed: ReturnType<typeof composePrompt>
   offeredForClassifier: { key: string; description: string }[]
   category: string
   venueInfo: unknown
@@ -225,7 +224,10 @@ async function generate(prepared: Prepared): Promise<string> {
     model: getGenerationModel(),
     schema: GeneratedMessageSchema,
     system: `${prepared.composed.systemPrompt}\n\n${VOICE_FIDELITY_INSTRUCTION}`,
-    prompt: prepared.composed.userPrompt,
+    messages: [
+      ...prepared.composed.historyTurns,
+      { role: 'user', content: prepared.composed.userPrompt },
+    ],
     temperature: 0.7,
     maxOutputTokens: MAX_OUTPUT_TOKENS,
   })
@@ -343,8 +345,6 @@ async function main(): Promise<void> {
       asksOrder: number
       twoQuestions: number
       nameInsteadOfOrder: number
-      grounded: number
-      groundingFlagged: number
     }
   > = {}
 
@@ -363,8 +363,6 @@ async function main(): Promise<void> {
     asksOrder: 0,
     twoQuestions: 0,
     nameInsteadOfOrder: 0,
-    grounded: 0,
-    groundingFlagged: 0,
   })
 
   for (const population of args.populations) {
@@ -551,24 +549,6 @@ async function main(): Promise<void> {
           }
         }
 
-        let groundingFlagged: boolean | null = null
-        if (population === 'why-turn') {
-          const g = await verifyGrounding({
-            inboundBody: inbound,
-            replyBody: body,
-            venueInfo: prepared.venueInfo,
-            knowledgeChunks: prepared.knowledgeChunks,
-            runtimeContext: prepared.runtimeContext,
-            isProactive: false,
-            conversationChannel: prepared.conversationChannel,
-          } as Parameters<typeof verifyGrounding>[0])
-          if (g.ok) {
-            groundingFlagged = g.data.hasUngroundedClaim
-            if (groundingFlagged) cell.groundingFlagged += 1
-            else cell.grounded += 1
-          }
-        }
-
         log.appendUnit({
           population,
           rep,
@@ -589,7 +569,6 @@ async function main(): Promise<void> {
           questionCount: v.questionCount,
           asksOrder: ft.isOrderQuestion,
           raised,
-          groundingFlagged,
         })
         console.log(
           `  [${population} ${rep + 1}/${args.reps}] ${JSON.stringify(body)}`,
@@ -633,9 +612,6 @@ async function main(): Promise<void> {
     if (population === 'why-turn') {
       console.log(`  whatToCallYou      ${c.whatToCallYouReason}/${c.n}`)
       console.log(`  overPromises (cut) ${c.overPromisesRecognition}/${c.n}`)
-      console.log(
-        `  grounding flagged  ${c.groundingFlagged}/${c.grounded + c.groundingFlagged}`,
-      )
     }
 
     // EVALUATED IN CODE, not left to whoever reads the output.

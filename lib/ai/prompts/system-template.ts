@@ -2039,7 +2039,35 @@ import {
 // It also means the earlier runs quoted above measured prompts that no longer
 // exist, which is why Jaipal ruled the run be repeated against the rebased
 // prompt rather than the rulings applied on top of it.
-export const PROMPT_VERSION = 'v1.78.0'
+//
+// v1.81.0: two rulings from reading one real conversation (2026-10-01).
+//
+//   1. Past messages reach the model as real chat turns (guest = user, delivered
+//      venue message = assistant) instead of a `## Recent conversation` text
+//      block in the user prompt, and every body is whole. The block cut each body
+//      at 200 characters with a trailing "…", and the model reads that as a
+//      message that was cut off in front of the guest. A 332-character recipe was
+//      shown ending "(longer …"; the guest then asked for more detail and the
+//      model wrote "continuing the numbered list from where the previous message
+//      cut off", repeating steps 5 and 6. Turns fix it at the root: the model
+//      sees its own earlier replies as things it said, not as a log to read.
+//      The only history left in the user prompt is drafts the guest never
+//      received (`## Drafts the guest has not received`, never an assistant
+//      turn). The per-line "N minutes ago" is gone with no replacement, and a
+//      venue message before the guest's first one in the window is left out
+//      because a chat cannot open on an assistant turn. See `splitHistory` in
+//      serializers.ts. No template text changed for this item.
+//   2. `# Output expectations`: "Do not reveal that you are an AI or describe
+//      yourself as a system, bot, or assistant." became "Do not reveal that you
+//      are an AI unless explicitly asked." The old wording forbade the honest
+//      answer to a guest who sincerely asks, which the model gave anyway,
+//      contradicting its own rule. The trailing clause is dropped with it.
+//
+// This number is the next free one on main, which was at v1.80.0 when this was
+// written. This branch was cut earlier (it carries v1.78.0), so the changelog
+// entries for v1.79.0 and v1.80.0 will conflict here at merge, and the sweep has
+// to be re-run after it.
+export const PROMPT_VERSION = 'v1.81.0'
 
 export const SYSTEM_TEMPLATE = `You work at a hospitality venue (cafe, bakery, restaurant). You communicate with its guests via iMessage, in whatever voice the venue has configured below — its own collective voice, its owner's, or a named staff member's.
 
@@ -2053,7 +2081,7 @@ export const SYSTEM_TEMPLATE = `You work at a hospitality venue (cafe, bakery, r
 # Output expectations
 - Plain text suitable for iMessage. No HTML, no markdown formatting in the message body, no headers or bullet points.
 - Brevity is a feature. One or two short messages is almost always enough; long blocks are almost always wrong.
-- Do not reveal that you are an AI or describe yourself as a system, bot, or assistant.
+- Do not reveal that you are an AI unless explicitly asked.
 
 # Hard rules
 - Never make up facts about the venue. If you don't know something (hours, prices, availability, menu specifics not given), say so naturally and offer to find out.

@@ -9,8 +9,7 @@ import type {
 
 // TAC-355. Deliberately its OWN version, not SYSTEM_TEMPLATE's PROMPT_VERSION
 // — this verifier never touches the classify/generate contract, same
-// independence rationale as VERIFY_GROUNDING_PROMPT_VERSION and
-// EXTRACT_REPORTED_ORDER_PROMPT_VERSION.
+// independence rationale as EXTRACT_REPORTED_ORDER_PROMPT_VERSION.
 export const VERIFY_MECHANIC_OFFER_PROMPT_VERSION = 'v1.0.0'
 
 const SYSTEM_PROMPT = `You read a reply a venue's AI assistant is ABOUT TO SEND to a guest, plus a list of special perks or offers this specific guest currently qualifies for but that require the venue owner's approval before being promised. Your job is to catch a reply that promises, offers, or grants one of those listed perks — in any wording, not just the perk's exact name — even when the reply never uses the perk's own name.
@@ -43,19 +42,17 @@ function buildUserPrompt(input: VerifyMechanicOfferInput): string {
 }
 
 /**
- * Independent verification backstop for the mechanic-approval gate. Mirrors
- * verify-grounding.ts's shape exactly (generateObject, Haiku, AIResult, no
- * regeneration loop) — the same architectural move this repo already made
- * for comp_regex_backstop and TAC-350's grounding backstop: self-report
- * (requiresOperatorApproval / commitment.type) proved unreliable, so a
+ * Independent verification backstop for the mechanic-approval gate
+ * (generateObject, Haiku, AIResult, no regeneration loop) — the same
+ * architectural move this repo already made for comp_regex_backstop:
+ * self-report (requiresOperatorApproval / commitment.type) proved unreliable, so a
  * second, independent check runs against the same underlying risk.
  *
  * The caller (verifyMechanicOfferStage in lib/agent/stages.ts) decides WHEN
  * to call this (skips when there's nothing gated eligible this turn, when
  * the model already self-flagged via either existing signal, or for a demo
- * guest) and how to treat a failure (FAILS CLOSED there — a deliberate
- * divergence from the grounding backstop). This function itself has no
- * gating beyond input validation.
+ * guest) and how to treat a failure (FAILS CLOSED there). This function
+ * itself has no gating beyond input validation.
  *
  * mechanicId is constrained via a z.enum built PER CALL from the actual
  * eligible-gated-mechanic id set (plus 'none') — never a bare z.string().
@@ -98,18 +95,15 @@ export async function verifyMechanicOffer(
       system: SYSTEM_PROMPT,
       prompt: buildUserPrompt(input),
       schema,
-      // Analytical task — keep determinism high, same as verify-grounding.ts.
+      // Analytical task — keep determinism high.
       temperature: 0.2,
       maxOutputTokens: 300,
     })
 
     // Defensive: nothing structurally stops the model from returning
     // offersGatedMechanic=true with mechanicId="none" — the schema doesn't
-    // cross-validate the two fields. Mirrors verify-grounding.ts's identical
-    // defensive substitution for the analogous ambiguous shape
-    // (hasUngroundedClaim=true + an empty claims array): the SAFETY-relevant
-    // boolean must survive untouched, only the identifying detail is
-    // patched. Silently downgrading to "clean" here would be exactly the
+    // cross-validate the two fields. The SAFETY-relevant boolean must survive
+    // untouched, only the identifying detail is patched. Silently downgrading to "clean" here would be exactly the
     // false negative this backstop exists to prevent — trust
     // offersGatedMechanic, not the enum, when the two disagree.
     const mechanicId =

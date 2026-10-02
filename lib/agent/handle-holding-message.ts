@@ -40,9 +40,7 @@ import {
   applyApprovalPolicyStage,
   generateStage,
   retrieveCorpusStage,
-  type GroundingBackstopResult,
   type ProsePromiseBackstopResult,
-  verifyGroundingStage,
   verifyCancellationClaimStage,
   verifyProsePromiseStage,
 } from './stages'
@@ -429,22 +427,9 @@ async function tryGenerateHolding(
     return null
   }
 
-  // TAC-376: independent grounding backstop, run before the gate. Was
-  // inbound-only (verifyGroundingStage returned 'skipped' unconditionally
-  // when ctx.currentMessage was null, which it always is on this path) — per
-  // the 2026-09-17 ruling it now runs here too, same verifier, same
-  // triggers, same failure posture as inbound. This path still never runs
-  // verifyMechanicOfferStage — a holding message doesn't offer mechanics.
-  //
-  // A 'flagged', 'truncated' or (TAC-424) 'degraded' result makes
-  // applyApprovalPolicyStage return something other than 'send' below, which
-  // this function already treats as "this attempt failed, try again or fall
-  // back" — no new branch, same ladder the gate already drove before this
-  // ticket.
-  //
-  // TAC-401: the prose-promise check runs here too, CONCURRENTLY with
-  // grounding (ruled 2026-09-21, ruling 2), which is why this call went from a
-  // bare await to an allSettled pair. A holding message is content-free by
+  // TAC-401: the prose-promise check runs here too, CONCURRENTLY with the
+  // cancellation check (ruled 2026-09-21, ruling 2), so this is an allSettled
+  // pair rather than a bare await. A holding message is content-free by
   // construction — it asserts nothing and commits to nothing — so this check
   // should never fire on it; if it does, that construction has broken, and the
   // right outcome is the one the ladder already produces. A flagged or failed
@@ -455,30 +440,15 @@ async function tryGenerateHolding(
   // allSettled, not Promise.all, for the reason both orchestrators give: a
   // hypothetical future throw in one stage must not discard the other's
   // finding on a check required to fail closed.
-  const [groundingSettled, prosePromiseSettled, cancellationSettled] =
-    await Promise.allSettled([
-      verifyGroundingStage(ctx, gen.result),
-      verifyProsePromiseStage(ctx, gen.result),
-      // TAC-513: a holding message is content-free by construction and cancels
-      // nothing, so this is expected to return clean every time. It runs anyway,
-      // for the reason the prose-promise check runs here: "content-free by
-      // construction" is a claim about the prompt, not a property the code
-      // enforces, and this path generates through the ordinary generator.
-      verifyCancellationClaimStage(ctx, gen.result),
-    ])
-  if (groundingSettled.status === 'rejected') {
-    logger.warn(
-      '[agent] holding message verifyGroundingStage threw unexpectedly (degrading to skipped)',
-      {
-        agentRunId,
-        attempt,
-        error:
-          groundingSettled.reason instanceof Error
-            ? groundingSettled.reason.message
-            : String(groundingSettled.reason),
-      },
-    )
-  }
+  const [prosePromiseSettled, cancellationSettled] = await Promise.allSettled([
+    verifyProsePromiseStage(ctx, gen.result),
+    // TAC-513: a holding message is content-free by construction and cancels
+    // nothing, so this is expected to return clean every time. It runs anyway,
+    // for the reason the prose-promise check runs here: "content-free by
+    // construction" is a claim about the prompt, not a property the code
+    // enforces, and this path generates through the ordinary generator.
+    verifyCancellationClaimStage(ctx, gen.result),
+  ])
   if (prosePromiseSettled.status === 'rejected') {
     logger.warn(
       '[agent] holding message verifyProsePromiseStage threw unexpectedly (degrading to check_failed)',
@@ -492,37 +462,10 @@ async function tryGenerateHolding(
       },
     )
   }
-  const groundingBackstop: GroundingBackstopResult =
-    groundingSettled.status === 'fulfilled'
-      ? groundingSettled.value
-      : { status: 'skipped' }
   const prosePromiseBackstop: ProsePromiseBackstopResult =
     prosePromiseSettled.status === 'fulfilled'
       ? prosePromiseSettled.value
       : { status: 'check_failed' }
-  if (groundingBackstop.status === 'flagged') {
-    logger.warn(
-      '[agent] holding message grounding backstop caught an unverified claim',
-      {
-        agentRunId,
-        attempt,
-        claimCount: groundingBackstop.claims.length,
-      },
-    )
-  }
-  // TAC-424: a degraded check now lands here too. On this path the ladder
-  // already treats any non-send gate verdict as "this attempt failed", so the
-  // consequence is a retry and then FALLBACK_HOLDING_BODY — a fixed string
-  // that asserts nothing. The guest is never left silent by it.
-  if (
-    groundingBackstop.status === 'truncated' ||
-    groundingBackstop.status === 'degraded'
-  ) {
-    logger.warn(
-      '[agent] holding message grounding backstop did not complete — treating as unclean (fail closed)',
-      { agentRunId, attempt, outcome: groundingBackstop.status },
-    )
-  }
 
   if (
     prosePromiseBackstop.status === 'flagged' ||
@@ -538,7 +481,6 @@ async function tryGenerateHolding(
   const approval = await applyApprovalPolicyStage(
     ctx,
     gen.result,
-    groundingBackstop,
     { status: 'skipped' },
     prosePromiseBackstop,
     // TAC-513: see handle-inbound.ts for why the resolution is RECOMPUTED on a
@@ -704,6 +646,7 @@ function buildFallbackGeneration(): GenerateMessageResult {
     attemptHistory: [],
     systemPrompt: '',
     userPrompt: '',
+    conversation: '',
     // Stamped so the row is attributable to the release that produced this
     // behavior, even though no prompt built the body.
     promptVersion: PROMPT_VERSION,

@@ -125,6 +125,9 @@ export function buildKnowledgeCorpusContent(
 
 export type GenerateParentContent = {
   systemPrompt: string
+  // The history as one text block. The model received it as chat turns before
+  // the user prompt; this is the readable form of those turns.
+  conversation: string
   userPrompt: string
   model: string
 }
@@ -145,6 +148,7 @@ export function buildGenerateContent(
 ): GenerateParentContent {
   return {
     systemPrompt: result.systemPrompt,
+    conversation: result.conversation,
     userPrompt: result.userPrompt,
     model: GENERATION_MODEL_LABEL,
   }

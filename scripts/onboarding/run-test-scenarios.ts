@@ -10,7 +10,6 @@ import {
   generateStage,
   retrieveCorpusStage,
   retrieveKnowledgeStage,
-  verifyGroundingStage,
   verifyClosedVenueArrivalStage,
   verifyProsePromiseStage,
 } from '@/lib/agent/stages'
@@ -569,16 +568,11 @@ export async function runScenario(
       }
     }
 
-    // TAC-350: harness parity with handle-inbound.ts's grounding backstop —
-    // called in the same place, same skip condition (verifyGroundingStage
-    // itself checks knowledgeGap / currentMessage / isDemo), so a scenario
-    // that trips the backstop is graded against the actual gate the shipped
-    // pipeline would apply, not against a knowledgeGap-only decision the
-    // real pipeline no longer makes on its own.
-    // TAC-401: concurrently with grounding, mirroring the production
-    // orchestrators (ruled 2026-09-21, ruling 2). The harness grades the
-    // shipped mechanism, so a scenario whose reply promises something with no
-    // carrier must route here exactly as it would in production.
+    // TAC-401: the prose-promise and closed-venue checks run concurrently,
+    // mirroring the production orchestrators (ruled 2026-09-21, ruling 2). The
+    // harness grades the shipped mechanism, so a scenario whose reply promises
+    // something with no carrier must route here exactly as it would in
+    // production.
     //
     // Promise.all here, where the three orchestrators use allSettled. The
     // difference is deliberate: their rationale is that a throw in one stage
@@ -586,27 +580,22 @@ export async function runScenario(
     // which protects a guest-facing decision. This is a grading harness with
     // no guest and no send, and a scenario that throws should fail loudly and
     // be re-run rather than be graded on half its evidence.
-    const [
-      groundingBackstop,
-      prosePromiseBackstop,
-      closedVenueArrivalBackstop,
-    ] = await Promise.all([
-      verifyGroundingStage(ctx, outcome.result),
-      verifyProsePromiseStage(ctx, outcome.result),
-      // TAC-363. Note this makes a run's routing grades depend on the venue
-      // clock in a second way: CLAUDE.md already says to run the harness
-      // during the venue's open hours because `## Right now` renders a
-      // status line, and now an arrival scenario run after close also
-      // queues where the same scenario would send at 10am.
-      verifyClosedVenueArrivalStage(ctx, outcome.result),
-    ])
+    const [prosePromiseBackstop, closedVenueArrivalBackstop] =
+      await Promise.all([
+        verifyProsePromiseStage(ctx, outcome.result),
+        // TAC-363. Note this makes a run's routing grades depend on the venue
+        // clock in a second way: CLAUDE.md already says to run the harness
+        // during the venue's open hours because `## Right now` renders a
+        // status line, and now an arrival scenario run after close also
+        // queues where the same scenario would send at 10am.
+        verifyClosedVenueArrivalStage(ctx, outcome.result),
+      ])
 
     // status === 'success' — evaluate the approval decision. Decision only:
     // this never persists a draft, dispatches to Sendblue, or fires a push.
     const decision = await evaluateApprovalDecision(
       ctx,
       outcome.result,
-      groundingBackstop,
       prosePromiseBackstop,
       closedVenueArrivalBackstop,
     )

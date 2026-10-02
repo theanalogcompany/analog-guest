@@ -45,8 +45,6 @@ describe('POST /admin/voices/api/regenerate', () => {
         attemptScores: [0.85],
         generatedAt: new Date('2026-05-08T10:00:00.000Z'),
         knowledgeGap: false,
-        hasUngroundedClaim: false,
-        ungroundedClaims: [],
         selfTalkViolationPersisted: false,
         emojiDirectiveViolated: false,
         offersGatedMechanic: false,
@@ -72,8 +70,6 @@ describe('POST /admin/voices/api/regenerate', () => {
       voiceFidelity: 0.85,
       attempts: 1,
       knowledgeGap: false,
-      hasUngroundedClaim: false,
-      ungroundedClaims: [],
     })
     // TAC-355: assert these three directly rather than folding into the
     // toMatchObject above — a partial match wouldn't catch the route
@@ -81,43 +77,6 @@ describe('POST /admin/voices/api/regenerate', () => {
     expect(json.selfTalkViolationPersisted).toBe(false)
     expect(json.offersGatedMechanic).toBe(false)
     expect(json.offeredMechanicId).toBeNull()
-  })
-
-  // TAC-350
-  it('surfaces a caught ungrounded claim through the response', async () => {
-    vi.mocked(regenerateWithCritique).mockResolvedValue({
-      ok: true,
-      data: {
-        body: 'the wifi is Le Mils Guest',
-        voiceFidelity: 0.85,
-        attempts: 1,
-        attemptScores: [0.85],
-        generatedAt: new Date('2026-05-08T10:00:00.000Z'),
-        knowledgeGap: false,
-        hasUngroundedClaim: true,
-        ungroundedClaims: ['invents a wifi network name not in venue facts'],
-        selfTalkViolationPersisted: false,
-        emojiDirectiveViolated: false,
-        offersGatedMechanic: false,
-        offeredMechanicId: null,
-        promisesSomething: false,
-        promisedCommitmentType: null,
-        promisedCommitmentDescription: null,
-      },
-    })
-
-    const res = await POST(
-      buildRequest({
-        venueId: VENUE_ID,
-        originalMessageId: MSG_ID,
-        critique: 'x',
-      }),
-    )
-    const json = await res.json()
-    expect(json.hasUngroundedClaim).toBe(true)
-    expect(json.ungroundedClaims).toEqual([
-      'invents a wifi network name not in venue facts',
-    ])
   })
 
   // TAC-355
@@ -131,8 +90,6 @@ describe('POST /admin/voices/api/regenerate', () => {
         attemptScores: [0.85],
         generatedAt: new Date('2026-05-08T10:00:00.000Z'),
         knowledgeGap: false,
-        hasUngroundedClaim: false,
-        ungroundedClaims: [],
         selfTalkViolationPersisted: false,
         emojiDirectiveViolated: false,
         offersGatedMechanic: true,

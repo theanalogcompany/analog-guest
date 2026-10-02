@@ -30,12 +30,10 @@ import {
   APPROVAL_TRIGGERS,
   generateStage,
   retrieveCorpusStage,
-  type GroundingBackstopResult,
   type MechanicOfferBackstopResult,
   type CancellationBackstopResult,
   type ClosedVenueArrivalBackstopResult,
   type ProsePromiseBackstopResult,
-  verifyGroundingStage,
   verifyMechanicOfferStage,
   verifyCancellationClaimStage,
   verifyClosedVenueArrivalStage,
@@ -103,6 +101,7 @@ function fixedWarmCloseGeneration(text: string): GenerateMessageResult {
     attemptHistory: [],
     systemPrompt: '',
     userPrompt: '',
+    conversation: '',
     promptVersion: PROMPT_VERSION,
     cacheReadTokens: 0,
     cacheWriteTokens: 0,
@@ -603,9 +602,9 @@ export async function handleFollowup(input: {
     // about a real topic, so retrieval against it is retrieval working as
     // designed. It is also the case that has the MOST to lose from the
     // blanket skip: a note asking the model to be specific, with nothing
-    // behind it, removes the grounding while leaving the pressure — on a path
-    // that still has no grounding backstop. Vague or invented, with nothing
-    // checking. That is worse than the state PR 2 fixed.
+    // behind it, removes the grounding while leaving the pressure. Vague or
+    // invented, with nothing checking. That is worse than the state PR 2
+    // fixed.
     //
     // No note, or any engine reason (day_*, cold_lapsed, perk_unlock) → no
     // query, so no retrieval. Those runs have no free text to query on at all;
@@ -848,56 +847,47 @@ export async function handleFollowup(input: {
     // path too — a mechanic can be offered on a proactive outbound message
     // exactly as easily as in reply to a guest's question. Runs for manual
     // followups too since TAC-307, same as the gate itself.
-    // TAC-376: independent grounding backstop, run alongside it. Was
-    // inbound-only (verifyGroundingStage returned 'skipped' unconditionally
-    // when ctx.currentMessage was null) — per the 2026-09-17 ruling it now
-    // runs on every followup too, same verifier, same triggers, same
-    // failure posture as inbound. Promise.allSettled, not Promise.all, for
-    // the identical reason handle-inbound.ts gives: both stages are
-    // independent Haiku calls verified to never throw today, but Promise.all
-    // would let a hypothetical future throw in one silently discard the
-    // other's finding — a fail-open by accident on a gate that has to fail
-    // closed on truncation.
-    // TAC-401: the prose-promise check joins this array, concurrently rather
-    // than in sequence (ruled 2026-09-21, ruling 2). THIS IS THE FOLLOWUP
-    // COVERAGE ruling 4 requires — "whatever mechanism questions 1 and 2
-    // produce must cover followups by design". It reuses the seam TAC-376
-    // already built here rather than adding a parallel one, which is also why
-    // manual followups are covered without touching their own rules.
+    // Promise.allSettled, not Promise.all: the stages are independent Haiku
+    // calls verified to never throw today, but Promise.all would let a
+    // hypothetical future throw in one silently discard another's finding — a
+    // fail-open by accident on a gate that has to fail closed.
+    // TAC-401: the prose-promise check runs concurrently with the others
+    // rather than in sequence (ruled 2026-09-21, ruling 2). THIS IS THE
+    // FOLLOWUP COVERAGE ruling 4 requires — "whatever mechanism questions 1
+    // and 2 produce must cover followups by design". Manual followups are
+    // covered without touching their own rules.
     //
     // One of the four genuine uncarried promises in the measurement was on
     // this path (A4 #34, an engine day_3 followup, "we still owe you a good
     // cortado"), and under the fleet default it sends.
     const [
-      groundingSettled,
       mechanicOfferSettled,
       prosePromiseSettled,
       cancellationSettled,
       closedVenueArrivalSettled,
     ] = await Promise.allSettled(
-      // TAC-568 (Q1, ruled 2026-09-30): THE FIVE CHECKS DO NOT RUN ON THE FIXED
+      // TAC-568 (Q1, ruled 2026-09-30): THE FOUR CHECKS DO NOT RUN ON THE FIXED
       // WARM CLOSE, and this is a recorded change to decision 0003 rather than
       // an exception smuggled in beside it.
       //
-      // 0003 says the five fail closed on MODEL OUTPUT, and that a proposal to
-      // loosen one is a proposal about all five. The premise does not hold here:
-      // no model ran. Every one of the five asks a question about something a
-      // model might have invented — a fact it could not ground, a mechanic it
-      // offered, a promise it made in prose, a cancellation it claimed, an
-      // arrival at a closed venue — and a per-venue constant a human approved
+      // 0003 says the four fail closed on MODEL OUTPUT, and that a proposal to
+      // loosen one is a proposal about all four. The premise does not hold here:
+      // no model ran. Every one of the four asks a question about something a
+      // model might have invented — a mechanic it offered, a promise it made
+      // in prose, a cancellation it claimed, an arrival at a closed venue —
+      // and a per-venue constant a human approved
       // can contain none of them, on this turn or any other, because it is the
       // same 143 bytes every time.
       //
-      // What running them would buy is not safety but exposure: five verifier
+      // What running them would buy is not safety but exposure: four verifier
       // calls that fail closed after one retry, on text that cannot be wrong, so
       // the only outcome they can produce is refusing a message that is correct.
       //
       // THE GOODBYE PATH IS NOT AFFECTED. There the model writes the reply and
-      // all five run on it exactly as before; only the appended fixed bubble is
+      // all four run on it exactly as before; only the appended fixed bubble is
       // unchecked, for the reason above.
       isFixedWarmClose
         ? [
-            Promise.resolve<GroundingBackstopResult>({ status: 'skipped' }),
             Promise.resolve<MechanicOfferBackstopResult>({ status: 'skipped' }),
             Promise.resolve<ProsePromiseBackstopResult>({ status: 'skipped' }),
             Promise.resolve<CancellationBackstopResult>({
@@ -912,7 +902,6 @@ export async function handleFollowup(input: {
             }),
           ]
         : [
-            verifyGroundingStage(ctx, gen.result),
             verifyMechanicOfferStage(ctx, gen.result),
             verifyProsePromiseStage(ctx, gen.result),
             verifyCancellationClaimStage(ctx, gen.result),
@@ -922,18 +911,6 @@ export async function handleFollowup(input: {
             verifyClosedVenueArrivalStage(ctx, gen.result),
           ],
     )
-    if (groundingSettled.status === 'rejected') {
-      console.warn(
-        '[agent] followup verifyGroundingStage threw unexpectedly (degrading to skipped)',
-        {
-          agentRunId,
-          error:
-            groundingSettled.reason instanceof Error
-              ? groundingSettled.reason.message
-              : String(groundingSettled.reason),
-        },
-      )
-    }
     if (prosePromiseSettled.status === 'rejected') {
       console.warn(
         '[agent] followup verifyProsePromiseStage threw unexpectedly (degrading to check_failed)',
@@ -970,10 +947,6 @@ export async function handleFollowup(input: {
         },
       )
     }
-    const groundingBackstop: GroundingBackstopResult =
-      groundingSettled.status === 'fulfilled'
-        ? groundingSettled.value
-        : { status: 'skipped' }
     const mechanicOfferBackstop: MechanicOfferBackstopResult =
       mechanicOfferSettled.status === 'fulfilled'
         ? mechanicOfferSettled.value
@@ -1003,28 +976,6 @@ export async function handleFollowup(input: {
             claim: 'check_failed',
           }
 
-    if (groundingBackstop.status === 'flagged') {
-      console.warn(
-        '[agent] followup grounding backstop caught an unverified claim',
-        {
-          agentRunId,
-          claimCount: groundingBackstop.claims.length,
-        },
-      )
-    }
-    // TAC-424: see handle-inbound.ts for why both outcomes log the same line.
-    if (
-      groundingBackstop.status === 'truncated' ||
-      groundingBackstop.status === 'degraded'
-    ) {
-      console.warn(
-        '[agent] followup grounding backstop did not complete — queuing (fail closed)',
-        {
-          agentRunId,
-          outcome: groundingBackstop.status,
-        },
-      )
-    }
     if (
       mechanicOfferBackstop.status === 'flagged' ||
       mechanicOfferBackstop.status === 'check_failed'
@@ -1065,7 +1016,6 @@ export async function handleFollowup(input: {
     const approval = await applyApprovalPolicyStage(
       ctx,
       gen.result,
-      groundingBackstop,
       mechanicOfferBackstop,
       prosePromiseBackstop,
       cancellationBackstop,
@@ -1099,16 +1049,6 @@ export async function handleFollowup(input: {
           // that specific trigger can never fire here. Passed for call-site
           // symmetry so the two orchestrators can't drift.
           //
-          // TAC-376: `ungroundedClaims` is REAL here, same as inbound.
-          // Followups run verifyGroundingStage now (see the Promise.allSettled
-          // above), so a followup CAN produce a KNOWLEDGE_GAP_BACKSTOP or
-          // GROUNDING_CHECK_FAILED trigger and arm the same pendingUntil clock
-          // an inbound catch would (isGapTurn unions both signals regardless
-          // of which orchestrator fed it) — that used to be structurally
-          // impossible on this path; it no longer is. `reviewTriggers` was
-          // already real here and carries the same co-firing information an
-          // inbound draft does.
-          //
           // TAC-394: a manual followup never regenerates over a card, even one
           // a 23505 reveals that the gate never saw ('never_regen').
           {
@@ -1121,7 +1061,6 @@ export async function handleFollowup(input: {
             // operator approves or edits it.
             pendingCancellation: approval.pendingCancellation,
             reviewTriggers: approval.triggers,
-            ungroundedClaims: approval.ungroundedClaims,
             callerPolicy:
               input.trigger.reason === 'manual' ? 'never_regen' : 'regen',
             // TAC-397: always false on this path — a followup has no guest

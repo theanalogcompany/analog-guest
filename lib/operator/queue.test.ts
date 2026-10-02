@@ -474,17 +474,6 @@ describe('listPendingQueue', () => {
       ],
       // --- Something outside the draft needs you ---
       ['knowledge_gap', "A guest asked something I don't have an answer for."],
-      [
-        'knowledge_gap_backstop',
-        "I wasn't sure this was true, so I didn't send it.",
-      ],
-      ['grounding_check_failed', "I couldn't finish checking this one."],
-      // TAC-424, transcribed from the 2026-09-21 ruling comment on the ticket,
-      // not read back out of REVIEW_REASON_LABELS.
-      [
-        'grounding_check_degraded',
-        "Tried twice and couldn't run. Nothing in this draft was checked.",
-      ],
       // TAC-401: the sibling of the line above, and deliberately a separate
       // sentence from prose_promise_backstop's — nothing was caught here.
       [
@@ -656,7 +645,7 @@ describe('listPendingQueue', () => {
   // undefined — an empty array or empty string where there is nothing, so the
   // client never branches on presence." Every test below exists to pin one
   // half of that.
-  describe('reviewReasonCode / reviewTriggers / ungroundedClaims', () => {
+  describe('reviewReasonCode / reviewTriggers', () => {
     const baseRow = {
       draft_id: 'd1',
       venue_id: 'v1',
@@ -685,7 +674,6 @@ describe('listPendingQueue', () => {
             ...baseRow,
             review_reason: 'commitment_type_gated',
             review_triggers: null,
-            ungrounded_claims: null,
           },
         ],
         error: null,
@@ -707,7 +695,6 @@ describe('listPendingQueue', () => {
             ...baseRow,
             review_reason: null,
             review_triggers: null,
-            ungrounded_claims: null,
           },
         ],
         error: null,
@@ -734,7 +721,6 @@ describe('listPendingQueue', () => {
               'commitment_type_gated',
               'gibberish_unknown_code',
             ],
-            ungrounded_claims: null,
           },
         ],
         error: null,
@@ -764,7 +750,6 @@ describe('listPendingQueue', () => {
               'commitment_type_gated',
               'gibberish_unknown_code',
             ],
-            ungrounded_claims: null,
           },
         ],
         error: null,
@@ -814,7 +799,6 @@ describe('listPendingQueue', () => {
               'fidelity_below_auto_send_floor',
               'commitment_type_gated',
             ],
-            ungrounded_claims: null,
           },
         ],
         error: null,
@@ -838,7 +822,6 @@ describe('listPendingQueue', () => {
             ...baseRow,
             review_reason: 'model_flagged',
             review_triggers: null,
-            ungrounded_claims: null,
           },
         ],
         error: null,
@@ -851,52 +834,6 @@ describe('listPendingQueue', () => {
         expect(result.drafts[0]!.reviewReason).toBe(
           'Something felt off about this one.',
         )
-      }
-    })
-
-    it('passes ungrounded_claims through VERBATIM', async () => {
-      // Deliberately not run through any label map or rewriter: these are the
-      // verifier's quotations from the draft body, and the operator is being
-      // shown exactly which sentence is suspect. Rewriting them defeats the
-      // point of quoting.
-      const claims = [
-        'The wifi password is bloomsday.',
-        'We roast a Panama Geisha every Tuesday.',
-      ]
-      rpcMock.mockResolvedValue({
-        data: [
-          {
-            ...baseRow,
-            review_reason: 'knowledge_gap_backstop',
-            review_triggers: ['knowledge_gap_backstop'],
-            ungrounded_claims: claims,
-          },
-        ],
-        error: null,
-      })
-      const result = await listPendingQueue(grantedVenues(['v1']))
-      expect(result.ok).toBe(true)
-      if (result.ok) {
-        expect(result.drafts[0]!.ungroundedClaims).toEqual(claims)
-      }
-    })
-
-    it('maps a null ungrounded_claims to []', async () => {
-      rpcMock.mockResolvedValue({
-        data: [
-          {
-            ...baseRow,
-            review_reason: 'model_flagged',
-            review_triggers: null,
-            ungrounded_claims: null,
-          },
-        ],
-        error: null,
-      })
-      const result = await listPendingQueue(grantedVenues(['v1']))
-      expect(result.ok).toBe(true)
-      if (result.ok) {
-        expect(result.drafts[0]!.ungroundedClaims).toEqual([])
       }
     })
 
@@ -914,30 +851,6 @@ describe('listPendingQueue', () => {
       if (result.ok) {
         expect(result.drafts[0]!.reviewTriggers).toEqual([])
         expect(result.drafts[0]!.reviewTriggerLabels).toEqual([])
-        expect(result.drafts[0]!.ungroundedClaims).toEqual([])
-      }
-    })
-
-    it('collapses the column NULL-vs-[] split at the wire, deliberately', async () => {
-      // The COLUMN distinguishes "the check never ran" (NULL) from "it ran and
-      // found nothing" ([]) — that is TAC-364 ruling 3 and it is asserted at
-      // the gate and persist layers. The WIRE does not: both are `[]`, because
-      // neither produces a UI element and the Contract's
-      // never-branch-on-presence guarantee is worth more to the client than a
-      // distinction it would never act on. Pinned so the collapse reads as a
-      // decision rather than as the distinction having been lost.
-      const rows = [null, []].map((claims) => ({
-        ...baseRow,
-        review_reason: 'model_flagged',
-        review_triggers: null,
-        ungrounded_claims: claims,
-      }))
-      rpcMock.mockResolvedValue({ data: rows, error: null })
-      const result = await listPendingQueue(grantedVenues(['v1']))
-      expect(result.ok).toBe(true)
-      if (result.ok) {
-        expect(result.drafts[0]!.ungroundedClaims).toEqual([])
-        expect(result.drafts[1]!.ungroundedClaims).toEqual([])
       }
     })
   })
@@ -959,7 +872,6 @@ describe('listPendingQueue', () => {
       voice_fidelity: null,
       review_reason: null,
       review_triggers: null,
-      ungrounded_claims: null,
       recognition_state: null,
       created_at: '2026-09-14T16:26:34.000Z',
       langfuse_trace_id: null,
@@ -1042,7 +954,6 @@ describe('listPendingQueue', () => {
       voice_fidelity: 0.85,
       review_reason: 'commitment_type_gated',
       review_triggers: ['commitment_type_gated'],
-      ungrounded_claims: [],
       recognition_state: 'returning',
       created_at: '2026-09-23T10:00:00.000Z',
       langfuse_trace_id: null,
@@ -1086,7 +997,6 @@ describe('listPendingQueue', () => {
         reviewReasonCode: 'commitment_type_gated',
         reviewTriggers: ['commitment_type_gated'],
         reviewTriggerLabels: ['This commits you to something. Your call.'],
-        ungroundedClaims: [],
         otherPendingDraftsForGuest: 0,
         replacedDraft: null,
         recognitionState: 'returning',
@@ -1578,7 +1488,6 @@ describe('listPendingQueue: the replied-to message (TAC-534)', () => {
     voice_fidelity: 0.9,
     review_reason: null,
     review_triggers: [],
-    ungrounded_claims: [],
     recognition_state: 'returning',
     created_at: '2026-09-23T18:10:00.000Z',
     langfuse_trace_id: null,

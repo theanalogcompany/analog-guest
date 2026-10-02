@@ -27,9 +27,8 @@
 // prompt once and string-replace the rule text for the BEFORE arm inside a
 // single run. That holds the clock and the venue config perfectly still, and
 // it was NOT chosen here because it bypasses `generateStage`, losing the regen
-// loop, the fidelity floor and the real approval gate — and this harness runs
-// the real grounding backstop precisely so its verdict is the gate's verdict.
-// Worth revisiting if run-to-run drift ever costs more than that.
+// loop, the fidelity floor and the real approval gate. Worth revisiting if
+// run-to-run drift ever costs more than that.
 //
 // WHAT IS NOT AUTOMATICALLY HELD STILL, since two runs means two clocks:
 //   - The injected entries are computed from each run's own `now`, so two arms
@@ -41,13 +40,6 @@
 //     which a human can edit between arms.
 // Before comparing two files, check their headers agree on `injectedEntries`.
 // The harness does not enforce any of this; it records what it saw.
-//
-// THE BACKSTOP RUNS IN THE LOOP. In production the incident draft was HELD for
-// approval rather than sent, so a run that measured generation alone would be
-// measuring something other than what ships. `verifyGroundingStage` is the
-// same call the gate makes, so its verdict here is the verdict the gate would
-// see. It also answers a regression question the bar does not: whether the new
-// rule makes the model hold more drafts than before.
 //
 // TELEMETRY: the stages fire PostHog events and some Slack relays. Run with
 // NEXT_PUBLIC_POSTHOG_KEY and SLACK_ALERTS_WEBHOOK_URL unset and both go inert
@@ -68,7 +60,6 @@ import {
   retrieveCorpusStage,
   retrieveKnowledgeStage,
   shouldRetrieveKnowledge,
-  verifyGroundingStage,
 } from '@/lib/agent/stages'
 import { startAgentTrace } from '@/lib/observability/langfuse'
 import { PROMPT_VERSION } from '@/lib/ai/prompts/system-template'
@@ -169,7 +160,7 @@ function buildInjectedEntries(now: Date): {
     // reach it by plain restatement, so the clause is measured on a case that
     // does not need it. It also hides the one interaction worth seeing, since
     // with a month-granularity note "no date set yet" is an inference from
-    // absence and the grounding verifier may read it as unsupported.
+    // absence.
     undated: `Masala Mixer is planned for ${monthYear} in the loft area.`,
     // A real date, close enough that a person would say the weekday.
     thisWeek: `Latte art throwdown on ${thisWeekLong}, 7pm in the loft. Free to watch, signups at the counter.`,
@@ -424,11 +415,6 @@ async function main(): Promise<void> {
       const matches = body ? findDateLanguage(body) : []
       const counts = countByKind(matches)
 
-      const grounding =
-        generated.status === 'success'
-          ? await verifyGroundingStage(ctx, generated.result)
-          : null
-
       log.appendUnit({
         scenarioId: scenario.id,
         inbound: scenario.body,
@@ -448,11 +434,6 @@ async function main(): Promise<void> {
           generated.status === 'success' ? generated.result.attempts : null,
         counts,
         matches,
-        // skipped | clean | flagged | truncated. `flagged` means production
-        // would have queued this rather than sent it.
-        groundingStatus: grounding?.status ?? null,
-        groundingClaims:
-          grounding?.status === 'flagged' ? grounding.claims : [],
         // Recorded so the weekday case can be read without re-deriving it.
         expectedWeekday:
           scenario.id === 'event-this-week' ? injected.thisWeekWeekday : null,
@@ -469,7 +450,6 @@ async function main(): Promise<void> {
         counts.numeric_date > 0 ? `numeric x${counts.numeric_date}` : null,
         counts.month_named > 0 ? `month x${counts.month_named}` : null,
       ].filter((f): f is string => f !== null)
-      const held = grounding?.status === 'flagged' ? ' [backstop HELD]' : ''
       // `month_named` is CORRECT on event-far-off (the scenario's own `why`
       // says so), so a right answer there must not print as a failure.
       const defectFlags =
@@ -491,7 +471,7 @@ async function main(): Promise<void> {
             : flags.length > 0
               ? flags.join(', ')
               : `person-shaped x${counts.person_shaped}`
-        }${held}`,
+        }`,
       )
       if (body) console.log(`    ${body.replace(/\s+/g, ' ')}`)
     }

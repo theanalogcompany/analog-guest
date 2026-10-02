@@ -6,7 +6,7 @@
 //
 // Until TAC-364 the review_reason legs were hand-listed here and hand-listed
 // again in `isKnowledgeGapCard`, and they DRIFTED: this query carried one value
-// where the predicate carried two, so a `knowledge_gap_backstop` card whose
+// where the predicate carried two, so a card whose
 // clock had already fired was recognized by the predicate and invisible to this
 // query — the `## Unanswered question` block silently vanished for that guest
 // while the card still sat in the operator's queue. The comment at the query
@@ -109,7 +109,6 @@ describe('findPendingQuestion — the card filter (TAC-364)', () => {
     expect(orMock.mock.calls[0][0]).toBe(
       'pending_until.not.is.null,' +
         'review_reason.eq.knowledge_gap,' +
-        'review_reason.eq.knowledge_gap_backstop,' +
         'review_reason.eq.generation_failed',
     )
   })
@@ -189,7 +188,7 @@ describe('findPendingQuestion — the linked inbound must read as a question (TA
         // a fixture modelling an impossible row is what migration 046's entry
         // is about.
         pending_until: null,
-        review_reason: 'knowledge_gap_backstop',
+        review_reason: 'knowledge_gap',
       },
       error: null,
     })
@@ -313,16 +312,6 @@ describe('findPendingQuestion — mode no longer keys on the clock (TAC-484)', (
     })
   }
 
-  // The regression this ticket introduced and then closed. A backstop card on a
-  // genuine question: clock null, because it can never arm one now.
-  it("a backstop card with no clock is 'outstanding', never 'acknowledged'", async () => {
-    cardWith(null, 'knowledge_gap_backstop')
-    const loaded = await findPendingQuestion(VENUE, GUEST)
-    expect(loaded?.question.mode).toBe('outstanding')
-  })
-
-  // The other half: the same answer whatever the column says. Without this, a
-  // conditional keyed the other way round would pass the test above.
   it("a self-reported card WITH a running clock is also 'outstanding'", async () => {
     cardWith('2026-09-18T15:46:00Z', 'knowledge_gap')
     const loaded = await findPendingQuestion(VENUE, GUEST)

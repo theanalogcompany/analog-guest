@@ -451,7 +451,10 @@ async function main(): Promise<void> {
                   const { object } = await generateObject({
                     model: getGenerationModel(),
                     system,
-                    prompt: composed.userPrompt,
+                    messages: [
+                      ...composed.historyTurns,
+                      { role: 'user', content: composed.userPrompt },
+                    ],
                     schema: GeneratedMessageSchema,
                     temperature: 0.7,
                     maxOutputTokens: MAX_OUTPUT_TOKENS,

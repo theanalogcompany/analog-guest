@@ -72,7 +72,7 @@ const fetchTraceMock = vi.fn()
 
 vi.mock('@langfuse/client', () => ({
   LangfuseClient: class MockClient {
-    fetchTrace = fetchTraceMock
+    api = { trace: { get: fetchTraceMock } }
     constructor(opts: unknown) {
       clientCtor(opts)
     }
@@ -548,8 +548,80 @@ describe('fetchTrace (THE-201)', () => {
     // read ran" from "the read was skipped".
     fetchTraceMock.mockResolvedValueOnce({ id: 'tr_1', name: 'agent.inbound' })
     const result = await fetchTrace('tr_1')
-    expect(fetchTraceMock).toHaveBeenCalledWith('tr_1')
     expect(result).toEqual({ id: 'tr_1', name: 'agent.inbound' })
+  })
+
+  it('bounds the read: 8s timeout and no retries, never the SDK defaults', async () => {
+    // The SDK default is a 60s timeout plus two retries honoring Retry-After up
+    // to 60s each. A 429 under those defaults held the admin page for minutes.
+    // Pin the values, not their presence: a mutant dropping the options object
+    // leaves every other assertion here green.
+    const { fetchTrace, _resetLangfuseClientForTest } =
+      await import('./langfuse')
+    _resetLangfuseClientForTest()
+    fetchTraceMock.mockResolvedValueOnce({ id: 'tr_1' })
+    await fetchTrace('tr_1')
+    expect(fetchTraceMock).toHaveBeenCalledWith(
+      'tr_1',
+      {},
+      { timeoutInSeconds: 8, maxRetries: 0 },
+    )
+  })
+
+  it('keeps the failure cause instead of flattening it to null', async () => {
+    const { fetchTraceResult, _resetLangfuseClientForTest } =
+      await import('./langfuse')
+    _resetLangfuseClientForTest()
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const infoSpy = vi.spyOn(console, 'log').mockImplementation(() => {})
+
+    fetchTraceMock.mockRejectedValueOnce(
+      Object.assign(new Error('Too Many Requests'), { statusCode: 429 }),
+    )
+    expect(await fetchTraceResult('tr_a')).toMatchObject({
+      ok: false,
+      error: 'rate_limited',
+      status: 429,
+    })
+
+    fetchTraceMock.mockRejectedValueOnce(
+      Object.assign(new Error('Timeout exceeded when calling GET /traces'), {}),
+    )
+    expect(await fetchTraceResult('tr_b')).toMatchObject({
+      ok: false,
+      error: 'timeout',
+    })
+
+    fetchTraceMock.mockRejectedValueOnce(
+      Object.assign(new Error('Not Found'), { statusCode: 404 }),
+    )
+    expect(await fetchTraceResult('tr_c')).toMatchObject({
+      ok: false,
+      error: 'not_found',
+    })
+    warnSpy.mockRestore()
+    infoSpy.mockRestore()
+  })
+
+  it('logs one structured line per read with the outcome and duration', async () => {
+    const { fetchTraceResult, _resetLangfuseClientForTest } =
+      await import('./langfuse')
+    _resetLangfuseClientForTest()
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    fetchTraceMock.mockRejectedValueOnce(
+      Object.assign(new Error('Too Many Requests'), { statusCode: 429 }),
+    )
+    await fetchTraceResult('tr_log')
+    const line = JSON.parse(String(warnSpy.mock.calls[0][0]))
+    expect(line).toMatchObject({
+      level: 'warn',
+      event: '[observability] fetchTrace failed',
+      traceId: 'tr_log',
+      outcome: 'rate_limited',
+      status: 429,
+    })
+    expect(typeof line.durationMs).toBe('number')
+    warnSpy.mockRestore()
   })
 
   it('returns null on empty trace ID without calling the SDK', async () => {

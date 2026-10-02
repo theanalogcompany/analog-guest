@@ -10,8 +10,8 @@
  * THE CORRECTION THAT DECIDES THE DESIGN. The ticket said each run was
  * generated without knowledge of the other. That is half wrong. Both runs
  * could see the other's MESSAGE — `build-runtime-context.ts` excludes only
- * `currentMessage.id`, so the second run had the first message in
- * `## Recent conversation`, rendered `[just now]`. Neither could see the
+ * `currentMessage.id`, so the second run had the first message in its history
+ * (then a `## Recent conversation` block, now a chat turn). Neither could see the
  * other's REPLY, because it did not exist yet. So the fix is **only one run
  * may produce a reply**, not "let the reply see both messages" — which is why
  * this module is a claim and no prompt file is touched.

@@ -32,9 +32,9 @@ const VALID_TYPES: readonly TunableType[] = [
 ]
 
 describe('TUNABLES manifest', () => {
-  it('contains exactly 49 entries (locks the audit set)', () => {
+  it('contains exactly 48 entries (locks the audit set)', () => {
     // TAC-350 added knowledge_relevance_floor; TAC-367 added
-    // verify_grounding_max_output_tokens. TAC-380 added six intention entries.
+    // verify_grounding_max_output_tokens (removed with the grounding verifier). TAC-380 added six intention entries.
     // TAC-421 removed the four lib/agent/timing.ts entries with the module.
     // 2026-09-29: agent_latency_high_threshold_ms split into per-kind inbound
     // and followup entries (+1), because inbound p50 is 18.0s against followup
@@ -49,7 +49,7 @@ describe('TUNABLES manifest', () => {
     // in a test name is a claim nothing enforces. Keep the two in sync by
     // editing them together, and treat a mismatch as the signal that someone
     // updated the assertion a failing run pointed at and nothing else.
-    expect(TUNABLES.length).toBe(49)
+    expect(TUNABLES.length).toBe(48)
   })
 
   // Per-category counts catch silent rebalancing — a future writer adding to
@@ -69,7 +69,7 @@ describe('TUNABLES manifest', () => {
     expect(counts).toEqual({
       // 24 with the per-kind latency split, minus corpus_top_similarity_low_threshold
       // (decision 0008).
-      agent_runtime: 23,
+      agent_runtime: 22,
       classification: 3,
       // TAC-421 took this from 11 to 7: the four lib/agent/timing.ts
       // constants went with the deleted module. The remaining seven are

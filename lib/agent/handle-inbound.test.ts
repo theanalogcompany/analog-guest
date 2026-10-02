@@ -35,12 +35,6 @@ const retrieveCorpusStageMock = vi.fn()
 const retrieveKnowledgeWithContextStageMock = vi.fn()
 const generateStageMock = vi.fn()
 const applyApprovalPolicyStageMock = vi.fn()
-// TAC-350: independent grounding backstop. Defaults to "nothing to flag" for
-// every test in this file that doesn't care about it — `clearAllMocks()`
-// (used below) clears call history but not this default implementation.
-const verifyGroundingStageMock = vi
-  .fn()
-  .mockResolvedValue({ status: 'skipped' })
 // TAC-401: defaults to 'skipped' like its sibling, so every pre-existing test
 // in this file behaves exactly as it did before the check existed.
 const verifyProsePromiseStageMock = vi
@@ -59,8 +53,7 @@ const verifyCancellationClaimStageMock = vi
   .fn()
   .mockResolvedValue({ resolution: { status: 'none' }, claim: 'clean' })
 // TAC-355: independent mechanic-offer backstop. Defaults to "skipped" for
-// every test in this file that doesn't care about it, mirroring
-// verifyGroundingStageMock's default-null posture above.
+// every test in this file that doesn't care about it.
 const verifyMechanicOfferStageMock = vi
   .fn()
   .mockResolvedValue({ status: 'skipped' })
@@ -162,7 +155,6 @@ vi.mock('./stages', async () => {
     generateStage: (...a: unknown[]) => generateStageMock(...a),
     applyApprovalPolicyStage: (...a: unknown[]) =>
       applyApprovalPolicyStageMock(...a),
-    verifyGroundingStage: (...a: unknown[]) => verifyGroundingStageMock(...a),
     verifyMechanicOfferStage: (...a: unknown[]) =>
       verifyMechanicOfferStageMock(...a),
     // TAC-401: this factory is an explicit ALLOW-LIST. A stage missing here
@@ -349,7 +341,7 @@ vi.mock('./typing-indicator', () => ({
 const traceControl = vi.hoisted(() => ({ flushThrows: false }))
 /**
  * TAC-540 part D. Spans now RECORD when they open and close, so a test can
- * see whether each of the five checks owns its own window or whether they
+ * see whether each of the four checks owns its own window or whether they
  * all share the batch's. Before this the mock discarded everything, which is
  * why three spans could wrap the same `Promise.allSettled` for a year with
  * nothing to notice it.
@@ -836,7 +828,7 @@ describe('handleInbound — failure-card policy (TAC-309)', () => {
         id: 'gap-comp',
         body: "Sorry about that. The next one's on us.",
         pending_until: new Date(Date.now() + 60_000).toISOString(),
-        review_reason: 'knowledge_gap_backstop',
+        review_reason: 'knowledge_gap',
         pending_commitment: {
           type: 'comp',
           description: "the next one's on us",
@@ -873,7 +865,6 @@ describe('handleInbound: a draft with nowhere to go (TAC-394)', () => {
     triggers: ['commitment_type_gated'],
     primaryTrigger: 'commitment_type_gated',
     compMatchedPattern: null,
-    ungroundedClaims: [],
     existingPendingDraftId: null,
     blankBody: false,
     slot: 'obligation',
@@ -1027,6 +1018,7 @@ function successResult() {
     attemptHistory: [],
     systemPrompt: '',
     userPrompt: '',
+    conversation: '',
     promptVersion: PROMPT_VERSION,
     dashViolationPersisted: false,
     selfTalkViolationPersisted: false,
@@ -1603,13 +1595,6 @@ describe('handleInbound — crisis-safety short circuit (TAC-348)', () => {
   })
 })
 
-// TAC-350: code-review follow-up. Every other test in this file relies on
-// verifyGroundingStageMock's default (null) — nothing previously asserted
-// that a NON-null finding actually reaches applyApprovalPolicyStage's third
-// argument. Without this test, a future refactor that dropped
-// `groundingBackstop` from the handleInbound call site would silently
-// disable the backstop for all live inbound traffic while every other test
-// in this file (and every pure-function test in stages.test.ts) kept passing.
 // TAC-495: the inbound row's channel is what picks the channel copy, so it has
 // to reach buildRuntimeContext intact. Two halves, because the supabase mock
 // above ignores its select() argument: the behavioural test proves the row's
@@ -1862,7 +1847,6 @@ describe('handleInbound — the queued draft push carries the guest turn (TAC-53
       triggers: [APPROVAL_TRIGGERS.KNOWLEDGE_GAP],
       primaryTrigger: APPROVAL_TRIGGERS.KNOWLEDGE_GAP,
       compMatchedPattern: null,
-      ungroundedClaims: null,
       existingPendingDraftId: null,
       pendingUntil: new Date(),
       blankBody: true,
@@ -1882,7 +1866,7 @@ describe('handleInbound — the queued draft push carries the guest turn (TAC-53
 })
 
 // ---------------------------------------------------------------------------
-// Decision 0003, rewritten 2026-09-29: the five post-generation checks are
+// Decision 0003, rewritten 2026-09-29: the four post-generation checks are
 // DEFERRED past dispatch on the inbound path.
 // ---------------------------------------------------------------------------
 //
@@ -1913,16 +1897,8 @@ describe('handleInbound — deferred post-generation checks (decision 0003 rewri
     await handleInbound(INBOUND_ID)
 
     expect(applyApprovalPolicyStageMock).toHaveBeenCalledTimes(1)
-    const [
-      ,
-      ,
-      grounding,
-      mechanicOffer,
-      prosePromise,
-      cancellation,
-      closedVenue,
-    ] = applyApprovalPolicyStageMock.mock.calls[0]
-    expect(grounding).toBeNull()
+    const [, , mechanicOffer, prosePromise, cancellation, closedVenue] =
+      applyApprovalPolicyStageMock.mock.calls[0]
     expect(mechanicOffer).toEqual({ status: 'skipped' })
     expect(prosePromise).toEqual({ status: 'skipped' })
     expect(cancellation).toEqual({
@@ -1934,8 +1910,8 @@ describe('handleInbound — deferred post-generation checks (decision 0003 rewri
 
   // The falsifiable half of "deferred": the count is snapshotted INSIDE the
   // gate mock, so a regression that moves any check back before the gate
-  // fails here even though all five have been called by the end of the turn.
-  it('calls no verify stage before the gate decides, and all five after the send', async () => {
+  // fails here even though all four have been called by the end of the turn.
+  it('calls no verify stage before the gate decides, and all four after the send', async () => {
     generateStageMock.mockResolvedValue({
       status: 'success',
       result: successResult(),
@@ -1943,7 +1919,6 @@ describe('handleInbound — deferred post-generation checks (decision 0003 rewri
     let callsAtGateTime = -1
     applyApprovalPolicyStageMock.mockImplementation(async () => {
       callsAtGateTime =
-        verifyGroundingStageMock.mock.calls.length +
         verifyMechanicOfferStageMock.mock.calls.length +
         verifyProsePromiseStageMock.mock.calls.length +
         verifyCancellationClaimStageMock.mock.calls.length +
@@ -1958,7 +1933,6 @@ describe('handleInbound — deferred post-generation checks (decision 0003 rewri
     await handleInbound(INBOUND_ID)
 
     expect(callsAtGateTime).toBe(0)
-    expect(verifyGroundingStageMock).toHaveBeenCalledTimes(1)
     expect(verifyMechanicOfferStageMock).toHaveBeenCalledTimes(1)
     expect(verifyProsePromiseStageMock).toHaveBeenCalledTimes(1)
     expect(verifyCancellationClaimStageMock).toHaveBeenCalledTimes(1)
@@ -1979,7 +1953,6 @@ describe('handleInbound — deferred post-generation checks (decision 0003 rewri
     await handleInbound(INBOUND_ID)
 
     for (const mock of [
-      verifyGroundingStageMock,
       verifyMechanicOfferStageMock,
       verifyProsePromiseStageMock,
       verifyCancellationClaimStageMock,
@@ -2002,7 +1975,6 @@ describe('handleInbound — deferred post-generation checks (decision 0003 rewri
       triggers: [APPROVAL_TRIGGERS.FIDELITY_BELOW_AUTO_SEND_FLOOR],
       primaryTrigger: APPROVAL_TRIGGERS.FIDELITY_BELOW_AUTO_SEND_FLOOR,
       compMatchedPattern: null,
-      ungroundedClaims: null,
       existingPendingDraftId: null,
       blankBody: false,
     })
@@ -2014,7 +1986,6 @@ describe('handleInbound — deferred post-generation checks (decision 0003 rewri
 
     await handleInbound(INBOUND_ID)
 
-    expect(verifyGroundingStageMock).not.toHaveBeenCalled()
     expect(verifyMechanicOfferStageMock).not.toHaveBeenCalled()
     expect(verifyProsePromiseStageMock).not.toHaveBeenCalled()
     expect(verifyCancellationClaimStageMock).not.toHaveBeenCalled()
@@ -2043,7 +2014,6 @@ describe('handleInbound — deferred post-generation checks (decision 0003 rewri
       action: 'queue',
       triggers: ['prose_promise_backstop'],
       primaryTrigger: 'prose_promise_backstop',
-      ungroundedClaims: [],
       compMatchedPattern: null,
       existingPendingDraftId: null,
       slot: 'obligation',
@@ -2072,7 +2042,7 @@ describe('handleInbound — deferred post-generation checks (decision 0003 rewri
       status: 'success',
       result: successResult(),
     })
-    verifyGroundingStageMock.mockRejectedValueOnce(
+    verifyMechanicOfferStageMock.mockRejectedValueOnce(
       new Error('unexpected throw'),
     )
     applyApprovalPolicyStageMock.mockResolvedValue({ action: 'send' })
@@ -2559,7 +2529,6 @@ describe('handleInbound — cancellation carrier (TAC-513)', () => {
       triggers: [APPROVAL_TRIGGERS.COMMITMENT_CANCELLATION_GATED],
       primaryTrigger: APPROVAL_TRIGGERS.COMMITMENT_CANCELLATION_GATED,
       compMatchedPattern: null,
-      ungroundedClaims: null,
       existingPendingDraftId: null,
       blankBody: false,
       pendingCancellation,
@@ -2596,7 +2565,6 @@ describe('handleInbound — cancellation carrier (TAC-513)', () => {
       triggers: [APPROVAL_TRIGGERS.COMMITMENT_CANCELLATION_GATED],
       primaryTrigger: APPROVAL_TRIGGERS.COMMITMENT_CANCELLATION_GATED,
       compMatchedPattern: null,
-      ungroundedClaims: null,
       existingPendingDraftId: null,
       blankBody: false,
     })
@@ -2608,8 +2576,7 @@ describe('handleInbound — cancellation carrier (TAC-513)', () => {
 
     await handleInbound(INBOUND_ID)
 
-    const [, , , , , cancellationArg] =
-      applyApprovalPolicyStageMock.mock.calls[0]
+    const [, , , , cancellationArg] = applyApprovalPolicyStageMock.mock.calls[0]
     expect(cancellationArg).toEqual({
       resolution: {
         status: 'resolved',
@@ -2637,8 +2604,7 @@ describe('handleInbound — cancellation carrier (TAC-513)', () => {
 
     await handleInbound(INBOUND_ID)
 
-    const [, , , , , cancellationArg] =
-      applyApprovalPolicyStageMock.mock.calls[0]
+    const [, , , , cancellationArg] = applyApprovalPolicyStageMock.mock.calls[0]
     expect(cancellationArg).toEqual({
       resolution: { status: 'none' },
       claim: 'skipped',
@@ -3963,7 +3929,6 @@ describe('TAC-540 — classify and voice retrieval overlap', () => {
 
 describe('TAC-540 — each verify check owns its own span window', () => {
   const CHECK_SPANS = [
-    'verify_grounding',
     'verify_mechanic_offer',
     'verify_prose_promise',
     'verify_cancellation_claim',
@@ -4002,7 +3967,7 @@ describe('TAC-540 — each verify check owns its own span window', () => {
     })
   })
 
-  it('opens a span for all five checks, including the two that had none', async () => {
+  it('opens a span for all four checks', async () => {
     await handleInbound(INBOUND_ID)
 
     const opened = spanLog.events
@@ -4017,15 +3982,14 @@ describe('TAC-540 — each verify check owns its own span window', () => {
    *
    * Before this ticket all three existing spans were ended after the
    * `Promise.allSettled`, so every one of them recorded the maximum of the
-   * five and no check could be told apart from another (TAC-420 finding F1).
+   * checks and no check could be told apart from another (TAC-420 finding F1).
    *
-   * The fixture releases the five checks in a chosen order and asserts the
+   * The fixture releases the four checks in a chosen order and asserts the
    * spans closed in that same order. Under the old shape every close lands
    * after the slowest check, so the recorded order would be the array order
    * instead — which is a DIFFERENT order here by construction.
    */
   it('closes each span while the other checks are STILL RUNNING, not after the batch', async () => {
-    const grounding = deferred('grounding', { status: 'skipped' as const })
     const mechanic = deferred('mechanic', { status: 'skipped' as const })
     const prose = deferred('prose', { status: 'skipped' as const })
     const cancellation = deferred('cancellation', {
@@ -4034,7 +3998,6 @@ describe('TAC-540 — each verify check owns its own span window', () => {
     })
     const closedVenue = deferred('closedVenue', { status: 'skipped' as const })
 
-    verifyGroundingStageMock.mockImplementation(grounding.run)
     verifyMechanicOfferStageMock.mockImplementation(mechanic.run)
     verifyProsePromiseStageMock.mockImplementation(prose.run)
     verifyCancellationClaimStageMock.mockImplementation(cancellation.run)
@@ -4047,7 +4010,6 @@ describe('TAC-540 — each verify check owns its own span window', () => {
     const releaseOrder = [
       ['verify_closed_venue_arrival', closedVenue],
       ['verify_prose_promise', prose],
-      ['verify_grounding', grounding],
       ['verify_cancellation_claim', cancellation],
       ['verify_mechanic_offer', mechanic],
     ] as const
@@ -4070,8 +4032,8 @@ describe('TAC-540 — each verify check owns its own span window', () => {
     //
     // What separates the two is the WINDOW. Each span must close while the
     // other checks are still in flight, so the log has to interleave:
-    // resolved, closed, resolved, closed. Batched ends produce all five
-    // resolutions and then all five closes.
+    // resolved, closed, resolved, closed. Batched ends produce all four
+    // resolutions and then all four closes.
     const log = spanLog.events
       .filter(
         (e) => CHECK_SPANS.includes(e.name) || e.name.startsWith('resolved:'),
@@ -4101,7 +4063,7 @@ describe('TAC-540 — each verify check owns its own span window', () => {
    * would then read a fulfilled `undefined` and crash where it destructures.
    */
   it('closes the span and still rejects when a check throws', async () => {
-    verifyGroundingStageMock.mockRejectedValue(new Error('haiku exploded'))
+    verifyMechanicOfferStageMock.mockRejectedValue(new Error('haiku exploded'))
 
     const r = await handleInbound(INBOUND_ID)
 
@@ -4109,7 +4071,7 @@ describe('TAC-540 — each verify check owns its own span window', () => {
     const closed = spanLog.events
       .filter((e) => e.phase === 'close')
       .map((e) => e.name)
-    expect(closed).toContain('verify_grounding')
+    expect(closed).toContain('verify_mechanic_offer')
   })
 })
 

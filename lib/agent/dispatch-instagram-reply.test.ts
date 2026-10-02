@@ -157,6 +157,7 @@ function generation(
     attemptHistory: [],
     systemPrompt: '',
     userPrompt: '',
+    conversation: '',
     promptVersion: 'v-test',
     cacheReadTokens: 0,
     cacheWriteTokens: 0,

@@ -39,8 +39,7 @@ export const VERIFY_CANCELLATION_CLAIM_MAX_OUTPUT_TOKENS = 600
  * Imported BY PATH in lib/agent/stages.ts, never via the @/lib/ai barrel:
  * stages.test.ts `vi.mock`s that barrel, and a bare constant arriving
  * `undefined` would make the no-retry branch silently unreachable in every
- * test. Same reasoning VERIFY_GROUNDING_TRUNCATED_ERROR_CODE and
- * VERIFY_PROSE_PROMISE_TRUNCATED_ERROR_CODE both carry.
+ * test. Same reasoning VERIFY_PROSE_PROMISE_TRUNCATED_ERROR_CODE carries.
  */
 export const VERIFY_CANCELLATION_CLAIM_TRUNCATED_ERROR_CODE =
   'ai_verify_cancellation_claim_truncated'
@@ -69,7 +68,7 @@ function buildUserPrompt(input: VerifyCancellationClaimInput): string {
  * TAC-513: independent post-generation check for a cancellation CLAIMED in
  * prose with no structured carrier behind it.
  *
- * Fourth instance of the shape verify-grounding.ts, verify-mechanic-offer.ts
+ * Instance of the shape verify-mechanic-offer.ts
  * and verify-prose-promise.ts already set: generateObject, Haiku, AIResult, its
  * own prompt version, no regeneration loop, no gating of its own beyond input
  * validation.
@@ -127,7 +126,7 @@ export async function verifyCancellationClaim(
   // `reasoning` FIRST, and the order is load-bearing. Structured output
   // generates in declaration order, so a verdict declared before the analysis
   // is a verdict the model has not reasoned about yet. TAC-301 part 1.5 found
-  // exactly this on verify-grounding, where the model emitted a flag and then
+  // exactly this on an earlier verifier, where the model emitted a flag and then
   // reasoned its way to the opposite conclusion inside the same object.
   const schema = z.object({
     reasoning: z.string(),

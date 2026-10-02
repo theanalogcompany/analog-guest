@@ -38,12 +38,6 @@ const retrieveCorpusStageMock = vi.fn()
 const retrieveKnowledgeWithContextStageMock = vi.fn()
 const generateStageMock = vi.fn()
 const applyApprovalPolicyStageMock = vi.fn()
-// TAC-350: independent grounding backstop. Defaults to "nothing to flag" for
-// every test in this file that doesn't care about it — `clearAllMocks()`
-// (used below) clears call history but not this default implementation.
-const verifyGroundingStageMock = vi
-  .fn()
-  .mockResolvedValue({ status: 'skipped' })
 // TAC-401: defaults to 'skipped' like its sibling, so every pre-existing test
 // in this file behaves exactly as it did before the check existed.
 const verifyProsePromiseStageMock = vi
@@ -62,8 +56,7 @@ const verifyCancellationClaimStageMock = vi
   .fn()
   .mockResolvedValue({ resolution: { status: 'none' }, claim: 'clean' })
 // TAC-355: independent mechanic-offer backstop. Defaults to "skipped" for
-// every test in this file that doesn't care about it, mirroring
-// verifyGroundingStageMock's default-null posture above.
+// every test in this file that doesn't care about it.
 const verifyMechanicOfferStageMock = vi
   .fn()
   .mockResolvedValue({ status: 'skipped' })
@@ -161,7 +154,6 @@ vi.mock('./stages', async () => {
     generateStage: (...a: unknown[]) => generateStageMock(...a),
     applyApprovalPolicyStage: (...a: unknown[]) =>
       applyApprovalPolicyStageMock(...a),
-    verifyGroundingStage: (...a: unknown[]) => verifyGroundingStageMock(...a),
     verifyMechanicOfferStage: (...a: unknown[]) =>
       verifyMechanicOfferStageMock(...a),
     // TAC-401: this factory is an explicit ALLOW-LIST. A stage missing here
@@ -516,6 +508,7 @@ function successResult() {
     attemptHistory: [],
     systemPrompt: '',
     userPrompt: '',
+    conversation: '',
     promptVersion: PROMPT_VERSION,
     dashViolationPersisted: false,
     selfTalkViolationPersisted: false,

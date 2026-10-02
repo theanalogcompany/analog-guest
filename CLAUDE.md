@@ -32,8 +32,8 @@ otherwise. `@path` imports are **eager** and do not help.
 
 | read this when you work in that directory | covers |
 | --- | --- |
-| `lib/agent/CLAUDE.md` | orchestrators, stage pipeline, floors, the 23 approval triggers, pending slots, coalescing, intentions |
-| `lib/ai/CLAUDE.md` | `generateObject` patterns, the schema budget, the five verifiers, truncation |
+| `lib/agent/CLAUDE.md` | orchestrators, stage pipeline, floors, the 20 approval triggers, pending slots, coalescing, intentions |
+| `lib/ai/CLAUDE.md` | `generateObject` patterns, the schema budget, the four verifiers, truncation |
 | `lib/ai/prompts/CLAUDE.md` | prompt assembly order, universal voice rules, channel copy, serializers |
 | `lib/messaging/instagram/CLAUDE.md` | the Meta half: signatures, echoes, the reply window, tokens, deletion |
 | `db/migrations/CLAUDE.md` | apply order, high-stakes tables, the SQL patterns this schema uses |
@@ -318,12 +318,12 @@ The live floors, all in `lib/agent/stages.ts`. A number quoted anywhere else may
 | `AUTO_SEND_FIDELITY_FLOOR` 0.6 | 0.4 to 0.6 queues for an operator |
 | voice pack (`lib/rag/voice-pack.ts`) | static per venue, no similarity; empty pack fails **closed** on inbound (decision 0008) |
 | `KNOWLEDGE_RELEVANCE_FLOOR` 0.3 | knowledge retrieval, degrades **gracefully** |
-| `PROMPT_VERSION` v1.78.0 | bumping it is a repo-wide sweep - `.claude/rules/prompt-versioning.md` |
+| `PROMPT_VERSION` v1.81.0 | bumping it is a repo-wide sweep - `.claude/rules/prompt-versioning.md` |
 
-**23 approval triggers compose; any one queues the draft.** The five post-generation LLM
+**20 approval triggers compose; any one queues the draft.** The four post-generation LLM
 checks run **post-send** on inbound (Slack forward on a finding, never a hold) and keep the
 fail-**closed**-after-one-retry posture on followups and the holding message - treat a
-posture change to one as a change to all five
+posture change to one as a change to all four
 (`docs/decisions/0003-post-generation-checks-fail-closed.md`). `lib/agent/CLAUDE.md` has the
 trigger table and priority order.
 

@@ -3,7 +3,6 @@ import { formatInTimeZone } from 'date-fns-tz'
 import { AuthError, verifyAnalogAdminAccess } from '@/lib/auth'
 import { createAdminClient } from '@/lib/db/admin'
 import { createServerClient } from '@/lib/db/server'
-import { type ApiTraceWithFullDetails, fetchTrace } from '@/lib/observability'
 import { logger } from '@/lib/observability/logger'
 import { type GuestState } from '@/lib/recognition'
 import {
@@ -12,6 +11,11 @@ import {
   filterActiveContext,
 } from '@/lib/schemas'
 import { guestNameWithPhone } from '../_lib/guest-name'
+import {
+  SLOW_RENDER_MS,
+  createStageTimer,
+  type StageTimer,
+} from '../_lib/stage-timer'
 import { ConversationsClient, type InitialData } from './conversations-client'
 import { EmptyState } from './_components/empty-state'
 import { Filters } from './_components/filters'
@@ -31,18 +35,32 @@ import {
 
 // Server orchestrator. Fetches everything the client needs in one render path
 // so initial paint is one network round trip. The client is responsible for
-// follow-up: trace fetches on click, Realtime subscription, filter changes
-// (which trigger this server fetch again via router.replace + RSC re-render).
+// follow-up: trace fetches (including the default selection's), Realtime
+// subscription, filter changes (which trigger this server fetch again via
+// router.replace + RSC re-render).
+//
+// NOTHING IN THIS RENDER MAY WAIT ON A THIRD PARTY. It used to prefetch the
+// last five Langfuse traces before sending any HTML. Langfuse rate-limits the
+// read API, and the SDK retried a 429 twice honoring Retry-After, so one
+// click on a guest could hang for minutes with no error. Measured on prod:
+// every database query here is under 300ms, a trace read is 0.2 to 3.8s and
+// ~115KB (five of them were also ~550KB of RSC payload). The trace panel
+// fetches its own trace through the bounded /api/trace route instead.
+//
+// BOUNDED: `maxDuration` caps the whole render, and the Supabase client aborts
+// any single request after SUPABASE_TIMEOUT_MS, so a stalled query becomes the
+// labeled "... load failed" error rather than an indefinite spinner.
 //
 // Auth: layout already gates the (authed) tree; we re-resolve the operator
 // here only to resolve the operator's `venueScope`.
 
 export const dynamic = 'force-dynamic'
+export const maxDuration = 30
 
+const SUPABASE_TIMEOUT_MS = 10_000
 const MESSAGE_LIMIT = 200
 const RECENT_ACTIVITY_LIMIT = 5
 const RECENT_GUESTS_LIMIT = 50
-const TRACE_PREFETCH_LIMIT = 5
 const VISIT_LOOKBACK_DAYS = 90
 const RECENT_EVENTS_LIMIT = 3
 const TRANSACTIONS_LIMIT = 50
@@ -52,9 +70,55 @@ interface PageProps {
   searchParams: Promise<{ venue?: string; guest?: string }>
 }
 
-export default async function ConversationsPage({ searchParams }: PageProps) {
-  const params = await searchParams
+// redirect() and notFound() unwind by throwing; those are control flow, not
+// failures, and must not be logged as errors.
+function isNextControlFlow(e: unknown): boolean {
+  if (typeof e !== 'object' || e === null) return false
+  const digest = (e as { digest?: unknown }).digest
+  return typeof digest === 'string' && digest.startsWith('NEXT_')
+}
 
+// One line per render with where the time went. A render that never returns
+// logs nothing, which is itself the signal: look for the request without a
+// matching line. `lastStage` on a failure names the stage it got past.
+export default async function ConversationsPage(props: PageProps) {
+  const timer = createStageTimer()
+  const params = await props.searchParams
+  const fields = {
+    venueId: params.venue ?? null,
+    guestId: params.guest ?? null,
+  }
+  try {
+    const page = await renderConversations(params, timer)
+    const rendered = {
+      ...fields,
+      totalMs: timer.totalMs(),
+      stages: timer.stages(),
+    }
+    if (rendered.totalMs >= SLOW_RENDER_MS) {
+      logger.warn('[conversations] render slow', rendered)
+    } else {
+      logger.info('[conversations] render', rendered)
+    }
+    return page
+  } catch (e) {
+    if (!isNextControlFlow(e)) {
+      logger.error('[conversations] render failed', {
+        ...fields,
+        totalMs: timer.totalMs(),
+        lastStage: timer.lastStage(),
+        stages: timer.stages(),
+        error: e,
+      })
+    }
+    throw e
+  }
+}
+
+async function renderConversations(
+  params: { venue?: string; guest?: string },
+  timer: StageTimer,
+) {
   // Resolve operator + allowed venues
   const supabaseSession = await createServerClient()
   const {
@@ -70,8 +134,9 @@ export default async function ConversationsPage({ searchParams }: PageProps) {
     if (e instanceof AuthError && e.status === 403) redirect('/admin')
     throw e
   }
+  timer.mark('auth')
 
-  const supabase = createAdminClient()
+  const supabase = createAdminClient({ timeoutMs: SUPABASE_TIMEOUT_MS })
 
   // Venues for dropdown — analog admins see every venue regardless of
   // operator_venues. The allowlist matters for non-admin operators (future).
@@ -81,6 +146,7 @@ export default async function ConversationsPage({ searchParams }: PageProps) {
     .order('name', { ascending: true })
   if (venuesErr) throw new Error(`venues load failed: ${venuesErr.message}`)
   const venues = (venuesRaw ?? []).filter((v) => allowsVenue(venueScope, v.id))
+  timer.mark('venues')
 
   // Validate filter ids against the allowlist — reject foreign IDs cleanly.
   const venueId =
@@ -96,6 +162,7 @@ export default async function ConversationsPage({ searchParams }: PageProps) {
       venueScope,
       venueId: null,
     })
+    timer.mark('recent_activity')
     return (
       <FullShell>
         <Filters
@@ -127,9 +194,11 @@ export default async function ConversationsPage({ searchParams }: PageProps) {
     phoneNumber: g.phone_number,
     instagramUsername: g.instagram_username,
   }))
+  timer.mark('guest_list')
 
   if (!guestId) {
     const recent = await loadRecentActivity({ supabase, venueScope, venueId })
+    timer.mark('recent_activity')
     return (
       <FullShell>
         <Filters
@@ -150,6 +219,7 @@ export default async function ConversationsPage({ searchParams }: PageProps) {
     venueRow,
     guestId,
   })
+  timer.mark('conversation')
 
   if (!initialData) {
     return (
@@ -480,29 +550,11 @@ async function loadConversationData({
         : earliestTransactionAt
       : (earliestMessageAt ?? earliestTransactionAt)
 
-  // TAC-316: group raw rows into responses once here — stats and trace
-  // prefetch below are response-grained; the client re-derives the same
-  // projection from the raw rows it receives (single source: projectThread).
+  // TAC-316: group raw rows into responses once here — stats below are
+  // response-grained; the client re-derives the same projection from the raw
+  // rows it receives (single source: projectThread).
   const messageRows: ConversationMessageRow[] = messagesResult.data ?? []
   const responses = projectThread(messageRows)
-
-  // Pre-fetch the last 5 outbound RESPONSES' traces in parallel (bubbles of a
-  // split share one generation → one trace). allSettled so one Langfuse
-  // hiccup doesn't 500 the whole page. Cache keyed by response id (= first
-  // bubble's row id), matching the client's selection identity.
-  const outboundWithTrace = responses
-    .filter((r) => r.direction === 'outbound' && r.langfuseTraceId)
-    .slice(-TRACE_PREFETCH_LIMIT)
-  const traceFetches = await Promise.allSettled(
-    outboundWithTrace.map(async (r) => {
-      const trace = await fetchTrace(r.langfuseTraceId as string)
-      return { messageId: r.id, trace }
-    }),
-  )
-  const traceMap: Record<string, ApiTraceWithFullDetails | null> = {}
-  for (const f of traceFetches) {
-    if (f.status === 'fulfilled') traceMap[f.value.messageId] = f.value.trace
-  }
 
   const todayLocalIso = formatInTimeZone(
     new Date(),
@@ -587,7 +639,6 @@ async function loadConversationData({
       createdAt: new Date(e.created_at),
     })),
     messageRows,
-    traceMap,
     todayLocalIso,
     transactions,
     transactionsWindowDays: VISIT_LOOKBACK_DAYS,

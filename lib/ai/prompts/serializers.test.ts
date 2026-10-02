@@ -20,10 +20,12 @@ import type {
 import {
   FIRST_TOUCH_SIGNAL_LINE,
   firstTouchOpenerFor,
+  formatConversationTranscript,
   formatOrderSummary,
   knowledgeChunksToProse,
   personaToProse,
   runtimeToProse,
+  splitHistory,
   venueInfoToProse,
 } from './serializers'
 import { renderableIntentions } from '../../agent/intentions/derive'
@@ -362,127 +364,191 @@ describe('runtimeToProse — today block', () => {
   })
 })
 
-describe('runtimeToProse — recent conversation block', () => {
+describe('splitHistory - past messages as chat turns', () => {
+  const at = (minutes: number) => new Date(NOW.getTime() - minutes * 60_000)
+
+  it('maps guest messages to user turns and DELIVERED venue messages to assistant turns, in order', () => {
+    const { turns } = splitHistory([
+      recent({ direction: 'inbound', body: 'hi', createdAt: at(30) }),
+      recent({ direction: 'outbound', body: 'hey.', createdAt: at(29) }),
+      recent({
+        direction: 'inbound',
+        body: 'do you have oat milk?',
+        createdAt: at(5),
+      }),
+    ])
+    expect(turns).toEqual([
+      { role: 'user', content: 'hi' },
+      { role: 'assistant', content: 'hey.' },
+      { role: 'user', content: 'do you have oat milk?' },
+    ])
+  })
+
+  it('merges consecutive same-role messages into one turn so roles strictly alternate', () => {
+    const { turns } = splitHistory([
+      recent({ direction: 'inbound', body: 'hi', createdAt: at(30) }),
+      recent({ direction: 'inbound', body: 'quick one', createdAt: at(29) }),
+      recent({ direction: 'outbound', body: 'hey.', createdAt: at(28) }),
+      recent({ direction: 'outbound', body: 'ask away', createdAt: at(27) }),
+      recent({ direction: 'inbound', body: 'oat milk?', createdAt: at(5) }),
+    ])
+    expect(turns).toEqual([
+      { role: 'user', content: 'hi\nquick one' },
+      { role: 'assistant', content: 'hey.\nask away' },
+      { role: 'user', content: 'oat milk?' },
+    ])
+  })
+
+  // v1.81.0 reversed a 200-char cap. A 332-char recipe shown ending "(longer …"
+  // made the model "continue where the previous message cut off". The tail
+  // marker is distinct from the head so a cut at ANY length fails, and the body
+  // is 5,000 chars because a cap of 300 still passed a 254-char fixture.
+  it('keeps a body whole: every character, its own line breaks, no ellipsis', () => {
+    const longBody = `${'a'.repeat(5000)}TAIL`
+    const { turns } = splitHistory([
+      recent({
+        direction: 'inbound',
+        body: 'how do I make it',
+        createdAt: at(10),
+      }),
+      recent({
+        direction: 'outbound',
+        body: `1. grind\n2. brew\n\n${longBody}`,
+        createdAt: at(9),
+      }),
+    ])
+    expect(turns[1]).toEqual({
+      role: 'assistant',
+      content: `1. grind\n2. brew\n\n${longBody}`,
+    })
+  })
+
+  it('never turns a draft the guest did not receive into an assistant turn', () => {
+    const draft = recent({
+      direction: 'outbound',
+      body: 'the next one is on us',
+      createdAt: at(4),
+      delivery: 'awaiting_review',
+    })
+    const split = splitHistory([
+      recent({ direction: 'inbound', body: 'it was cold', createdAt: at(5) }),
+      draft,
+    ])
+    expect(split.turns).toEqual([{ role: 'user', content: 'it was cold' }])
+    expect(split.undelivered).toEqual([draft])
+  })
+
+  it('opens the chat on a user turn by leaving out a venue message that precedes the first guest message', () => {
+    const split = splitHistory([
+      recent({
+        direction: 'outbound',
+        body: 'how was the cortado?',
+        createdAt: at(60),
+      }),
+      recent({
+        direction: 'inbound',
+        body: 'great, thanks',
+        createdAt: at(30),
+      }),
+    ])
+    expect(split.turns).toEqual([{ role: 'user', content: 'great, thanks' }])
+  })
+
+  it('skips a message with nothing in it, which the API would reject as an empty turn', () => {
+    const { turns } = splitHistory([
+      recent({ direction: 'inbound', body: '   ', createdAt: at(10) }),
+      recent({ direction: 'inbound', body: 'hello', createdAt: at(9) }),
+    ])
+    expect(turns).toEqual([{ role: 'user', content: 'hello' }])
+  })
+
+  it('returns nothing for no history', () => {
+    expect(splitHistory([])).toEqual({ turns: [], undelivered: [] })
+  })
+})
+
+// Trace-only: the generating model does not read this text.
+
+describe('formatConversationTranscript - the trace text', () => {
   it('renders chronological [speaker, delta] body lines', () => {
+    const out = formatConversationTranscript(
+      [
+        recent({
+          direction: 'inbound',
+          body: 'hi',
+          createdAt: new Date(NOW.getTime() - 2 * 60 * 60 * 1000),
+        }),
+        recent({
+          direction: 'outbound',
+          body: 'hey.',
+          createdAt: new Date(NOW.getTime() - 2 * 60 * 60 * 1000 + 60_000),
+        }),
+        recent({
+          direction: 'inbound',
+          body: 'do you have oat milk?',
+          createdAt: new Date(NOW.getTime() - 5 * 60 * 1000),
+        }),
+      ],
+      NOW,
+    )
+    expect(out).toBe(
+      '## Recent conversation\n' +
+        '[guest, 2 hours ago] hi\n' +
+        '[venue, 1 hour ago] hey.\n' +
+        '[guest, 5 minutes ago] do you have oat milk?',
+    )
+  })
+})
+
+// v1.81.0: the history is chat turns, so the user prompt carries only what a
+// turn cannot: drafts the guest never received.
+describe('runtimeToProse - history context', () => {
+  const at = (minutes: number) => new Date(NOW.getTime() - minutes * 60_000)
+
+  it('does not render the history itself', () => {
     const out = runtimeToProse(
       {
         recentMessages: [
-          recent({
-            direction: 'inbound',
-            body: 'hi',
-            createdAt: new Date(NOW.getTime() - 2 * 60 * 60 * 1000),
-          }),
-          recent({
-            direction: 'outbound',
-            body: 'hey.',
-            createdAt: new Date(NOW.getTime() - 2 * 60 * 60 * 1000 + 60_000),
-          }),
           recent({
             direction: 'inbound',
             body: 'do you have oat milk?',
-            createdAt: new Date(NOW.getTime() - 5 * 60 * 1000),
+            createdAt: at(120),
+          }),
+          recent({
+            direction: 'outbound',
+            body: 'yes we do, no charge',
+            createdAt: at(90),
           }),
         ],
       },
       'reply',
       NOW,
     )
-    expect(out).toContain('## Recent conversation')
-    expect(out).toContain('[guest, 2 hours ago] hi')
-    expect(out).toContain('[venue, 1 hour ago] hey.')
-    expect(out).toContain('[guest, 5 minutes ago] do you have oat milk?')
-  })
-
-  it('renders time deltas at each threshold', () => {
-    const out = runtimeToProse(
-      {
-        recentMessages: [
-          recent({ body: 'now', createdAt: new Date(NOW.getTime() - 30_000) }), // 30s
-          recent({
-            body: 'oneMin',
-            createdAt: new Date(NOW.getTime() - 60_000),
-          }), // 1 min
-          recent({
-            body: 'manyMin',
-            createdAt: new Date(NOW.getTime() - 30 * 60_000),
-          }), // 30 min
-          recent({
-            body: 'oneHr',
-            createdAt: new Date(NOW.getTime() - 60 * 60_000),
-          }), // 1 h
-          recent({
-            body: 'manyHr',
-            createdAt: new Date(NOW.getTime() - 5 * 60 * 60_000),
-          }), // 5 h
-          recent({
-            body: 'yesterday',
-            createdAt: new Date(NOW.getTime() - 30 * 60 * 60_000),
-          }), // 30 h
-          recent({
-            body: 'multiDay',
-            createdAt: new Date(NOW.getTime() - 5 * 24 * 60 * 60_000),
-          }), // 5 d
-        ],
-      },
-      'reply',
-      NOW,
-    )
-    expect(out).toContain('] now')
-    expect(out).toContain('[guest, just now] now')
-    expect(out).toContain('[guest, 1 minute ago] oneMin')
-    expect(out).toContain('[guest, 30 minutes ago] manyMin')
-    expect(out).toContain('[guest, 1 hour ago] oneHr')
-    expect(out).toContain('[guest, 5 hours ago] manyHr')
-    expect(out).toContain('[guest, yesterday] yesterday')
-    expect(out).toContain('[guest, 5 days ago] multiDay')
-  })
-
-  it('omits the block entirely when recentMessages is empty', () => {
-    const out = runtimeToProse({ recentMessages: [] }, 'reply', NOW)
     expect(out).not.toContain('## Recent conversation')
+    expect(out).not.toContain('do you have oat milk?')
+    expect(out).not.toContain('yes we do, no charge')
   })
 
-  it('omits the block when recentMessages is undefined', () => {
-    const out = runtimeToProse({ inboundMessage: 'hi' }, 'reply', NOW)
-    expect(out).not.toContain('## Recent conversation')
-  })
-
-  it('collapses newlines in body and truncates long bodies to 200 chars with ellipsis', () => {
-    const longBody = 'a'.repeat(250)
-    const out = runtimeToProse(
+  // Nothing is added for the gaps between messages or for a venue message the
+  // chat cannot open on: the history is the turns and nothing else.
+  it('adds nothing for a delivered history, however old or however it opens', () => {
+    const withHistory = runtimeToProse(
       {
         recentMessages: [
           recent({
-            body: 'line1\nline2\n  line3',
-            createdAt: new Date(NOW.getTime() - 60_000),
+            direction: 'outbound',
+            body: 'how was the cortado?',
+            createdAt: at(1500),
           }),
-          recent({
-            body: longBody,
-            createdAt: new Date(NOW.getTime() - 120_000),
-          }),
+          recent({ direction: 'inbound', body: 'great', createdAt: at(1440) }),
+          recent({ direction: 'outbound', body: 'good.', createdAt: at(1439) }),
         ],
       },
       'reply',
       NOW,
     )
-    expect(out).toContain('] line1 line2 line3')
-    expect(out).toContain(`] ${'a'.repeat(200)}…`)
-    expect(out).not.toContain('a'.repeat(201))
-  })
-
-  it('renders today before recent conversation', () => {
-    const out = runtimeToProse(
-      {
-        today,
-        recentMessages: [
-          recent({ body: 'hi', createdAt: new Date(NOW.getTime() - 60_000) }),
-        ],
-      },
-      'reply',
-      NOW,
-    )
-    expect(out.indexOf('## Right now')).toBeLessThan(
-      out.indexOf('## Recent conversation'),
+    expect(withHistory).toBe(
+      runtimeToProse({ recentMessages: [] }, 'reply', NOW),
     )
   })
 })
@@ -519,20 +585,18 @@ describe('runtimeToProse — unsent history (TAC-394)', () => {
       'new_question',
       NOW,
     )
-  const historyBlock = (out: string) =>
+  const draftsBlock = (out: string) =>
     out.slice(
-      out.indexOf('## Recent conversation'),
+      out.indexOf('## Drafts the guest has not received'),
       out.indexOf('\n\nThe guest just sent:'),
     )
 
-  it('renders history with nothing unsent exactly as before', () => {
+  // A delivered reply is an assistant turn now, so nothing of it is left in the
+  // user prompt to carry a marker or a note.
+  it('adds no drafts block and no marker when nothing is unsent', () => {
     const out = render(incident('delivered'))
-    // Exact, not toContain: anything appended to the block must fail this.
-    expect(historyBlock(out)).toBe(
-      '## Recent conversation\n' +
-        '[guest, 5 minutes ago] the cortado i got this morning was cold and bad\n' +
-        `[venue, 4 minutes ago] ${DRAFT}`,
-    )
+    expect(out).not.toContain('## Drafts the guest has not received')
+    expect(out).not.toContain(DRAFT)
     expect(out).not.toContain('NOT SENT')
     expect(out).not.toContain('NEVER SENT')
     expect(out).not.toContain('never reached the guest')
@@ -557,26 +621,24 @@ describe('runtimeToProse — unsent history (TAC-394)', () => {
   ] as const)(
     'marks a %s line "%s" and adds only the note',
     (delivery, marker) => {
-      expect(historyBlock(render(incident(delivery)))).toBe(
-        '## Recent conversation\n' +
-          '[guest, 5 minutes ago] the cortado i got this morning was cold and bad\n' +
+      expect(draftsBlock(render(incident(delivery)))).toBe(
+        '## Drafts the guest has not received\n' +
           `[venue, 4 minutes ago, ${marker}] ${DRAFT}\n\n` +
           NOTE,
       )
     },
   )
 
-  // v1.50.0 first exempted pending lines from the cap, because the removed
-  // instruction asked the model to carry a pending offer forward. With nothing
-  // asking that, an exemption has no reason to exist.
+  // v1.81.0 removed the 200-char cap for every delivery state. It used to cut
+  // all of them alike (v1.50.0 had exempted pending lines, then undone), and a
+  // cut line reads as a message that was really cut off, so no state may be cut.
   it.each([
-    'delivered',
     'awaiting_review',
     'skipped_by_operator',
     'answered_outside_app',
     'never_sent',
-  ] as const)('truncates a %s line at 200 characters', (delivery) => {
-    const long = 'a'.repeat(250)
+  ] as const)('renders a %s line in full', (delivery) => {
+    const long = `${'a'.repeat(5000)}TAIL`
     const out = render([
       recent({
         direction: 'outbound',
@@ -585,8 +647,8 @@ describe('runtimeToProse — unsent history (TAC-394)', () => {
         delivery,
       }),
     ])
-    expect(out).toContain(`${'a'.repeat(200)}…`)
-    expect(out).not.toContain('a'.repeat(201))
+    expect(out).toContain(long)
+    expect(out).not.toContain('…')
   })
 
   it('states the note once however many lines are unsent', () => {
@@ -724,24 +786,13 @@ describe('runtimeToProse — eligibility block (THE-170)', () => {
     expect(out).not.toContain('## What this guest can access')
   })
 
-  it('renders eligibility block after Right now and before Recent conversation', () => {
-    const out = runtimeToProse(
-      {
-        today,
-        mechanics: [],
-        recentMessages: [
-          recent({ body: 'hi', createdAt: new Date(NOW.getTime() - 60_000) }),
-        ],
-      },
-      'reply',
-      NOW,
-    )
+  it('renders eligibility block after Right now', () => {
+    const out = runtimeToProse({ today, mechanics: [] }, 'reply', NOW)
     const rightNowIdx = out.indexOf('## Right now')
-    const eligibilityIdx = out.indexOf('## What this guest can access')
-    const recentIdx = out.indexOf('## Recent conversation')
     expect(rightNowIdx).toBeGreaterThanOrEqual(0)
-    expect(eligibilityIdx).toBeGreaterThan(rightNowIdx)
-    expect(recentIdx).toBeGreaterThan(eligibilityIdx)
+    expect(out.indexOf('## What this guest can access')).toBeGreaterThan(
+      rightNowIdx,
+    )
   })
 })
 
@@ -911,7 +962,7 @@ describe("runtimeToProse — ## What you're hoping to get to block (TAC-324)", (
   // in production. A mutant reverting the position for every category except
   // follow_up passed all 248 tests. The block only ever renders on an inbound
   // turn, so the guard has to run on one.
-  it('renders AFTER ## Recent conversation on an inbound turn, not before it', () => {
+  it('renders AFTER visit history on an inbound turn, not before it', () => {
     const out = runtimeToProse(
       {
         mechanics: [],
@@ -922,26 +973,16 @@ describe("runtimeToProse — ## What you're hoping to get to block (TAC-324)", (
             items: ['cortado'],
           },
         ],
-        recentMessages: [
-          {
-            direction: 'inbound',
-            body: 'hey',
-            createdAt: new Date(NOW.getTime() - 3600_000),
-            delivery: 'delivered',
-          },
-        ],
       },
       'reply',
       NOW,
     )
     const eligibilityIdx = out.indexOf('## What this guest can access')
     const visitIdx = out.indexOf('## Visit history')
-    const recentIdx = out.indexOf('## Recent conversation')
     const intentionsIdx = out.indexOf("## What you're hoping to get to")
     expect(eligibilityIdx).toBeGreaterThanOrEqual(0)
     expect(visitIdx).toBeGreaterThan(eligibilityIdx)
-    expect(recentIdx).toBeGreaterThan(visitIdx)
-    expect(intentionsIdx).toBeGreaterThan(recentIdx)
+    expect(intentionsIdx).toBeGreaterThan(visitIdx)
   })
 
   // TAC-519. The block is LAST of the content blocks on every category that
@@ -1059,7 +1100,6 @@ describe("runtimeToProse — ## What you're hoping to get to block (TAC-324)", (
       '## Guest context',
       '## Active commitments',
       '## Unanswered question',
-      '## Recent conversation',
       "## What you're hoping to get to",
       '## Emoji for this message',
     ])
@@ -1974,7 +2014,7 @@ describe('firstTouchOpenerFor — channel variants (TAC-495)', () => {
       'utf8',
     )
     expect(composeSrc).toContain(
-      'runtimeToProse(runtime, category, undefined, input.channel)',
+      'runtimeToProse(runtime, category, now, input.channel)',
     )
   })
 })
@@ -2449,30 +2489,24 @@ describe('runtimeToProse — ## Visit history block (TAC-234)', () => {
     }
   })
 
-  it('places the block after mechanics and before recent conversation', () => {
+  it('places the block after mechanics', () => {
     const out = runtimeToProse(
       {
         today,
         mechanics: [],
         recentVisits: [{ items: ['cappuccino'], visitedAt: visitedAt3 }],
-        recentMessages: [
-          recent({ body: 'hi', createdAt: new Date(NOW.getTime() - 60_000) }),
-        ],
       },
       'reply',
       NOW,
     )
     const eligibilityIdx = out.indexOf('## What this guest can access')
-    const visitHistoryIdx = out.indexOf('## Visit history')
-    const recentIdx = out.indexOf('## Recent conversation')
     expect(eligibilityIdx).toBeGreaterThanOrEqual(0)
-    expect(visitHistoryIdx).toBeGreaterThan(eligibilityIdx)
-    expect(recentIdx).toBeGreaterThan(visitHistoryIdx)
+    expect(out.indexOf('## Visit history')).toBeGreaterThan(eligibilityIdx)
   })
 })
 
 // THE-232: Operator instruction block. Renders at the top of the prompt
-// (above mechanics + visit history + recent conversation) when the operator's
+// (above mechanics + visit history) when the operator's
 // note flowed through buildAiRuntime.
 describe('runtimeToProse — ## Operator instruction block', () => {
   it("renders the block with the operator's note verbatim", () => {
@@ -2500,7 +2534,7 @@ describe('runtimeToProse — ## Operator instruction block', () => {
     expect(out).not.toContain('## Operator instruction')
   })
 
-  it('places the block above mechanics, visit history, and recent conversation', () => {
+  it('places the block above mechanics and visit history', () => {
     const visitedAt = new Date(NOW.getTime() - 2 * 24 * 60 * 60 * 1000)
     const out = runtimeToProse(
       {
@@ -2508,21 +2542,14 @@ describe('runtimeToProse — ## Operator instruction block', () => {
         operatorInstruction: 'follow up on their recent visit',
         mechanics: [],
         recentVisits: [{ items: ['cappuccino'], visitedAt }],
-        recentMessages: [
-          recent({ body: 'hey', createdAt: new Date(NOW.getTime() - 60_000) }),
-        ],
       },
       'manual',
       NOW,
     )
     const opIdx = out.indexOf('## Operator instruction')
-    const eligibilityIdx = out.indexOf('## What this guest can access')
-    const visitHistoryIdx = out.indexOf('## Visit history')
-    const recentIdx = out.indexOf('## Recent conversation')
     expect(opIdx).toBeGreaterThanOrEqual(0)
-    expect(eligibilityIdx).toBeGreaterThan(opIdx)
-    expect(visitHistoryIdx).toBeGreaterThan(opIdx)
-    expect(recentIdx).toBeGreaterThan(opIdx)
+    expect(out.indexOf('## What this guest can access')).toBeGreaterThan(opIdx)
+    expect(out.indexOf('## Visit history')).toBeGreaterThan(opIdx)
   })
 
   it('places the block after Right now (orientation stays first)', () => {
@@ -2967,7 +2994,7 @@ describe('runtimeToProse — ## Guest context block (TAC-296)', () => {
     expect(out).toContain('- has a dog named Hank')
   })
 
-  it('sits between Visit history and Recent conversation in the assembled prompt', () => {
+  it('sits after Visit history in the assembled prompt', () => {
     const out = runtimeToProse(
       {
         today,
@@ -2978,24 +3005,13 @@ describe('runtimeToProse — ## Guest context block (TAC-296)', () => {
           },
         ],
         guestContext: { guest_details: { first_name: 'Sarah' } },
-        recentMessages: [
-          {
-            direction: 'inbound',
-            body: 'hi',
-            createdAt: new Date('2026-05-07T10:00:00Z'),
-            delivery: 'delivered',
-          },
-        ],
       },
       'reply',
       new Date('2026-05-08T10:00:00Z'),
     )
     const visitIdx = out.indexOf('## Visit history')
-    const guestCtxIdx = out.indexOf('## Guest context')
-    const recentIdx = out.indexOf('## Recent conversation')
     expect(visitIdx).toBeGreaterThanOrEqual(0)
-    expect(guestCtxIdx).toBeGreaterThan(visitIdx)
-    expect(recentIdx).toBeGreaterThan(guestCtxIdx)
+    expect(out.indexOf('## Guest context')).toBeGreaterThan(visitIdx)
   })
 
   it('renders the framing intro instructing the model to use context for recognition', () => {
@@ -3345,29 +3361,18 @@ describe('runtimeToProse — ## Active commitments block (TAC-297)', () => {
     expect(introOnly).not.toContain('\u2014')
   })
 
-  it('renders between Guest context and Recent conversation when both present', () => {
+  it('renders after Guest context when both present', () => {
     const out = runtimeToProse(
       {
         guestContext: { guest_details: { first_name: 'Jaipal' } },
         activeCommitments: [commitment()],
-        recentMessages: [
-          {
-            direction: 'inbound' as const,
-            body: 'hello',
-            createdAt: new Date('2026-04-29T11:30:00Z'),
-            delivery: 'delivered',
-          },
-        ],
       },
       'reply',
       NOW,
     )
     const guestIdx = out.indexOf('## Guest context')
-    const activeIdx = out.indexOf('## Active commitments')
-    const recentIdx = out.indexOf('## Recent conversation')
     expect(guestIdx).toBeGreaterThanOrEqual(0)
-    expect(activeIdx).toBeGreaterThan(guestIdx)
-    expect(recentIdx).toBeGreaterThan(activeIdx)
+    expect(out.indexOf('## Active commitments')).toBeGreaterThan(guestIdx)
   })
 })
 
@@ -3668,28 +3673,6 @@ describe('runtimeToProse — ## Unanswered question (TAC-308)', () => {
     expect(out).toContain('This message is the holding note')
     expect(out).toContain('Do not attempt the answer')
     expect(out).toContain('do not name a time or a day')
-  })
-
-  // Placement is load-bearing: the block sits next to the history the model
-  // would otherwise mine for an earlier "let me find out" to imitate.
-  it('sits immediately before ## Recent conversation', () => {
-    const out = runtimeToProse(
-      {
-        pendingQuestion: { question: 'q', askedAt: ASKED, mode: 'outstanding' },
-        recentMessages: [
-          {
-            direction: 'inbound',
-            body: 'hello',
-            createdAt: ASKED,
-          } as RecentMessage,
-        ],
-      },
-      'reply',
-      NOW_308,
-    )
-    expect(out.indexOf('## Unanswered question')).toBeLessThan(
-      out.indexOf('## Recent conversation'),
-    )
   })
 
   it('renders no em or en dashes (R3 self-consistency)', () => {
@@ -4011,28 +3994,16 @@ describe('emoji cadence — per-message block (TAC-362)', () => {
 
   // Position is the point: most-proximate-wins is the failure class behind
   // TAC-301/314/329/330/338, so the per-message call has to be the LAST
-  // thing read before the generate instruction — after the inbound, after
-  // recent conversation, after everything.
-  it('renders as the last block, after recent conversation and ahead of the generate line', () => {
+  // thing read before the generate instruction.
+  it('renders as the last block, ahead of the generate line', () => {
     const out = runtimeToProse(
       {
         emojiDirective: 'none',
         inboundMessage: 'what time do you close?',
         guestName: 'Sam',
-        recentMessages: [
-          {
-            direction: 'inbound',
-            body: 'hey',
-            createdAt: new Date(NOW.getTime() - 60_000),
-            delivery: 'delivered',
-          },
-        ],
       },
       'reply',
       NOW,
-    )
-    expect(out.indexOf('## Emoji for this message')).toBeGreaterThan(
-      out.indexOf('## Recent conversation'),
     )
     expect(out.indexOf('## Emoji for this message')).toBeLessThan(
       out.indexOf('Generate the message now.'),

@@ -10,7 +10,7 @@ Estimates below came from Langfuse span timings on the live pilot traffic during
 Done as of this document (all on the worktree branch, not yet merged):
 
 - **Jev classification is ON** (`lib/ai/classify-message-jev.ts`), ~150ms against Haiku's ~2.8s, fail-open to Haiku.
-- **The five post-generation checks run post-send on inbound** (decision 0003 rewrite, `lib/agent/post-send-checks.ts`), removing the whole verifier batch from the reply path.
+- **The four post-generation checks run post-send on inbound** (decision 0003 rewrite, `lib/agent/post-send-checks.ts`), removing the whole verifier batch from the reply path.
   Remediation is a Slack forward for upstream fixing, never a hold.
 - **Voice is a static per-venue pack** (decision 0008, `lib/rag/voice-pack.ts`), removing a Voyage embed plus an RPC per turn and the embeddings-down outage mode.
 - **Coalesce settle window is zero** (`COALESCE_SETTLE_MS`, decision 0005 run), kept as the rollback lever.
@@ -39,7 +39,7 @@ Generation is nearly everything left.
 9. **Faster generation model.**
    A product decision (voice quality is the product), not an engineering one; revisit only with a scenario-harness comparison in hand.
 
-Dropped as moot: bounding `verify_grounding` reasoning for latency - it runs post-send now (its output-token cap still matters for correctness, see `lib/tunables/manifest.ts`).
+Dropped as moot: bounding `verify_grounding` reasoning for latency. The verifier was later removed entirely.
 
 ## Ground rules that bound this work
 

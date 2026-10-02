@@ -56,7 +56,7 @@ export interface RunLogMeta {
   arm: string
   // Anything else worth freezing alongside the arm: prompt version
   // constants, the tunable under test, sample size, concurrency. TAC-409's
-  // replay needed VERIFY_GROUNDING_PROMPT_VERSION here to tell its two
+  // replay needed a verifier prompt version here to tell its two
   // arms apart after the fact.
   [key: string]: unknown
 }

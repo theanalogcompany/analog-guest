@@ -1,4 +1,4 @@
-// Tests for runPostSendChecks (decision 0003, rewritten 2026-09-29): the five
+// Tests for runPostSendChecks (decision 0003, rewritten 2026-09-29): the four
 // post-generation checks run AFTER dispatch, inside waitUntil, against a reply
 // the guest already has.
 //
@@ -20,17 +20,15 @@ import type { GenerateMessageResult } from '@/lib/ai'
 import type { AgentTrace } from '@/lib/observability'
 import type { RuntimeContext } from './types'
 
-const verifyGroundingStageMock = vi.fn()
 const verifyMechanicOfferStageMock = vi.fn()
 const verifyProsePromiseStageMock = vi.fn()
 const verifyCancellationClaimStageMock = vi.fn()
 const verifyClosedVenueArrivalStageMock = vi.fn()
 
-// Explicit allow-list: post-send-checks.ts imports exactly these five names.
+// Explicit allow-list: post-send-checks.ts imports exactly these four names.
 // Mocking the module wholesale also keeps the real stages.ts (and its
 // @/lib/rag → voyageai chain) out of the test process entirely.
 vi.mock('./stages', () => ({
-  verifyGroundingStage: (...a: unknown[]) => verifyGroundingStageMock(...a),
   verifyMechanicOfferStage: (...a: unknown[]) =>
     verifyMechanicOfferStageMock(...a),
   verifyProsePromiseStage: (...a: unknown[]) =>
@@ -44,7 +42,6 @@ vi.mock('./stages', () => ({
 import { runPostSendChecks } from './post-send-checks'
 
 const CHECK_NAMES = [
-  'verify_grounding',
   'verify_mechanic_offer',
   'verify_prose_promise',
   'verify_cancellation_claim',
@@ -52,15 +49,14 @@ const CHECK_NAMES = [
 ] as const
 
 const ALL_STAGE_MOCKS = [
-  verifyGroundingStageMock,
   verifyMechanicOfferStageMock,
   verifyProsePromiseStageMock,
   verifyCancellationClaimStageMock,
   verifyClosedVenueArrivalStageMock,
 ]
 
-// Only the fields post-send-checks.ts itself dereferences (guest.isDemo for
-// the grounding span's `ran`, mechanics for gatedMechanicCount). The stages
+// Only the fields post-send-checks.ts itself dereferences (mechanics for
+// gatedMechanicCount). The stages
 // are mocked, so nothing else on the context is read.
 function makeCtx(): RuntimeContext {
   return {
@@ -124,7 +120,6 @@ beforeEach(() => {
   // Explicit realistic defaults, never bare vi.fn(): the module reads
   // `.status` / `.claim` / `.resolution.status` off each settled value when
   // shaping span outputs and the batch log line.
-  verifyGroundingStageMock.mockResolvedValue({ status: 'clean' })
   verifyMechanicOfferStageMock.mockResolvedValue({ status: 'skipped' })
   verifyProsePromiseStageMock.mockResolvedValue({ status: 'clean' })
   verifyCancellationClaimStageMock.mockResolvedValue({
@@ -134,7 +129,7 @@ beforeEach(() => {
   verifyClosedVenueArrivalStageMock.mockResolvedValue({ status: 'skipped' })
 })
 
-describe('runPostSendChecks — the five checks and their arguments', () => {
+describe('runPostSendChecks — the four checks and their arguments', () => {
   it("calls each check exactly once with the ctx, the generation, and disposition 'sent'", async () => {
     const { trace } = makeTrace()
     const args = baseArgs(trace)
@@ -155,7 +150,7 @@ describe('runPostSendChecks — the five checks and their arguments', () => {
 describe('runPostSendChecks — allSettled / fail-open posture', () => {
   it('resolves, keeps the siblings, and still flushes when one check rejects', async () => {
     const { trace, flushAsync } = makeTrace()
-    verifyGroundingStageMock.mockRejectedValue(new Error('verifier down'))
+    verifyMechanicOfferStageMock.mockRejectedValue(new Error('verifier down'))
 
     await expect(runPostSendChecks(baseArgs(trace))).resolves.toBeUndefined()
 
@@ -171,18 +166,18 @@ describe('runPostSendChecks — allSettled / fail-open posture', () => {
 
   it('ends the rejecting check’s span as ERROR while the others end normally', async () => {
     const { trace, spans } = makeTrace()
-    verifyGroundingStageMock.mockRejectedValue(new Error('verifier down'))
+    verifyMechanicOfferStageMock.mockRejectedValue(new Error('verifier down'))
 
     await runPostSendChecks(baseArgs(trace))
 
-    const grounding = spans.find((s) => s.name === 'verify_grounding')
-    expect(grounding).toBeDefined()
-    expect(grounding!.end).toHaveBeenCalledTimes(1)
-    expect(grounding!.end.mock.calls[0][0]).toMatchObject({
+    const rejected = spans.find((s) => s.name === 'verify_mechanic_offer')
+    expect(rejected).toBeDefined()
+    expect(rejected!.end).toHaveBeenCalledTimes(1)
+    expect(rejected!.end.mock.calls[0][0]).toMatchObject({
       level: 'ERROR',
       statusMessage: 'verifier down',
     })
-    for (const s of spans.filter((s) => s.name !== 'verify_grounding')) {
+    for (const s of spans.filter((s) => s.name !== 'verify_mechanic_offer')) {
       expect(s.end).toHaveBeenCalledTimes(1)
       expect(s.end.mock.calls[0][0]).not.toMatchObject({ level: 'ERROR' })
     }
@@ -209,7 +204,7 @@ describe('runPostSendChecks — the trace', () => {
     expect(flushAsync).toHaveBeenCalledTimes(1)
     // Snapshotted INSIDE the flush mock: an after-the-fact count cannot tell
     // "flushed after the checks" from "flushed before them".
-    expect(endedAtFlushTime).toBe(5)
+    expect(endedAtFlushTime).toBe(4)
   })
 
   it("opens one span per check under the unchanged names, input carrying disposition 'sent' and the outbound id, and ends each", async () => {

@@ -32,7 +32,6 @@ import {
   MAX_OUTPUT_TOKENS,
   MIN_VOICE_FIDELITY,
 } from '@/lib/ai/generate-message'
-import { VERIFY_GROUNDING_MAX_OUTPUT_TOKENS } from '@/lib/ai/verify-grounding'
 import {
   AGENT_LATENCY_HIGH_THRESHOLD_MS,
   CLASSIFICATION_CONFIDENCE_LOW_THRESHOLD,
@@ -350,7 +349,7 @@ export const TUNABLES = [
     category: 'retrieval',
     source: 'lib/agent/stages.ts',
     description:
-      'Minimum per-query cosine similarity for a knowledge_corpus chunk to reach the prompt. A sanity bound, NOT a relevance filter — TAC-358 measured that cosine tracks query length rather than answerability on this corpus (an unanswerable question outscored every answerable terse one), so the floor stopped judging relevance and the semantic call moved to verify-grounding. A different axis from knowledge_confidence_floor_default (seed-time trust score vs. per-query similarity).',
+      'Minimum per-query cosine similarity for a knowledge_corpus chunk to reach the prompt. A sanity bound, NOT a relevance filter — TAC-358 measured that cosine tracks query length rather than answerability on this corpus (an unanswerable question outscored every answerable terse one), so the floor stopped judging relevance and the semantic call moved to the model self-reported knowledge_gap flag. A different axis from knowledge_confidence_floor_default (seed-time trust score vs. per-query similarity).',
     relatedTickets: ['TAC-350', 'TAC-358'],
   },
   {
@@ -581,15 +580,5 @@ export const TUNABLES = [
     description:
       "Output-token ceiling for one generation attempt. Raised 500 -> 1500 in TAC-309: the emission serializes body/voiceFidelity/reasoning first and knowledgeGap/contextUpdate/commitment/arrivalCapture last, so exhausting the budget truncates mid-JSON and the whole object fails to parse as a generic 'could not parse the response'. Every ticket since TAC-296 has appended a required field to that tail. Watch generation_truncated in PostHog.",
     relatedTickets: ['TAC-309'],
-  },
-  {
-    name: 'verify_grounding_max_output_tokens',
-    value: VERIFY_GROUNDING_MAX_OUTPUT_TOKENS,
-    type: 'number',
-    category: 'agent_runtime',
-    source: 'lib/ai/verify-grounding.ts',
-    description:
-      'Output-token ceiling for one grounding-backstop verdict. Raised 500 -> 2000 in TAC-367, the second instance of the TAC-309 hazard above: measured live, successful calls emit 373-496 tokens against the old 500 cap (the best success cleared it by four) and ~1 in 12 ran past it, truncated mid-JSON, and failed OPEN with no event. TAC-301 part 1.5 put unbounded `reasoning` FIRST in the schema, which is load-bearing for correctness, against a cap that never moved. HEADROOM, NOT A BOUND — reasoning is still unbounded, so the fail-CLOSED handling of finishReason=length is what actually closes the hole. Watch grounding_verifier_unavailable in PostHog.',
-    relatedTickets: ['TAC-367', 'TAC-350', 'TAC-309'],
   },
 ] as const satisfies readonly Tunable[]

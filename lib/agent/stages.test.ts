@@ -19,7 +19,6 @@ import {
   retrieveKnowledgeStage,
   retrieveKnowledgeWithContextStage,
   shouldRetrieveKnowledge,
-  verifyGroundingStage,
   verifyMechanicOfferStage,
   verifyProsePromiseStage,
   verifyCancellationClaimStage,
@@ -35,10 +34,8 @@ import type {
 } from './types'
 import type { GenerateMessageResult } from '@/lib/ai'
 import type { RecentMessage } from '@/lib/ai/types'
-// TAC-367: by path, not via the '@/lib/ai' barrel this file vi.mocks — the
+// TAC-513: by path, not via the '@/lib/ai' barrel this file vi.mocks — the
 // source under test imports it the same way for the same reason.
-import { VERIFY_GROUNDING_TRUNCATED_ERROR_CODE } from '@/lib/ai/verify-grounding'
-// TAC-513: by path, for the same reason as the line above.
 import { VERIFY_CANCELLATION_CLAIM_TRUNCATED_ERROR_CODE } from '@/lib/ai/verify-cancellation-claim'
 import { BrandPersonaSchema } from '@/lib/schemas'
 import { gapFlagsFromTriggers } from './pending-slots'
@@ -51,12 +48,7 @@ const captureClassificationLowMock = vi.fn()
 const classifyMessageMock = vi.fn()
 const retrieveKnowledgeContextMock = vi.fn()
 const generateMessageMock = vi.fn()
-// TAC-350: verifyGrounding (lib/ai) is the grounding backstop's model call;
-// captureUngroundedClaimCaught (posthog) fires when it catches something.
-const verifyGroundingMock = vi.fn()
-const captureUngroundedClaimCaughtMock = vi.fn()
 const captureUnverifiedUrlHeldMock = vi.fn()
-const captureGroundingVerifierUnavailableMock = vi.fn()
 // TAC-355: verifyMechanicOffer (lib/ai) is the mechanic-offer backstop's
 // model call; captureMechanicOfferBackstopCaught (posthog) fires when it
 // catches something.
@@ -123,8 +115,6 @@ vi.mock('@/lib/ai', () => ({
   // import doesn't pull in real SDK init. TAC-309 gave it a named handle so
   // the fidelity-exemption tests can drive generateStage directly.
   generateMessage: (...args: unknown[]) => generateMessageMock(...args),
-  // TAC-350: the grounding backstop's model call.
-  verifyGrounding: (...args: unknown[]) => verifyGroundingMock(...args),
   // TAC-355: the mechanic-offer backstop's model call.
   verifyMechanicOffer: (...args: unknown[]) => verifyMechanicOfferMock(...args),
   // TAC-401: the prose-promise backstop's model call. This factory is an
@@ -148,12 +138,8 @@ vi.mock('@/lib/analytics/posthog', () => ({
   captureDemoBypassedApprovalGate: (...args: unknown[]) =>
     captureDemoBypassMock(...args),
   captureRegenerationTriggered: vi.fn(),
-  captureUngroundedClaimCaught: (...args: unknown[]) =>
-    captureUngroundedClaimCaughtMock(...args),
   captureUnverifiedUrlHeld: (...args: unknown[]) =>
     captureUnverifiedUrlHeldMock(...args),
-  captureGroundingVerifierUnavailable: (...args: unknown[]) =>
-    captureGroundingVerifierUnavailableMock(...args),
   captureMechanicOfferBackstopCaught: (...args: unknown[]) =>
     captureMechanicOfferBackstopCaughtMock(...args),
   captureProsePromiseCaught: (...args: unknown[]) =>
@@ -984,7 +970,7 @@ describe('retrieveKnowledgeStage — tag-aware routing (v1.12.0)', () => {
       // one (max 0.4971) — so no value separates the sets and this one is
       // chosen to sit below the worst measured on-topic query (0.3250) and
       // exclude essentially nothing. Raising it back toward 0.5 reinstates
-      // the bug. The semantic judgement belongs to verify-grounding.
+      // the bug.
       expect(KNOWLEDGE_RELEVANCE_FLOOR).toBe(0.3)
     })
   })
@@ -1024,6 +1010,7 @@ function makeGenerationResult(
     attemptHistory: [],
     systemPrompt: '',
     userPrompt: '',
+    conversation: '',
     promptVersion: 'v1.16.0',
     cacheReadTokens: 0,
     cacheWriteTokens: 0,
@@ -2558,1126 +2545,6 @@ describe('applyApprovalPolicyStage — clock requires an actual question (TAC-48
   })
 })
 
-describe('applyApprovalPolicyStage — knowledge_gap_backstop trigger (TAC-350)', () => {
-  beforeEach(() => {
-    pendingDraftMaybeSingleMock.mockReset()
-    pendingDraftMaybeSingleMock.mockResolvedValue({ data: null, error: null })
-  })
-
-  const inboundCtx = () =>
-    makeCtx({
-      currentMessage: {
-        id: 'inbound-1',
-        body: 'what are the four SoFi variations?',
-        providerMessageId: 'p1',
-        receivedAt: new Date(),
-        channel: 'text',
-        referralSource: null,
-      },
-      classification: {
-        category: 'new_question',
-        classifierConfidence: 0.9,
-        reasoning: 'question',
-        crisisSafety: false,
-        correctsPendingReply: false,
-        followUpWorthy: false,
-      },
-    })
-
-  // TAC-301 part 1.5 REVERSED the blanking half of this, deliberately: the
-  // body SURVIVES on the backstop path, because the model never admitted to
-  // guessing and the flag is a second opinion that on 2026-09-13 was wrong
-  // twice in the first two minutes after deploy, on replies that were
-  // correct. Blanking destroyed a correct message and left the operator an
-  // empty card.
-  //
-  // TAC-484 REVERSED the clock half. A caught fabrication means "do not send
-  // this," not "we owe them an answer" — the model never admitted to a gap,
-  // so there is nothing to hold on. Arming the clock here produced exactly
-  // the 2026-09-18 incident: a holding message asserting a wait that didn't
-  // exist, defended with two invented reasons across the guest's next three
-  // replies.
-  it('queues and KEEPS the body, but does not arm the clock, when the backstop catches a claim', async () => {
-    const decision = await applyApprovalPolicyStage(
-      inboundCtx(),
-      makeGenerationResult({ knowledgeGap: false }),
-      {
-        status: 'flagged' as const,
-        claims: ['invents four SoFi variation names not in the corpus'],
-      },
-    )
-    expect(decision.action).toBe('queue')
-    if (decision.action !== 'queue') return
-    expect(decision.triggers).toContain(
-      APPROVAL_TRIGGERS.KNOWLEDGE_GAP_BACKSTOP,
-    )
-    expect(decision.primaryTrigger).toBe(
-      APPROVAL_TRIGGERS.KNOWLEDGE_GAP_BACKSTOP,
-    )
-    expect(decision.pendingUntil).toBeUndefined()
-    expect(decision.blankBody).toBe(false)
-  })
-
-  // ---- TAC-367: truncated verdict ----
-
-  it('queues with grounding_check_failed when the grounding check truncated', async () => {
-    const decision = await applyApprovalPolicyStage(
-      inboundCtx(),
-      makeGenerationResult({ knowledgeGap: false }),
-      { status: 'truncated' as const },
-    )
-    expect(decision.action).toBe('queue')
-    if (decision.action !== 'queue') return
-    expect(decision.triggers).toContain(
-      APPROVAL_TRIGGERS.GROUNDING_CHECK_FAILED,
-    )
-    expect(decision.primaryTrigger).toBe(
-      APPROVAL_TRIGGERS.GROUNDING_CHECK_FAILED,
-    )
-  })
-
-  // TAC-367. The load-bearing negative. A truncated check is an ABSENCE of
-  // information about the reply, not a finding against it — so it must not
-  // inherit any of the knowledge-gap consequences, each of which has a
-  // guest-facing effect that would be wrong here: an armed clock puts a
-  // "still looking into it" holding message in front of a guest whose reply
-  // was probably fine, and a blanked body destroys a reply nobody found
-  // anything wrong with. Folding this into `isGapTurn` is the natural-looking
-  // edit that breaks both at once.
-  it('does NOT arm the clock, blank the body, or claim a gap on a truncated check', async () => {
-    const decision = await applyApprovalPolicyStage(
-      inboundCtx(),
-      makeGenerationResult({ knowledgeGap: false }),
-      { status: 'truncated' as const },
-    )
-    expect(decision.action).toBe('queue')
-    if (decision.action !== 'queue') return
-    expect(decision.pendingUntil).toBeUndefined()
-    expect(decision.blankBody).toBe(false)
-    expect(decision.triggers).not.toContain(APPROVAL_TRIGGERS.KNOWLEDGE_GAP)
-    expect(decision.triggers).not.toContain(
-      APPROVAL_TRIGGERS.KNOWLEDGE_GAP_BACKSTOP,
-    )
-  })
-
-  // TAC-367: a truncated check reports nothing about the draft, so any
-  // concrete finding that co-fires must win the operator-facing label.
-  it('yields the primary label to a concrete co-firing trigger', async () => {
-    const decision = await applyApprovalPolicyStage(
-      inboundCtx(),
-      makeGenerationResult({ knowledgeGap: false, voiceFidelity: 0.45 }),
-      { status: 'truncated' as const },
-    )
-    expect(decision.action).toBe('queue')
-    if (decision.action !== 'queue') return
-    expect(decision.triggers).toContain(
-      APPROVAL_TRIGGERS.GROUNDING_CHECK_FAILED,
-    )
-    expect(decision.primaryTrigger).toBe(
-      APPROVAL_TRIGGERS.FIDELITY_BELOW_AUTO_SEND_FLOOR,
-    )
-  })
-
-  // TAC-367 REGRESSION GUARD (code review, MAJOR). Excluding `truncated` from
-  // isGapTurn is correct forward and wrong backward: the trigger cancels the
-  // protected-card carve-out, which lands the turn on the TAC-308 drop and
-  // DESTROYS the reply. Before this ticket the same turn fired no trigger and
-  // SENT, so the naive version converts a delivered reply into guest silence.
-  it('queues rather than DROPPING when a gap card is pending and this turn truncated', async () => {
-    const gapCard = {
-      id: 'gap-card-1',
-      body: '',
-      pending_until: new Date(Date.now() + 60_000).toISOString(),
-      review_reason: APPROVAL_TRIGGERS.KNOWLEDGE_GAP,
-    }
-    pendingDraftMaybeSingleMock.mockResolvedValue({
-      data: gapCard,
-      error: null,
-    })
-    const decision = await applyApprovalPolicyStage(
-      inboundCtx(),
-      makeGenerationResult({ knowledgeGap: false }),
-      { status: 'truncated' as const },
-    )
-    expect(decision.action).toBe('queue')
-    if (decision.action !== 'queue') return
-    // TAC-397: its own card now, rather than a regen over the gap card. The
-    // property these tests exist for is unchanged and stronger — the turn is
-    // NOT dropped, and the guest's outstanding question keeps its card, its
-    // text and its clock intact rather than being overwritten.
-    expect(decision.existingPendingDraftId).toBeNull()
-    expect(decision.pendingUntil).toBeUndefined()
-    expect(decision.blankBody).toBe(false)
-  })
-
-  // TAC-367 (code review, MAJOR). The two tests above this one both survive
-  // deleting GROUNDING_CHECK_FAILED from PRIMARY_TRIGGER_PRIORITY, because
-  // pickPrimaryTrigger falls through to triggers[0] and that happens to be
-  // the right answer in both. This is the only assertion that distinguishes
-  // "ranked where the comment says" from "absent and rescued by the
-  // fallback": it must OUTRANK a co-firing policy trigger.
-  it('outranks hold_all_outbound for the operator-facing label', async () => {
-    const ctx = inboundCtx()
-    const decision = await applyApprovalPolicyStage(
-      {
-        ...ctx,
-        venue: { ...ctx.venue, holdAllOutbound: true },
-      } as RuntimeContext,
-      makeGenerationResult({ knowledgeGap: false }),
-      { status: 'truncated' as const },
-    )
-    expect(decision.action).toBe('queue')
-    if (decision.action !== 'queue') return
-    expect(decision.triggers).toContain(APPROVAL_TRIGGERS.HOLD_ALL_OUTBOUND)
-    expect(decision.primaryTrigger).toBe(
-      APPROVAL_TRIGGERS.GROUNDING_CHECK_FAILED,
-    )
-  })
-
-  // TAC-367: a truncation card carries no clock and its own review_reason, so
-  // it must NOT be treated as a protected knowledge-gap card on a later turn.
-  // Cheap, and it pins the forward half of the isGapTurn exclusion.
-  it('does not treat a grounding_check_failed card as a protected gap card', async () => {
-    const truncationCard = {
-      id: 'trunc-card-1',
-      body: 'a perfectly fine reply',
-      pending_until: null,
-      review_reason: APPROVAL_TRIGGERS.GROUNDING_CHECK_FAILED,
-    }
-    pendingDraftMaybeSingleMock.mockResolvedValue({
-      data: truncationCard,
-      error: null,
-    })
-    const decision = await applyApprovalPolicyStage(
-      inboundCtx(),
-      makeGenerationResult({ knowledgeGap: false }),
-      { status: 'clean' as const },
-    )
-    // Not protected, so never a drop — the property this test is named for.
-    //
-    // TAC-397 changes the outcome from queue to SEND, and that is the headline
-    // behaviour change of the ticket: an occupied slot is no longer a trigger
-    // on its own, so a clean high-fidelity reply with nothing else against it
-    // goes to the guest while the earlier card waits. It used to queue on
-    // previous_pending_held alone and regenerate the earlier draft away.
-    expect(decision.action).toBe('send')
-  })
-
-  // TAC-367, corrected by TAC-424. This comment used to read "'clean' is what
-  // a transient fault degrades to" — true then, false now, and the kind of
-  // stale claim that gets believed because it sits beside a passing test. A
-  // transient fault returns `degraded` and queues; `clean` means the verifier
-  // genuinely ran and found nothing, and only that. The assertion is unchanged
-  // and still the one that catches the fail-open line moving by accident: two
-  // of the five states let a draft through, and these are they.
-  it('sends on a clean grounding result, exactly as when the stage was skipped', async () => {
-    const clean = await applyApprovalPolicyStage(
-      inboundCtx(),
-      makeGenerationResult({ knowledgeGap: false }),
-      { status: 'clean' as const },
-    )
-    const skipped = await applyApprovalPolicyStage(
-      inboundCtx(),
-      makeGenerationResult({ knowledgeGap: false }),
-      { status: 'skipped' as const },
-    )
-    expect(clean.action).toBe('send')
-    expect(skipped.action).toBe('send')
-  })
-
-  // TAC-424 acceptance criterion 3, the holding half. Stated against `clean`
-  // rather than alone, because "degraded queues" is only meaningful next to
-  // the state it used to be confused with.
-  it('HOLDS on a degraded grounding result, where a clean one sends', async () => {
-    const degraded = await applyApprovalPolicyStage(
-      inboundCtx(),
-      makeGenerationResult({ knowledgeGap: false }),
-      { status: 'degraded' as const },
-    )
-    const clean = await applyApprovalPolicyStage(
-      inboundCtx(),
-      makeGenerationResult({ knowledgeGap: false }),
-      { status: 'clean' as const },
-    )
-    expect(degraded.action).toBe('queue')
-    expect(clean.action).toBe('send')
-    if (degraded.action !== 'queue') return
-    expect(degraded.primaryTrigger).toBe(
-      APPROVAL_TRIGGERS.GROUNDING_CHECK_FAILED,
-    )
-  })
-
-  // TAC-424: same consequences the truncated case is exempt from. A degraded
-  // check reports nothing ABOUT the reply, so it must not arm a clock in front
-  // of a guest or destroy a body nobody found anything wrong with.
-  it('does NOT arm the clock, blank the body, or claim a gap on a degraded check', async () => {
-    const decision = await applyApprovalPolicyStage(
-      inboundCtx(),
-      makeGenerationResult({ knowledgeGap: false }),
-      { status: 'degraded' as const },
-    )
-    expect(decision.action).toBe('queue')
-    if (decision.action !== 'queue') return
-    expect(decision.pendingUntil).toBeUndefined()
-    expect(decision.blankBody).toBe(false)
-    expect(decision.triggers).not.toContain(APPROVAL_TRIGGERS.KNOWLEDGE_GAP)
-    expect(decision.triggers).not.toContain(
-      APPROVAL_TRIGGERS.KNOWLEDGE_GAP_BACKSTOP,
-    )
-  })
-
-  // TAC-424 REGRESSION GUARD, and the load-bearing test of this ticket.
-  //
-  // The same shape TAC-367 had to guard for truncation, arriving by a new
-  // route. Adding a trigger for a degraded check makes triggers.length > 0,
-  // which cancels the protected-card carve-out and lands the turn on the
-  // TAC-308 drop — so a guest already waiting on a knowledge-gap card would
-  // get SILENCE because a Haiku call faulted twice. Before this ticket that
-  // same turn fired no trigger at all and SENT.
-  //
-  // Mutation target: removing `grounding.status === 'degraded'` from
-  // checkDidNotComplete must fail THIS test, by name.
-  it('queues rather than DROPPING when a gap card is pending and this turn degraded', async () => {
-    const gapCard = {
-      id: 'gap-card-1',
-      body: '',
-      pending_until: new Date(Date.now() + 60_000).toISOString(),
-      review_reason: APPROVAL_TRIGGERS.KNOWLEDGE_GAP,
-    }
-    pendingDraftMaybeSingleMock.mockResolvedValue({
-      data: gapCard,
-      error: null,
-    })
-    const decision = await applyApprovalPolicyStage(
-      inboundCtx(),
-      makeGenerationResult({ knowledgeGap: false }),
-      { status: 'degraded' as const },
-    )
-    expect(decision.action).toBe('queue')
-    if (decision.action !== 'queue') return
-    // TAC-397: its own card now, rather than a regen over the gap card. The
-    // property these tests exist for is unchanged and stronger — the turn is
-    // NOT dropped, and the guest's outstanding question keeps its card, its
-    // text and its clock intact rather than being overwritten.
-    expect(decision.existingPendingDraftId).toBeNull()
-    expect(decision.pendingUntil).toBeUndefined()
-    expect(decision.blankBody).toBe(false)
-  })
-
-  // TAC-424: the sub-cause marker is a RECORD, not a label, and this is the
-  // assertion that keeps it one.
-  //
-  // hold_all_outbound co-fires deliberately, and it is what gives the test
-  // teeth. Trigger enumeration order puts it at triggers[0], so
-  // pickPrimaryTrigger's fallback would answer `hold_all_outbound` — meaning
-  // this fails if GROUNDING_CHECK_FAILED is dropped from
-  // PRIMARY_TRIGGER_PRIORITY, and it fails if GROUNDING_CHECK_DEGRADED is
-  // ranked above its partner. Without the co-firing trigger it would pass
-  // against both mutants, which is the trap CLAUDE.md records from TAC-367.
-  it('records the degraded sub-cause without letting it win the operator label', async () => {
-    const ctx = inboundCtx()
-    const decision = await applyApprovalPolicyStage(
-      {
-        ...ctx,
-        venue: { ...ctx.venue, holdAllOutbound: true },
-      } as RuntimeContext,
-      makeGenerationResult({ knowledgeGap: false }),
-      { status: 'degraded' as const },
-    )
-    expect(decision.action).toBe('queue')
-    if (decision.action !== 'queue') return
-    expect(decision.triggers).toContain(
-      APPROVAL_TRIGGERS.GROUNDING_CHECK_FAILED,
-    )
-    expect(decision.triggers).toContain(
-      APPROVAL_TRIGGERS.GROUNDING_CHECK_DEGRADED,
-    )
-    expect(decision.primaryTrigger).toBe(
-      APPROVAL_TRIGGERS.GROUNDING_CHECK_FAILED,
-    )
-  })
-
-  // TAC-424: the marker never fires alone. If it ever did, a card would be
-  // held under a reason whose copy is written to sit UNDER another line, and
-  // the operator would read a sub-cause as the whole explanation.
-  it('never fires the degraded marker without the trigger that holds the draft', async () => {
-    for (const status of ['clean', 'truncated', 'skipped'] as const) {
-      const decision = await applyApprovalPolicyStage(
-        inboundCtx(),
-        makeGenerationResult({
-          knowledgeGap: status === 'skipped',
-          voiceFidelity: 0.5,
-        }),
-        { status },
-      )
-      // `expect(...).toBe('queue')` rather than `continue`, matching every
-      // sibling in this block: a `continue` would run zero assertions and stay
-      // green if the gate ever stopped queueing these cases.
-      expect(decision.action).toBe('queue')
-      if (decision.action !== 'queue') return
-      expect(decision.triggers).not.toContain(
-        APPROVAL_TRIGGERS.GROUNDING_CHECK_DEGRADED,
-      )
-    }
-  })
-
-  // The asymmetry is the whole point of the change, so pin both sides of it
-  // in one place: identical gate call, only the SOURCE of the gap differs.
-  // TAC-484 adds a second asymmetry on top: the clock now arms ONLY on the
-  // self-reported side, because a backstop catch means "do not send this,"
-  // not "we owe them an answer" — the inbound behind it (see inboundCtx
-  // above) is a real question either way, so this pins the SOURCE asymmetry
-  // specifically, not the question-detection gate (that's looks-like-
-  // question.test.ts and the replay test).
-  it('blanks and arms the clock only for a self-reported gap, never for a backstop catch, on otherwise identical input', async () => {
-    const selfReported = await applyApprovalPolicyStage(
-      inboundCtx(),
-      makeGenerationResult({ knowledgeGap: true }),
-    )
-    const backstop = await applyApprovalPolicyStage(
-      inboundCtx(),
-      makeGenerationResult({ knowledgeGap: false }),
-      { status: 'flagged' as const, claims: ['invents a fact'] },
-    )
-    if (selfReported.action !== 'queue' || backstop.action !== 'queue') {
-      throw new Error('both should queue')
-    }
-    expect(selfReported.blankBody).toBe(true)
-    expect(backstop.blankBody).toBe(false)
-    expect(selfReported.pendingUntil).toBeInstanceOf(Date)
-    expect(backstop.pendingUntil).toBeUndefined()
-  })
-
-  it('sends normally when there is no backstop finding (null)', async () => {
-    const decision = await applyApprovalPolicyStage(
-      inboundCtx(),
-      makeGenerationResult({ knowledgeGap: false }),
-      null,
-    )
-    expect(decision.action).toBe('send')
-  })
-
-  it('sends normally when the third argument is omitted (backward compatible default)', async () => {
-    const decision = await applyApprovalPolicyStage(
-      inboundCtx(),
-      makeGenerationResult({ knowledgeGap: false }),
-    )
-    expect(decision.action).toBe('send')
-  })
-
-  // The two triggers are mutually exclusive by construction (the backstop is
-  // only ever invoked by the orchestrator when knowledgeGap is false), but
-  // the gate itself must not assume that — it should handle whatever it's
-  // given. commitment_type_gated still outranks the backstop, same as it
-  // outranks the self-reported trigger.
-  it('yields the operator label to commitment_type_gated when both fire, and arms no clock (backstop source)', async () => {
-    const decision = await applyApprovalPolicyStage(
-      inboundCtx(),
-      makeGenerationResult({
-        knowledgeGap: false,
-        commitment: { type: 'comp', description: 'oat latte' },
-      }),
-      { status: 'flagged' as const, claims: ['invents a fact'] },
-    )
-    expect(decision.action).toBe('queue')
-    if (decision.action !== 'queue') return
-    expect(decision.triggers).toContain(
-      APPROVAL_TRIGGERS.KNOWLEDGE_GAP_BACKSTOP,
-    )
-    expect(decision.primaryTrigger).toBe(
-      APPROVAL_TRIGGERS.COMMITMENT_TYPE_GATED,
-    )
-    // TAC-484: the label and the clock are independent, and this turn's gap
-    // came from the backstop, not a self-report, so no clock arms — the
-    // label winning to COMMITMENT_TYPE_GATED doesn't change that.
-    expect(decision.pendingUntil).toBeUndefined()
-    // TAC-301 part 1.5: no longer blanked. pending_commitment now rides along
-    // WITH a visible body, which is the safe combination — TAC-309's concern
-    // was an invisible commitment on a blank card the operator would
-    // authorize without seeing. The operator can see it here.
-    expect(decision.blankBody).toBe(false)
-  })
-
-  it('outranks fidelity_below_auto_send_floor for the operator label', async () => {
-    const decision = await applyApprovalPolicyStage(
-      inboundCtx(),
-      makeGenerationResult({ knowledgeGap: false, voiceFidelity: 0.45 }),
-      { status: 'flagged' as const, claims: ['invents a fact'] },
-    )
-    expect(decision.action).toBe('queue')
-    if (decision.action !== 'queue') return
-    expect(decision.primaryTrigger).toBe(
-      APPROVAL_TRIGGERS.KNOWLEDGE_GAP_BACKSTOP,
-    )
-  })
-
-  // A backstop-caught turn must protect the card and preserve the clock on
-  // regen, identically to a self-reported gap turn (TAC-308 case 3 / case 2
-  // shape, now exercised via the backstop path).
-  it("preserves an existing gap card's clock when regenerated via a fresh backstop catch", async () => {
-    const gapCard = {
-      id: 'gap-card-1',
-      body: 'best guess at the answer',
-      pending_until: new Date(Date.now() + 60_000).toISOString(),
-      review_reason: APPROVAL_TRIGGERS.KNOWLEDGE_GAP_BACKSTOP,
-    }
-    pendingDraftMaybeSingleMock.mockResolvedValue({
-      data: gapCard,
-      error: null,
-    })
-    const decision = await applyApprovalPolicyStage(
-      inboundCtx(),
-      makeGenerationResult({ knowledgeGap: false }),
-      {
-        status: 'flagged' as const,
-        claims: ['invents a different fact this turn'],
-      },
-    )
-    expect(decision.action).toBe('queue')
-    if (decision.action !== 'queue') return
-    // TAC-397: its own card, so the existing card's clock is preserved by not
-    // being touched at all rather than by omitting the column on a regen. The
-    // guarantee is the same one: one holding message per wait.
-    expect(decision.existingPendingDraftId).toBeNull()
-    expect(decision.pendingUntil).toBeUndefined()
-    // TAC-301 part 1.5: the backstop path keeps the body.
-    expect(decision.blankBody).toBe(false)
-  })
-
-  // A self-reported gap card must not be dropped by a turn the BACKSTOP (not
-  // self-report) catches — both are "gapping itself" from the card-
-  // protection carve-out's point of view.
-  it('does not drop an existing self-reported gap card when this turn is caught by the backstop instead', async () => {
-    const gapCard = {
-      id: 'gap-card-1',
-      body: 'best guess at the answer',
-      pending_until: new Date(Date.now() + 60_000).toISOString(),
-      review_reason: APPROVAL_TRIGGERS.KNOWLEDGE_GAP,
-    }
-    pendingDraftMaybeSingleMock.mockResolvedValue({
-      data: gapCard,
-      error: null,
-    })
-    const decision = await applyApprovalPolicyStage(
-      inboundCtx(),
-      makeGenerationResult({ knowledgeGap: false }),
-      { status: 'flagged' as const, claims: ['a different unverified claim'] },
-    )
-    expect(decision.action).toBe('queue')
-    if (decision.action !== 'queue') return
-    // TAC-397: its own card. Not dropped, and the self-reported gap card it
-    // sits beside is untouched — which is what this test is named for.
-    expect(decision.existingPendingDraftId).toBeNull()
-  })
-})
-
-// ---------------------------------------------------------------------------
-// TAC-501: the agent invented a phone number and gave it to a guest.
-//
-// Le Mil's config has no phone number anywhere — venue_info.contact carries
-// only a website and publicEmail. Asked "can i just call you instead?", the
-// model answered confidently (knowledgeGap: false — it never admitted to
-// guessing) and invented a plausible-looking 415 number. Two consecutive
-// generations of the identical prompt produced two DIFFERENT numbers, which
-// is what rules out a real number surfacing from somewhere in context: the
-// model was filling a gap, not recalling a fact.
-//
-// Ruled 2026-09-21 (question 1: B): the regen loop that produced the
-// fabrication (see generate-message.test.ts's sibling describe block) stays
-// as it is. The grounding backstop on the FINAL body is the single
-// enforcement point this ticket adds coverage for. These tests pin the two
-// halves of that: the backstop queues rather than sends when it catches an
-// invented contact detail (the AC2 bar, already the shipped mechanism per
-// the TAC-501 audit), and — the reason AC1's measured catch-rate matters —
-// nothing else stops the send when the backstop does not fire.
-// ---------------------------------------------------------------------------
-describe('applyApprovalPolicyStage — invented contact detail (TAC-501)', () => {
-  beforeEach(() => {
-    pendingDraftMaybeSingleMock.mockReset()
-    pendingDraftMaybeSingleMock.mockResolvedValue({ data: null, error: null })
-  })
-
-  const callInsteadCtx = () =>
-    makeCtx({
-      currentMessage: {
-        id: 'inbound-1',
-        body: 'can i just call you instead?',
-        providerMessageId: 'p1',
-        receivedAt: new Date(),
-        channel: 'text',
-        referralSource: null,
-      },
-      classification: {
-        category: 'new_question',
-        classifierConfidence: 0.9,
-        reasoning: 'asks for a phone number',
-        crisisSafety: false,
-        correctsPendingReply: false,
-        followUpWorthy: false,
-      },
-    })
-
-  const invented =
-    "yeah, here's the number: 415-735-5428. though I'll be honest, I don't always catch calls right away. what's on your mind?"
-
-  it('never auto-sends a generation whose body invents a phone number, when the backstop catches it', async () => {
-    const decision = await applyApprovalPolicyStage(
-      callInsteadCtx(),
-      makeGenerationResult({ body: invented, knowledgeGap: false }),
-      {
-        status: 'flagged' as const,
-        claims: ['gives out a phone number that is not in the venue config'],
-      },
-    )
-    expect(decision.action).toBe('queue')
-    if (decision.action !== 'queue') return
-    expect(decision.triggers).toContain(
-      APPROVAL_TRIGGERS.KNOWLEDGE_GAP_BACKSTOP,
-    )
-    // TAC-301 part 1.5: the backstop path keeps the body — the operator needs
-    // to see the invented number to know what to strike, not an empty card.
-    expect(decision.blankBody).toBe(false)
-  })
-
-  // The exposure AC1 is about, pinned rather than left implicit: the
-  // self-report and the backstop are the ONLY two chances to catch this, and
-  // this file's `knowledge_gap trigger (TAC-308)` describe block already
-  // covers the self-report miss. This is the other one. When neither fires —
-  // the model didn't flag its own gap and the backstop verdict is 'clean' —
-  // there is nothing left in the pipeline to hold the send. This is not a
-  // defect in the gate; it is what makes AC1's measured catch rate the thing
-  // that decides whether AC2's bar actually holds in production.
-  it('auto-sends the invented number when neither the self-report nor the backstop catch it', async () => {
-    const decision = await applyApprovalPolicyStage(
-      callInsteadCtx(),
-      makeGenerationResult({ body: invented, knowledgeGap: false }),
-      { status: 'clean' as const },
-    )
-    expect(decision.action).toBe('send')
-  })
-})
-
-describe('verifyGroundingStage (TAC-350)', () => {
-  beforeEach(() => {
-    verifyGroundingMock.mockReset()
-    captureUngroundedClaimCaughtMock.mockReset()
-    captureGroundingVerifierUnavailableMock.mockReset()
-  })
-
-  const inboundCtx = (overrides: Partial<RuntimeContext> = {}) =>
-    makeCtx({
-      currentMessage: {
-        id: 'inbound-1',
-        body: "what's the wifi password?",
-        providerMessageId: 'p1',
-        receivedAt: new Date(),
-        channel: 'text',
-        referralSource: null,
-      },
-      knowledgeCorpus: [],
-      ...overrides,
-    })
-
-  function makeGen(
-    overrides: {
-      knowledgeGap?: boolean
-      body?: string
-      userPrompt?: string
-    } = {},
-  ) {
-    return {
-      knowledgeGap: false,
-      body: 'Le Mils Guest',
-      // TAC-301 part 1.5: the generator's composed user prompt is now part of
-      // what the verifier is given.
-      userPrompt: '## Right now\n- Status: OPEN right now, closes at 3:00 PM.',
-      ...overrides,
-    }
-  }
-
-  // TAC-376 REVERSES this test. It used to assert the outbound (followup)
-  // path skipped entirely — the exact gap this ticket closes. Per the
-  // 2026-09-17 ruling, a followup now gets the same check an inbound reply
-  // gets, with isProactive derived from ctx.currentMessage === null.
-  it('calls the model on the outbound (followup) path with isProactive: true and an empty inboundBody', async () => {
-    verifyGroundingMock.mockResolvedValueOnce({
-      ok: true,
-      data: {
-        hasUngroundedClaim: false,
-        ungroundedClaims: [],
-        promptVersion: 'v1.6.0',
-      },
-    })
-    const ctx = makeCtx({
-      currentMessage: null,
-      followupTrigger: { reason: 'day_7', triggeredAt: new Date() },
-    })
-    const result = await verifyGroundingStage(ctx, makeGen())
-    expect(result).toEqual({ status: 'clean' })
-    expect(verifyGroundingMock).toHaveBeenCalledTimes(1)
-    const args = verifyGroundingMock.mock.calls[0][0] as {
-      isProactive: boolean
-      inboundBody: string
-    }
-    expect(args.isProactive).toBe(true)
-    expect(args.inboundBody).toBe('')
-  })
-
-  // Same shape, a holding-message ctx (manual followup trigger, no inbound) —
-  // the second of the two proactive orchestrators this ticket wires up.
-  it('calls the model for a holding-message-shaped ctx (manual trigger, no inbound) with isProactive: true', async () => {
-    verifyGroundingMock.mockResolvedValueOnce({
-      ok: true,
-      data: {
-        hasUngroundedClaim: false,
-        ungroundedClaims: [],
-        promptVersion: 'v1.6.0',
-      },
-    })
-    const ctx = makeCtx({
-      currentMessage: null,
-      followupTrigger: { reason: 'manual', triggeredAt: new Date() },
-    })
-    const result = await verifyGroundingStage(ctx, makeGen())
-    expect(result).toEqual({ status: 'clean' })
-    const args = verifyGroundingMock.mock.calls[0][0] as {
-      isProactive: boolean
-    }
-    expect(args.isProactive).toBe(true)
-  })
-
-  // Mutation-verified pair: a hardcoded `isProactive: false` (or `true`) must
-  // fail one of these two tests. Together with the two above, this pins the
-  // derivation to `ctx.currentMessage === null` rather than any other signal
-  // (followupTrigger, category, etc.) that happens to correlate with it.
-  it('calls the model on the inbound path with isProactive: false and the real inbound body', async () => {
-    verifyGroundingMock.mockResolvedValueOnce({
-      ok: true,
-      data: {
-        hasUngroundedClaim: false,
-        ungroundedClaims: [],
-        promptVersion: 'v1.6.0',
-      },
-    })
-    const result = await verifyGroundingStage(inboundCtx(), makeGen())
-    expect(result).toEqual({ status: 'clean' })
-    const args = verifyGroundingMock.mock.calls[0][0] as {
-      isProactive: boolean
-      inboundBody: string
-    }
-    expect(args.isProactive).toBe(false)
-    expect(args.inboundBody).toBe("what's the wifi password?")
-  })
-
-  it('returns skipped without calling the model for a demo guest', async () => {
-    const ctx = inboundCtx({
-      guest: {
-        id: 'guest-1',
-        firstName: 'Sam',
-        isDemo: true,
-      } as RuntimeContext['guest'],
-    })
-    const result = await verifyGroundingStage(ctx, makeGen())
-    expect(result).toEqual({ status: 'skipped' })
-    expect(verifyGroundingMock).not.toHaveBeenCalled()
-  })
-
-  it('returns skipped without calling the model when the generation already self-reported a gap', async () => {
-    const result = await verifyGroundingStage(
-      inboundCtx(),
-      makeGen({ knowledgeGap: true }),
-    )
-    expect(result).toEqual({ status: 'skipped' })
-    expect(verifyGroundingMock).not.toHaveBeenCalled()
-  })
-
-  // TAC-424 REVERSES the test that used to sit here. It asserted
-  // `{ status: 'clean' }` on a transient fault — the fail-OPEN half of
-  // TAC-367 — which is precisely the behaviour this ticket removes: a fault
-  // that returned `clean` was recorded on the row as `[]`, byte-identical to
-  // a genuine pass. The verdict is its own state now, and it queues.
-  //
-  // Two mock responses because the stage retries once. A single
-  // mockResolvedValueOnce leaves the retry reading `undefined`, which is how
-  // the retry announced itself when this test was first run against it.
-  it('returns degraded after retrying once, and logs that it failed closed', async () => {
-    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
-    verifyGroundingMock
-      .mockResolvedValueOnce({
-        ok: false,
-        error: 'model unavailable',
-        errorCode: 'ai_verify_grounding_failed',
-      })
-      .mockResolvedValueOnce({
-        ok: false,
-        error: 'model unavailable',
-        errorCode: 'ai_verify_grounding_failed',
-      })
-    const result = await verifyGroundingStage(inboundCtx(), makeGen())
-    expect(result).toEqual({ status: 'degraded' })
-    expect(verifyGroundingMock).toHaveBeenCalledTimes(2)
-    expect(warnSpy).toHaveBeenCalled()
-  })
-
-  // TAC-424: the retry is the whole reason the closed posture is affordable,
-  // so "one blip does not hold a reply" needs its own assertion. Mutation
-  // target: deleting the retry makes this return `degraded`.
-  it('retries once and returns the retry verdict when the second call succeeds', async () => {
-    vi.spyOn(console, 'warn').mockImplementation(() => {})
-    verifyGroundingMock
-      .mockResolvedValueOnce({
-        ok: false,
-        error: 'socket hang up',
-        errorCode: 'ai_verify_grounding_failed',
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        data: {
-          hasUngroundedClaim: false,
-          ungroundedClaims: [],
-          promptVersion: 'v1.6.0',
-        },
-      })
-    const result = await verifyGroundingStage(inboundCtx(), makeGen())
-    expect(result).toEqual({ status: 'clean' })
-    expect(verifyGroundingMock).toHaveBeenCalledTimes(2)
-    // A recovered call is not a failure: nothing is emitted, because nothing
-    // went unchecked.
-    expect(captureGroundingVerifierUnavailableMock).not.toHaveBeenCalled()
-  })
-
-  // TAC-424: the retry sends the SAME inputs. A retry that quietly dropped
-  // the runtime context would still return a verdict, and that verdict would
-  // be measured against different source material than the generator had —
-  // the TAC-301 part 1.5 defect, reintroduced one layer down.
-  it('sends identical arguments on the retry', async () => {
-    vi.spyOn(console, 'warn').mockImplementation(() => {})
-    verifyGroundingMock
-      .mockResolvedValueOnce({
-        ok: false,
-        error: 'socket hang up',
-        errorCode: 'ai_verify_grounding_failed',
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        data: {
-          hasUngroundedClaim: false,
-          ungroundedClaims: [],
-          promptVersion: 'v1.6.0',
-        },
-      })
-    await verifyGroundingStage(inboundCtx(), makeGen())
-    expect(verifyGroundingMock).toHaveBeenCalledTimes(2)
-    expect(verifyGroundingMock.mock.calls[1][0]).toEqual(
-      verifyGroundingMock.mock.calls[0][0],
-    )
-  })
-
-  // TAC-424: a degraded turn now HOLDS the reply, so the event must say so.
-  // The assertion is on failedClosed rather than only on outcome because
-  // `outcome` alone never told anyone what happened to the draft.
-  it('emits grounding_verifier_unavailable with failedClosed=true and retried=true when it degrades', async () => {
-    vi.spyOn(console, 'warn').mockImplementation(() => {})
-    verifyGroundingMock
-      .mockResolvedValueOnce({
-        ok: false,
-        error: 'socket hang up',
-        errorCode: 'ai_verify_grounding_failed',
-      })
-      .mockResolvedValueOnce({
-        ok: false,
-        error: 'socket hang up',
-        errorCode: 'ai_verify_grounding_failed',
-      })
-    await verifyGroundingStage(inboundCtx(), makeGen())
-    expect(captureGroundingVerifierUnavailableMock).toHaveBeenCalledTimes(1)
-    const call = captureGroundingVerifierUnavailableMock.mock.calls[0][0]
-    expect(call.outcome).toBe('degraded')
-    expect(call.failedClosed).toBe(true)
-    expect(call.retried).toBe(true)
-    // Decision 0003 rewrite: no third argument means the pre-send callers
-    // (followups, holding message), whose finding can still hold the draft.
-    expect(call.disposition).toBe('held')
-  })
-
-  // Decision 0003, rewritten 2026-09-29: the post-send caller passes 'sent',
-  // and on that path NOTHING holds — failedClosed must say so, or a query for
-  // "turns that sent without a grounding verdict" reads the deferred checks
-  // as holds that never happened.
-  it("emits disposition 'sent' AND failedClosed=false on the unavailable event when run post-send", async () => {
-    vi.spyOn(console, 'warn').mockImplementation(() => {})
-    verifyGroundingMock
-      .mockResolvedValueOnce({
-        ok: false,
-        error: 'socket hang up',
-        errorCode: 'ai_verify_grounding_failed',
-      })
-      .mockResolvedValueOnce({
-        ok: false,
-        error: 'socket hang up',
-        errorCode: 'ai_verify_grounding_failed',
-      })
-    await verifyGroundingStage(inboundCtx(), makeGen(), 'sent')
-    expect(captureGroundingVerifierUnavailableMock).toHaveBeenCalledTimes(1)
-    const call = captureGroundingVerifierUnavailableMock.mock.calls[0][0]
-    expect(call.disposition).toBe('sent')
-    expect(call.failedClosed).toBe(false)
-  })
-
-  // TAC-367: the fail-CLOSED half. Truncation is a verdict the model produced
-  // that we could not read, so it queues instead of being discarded.
-  it('returns truncated when the call fails with the truncation errorCode', async () => {
-    vi.spyOn(console, 'warn').mockImplementation(() => {})
-    verifyGroundingMock.mockResolvedValueOnce({
-      ok: false,
-      error: 'No object generated: could not parse the response.',
-      errorCode: VERIFY_GROUNDING_TRUNCATED_ERROR_CODE,
-    })
-    const result = await verifyGroundingStage(inboundCtx(), makeGen())
-    expect(result).toEqual({ status: 'truncated' })
-  })
-
-  it('emits grounding_verifier_unavailable with failedClosed=true and retried=false on truncation', async () => {
-    vi.spyOn(console, 'warn').mockImplementation(() => {})
-    verifyGroundingMock.mockResolvedValueOnce({
-      ok: false,
-      error: 'No object generated: could not parse the response.',
-      errorCode: VERIFY_GROUNDING_TRUNCATED_ERROR_CODE,
-    })
-    await verifyGroundingStage(inboundCtx(), makeGen())
-    expect(captureGroundingVerifierUnavailableMock).toHaveBeenCalledTimes(1)
-    const call = captureGroundingVerifierUnavailableMock.mock.calls[0][0]
-    expect(call.outcome).toBe('truncated')
-    expect(call.failedClosed).toBe(true)
-    expect(call.retried).toBe(false)
-  })
-
-  // TAC-424: truncation is NOT retried. Retrying a cap that was already hit
-  // spends a second call to hit it again, and the fix is the cap. The call
-  // count is the assertion; the verdict alone cannot tell the two apart,
-  // because a retried truncation would truncate again and return the same
-  // status.
-  it('does NOT retry a truncated call', async () => {
-    vi.spyOn(console, 'warn').mockImplementation(() => {})
-    verifyGroundingMock.mockResolvedValueOnce({
-      ok: false,
-      error: 'No object generated: could not parse the response.',
-      errorCode: VERIFY_GROUNDING_TRUNCATED_ERROR_CODE,
-    })
-    const result = await verifyGroundingStage(inboundCtx(), makeGen())
-    expect(result).toEqual({ status: 'truncated' })
-    expect(verifyGroundingMock).toHaveBeenCalledTimes(1)
-  })
-
-  // TAC-367. Pins the DEFAULT DIRECTION: an errorCode this stage doesn't
-  // recognize must degrade to fail-open, never be treated as truncation.
-  // (An earlier version of this comment claimed it guarded against the
-  // constant being renamed on one side only — it doesn't: stages.ts imports
-  // VERIFY_GROUNDING_TRUNCATED_ERROR_CODE by name, so a one-sided rename
-  // fails tsc. Reworded rather than left as a fourth entry in this repo's
-  // list of tests whose stated rationale was never true.)
-  it('treats an unrecognized errorCode as degraded, not truncated', async () => {
-    vi.spyOn(console, 'warn').mockImplementation(() => {})
-    verifyGroundingMock
-      .mockResolvedValueOnce({
-        ok: false,
-        error: 'something else entirely',
-        errorCode: 'some_other_code',
-      })
-      .mockResolvedValueOnce({
-        ok: false,
-        error: 'something else entirely',
-        errorCode: 'some_other_code',
-      })
-    const result = await verifyGroundingStage(inboundCtx(), makeGen())
-    expect(result).toEqual({ status: 'degraded' })
-    // TAC-424: and it IS retried, which is the other half of the default
-    // direction — an unrecognized code is a transient fault until proven
-    // otherwise, so it gets the second attempt truncation does not.
-    expect(verifyGroundingMock).toHaveBeenCalledTimes(2)
-  })
-
-  it('returns clean and does NOT fire the PostHog event when nothing is found', async () => {
-    verifyGroundingMock.mockResolvedValueOnce({
-      ok: true,
-      data: {
-        hasUngroundedClaim: false,
-        ungroundedClaims: [],
-        promptVersion: 'v1.0.0',
-      },
-    })
-    const result = await verifyGroundingStage(inboundCtx(), makeGen())
-    expect(result).toEqual({ status: 'clean' })
-    expect(captureUngroundedClaimCaughtMock).not.toHaveBeenCalled()
-    expect(captureGroundingVerifierUnavailableMock).not.toHaveBeenCalled()
-  })
-
-  // TAC-301 part 1.5. The identity is the fix: the verifier must receive the
-  // string the GENERATOR actually got, not one this stage rebuilds. A rebuild
-  // is how the verifier's view drifts from the generator's, which is what
-  // produced six false-positive classes.
-  it("passes the generator's own composed userPrompt through verbatim", async () => {
-    verifyGroundingMock.mockResolvedValueOnce({
-      ok: true,
-      data: {
-        hasUngroundedClaim: false,
-        ungroundedClaims: [],
-        promptVersion: 'v1.1.0',
-      },
-    })
-    const userPrompt =
-      '## Right now\n- Status: CLOSED right now. Next open tomorrow at 7:00 AM.\n\n## Visit history\n- cortado [3 days ago]'
-    await verifyGroundingStage(inboundCtx(), makeGen({ userPrompt }))
-    expect(verifyGroundingMock).toHaveBeenCalledWith(
-      expect.objectContaining({ runtimeContext: userPrompt }),
-    )
-  })
-
-  it('returns the finding and fires the PostHog event when the backstop catches something', async () => {
-    verifyGroundingMock.mockResolvedValueOnce({
-      ok: true,
-      data: {
-        hasUngroundedClaim: true,
-        ungroundedClaims: ['invents a wifi network name and password'],
-        promptVersion: 'v1.0.0',
-        cacheReadTokens: 0,
-        cacheWriteTokens: 0,
-      },
-    })
-    const result = await verifyGroundingStage(inboundCtx(), makeGen())
-    expect(result).toEqual({
-      status: 'flagged' as const,
-      claims: ['invents a wifi network name and password'],
-    })
-    expect(captureUngroundedClaimCaughtMock).toHaveBeenCalledTimes(1)
-    const call = captureUngroundedClaimCaughtMock.mock.calls[0][0]
-    expect(call.ungroundedClaims).toEqual([
-      'invents a wifi network name and password',
-    ])
-    expect(call.replyBody).toBe('Le Mils Guest')
-    // Decision 0003 rewrite: the default is the pre-send posture. The Slack
-    // headline branches on this field, so 'held' here is the claim that the
-    // draft was actually stopped.
-    expect(call.disposition).toBe('held')
-  })
-
-  // Decision 0003, rewritten 2026-09-29: post-send the same catch describes a
-  // reply the guest already has, and the event must say so.
-  it("emits disposition 'sent' on the caught event when run post-send", async () => {
-    verifyGroundingMock.mockResolvedValueOnce({
-      ok: true,
-      data: {
-        hasUngroundedClaim: true,
-        ungroundedClaims: ['invents a wifi network name and password'],
-        promptVersion: 'v1.0.0',
-        cacheReadTokens: 0,
-        cacheWriteTokens: 0,
-      },
-    })
-    await verifyGroundingStage(inboundCtx(), makeGen(), 'sent')
-    expect(captureUngroundedClaimCaughtMock).toHaveBeenCalledTimes(1)
-    expect(captureUngroundedClaimCaughtMock.mock.calls[0][0].disposition).toBe(
-      'sent',
-    )
-  })
-
-  // TAC-502. The stage's job here is to hand over `ctx.conversationChannel`
-  // unchanged, so the verifier can tell that a reply naming the medium the
-  // guest is on describes the live conversation rather than claiming a contact
-  // method the venue does not list. Mutation-verified triple, the same shape
-  // as the isProactive pair above: a hardcoded channel, or a dropped field,
-  // must fail one of these three.
-  it('passes the conversation channel through to the verifier', async () => {
-    verifyGroundingMock.mockResolvedValueOnce({
-      ok: true,
-      data: {
-        hasUngroundedClaim: false,
-        ungroundedClaims: [],
-        promptVersion: 'v1.6.0',
-      },
-    })
-    await verifyGroundingStage(inboundCtx(), makeGen())
-    const args = verifyGroundingMock.mock.calls[0][0] as {
-      conversationChannel: unknown
-    }
-    expect(args.conversationChannel).toBe('text')
-  })
-
-  it('passes an instagram conversation through as instagram, not the default', async () => {
-    verifyGroundingMock.mockResolvedValueOnce({
-      ok: true,
-      data: {
-        hasUngroundedClaim: false,
-        ungroundedClaims: [],
-        promptVersion: 'v1.6.0',
-      },
-    })
-    await verifyGroundingStage(
-      inboundCtx({ conversationChannel: 'instagram' }),
-      makeGen(),
-    )
-    const args = verifyGroundingMock.mock.calls[0][0] as {
-      conversationChannel: unknown
-    }
-    expect(args.conversationChannel).toBe('instagram')
-  })
-
-  // An unresolved channel is handed over AS null rather than substituted.
-  // Deciding what null means is the verifier's (it renders no section and
-  // checks the claim as before); a stage that guessed 'text' here would
-  // manufacture the exemption on a turn nobody could place.
-  it('passes an unresolved channel through as null rather than substituting one', async () => {
-    verifyGroundingMock.mockResolvedValueOnce({
-      ok: true,
-      data: {
-        hasUngroundedClaim: false,
-        ungroundedClaims: [],
-        promptVersion: 'v1.6.0',
-      },
-    })
-    await verifyGroundingStage(
-      inboundCtx({ conversationChannel: null }),
-      makeGen(),
-    )
-    const args = verifyGroundingMock.mock.calls[0][0] as {
-      conversationChannel: unknown
-    }
-    expect(args.conversationChannel).toBeNull()
-  })
-
-  it('passes ctx.knowledgeCorpus through to the verifier as knowledgeChunks', async () => {
-    verifyGroundingMock.mockResolvedValueOnce({
-      ok: true,
-      data: {
-        hasUngroundedClaim: false,
-        ungroundedClaims: [],
-        promptVersion: 'v1.0.0',
-      },
-    })
-    const chunk = {
-      id: 'k1',
-      knowledgeCorpusId: 'kc1',
-      text: 'chunk',
-      sourceType: 'x',
-      confidence: 0.9,
-      primaryTags: [],
-      secondaryTags: [],
-      similarity: 0.6,
-    }
-    await verifyGroundingStage(
-      inboundCtx({
-        knowledgeCorpus: [chunk] as RuntimeContext['knowledgeCorpus'],
-      }),
-      makeGen(),
-    )
-    expect(verifyGroundingMock).toHaveBeenCalledTimes(1)
-    const args = verifyGroundingMock.mock.calls[0][0] as {
-      knowledgeChunks?: unknown[]
-    }
-    expect(args.knowledgeChunks).toEqual([chunk])
-  })
-})
-
 describe('isModelFlagged / isCommitmentTypeGated (TAC-355)', () => {
   it('isModelFlagged is true only when requiresOperatorApproval is true', () => {
     expect(
@@ -3841,7 +2708,6 @@ describe('applyApprovalPolicyStage — mechanic_offer_backstop trigger (TAC-355)
     const decision = await applyApprovalPolicyStage(
       makeCtx({}),
       makeGenerationResult({}),
-      null,
       { status: 'flagged', mechanicId: 'mech-1' },
     )
     expect(decision.action).toBe('queue')
@@ -3858,7 +2724,6 @@ describe('applyApprovalPolicyStage — mechanic_offer_backstop trigger (TAC-355)
     const decision = await applyApprovalPolicyStage(
       makeCtx({}),
       makeGenerationResult({}),
-      null,
       { status: 'check_failed' },
     )
     expect(decision.action).toBe('queue')
@@ -3872,7 +2737,6 @@ describe('applyApprovalPolicyStage — mechanic_offer_backstop trigger (TAC-355)
     const decision = await applyApprovalPolicyStage(
       makeCtx({}),
       makeGenerationResult({}),
-      null,
       { status: 'clean' },
     )
     expect(decision.action).toBe('send')
@@ -3893,7 +2757,6 @@ describe('applyApprovalPolicyStage — mechanic_offer_backstop trigger (TAC-355)
         body: "that one's on us today",
         requiresOperatorApproval: true,
       }),
-      null,
       { status: 'flagged', mechanicId: 'mech-1' },
     )
     expect(decision.action).toBe('queue')
@@ -3907,7 +2770,6 @@ describe('applyApprovalPolicyStage — mechanic_offer_backstop trigger (TAC-355)
       makeGenerationResult({
         commitment: { type: 'comp', description: 'oat latte' },
       }),
-      null,
       { status: 'flagged', mechanicId: 'mech-1' },
     )
     expect(decisionWithCommitment.action).toBe('queue')
@@ -4322,18 +3184,6 @@ describe('isKnowledgeGapCard (TAC-308)', () => {
       isKnowledgeGapCard({
         pending_until: null,
         review_reason: APPROVAL_TRIGGERS.KNOWLEDGE_GAP,
-      }),
-    ).toBe(true)
-  })
-
-  // TAC-350: a card the backstop caught must get identical eviction
-  // protection to a self-reported one — otherwise a regen could silently
-  // lose its clock the moment the label won by a co-firing trigger changed.
-  it('identifies a fired backstop card by its review_reason', () => {
-    expect(
-      isKnowledgeGapCard({
-        pending_until: null,
-        review_reason: APPROVAL_TRIGGERS.KNOWLEDGE_GAP_BACKSTOP,
       }),
     ).toBe(true)
   })
@@ -4921,226 +3771,6 @@ describe('buildAiRuntime — emoji cadence wiring (TAC-362)', () => {
 })
 
 // ---------------------------------------------------------------------------
-// TAC-364: the gate threads the verifier's claims to the persist layer
-// ---------------------------------------------------------------------------
-//
-// Before this the claims went to PostHog and the Langfuse span and nowhere
-// else — computed, then discarded at exactly the point they would be useful.
-// The gate used them only as a boolean. Now they ride on the decision so
-// `persistOrRegenQueuedDraft` can land them on messages.ungrounded_claims and
-// the operator card can show WHICH sentence is the suspect one.
-describe('applyApprovalPolicyStage — ungroundedClaims (TAC-364)', () => {
-  beforeEach(() => {
-    pendingDraftMaybeSingleMock.mockReset()
-    pendingDraftMaybeSingleMock.mockResolvedValue({ data: null, error: null })
-  })
-
-  // Same shape as the TAC-350 backstop block's fixture: an inbound turn. This
-  // block tests applyApprovalPolicyStage directly with a groundingBackstop
-  // ARGUMENT already supplied, so it's exercising the gate's own trigger
-  // logic, not verifyGroundingStage's decision about when to call the model
-  // (which, since TAC-376, also runs on followups — see that describe block).
-  const inboundCtx = () =>
-    makeCtx({
-      currentMessage: {
-        id: 'inbound-1',
-        body: 'what are the four SoFi variations?',
-        providerMessageId: 'p1',
-        receivedAt: new Date(),
-        channel: 'text',
-        referralSource: null,
-      },
-      classification: {
-        category: 'new_question',
-        classifierConfidence: 0.9,
-        reasoning: 'question',
-        crisisSafety: false,
-        correctsPendingReply: false,
-        followUpWorthy: false,
-      },
-    })
-
-  it('carries the flagged claims through verbatim', async () => {
-    const claims = [
-      'invents four SoFi variation names not in the corpus',
-      'states a wifi password that appears nowhere in venue knowledge',
-    ]
-    const decision = await applyApprovalPolicyStage(
-      inboundCtx(),
-      makeGenerationResult({ knowledgeGap: false }),
-      { status: 'flagged' as const, claims },
-    )
-    expect(decision.action).toBe('queue')
-    if (decision.action !== 'queue') return
-    expect(decision.ungroundedClaims).toEqual(claims)
-  })
-
-  // The three-state contract (TAC-364 ruling 3). `[]` and `null` are DIFFERENT
-  // answers here and the difference is the point: TAC-367 was filed because a
-  // grounding check that silently didn't run was invisible everywhere, so
-  // "ran and found nothing" must be distinguishable from "never ran" on the
-  // row. Each of the four grounding states gets its own assertion below,
-  // because a single "is falsy when there's nothing" test would pass against a
-  // version that conflated them — which is the bug being avoided.
-  it('is [] — the check RAN and found nothing — on clean', async () => {
-    const decision = await applyApprovalPolicyStage(
-      inboundCtx(),
-      makeGenerationResult({ knowledgeGap: false, voiceFidelity: 0.5 }),
-      { status: 'clean' as const },
-    )
-    expect(decision.action).toBe('queue')
-    if (decision.action !== 'queue') return
-    expect(decision.ungroundedClaims).toEqual([])
-    expect(decision.ungroundedClaims).not.toBeNull()
-  })
-
-  // The one that is easy to get backwards. A truncated check RAN but produced
-  // no readable verdict, so there is no claim information — which is NULL, not
-  // `[]`. `[]` would assert it found nothing, and the paired review_reason
-  // ("I couldn't finish checking this one") already carries the
-  // didn't-complete signal, so NULL is what reads coherently beside it.
-  it('is null on a truncated check — ran, but no readable verdict', async () => {
-    const decision = await applyApprovalPolicyStage(
-      inboundCtx(),
-      makeGenerationResult({ knowledgeGap: false }),
-      { status: 'truncated' as const },
-    )
-    expect(decision.action).toBe('queue')
-    if (decision.action !== 'queue') return
-    expect(decision.triggers).toContain(
-      APPROVAL_TRIGGERS.GROUNDING_CHECK_FAILED,
-    )
-    expect(decision.ungroundedClaims).toBeNull()
-  })
-
-  // TAC-424. The defect this ticket was opened on: a transient fault returned
-  // `clean` and landed here as `[]`, byte-identical to a genuine pass, so the
-  // column could not answer the one question migration 039 built it to answer.
-  it('is null on a degraded check — two attempts, no verdict', async () => {
-    const decision = await applyApprovalPolicyStage(
-      inboundCtx(),
-      makeGenerationResult({ knowledgeGap: false }),
-      { status: 'degraded' as const },
-    )
-    expect(decision.action).toBe('queue')
-    if (decision.action !== 'queue') return
-    expect(decision.triggers).toContain(
-      APPROVAL_TRIGGERS.GROUNDING_CHECK_FAILED,
-    )
-    expect(decision.ungroundedClaims).toBeNull()
-  })
-
-  it('is null when the check never ran at all', async () => {
-    // knowledgeGap=true means the model self-reported, so verifyGroundingStage
-    // skips — the exact "didn't run" case the null exists to record.
-    const decision = await applyApprovalPolicyStage(
-      inboundCtx(),
-      makeGenerationResult({ knowledgeGap: true }),
-    )
-    expect(decision.action).toBe('queue')
-    if (decision.action !== 'queue') return
-    expect(decision.ungroundedClaims).toBeNull()
-  })
-
-  // TAC-424 acceptance criterion 5, stated as one assertion rather than left
-  // to be inferred from the per-state tests above: the five grounding states
-  // must not collapse, and folding `degraded` back into the pass value fails
-  // HERE, by name, rather than as a confusing mismatch in a neighbouring test.
-  //
-  // What this test does NOT do, contrary to what an earlier version of this
-  // comment claimed, is force a SIXTH state to decide what it records — a
-  // table of five literal calls cannot see a sixth union member. Code review
-  // demonstrated exactly that: adding one compiled clean and passed every
-  // test, mapping to null and sending. That guarantee now lives where it can
-  // be real, on UNGROUNDED_CLAIMS_BY_STATUS's `satisfies` clause in stages.ts,
-  // which fails tsc instead.
-  it('maps every grounding state to a distinct record, and degraded is not a pass', async () => {
-    const mapped = async (
-      grounding: Parameters<typeof applyApprovalPolicyStage>[2],
-      knowledgeGap = false,
-    ) => {
-      const decision = await applyApprovalPolicyStage(
-        inboundCtx(),
-        makeGenerationResult({ knowledgeGap, voiceFidelity: 0.5 }),
-        grounding,
-      )
-      if (decision.action !== 'queue') throw new Error('expected queue')
-      return {
-        ungroundedClaims: decision.ungroundedClaims,
-        held: decision.triggers.includes(
-          APPROVAL_TRIGGERS.GROUNDING_CHECK_FAILED,
-        ),
-        degradedMarker: decision.triggers.includes(
-          APPROVAL_TRIGGERS.GROUNDING_CHECK_DEGRADED,
-        ),
-      }
-    }
-
-    const claims = [
-      'states a wifi password that appears nowhere in venue knowledge',
-    ]
-    expect(await mapped({ status: 'flagged', claims })).toEqual({
-      ungroundedClaims: claims,
-      held: false,
-      degradedMarker: false,
-    })
-    expect(await mapped({ status: 'clean' })).toEqual({
-      ungroundedClaims: [],
-      held: false,
-      degradedMarker: false,
-    })
-    expect(await mapped({ status: 'truncated' })).toEqual({
-      ungroundedClaims: null,
-      held: true,
-      degradedMarker: false,
-    })
-    expect(await mapped({ status: 'degraded' })).toEqual({
-      ungroundedClaims: null,
-      held: true,
-      degradedMarker: true,
-    })
-    expect(await mapped({ status: 'skipped' }, true)).toEqual({
-      ungroundedClaims: null,
-      held: false,
-      degradedMarker: false,
-    })
-
-    // The two pairs the rulings name, asserted directly rather than left to be
-    // read off the table above.
-    //
-    // Ruling 1 C: a degraded check and a clean pass must not produce the same
-    // row. Ruling 2 B: a degraded check and a truncated one must not either —
-    // they hold the draft under the same trigger, and the sub-cause marker is
-    // the only thing between them.
-    const degraded = await mapped({ status: 'degraded' })
-    expect(degraded).not.toEqual(await mapped({ status: 'clean' }))
-    expect(degraded).not.toEqual(await mapped({ status: 'truncated' }))
-  })
-
-  it('distinguishes ran-and-found-nothing from never-ran', async () => {
-    // The pair, asserted together. A version that collapsed both to `[]` — or
-    // both to null — passes each of the two tests above in isolation only if
-    // they are read separately; this one fails outright, and it is the whole
-    // ruling in one assertion.
-    const ran = await applyApprovalPolicyStage(
-      inboundCtx(),
-      makeGenerationResult({ knowledgeGap: false, voiceFidelity: 0.5 }),
-      { status: 'clean' as const },
-    )
-    const neverRan = await applyApprovalPolicyStage(
-      inboundCtx(),
-      makeGenerationResult({ knowledgeGap: true }),
-      { status: 'skipped' as const },
-    )
-    if (ran.action !== 'queue' || neverRan.action !== 'queue')
-      throw new Error('both queue')
-    expect(ran.ungroundedClaims).not.toEqual(neverRan.ungroundedClaims)
-    expect(ran.ungroundedClaims).toEqual([])
-    expect(neverRan.ungroundedClaims).toBeNull()
-  })
-})
-
-// ---------------------------------------------------------------------------
 // TAC-364: generation_failed is a gap card to the shared predicate
 // ---------------------------------------------------------------------------
 describe('isKnowledgeGapCard — generation_failed (TAC-364)', () => {
@@ -5179,10 +3809,9 @@ describe('KNOWLEDGE_GAP_CARD_REVIEW_REASONS (TAC-364)', () => {
   // Sharing the array makes the drift impossible; this test makes a change to
   // the SET deliberate, since adding a value silently widens what the agent
   // treats as an unanswered question.
-  it('is exactly the three card-producing reasons', () => {
+  it('is exactly the two card-producing reasons', () => {
     expect([...KNOWLEDGE_GAP_CARD_REVIEW_REASONS]).toEqual([
       'knowledge_gap',
-      'knowledge_gap_backstop',
       'generation_failed',
     ])
   })
@@ -5449,7 +4078,7 @@ describe('applyApprovalPolicyStage — two pending slots (TAC-394)', () => {
     const compGapCard = {
       ...compCard,
       pending_until: new Date(Date.now() + 60_000).toISOString(),
-      review_reason: APPROVAL_TRIGGERS.KNOWLEDGE_GAP_BACKSTOP,
+      review_reason: APPROVAL_TRIGGERS.KNOWLEDGE_GAP,
     }
     pendingDraftMaybeSingleMock.mockResolvedValue({
       data: [compGapCard],
@@ -5463,7 +4092,6 @@ describe('applyApprovalPolicyStage — two pending slots (TAC-394)', () => {
           description: 'a free cortado on your next visit',
         },
       }),
-      { status: 'clean' as const },
     )
     expect(decision.action).toBe('drop')
     if (decision.action !== 'drop') return
@@ -5486,36 +4114,11 @@ describe('applyApprovalPolicyStage — two pending slots (TAC-394)', () => {
   // The holding-message clock is the guest's, not the slot's. The timeout scan
   // fires once per card, so a gap turn that armed a clock beside a gap card in
   // the OTHER slot would send the guest a second holding message.
-  it('a gap turn in the obligation slot arms no clock beside a gap card in the conversation slot', async () => {
-    pendingDraftMaybeSingleMock.mockResolvedValue({
-      data: [conversationGapCard],
-      error: null,
-    })
-    const decision = await applyApprovalPolicyStage(
-      inbound('comp_complaint'),
-      makeGenerationResult({
-        commitment: {
-          type: 'comp',
-          description: 'a free cortado on your next visit',
-        },
-      }),
-      { status: 'flagged' as const, claims: ['invents a fact'] },
-    )
-    expect(decision.action).toBe('queue')
-    if (decision.action !== 'queue') return
-    expect(decision.slot).toBe('obligation')
-    expect(decision.existingPendingDraftId).toBeNull()
-    expect(decision.triggers).toContain(
-      APPROVAL_TRIGGERS.KNOWLEDGE_GAP_BACKSTOP,
-    )
-    expect(decision.pendingUntil).toBeUndefined()
-  })
-
   it('a gap turn in the conversation slot arms no clock beside a gap card in the obligation slot', async () => {
     const compGapCard = {
       ...compCard,
       pending_until: new Date(Date.now() + 60_000).toISOString(),
-      review_reason: APPROVAL_TRIGGERS.KNOWLEDGE_GAP_BACKSTOP,
+      review_reason: APPROVAL_TRIGGERS.KNOWLEDGE_GAP,
     }
     pendingDraftMaybeSingleMock.mockResolvedValue({
       data: [compGapCard],
@@ -5578,7 +4181,6 @@ describe('pending-slot literals track the gate constants (TAC-394)', () => {
   it('KNOWLEDGE_GAP_CARD_REVIEW_REASONS is the gate constants, in order', () => {
     expect([...KNOWLEDGE_GAP_CARD_REVIEW_REASONS]).toEqual([
       APPROVAL_TRIGGERS.KNOWLEDGE_GAP,
-      APPROVAL_TRIGGERS.KNOWLEDGE_GAP_BACKSTOP,
       GENERATION_FAILED_REVIEW_REASON,
     ])
   })
@@ -5589,30 +4191,7 @@ describe('pending-slot literals track the gate constants (TAC-394)', () => {
       checkDidNotComplete: false,
     })
     expect(
-      gapFlagsFromTriggers([APPROVAL_TRIGGERS.KNOWLEDGE_GAP_BACKSTOP]),
-    ).toEqual({
-      isGapTurn: true,
-      checkDidNotComplete: false,
-    })
-    expect(
-      gapFlagsFromTriggers([APPROVAL_TRIGGERS.GROUNDING_CHECK_FAILED]),
-    ).toEqual({
-      isGapTurn: false,
-      checkDidNotComplete: true,
-    })
-    // TAC-424: the pair the gate actually emits on a degraded turn, and the
-    // marker alone. The pair is what recovery sees in production; the marker
-    // alone is unreachable today and is asserted so that making it reachable
-    // (by pushing only the more specific code) does not silently turn race
-    // recovery into a draft-destroyer while the gate spares the same turn.
-    expect(
-      gapFlagsFromTriggers([
-        APPROVAL_TRIGGERS.GROUNDING_CHECK_FAILED,
-        APPROVAL_TRIGGERS.GROUNDING_CHECK_DEGRADED,
-      ]),
-    ).toEqual({ isGapTurn: false, checkDidNotComplete: true })
-    expect(
-      gapFlagsFromTriggers([APPROVAL_TRIGGERS.GROUNDING_CHECK_DEGRADED]),
+      gapFlagsFromTriggers([APPROVAL_TRIGGERS.PROSE_PROMISE_CHECK_FAILED]),
     ).toEqual({
       isGapTurn: false,
       checkDidNotComplete: true,
@@ -5890,8 +4469,7 @@ describe('verifyProsePromiseStage (TAC-401)', () => {
     })
   })
 
-  // TAC-527 built the input once and passes it twice, the shape TAC-424 gave
-  // verifyGroundingStage. This is the parity guard: a future edit that
+  // TAC-527 built the input once and passes it twice. This is the parity guard: a future edit that
   // restates the literal at the retry can diverge, and the two calls judging
   // different inputs is invisible in every other assertion here.
   it('sends IDENTICAL input on the retry', async () => {
@@ -6016,7 +4594,6 @@ describe('applyApprovalPolicyStage — prose-promise triggers (TAC-401)', () => 
       makeCtx({}),
       makeGenerationResult({ body: "next one's on us" }),
       { status: 'skipped' },
-      { status: 'skipped' },
       { status: 'flagged', commitment: promisedComp },
     )
     expect(decision.action).toBe('queue')
@@ -6031,7 +4608,6 @@ describe('applyApprovalPolicyStage — prose-promise triggers (TAC-401)', () => 
     const decision = await applyApprovalPolicyStage(
       makeCtx({}),
       makeGenerationResult({}),
-      { status: 'skipped' },
       { status: 'skipped' },
       { status: 'check_failed' },
     )
@@ -6050,7 +4626,6 @@ describe('applyApprovalPolicyStage — prose-promise triggers (TAC-401)', () => 
     const decision = await applyApprovalPolicyStage(
       makeCtx({}),
       makeGenerationResult({}),
-      { status: 'skipped' },
       { status: 'skipped' },
       { status: 'clean' },
     )
@@ -6075,7 +4650,6 @@ describe('applyApprovalPolicyStage — prose-promise triggers (TAC-401)', () => 
       makeCtx({}),
       makeGenerationResult({}),
       { status: 'skipped' },
-      { status: 'skipped' },
       { status: 'flagged', commitment: promisedComp },
     )
     expect(decision.action).toBe('queue')
@@ -6092,7 +4666,6 @@ describe('applyApprovalPolicyStage — prose-promise triggers (TAC-401)', () => 
       makeGenerationResult({
         commitment: { type: 'recommendation', description: 'the cortado' },
       }),
-      { status: 'skipped' },
       { status: 'skipped' },
       { status: 'flagged', commitment: promisedComp },
     )
@@ -6114,7 +4687,6 @@ describe('applyApprovalPolicyStage — prose-promise triggers (TAC-401)', () => 
         requiresOperatorApproval: true,
       }),
       { status: 'skipped' },
-      { status: 'skipped' },
       { status: 'flagged', commitment: promisedComp },
     )
     expect(decision.action).toBe('queue')
@@ -6134,7 +4706,6 @@ describe('applyApprovalPolicyStage — prose-promise triggers (TAC-401)', () => 
       makeGenerationResult({
         commitment: { type: 'comp', description: 'oat latte' },
       }),
-      { status: 'skipped' },
       { status: 'skipped' },
       { status: 'check_failed' },
     )
@@ -6486,7 +5057,7 @@ describe('applyApprovalPolicyStage — cancellations (TAC-513)', () => {
   }
 
   async function gate(
-    cancellation: Parameters<typeof applyApprovalPolicyStage>[5],
+    cancellation: Parameters<typeof applyApprovalPolicyStage>[4],
     generationOverrides: Parameters<typeof makeGenerationResult>[0] = {},
   ) {
     return applyApprovalPolicyStage(
@@ -6495,7 +5066,6 @@ describe('applyApprovalPolicyStage — cancellations (TAC-513)', () => {
         body: "that one's off then",
         ...generationOverrides,
       }),
-      { status: 'skipped' },
       { status: 'skipped' },
       { status: 'skipped' },
       cancellation,
@@ -6661,7 +5231,6 @@ describe('applyApprovalPolicyStage — cancellations (TAC-513)', () => {
       makeGenerationResult({}),
       { status: 'skipped' },
       { status: 'skipped' },
-      { status: 'skipped' },
     )
     expect(decision.action).toBe('send')
   })
@@ -6710,7 +5279,6 @@ describe('applyApprovalPolicyStage — cancellations (TAC-513)', () => {
       makeCtx({ activeCommitments: [TONIC] }),
       makeGenerationResult({ body: 'the comp is off', voiceFidelity: 0.5 }),
       { status: 'skipped' },
-      { status: 'skipped' },
       { status: 'flagged', commitment: null },
       { resolution: { status: 'none' }, claim: 'flagged' },
     )
@@ -6743,7 +5311,6 @@ describe('applyApprovalPolicyStage — cancellations (TAC-513)', () => {
         },
       }),
       makeGenerationResult({ knowledgeGap: true, body: "that one's off" }),
-      { status: 'skipped' },
       { status: 'skipped' },
       { status: 'skipped' },
       RESOLVED,
@@ -6881,7 +5448,6 @@ describe('closed-venue arrival (TAC-363)', () => {
       const d = await applyApprovalPolicyStage(
         ctxAt(AFTER_CLOSE),
         makeGenerationResult(),
-        null,
         { status: 'skipped' },
         { status: 'skipped' },
         { resolution: { status: 'none' }, claim: 'skipped' },
@@ -6896,7 +5462,6 @@ describe('closed-venue arrival (TAC-363)', () => {
       const d = await applyApprovalPolicyStage(
         ctxAt(AFTER_CLOSE),
         makeGenerationResult(),
-        null,
         { status: 'skipped' },
         { status: 'skipped' },
         { resolution: { status: 'none' }, claim: 'skipped' },
@@ -6911,7 +5476,6 @@ describe('closed-venue arrival (TAC-363)', () => {
       const d = await applyApprovalPolicyStage(
         ctxAt(AFTER_CLOSE),
         makeGenerationResult(),
-        null,
         { status: 'skipped' },
         { status: 'skipped' },
         { resolution: { status: 'none' }, claim: 'skipped' },
@@ -6977,7 +5541,6 @@ describe('closed-venue arrival (TAC-363)', () => {
       const d = await applyApprovalPolicyStage(
         ctxAt(AFTER_CLOSE),
         makeGenerationResult({ voiceFidelity: 0.45 }),
-        null,
         { status: 'skipped' },
         { status: 'skipped' },
         { resolution: { status: 'none' }, claim: 'skipped' },
@@ -6998,7 +5561,6 @@ describe('closed-venue arrival (TAC-363)', () => {
       const d = await applyApprovalPolicyStage(
         ctxAt(AFTER_CLOSE),
         makeGenerationResult({ arrivalCapture: IMMINENT }),
-        null,
         { status: 'skipped' },
         { status: 'skipped' },
         { resolution: { status: 'none' }, claim: 'skipped' },

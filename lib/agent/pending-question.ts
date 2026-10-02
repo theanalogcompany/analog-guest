@@ -70,10 +70,10 @@ export async function findPendingQuestion(
     // TAC-364: the review_reason legs are now GENERATED from the shared
     // KNOWLEDGE_GAP_CARD_REVIEW_REASONS rather than hand-listed here. They were
     // hand-listed, and they drifted: this query carried one value while
-    // isKnowledgeGapCard carried two, so a `knowledge_gap_backstop` card whose
-    // clock had already fired was recognized by the predicate and invisible to
-    // this query — the `## Unanswered question` block silently vanished for
-    // that guest while the card still sat in the operator's queue. Nothing
+    // isKnowledgeGapCard carried two, so a card whose clock had already fired
+    // was recognized by the predicate and invisible to this query — the
+    // `## Unanswered question` block silently vanished for that guest while
+    // the card still sat in the operator's queue. Nothing
     // caught it, because the re-check below only sees rows the filter DID
     // return; a row the filter never returns is indistinguishable from no row
     // at all. The filter STRING is asserted in pending-question.test.ts, since

@@ -548,12 +548,12 @@ describe('generateMessage — basic shape', () => {
     expect(r.ok).toBe(true)
   })
 
-  it('exposes promptVersion v1.78.0 on a successful result', async () => {
+  it('exposes promptVersion v1.81.0 on a successful result', async () => {
     queueResponses({ body: 'hi', voiceFidelity: 0.9, reasoning: 'ok' })
     const r = await generateMessage(makeInput())
     expect(r.ok).toBe(true)
     if (!r.ok) return
-    expect(r.data.promptVersion).toBe('v1.78.0')
+    expect(r.data.promptVersion).toBe('v1.81.0')
   })
 })
 
@@ -1742,5 +1742,79 @@ describe('generateMessage — usage for Langfuse pricing', () => {
     if (!r.ok) return
     expect(r.data.modelId).toBe('claude-sonnet-4-6-20260219')
     expect(r.data.modelId).not.toBe('mock-model')
+  })
+})
+
+describe('generateMessage - history as chat turns', () => {
+  const HISTORY = [
+    {
+      direction: 'inbound' as const,
+      body: 'how do I make it',
+      createdAt: new Date('2026-05-02T16:50:00Z'),
+      delivery: 'delivered' as const,
+    },
+    {
+      direction: 'outbound' as const,
+      body: 'grind, brew, pour',
+      createdAt: new Date('2026-05-02T16:51:00Z'),
+      delivery: 'delivered' as const,
+    },
+  ]
+  const withHistory = (): GenerateMessageInput => {
+    const base = makeInput()
+    return { ...base, runtime: { ...base.runtime, recentMessages: HISTORY } }
+  }
+
+  beforeEach(() => {
+    generateObjectMock.mockReset()
+  })
+
+  it('sends past messages as user/assistant turns between the system blocks and the final user message, on every attempt', async () => {
+    // The dash makes the loop run a second attempt; the turns must be there too.
+    queueResponses(
+      { body: 'a — b', voiceFidelity: 0.4, reasoning: '1' },
+      { body: 'a, b', voiceFidelity: 0.85, reasoning: '2' },
+    )
+    const r = await generateMessage(withHistory())
+    expect(r.ok).toBe(true)
+    expect(generateObjectMock.mock.calls.length).toBe(2)
+    for (const call of generateObjectMock.mock.calls) {
+      const { messages } = call[0] as {
+        messages: { role: string; content: string }[]
+      }
+      expect(messages.map((m) => m.role)).toEqual([
+        'system',
+        'system',
+        'user',
+        'assistant',
+        'user',
+      ])
+      expect(messages[2].content).toBe('how do I make it')
+      expect(messages[3].content).toBe('grind, brew, pour')
+      expect(messages[4].content).not.toContain('grind, brew, pour')
+    }
+  })
+
+  it('hands back the transcript the grounding verifier reads', async () => {
+    queueResponses({ body: 'ok', voiceFidelity: 0.85, reasoning: 'r' })
+    const r = await generateMessage(withHistory())
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+    expect(r.data.conversation).toContain('## Recent conversation')
+    expect(r.data.conversation).toContain('] how do I make it')
+    expect(r.data.conversation).toContain('] grind, brew, pour')
+    expect(r.data.userPrompt).not.toContain('grind, brew, pour')
+  })
+
+  it('sends no history turns, and an empty transcript, when there is no history', async () => {
+    queueResponses({ body: 'ok', voiceFidelity: 0.85, reasoning: 'r' })
+    const r = await generateMessage(makeInput())
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+    const { messages } = generateObjectMock.mock.calls[0][0] as {
+      messages: { role: string }[]
+    }
+    expect(messages.map((m) => m.role)).toEqual(['system', 'system', 'user'])
+    expect(r.data.conversation).toBe('')
   })
 })
