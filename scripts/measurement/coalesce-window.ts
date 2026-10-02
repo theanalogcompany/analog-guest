@@ -34,11 +34,7 @@
  *   - Gaps are computed on `created_at` for both channels — our receipt time.
  *     Instagram rows also carry Meta's own clock and Sendblue rows never do,
  *     so ordering on that would sort the two channels on different clocks.
- *     (Named indirectly on purpose: `handle-events.test.ts` guards that column
- *     by MENTION, and its list is meant to be the set of files that genuinely
- *     read or write it. A measurement script explaining why it does neither
- *     does not belong there.) Two messages of one Instagram delivery can share
- *     a millisecond, which shows up as a zero gap and is real, not an artifact.
+ *     Two messages of one Instagram delivery can share a millisecond, which shows up as a zero gap and is real, not an artifact.
  *
  * Run:
  *   npx tsx --env-file=.env.local scripts/measurement/coalesce-window.ts --days 30

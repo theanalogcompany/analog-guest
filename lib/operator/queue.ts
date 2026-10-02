@@ -83,8 +83,8 @@ export interface QueueDraft {
   //
   // Two arrays rather than an array of pairs because the client indexes them
   // independently: the colour/grouping logic reads codes and never needs the
-  // prose, and the card body reads prose and never needs the codes. The
-  // index-alignment invariant is asserted in queue.test.ts.
+  // prose, and the card body reads prose and never needs the codes. The two
+  // arrays must stay index-aligned.
   reviewTriggerLabels: string[]
   // TAC-394, Contract-locked (TAC-394's description, `## Contract`): how many
   // OTHER pending drafts this guest has at this venue. Always present, 0 when
@@ -186,8 +186,7 @@ type ExtraReviewReason =
 //
 // No count here on purpose: this comment said "five of the thirteen" while
 // APPROVAL_TRIGGERS held 23, and a stale count is worse than none because it
-// stops you counting. scripts/lib/claude-md-claims.test.ts now fails on a
-// digit-form count that disagrees with the map.
+// stops you counting.
 //
 // The wire field stays `string | null` — only the value changes from raw
 // classifier code to human-readable text. Typed as Record<ApprovalTrigger |
@@ -199,8 +198,7 @@ type ExtraReviewReason =
 //
 // NO EM DASHES in any value here (ruled 2026-09-14). These are read fast on a
 // phone mid-shift, and an em dash is a pause the reader has to parse; a full
-// stop or a comma is not. Enforced by a test over this map in queue.test.ts,
-// not by review, so a new trigger's copy cannot reintroduce one. Comments in
+// stop or a comma is not. Comments in
 // this file are prose and may keep them; only the strings reach the card.
 // The copy table in the TAC-364 description is the source; transcribe from it,
 // never from this map, when asserting on them.
@@ -392,14 +390,12 @@ const REVIEW_REASON_LABELS: Record<
 }
 
 /**
- * TAC-364: the label map's key set, for tests only.
+ * TAC-364: the label map's key set.
  *
  * `tsc` already forces COPY to exist for every trigger (the map is total over
  * `ApprovalTrigger | ExtraReviewReason`). What it cannot force is that the new
  * copy was ever checked against the Contract — a 16th trigger compiles the
- * moment someone types any string, and `queue.test.ts`'s `it.each` table is
- * hand-maintained. Exporting the keys lets that test assert its own
- * completeness, so new copy cannot ship having been read by nobody.
+ * moment someone types any string.
  *
  * Not for runtime branching. Same shape as `_PUSH_POLICY_FOR_TESTS`.
  */
@@ -434,10 +430,8 @@ const COMMITMENT_SENTENCE = {
  * TAC-527: a card-facing string may not contain an em dash (ruled 2026-09-14),
  * and this is the first one built from MODEL-WRITTEN text.
  *
- * queue.test.ts's no-em-dash invariant runs every key of the STATIC label map,
- * so it cannot see a dash arriving through an interpolated description. Strip
- * here rather than relying on that test, and the test gains an interpolated
- * case so the guard is checked rather than asserted.
+ * The STATIC label map carries no em dash, so a dash can only arrive through
+ * an interpolated description. Strip it here.
  *
  * The cap is on the same footing: `commitmentDescription` is a short noun
  * phrase by the verifier's own prompt, but nothing enforces that, and an
@@ -487,9 +481,7 @@ function labelForTrigger(code: string, info: CardCarrierInfo | null): string {
   // a recommendation, or an obligation whose description sanitized to nothing —
   // and `createCommitmentFromPending` inserts from the carrier whatever its
   // type, so telling the operator nothing will be created would be false.
-  // Caught in code review: the recommendation case rendered the suffix, and the
-  // existing recommendation test used prose_promise_backstop, where the
-  // fallback wording happens to be true.
+  // Caught in code review: the recommendation case rendered the suffix.
   if (code === 'comp_regex_backstop' && info === null) {
     return "This sounds like it's offering something on the house. Approving won't create anything."
   }
@@ -757,7 +749,7 @@ async function loadCardCarriers(
 
 export async function listPendingQueue(
   venueScope: VenueScope,
-  /** Optional override for testing. Defaults to Date.now(). */
+  /** Optional clock override. Defaults to Date.now(). */
   nowMs: number = Date.now(),
 ): Promise<ListPendingQueueResult> {
   // No granted venues → empty queue; an operator with no venue grants isn't

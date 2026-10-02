@@ -23,7 +23,7 @@
 // about what the guest has seen.
 //
 // Pure. The only import is type-only and therefore erased at runtime, so this
-// module can be unit-tested without any SDK init.
+// module loads without any SDK init.
 
 import type { MessageDelivery, RecentMessage } from '@/lib/ai'
 import { RESOLVED_EXTERNALLY_REVIEW_STATE } from '@/lib/schemas/review-state'
@@ -53,8 +53,7 @@ export interface HistoryRow {
  * are different costs, so the two sets differ on purpose.
  *
  * TAC-395: lib/operator/thread.ts and migrations 043 and 044 filter on this
- * same set, in SQL. Changing it needs a migration recreating both functions,
- * and lib/operator/reached-guest-condition.test.ts fails until that lands.
+ * same set, in SQL. Changing it needs a migration recreating both functions.
  */
 export const DELIVERED_OUTBOUND_STATUSES: ReadonlySet<string> = new Set([
   'sending',
@@ -119,7 +118,7 @@ export function deriveDelivery(
  * identity the two SQL surfaces in migration 032 use, so all three agree by
  * construction. Adjacency would be wrong: a guest can text between two bubbles
  * of a split reply, which puts an inbound row in the middle of a response, and
- * an adjacency-based merge would look correct in every fixture and silently
+ * an adjacency-based merge would look correct on simple threads and silently
  * mis-render in production.
  *
  * A row with a null `generation_id` groups by its own id, so legacy rows,

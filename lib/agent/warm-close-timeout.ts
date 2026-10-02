@@ -347,8 +347,7 @@ async function considerCandidate(
 
   // An operator holding a card for this guest is mid-decision; a warm close
   // landing under them would answer for them. loadPendingRowsBySlot is the ONE
-  // per-guest pending read in the repo (a fresh query here would trip the source
-  // guard in pending-slots.test.ts) and it fails OPEN to two empty slots.
+  // per-guest pending read in the repo and it fails OPEN to two empty slots.
   const pending = await loadPendingRowsBySlot(
     candidate.venueId,
     candidate.guestId,

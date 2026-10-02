@@ -285,7 +285,7 @@ export function run({ env, stdin, git, gh, now, stdout, stderr }) {
   // No main among them means the checkout fetched no branches from GitHub,
   // and every commit signal would be silently missing. A shallow checkout
   // of main still lists main, so this cannot catch that; the fetch-depth: 0
-  // pin in build-workflow.test.ts is what protects the scheduled run.
+  // pin in the workflow is what protects the scheduled run.
   if (!refs.some((ref) => ref.name === 'main')) {
     stderr(
       '::error title=Claim check::Could not read the branches on GitHub from the checkout, so no ticket can be checked for another session. Taking nothing.\n',

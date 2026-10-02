@@ -20,8 +20,8 @@
 //
 // Both landed on messages.review_reason, neither was in the allow-list, and
 // `shouldSendDraftFlaggedPush` silently returned false. No APNs request was
-// attempted between 2026-06-01 and the fix. 121 unit tests stayed green
-// throughout — nothing asserted the two sets agreed.
+// attempted between 2026-06-01 and the fix, and nothing checked that the two
+// sets agreed.
 //
 // THE FIX, three properties:
 //
@@ -54,8 +54,7 @@ export type PushDecision = 'push' | 'skip'
  * ApprovalTrigger is DERIVED from APPROVAL_TRIGGERS
  * (`(typeof APPROVAL_TRIGGERS)[keyof typeof APPROVAL_TRIGGERS]`), not a
  * hand-written union, so a trigger added to the const object automatically
- * widens the type and breaks this map. The runtime test in
- * push-policy.test.ts is belt-and-braces, not the primary guard.
+ * widens the type and breaks this map.
  */
 const PUSH_POLICY = {
   // Model self-flagged a resource commitment.

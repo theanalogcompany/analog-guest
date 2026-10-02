@@ -13,8 +13,7 @@
 //             postback opens that window as much as a message does. That row
 //             has body '' and no media, and messages_has_content accepts it
 //             only because array_length('{}', 1) is NULL and a CHECK passes on
-//             NULL (the TAC-309 gotcha); the test fake models no CHECKs, so no
-//             test proves it. A guest message with nothing to show (unsupported
+//             NULL (the TAC-309 gotcha). A guest message with nothing to show (unsupported
 //             content, or no text and no attachment URL) is NOT saved the same
 //             way, as planned and approved on 2026-09-18: it is logged as
 //             unhandled, so it creates no guest and does not count toward the
@@ -99,11 +98,10 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 
 import type { Database } from '@/db/types'
 // Type-only, so it is erased at compile time and pulls no analytics into this
-// module, which its own tests run against an in-memory store.
+// module.
 import type { InstagramScanUnattributedReason } from '@/lib/analytics/posthog'
 // By path, not through @/lib/schemas: TAC-518 shares this predicate with the
-// agent runtime, and a barrel a test mocks would hand one of the two a stub
-// while the other kept the real thing, which is the drift it exists to stop.
+// agent runtime so the two cannot drift.
 import { isScanReferral } from '@/lib/schemas/referral-source'
 
 import {
@@ -719,7 +717,7 @@ export async function processInstagramDelivery(
  *     thread with no history, so a tap is the venue's link being opened. This
  *     is the shape a returning guest's scan takes if Meta declines to repeat
  *     the referral into a thread that still has messages — the one thing
- *     TAC-518's recorded fixtures could not settle, and the reason this exists.
+ *     TAC-518's recorded payloads could not settle, and the reason this exists.
  *   - A referral whose source is not the one meaning "opened from a link".
  *     Meta documents others, so it is not necessarily wrong; but if Meta ever
  *     renames the value we match on, every scan silently stops arming and

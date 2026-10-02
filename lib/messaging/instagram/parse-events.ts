@@ -2,8 +2,7 @@
 //
 // Pure. The route verifies the signature and parses the JSON; this decides
 // what each item in the delivery IS, and handle-events.ts decides what to save.
-// Kept apart so the rules here are tested against Meta's recorded payloads
-// (fixtures/) without a database.
+// Kept apart so the rules here need no database.
 //
 // Meta batches: one delivery holds `entry[]`, and each entry holds a
 // `messaging[]` array (or `changes[]` / `standby[]` for fields this handler

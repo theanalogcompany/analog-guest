@@ -35,10 +35,7 @@ export const VERIFY_CLOSED_VENUE_ARRIVAL_MAX_OUTPUT_TOKENS = 600
  * truncation is not — retrying a cap that was already hit spends a second call
  * to hit it again.
  *
- * Imported BY PATH in lib/agent/stages.ts, never via the @/lib/ai barrel:
- * stages.test.ts `vi.mock`s that barrel, and a bare constant arriving
- * `undefined` would make the no-retry branch silently unreachable in every
- * test — the same reasoning VERIFY_PROSE_PROMISE_TRUNCATED_ERROR_CODE carries.
+ * Imported BY PATH in lib/agent/stages.ts, never via the @/lib/ai barrel.
  */
 export const VERIFY_CLOSED_VENUE_ARRIVAL_TRUNCATED_ERROR_CODE =
   'ai_verify_closed_venue_arrival_truncated'

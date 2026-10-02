@@ -1,5 +1,5 @@
 // Pure helper for the /admin/health Langfuse row. Extracted from page.tsx so
-// it's directly testable without rendering the server component (mirrors the
+// it's separate from the server component (mirrors the
 // verify-analog-admin pattern). Reads process.env at call time; returns a
 // CheckRow shape consumed by the page.
 //
@@ -37,8 +37,8 @@ export const KNOWN_LANGFUSE_HOSTS = [
 ] as const
 
 // Parameter is the runtime shape of process.env (string-or-undefined keyed by
-// var name). Typed loosely (not as NodeJS.ProcessEnv) so tests can pass small
-// synthetic env objects without satisfying the @types/node `NODE_ENV` constraint.
+// var name). Typed loosely (not as NodeJS.ProcessEnv) so a caller can pass a
+// small env object without satisfying the @types/node `NODE_ENV` constraint.
 type EnvLike = Record<string, string | undefined>
 
 export function checkLangfuse(env: EnvLike = process.env): CheckLangfuseRow {

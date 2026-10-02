@@ -7,7 +7,7 @@
  *   node scripts/reconcile-needs-decision.mjs < candidates.json
  *
  * Run by the workflow's "Find tickets to work" step, never by a session. All
- * the logic is in lib/reconcile-needs-decision.mjs, which the tests import.
+ * the logic is in lib/reconcile-needs-decision.mjs.
  * This file only wires it to the process. Unlike scripts/reconcile-status.mjs
  * it needs no git or gh call — every input is already in the same Linear
  * query the workflow already ran — so it touches only stdin and stdout. Uses

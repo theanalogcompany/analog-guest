@@ -20,8 +20,7 @@ Four entry points, each owning one lifecycle. They share stages but not policy.
 `AgentResult` at one exit, which is what makes "no path's decision changed" a property of
 the diff rather than a review claim. See `record-inbound-turn-outcome.ts`.
 
-**`handle-operator-decline.ts` must never import `scheduleAndSend` or `sendMessage`.** An
-import-set check in its test file enforces it. It also skips the approval gate entirely
+**`handle-operator-decline.ts` must never import `scheduleAndSend` or `sendMessage`.** It also skips the approval gate entirely
 (the operator's swipe IS the approval) and narrows `ctx.activeCommitments` to the declined
 id **before** `generateStage` sees it.
 
@@ -127,10 +126,6 @@ category_requires_approval > hold_all_outbound
 The shape of that order: a claim about **this draft** beats an **absence** of information
 about it, which beats **venue-wide policy**.
 
-**A priority test needs a co-firing trigger.** `pickPrimaryTrigger` falls through to
-`triggers[0]`, so a single-trigger assertion passes against a ranking that does not exist.
-Co-fire something the trigger under test must beat.
-
 ### Post-generation checks: post-send on inbound, fail CLOSED on the pre-send paths
 
 `verify_mechanic_offer`, `verify_prose_promise`, `verify_cancellation_claim`,
@@ -160,8 +155,7 @@ is comp, hold or discount. **Conversation slot**: everything else, keyed per inb
 
 `pending-slots.ts` owns the whole rule. `decideSlotAction` is the one decision table,
 shared by the gate, 23505 recovery, the crash card and the decline. Never read a pending
-draft with a bare `.limit(1)` or `.maybeSingle()` - a source-level guard in
-`pending-slots.test.ts` enforces it, because an unordered single-row read returns an
+draft with a bare `.limit(1)` or `.maybeSingle()` - an unordered single-row read returns an
 arbitrary one of the two slots.
 
 The knowledge-gap clock is decided **per guest**, not per slot.
@@ -230,12 +224,12 @@ the only moment it fits.
 
 `are_they_new_here` and `understand_order` can never be open on one turn: the first arms
 only once a transaction exists, and a transaction satisfies the second. That is why its
-priority is 15 rather than 5 - a test asserting it wins that race could never fail.
+priority is 15 rather than 5 - the two never compete for a turn.
 
 Two predicates must move together: `shouldRenderOpenIntentions` (render side) and
 `renderableIntentions` (record side). Suppressing on one only means the post-send
 classifier is offered intentions the prompt never showed, which closes goals the guest
-never saw. A cross-module test iterates every category for exactly this.
+never saw.
 
 ### A first conversation asks two things, then the close (TAC-567/TAC-568)
 
@@ -264,15 +258,14 @@ against the same `conversationWindowMs` the brake reads, anchored on
 suppressed intention, so no `eligible_at` row is written and its window does not start ticking
 on a question nobody may ask. The open-set filter is the actual guarantee: first-contact
 eligibility is STICKY, so a row already on file is never re-gated and only the filter can stop
-it rendering. `derive.test.ts` kills each half with its own test.
+it rendering.
 
 The prompt half is a restraint paragraph the serializer renders into the intentions block when
 `firstConversation` is true. It rides that block, so it does not render on a first-conversation
 turn where nothing is open - stated at the constant, not discovered.
 
 `understand_order` must not arm off `guests.last_visit_at` - every writer of that column
-runs downstream of a transaction, and a transaction satisfies the intention. There is a
-source-level guard matching both the snake_case column and the camelCase field.
+runs downstream of a transaction, and a transaction satisfies the intention.
 
 ### A raised question is always its own last message (TAC-554)
 
@@ -296,8 +289,7 @@ firing rate rides on `intentionQuestionDroppedForBodyQuestion` because a guard n
 count is how `comp_regex_backstop` became an illusion. Detector is a bare `?` in the answer:
 this reads our own outbound, where the copy always punctuates.
 
-**`''` is byte-identical to the pre-TAC-554 path**, asserted as an equivalence rather than
-by restating expected bubbles. The answer's own cap drops to `MAX_BUBBLES_PER_RESPONSE - 1`
+**`''` is byte-identical to the pre-TAC-554 path.** The answer's own cap drops to `MAX_BUBBLES_PER_RESPONSE - 1`
 so the total still honours the cap.
 
 **`fitBubblesToInstagramCap` takes the tail too, and must.** Its repack throws the bubble
@@ -316,14 +308,6 @@ a warm-close anchor, excluded inside `loadWarmCloseCandidates`. Reasons in those
 
 ## Other rules that bite
 
-- **A mock's recorded argument is a live reference.** These orchestrators mutate the `ctx`
-  they pass on, so asserting on `mock.calls[0][0]` describes the end state, not what the
-  stage saw. Snapshot inside the mock.
-- `./stages` mocks here are explicit allow-lists. A helper added to `stages.ts` and not to
-  the mock arrives `undefined` and throws the whole turn into `failed`, with the file still
-  reporting green.
-- A bare `vi.fn()` resolves `undefined`, which `Promise.allSettled` reports as fulfilled -
-  so the orchestrator reads `undefined.status`. Default every check mock explicitly.
 - `dispatch-reply.ts` is the one place a reply picks its transport. Nothing routes on a
   null channel.
 

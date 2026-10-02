@@ -4,7 +4,7 @@
 // scheduleAndSend, unchanged; nothing here runs for a text conversation, and
 // nothing in scheduleAndSend knows Instagram exists. Branch by channel, don't
 // converge: the window, the byte cap and the reply check are Instagram's
-// constraints and stay on this side (window-import-guard.test.ts enforces it).
+// constraints and stay on this side.
 //
 // Only a reply to something the guest just did comes through here: an inbound
 // reply, the crisis-safety reply, the knowledge-gap holding message. Scheduled
@@ -431,7 +431,7 @@ export type InstagramReplyOutcome =
   /** At least one message went out but none could be saved. Its echo will record it. */
   | { kind: 'sent_unrecorded'; providerMessageId: string; reason: string }
 
-/** Everything the dispatch reaches outside itself, replaceable in tests. */
+/** Everything the dispatch reaches outside itself. */
 export interface InstagramDispatchDeps {
   loadTarget: (
     venueId: string,
@@ -467,8 +467,7 @@ export interface InstagramDispatchDeps {
 }
 
 function defaultDeps(): InstagramDispatchDeps {
-  // Built on first use, so a test that injects every database-facing
-  // dependency never constructs a client (which reads env at call time).
+  // Built on first use: the client reads env at call time.
   let client: AdminSupabaseClient | null = null
   const supabase = (): AdminSupabaseClient => (client ??= createAdminClient())
   return {

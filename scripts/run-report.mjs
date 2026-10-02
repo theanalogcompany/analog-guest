@@ -7,7 +7,7 @@
  *   node scripts/run-report.mjs notice <ticket> <execution-file> <max-turns>
  *
  * Run by the workflow's check step after the session, never by the session.
- * All the logic is in lib/run-report.mjs, which the tests import. This file
+ * All the logic is in lib/run-report.mjs. This file
  * only wires it to the process. Uses nothing outside Node's standard library.
  */
 

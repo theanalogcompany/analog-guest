@@ -7,24 +7,11 @@ paths:
   - "lib/voices/**"
 ---
 
-<!--
-Scoped to the directories that own the composed prompt, NOT to `**/*.test.ts`.
-That glob matched all 304 test files in the repo to reach the 52 in these
-directories, so this file loaded on five reads out of six that had nothing to do
-with the prompt. The cost is not tokens: a rule that shows up on every unrelated
-read is a rule that gets skimmed, and injected mid-session text competes for
-authority with the actual task (root CLAUDE.md, "later beats earlier").
-
-The sweep this file describes is still repo-wide - the tests it warns about are
-fixtures scattered anywhere. That is what the grep is for. The rule does not have
-to be resident in every session to be followed once you are bumping the constant,
-and every path that gets you there is covered above.
--->
-
 # Bumping PROMPT_VERSION is a repo-wide sweep
 
 `PROMPT_VERSION` lives in `lib/ai/prompts/system-template.ts`. Changing the composed prompt
-means bumping it, and the bump touches files in several directories.
+means bumping it, and the bump touches files in several directories. This file loads only when
+you read the directories that own the composed prompt; the sweep itself is repo-wide.
 
 ## Grep. Never read a list, including this one.
 
@@ -32,48 +19,18 @@ means bumping it, and the bump touches files in several directories.
 grep -rn "v1\.<old>\.<new>" --include='*.ts' --include='*.md' .
 ```
 
-**`--include='*.md'` is not optional, and it was missing here until TAC-554.** Two sites live
-in prose rather than code - the constants table in the root `CLAUDE.md` and the
-`PROMPT_VERSION` sentence in `lib/ai/CLAUDE.md` - so a `*.ts`-only sweep cannot see either,
-and this file was telling people to run exactly that. What caught them was
-`scripts/lib/claude-md-claims.test.ts`, which compares both against the live constant. That
-guard works; the instruction above did not.
+**`--include='*.md'` is not optional.** Two sites live in prose rather than code - the
+constants table in the root `CLAUDE.md` and the `PROMPT_VERSION` sentence in `lib/ai/CLAUDE.md`
+- so a `*.ts`-only sweep cannot see either.
 
 **A carried count is worse than no count - no count makes you grep, a stale one tells you
-that you already did.** The site list has grown on essentially every bump, because every new
-orchestrator test adds a `promptVersion` fixture. Recorded history: 4 files, then 7, then 8,
-then 9, then 12 sites in 9 files, then 14 in 13. Fixture inputs left that population on
-2026-09-29 (they derive the constant now); only assertions and prose can still grow it.
-
-**Re-run the grep after EVERY rebase**, and do not carry the earlier result forward. One
-sweep found 14 sites and its re-run found 12, and the two sets were not the same. Another
-re-run **grew** by two files that arrived with the commits the rebase was picking up - one of
-them from a ticket that had merged into the very head commit being rebased onto. That is the
-expensive direction: a carried list silently **omits** the new sites, and those are fixture
-values fed to mocks, so nothing fails.
-
-## Fixture inputs derive the constant; assertions stay literal
-
-A `promptVersion` in a mocked result is never compared against the live constant, so a stale
-one ships green - that used to be the majority of every sweep. Since 2026-09-29 fixture
-INPUTS derive the live constant instead of spelling a version (11 sites across 7 files:
-`stages`, `handle-inbound`, `handle-followup`, `two-pending-slots`, `coalesce-inbound`,
-`holding-message-replay`, `regenerate-with-critique`). A new mock or factory imports
-`PROMPT_VERSION`; it must never spell a version string. Historical literals in fixtures
-(`v1.6.0`, `v1.13.0`, `v1.16.0`) are deliberate old-version shapes and are not sweep hits.
-
-What the grep still finds, and must keep finding, is ASSERTION literals
-(`expect(r.data.promptVersion).toBe('v1.7x.0')`). Those are the tripwires: they go red the
-moment the constant moves, which is what makes the sweep unavoidable rather than optional.
-Replacing one with the imported constant would be circular - the test would compare the
-constant to itself and certify nothing (testing-discipline.md: "a test comparing a
-derivation against a literal that could never differ from it").
+that you already did.** **Re-run the grep after EVERY rebase**, and do not carry the earlier
+result forward: commits the rebase picks up can add new sites, and nothing else will flag them.
 
 ## Two kinds of hit you must NOT change
 
 1. **`system-template.ts`'s own changelog entry** for the old version. That is history.
-2. **Comments elsewhere citing what a past version decided** (`serializers.ts`,
-   `serializers.test.ts` have carried these). Also history.
+2. **Comments elsewhere citing what a past version decided** (`serializers.ts` has carried these). Also history.
 
 A blind `sed` breaks all of them.
 

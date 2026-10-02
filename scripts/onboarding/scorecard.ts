@@ -7,7 +7,7 @@ import type { ScenarioSheetRow } from './scenario-schema'
 /**
  * TAC-347 Stage 3. Pure aggregation over one run's graded scenarios: per-
  * topic pass rates, a severity-sorted review list, a voice-read sample, and
- * a grader spot-check sample. No imports beyond types — vitest-safe.
+ * a grader spot-check sample. No imports beyond types.
  */
 
 export interface GradedScenario {

@@ -1,11 +1,11 @@
 /**
  * End-to-end smoke test for the Langfuse v5 (OpenTelemetry) write path.
  *
- * WHY THIS EXISTS. `tsc`, `vitest` and `next build` all pass with a write path
- * that ingests nothing - the unit tests assert against mocks, and the build
- * never has Langfuse credentials so `register()` returns early. The v3 SDK
- * failing after 2026-11-16 is itself a silent, server-side failure. A migration
- * whose only evidence is a green suite reproduces exactly the class of defect
+ * WHY THIS EXISTS. `tsc` and `next build` both pass with a write path that
+ * ingests nothing - the build never has Langfuse credentials so `register()`
+ * returns early. The v3 SDK failing after 2026-11-16 is itself a silent,
+ * server-side failure. A migration whose only evidence is a green build
+ * reproduces exactly the class of defect
  * this repo keeps paying for: a claim nothing enforces.
  *
  * So this writes a real trace through the real `instrumentation.ts` +
@@ -29,7 +29,7 @@ const SMOKE_MODEL = 'claude-haiku-4-5-20251001'
  * The token counts written, and the exact `usageDetails` Langfuse must store back.
  *
  * WHY THE EXPECTED VALUES ARE PINNED rather than checked for mere presence.
- * A mutant renaming the wrapper's native `usageDetails` field to `usage` SURVIVED
+ * Renaming the wrapper's native `usageDetails` field to `usage` passes
  * a non-emptiness check: Langfuse fell back to tokenizing the span's own
  * input/output text and returned `{input: 5, output: 5, total: 10}` - plausible,
  * priced, charted, and nothing to do with the call. That is this repo's recurring
@@ -177,8 +177,7 @@ async function main(): Promise<void> {
       }
       // Presence of our spans is the binding check that `startObservation` really
       // stamps the instrumentation scope `shouldExportSpan` allowlists. If that
-      // scope is ever renamed, these vanish - which the unit test CANNOT catch,
-      // because it imports the scope constant from the same place the source does.
+      // scope is ever renamed, these vanish.
       for (const required of REQUIRED_SPANS) {
         if (!names.includes(required))
           problems.push(`missing observation ${required}`)

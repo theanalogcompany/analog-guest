@@ -247,7 +247,7 @@ export async function exchangeForLongLivedToken(
  * this file's own constant says so. It went through `graphRequest` at first,
  * which prefixes `/v25.0`, so the code contradicted the comment stating the
  * fact — on the one call that has to run unattended for sixty days. Caught in
- * code review. Both tests now pin the full URL.
+ * code review.
  */
 export async function refreshInstagramLongLivedToken(
   token: string,

@@ -12,9 +12,8 @@
 -- `delivered`. It replaces 042's `review_state is distinct from 'pending'`,
 -- which it covers, so pending drafts stay out and skipped drafts and replies
 -- that never sent now leave the card's context too. The same condition is
--- written in lib/operator/thread.ts and in migration 043;
--- lib/operator/reached-guest-condition.test.ts reads all three and fails if any
--- status list drifts from DELIVERED_OUTBOUND_STATUSES.
+-- written in lib/operator/thread.ts and in migration 043; all three status
+-- lists must match DELIVERED_OUTBOUND_STATUSES.
 --
 -- The condition applies per row, BEFORE rows are grouped into responses and
 -- before the 3-response limit, so a split reply keeps the bubbles that went out.

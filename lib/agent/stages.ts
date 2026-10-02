@@ -32,10 +32,7 @@ import {
   type VoiceCorpusChunk as AiVoiceCorpusChunk,
 } from '@/lib/ai'
 import { resolveEmojiDirective } from '@/lib/ai/emoji-cadence'
-// TAC-401: imported BY PATH, not from the barrel above — this
-// file's tests `vi.mock` the '@/lib/ai' barrel, and a bare constant arriving
-// `undefined` would make the no-retry branch silently unreachable in every
-// one of them.
+// TAC-401: imported BY PATH, not from the barrel above.
 import { VERIFY_PROSE_PROMISE_TRUNCATED_ERROR_CODE } from '@/lib/ai/verify-prose-promise'
 // TAC-513: imported BY PATH for the same reason as the line above.
 import { VERIFY_CANCELLATION_CLAIM_TRUNCATED_ERROR_CODE } from '@/lib/ai/verify-cancellation-claim'
@@ -198,7 +195,7 @@ export const KNOWLEDGE_GAP_WINDOW_MS = 5 * 60 * 1000
  * TAC-212 approval-policy triggers. Used as both the keys for the
  * `triggers: string[]` array on a queue decision AND the lookup keys for
  * PRIMARY_TRIGGER_PRIORITY. Exported so the orchestrator (handle-inbound,
- * handle-followup), the PostHog event helper, and tests can reuse the
+ * handle-followup) and the PostHog event helper can reuse the
  * literal strings without copy-paste drift.
  */
 export const APPROVAL_TRIGGERS = {
@@ -618,8 +615,8 @@ export function knowledgeGapWillQueue(
 // TAC-394: KNOWLEDGE_GAP_CARD_REVIEW_REASONS and isKnowledgeGapCard moved to
 // ./pending-slots, so the persist layer can use them without importing this
 // file. Re-exported here so every existing import keeps working. The moved
-// review_reason values are literals there; stages.test.ts pins them against
-// APPROVAL_TRIGGERS and GENERATION_FAILED_REVIEW_REASON.
+// review_reason values are literals there and must match APPROVAL_TRIGGERS
+// and GENERATION_FAILED_REVIEW_REASON.
 export {
   isKnowledgeGapCard,
   KNOWLEDGE_GAP_CARD_REVIEW_REASONS,
@@ -845,8 +842,7 @@ export async function retrieveKnowledgeStage(
  *
  * WHY TWO CALLS TO THE EXISTING STAGE rather than one widened function: each
  * arm keeps its own tag-preference fallback and its own graceful degrade for
- * free, and `retrieveKnowledgeStage` stays byte-identical so every test that
- * pins it still does.
+ * free, and `retrieveKnowledgeStage` stays byte-identical.
  *
  * NO PRIOR TURN → ONE ARM. When `buildContextQuery` returns '' (a first
  * message, a conversation older than the window, nothing delivered) this
@@ -854,14 +850,13 @@ export async function retrieveKnowledgeStage(
  * second RPC, no merge. That is what makes a standalone first message
  * byte-identical to today rather than merely similar.
  *
- * That early return is DEFENCE IN DEPTH, and honestly inert today: bypassing
- * it was run as a mutant and survived, because `retrieveKnowledgeStage`
+ * That early return is DEFENCE IN DEPTH, and honestly inert today:
+ * `retrieveKnowledgeStage`
  * short-circuits an empty query to [] on its own, so the merge of
  * [armA, []] reproduces armA exactly. It is kept because it makes the
  * guarantee independent of that second guard — if an empty query ever stopped
  * meaning "return nothing", this path would still run one arm — and because
- * it states the intent where a reader looks for it. Do not read it as the
- * thing the tests are pinning; the single-call assertions are.
+ * it states the intent where a reader looks for it.
  *
  * DEGRADATION. `allSettled`, so one arm's rejection cannot take the other
  * down. Arm B failing leaves arm A alone — exactly today's behaviour. Arm A
@@ -2713,7 +2708,7 @@ function renderedIntentionLines(ctx: RuntimeContext): string[] | undefined {
 
 export function buildAiRuntime(
   ctx: RuntimeContext,
-  // TAC-362: injectable so tests can pin both branches of the emoji coin
+  // TAC-362: injectable so both branches of the emoji coin are reachable
   // without stubbing globals, defaulted here at the boundary so the pure
   // module stays pure. Same split scheduleAndSend uses for
   // resolveDispatchBubbles.
@@ -2852,8 +2847,7 @@ export function buildAiRuntime(
     // live in would be confidently wrong. The helper reaches the same answer on
     // its own (the venue's real timezone makes `venueLocalNow` throw, which
     // resolves to `unknown`), so this branch is belt and braces rather than the
-    // only thing standing between a bad zone and a wrong verdict; a test pins
-    // the equivalence.
+    // only thing standing between a bad zone and a wrong verdict.
     today: {
       ...computeToday(timezone, now),
       openState: timezoneSubstituted

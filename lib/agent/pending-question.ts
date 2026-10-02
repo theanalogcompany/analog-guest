@@ -76,8 +76,7 @@ export async function findPendingQuestion(
     // the card still sat in the operator's queue. Nothing
     // caught it, because the re-check below only sees rows the filter DID
     // return; a row the filter never returns is indistinguishable from no row
-    // at all. The filter STRING is asserted in pending-question.test.ts, since
-    // Postgres is the only thing that evaluates it.
+    // at all. Postgres is the only thing that evaluates the filter string.
     const { data: card, error: cardError } = await supabase
       .from('messages')
       .select('id, reply_to_message_id, pending_until, review_reason')

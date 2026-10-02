@@ -36,7 +36,7 @@ export const IntentionRulesSchema = z.object({
 
 export type IntentionRules = z.infer<typeof IntentionRulesSchema>
 
-/** Canonical default. Pinned in intention-rules.test.ts so moving one is a deliberate change. */
+/** Canonical default. */
 export const INTENTION_RULES_DEFAULT: IntentionRules = {
   response_rate_floor: 50,
   unanswered_streak: 2,

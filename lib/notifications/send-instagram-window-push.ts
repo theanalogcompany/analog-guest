@@ -18,8 +18,7 @@
 // what is waiting. See the note in ./recipients about the two disagreeing.
 //
 // PRIVACY: the payload carries no message body and no guest handle. Title, a
-// first name, the time left, and ids. Same invariant as the other two surfaces
-// and asserted in the tests.
+// first name, the time left, and ids. Same invariant as the other two surfaces.
 
 import {
   capturePushSent,

@@ -18,10 +18,6 @@ The id on the agent path comes from the **model**, copied out of the prompt bloc
 hallucinated or stale one transitioned whatever row it named - including another guest's or
 another venue's - and returned what looked like a clean win.
 
-Their tests **apply the recorded predicate to a row set** rather than checking the query
-mentions the right columns. That is what catches a filter built with the right column name
-and the wrong value.
-
 Two cancel helpers exist and the split is deliberate: `markCancelled` gates on
 `pending_ack` alone (the decline path), `cancelCommitmentForGuest` gates on
 `open | pending_ack` (a reply that says a comp is off, which is usually `open` with no
@@ -36,8 +32,7 @@ erase the record that the venue honoured it.
 At most one **open** commitment per `(venue_id, guest_id, lower(trim(description)))`.
 
 **The app-level check inside `createCommitmentFromPending` is the enforcement; the partial
-unique index is the backstop.** A row-count test would pass with the entire app check
-deleted, which is why the load-bearing assertions are `insertCallCount === 0`.
+unique index is the backstop.**
 
 `type` is deliberately **not** in the key: two open promises with the same description are
 the same promise to the guest whatever the model labelled them. That creates one hazard,
@@ -47,9 +42,8 @@ saying "recommendation", the operator's authorisation leaving no trace. The upgr
 **one-directional**; a comp is never downgraded, because that would destroy a code the guest
 already has.
 
-The field set that moves on upgrade is pinned with `toEqual`, never `toMatchObject` - a
-partial match passes while `code` silently goes missing, which is the original bug's exact
-shape. Mutation-check both directions: drop each field, then add one that must not move.
+The field set that moves on upgrade must be exact - a partial copy lets `code` silently go
+missing, which is the original bug's exact shape.
 
 Dedup reads **fail open** - proceed to insert, because losing a real commitment to a
 hiccuped SELECT is worse than a duplicate the index will reject anyway.
@@ -59,7 +53,6 @@ hiccuped SELECT is worse than a duplicate the index will reject anyway.
 `commitment-expiry.ts` is the **single derivation site** for every horizon. Scope is
 obligations only (comp, hold, discount) via `OBLIGATION_TYPES`, which is an **allowlist** so
 a fifth type defaults to being left alone rather than inheriting a negation nobody revisited.
-There is a source-level test for that, because an exclusion passes every behavioural test.
 
 `expires_at` is **server-derived, never agent-set.** An upgrade takes the comp horizon keyed
 off the row's own `created_at`, never `now` - keying off `now` would extend the horizon every
@@ -70,8 +63,7 @@ site is how the two drift.
 
 `venueLocalInstant` is **two-pass** and must stay so: the offset has to be sampled at an
 instant that is itself what you are solving for, and a single pass is silently an hour wrong
-for any local time on the far side of a DST transition. A US-only test suite passes the
-single-pass version.
+for any local time on the far side of a DST transition.
 
 Escalation writes `escalated_at` as an **idempotency marker, not an audit trail** - it
 answers one question, has a human been told. The reason rides on the PostHog event. Without
@@ -113,7 +105,7 @@ ladder: the timestamp advances past a stale precision and nothing rewrites it.
 
 `null` precision is **permissive** - it means nobody recorded one, which is every row
 predating the column. Do not tidy the gate from `=== 'approximate'` to `!== 'pinned'`; that
-silently switches off every legacy row. There is a mutation-verified negative test.
+silently switches off every legacy row.
 
 ---
 

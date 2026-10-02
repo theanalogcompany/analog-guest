@@ -14,7 +14,7 @@
 //
 // THE MERGE IS LOAD-BEARING. Every venue in production carries an EMPTY
 // perCategory. If the stored value replaced the code default, wiring this
-// column would route nothing in production while passing every unit test.
+// column would route nothing in production while looking correct everywhere else.
 // So the code default is the base and stored entries layer ON TOP:
 //
 //   effective = { ...APPROVAL_POLICY_DEFAULT.perCategory, ...stored.perCategory }

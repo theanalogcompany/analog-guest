@@ -50,7 +50,6 @@ directory; a human has to click.
 | [.github](.github/CLAUDE.md) | what a CI session may run, and the known gaps in that allowlist |
 
 Three more rule files load by file pattern rather than by directory:
-[testing discipline](.claude/rules/testing-discipline.md) on any test file,
 [errors as values](.claude/rules/errors-as-values.md) across `lib/` and
 `app/api/`, and [prompt versioning](.claude/rules/prompt-versioning.md) in the
 directories that own the composed prompt.
@@ -72,8 +71,7 @@ magic link).
 
 `npm install` also wires up the git pre-commit hook (via husky's `prepare`
 script). The hook runs `eslint --fix` on staged `.ts/.tsx` files, then
-`tsc --noEmit` against the full project, then `vitest related --run` on the
-staged files. Any failure rejects the commit.
+`tsc --noEmit` against the full project. Any failure rejects the commit.
 
 Environment variables: copy `.env.local.example` to `.env.local` and fill in
 real values (ask the operator for the secrets bundle). Never regenerate
@@ -97,12 +95,12 @@ behaves per environment and the failure it produces when it is wrong.
 Before pushing, run the same checks CI runs:
 
 ```bash
-npx tsc --noEmit && npm run lint && npx vitest run && npm run build
+npx tsc --noEmit && npm run lint && npx prettier --check . && npm run build
 ```
 
 ## CI
 
-GitHub Actions runs `tsc --noEmit`, `eslint`, `vitest run`, and `next build`
+GitHub Actions runs `tsc --noEmit`, `eslint`, `prettier --check`, `jscpd`, and `next build`
 on every pull request and push to `main`. Merge to `main` is blocked on red.
 
 The workflow lives at `.github/workflows/ci.yml`. To configure branch

@@ -16,7 +16,7 @@
  *
  * This is the measurement-harness convention's point 10 in a module: a variable
  * you hold fixed is an instrument too, so check its distribution before
- * trusting a run. `seeded-flip.test.ts` checks it here so neither caller has to.
+ * trusting a run.
  */
 export function seededFlip(seed: string): number {
   let h = 0x811c9dc5

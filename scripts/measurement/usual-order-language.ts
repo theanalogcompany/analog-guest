@@ -26,7 +26,7 @@
  * directions are not symmetric: a false positive costs reading one body, a
  * false negative ships an R23 violation to a guest. So they over-match on
  * purpose and print what they matched, and a verdict is read rather than
- * trusted. Known false positives are pinned in the test file as non-goals.
+ * trusted. Known false positives are non-goals.
  *
  * `repeatedPhrases` is NOT reimplemented here. The templating ceiling imports
  * TAC-548's, which already defaults to the quarter-share this ticket asks for

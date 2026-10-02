@@ -107,7 +107,7 @@ import type { AgentResult, InboundMessage, RuntimeContext } from './types'
  * socket reset, an aborted fetch or `createAdminClient()` throwing on a
  * missing env var THROWS — and an unguarded throw here propagates to
  * `runInboundTurn`'s catch, which red-alerts and returns `failed`, leaving the
- * guest with nothing. Measured, not reasoned about: a rejecting mock produced
+ * guest with nothing. Measured, not reasoned about: a rejecting read produced
  * `{status:'failed', stage:'context_build'}` before this was added. Same shape
  * and same fix as `loadInboundIdentity` in `record-inbound-turn-outcome.ts`.
  */
@@ -380,8 +380,7 @@ async function persistGenerationFailureCard(
     }
     // shouldSendDraftFlaggedPush fails OPEN on any value outside PUSH_POLICY's
     // total map, so `generation_failed` pushes — which is what this card wants
-    // (nobody is coming to look at it otherwise) and is asserted in
-    // push-policy.test.ts rather than left to be inferred from the default.
+    // (nobody is coming to look at it otherwise).
     if (shouldSendDraftFlaggedPush(GENERATION_FAILED_REVIEW_REASON)) {
       waitUntil(
         sendDraftFlaggedPush({
@@ -483,8 +482,8 @@ interface ClaimedWarmClose {
  * markWarmCloseSent is a CAS (`... where warm_close_sent_at is null`), so
  * `already_marked` is the answer for a guest the pause timer closed ten minutes
  * ago, or one this venue closed on an earlier turn. Either way no second close
- * goes out, and that is the acceptance criterion the ticket asks for a mutant
- * against: delete the `already_marked` branch and a guest can be closed twice.
+ * goes out, and that is the acceptance criterion: delete the `already_marked`
+ * branch and a guest can be closed twice.
  *
  * FAILS CLOSED. A marker write that errors returns null, so the bubble is NOT
  * appended. The alternative — sending on an unknown marker state — is the one
@@ -2386,7 +2385,7 @@ async function runInboundTurn(
     // check: the crisis short-circuit returns hundreds of lines above this,
     // before retrieval. A crisis reply is fixed and unconditional, and
     // deferring it to a newer fragment is the worst failure this feature could
-    // have. There is a test pinning that it never reaches here.
+    // have.
     if (mayExtend(turn)) {
       const uncovered = await findUncoveredInbound(
         { venueId: ctx.venue.id, guestId: ctx.guest.id },

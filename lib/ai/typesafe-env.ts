@@ -8,7 +8,7 @@
  *      name the var and the defect, never the value.
  *   2. First-call enforcement in `classify-message-jev.ts` (NOT module-load:
  *      CI sets no JEV_* vars, so a module-init throw would break tsc,
- *      vitest and next build).
+ *      and next build).
  *   3. An /admin/health row (`check-typesafe.ts`).
  *
  * The key format is `apikey_<hex>_<hex>`. The checks here are deliberately

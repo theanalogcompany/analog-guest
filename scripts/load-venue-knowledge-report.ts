@@ -1,6 +1,6 @@
 // Markdown renderer for the knowledge dedup report. Pure: types only, no
 // clients, no I/O. Split from load-venue-knowledge-pure.ts to keep both
-// readable; the load-bearing decision logic lives there and is unit-tested,
+// readable; the load-bearing decision logic lives there,
 // this is presentation.
 
 import type {

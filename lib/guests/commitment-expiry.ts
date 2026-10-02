@@ -7,8 +7,8 @@ import type { VenueInfo } from '@/lib/schemas/venue-info'
  * need to hear about it.
  *
  * Pure. Imports two schema modules for their types and one pure interpreter
- * (classifyDay) — no DB client, no SDK init at module load, so vitest can
- * load it unmocked. Deliberately NOT exported from a barrel: the horizons
+ * (classifyDay) — no DB client, no SDK init at module load. Deliberately NOT
+ * exported from a barrel: the horizons
  * here are the single derivation site and an extra import path is an extra
  * way for a second one to appear.
  *
@@ -125,14 +125,13 @@ const MINIMUM_HOLD_WINDOW_MS = 60 * 60 * 1000
 // than exported from there because that module's copy is `satisfies
 // ReadonlyArray<keyof VenueInfo['hours']>` and widening its export surface to
 // serve one caller is the change more likely to go wrong later; the ordering
-// (Sunday-first, matching Date.getUTCDay) is locked by a test here.
+// is Sunday-first, matching Date.getUTCDay.
 //
 // TAC-386 EXPORTED IT, rather than making a third copy. The reasoning above
 // still stands and is the reason the export is from HERE and not from
 // venue-hours.ts: this module already owns the venue-local instant arithmetic
-// (venueLocalDate, venueLocalInstant) that a day-walking caller needs, and the
-// ordering is pinned by a test in this file, so the exported copy is the tested
-// one. lib/followups/inquiry-followup-timing.ts is the second caller.
+// (venueLocalDate, venueLocalInstant) that a day-walking caller needs.
+// lib/followups/inquiry-followup-timing.ts is the second caller.
 export const DAY_KEYS = [
   'sunday',
   'monday',

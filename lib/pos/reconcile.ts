@@ -6,8 +6,7 @@
 // WRITES the fingerprint mapping) lives in reconcile-tap.ts.
 //
 // RAGResult-shaped, never throws into the caller — mirrors lib/guests/*. The
-// supabase client is injectable so the policy is unit-testable without a live
-// DB.
+// supabase client is injectable so the policy runs without a live DB.
 
 import { createAdminClient } from '@/lib/db/admin'
 import { logger } from '@/lib/observability/logger'

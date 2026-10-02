@@ -6,7 +6,7 @@
  *   node scripts/reconcile-status.mjs < candidates.json
  *
  * Run by the workflow's "Find tickets to work" step, never by a session. All
- * the logic is in lib/reconcile-status.mjs, which the tests import. This
+ * the logic is in lib/reconcile-status.mjs. This
  * file only wires it to the process. Uses nothing outside Node's standard
  * library.
  */

@@ -7,8 +7,7 @@
 // perkMechanic separately.
 //
 // Detectors are PURE — they consult only the data the caller hands in.
-// The engine pre-loads everything in a batched per-venue query. This
-// keeps each detector trivially unit-testable per branch.
+// The engine pre-loads everything in a batched per-venue query.
 //
 // Detectors do NOT consult followup_log. Intent-bound dedup (have we
 // already fired this dedup_key?) lives at the engine's claim step where

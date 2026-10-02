@@ -43,8 +43,7 @@
 -- FOLLOWUP_RULES_DEFAULT in lib/schemas/followup-rules.ts — that constant
 -- is the source of truth for the Zod parser; this SQL value is the source
 -- of truth for the existing-row backfill at deploy time. they MUST match
--- on v1 ship (the test in followup-rules.test.ts asserts this by
--- round-tripping through JSON.parse).
+-- on v1 ship.
 
 alter table venue_configs
   add column followup_rules jsonb;

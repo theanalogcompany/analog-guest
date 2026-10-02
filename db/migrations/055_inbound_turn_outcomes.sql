@@ -111,8 +111,7 @@ create table inbound_turn_outcomes (
   agent_run_id uuid,
 
   -- nullable: a run that fails at context_build may never resolve a channel.
-  -- mirrors messages_channel_check (048); bound to MESSAGE_CHANNELS by
-  -- lib/schemas/inbound-turn-outcome.test.ts.
+  -- mirrors messages_channel_check (048) and MESSAGE_CHANNELS.
   channel text check (channel in ('text', 'instagram')),
 
   -- which layer decided. 'webhook' = the agent was never invoked.

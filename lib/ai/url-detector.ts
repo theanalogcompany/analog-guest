@@ -19,9 +19,8 @@
 // normal state and means no link may be sent.
 //
 // Pure and dependency-free, mirroring self-talk-detector.ts. Deliberately NOT
-// exported from lib/ai/index.ts: stages.test.ts mocks that barrel, and a pure
-// function the tests need for real must not arrive mocked (same reasoning as
-// emoji-cadence.ts and self-talk-detector.ts).
+// exported from lib/ai/index.ts (same as emoji-cadence.ts and
+// self-talk-detector.ts).
 
 /**
  * Trailing characters stripped from a matched token before it is judged.
@@ -109,8 +108,7 @@ function trimTrailingNoise(token: string): string {
  * Kept SEPARATE from canonicalizeUrl below, and isUrl must call THIS one.
  * canonicalizeUrl supplies a missing scheme, and "https://" contains a "/",
  * so an isUrl built on it would read every bare domain as a link and undo
- * the rule that "lemils.com" is prose. The bare-domain tests are what catch
- * that mutant.
+ * the rule that "lemils.com" is prose.
  */
 function stripOneTrailingSlash(url: string): string {
   return url.endsWith('/') ? url.slice(0, -1) : url

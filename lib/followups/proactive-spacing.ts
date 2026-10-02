@@ -4,10 +4,8 @@
 // Three mechanisms read this rule (TAC-536's scan greeting, TAC-560's warm
 // close, TAC-386's inquiry follow-up), and the engine that owns the newest of
 // them imports handleFollowup, which reaches the Voyage and Supabase clients at
-// module load. Importing a constant from there pulls all of that into any test
-// process that touches it, and `vi.mock` does not help (root CLAUDE.md, "Module
-// split for testability"). That is not hypothetical: it is how this module came
-// to exist, after `warm-close-timeout.test.ts` failed to load at all.
+// module load. Importing a constant from there pulls all of that into any
+// process that touches it.
 //
 // THE PREDICATE LIVES HERE TOO, not just the number. An earlier draft exported
 // the constant and left each caller to write `now - last < MINUTES * 60 * 1000`,

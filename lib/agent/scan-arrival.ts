@@ -2,8 +2,8 @@
 //
 // Pure, no imports beyond the shared venue-local date helper, split from the
 // DB layer the way isVenueClosed and looksLikeQuestion are: every constant
-// here decides something guest-facing, and a test should be able to drive the
-// boundary without a database.
+// here decides something guest-facing, and the boundary should be drivable
+// without a database.
 //
 // THE SHAPE OF THE FLOW, so the four constants below read as one rule rather
 // than four numbers (ruled 2026-09-25):

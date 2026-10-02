@@ -45,8 +45,7 @@
 -- 'pending' literal elsewhere in the codebase is either a different column —
 -- pos_tap_events.status, venues.status, review_state / previous_review_state,
 -- each of whose constraints does permit it — or not a database value at all
--- (a React state discriminant in the Voices commit modal, a venue fixture in
--- load-venue-context.test.ts).
+-- (a React state discriminant in the Voices commit modal).
 --
 -- An earlier draft of this paragraph said "the three insert sites" and named
 -- three. The count was wrong, and an enumeration offered as PROOF, inside a
@@ -109,11 +108,9 @@
 -- NO CONSTRAINT CHANGE. messages_status_check keeps its name and all nine
 -- values. This migration touches the column default and nothing else.
 --
--- That is load-bearing for two tests, not merely tidy: group-responses.test.ts
--- and reached-guest-condition.test.ts both parse the status vocabulary out of
--- migration 001 BY NAME, on the stated premise that no later migration touches
--- messages_status_check. Still true after this one. A future migration that
--- does change the constraint has to update those two tests as well.
+-- That is load-bearing, not merely tidy: the status vocabulary is read from
+-- migration 001 BY NAME, on the premise that no later migration touches
+-- messages_status_check. Still true after this one.
 --
 -- NO RUNTIME BEHAVIOUR CHANGE. Nothing reads the default, so no code path
 -- changes when it goes.

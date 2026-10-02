@@ -19,7 +19,7 @@
 // in `metadata.replacedContent`, which is the only rollback there is.
 //
 // Thin orchestrator per CLAUDE.md § Scripts. Decision logic is in
-// ./load-venue-knowledge-pure (unit-tested), rendering in
+// ./load-venue-knowledge-pure, rendering in
 // ./load-venue-knowledge-report.
 //
 //   npm run load-venue-knowledge -- --venue le-mils-coffee

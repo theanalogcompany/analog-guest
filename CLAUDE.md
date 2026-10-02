@@ -18,13 +18,13 @@ This file holds what **every** task needs. Everything else is routed:
 | a rule one directory needs | that directory's `CLAUDE.md` |
 | a rule that follows a file pattern | `.claude/rules/` |
 | why a decision was made | that source file's header comment |
-| an incident, a measurement run, mutation results | the PR body |
+| an incident, a measurement run | the PR body |
 | a cross-cutting decision people re-litigate | `docs/decisions/README.md` indexes them |
-| per-ticket narrative, test-count deltas | nowhere. Git has it. |
+| per-ticket narrative | nowhere. Git has it. |
 
 **Do not append subsystem detail here.** This file was 1.34 MB and 376k tokens, which
 exceeded a subagent's entire context window and broke every `.claude/agents/*` and every
-subagent handoff. `scripts/lib/claude-md-budget.test.ts` now fails CI if it regrows. Full
+subagent handoff. Keep it an index. Full
 reasoning: `docs/decisions/0001-claude-md-is-an-index.md`.
 
 Nested files load only when Claude reads a file in that directory, so they cost nothing
@@ -45,8 +45,7 @@ otherwise. `@path` imports are **eager** and do not help.
 | `scripts/CLAUDE.md` | onboarding pipeline, measurement harness convention, Drive auth |
 | `.github/CLAUDE.md` | what a CI session may run, and the known gaps in that allowlist |
 
-`.claude/rules/` holds `testing-discipline.md`, `prompt-versioning.md` and
-`errors-as-values.md`. `.claude/process.md` is canonical for Linear statuses, labels and
+`.claude/rules/` holds `prompt-versioning.md` and `errors-as-values.md`. `.claude/process.md` is canonical for Linear statuses, labels and
 markers.
 
 ## Product principles (do not violate)
@@ -109,10 +108,6 @@ functions, kebab-case filenames, SCREAMING_SNAKE env vars. Prefer functions over
 boundaries. Failure *direction* is a design decision, not a style choice - see
 `.claude/rules/errors-as-values.md`.
 
-**Module split for testability.** Importing a module that builds a Voyage or Supabase client at
-the top level runs that init in the test process, and `vi.mock` does not help. Split into
-`<name>-pure.ts` (no `@/*`, tests import this) and `<name>.ts`.
-
 **Never use `.min()` or `.max()` on a number field in an LLM-output schema** - Anthropic's
 structured output rejects them. Same for `.max()` on an array (`maxItems`); `.min()` on an
 array is fine. Cap with `.slice(0, N)` after the call.
@@ -129,8 +124,7 @@ never one ticket carrying both repo labels.
 **Plan, review, build, review, commit.** Output a written plan first (scope, file paths,
 decomposition, sequence, patterns to reuse, edge cases, what you chose *not* to do, open
 questions) and stop. Build only on explicit authorization. Then run `npx tsc --noEmit` and
-`npx vitest run` and report changes, test count, deviations, and anything you would push back
-on. Commit only when told.
+report changes, deviations, and anything you would push back on. Commit only when told.
 
 **Two gates above that:**
 
@@ -145,8 +139,7 @@ Neither tier proceeds on `[NEEDS-INPUT]` alone. A change to guest-facing copy sh
 wording **verbatim** in the plan and waits for approval of that wording.
 
 **Audit first.** Before writing code: this file, the nested `CLAUDE.md` for the directory,
-the neighbouring files, the migrations touching the relevant tables, and the existing tests -
-the `describe` block covering the behaviour you touch, not whole test files. Cite specific
+the neighbouring files, and the migrations touching the relevant tables. Cite specific
 paths in the plan. Do not infer architecture from filenames.
 
 **Comment protocol.** Every Linear comment opens with `**[FROM CLAUDE CODE]**` on its own
@@ -191,7 +184,7 @@ command when the question is which variables exist.
 
 Branch protection on `main`; everything goes through a PR. CI must be green:
 `tsc --noEmit`, `npm run lint`, `npx prettier --check .`, `npx jscpd` (the duplication
-gate; threshold in `.jscpd.json`, tests excluded), `npx vitest run`, `npm run build`.
+gate; threshold in `.jscpd.json`), `npm run build`.
 `.github/workflows/ci.yml` is the source of truth for this list - read it before claiming
 a change is verified, because this line has been stale before (prettier shipped in TAC-554
 and the list above missed it, and a branch failed CI on exactly that).
@@ -215,7 +208,7 @@ conflict is visible and recoverable, a destroyed PR object is not. Stack only wh
 genuinely cannot be reviewed without its parent, and budget a replacement PR.
 
 Pre-commit hook: lint-staged (`eslint --fix` + `prettier --write`) on staged files,
-`tsc --noEmit` project-wide, `vitest related`. Do not `--no-verify` without a reason - and
+`tsc --noEmit` project-wide. Do not `--no-verify` without a reason - and
 when the hook cannot run (an environment floor, e.g. git under lint-staged's minimum), the
 manual substitute must mirror every step including lint-staged's prettier pass; skipping
 the step the hook could not reach is how a formatting failure reaches CI as news. **In a `git worktree` the hook half-fails** on
@@ -235,9 +228,9 @@ character-exact. The Contract is the single source of truth.
   client ticket starts. The bar is 401 on missing auth - not 404 (route not deployed where the
   Contract said) and not 400 on a valid body (schema diverged).
 - **Manual end-to-end UAT gates the server ticket**, never deferred to the client.
-- **Assert against the Contract's literal payload, never against your own serialization.** A
-  test written by reading the implementation can only confirm the code equals itself. A client
-  test once *certified* a mismatch on every green run while five operator sends failed in
+- **Check against the Contract's literal payload, never against your own serialization.** A
+  check written by reading the implementation can only confirm the code equals itself. A client
+  check once *certified* a mismatch on every green run while five operator sends failed in
   production - and the server side was correct throughout.
 
 ## Migrations
@@ -262,7 +255,6 @@ Everything else, including the high-stakes list and the SQL patterns: `db/migrat
 
 | | |
 | --- | --- |
-| `npx vitest run` | all tests. `npx vitest run <path>` for one |
 | `npx tsc --noEmit` | typecheck. Run it directly, **never through a pipe** - `$?` after a pipe reports the pipe and has misread a failing typecheck as clean |
 | `npm run lint` | eslint. `-- --fix` for the auto-fixable |
 | `npm run build` | Next.js build |
@@ -277,36 +269,10 @@ Everything else, including the high-stakes list and the SQL patterns: `db/migrat
 
 ## Testing
 
-Vitest, tests colocated as `module.test.ts`. Pure functions get unit tests; DB-touching code
-generally does not.
-
-**The suite refuses to run on the wrong Node major.** `.nvmrc` is `24` and
-`vitest.node-version.ts` throws before any test collects. There is no escape hatch and none
-should be added - fix the Node, never the guard. `tsc` is unaffected.
-
-Coverage is report-only and deliberately ungated (`npx vitest run --coverage`).
-
-Roughly 7,000 tests across roughly 300 files, as a smell test only. **Quote a count only when
-the number carries the claim, and then only from a run you executed in this session** - never
-an estimate, never a recorded one. An exact baseline in this file once disagreed with
-`.claude/rules/testing-discipline.md`'s figures for the same day, and a number that precise is
-read as authoritative. Most sessions need no count at all: vitest's summary line for your own
-run is the whole report.
-
-When the claim IS a delta ("added N", "none broke"), measure both sides in one session - the
-before in a throwaway worktree, the after in this checkout:
-
-```
-git worktree add .worktrees/baseline origin/main
-npx vitest run --root .worktrees/baseline    # before
-git worktree remove .worktrees/baseline      # remove BEFORE measuring after
-npx vitest run                               # after
-```
-
-The worktree must live inside the checkout or Node cannot reach `node_modules`. Remove it
-before the after-count, or the run collects both copies and per-file figures come back
-doubled. Every other testing rule is in `.claude/rules/testing-discipline.md`, which loads
-when you open a test file.
+This repo has no automated test suite. Verification is `npx tsc --noEmit`, `npm run lint`,
+`npx prettier --check .`, `npx jscpd`, `npm run build`, and checking against the running
+system: `curl` the real endpoint, or run the measurement harness the ticket names (`npm run`
+lists them). For behaviour a human needs to see, say what to try by hand.
 
 ## AI agent runtime contract
 
@@ -358,19 +324,18 @@ contents, multi-line, both armor lines), `APNS_KEY_ID`, `APNS_TEAM_ID`, `APNS_BU
 
 **A new credential var ships with its validator in the same PR**, in three parts: a pure shape
 validator that never returns key material, first-call enforcement (**not** module-load - CI
-sets no `APNS_*` at all, so a module-init throw breaks `tsc`, `vitest` and `next build`), and
+sets no `APNS_*` at all, so a module-init throw breaks `tsc` and `next build`), and
 an `/admin/health` row. A validator that only runs on the unhappy path of a fire-and-forget
 call is not loud enough alone.
 
 ## Gotchas worth carrying everywhere
 
 - **Ask what would fail if a claim were untrue.** The expensive defects here are a claim
-  nothing enforces - a test name, a comment, a printed PASS, a schema default - and the claim
+  nothing enforces - a comment, a printed PASS, a schema default - and the claim
   is what stops anyone looking. If no input could make it fail, it proves nothing.
 - **Arrange for something to disagree.** Careful reading catches none of those. A control arm,
-  a reconciliation against a total, a mutant, an independent tool. A number nobody can
+  a reconciliation against a total, an independent tool. A number nobody can
   contradict is not evidence.
-- **A green suite can certify a bug.** Check that a test could fail before trusting it.
 - **Later beats earlier in the composed prompt.** Proximity reads as authority; this has cost
   six separate defects.
 - **A totality claim needs `satisfies Record<K, V>`.** `readonly K[]` is not
@@ -380,5 +345,5 @@ call is not loud enough alone.
   unread for 102 days; one flag reads like a runtime switch and changes nothing.
 - **Distrust any gate whose true-positive history you cannot produce.** One backstop fired once
   in its lifetime, on a false positive, and was read as working for two months.
-- **A stray `.worktrees/` or `.claude/` worktree** adds a full repo copy to `vitest` and
-  `eslint` runs. Config excludes them; a stray one still doubles per-file counts.
+- **A stray `.worktrees/` or `.claude/` worktree** adds a full repo copy to `eslint`
+  runs. Config excludes them; a stray one still doubles per-file counts.

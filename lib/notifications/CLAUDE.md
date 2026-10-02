@@ -18,7 +18,7 @@ continues and push just does not arrive. So:
    reports "missing END footer", not the value). Layer-scoped via `JWT_APNS_VARS` /
    `TRANSPORT_APNS_VARS` so the transport is not coupled to signing credentials.
 2. **First-call enforcement** at each layer boundary, not at module load - CI sets no
-   `APNS_*` vars at all, so a module-init throw breaks `tsc`, `vitest` and `next build`.
+   `APNS_*` vars at all, so a module-init throw breaks `tsc` and `next build`.
 3. **Ambient visibility** via `/admin/health`, because a validator that only runs on the
    unhappy path of a fire-and-forget call is not loud enough alone.
 
@@ -40,8 +40,7 @@ trigger fails `tsc` until someone decides. Everything pushes except an explicit 
 
 It was an allow-list derived from `Object.keys()` of a label map that did two jobs. Two
 triggers shipped afterwards, fell outside it, and **no APNs request was attempted for two
-months** while 121 tests stayed green - one of which asserted the broken behaviour under the
-name `returns false for unknown triggers (future-add safety)`.
+months**.
 
 So: `shouldSendDraftFlaggedPush` additionally **fails OPEN** on an unrecognised string. A
 dismissible push beats a queued draft nobody was told about.
@@ -53,8 +52,8 @@ into one constant - that merge is what caused the outage.
 and twelve reasons pushed as a bare `Reply to Alex`.
 
 `instagram_send_failed` is a **literal** there, not an import, because importing it would
-pull Instagram's outbound modules onto the shared push path against the import guard. A
-source-level test binds the two copies.
+pull Instagram's outbound modules onto the shared push path against the import guard. Keep
+the two copies equal.
 
 ## Privacy
 
@@ -70,10 +69,6 @@ operatorId}`. Per-surface rules:
 - **Arrival push** carries the commitment description, which is our own text about our own
   promise, and the guest's message has no route into that function.
 - **Window warning** is content-free: no body, no handle.
-
-A privacy test must **plant a distinctive string and assert its absence across the whole
-serialized payload**. Asserting that a key is missing cannot fail on guest text
-interpolated into the body as a plain string, which is exactly what these surfaces do.
 
 ## Badge counts genuinely disagree
 

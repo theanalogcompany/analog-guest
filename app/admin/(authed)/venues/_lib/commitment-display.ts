@@ -1,10 +1,8 @@
 import { isObligationType } from '@/lib/guests/commitment-expiry'
 import type { VenueCommitmentRow } from '../../_lib/load-venue-commitments'
 
-// TAC-381: pure display helpers for the venue page's commitments section.
-// Split out of the component so they're unit-testable — this repo has no React
-// component test harness (no .test.tsx anywhere, no jsdom in vitest.config),
-// the same reason TAC-379 split definition-display.ts out.
+// TAC-381: pure display helpers for the venue page's commitments section,
+// split out of the component (as TAC-379 did for definition-display.ts).
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000
 

@@ -4,8 +4,7 @@ Loads only when you work in this directory.
 
 Meta app on the **Instagram Login** path: `graph.instagram.com` and an Instagram User token.
 Never `graph.facebook.com`, never a Page token. Modules here are imported **by path** -
-there is no barrel, because a barrel is what would let a test hand a stubbed verifier to
-code that needs the real one.
+there is no barrel.
 
 ## Routing depends on one hand-set column
 
@@ -28,22 +27,17 @@ Three rules, each written from a real hole:
 
 1. **Never log a digest, not even from a log-only scaffold.** HMAC is keyed by our secret
    over their body, so our digest of any body is a valid signature for that body until the
-   secret rotates. `verifyInstagramSignature` returns a reason and never the digest, and a
-   test fails if any outcome carries one.
+   secret rotates. `verifyInstagramSignature` returns a reason and never the digest.
 2. **An empty secret is a valid HMAC key.** `createHmac('sha256', '')` does not throw; it
    produces a digest anyone can compute. Refuse an empty secret in the **verifier**, not only
-   in the route, and test each layer separately - with both guards present, removing either
-   still refuses an ordinary request, so a plain 403 assertion cannot tell whether the other
-   is there.
+   in the route.
 3. **Truncate AFTER comparing, never before.** Cutting a received signature to digest length
    first lets a long forgery match by being trimmed to fit.
 
 `verify-webhook.ts` here is **not** `lib/messaging/verify-webhook.ts`. Sendblue echoes its
 secret in plaintext in a header and is not HMAC at all; the reusable precedent is Square's.
 
-Timing safety is asserted the only way it can be: the test mocks `node:crypto` with the real
-module spread and `timingSafeEqual` wrapped in a spy, asserting the spy decides the
-comparison. A constant-time compare cannot be told from `===` by its result.
+The comparison goes through `timingSafeEqual`, never `===`.
 
 **Replay is open.** Meta signs no timestamp and no nonce, so a captured genuine delivery
 stays valid until the secret rotates. Dedupe on the message `mid`, which Meta's retries
@@ -106,7 +100,6 @@ exactly where one of our sends could still be in flight.
 
 Only `lib/agent/dispatch-instagram-reply.ts` and `lib/operator/dispatch-instagram-outbound.ts`
 may import `send.ts`, `window.ts`, `reply-check.ts`, `send-target.ts` or `graph.ts`.
-`window-import-guard.test.ts` enforces it in both directions.
 
 - **24-hour reply window** computed from `provider_sent_at` on the newest inbound row that has
   one. `INSTAGRAM_WINDOW_MARGIN_MS` is 5 minutes, a judgement against roughly 11 s of known
@@ -171,24 +164,12 @@ mistaken for Meta or a guest's privacy setting.
 
 `delete-venue-data.ts` **tombstones** the scoped id (`deleted:<uuid>`) rather than nulling it.
 `guests_must_have_identity` forbids nulling phone and scoped id together, so the approved
-redaction list would have failed every deletion request - found at implementation time, because
-no fixture in this repo enforces a CHECK. One tombstone per guest; a shared value collides on
+redaction list would have failed every deletion request - found at implementation time. One tombstone per guest; a shared value collides on
 the unique constraint.
 
 **A redaction list written from the columns you remember is a list of the columns you
 remember.** Enumerate from the schema. `messages.ungrounded_claims` holds verbatim guest
 excerpts (legacy rows) and `pending_commitment` holds model-written descriptions of them.
-
-## Fixtures
-
-`fixtures/` holds real deliveries captured 2026-09-17 with IDs, `mid`s and text replaced,
-because this repo is public. **Never commit a delivery's signature beside its body.** Copy
-fixtures from logs by script, never by hand - a hand transcription put a postback's `mid`
-outside `postback` instead of inside it.
-
-**Two guards, and a new reader usually trips both.** `window-import-guard.test.ts`
-allow-lists importers of `window.ts`; `handle-events.test.ts` keeps a SEPARATE mention list
-for `provider_sent_at`.
 
 ---
 

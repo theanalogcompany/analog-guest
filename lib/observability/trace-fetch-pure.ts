@@ -1,5 +1,5 @@
 // Pure: classifies why a Langfuse trace read failed. No `@/*` imports, no SDK
-// import, so tests exercise it without a client.
+// import, so it runs without a client.
 //
 // WHY THIS EXISTS. The SDK's defaults are hostile to a server render: a 60s
 // per-request timeout and two retries that honor `Retry-After` up to 60s each,

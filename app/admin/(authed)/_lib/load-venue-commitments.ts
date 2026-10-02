@@ -32,7 +32,7 @@ import { guestNameWithPhone } from './guest-name'
  * An earlier version of this was two hand-written arrays typed
  * `readonly CommitmentStatus[]` carrying this exact claim in a comment. The
  * claim was FALSE — an array type is not exhaustiveness-checked, so adding a
- * status compiled clean and the whole suite stayed green. Caught in code
+ * status compiled clean and nothing failed. Caught in code
  * review by actually adding one. The arrays below are derived, so the
  * guarantee is now the one the comment describes.
  */

@@ -1,9 +1,8 @@
 // TAC-567: on a guest's FIRST conversation, how many questions do they get, and
 // which ones?
 //
-// PURE. No @/* imports, no clients, no model calls, so every boundary here is a
-// plain unit test and the harness that spends the model calls holds no logic that
-// could be wrong without something failing.
+// PURE. No @/* imports, no clients, no model calls; the harness that spends the
+// model calls holds no scoring logic.
 //
 // THE THREE BARS, all absolute zeros, transcribed from the acceptance criteria:
 //
@@ -12,10 +11,9 @@
 //   2. turns carrying two questions (a body question plus an intention bubble): 0.
 //   3. "you've reached" or equivalent in the opener: 0.
 //
-// A ZERO IS ONLY EVIDENCE IF THE DETECTOR COULD HAVE FIRED, which is why each
-// detector below is driven from both sides in the test file rather than only on
-// clean input. That is this repo's most-repeated lesson: a claim nothing enforces
-// is the expensive defect, and a printed PASS is exactly such a claim.
+// A ZERO IS ONLY EVIDENCE IF THE DETECTOR COULD HAVE FIRED. That is this repo's
+// most-repeated lesson: a claim nothing enforces is the expensive defect, and a
+// printed PASS is exactly such a claim.
 
 /**
  * The intentions a first conversation may raise BEFORE the warm close
@@ -32,9 +30,8 @@
  * a first conversation once `guests.warm_close_sent_at` is set. Both harnesses
  * that feed this scorer pass `warmCloseSent: false` — they model the opening
  * flow, which is the thing this measurement is about — so no turn they generate
- * can legitimately raise it. That input is pinned by a source-level guard in
- * this file's test, because it is what makes this constant correct rather than
- * merely conservative.
+ * can legitimately raise it. That input is what makes this constant correct rather than merely
+ * conservative.
  *
  * KNOWN LIMIT, stated rather than discovered: point this scorer at a transcript
  * that continues PAST the close and it will report are_they_new_here as

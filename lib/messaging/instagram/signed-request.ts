@@ -19,8 +19,7 @@
 //   2. AN EMPTY SECRET IS REFUSED HERE, not only at the route. HMAC accepts
 //      an empty key and produces a digest anyone can compute, so a caller
 //      passing '' would verify a forgery. Refusing in both places means
-//      removing either guard still fails closed, which is why each has its
-//      own test.
+//      removing either guard still fails closed.
 //
 // REPLAY IS OPEN, AND THAT IS A DECISION RATHER THAN AN OVERSIGHT (found in
 // code review). `issued_at` is parsed and carried through; nothing refuses a

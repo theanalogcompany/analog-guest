@@ -9,9 +9,8 @@ import {
 
 // TAC-379. Renders INTENTION_DEFINITIONS directly — never a copy. A hardcoded
 // duplicate of `promptLine` here would misreport what the model actually
-// reads, which is the one thing this surface must not do. There is a
-// source-level test (no-copied-strings.test.ts) that fails if any definition
-// string is pasted into these files as a literal.
+// reads, which is the one thing this surface must not do. No definition string
+// may be pasted into these files as a literal.
 
 function Field({ label, children }: { label: string; children: ReactNode }) {
   return (

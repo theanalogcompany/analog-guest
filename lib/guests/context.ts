@@ -58,7 +58,7 @@ export function isEmptyContextUpdate(update: GuestContextUpdate): boolean {
  *   (TAC-300); the observation string shortcut on GuestContextUpdate is the
  *   only append path and lives in updateGuestContext below.
  *
- * Exported for direct unit testing. Callers should usually go through
+ * Callers should usually go through
  * updateGuestContext, which also handles the observation shortcut and
  * identity-column sync.
  */

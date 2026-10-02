@@ -40,8 +40,7 @@ export const MAX_CLASSIFIER_INPUT_CHARS = 1000
 // 4x the classification cap is well beyond any plausible real guest message.
 export const MAX_CRISIS_CHECK_INPUT_CHARS = 4000
 
-// Exported (by path, never via the barrel) for classify-message-jev.test.ts,
-// whose drift guard pins the Jev criteria keys against this enum's options.
+// The Jev criteria keys must match this enum's options.
 export const ClassifiedMessageSchema = z.object({
   category: z.enum([
     'reply',
@@ -239,8 +238,7 @@ export async function classifyMessageJevArm(
 
 export async function classifyMessage(
   input: ClassifyMessageInput,
-  // Tests force the gate BOTH ways (the openCoalescedTurn precedent), so the
-  // Haiku path stays covered while the flag is on and vice versa.
+  // The gate can be forced either way (the openCoalescedTurn precedent).
   jev: JevDeps & { enabled?: boolean } = {},
 ): Promise<AIResult<ClassifyMessageResult>> {
   if (typeof input.inboundBody !== 'string' || input.inboundBody.length === 0) {

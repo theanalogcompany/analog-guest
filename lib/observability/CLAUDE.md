@@ -163,9 +163,9 @@ span.end({ output: { matchCount: rows.length } })
 
 ## Verifying the write path
 
-**A green suite does not tell you traces are landing.** The unit tests assert against mocks,
-and `next build` has no credentials so `register()` returns early - both pass with a write path
-that ingests nothing, and the v3 deadline failure is itself silent and server-side.
+**A green build does not tell you traces are landing.** `next build` has no credentials so
+`register()` returns early, so it passes with a write path that ingests nothing, and the v3
+deadline failure is itself silent and server-side.
 
 ```
 npm run langfuse-smoke
@@ -229,8 +229,7 @@ What does *not* change between runs, and is the part that got mis-read once:
 `cacheReadTokens` / `cacheWriteTokens` sit in the `generate` span's **`output` object**, which the
 metrics API cannot aggregate. Since 2026-09-29 the same two numbers ALSO ride that span's native
 `usageDetails` as `input_cached_tokens` / `input_cache_creation`, which it can - prefer those for
-anything new. The output fields stay because they are what pre-2026-09-29 spans carry, and
-`generate-message.test.ts` asserts the two representations agree.
+anything new. The output fields stay because they are what pre-2026-09-29 spans carry.
 
 To read the output fields, the only option on historical spans:
 
@@ -284,10 +283,10 @@ route above already delivers the usage and cost attribution that was the point.
 
 **Langfuse silently ESTIMATES usage when the native field is missing.** Send the tokens under any
 key other than `usageDetails` and it does not error and does not leave the field empty: it
-tokenizes the observation's own `input`/`output` text and stores that, priced. A mutant renaming
+tokenizes the observation's own `input`/`output` text and stores that, priced. Renaming
 `usageDetails` to `usage` produced `{input: 5, output: 5, total: 10}` for a call that reported
-194/13/207 - and survived a check that only asserted `usageDetails` was non-empty. **Any assertion
-here must pin the values, not their presence.** `langfuse-v5-smoke.ts` does, and its
+194/13/207 - and passed a check that only asked whether `usageDetails` was non-empty. **Any check
+here must compare the values, not their presence.** `langfuse-v5-smoke.ts` does, and its
 `SMOKE_TOKENS` comment carries the reasoning.
 
 **The input buckets are DISJOINT and Langfuse sums them.** `input`, `input_cached_tokens` and
@@ -296,7 +295,7 @@ tokens came back as `$0.0012 + $0.00089 + $0.000175`. But the AI SDK's `usage.in
 **total including both cache buckets** - the uncached portion is
 `usage.inputTokenDetails.noCacheTokens`. Mapping `inputTokens` to `input`, which is the obvious
 reading of the field name, bills every cached token twice at two different rates: on the same
-fixture it reports $0.012855 against a true $0.003815, **3.4x over**. Nothing errors, no chart looks
+inputs it reports $0.012855 against a true $0.003815, **3.4x over**. Nothing errors, no chart looks
 broken, and the call with a ~75% cache hit rate is `generate` - the expensive one. `toAgentUsage()`
 owns this arithmetic for exactly that reason; pass the SDK's `usage` through whole and never pick
 fields off it at a call site.
@@ -335,7 +334,6 @@ day Path B lands. `AgentUsage` is the single definition.
   above the measured p99 of 40.7s, so it means "the distribution moved" and not "one run was
   slow". Until it exists, a latency regression has no alarm at all - the PostHog event is
   forensics, deliberately, and nobody watches it in real time.
-- **Nothing gates latency in CI.** The repo budgets `CLAUDE.md` bytes and LLM schema optional
-  fields, but not the two things that actually drive this: how many model round trips sit in
-  series, and how large the prompt is. A sixth verifier added in sequence would pass every
-  existing gate.
+- **Nothing gates latency in CI.** Nothing budgets the two things that actually drive it: how
+  many model round trips sit in series, and how large the prompt is. A sixth verifier added in
+  sequence would pass every existing gate.

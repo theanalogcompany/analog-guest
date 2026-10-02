@@ -1,13 +1,8 @@
 // TAC-476: the conversations dropdown's guest list, ordered by derived
 // activity.
 //
-// Extracted out of the page so the WIRING is testable, not just the sort.
-// `orderGuestsByActivity` had full unit coverage while the page's calls into
-// it had none: a mutant that ignored the RPC entirely, and one that asked for
-// the wrong venue, both passed the whole 4967-test suite. Reverting the page to
-// the old enrollment ordering would have been green. Same remedy the engine
-// got in this ticket and `heads-up-queue.ts` got in TAC-364 — capture the query
-// arguments, because a mock answers whatever it is asked.
+// Extracted out of the page so the wiring (RPC call, venue argument) lives in
+// one place apart from the sort.
 //
 // Degrade-gracefully, like the sibling loaders here: a failed read costs the
 // ordering, never the page.

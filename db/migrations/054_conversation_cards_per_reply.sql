@@ -264,9 +264,7 @@ comment on column messages.replaced_draft_at is
 -- both exist, so this build cannot fail (see the header).
 --
 -- The type list here and OBLIGATION_TYPES (lib/guests/commitment-expiry.ts)
--- MOVE TOGETHER: pending-slots.test.ts reads this file and fails if they
--- differ. The SQL cannot import the constant, so that test is the only thing
--- keeping the two in step.
+-- MOVE TOGETHER. The SQL cannot import the constant.
 create unique index idx_messages_one_pending_conversation_per_guest_reply
   on messages (
     venue_id,

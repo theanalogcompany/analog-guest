@@ -5,8 +5,8 @@ import type { VenueDetailMechanicRow } from '../../_lib/load-venue-detail'
 // table enumerates sections by naming specific fields; building one
 // component per named field means anything the table failed to name simply
 // never renders, and the page looks complete while quietly omitting things —
-// the exact failure the coverage-test principle in §2 exists to prevent,
-// applied here to the render path instead of the ticket prose.
+// the same failure §2 guards against in the ticket prose, here on the
+// render path.
 //
 // These two functions compute the complement of "what a named section
 // claims" structurally, so the venue page can render a visible catch-all
@@ -124,8 +124,7 @@ function isEmptyUnclaimedValue(value: unknown): boolean {
  * loader field with an actual value surfaces here automatically until
  * someone updates the claimed list, rather than silently never rendering.
  * The `satisfies` constraint above also means removing a field from the
- * loader without updating this list fails `tsc`, not just this function's
- * own tests.
+ * loader without updating this list fails `tsc`.
  */
 export function computeUnclaimedMechanicColumns(
   row: VenueDetailMechanicRow,

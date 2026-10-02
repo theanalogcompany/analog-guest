@@ -3,8 +3,8 @@
 // model reading a frequency word.
 //
 // Pure module: the only import is `import type`, fully erased at compile
-// time, so this loads in vitest with no SDK init (see CLAUDE.md "Module
-// split for testability"). Same shape as its sibling self-talk-detector.ts.
+// time, so this loads with no SDK init. Same shape as its sibling
+// self-talk-detector.ts.
 //
 // WHY CODE AND NOT A PROMPT RULE. Measured across every generated outbound
 // in the database, grouped by RESPONSE (coalesce(generation_id, id) — a
@@ -126,8 +126,8 @@ export type EmojiDirective = 'none' | 'allowed'
  * EMOJI_PROBABILITY); the caller renders no per-message block.
  *
  * `rng` is REQUIRED here and defaulted at the boundary instead — the same
- * split resolveDispatchBubbles uses, so this module stays pure and tests
- * can pin both branches without stubbing globals.
+ * split resolveDispatchBubbles uses, so this module stays pure and both
+ * branches can be pinned without stubbing globals.
  */
 export function resolveEmojiDirective(
   policy: BrandPersona['emojiPolicy'],

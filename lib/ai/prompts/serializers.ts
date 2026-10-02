@@ -1005,8 +1005,7 @@ function formatFollowupContext(
  * An earlier version of this comment claimed case was PRESERVED so a menu name
  * could never be handed back mis-cased. That was false in the direction that
  * matters: the mis-casing happens at extraction, before this function sees the
- * name, and seven tests pinned it only because their fixtures were capitalised
- * in a way production cannot produce. If guest-facing casing is worth fixing it
+ * name. If guest-facing casing is worth fixing it
  * is `extractItemNames`'s to fix, not this line's.
  *
  * The lowercase dedupe KEY below is therefore inert on production input and is
@@ -1582,9 +1581,7 @@ function formatMechanicEligibility(
 //
 //      DO NOT RESTORE IT IN ANY FORM. The same instruction lived in TAC-536's
 //      scan greeting (GUEST_ARRIVED_INSTRUCTIONS_NEW) and was deleted in the
-//      same ticket. serializers.test.ts pins the absence on THIS string, on both
-//      channels; categories/index.test.ts pins it on the scan greeting, on both
-//      of its variants. Two files, because the two strings live in two modules.
+//      same ticket. Neither string may carry it, on either channel.
 //
 //      The clause was conditional on the guest's own message not naming a
 //      person. Le Mil's prefill names the venue and not a person, so every
@@ -1625,11 +1622,9 @@ function formatMechanicEligibility(
 // and "Asking never changes what the reply is about ... the question is one
 // short line on its own, or not at all." The second of them was also the
 // deadlock sentence TAC-436 deleted from that paragraph, surviving here in
-// different words and so invisible to the canary guarding it. Consequence,
+// different words. Consequence,
 // ruled rather than inherited: a guest who scans AND asks something gets their
 // answer plus one short question, where the old opener held the question back.
-// serializers.test.ts carries a canary on this paragraph's own dropped
-// wording, since the existing one could not see it.
 //
 // Honest note on that rationale, because the measurement did not support it:
 // the deferral clause was expected to SUPPRESS the ask on a turn where the
@@ -1708,9 +1703,7 @@ export function firstTouchOpenerFor(channel: MessageChannel | null): string {
  * NO QUOTED QUESTION, deliberately and unlike most rules here. A worked example
  * is the thing a model reproduces verbatim, and an invented question is the
  * defect itself, so an example would model it. Same reasoning as
- * are_they_new_here's promptLine carrying none. serializers.test.ts pins this as
- * one contiguous literal, not fragments: a sentence can be reversed while every
- * asserted fragment survives.
+ * are_they_new_here's promptLine carrying none.
  */
 const FIRST_CONVERSATION_RESTRAINT = [
   'This is your first conversation with this guest. The reply itself asks',
@@ -1875,15 +1868,14 @@ function formatEmojiDirective(directive: EmojiDirective): string {
 
 // TAC-495: the first-touch signal line. Identical on both channels: it claims
 // no number and no texting, and "scanned" is presence language, out of scope by
-// ruling. Exported so tests can assert its absence by the real string rather
-// than a fragment that would stop matching the day it was reworded.
+// ruling.
 //
 // It is also what switches on R1's exception in SYSTEM_TEMPLATE, which applies
 // "when the context says this is the guest's first message after they scanned a
 // sign at the venue". Nothing structural links the two: the model matches them.
 // The opener's first sentence says the same thing, so R1 still fires where the
 // opener renders; on opt_out, comp_complaint and empty-intention turns this line
-// is the only trigger. compose-prompt.test.ts holds the pair together.
+// is the only trigger.
 export const FIRST_TOUCH_SIGNAL_LINE =
   "This is the guest's first message, sent after they scanned your venue's QR sign."
 
@@ -1892,8 +1884,7 @@ export const FIRST_TOUCH_SIGNAL_LINE =
  * defaults to null, the unknown channel, which gets the copy that asserts no
  * phone number: absence is the safe direction, which is what licenses a
  * default here (the TAC-362 emojiDirective rule). composePrompt is the only
- * production caller and always passes GenerateMessageInput.channel; a test pins
- * that it is the only one.
+ * production caller and always passes GenerateMessageInput.channel.
  */
 export function runtimeToProse(
   runtime: RuntimeContext,
@@ -1916,9 +1907,7 @@ export function runtimeToProse(
   // say about past visits", and this is those facts.
   //
   // The POSITION is a choice, not a measurement. TAC-519 found block order
-  // moves behaviour, and nothing has measured this one; the full-order test in
-  // serializers.test.ts exists so moving it is deliberate rather than
-  // accidental.
+  // moves behaviour, and nothing has measured this one.
   if (runtime.scanArrival) {
     blocks.push(formatScanArrival(runtime.scanArrival))
   }
@@ -1931,8 +1920,7 @@ export function runtimeToProse(
   // nothing needs to: they make different claims and neither contradicts the
   // other.
   //
-  // The POSITION is a choice, not a measurement, exactly as TAC-536's is. The
-  // full-order test in serializers.test.ts exists so moving it is deliberate.
+  // The POSITION is a choice, not a measurement, exactly as TAC-536's is.
   // TAC-568 removed the warm close's block from this slot. The close is no
   // longer generated at all: it is a fixed per-venue string
   // (`followup_rules.warm_close_text`) that the dispatch layer sends, so there

@@ -24,9 +24,8 @@
 // WHAT CAN CONTRADICT A ZERO, because a number nobody can contradict is not
 // evidence, and every bar here counts a BAD thing so a broken run reads clean:
 //
-//   - THE DETECTORS ARE DRIVEN FROM BOTH SIDES in the score file's tests, on the
-//     device transcript verbatim. That is where the real risk sits: a detector
-//     that cannot fire turns all three bars into decoration.
+//   - THE DETECTORS are where the real risk sits: a detector that cannot fire
+//     turns all three bars into decoration.
 //   - MEASURE_ARM=control runs the real derivation with isFirstConversation FALSE,
 //     which restores the pre-ticket eligibility AND drops the first-conversation
 //     restraint, on the same guest, venue and turn bodies. It produces off-target
@@ -46,13 +45,11 @@
 //         on turn 5, and only once all three allowed intentions have closed.
 //     So the control's off-target questions are mostly the model INVENTING them
 //     with no restraint to stop it, not suppressed intentions rendering. The
-//     eligibility half is carried by derive.test.ts, which drives one fixture with
-//     all eight open through both arms. This run does not test it and must not be
-//     read as if it did.
+//     eligibility half is not covered here and this run must not be read as if
+//     it were.
 //   - BAR 3 HAS NO IN-PROCESS CONTROL and this file says so rather than implying
 //     one: the opener is a compiled string constant, so an arm cannot restore it
-//     without editing the source. Its contrast is the mutation pass on the ticket
-//     (restoring the sentence fails nine tests across two files), not this run.
+//     without editing the source, so this run gives it no contrast.
 //
 // THE CONTROL IS NOT origin/main, precisely: both arms carry the new opener text
 // and the new two-question gate, because neither can be varied per turn. The
@@ -245,7 +242,7 @@ async function main(): Promise<void> {
       controlIs:
         'branch code with isFirstConversation=false in the derivation, so pre-ticket eligibility and no first-conversation restraint. NOT origin/main: both arms carry the new opener text and the new two-question gate, neither of which a boolean can vary.',
       bar3HasNoInProcessControl:
-        'the opener is a compiled constant; its contrast is the ticket mutation pass, not this run',
+        'the opener is a compiled constant, so this run has no in-process contrast for it',
     },
   })
 
@@ -436,7 +433,7 @@ async function main(): Promise<void> {
         // and FIRST_TOUCH_OPENER never entered the prompt at all. A zero for "the
         // opener says who they have reached" measured against a prompt with no
         // opener in it is the "can the fixture reach the code" failure that
-        // scripts/CLAUDE.md warns is the one an author's own mutation pass misses.
+        // scripts/CLAUDE.md warns about.
         //
         // This CONSTRUCTS THE POPULATION rather than overriding the flag:
         // firstTouchAfterQrScan is still derived by production's own predicate from

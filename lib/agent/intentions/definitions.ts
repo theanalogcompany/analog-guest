@@ -298,8 +298,6 @@ export interface IntentionDefinition {
    * first_contact), and `first_contact` also arms three of the five suppressed
    * ones, so there is no structural property to read this off. Nothing in
    * derive.ts branches on an intention's key; it reads this field.
-   * definitions.test.ts asserts that overlap rather than asserting the claim,
-   * so it cannot go stale silently.
    *
    * SUPPRESSION IS NOT CLOSURE, and it is applied in two places
    * (deriveOpenIntentions): the arming loop skips a suppressed intention, so no
@@ -358,7 +356,7 @@ export interface IntentionDefinition {
 // how long Sana still ASKS about one. Listening longer than asking is free;
 // asking as long as listening is the "catching up on a backlog" failure. Only
 // the inequality UNDERSTAND_ORDER_WINDOW_DAYS <= REPORTED_ORDER_WINDOW_DAYS is
-// asserted (derive.test.ts).
+// required.
 export const UNDERSTAND_ORDER_WINDOW_DAYS = 3
 
 // Event-armed intentions are perishable (TAC-380 ruling 3): "did you get the
@@ -397,9 +395,7 @@ const DEFINITIONS = {
     // FIRST IN LINE ONCE ACTIVE (TAC-558), and 15 rather than 5 deliberately.
     // It cannot co-occur with understand_order at priority 10: arming requires a
     // transaction, and a transaction satisfies understand_order through its own
-    // isSatisfied, so the two are mutually exclusive by construction. A test
-    // asserting this beats understand_order could therefore never fail in
-    // production, which is the antipattern the root CLAUDE.md keeps logging. 15
+    // isSatisfied, so the two are mutually exclusive by construction. 15
     // is first among everything it can actually meet (20 through 70) and records
     // the exclusion honestly; 5 would imply a race that cannot happen.
     priority: 15,
@@ -460,9 +456,7 @@ const DEFINITIONS = {
     // tested changes that. Rewording this line to chase phrasing variety is a
     // road already walked; the mechanism route is TAC-564's.
     //
-    // NO QUOTED EXAMPLE, which is enforced mechanically rather than by this
-    // comment - definitions.test.ts's "leaves every other promptLine a bare state
-    // with no worked example" asserts no double quote appears in any line but
+    // NO QUOTED EXAMPLE: no double quote appears in any promptLine but
     // learn_name's. Necessary and, as wording 2 showed, NOT sufficient against
     // verbatim repetition.
     //
@@ -562,8 +556,8 @@ const DEFINITIONS = {
     // STILL A STATE, NOT AN INSTRUCTION, which is this field's whole mechanism
     // (see promptLine's own docstring). "Asked at all" is load-bearing: it
     // shapes the FORM if the ask happens and says nothing about whether to ask,
-    // which remains entirely the restraint paragraph's call. Inverting it to
-    // "Ask their name" is a mutant definitions.test.ts kills.
+    // which remains entirely the restraint paragraph's call. Do not invert it
+    // to "Ask their name".
     promptLine:
       'You don\'t know this guest\'s name yet. Asked at all, it goes on the end as a light aside, always with something softening it in front, the way "by the way, what\'s your name?" reads. A bare "what\'s your name?" tacked onto a reply about something else is the one shape to avoid: without the softener in front of it, it reads as a demand rather than an aside.',
     classifierDescription: "asks the guest's name or what to call them",
@@ -608,7 +602,6 @@ const DEFINITIONS = {
     // the question — "since you're in most mornings" — when the model uses the
     // answer. No rewording saves a goal that is about frequency; one about time
     // of day ("see you in the morning") never produces a count to state.
-    // definitions.test.ts guards the wording.
     promptLine: "You don't know what time of day this guest tends to come by.",
     classifierDescription:
       'asks what time of day the guest usually comes by, such as mornings or afternoons',

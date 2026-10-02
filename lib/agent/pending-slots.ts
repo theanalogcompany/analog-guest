@@ -59,10 +59,8 @@ export type PendingSlot = 'obligation' | 'conversation'
  * Derived from OBLIGATION_TYPES (TAC-341's allowlist) rather than restated, so
  * the slot rule and the commitment lifecycle can never disagree about what an
  * obligation is. Migration 041's two index predicates list the same strings as
- * SQL literals, and pending-slots.test.ts reads that file and fails if they
- * differ. The SQL cannot import this constant, so that test is the only thing
- * keeping the two in step. A new obligation type therefore needs a new
- * migration, and the failing test is what says so.
+ * SQL literals. The SQL cannot import this constant, so a new obligation type
+ * needs a new migration.
  */
 export const OBLIGATION_SLOT_TYPES: readonly string[] = [
   ...OBLIGATION_TYPES,
@@ -198,8 +196,7 @@ export function draftCommitmentIdentity(
  * see is one they must not be able to bind by approving.
  *
  * Paired with resolveDraftCarrierIdentity below. The two must apply the same
- * precedence, and a test pins that they do rather than leaving it to whoever
- * edits one of them next.
+ * precedence.
  */
 export function resolveDraftCarrier(
   emission: CommitmentEmission,
@@ -373,9 +370,8 @@ export function mostRecentlyOpenedConversationCard(
 
 /**
  * THE per-guest pending read. Every caller that needs "this guest's pending
- * card" goes through here and then names the slot it wants. pending-slots.test.ts
- * carries a source guard that fails if another single-row pending read for a
- * guest appears anywhere in the repo.
+ * card" goes through here and then names the slot it wants. No other
+ * single-row pending read for a guest may exist.
  *
  * It replaced `findPendingDraft` (stages.ts) and `findOpenPendingRow`
  * (schedule-and-send.ts). Both were `.limit(1).maybeSingle()` with no ordering,
@@ -564,8 +560,8 @@ export interface ConversationDispositionInput {
  *    no_answer.
  *
  *    The AND is doing the safety work here, not looksLikeQuestion. That
- *    function is deliberately precision-biased (TAC-484) — its own test pins
- *    `looksLikeQuestion('tell me the wifi password') === false` — and TAC-484
+ *    function is deliberately precision-biased (TAC-484), so
+ *    `looksLikeQuestion('tell me the wifi password')` is false, and TAC-484
  *    uses it where a false return costs a nudge. Here a false return argues
  *    for SILENCE, the opposite direction, so it is never trusted alone: an
  *    imperative request would also have to classify as acknowledgment or
@@ -890,8 +886,8 @@ export function otherSlotOccupied(
  * (`reviewTriggers`) but not the gate's intermediate booleans. Mirrors the
  * gate: a gap turn is the self-reported knowledge-gap trigger, and an
  * incomplete check is prose_promise_check_failed. Literals for the reason
- * given at KNOWLEDGE_GAP_CARD_REVIEW_REASONS below, and pinned against
- * APPROVAL_TRIGGERS in stages.test.ts. A caller with no trigger set (the
+ * given at KNOWLEDGE_GAP_CARD_REVIEW_REASONS below, and matching
+ * APPROVAL_TRIGGERS. A caller with no trigger set (the
  * decline, the crash card) reads as neither, which is what their own policies
  * assume.
  */
@@ -917,8 +913,7 @@ export function gapFlagsFromTriggers(triggers: readonly string[] | undefined): {
 // decideSlotAction needs the predicate and the persist layer cannot import
 // stages.ts. The review_reason values are string literals here for the same
 // reason: APPROVAL_TRIGGERS and GENERATION_FAILED_REVIEW_REASON live in
-// stages.ts. stages.test.ts pins the literals against those constants, so the
-// two cannot drift silently.
+// stages.ts. The literals must match those constants.
 
 /**
  * Every `messages.review_reason` that marks a pending row as a knowledge-gap

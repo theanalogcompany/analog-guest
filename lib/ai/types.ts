@@ -186,10 +186,9 @@ export type RuntimeContext = {
   /**
    * UNBUILT SCAFFOLDING — nothing in production sets this (TAC-367).
    *
-   * Verified, not inferred: the only assignments anywhere are two fixtures in
-   * `serializers.test.ts`, so the `## Event being invited` block this feeds
-   * has never rendered to a guest. Its companion `FollowupTrigger` reason
-   * `'event'` is equally unreachable — `handleFollowup`'s only two production
+   * Verified, not inferred: nothing assigns it anywhere, so the
+   * `## Event being invited` block this feeds has never rendered to a guest.
+   * Its companion `FollowupTrigger` reason `'event'` is equally unreachable — `handleFollowup`'s only two production
    * callers hardcode `'manual'` (the Command Center button) or map through
    * `primaryReasonToTriggerReason`, a total switch that never returns
    * `'event'`.
@@ -380,12 +379,8 @@ export type RuntimeContext = {
   // `## Emojis` statement governing the turn unchanged — including `never`'s
   // absolute prohibition, which always renders. So absence can never ADD an
   // emoji where a venue forbade one; the compliance direction is safe by
-  // construction rather than by the type. Making it required would instead
-  // force a ~150-site mechanical edit across serializers.test.ts's 113
-  // runtimeToProse fixtures, which are the primary guard for prompt content
-  // — a worse risk than the one it removes. buildAiRuntime sets it for every
-  // policy that varies, and a test in stages.test.ts pins that for all three
-  // enum values so "always set" is guarded rather than assumed.
+  // construction rather than by the type. buildAiRuntime sets it for every
+  // policy that varies.
   emojiDirective?: EmojiDirective
   // TAC-324: true only when this is a qr_scan guest's first-ever inbound,
   // inside the R1 carve-out's freshness window. Lets the R1 exception in
@@ -599,7 +594,7 @@ export type GenerateMessageResult = {
   // REQUIRED rather than optional, deliberately, and it is why every
   // construction site of this type had to decide a value when it landed. An
   // optional field would let all of them default to "cancels nothing" in
-  // silence, which is exactly the fixture trap this repo keeps paying for:
+  // silence, which is exactly the silent-default trap this repo keeps paying for:
   // the paths that genuinely cancel nothing (crisis safety, the holding
   // fallback, the crash card) should SAY so rather than omit it.
   //

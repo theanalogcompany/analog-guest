@@ -14,7 +14,7 @@
  *
  * Env: LINEAR_API_KEY. Read here and never printed.
  *
- * All the logic is in lib/linear-cli.mjs, which the tests import. This file
+ * All the logic is in lib/linear-cli.mjs. This file
  * only wires it to the process. Uses nothing outside Node's standard library,
  * because the audit workflow runs it without installing dependencies.
  */

@@ -6,12 +6,9 @@ import type { MetaEntry } from './merge-scenario-sheet-pure'
 
 /**
  * TAC-347 Stage 1 (redesign). Sheet row <-> ScenarioSheetRow serialization,
- * split out from merge-scenario-sheet.ts so it stays vitest-safe: that file
- * imports @/lib/rag for embedText, which transitively imports the `voyageai`
- * SDK — a directory-style ESM import vitest's resolver can't follow (same
- * failure class CLAUDE.md documents for lib/tunables/manifest.test.ts).
- * Per the module-split-for-testability convention, the pure serialization
- * logic (no SDK deps) lives here; DB/SDK-touching orchestration stays in
+ * split out from merge-scenario-sheet.ts, which imports @/lib/rag for
+ * embedText and so pulls in the `voyageai` SDK. The pure serialization logic
+ * (no SDK deps) lives here; DB/SDK-touching orchestration stays in
  * merge-scenario-sheet.ts, which re-exports everything from this file.
  */
 

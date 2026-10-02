@@ -6,7 +6,7 @@
  *   node scripts/pending-question.mjs < candidates.json
  *
  * Run by the workflow's "Find tickets to work" step, never by a session. All
- * the logic is in lib/pending-question.mjs, which the tests import. This
+ * the logic is in lib/pending-question.mjs. This
  * file only wires it to the process — it needs no git or gh, since
  * everything it reads is the comment thread already fetched from Linear.
  * Uses nothing outside Node's standard library.

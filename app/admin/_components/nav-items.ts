@@ -3,7 +3,7 @@
 // (command-palette.tsx) so the two can never drift — the palette's jump
 // targets are exactly the sidebar's links. Pure data + a pure active-state
 // helper; no React, no icons (those live in the sidebar's React layer keyed by
-// href) so this module stays trivially unit-testable.
+// href) so this module stays pure.
 
 export interface NavItem {
   href: string

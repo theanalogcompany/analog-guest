@@ -34,7 +34,7 @@ export interface ExtractInput {
 
 /**
  * Pure prompt builder, split out from extractVenueSpec (TAC-331) so the
- * routing/mood rules below are unit-testable without a network call.
+ * routing/mood rules below need no network call.
  */
 export function buildExtractionSystemPrompt(fixtureMarkdown: string): string {
   return `You are extracting a venue specification document from raw inputs into a single markdown document.

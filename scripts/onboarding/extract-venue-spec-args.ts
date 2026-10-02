@@ -1,6 +1,6 @@
 // Pure CLI-argument parsing + the overwrite-guard decision for
 // scripts/extract-venue-spec.ts, split out (TAC-346) so both can be
-// unit-tested without importing the entry script itself. Importing the
+// reused without importing the entry script itself. Importing the
 // entry script directly would have required a main-module guard comparing
 // import.meta.url against process.argv[1] — that comparison is unreliable
 // on any path containing characters import.meta.url percent-encodes (this
@@ -57,7 +57,7 @@ export function parseArgs(argv: string[]): ParsedArgs | null {
 }
 
 /**
- * TAC-346 overwrite guard, pure so it's unit-testable without mocking Drive.
+ * TAC-346 overwrite guard, pure, with no Drive access.
  * Mirrors seed-venue's hard-refuse-on-existing pattern. --dry-run is exempt
  * (per CLAUDE.md: its whole documented purpose is testing an extraction
  * against a venue that already has a live 06-file without touching it), and

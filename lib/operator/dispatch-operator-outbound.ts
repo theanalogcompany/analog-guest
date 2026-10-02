@@ -51,10 +51,7 @@ import {
   settleFailedInstagramOperatorSend,
   stampInstagramOperatorSend,
 } from './dispatch-instagram-outbound'
-// TAC-385 PR 1: imported BY PATH, not through a barrel. record.ts pulls
-// classifyIntentionPrompts from @/lib/ai, and CLAUDE.md documents twice
-// (emoji-cadence, the verifier truncation codes) what a barrel mock
-// does to something a test needs for real.
+// TAC-385 PR 1: imported BY PATH, not through a barrel.
 import { parseRenderedIntentionsForRecording } from '@/lib/agent/intentions/rendered'
 import { recordIntentionPrompts } from '@/lib/agent/intentions/record'
 import { bearerAllowsVenue, type VenueScope } from '@/lib/auth/venue-scope'

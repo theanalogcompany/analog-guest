@@ -30,9 +30,8 @@
  * THE QUESTION SET IS A PARALLEL COPY of the Haiku prompt's semantics, worded
  * for Jev's criteria format - it is NOT extracted from `CLASSIFY_SYSTEM_PROMPT`,
  * because that string must stay byte-identical (a change there is a
- * `PROMPT_VERSION` bump and a repo-wide sweep). The drift guard is
- * `classify-message-jev.test.ts`, which asserts this module's category keys
- * exactly equal the Haiku schema's enum options. Versioned independently as
+ * `PROMPT_VERSION` bump and a repo-wide sweep). This module's category keys
+ * must exactly equal the Haiku schema's enum options. Versioned independently as
  * `CLASSIFY_JEV_PROMPT_VERSION` per the sibling-version rule in
  * `lib/ai/CLAUDE.md`; `ClassifyMessageResult.promptVersion` has no consumer
  * today (verified 2026-09-29 - `classifyStage` drops it), so carrying the Jev
@@ -102,8 +101,7 @@ export type ClassifierCategory = (typeof CLASSIFIER_CATEGORIES)[number]
 
 /**
  * One description per category, mirroring CLASSIFY_SYSTEM_PROMPT's semantics.
- * `satisfies` makes a missing or extra key a tsc error; the test pins the key
- * set against the Haiku schema so the two cannot drift apart silently.
+ * `satisfies` makes a missing or extra key a tsc error.
  */
 export const JEV_CATEGORY_CRITERIA = {
   reply:

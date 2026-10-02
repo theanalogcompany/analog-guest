@@ -1,8 +1,8 @@
 // TAC-560: the timing rules behind the warm "line is open" close.
 //
 // Pure, split from the DB layer the way scan-arrival.ts and looks-like-question.ts
-// are: every constant here decides something guest-facing, and a test should be
-// able to drive the boundary without a database.
+// are: every constant here decides something guest-facing, and the boundary
+// should be drivable without a database.
 //
 // THE SHAPE OF THE FLOW, so the constants read as one rule rather than three
 // numbers (ruled 2026-09-29):

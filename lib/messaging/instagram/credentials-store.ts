@@ -2,8 +2,7 @@
 // deciding which token a given venue sends with.
 //
 // WHY THIS IS NOT IN send-target.ts. `send-target` is one of four guarded
-// INSTAGRAM_OUTBOUND_MODULES (window-import-guard.test.ts): only the two
-// Instagram dispatch arms may import it from outside this folder, because
+// outbound modules: only the two Instagram dispatch arms may import it from outside this folder, because
 // Instagram's outbound constraints must never reach the SMS path. The connect
 // route, the OAuth callback, the refresh cron and the operator venue endpoint
 // all need credentials and none of them is an outbound arm, so putting the
@@ -60,7 +59,7 @@ export type LoadInstagramCredentialResult =
 /**
  * The one token-bearing env var, read at call time and never at module load
  * (CI defines none of the Meta vars). Moved here from send-target.ts, which
- * re-exports it so its existing callers and tests are unchanged.
+ * re-exports it so its existing callers are unchanged.
  */
 export function readInstagramAccessToken(
   env: NodeJS.ProcessEnv = process.env,

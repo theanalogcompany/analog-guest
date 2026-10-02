@@ -13,7 +13,7 @@
 //
 // .github/workflows/ci.yml sets ZERO APNS_* vars, and its env block comments
 // that the codebase "reads env vars lazily inside functions (not at module
-// load)". A module-init throw would crash `tsc`, `vitest`, and `next build`
+// load)". A module-init throw would crash `tsc` and `next build`
 // on the very next PR, and the only way to satisfy it in CI would be to
 // commit a real PKCS#8 key to a workflow file. So validation runs at first
 // call (sendApnsRequest) where it fails loudly into the [apns] logs and the
@@ -105,10 +105,10 @@ export const TRANSPORT_APNS_VARS = ['APNS_BUNDLE_ID', 'APNS_ENV'] as const
 
 /**
  * Validates APNs env shape. Pure — reads the passed object (defaults to
- * process.env) at call time so tests and the health page can pass a stub.
+ * process.env) at call time so the health page can pass its own.
  *
  * `vars` scopes the check to one layer's own variables. This matters: the
- * client mocks getApnsJwt in its tests and genuinely does not use the signing
+ * client genuinely does not use the signing
  * key, so validating the full set inside sendApnsRequest would couple the
  * transport layer to credentials it never touches. Each layer validates what
  * it owns; the health page validates all five.

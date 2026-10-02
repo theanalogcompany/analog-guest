@@ -1,5 +1,5 @@
-// Pure helpers for classify-critique. Split out so tests can load the
-// prompt builder + schema without dragging the AI SDK / Anthropic client
+// Pure helpers for classify-critique. Split out so the prompt builder +
+// schema load without dragging the AI SDK / Anthropic client
 // init through module load.
 //
 // Sonnet decides whether the operator's critique is a one-shot correction

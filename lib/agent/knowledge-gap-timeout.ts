@@ -62,7 +62,7 @@ import { loadInboundQuestion } from './pending-question'
  * behaviour means reverting that too. Mirrors
  * lib/messaging/instagram/agent-gate.ts's INSTAGRAM_AGENT_REPLIES_ENABLED
  * shape: a named constant plus an `enabled` parameter on the function it
- * gates, so tests can still exercise the send path explicitly without
+ * gates, so the send path can still be exercised explicitly without
  * flipping the default for production.
  */
 export const KNOWLEDGE_GAP_HOLDING_MESSAGE_ENABLED: boolean = false
@@ -121,7 +121,7 @@ interface PendingQuestionRow {
  * currently false). When disabled, this returns the all-zero summary
  * immediately — no scan, no claim, no clock clearing, no DB access at all.
  * `/api/cron/pending-timeout` calls this with no second argument and needs no
- * change; a test that wants to exercise the send path passes `true`
+ * change; a caller that wants to exercise the send path passes `true`
  * explicitly.
  */
 export async function processDueKnowledgeGaps(

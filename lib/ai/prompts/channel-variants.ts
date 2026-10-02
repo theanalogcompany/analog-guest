@@ -8,7 +8,7 @@
 //
 // Every substitution's `from` must occur exactly once in the text it applies
 // to, or applyChannelSubstitutions throws. The callers apply their tables at
-// module load, so a miss fails every test that imports the module. That is the
+// module load, so a miss fails every importer of the module. That is the
 // point: edit an SMS phrase that has an Instagram twin and the import breaks at
 // the exact phrase, forcing a decision about the other channel rather than
 // letting the two drift apart silently. It is safe to throw at load here, where
@@ -16,10 +16,8 @@
 // constants: identical in CI and in production, so if CI passes, production
 // does too.
 //
-// Scope is deliberately narrow. Adding a substitution anywhere means the scope
-// guards in system-template.test.ts and serializers.test.ts fail until someone
-// updates them on purpose. Those guards are the brake on "everything could now
-// vary by channel".
+// Scope is deliberately narrow. Adding a substitution anywhere is a deliberate
+// act, the brake on "everything could now vary by channel".
 import type { MessageChannel } from '@/lib/schemas/message-channel'
 
 export type ChannelSubstitution = {

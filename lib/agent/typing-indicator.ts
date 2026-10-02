@@ -7,8 +7,8 @@
 // it has one.
 //
 // IT EXISTS SO handle-inbound.ts NEVER IMPORTS AN INSTAGRAM MODULE. The inbound
-// orchestrator serves both channels, and window-import-guard.test.ts keeps
-// Instagram's outbound modules off the shared and SMS paths. Without this
+// orchestrator serves both channels, and Instagram's outbound modules stay off
+// the shared and SMS paths. Without this
 // seam, honouring the ticket would have meant adding handle-inbound.ts itself
 // to that allow-list — which is exactly the coupling the guard exists to
 // prevent. One file is on the list instead, and it is a switch that routes
@@ -62,10 +62,8 @@ export interface TypingIndicatorTarget {
 }
 
 /**
- * Injected so a test asserts on the calls this makes rather than on a mock's
- * opinion of them — `dispatch-instagram-reply.ts`'s shape. In particular
- * `loadTarget` records WHICH venue and guest were asked about, which is the
- * thing a stub that ignored its arguments would let a call site get wrong.
+ * Injected, in `dispatch-instagram-reply.ts`'s shape. In particular
+ * `loadTarget` is told WHICH venue and guest are asked about.
  */
 export interface TypingIndicatorDeps {
   loadTarget: (input: {

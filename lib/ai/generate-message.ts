@@ -161,10 +161,8 @@ function unverifiedUrlConstraint(urls: readonly string[]): string {
   return `Constraint: ${quoted} ${isAre} the venue has approved, and must not appear in your reply. Use only a link from the "## Links" section, copied exactly as written there, or no link at all. Do not guess a web address and do not build one from a pattern.`
 }
 
-// Exported for the TAC-300 CI guardrail in lib/ai/schema-budget.test.ts —
-// the test walks this schema's tree counting ZodOptional wrappers and fails
-// CI if the count breaches OPTIONAL_FIELD_BUDGET. No other call sites; the
-// generation pipeline uses the schema directly via the `schema:` arg below.
+// Exported for the measurement scripts; the generation pipeline uses the
+// schema directly via the `schema:` arg below.
 export const GeneratedMessageSchema = z.object({
   body: z.string().min(1),
   // v1.80.0 schema diet: `voiceFidelity` and `reasoning` used to sit here.
@@ -249,7 +247,7 @@ export const GeneratedMessageSchema = z.object({
   // A BARE REQUIRED STRING rather than a nested optional object, for the reason
   // knowledgeGap is a bare required boolean: Anthropic counts only optionals
   // against the 24-property cap, this schema sits at exactly 20 against a repo
-  // budget of 22 (lib/ai/schema-budget.test.ts), and a nested
+  // budget of 22, and a nested
   // `{ commitmentId?: string }` would cost 2 and land on the budget line.
   // The sentinel is '' and the schema does not police it; resolveCancellation
   // does, against the guest's own rendered list.
@@ -266,7 +264,7 @@ export const GeneratedMessageSchema = z.object({
   //
   // A BARE REQUIRED BOOLEAN, for the reason knowledgeGap is: Anthropic counts
   // only optionals against the 24-property cap, this schema sits at exactly 20
-  // against a repo budget of 22 (lib/ai/schema-budget.test.ts), and a required
+  // against a repo budget of 22, and a required
   // field costs nothing there.
   //
   // WHAT IT IS FOR. The close is once per guest EVER, from either path, and the
@@ -305,7 +303,7 @@ export const GeneratedMessageSchema = z.object({
   //
   // A BARE REQUIRED STRING, the cancelsCommitmentId reasoning verbatim:
   // Anthropic counts only optionals against the 24-property cap, this schema
-  // sits at 20 against a repo budget of 22 (lib/ai/schema-budget.test.ts), and
+  // sits at 20 against a repo budget of 22, and
   // a required string costs zero.
   intentionQuestion: z.string(),
 })
@@ -819,8 +817,7 @@ export async function generateMessage(
         // consumes, so the orchestrator can price the `generate` generation
         // without reassembling them. cacheReadTokens/cacheWriteTokens above stay
         // because the prompt-cache accounting in the span's output object is
-        // documented and queried; these two representations must agree, and
-        // generate-message.test.ts asserts they do.
+        // documented and queried; these two representations must agree.
         modelId: servedModelId,
         usage: {
           inputTokens: uncachedInputTokens + cacheReadTokens + cacheWriteTokens,

@@ -20,9 +20,7 @@
 //
 // The value must match migration 056's `messages_review_state_check`, which is
 // the only thing that can actually reject a wrong one. SQL cannot import this
-// constant, so `review-state.test.ts` reads the migration and binds the two —
-// the same technique `pending-slots.test.ts` uses on migration 054's index and
-// `reached-guest-condition.test.ts` uses on migrations 043/044.
+// constant, so the two must be kept equal by hand.
 
 /**
  * A pending draft the guest was answered on, outside the operator app: either

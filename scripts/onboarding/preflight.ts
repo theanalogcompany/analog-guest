@@ -26,7 +26,6 @@ import { diffGuardrailState, type GuardrailCounts } from './preflight-pure'
  * "Any notification records": there's no dedicated notifications table in
  * this schema (APNs tokens live on operators, push delivery is logged to
  * PostHog only) — resolves to "N/A, no table to count," backed instead by
- * the import-boundary test (evaluate-approval-decision.test.ts) plus
  * credential-clearing below.
  */
 
@@ -55,10 +54,9 @@ const CREDENTIAL_ENV_VARS = [
  * does NOT throw — it fails soft ({ok:false}, logged, swallowed), matching
  * production's fire-and-forget posture. This function's real guarantee is
  * "nothing is actually delivered," not "the harness crashes loudly." The
- * loud-failure signal for an accidental call comes from the import-boundary
- * test (evaluate-approval-decision.test.ts), which prevents the call from
- * existing at all — this is defense-in-depth on top of that, not a
- * standalone detector.
+ * loud-failure signal for an accidental call is that evaluate-approval-decision.ts
+ * keeps the dispatch surface out of the harness entirely - this is
+ * defense-in-depth on top of that, not a standalone detector.
  */
 export function clearMessagingCredentials(): void {
   for (const key of CREDENTIAL_ENV_VARS) {

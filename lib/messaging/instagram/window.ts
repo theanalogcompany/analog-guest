@@ -12,7 +12,7 @@
 // they are operator tasks, not sends.
 //
 // Instagram-only. SMS has no window, and nothing outside the Instagram arms may
-// import this module (window-import-guard.test.ts enforces it). Putting it in
+// import this module. Putting it in
 // shared code and making SMS "always open" is the shortcut TAC-469 forbids.
 //
 // THE CLOCK IS META'S. The window runs from `provider_sent_at`, the

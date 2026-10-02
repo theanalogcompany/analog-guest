@@ -60,7 +60,7 @@ function escapeRe(s: string): string {
  *
  * `\b` alone is not enough on the LEFT for a name that starts with a
  * non-word character, and no such name is expected; it is used because it is
- * correct for every name that is a plain word, which the guard below enforces.
+ * correct for every name that is a plain word.
  */
 export function countNameUses(
   body: string,

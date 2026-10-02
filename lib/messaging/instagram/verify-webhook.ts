@@ -1,6 +1,6 @@
 // Instagram (Meta) webhook verification. Both helpers are pure — the secret is
-// passed in rather than read from env — so they're unit-testable with known
-// vectors; the route reads the env vars and passes them. Mirrors
+// passed in rather than read from env; the route reads the env vars and
+// passes them. Mirrors
 // lib/pos/square/verify-webhook.ts, which is the repo's HMAC precedent.
 //
 // NOT lib/messaging/verify-webhook.ts: that one is Sendblue's, and Sendblue

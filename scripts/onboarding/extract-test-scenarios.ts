@@ -1,9 +1,8 @@
 import { anthropic } from '@ai-sdk/anthropic'
 import { generateObject } from 'ai'
 import { z } from 'zod'
-// Relative import: @/* doesn't resolve when vitest loads this module via the
-// test file. lib/recognition/types is leaf code (no DB deps); safe to import
-// directly. Per the module-split-for-testability convention in CLAUDE.md.
+// Relative import: lib/recognition/types is leaf code (no DB deps); safe to
+// import directly.
 import { GUEST_STATES, type GuestState } from '../../lib/recognition/types'
 import type { Scenario } from './scenario-schema'
 

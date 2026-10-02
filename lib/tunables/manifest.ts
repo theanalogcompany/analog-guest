@@ -80,8 +80,7 @@ export interface Tunable {
 
 export const TUNABLES = [
   // ---------------------------------------------------------------------------
-  // agent_runtime (count asserted in manifest.test.ts, not here)
-  // ---------------------------------------------------------------------------
+  // agent_runtime  // ---------------------------------------------------------------------------
   {
     name: 'agent_latency_high_threshold_ms_inbound',
     value: AGENT_LATENCY_HIGH_THRESHOLD_MS.inbound,
@@ -277,8 +276,7 @@ export const TUNABLES = [
   },
 
   // ---------------------------------------------------------------------------
-  // retrieval (count asserted in manifest.test.ts, not here)
-  // ---------------------------------------------------------------------------
+  // retrieval  // ---------------------------------------------------------------------------
   {
     name: 'default_limit',
     value: DEFAULT_LIMIT,

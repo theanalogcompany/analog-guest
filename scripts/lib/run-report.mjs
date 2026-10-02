@@ -19,8 +19,7 @@
  * What reached GitHub is read from the runner's own git refs after the
  * session. `git push` updates refs/remotes/origin/<branch> only when the push
  * succeeds, and the checkout fetched every branch at the start, so a
- * branch pushed by an earlier run is there too. No network call is needed,
- * which keeps this testable with a fake `git`.
+ * branch pushed by an earlier run is there too. No network call is needed.
  *
  * No I/O at module load, and none outside `run`'s injected dependencies. The
  * workflow runs it from a shell step, never from the session, so no allowlist

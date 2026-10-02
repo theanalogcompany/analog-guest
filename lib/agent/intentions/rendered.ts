@@ -1,10 +1,5 @@
-// BY PATH, not through the @/lib/schemas barrel. dispatch-operator-outbound.test.ts
-// factory-mocks that barrel for PendingCommitmentSchema, and under such a mock a
-// barrel import here throws "No parseRenderedIntentions export is defined on the
-// mock". That throw would land at the dispatch call site, which is SYNCHRONOUS and
-// after the guest has already received the message — turning a successful send
-// into a 500 on the operator's approve. Same reasoning as record.ts's own
-// by-path import one hop away; the hazard does not stop at the first hop.
+// BY PATH, not through the @/lib/schemas barrel. Same reasoning as record.ts's
+// own by-path import one hop away.
 import {
   parseRenderedIntentions,
   type RenderedIntention,

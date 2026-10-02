@@ -2,9 +2,9 @@
 
 <!-- What changes and why. Link the Linear ticket (THE-XXX / TAC-XXX); docs-only PRs may have none. -->
 
-## Testing
+## Verification
 
-<!-- How this was verified: `npx tsc --noEmit`, `npm run lint`, `npx vitest run` results, manual QA. -->
+<!-- How this was verified: `npx tsc --noEmit`, `npm run lint`, `npm run build` results, and what to try by hand. There are no automated tests in this repo. -->
 
 ## Deployment notes
 

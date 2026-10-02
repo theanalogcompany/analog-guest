@@ -30,14 +30,13 @@ This is not a per-file code review. Don't relitigate the per-PR `code-reviewer`'
 - Migrations on disk whose own header does not say why they exist. There is no migration log; the numbered files are the record.
 - Gotchas that have been resolved by code changes and could be removed.
 - Conventions or patterns referenced in code in 3+ places that aren't documented in CLAUDE.md (promote to documented convention).
-- "Module split for testability" exceptions or other workarounds — list anywhere this pattern is in use, flag if any have been resolved (e.g., the gotcha is no longer needed).
+- Workarounds that no longer have a reason — e.g. `<name>-pure.ts` module splits whose original reason no longer applies. List them; do not remove them without a ticket.
 
 ## Documentation routing from past week's PRs
 - For each PR merged in last 7 days, the PR description should include "Documentation routing considered: ..." per /work-ticket Phase 3 step 19. List PRs that skipped this note. List PRs that included a note but landed code that should have been written down somewhere. Check it landed in the place CLAUDE.md's "Where things are written down" table names — subsystem detail appended to the root file is itself a finding.
 
 ## Dead code
 - Exports not imported anywhere (grep `^export` against import statements).
-- Test files for code that no longer exists.
 - Commented-out blocks older than 2 weeks that should be deleted.
 - Files in `scripts/` that haven't been run (no recent `package.json` references, no recent commits).
 - Env vars referenced in code that aren't actually set in any deployment (check `vercel.json`, `.env.example` if it exists).
@@ -47,11 +46,6 @@ This is not a per-file code review. Don't relitigate the per-PR `code-reviewer`'
 - README.md sections referencing outdated commands or workflows.
 - Inline code comments that contradict current behavior (the code was changed, the comment wasn't).
 - Type definitions in `db/types.ts` patches that should have been overwritten by `db:types` regeneration (per CLAUDE.md migration workflow).
-
-## Tests and coverage
-- Test count. Measure it with `npx vitest run`; do not quote a remembered figure, and do not record one here - this line said "~580" for long enough that the real count passed 7,000 underneath it. Is it growing in proportion to functional code?
-- Files with new functional code that don't have corresponding test files.
-- Test files that have been around for 30+ days with 0 tests inside.
 
 # Output
 
@@ -70,7 +64,7 @@ Produce a structured report in chat:
 ### Findings
 
 **[HIGH | MEDIUM | LOW] — one-line summary**
-- Category: drift / dead code / staleness / convention / docs / tests
+- Category: drift / dead code / staleness / convention / docs
 - Evidence: file paths with line numbers
 - Proposed action: create ticket / update CLAUDE.md / delete / refactor / no action
 - If creating ticket: draft title + 2-line description

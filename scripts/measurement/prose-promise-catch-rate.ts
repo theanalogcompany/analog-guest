@@ -32,8 +32,7 @@
 //
 // NOT COVERED HERE, deliberately: the fail-closed branch. A replay against a
 // live model produces `check_failed` only by accident, and a count of zero
-// would say nothing about it. It is exercised by injected faults in
-// lib/agent/stages.test.ts instead.
+// would say nothing about it.
 //
 // PRODUCTION BODIES ARE NOT IN THE FIXTURE AND MUST NEVER BE ADDED — this
 // repo is public. The R pass of the original measurement read production

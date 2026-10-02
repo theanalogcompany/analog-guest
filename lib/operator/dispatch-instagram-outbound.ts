@@ -3,7 +3,7 @@
 // dispatchOperatorOutbound switches on the card's own channel; this is what it
 // calls for an Instagram card. The text arm is untouched and knows nothing of
 // this file. Kept apart so the window, the byte cap and the Send API are
-// imported by an Instagram arm only (window-import-guard.test.ts).
+// imported by an Instagram arm only.
 //
 // An approved card is a reply the agent wrote to something the guest said, so
 // it is allowed on Instagram while the window is open. The card may have sat

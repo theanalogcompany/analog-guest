@@ -1,7 +1,6 @@
 // TAC-516: the two pages the Instagram callback can render.
 //
-// Split from the route so the copy is testable without exercising the whole
-// OAuth flow, and so there is exactly one place that builds HTML — a second
+// Split from the route so there is exactly one place that builds HTML — a second
 // one is how a token eventually reaches a page.
 //
 // NOTHING INTERPOLATED HERE IS ATTACKER-CONTROLLED OR SECRET. The failure

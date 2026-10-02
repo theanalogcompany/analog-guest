@@ -164,7 +164,7 @@ import {
 // (after the recommend-other-places rule, before the greeting rule), so it is
 // R11 in the curated UNIVERSAL_RULES_DISPLAY + the onboarding fixture table;
 // the trailing greeting / operator-instruction / Last-Visit guidance bullets
-// shift to R12 / R13 / R14 in the system-template.test.ts describe labels. No
+// shift to R12 / R13 / R14. No
 // schema change, no regex backstop (positive rule, not a banlist).
 
 // v1.23.0: widens the resource-commitment gates from MONETARY framing to
@@ -278,8 +278,8 @@ import {
 // THE DELIMITER IS A DUAL SOURCE OF TRUTH with BUBBLE_DELIMITER in
 // lib/agent/split-message.ts. If the string here and the pattern there ever
 // disagree, every split reply ships the literal token into a guest's thread.
-// system-template.test.ts asserts the token's presence here; split-message.ts
-// owns the (deliberately near-miss-tolerant) matcher. Change neither alone.
+// split-message.ts owns the (deliberately near-miss-tolerant) matcher. Change
+// neither alone.
 //
 // R12 also carries the reconciliation against per-venue `lengthGuide`, which
 // commonly says "default to one sentence" and would otherwise fight the rule
@@ -323,8 +323,7 @@ import {
 // the nearby-places carve-out lived only in venue data that renders earlier
 // and loses.
 //
-// GOVERNING PRINCIPLE (enforced by the forbidden-pattern test in
-// categories/index.test.ts): a category instruction block governs what the
+// GOVERNING PRINCIPLE: a category instruction block governs what the
 // turn is ABOUT — topic, intent, relevant content. It may not prescribe
 // message structure, length, sentence count, splitting, hedging policy, or
 // disclosure policy. Those belong here, in the universal layer.
@@ -601,7 +600,7 @@ import {
 // "On the venue's behalf" is now a banned framing repo-wide for this
 // identity fact (grep before reintroducing it anywhere prompt text
 // describes who is speaking). Verification is manual UAT at Mock Sextant,
-// not a new test mechanism — this is a wording fix.
+// this is a wording fix.
 //
 // v1.40.0 (TAC-340): the `# Arrival capture` guest-utterance example list
 // named "see you then" and "sounds good — see you tomorrow" as things a
@@ -679,9 +678,8 @@ import {
 // messages — texts don't carry signatures, and at least one venue needed a
 // manual rule to undo this. And the Voices Rules-tab display
 // (UNIVERSAL_RULES_DISPLAY) is resynced to every universal rule via an
-// explicit displayed/undisplayed classification test, replacing the
-// informal "we do NOT assert display-count === template-bullet-count"
-// comment with an enforced CI guard.
+// explicit displayed/undisplayed classification, replacing the informal
+// "we do NOT assert display-count === template-bullet-count" comment.
 //
 // v1.43.0 (TAC-356): three more universal rules mined the same way TAC-348
 // mined R23-R28 — misfiled as venue-specific on Mock Sextant when they're
@@ -931,8 +929,7 @@ import {
 // entirely. The comment asserted a safety the code did not have, in the
 // function that cited the existing DST lesson. computeCalendar now resolves
 // the venue-local date once and does pure Date.UTC calendar arithmetic,
-// formatted in UTC so no zone can shift a date-only label. The skipped-day
-// case is a named regression test.
+// formatted in UTC so no zone can shift a date-only label.
 //
 // THE CALENDAR CREATES ONE FAILURE MODE OF ITS OWN, and the out-of-window
 // clause had to grow to close it. A lookup table is also a source of
@@ -949,7 +946,6 @@ import {
 // is the finding worth carrying further than this ticket. A whole new line
 // entered `## Right now` and no test failed, because the block was only ever
 // checked by substring and by ordering, and computeToday had no tests at all.
-// Both are now fixed: the block is pinned whole.
 //
 // v1.61.0 (TAC-520): a new R36. Don't name the year, and when the venue's
 // notes give a month with no day, say the date is not set rather than naming
@@ -1008,8 +1004,7 @@ import {
 // TAC-522 is the other half, deliberately separated: give the model the
 // calendar in ## Right now so a weekday becomes a lookup rather than a
 // calculation, then restore these clauses and re-measure. Do not restore them
-// without it. There are canaries in system-template.test.ts on both deleted
-// clauses so they cannot come back quietly.
+// without it.
 //
 // THE WORKED EXAMPLE IS GONE TOO, AND IT FAILED TWICE IN TWO DIFFERENT WAYS.
 // It read: a line reading "planned for September 2026" is the venue telling
@@ -1030,9 +1025,8 @@ import {
 // clean and the sentence was carrying no weight the two remaining clauses do
 // not carry, so it was cut rather than reworded a third time.
 //
-// A CANARY in system-template.test.ts now forbids any month name or any
-// four-digit year inside this rule's body. A worked example here has to be
-// abstract or not exist.
+// No month name or four-digit year may appear inside this rule's body. A
+// worked example here has to be abstract or not exist.
 //
 // Two further decisions, ruled 2026-09-22:
 //
@@ -1086,7 +1080,7 @@ import {
 // Both clauses that followed the old question are gone, because the paragraph
 // beneath now says both. The second was also the deadlock sentence v1.51.0
 // deleted from that paragraph, surviving here in different words and so
-// invisible to the canary guarding it. Consequence, ruled rather than
+// words. Consequence, ruled rather than
 // inherited: a guest who scans AND asks something now gets their answer plus
 // one short question.
 //
@@ -1250,8 +1244,7 @@ import {
 // because the other channel is the one to name.
 //
 // Presence language (scanned, at pickup, on-site) is identical on both channels
-// by ruling, and the scope guard in system-template.test.ts holds the variants
-// to differing only in the rules listed there.
+// by ruling, and the variants differ only in the rules listed there.
 //
 // The channel comes from the conversation, never a venue setting
 // (lib/agent/conversation-channel.ts). An unknown channel gets the Instagram
@@ -1480,7 +1473,7 @@ import {
 // `cacheableSystemPrefix` / `volatileSystemSuffix`, applied in
 // generate-message.ts).
 //
-// NOTHING IN THE TEXT CHANGED. The bytes are identical and a test asserts it:
+// NOTHING IN THE TEXT CHANGED. The bytes are identical:
 // `systemPrompt === `${cacheableSystemPrefix}\n\n${volatileSystemSuffix}``
 // holds for every category, and the voice-fidelity instruction stays last
 // where it has always been. What moved is the ENVELOPE — one system text
@@ -1761,9 +1754,7 @@ import {
 //   GUEST_ARRIVED_INSTRUCTIONS_NEW. TAC-541 had already cut its override half
 //   after it produced "I'm Himanshu" on a live scan; this is the rest of it. The
 //   ruling is that the instruction is pointless rather than mis-worded, since the
-//   guest chose the venue a second earlier. Both openers carry a canary wider
-//   than the deleted wording, because a reworded revival would pass a
-//   literal-revert check.
+//   guest chose the venue a second earlier.
 //
 //   THE INTENTIONS BLOCK GAINS A FIRST-CONVERSATION RESTRAINT, rendered only
 //   while RuntimeContext.firstConversation is true and placed last in the
@@ -1816,7 +1807,7 @@ import {
 //   branch waited on rulings. Same contention the two entries below record, and
 //   the fourth time in this window. THE SWEEP WAS RE-RUN FROM SCRATCH at the
 //   renumber rather than carried, per TAC-555's own note: main's bump had
-//   already moved some fixture sites and added others, so a carried hit count
+//   already moved some sites and added others, so a carried hit count
 //   would have silently omitted the new ones.
 // v1.74.0 (TAC-558): a new intention, are_they_new_here, asking whether a guest
 //   is on their first visit once their order is on record, plus the
@@ -2053,7 +2044,7 @@ import {
 // concurrently open prompt tickets rather than one branch being slow.
 //
 // THE SWEEP WAS RE-RUN FROM SCRATCH AT EVERY BUMP, never carried, and that is
-// the only reason the fixture set is right: the hit count differed on each pass
+// the only reason the sweep is right: the hit count differed on each pass
 // because main's own bumps had already moved some sites and added others. A
 // carried count silently omits the new ones, which is the expensive direction.
 //
@@ -2325,8 +2316,7 @@ You may see two retrieval sections in the system prompt: "Examples of how the ve
 // that is safe and wanted). The lines they touch: the opening line, the
 // "would actually text" register line, the plain-text rule, the heads-up
 // examples, R1, R5 and R32. Adding a row here is adding channel-specific copy:
-// the scope guard in system-template.test.ts fails until it is updated on
-// purpose. Wording approved on the ticket, 2026-09-19.
+// do it on purpose. Wording approved on the ticket, 2026-09-19.
 const SYSTEM_TEMPLATE_CHANNEL_SUBSTITUTIONS = {
   text: [],
   instagram: [

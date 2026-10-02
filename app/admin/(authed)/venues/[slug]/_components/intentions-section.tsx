@@ -26,8 +26,7 @@ import { formatAge } from '../../_lib/commitment-display'
 // misreport both.
 //
 // Every definition string is READ from INTENTION_DEFINITIONS via
-// resolveDefinition, never pasted. no-copied-strings.test.ts enforces that at
-// the source level across both this surface and the intentions page.
+// resolveDefinition, never pasted.
 
 function OpenIntentionsBlock({
   openIntentions,

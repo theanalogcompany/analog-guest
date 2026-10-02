@@ -158,9 +158,8 @@ function pickPrimaryReason(
   }
   // Unreachable in practice: pickPrimaryReason is only called when
   // reasons.length >= 1 AND every EngineFollowupReason value is enumerated
-  // in PRIMARY_REASON_PRIORITY (locked by exhaustiveness — a new reason
-  // landing in the union without being added here will fail the priority-
-  // coverage assertion in detectors.test.ts). Throw rather than return
+  // in PRIMARY_REASON_PRIORITY (a new reason landing in the union must be
+  // added here). Throw rather than return
   // `reasons[0] | undefined` so the type signature stays honest.
   throw new Error(
     `pickPrimaryReason: no priority match for reasons=${JSON.stringify(reasons)} — extend PRIMARY_REASON_PRIORITY?`,
@@ -280,9 +279,7 @@ export async function processDueFollowups(
   const venuesResult = await supabase.from('venues').select(
     // TAC-529: status and both channel columns. Dropping any of them from
     // this string makes the corresponding gate read `undefined` and go
-    // inert, which no behavioural test can see because the test double
-    // ignores its select argument — engine.test.ts captures this string for
-    // exactly that reason.
+    // inert.
     'id, timezone, status, messaging_phone_number, instagram_account_id, venue_configs(followup_rules, messaging_cadence)',
   )
   if (venuesResult.error || !venuesResult.data) {
@@ -456,7 +453,7 @@ function parseMessagingCadence(value: unknown): MessagingCadence {
  *
  * So at a venue with weekly_cap raised above 1, an anniversary-crossing day
  * can produce two post-visit follow-ups where `===` made that impossible. With
- * the default cap it cannot, and there is a test for exactly that.
+ * the default cap it cannot.
  *
  * Known cost, accepted: a guest whose dispatch fails at a pre-persist stage
  * has its claim released, so it is retried on every remaining tick that day

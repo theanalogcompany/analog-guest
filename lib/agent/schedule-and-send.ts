@@ -419,8 +419,8 @@ async function persistOutbound(
  *
  * `options.rng`: TAC-319 — the coin behind the deterministic split. Defaults
  * to Math.random at this boundary (the pure module takes it as a required
- * parameter so no randomness hides inside it); tests inject a constant to pin
- * either branch. See resolveDispatchBubbles for the full split rule.
+ * parameter so no randomness hides inside it); a caller can inject a constant
+ * to pin either branch. See resolveDispatchBubbles for the full split rule.
  */
 export async function scheduleAndSend(
   ctx: RuntimeContext,

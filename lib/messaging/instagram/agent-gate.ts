@@ -7,9 +7,8 @@
 // lib/agent/dispatch-instagram-reply.ts sends it) and deliberately left the
 // gate shut so the flip could be its own change. The constant and the
 // `enabled` parameter are deleted in a later cleanup, once replies have run
-// for a while; until then agent-gate.test.ts pins the constant at true AND
-// keeps the shut behaviour covered through the parameter, because that is what
-// a rollback restores.
+// for a while; until then the shut behaviour stays available through the
+// parameter, because that is what a rollback restores.
 //
 // ROLLING BACK: set this to false. Nothing else has to move. In-flight drafts
 // are unaffected — a queued Instagram card stays queued and an operator can
@@ -56,10 +55,8 @@
 //     suppresses the recognition moment deterministically, every time. A
 //     title that names a menu item drops understand_order's line for the turn
 //     (applyCurrentTurnSuppression, TAC-326) and sends the turn to the order
-//     extractor; the "QR prefilled-body collision guard" table in
-//     extract-reported-order.test.ts carries Le Mil's title and menu, and has
-//     to be updated whenever either changes, because nothing errors when it
-//     breaks. Per Jaipal the configured title is "Hi Le Mil's!" (payload
+//     extractor, and nothing errors when that happens, so re-check it
+//     whenever the title or menu changes. Per Jaipal the configured title is "Hi Le Mil's!" (payload
 //     ICEBREAKER_HELLO). An earlier version of this comment called "What are
 //     your hours?" the recorded title; that was the body of a Phase 0 QA step,
 //     not a configured title. MANUAL, before the flip: read the LIVE titles
@@ -83,7 +80,7 @@
 //     is the one the guest last messaged on (conversation-channel.ts), and the
 //     copy and the routing read the same answer. No such guest exists yet.
 //   - An Instagram-only venue. DONE for sends: nothing on the Instagram path
-//     reads messaging_phone_number (window-import-guard.test.ts pins that).
+//     reads messaging_phone_number.
 //     NOT fixed: the test harness (run-test-scenarios) still needs the number,
 //     since its synthetic guests all have phones, so it stops working at Le
 //     Mil's when the number is deleted.
@@ -99,8 +96,7 @@
 
 import type { InboundTurnReason } from '@/lib/schemas/inbound-turn-outcome'
 // By path, not through @/lib/schemas, for the reason handle-events.ts gives at
-// the same import: a barrel a test mocks would hand one of the two a stub
-// while the other kept the real thing.
+// the same import.
 import { isScanReferral } from '@/lib/schemas/referral-source'
 import type { InstagramEventOutcome } from './handle-events'
 import type { InstagramUnhandledReason } from './parse-events'

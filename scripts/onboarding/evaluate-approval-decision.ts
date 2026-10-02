@@ -12,9 +12,8 @@ export type { ApprovalDecision }
 /**
  * TAC-347 Stage 2. Decision-only boundary: calls applyApprovalPolicyStage
  * for its return value and nothing else. Deliberately the ONLY thing this
- * file does — see evaluate-approval-decision.test.ts, which parses this
- * file's own import statements and fails if any name from the production
- * dispatch/persist/notify surface appears anywhere in it. Mirrors the
+ * file does: no name from the production dispatch/persist/notify surface may
+ * appear anywhere in it. Mirrors the
  * handle-operator-decline.ts structural-invariant pattern (TAC-299).
  *
  * Never persists a draft, never dispatches to Sendblue, never fires a push.

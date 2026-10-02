@@ -16,7 +16,7 @@
 // guest, so they are never asked for.
 //
 // Pure apart from the fetch, which is passed in, as is the token: nothing here
-// reads the environment, so the tests need no network and no env. Neither
+// reads the environment, so it needs no network and no env. Neither
 // function throws; each returns a profile, an account ID, or a failure.
 //
 // What may and may not leave this module: the rules in graph.ts, which owns

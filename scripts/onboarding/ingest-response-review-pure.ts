@@ -1,7 +1,6 @@
 // Pure helpers for ingest-response-review (THE-178). Split out from
-// ingest-response-review.ts so the test file's import chain doesn't transit
-// through `lib/rag` and friends, which use `@/*` path aliases that vitest
-// doesn't resolve at runtime.
+// ingest-response-review.ts so it doesn't transit through `lib/rag` and
+// friends.
 //
 // Anything in this file must remain free of @/... imports and DB-touching code.
 

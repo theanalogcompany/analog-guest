@@ -41,8 +41,8 @@
 //   - `or(review_state.is.null,review_state.neq.pending)` is IS DISTINCT FROM.
 //     A bare `neq` would drop outbound rows whose review_state is NULL.
 //
-// The same condition is written in migrations 043 and 044, and
-// reached-guest-condition.test.ts keeps all three in step. The Realtime channel
+// The same condition is written in migrations 043 and 044, so all three must
+// move together. The Realtime channel
 // is not filtered by any of this; the operator app applies the same rule to
 // live rows (TAC-411).
 

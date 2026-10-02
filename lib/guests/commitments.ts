@@ -80,9 +80,8 @@ export function commitmentDedupKey(description: string): string {
  * The description match runs in JS rather than SQL on purpose. Matching
  * `lower(trim(description))` through PostgREST would mean `ilike` with
  * pattern-escaping for `%` and `_` in free-form model prose, and it would put
- * the dedup decision somewhere a unit test can only observe through a mock's
- * opinion of a query string. Here the decision is literally
- * `commitmentDedupKey`, so a test can prove the app path made it.
+ * the dedup decision somewhere only Postgres can see. Here the decision is
+ * literally `commitmentDedupKey`.
  *
  * The extra rows this pulls are bounded and small: it is the same per-guest
  * open set `findActiveCommitmentsForGuest` already loads on every agent run,
@@ -314,9 +313,7 @@ async function loadVenueClock(
     // Parse the HOURS SUB-OBJECT, never the whole VenueInfoSchema. That
     // schema requires `address`, so a venue whose venue_info is missing an
     // unrelated field would lose its hold horizon and take the 23:59 fallback
-    // for a reason that has nothing to do with hours. Caught by a test whose
-    // fixture carried only the field this function actually reads — which is
-    // the fixture a reader would naturally write, and it was right.
+    // for a reason that has nothing to do with hours.
     let hours: VenueInfo['hours'] | null = null
     const rawInfo = config.data?.venue_info
     if (
