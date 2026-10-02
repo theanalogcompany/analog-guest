@@ -52,7 +52,7 @@ jobs:
       # never walks node_modules. A lockfile change invalidates fully; a
       # source-only change restores the nearest cache via restore-keys and
       # rebuilds incrementally.
-      - uses: actions/cache@v4
+      - uses: actions/cache@v6
         with:
           path: .next/cache
           key: nextjs-${{ runner.os }}-${{ hashFiles('package-lock.json') }}-${{ hashFiles('**/*.ts', '**/*.tsx') }}
