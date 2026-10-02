@@ -19,22 +19,16 @@ db/types.ts
 docs/brand/
 
 # Markdown and YAML are excluded deliberately: CLAUDE.md files carry
-# byte/line budgets and exact phrases that tests locate
-# (scripts/lib/claude-md-budget.test.ts, bash-allowlist.test.ts), and
-# workflow YAML holds allowlist strings the same tests model. Formatting
-# those is churn with real blast radius and no readability win.
+# byte/line budgets and exact phrases, and workflow YAML holds allowlist
+# strings. Formatting those is churn with real blast radius and no
+# readability win.
 *.md
 *.yml
 *.yaml
 
-# Recorded webhook payloads: the paired X-Hub-Signature-256 is an HMAC over
-# these exact bytes, so any reformat breaks signature verification in tests.
-lib/messaging/instagram/fixtures/
 # Measurement fixtures are recorded artifacts, same byte-exactness posture.
 scripts/measurement/fixtures/
 
-# Parsed by lib/ui/token-bridge.test.ts; formatting is not worth risking the
-# token-bridge guard's anchors.
 app/globals.css
 *.css
 

@@ -13,9 +13,9 @@
 --     (guest_id, intention_key) still caps it at one row per intention per guest.
 --
 -- That change silently inverts code written against the old meaning. Each trap
--- below has a test written BEFORE this file (TAC-380 ruling 2):
+-- below follows from it (TAC-380 ruling 2):
 --   1. A reader that keys on row EXISTENCE now reads every eligible intention as
---      already asked: nothing renders, nothing records, the suite stays green.
+--      already asked: nothing renders, nothing records, nothing errors.
 --      Readers filter prompted_at IS NOT NULL in SQL
 --      (lib/agent/intentions/load.ts; the Command Center's
 --      load-intention-prompts.ts is trap 5).

@@ -14,8 +14,7 @@ import {
 import type { IntentionRows, PromptedIntentionRow } from './load'
 
 // TAC-324 / TAC-380. Pure: no DB access. build-runtime-context.ts loads every
-// fact this needs and passes it in, mirroring filterEligibleMechanics, which is
-// also what makes every open/closed/expired combination a plain unit test.
+// fact this needs and passes it in, mirroring filterEligibleMechanics.
 //
 // One uniform rule, with no branching on an intention's key: an intention is
 // OPEN once it has become eligible and until it is prompted, satisfied or

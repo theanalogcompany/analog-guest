@@ -100,10 +100,6 @@ type Variant = {
 // defaults to `new Date()` and `formatTimeDelta` measures every `createdAt`
 // against TODAY.
 //
-// (That serializer is deliberately named here without its call parentheses:
-// `serializers.test.ts`'s TAC-495 scope guard greps raw file text for the
-// call and counts a match as a second production caller, comments included.)
-//
 // Anchoring the fixture at a fixed 2026-09-18 instant — which is what
 // this file did when it was written, on the day of the incident — renders the
 // two prior turns as "[guest, 3 days ago]" once any time has passed.

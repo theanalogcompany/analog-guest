@@ -15,8 +15,8 @@
 // appear in it.
 //
 // This module is the schema and the loader only. It makes no model calls and
-// has no I/O beyond reading its own fixture, so it is unit-testable and cheap
-// to import from a runner, a report, or a test.
+// has no I/O beyond reading its own fixture, so it is cheap to import from a
+// runner or a report.
 
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'

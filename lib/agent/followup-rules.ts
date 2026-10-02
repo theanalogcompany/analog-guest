@@ -3,9 +3,8 @@
 // Pure function. The caller (lib/followups/engine.ts) pre-loads everything
 // this gate inspects in a single batched read per venue (guest row,
 // last-7-day engine-initiated send count, per-reason last-dispatch row),
-// then runs canSendFollowup once per guest. Keeping the gate pure makes
-// every suppression branch trivially unit-testable without a DB harness
-// and lets the engine fan out cleanly.
+// then runs canSendFollowup once per guest. Keeping the gate pure lets the
+// engine fan out cleanly.
 //
 // Gate 2 (lib/agent/stages.ts → applyApprovalPolicyStage) is the second
 // guard — runs post-generation, decides queue-vs-send. This gate is the
@@ -171,8 +170,6 @@ export function canSendFollowup(
  * Pure quiet-hours check. Compares the venue-local hour of `now` against
  * `[start, end)`. Handles the midnight-crossing case (end < start) via the
  * two-interval form: hour >= start OR hour < end.
- *
- * Exported for unit testing the boundaries (20:59 / 21:00 / 07:59 / 08:00).
  *
  * Invalid timezone returns `false` (fail-OPEN — better to risk a quiet-
  * hours send than block the whole engine on bad venue config).

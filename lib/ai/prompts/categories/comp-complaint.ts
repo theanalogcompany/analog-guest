@@ -41,8 +41,7 @@
 // another on us" is the default remedy shape — not a refund, not settling a
 // score. That framing is the product thesis, not a stylistic preference.
 //
-// No em or en dashes: THE-225 prose hygiene is asserted over this string in
-// lib/ai/prompts/categories/index.test.ts.
+// No em or en dashes: THE-225 prose hygiene.
 //
 // TAC-314 KEEP: "ask one real question and send only that" / "A question is a
 // complete turn on its own" read as structural prescriptions and a future

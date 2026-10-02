@@ -1,7 +1,7 @@
 // Structured logger: one JSON line per event through the console, so
 // Vercel's log pipeline (and any future drain) gets level, event and fields
 // without parsing prose. Pure by design - no `@/*` imports, no client init -
-// so tests import it directly.
+// so any module can import it directly.
 //
 // Convention for new code: `logger.warn("[area] what happened", { fields })`
 // instead of `console.warn(...)`. Existing console call sites migrate as

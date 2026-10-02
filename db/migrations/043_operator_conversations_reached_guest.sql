@@ -20,8 +20,7 @@
 --
 -- which is the set `deriveDelivery` (lib/agent/group-responses.ts) calls
 -- `delivered`. The same condition is written in lib/operator/thread.ts and in
--- migration 044. lib/operator/reached-guest-condition.test.ts reads all three
--- and fails if any status list drifts from DELIVERED_OUTBOUND_STATUSES.
+-- migration 044. All three status lists must match DELIVERED_OUTBOUND_STATUSES.
 --
 --   1. A guest with at least one message that reached them: every field comes
 --      from those messages only. A pending draft, a skipped draft or a reply

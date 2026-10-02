@@ -2,8 +2,7 @@
 // still talk like SMS? Generate-only. NOTHING IS SENT and nothing is written
 // to the database.
 //
-// TAC-495 gave Instagram its own prompt copy, and `compose-prompt.test.ts`
-// proves those swaps are in the prompt. A prompt is an instruction; whether
+// TAC-495 gave Instagram its own prompt copy. A prompt is an instruction; whether
 // the model obeys it is a different question and only generation answers it.
 // This is the arm that answers it, and it is the last open item on TAC-469's
 // pre-flight before the gate flips.
@@ -14,8 +13,8 @@
 // Instagram guest for one arm and a phone guest for the other — would vary the
 // guest, their history, their name and their recognition state alongside the
 // channel, and no difference in the output could then be attributed to the
-// copy. The resolver has its own tests; what is under test here is the effect
-// of the channel on what the model writes.
+// copy. What is measured here is the effect of the channel on what the model
+// writes.
 //
 // TELEMETRY: the stages fire PostHog events and some Slack relays. Run with
 // NEXT_PUBLIC_POSTHOG_KEY and SLACK_ALERTS_WEBHOOK_URL unset and both go

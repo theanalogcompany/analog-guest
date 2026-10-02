@@ -124,8 +124,7 @@ function isEmptyUnclaimedValue(value: unknown): boolean {
  * loader field with an actual value surfaces here automatically until
  * someone updates the claimed list, rather than silently never rendering.
  * The `satisfies` constraint above also means removing a field from the
- * loader without updating this list fails `tsc`, not just this function's
- * own tests.
+ * loader without updating this list fails `tsc`.
  */
 export function computeUnclaimedMechanicColumns(
   row: VenueDetailMechanicRow,

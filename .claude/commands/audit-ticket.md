@@ -146,7 +146,7 @@ comment put on the ticket is not a question he was asked. This audit's own
 outcome replaces it.
 
 If the ticket's `## Gate` section names no QA route, set one — `QA: Script`
-if the gate is provable by a test or query, `QA: Device` if it needs Jaipal on
+if the gate is provable by a query or script, `QA: Device` if it needs Jaipal on
 a real device or at the venue — and say what would make a device gate
 script-provable.
 

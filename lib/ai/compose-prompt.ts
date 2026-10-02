@@ -37,8 +37,8 @@ const CACHEABLE_SECTION_COUNT = 3
  *
  *   systemPrompt === `${cacheableSystemPrefix}\n\n${volatileSystemSuffix}`
  *
- * That identity is asserted in compose-prompt.test.ts. Callers that only need
- * the text keep destructuring `systemPrompt` and are unaffected.
+ * Callers that only need the text keep destructuring `systemPrompt` and are
+ * unaffected.
  */
 export function composePrompt(input: GenerateMessageInput): {
   systemPrompt: string

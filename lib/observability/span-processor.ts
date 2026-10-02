@@ -12,10 +12,8 @@ import { LangfuseSpanProcessor } from '@langfuse/otel'
 // the processor FROM `instrumentation.ts` would work on Vercel and break in
 // any context where `register()` never runs.
 //
-// WHY LAZY. Constructing the processor at module load runs an SDK init in the
-// test process, and `vi.mock` does not help because mocks intercept resolution,
-// not transitive eager init (CLAUDE.md, "Module split for testability"). Same
-// cached-singleton shape the v3 wrapper used for its client.
+// WHY LAZY. Constructing the processor at module load runs an SDK init as a
+// side effect of import. Same cached-singleton shape the v3 wrapper used for its client.
 
 export interface LangfuseConfig {
   publicKey: string
@@ -33,8 +31,7 @@ export interface LangfuseConfig {
  * being silently dropped.
  *
  * DERIVED from the SDK constant, not a pasted literal: if Langfuse renames its
- * tracer, this follows and `span-processor.test.ts` proves the value still
- * matches what `startObservation` actually stamps.
+ * tracer, this follows.
  */
 const EXPORTED_INSTRUMENTATION_SCOPES: readonly string[] = [
   LANGFUSE_TRACER_NAME,
@@ -44,7 +41,7 @@ const EXPORTED_INSTRUMENTATION_SCOPES: readonly string[] = [
 /**
  * Whether a finished span should be shipped to Langfuse.
  *
- * Exported for the test; `getLangfuseSpanProcessor` wires it in.
+ * `getLangfuseSpanProcessor` wires it in.
  */
 export function shouldExportSpan({
   otelSpan,

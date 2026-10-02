@@ -9,15 +9,12 @@ Layout: `scripts/*.ts` are thin orchestrators (read args, set up clients, call h
 Add a script with a `package.json` entry of the form
 `"<name>": "tsx --env-file=.env.local scripts/<file>.ts"`.
 
-## Module split for testability
+## Module split
 
-`vitest.config.ts` resolves `@/*`. The remaining failure mode is **module-load-time SDK
-init**: importing a module that constructs a Voyage or Supabase client at the top level runs
-that init in the test process, and `vi.mock` does not help because mocks intercept resolution,
-not transitive eager init.
-
-When it happens, split: `<name>-pure.ts` with no `@/*` imports (tests import this) and
-`<name>.ts` with the DB-touching code, re-exporting from `-pure` so the CLI keeps one import.
+Importing a module that constructs a Voyage or Supabase client at the top level runs that
+init on import. When pure helpers must be importable without it, split: `<name>-pure.ts`
+with no `@/*` imports and `<name>.ts` with the DB-touching code, re-exporting from `-pure` so
+the CLI keeps one import.
 
 A `main()` guard via `import.meta.url === file://${process.argv[1]}` is **not** a safe fix -
 that comparison silently never matches on a path containing characters `import.meta.url`
@@ -68,7 +65,7 @@ reads it.
   never as an instruction to the assistant. An imperative there beats a universal rule that
   invites judgement - measured.
 - A fixture's own `e.g.` placeholder is copy the model will echo. One leaked vocabulary into
-  every extraction until a canary was added.
+  every extraction.
 - Extraction rules never name "Needs confirmation" as a destination. Omitted content is just
   omitted; the verification pass finds it independently, so the two cannot silently disagree
   about what was dropped and why.
@@ -92,11 +89,9 @@ Then, on whatever reports the run:
 5. **A failed unit is not a result.** An errored call produces no verdict, so a harness
    counting positives scores it like a negative and a wholly broken run reports clean. Make
    a failure **disqualify** its cell whatever the count reads, and print failures per unit.
-6. **A crashed or skipped run is not a result either, and it reads as a survivor.** A dead
-   vitest worker still prints a summary line, so `0 failed` was parsed as a pass on the two
-   mutants a bound exists for - twice. Check for a crash or skip **before** reading any count,
-   and make every failing fixture self-limiting so a removed bound terminates and fails an
-   assertion instead of hanging.
+6. **A crashed or skipped run is not a result either.** A dead worker can still print a
+   summary line that reads as zero failures. Check for a crash or skip **before** reading any
+   count.
 7. **Check a free-text detector for asymmetry between arms.** A phrase list systematically
    under-counts whichever arm is not echoing a script, and the error always flatters the
    scripted control. Read bodies before believing a rate; prefer a pattern with an optional
@@ -117,20 +112,13 @@ Then, on whatever reports the run:
    the output rather than any number in the summary. Same family as 7, one layer out: there
    the detector flattered an arm, here the controlled variable did.
 
-**An author's own mutation pass verifies the mutants they already thought of.** It proves the
-tests catch the failures they imagined. The survivors are usually a different question: not
-"what does the code compute" but "can the fixture reach the code at all", or "is the caller
-wired in". Two cheap habits close most of the gap - ask what the fixture cannot express (one
-category, one channel, one flag state guards only that one), and get a second reader whose
-first question is "can this test fail".
-
 `scripts/onboarding/tab-retention.ts` is the same lesson in a different medium: a single
 reused sheet tab destroyed the previous run, and a 455-scenario run was lost that way.
 
 ## GitHub Actions helpers
 
 `scripts/lib/*.mjs` run inside workflow steps, not in this app's process - plain `.mjs`, no
-`@/*`, no SDK init at module load, colocated `.test.ts` importing the `.mjs` directly.
+`@/*`, no SDK init at module load.
 
 `scripts/linear.mjs` is the only write path to Linear from CI. It takes comment text from a
 markdown file so nothing is JSON-escaped by hand, refuses a comment without the authorship

@@ -1,6 +1,6 @@
 // Square webhook signature verification. Pure (signature key passed in, not
-// read from env) so it's unit-testable with known vectors; the provider reads
-// SQUARE_WEBHOOK_SIGNATURE_KEY and passes it.
+// read from env); the provider reads SQUARE_WEBHOOK_SIGNATURE_KEY and passes
+// it.
 //
 // Square signs each delivery with HMAC-SHA256 over (notificationUrl + rawBody),
 // base64-encoded, in the `x-square-hmacsha256-signature` header. The

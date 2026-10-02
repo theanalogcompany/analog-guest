@@ -3,7 +3,7 @@
 // 'text' is iMessage or SMS through the phone-number provider; 'instagram' is
 // an Instagram message. The strict half is migration 048's
 // messages_channel_check, which permits exactly these two; this list moves with
-// it, and message-channel.test.ts reads the migration to hold them equal.
+// it.
 //
 // Domain-free on purpose, like visit-precision.ts: lib/ai needs the type for
 // GenerateMessageInput and must not depend on lib/agent, where the rule that

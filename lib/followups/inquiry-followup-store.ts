@@ -80,9 +80,7 @@ export interface InquiryGuestFacts {
  *
  * EVERY COLUMN IN THIS SELECT IS READ BY A GATE, and that is worth stating
  * because of how it fails otherwise: dropping one from the string makes its gate
- * read `undefined` and go inert, and the test double ignores its select
- * argument, so no behavioural test can see it. TAC-560's store learned this and
- * has its processor test capture the string; this one is captured the same way.
+ * read `undefined` and go inert.
  */
 export async function loadInquiryFollowupVenues(
   supabase: AdminSupabaseClient,
@@ -197,8 +195,7 @@ export async function loadInquiryGuestFacts(
  * insert time, and the two are 1.8 to 2.3 seconds apart in production, so the
  * question's own row is always "an inbound after the question". Every row
  * resolved `skipped / guest_wrote_again` and the counter reported a plausible
- * reason for it. Found in review; the engine's test mocks this module, so no
- * behavioural test could see it.
+ * reason for it. Found in review.
  */
 export async function hasInboundSince(
   supabase: AdminSupabaseClient,

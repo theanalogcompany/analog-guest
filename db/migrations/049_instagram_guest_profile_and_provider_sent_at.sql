@@ -11,7 +11,7 @@
 --    `messaging[]` item: when the guest sent a message or tapped an
 --    icebreaker, or when the venue account sent an echo. NOT `entry.time`,
 --    which is when Meta sent the delivery; in all four recorded payloads
---    (lib/messaging/instagram/fixtures/) it is 0.4 to 1.1 seconds later.
+--    it is 0.4 to 1.1 seconds later.
 --    - Why it exists: Instagram measures its 24-hour reply window from the
 --      guest's action on Instagram's clock. created_at is when our webhook
 --      received it, which runs later, and by far more than seconds when Meta

@@ -11,8 +11,8 @@ import { HairlineRow } from '@/lib/ui'
 // defaults are on /admin/tunables.
 //
 // The menu-mention entry describes the rule rather than quoting the prompt line
-// it suppresses. no-copied-strings.test.ts catches a quoted definition string but
-// not a paraphrase, so the safe move is not to paraphrase one either.
+// it suppresses. A paraphrase drifts from the prompt just as a quote does, so
+// do not paraphrase one either.
 
 interface Gate {
   title: string

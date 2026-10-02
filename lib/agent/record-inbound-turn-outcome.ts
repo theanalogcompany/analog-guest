@@ -26,8 +26,7 @@ import type {
   InboundTurnReason,
 } from '@/lib/schemas/inbound-turn-outcome'
 // capturePostHogEvent via ./alerts, not the analytics barrel: alerts.ts
-// re-exports it precisely so this directory imports from one place, and the
-// orchestrator test files mock ./alerts rather than the barrel.
+// re-exports it precisely so this directory imports from one place.
 import { capturePostHogEvent } from './alerts'
 import type { AgentResult } from './types'
 
@@ -51,8 +50,7 @@ const REDACTED = '[redacted]'
  * `22222222-2222-4222-8222-222222222222` is digits and hyphens, which is
  * exactly what PHONE_LIKE matches, so `missingInboundMessageId` came back
  * `[redacted]`. A redactor that destroys the ids is worse than the leak it
- * prevents — the ids are what the table is FOR. Caught by an existing test
- * failing, not by the new ones.
+ * prevents — the ids are what the table is FOR.
  */
 const UUID_LIKE =
   /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi
@@ -60,10 +58,8 @@ const UUID_LIKE =
 /**
  * Migration 055's header says this table never holds a full phone number. That
  * was a comment, not a guarantee, until this existed: `detail` was passed
- * straight through, and the test named for the invariant planted its own
- * fixture and asserted a string it had never inserted — so it could not fail,
- * and TAC-523 PR 2 (the Sendblue bails, the one layer that HAS phone numbers
- * in scope) would have walked into it.
+ * straight through, and TAC-523 PR 2 (the Sendblue bails, the one layer that
+ * HAS phone numbers in scope) would have walked into it.
  *
  * Applied at the single INSERT rather than at each caller, so a new caller
  * inherits it instead of having to remember it. Keys are left alone; only
@@ -186,7 +182,7 @@ const LEDGER_DERIVERS: LedgerDerivers = {
     },
   }),
   // TAC-397, mapped when the rebase made `tsc` refuse to compile without it —
-  // the total map firing on a real merge rather than on a mutant. A decision,
+  // the total map firing on a real merge. A decision,
   // not a failure: the guest said "haha" and already holds a pending card.
   silenced: () => ({
     outcome: 'silenced',
@@ -222,8 +218,8 @@ const LEDGER_DERIVERS: LedgerDerivers = {
 // `satisfies` is what makes isRecordableStage's type predicate honest. A type
 // predicate is an assertion tsc never verifies against the body, so without
 // this the list was a third, unbound copy of the stage vocabulary: renaming a
-// value in INBOUND_TURN_REASONS and migration 055 together would pass the
-// binding test, miss this, and every `failed` row at that stage would violate
+// value in INBOUND_TURN_REASONS and migration 055 together would miss this,
+// and every `failed` row at that stage would violate
 // the CHECK and be swallowed — the exact blindness this table removes.
 const RECORDABLE_STAGES = [
   'context_build',
@@ -245,8 +241,8 @@ function truncate(value: string): string {
 }
 
 /**
- * Exported for tests: the pure half, with no database in it. The mapping from
- * an outcome to a ledger entry is the part worth asserting directly.
+ * The pure half, with no database in it: the mapping from an outcome to a
+ * ledger entry.
  */
 export function ledgerEntryFor(result: AgentResult): LedgerEntry {
   // LEDGER_DERIVERS is total over the union by its TYPE — that is the

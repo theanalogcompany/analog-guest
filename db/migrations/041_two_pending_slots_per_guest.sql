@@ -25,8 +25,7 @@
 -- nothing else. Prose that promises something without a carrier still sits in
 -- the conversation slot (TAC-401). The same condition lives in TypeScript as
 -- pendingSlotOf in lib/agent/pending-slots.ts, derived from OBLIGATION_TYPES in
--- lib/guests/commitment-expiry.ts. The two MOVE TOGETHER: pending-slots.test.ts
--- reads this file and fails if the type lists differ.
+-- lib/guests/commitment-expiry.ts. The two MOVE TOGETHER.
 --
 -- HIGH-STAKES: touches `messages`. No column, no backfill, no constraint
 -- change; indexes don't surface in db/types.ts.

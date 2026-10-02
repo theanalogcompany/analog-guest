@@ -87,9 +87,7 @@ export interface WarmCloseGuestFacts {
  *
  * Mirrors the follow-up engine's own venue scan, including its lesson: every
  * column here is read by a gate, and dropping one from this string makes that
- * gate read `undefined` and go inert with no test able to see it, because the
- * test double ignores its select argument. The processor's test captures this
- * string for exactly that reason.
+ * gate read `undefined` and go inert.
  */
 export async function loadWarmCloseVenues(
   supabase: AdminSupabaseClient,

@@ -97,7 +97,7 @@ export const FORWARD_COMMITMENT_PATTERNS: readonly RegExp[] = [
   // Apostrophe REQUIRED on contractions, and both straight (') and curly (’)
   // accepted. An optional apostrophe — /\bwe'?ll\b/ — collapses to the word
   // "well", so "we're usually well stocked" reads as a promise; /\bi'?ll\b/
-  // likewise matches "ill". Both were caught by the fixture suite below.
+  // likewise matches "ill".
   // Guests send curly apostrophes from iOS, so the class is not optional.
   /\bi['’]ll\b/i,
   /\bwe['’]ll\b/i,

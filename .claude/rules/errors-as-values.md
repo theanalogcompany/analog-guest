@@ -44,11 +44,11 @@ Two rules that follow:
 **A comment claiming a direction is not the direction.** One docstring said "FAILS OPEN"
 above a function handling only `{ error }` - a **thrown** read propagated to the orchestrator
 and produced a red alert with no reply, the exact outcome the docstring called the worse
-failure. Test the direction with a rejecting mock, not only an erroring one.
+failure. Check the direction by reading both a thrown and an errored read.
 
 **supabase-js is inconsistent here.** It returns most failures as `{ error }` and **throws**
 on some (unreachable host, malformed client). A module whose contract is "never throws" needs
-a `try/catch`, and a type cannot express that claim - only a test can.
+a `try/catch`, and a type cannot express that claim.
 
 ## A three-state result is often the honest one
 
@@ -66,9 +66,8 @@ Before widening a two-state return, ask which caller would read the new state wr
 
 ## Writes
 
-**A check-then-act needs a storage-layer backstop.** The app check is the enforcement (a
-row-count test passes with the check entirely deleted); the partial unique index catches the
-TOCTOU window. Handle `23505` as an outcome, not an error.
+**A check-then-act needs a storage-layer backstop.** The app check is the enforcement; the partial
+unique index catches the TOCTOU window. Handle `23505` as an outcome, not an error.
 
 **A CAS write's `rowcount === 1` is the idempotency anchor.** Gate the side effect on it.
 Scope the predicate on `venue_id` and `guest_id`, not on `id` alone - an id that came from a

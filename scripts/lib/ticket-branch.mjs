@@ -19,8 +19,7 @@
  *   - scripts/lib/run-report.mjs  readGitState, the turn-limit report
  *
  * It is not in claims.mjs because build-ready.yml copies run-report.mjs AND ITS
- * TRANSITIVE IMPORTS to $RUNNER_TEMP before the session starts, and a test
- * asserts the copy list equals that closure. Importing claims.mjs for one
+ * TRANSITIVE IMPORTS to $RUNNER_TEMP before the session starts. Importing claims.mjs for one
  * string would drag the whole claim-check module into the reporter's copy - the
  * wrong dependency direction, and a larger blast radius than the constant
  * deserves. A leaf adds exactly one file.
@@ -28,6 +27,6 @@
  * Three copies of this pattern is how it went stale before: two regexes and a
  * glob in .claude/commands/work-ticket.md, and a note claiming five sites when
  * two of the five no longer existed. The glob is still a fourth copy, in prose
- * a session reads rather than code it runs; build-workflow.test.ts pins it.
+ * a session reads rather than code it runs.
  */
 export const TICKET_BRANCH_OWNER = '[\\w.-]+'

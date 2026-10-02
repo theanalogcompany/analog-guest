@@ -2,7 +2,7 @@
  * generation-latency-score.ts — the pure half of the generation-latency
  * probe (generation-latency.ts). No `@/*` imports, per the scripts
  * module-split convention, so the aggregation and the arm-integrity rules
- * are testable without any SDK init.
+ * need no SDK init.
  *
  * WHY THIS EXISTS. Production `generate` latency (p50 ~6s) decomposes as
  * TTFT + decode, but `generateObject` is non-streaming so no trace records

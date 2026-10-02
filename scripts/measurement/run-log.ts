@@ -36,7 +36,7 @@
  * (scripts/onboarding/tab-retention.ts). Different API (Sheets tabs vs.
  * local files), same idea — cited as a pointer, not reused as code.
  *
- * No I/O at module load. `now` and `gitSha` are injectable for tests.
+ * No I/O at module load. `now` and `gitSha` are injectable.
  */
 
 import { execFileSync } from 'node:child_process'
@@ -143,9 +143,9 @@ function resolveDefaultPath(name: string, date: Date): string {
   // A `name` carrying a separator would escape RUN_LOG_DIR, which is the one
   // thing the directory exists to prevent — `join('measurement-runs', '/tmp/x')`
   // is `measurement-runs/tmp/x`, a mirrored tree under the checkout rather than
-  // the absolute path the caller plainly meant. This repo's own tests did
-  // exactly that (they used an absolute `name` to steer the old CWD default
-  // into a temp dir) and quietly rebuilt a `/var/folders/...` tree inside the
+  // the absolute path the caller plainly meant. A caller did
+  // exactly that (an absolute `name` meant to steer the old CWD default into a
+  // temp dir) and quietly rebuilt a `/var/folders/...` tree inside the
   // working directory. Refuse it and name the field that does the job.
   if (name.includes('/') || name.includes('\\')) {
     throw new Error(

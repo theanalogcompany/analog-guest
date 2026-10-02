@@ -60,8 +60,7 @@
 --
 -- 5. messages.referral_ref and messages.referral_source: the `ref` and
 --    `source` of the referral an ig.me link carries (verified 2026-09-17 on a
---    postback: ref "TESTVENUE", source "SHORTLINK", type "OPEN_THREAD"; see
---    lib/messaging/instagram/fixtures/postback-referral.json). Instagram
+--    postback: ref "TESTVENUE", source "SHORTLINK", type "OPEN_THREAD"). Instagram
 --    delivers them once, with the guest's first action, and they cannot be
 --    queried back, so they are stored on the message they arrived with. First-
 --    touch attribution per guest can be derived from these later. `type` is

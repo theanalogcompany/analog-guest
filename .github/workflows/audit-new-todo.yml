@@ -381,7 +381,7 @@ jobs:
           # expression, kept if NAME is set here. That also matches with:
           # inputs, which never are. A secret nested in a longer value can't
           # be redacted on its own, so each must be the whole value of its
-          # entry (scripts/lib/denials-redaction.test.ts). With nothing to
+          # entry. With nothing to
           # redact against, the commands are withheld, never posted as they
           # are.
           if [ -f "$EXECUTION_FILE" ]; then

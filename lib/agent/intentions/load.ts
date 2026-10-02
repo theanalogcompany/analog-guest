@@ -1,9 +1,8 @@
 import { createAdminClient } from '@/lib/db/admin'
 
 // TAC-380: the two reads behind intention derivation. Split out of
-// build-runtime-context.ts so the filters they depend on can be pinned by a
-// test — that file has no test harness, and these filters are the easiest thing
-// in the whole feature to break silently.
+// build-runtime-context.ts; these filters are the easiest thing in the whole
+// feature to break silently.
 //
 // Since migration 040, guest_intention_prompts holds two kinds of row:
 //   - a PROMPTED row (prompted_at set): the intention was raised and is closed
@@ -14,8 +13,7 @@ import { createAdminClient } from '@/lib/db/admin'
 // TRAP 1, and why both filters are in SQL rather than JS. Before 040 every row
 // was a prompted row, so "a row exists" meant "already asked". A reader still
 // keying on row existence now reads every eligible intention as already asked:
-// the feature renders nothing, records nothing, and every test that doesn't
-// inspect the query stays green. Filtering in SQL is also what keeps the fail-
+// the feature renders nothing, records nothing, and nothing errors. Filtering in SQL is also what keeps the fail-
 // closed contract meaning what it says — a null result means a read failed, and
 // never "the rows came back and JS sorted them wrongly".
 

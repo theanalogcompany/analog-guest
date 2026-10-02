@@ -33,7 +33,7 @@ import { isNavItemActive, NAV_GROUPS } from './nav-items'
 // by href so the collapsed rail stays legible.
 
 // Icon per nav href. Kept in the React layer (not nav-items.ts) so the shared
-// nav source stays pure/unit-testable. Adding a nav item without an icon falls
+// nav source stays pure. Adding a nav item without an icon falls
 // back to no glyph — visible in the expanded label, blank in the icon rail.
 const NAV_ICONS: Record<string, LucideIcon> = {
   '/admin': Home,

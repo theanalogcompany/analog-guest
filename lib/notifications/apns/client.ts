@@ -10,9 +10,6 @@
 // sessions are short-lived per request for pilot scope. If push volume
 // climbs enough that the TLS handshake becomes a bottleneck we can pool;
 // not before.
-//
-// Mock seam: tests mock 'node:http2' via vi.mock at module level. The
-// jwt module is mocked separately so client tests don't need real keys.
 
 import {
   connect,
@@ -76,15 +73,16 @@ function selectHost():
  * (status carried on the response) or a transport-failure (error code).
  * Never throws.
  *
- * options.connectOptions is a test seam — production callers omit it.
+ * options.connectOptions overrides connection options - production callers
+ * omit it.
  */
 export async function sendApnsRequest(
   payload: ApnsRequestPayload,
   options: { connectOptions?: SecureClientSessionOptions } = {},
 ): Promise<ApnsClientResult> {
   // First-call validation for the TRANSPORT vars only (topic + host). The
-  // signing credentials are getApnsJwt's to validate — this layer mocks that
-  // call in tests and never reads the key. Runs before any network work so a
+  // signing credentials are getApnsJwt's to validate — this layer never reads
+  // the key. Runs before any network work so a
   // misconfiguration surfaces as a specific, named defect in the [apns] logs
   // and the PostHog push.sent errorDetail, rather than as silence. See
   // ./env.ts for why validation is first-call and not module-load.

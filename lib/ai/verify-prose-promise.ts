@@ -39,10 +39,7 @@ export const VERIFY_PROSE_PROMISE_MAX_OUTPUT_TOKENS = 1000
  * treating truncation as a verdict the model produced rather than as an
  * absence of one.
  *
- * Imported BY PATH in lib/agent/stages.ts, never via the @/lib/ai barrel:
- * stages.test.ts `vi.mock`s that barrel, and a bare constant arriving
- * `undefined` would make the no-retry branch silently unreachable in every
- * test — the same reasoning VERIFY_GROUNDING_TRUNCATED_ERROR_CODE carries.
+ * Imported BY PATH in lib/agent/stages.ts, never via the @/lib/ai barrel.
  */
 export const VERIFY_PROSE_PROMISE_TRUNCATED_ERROR_CODE =
   'ai_verify_prose_promise_truncated'
@@ -83,8 +80,7 @@ When promisesSomething is false, set commitmentType to "none" and commitmentDesc
  *
  * Rendering conditionally makes the no-inbound system prompt BYTE-IDENTICAL to
  * v1.0.0's, so TAC-401's baseline is preserved by construction rather than by
- * re-measurement, and every proactive path behaves exactly as it did. A test
- * pins that identity against the transcribed v1.0.0 text.
+ * re-measurement, and every proactive path behaves exactly as it did.
  */
 const GUEST_MESSAGE_SCOPE = `
 
@@ -115,8 +111,7 @@ function buildUserPrompt(input: VerifyProsePromiseInput): string {
   //
   // A null or blank inbound renders NOTHING, so the prompt is byte-identical
   // to v1.0.0's on every proactive turn and for every body-only replay. That
-  // identity is what keeps TAC-401's 220-fixture measurement comparable, and
-  // a test pins it.
+  // identity is what keeps TAC-401's 220-fixture measurement comparable.
   const guestLine = hasGuestMessage(input)
     ? `Guest's message, which this reply is answering: "${input.guestInboundBody}"\n\n`
     : ''

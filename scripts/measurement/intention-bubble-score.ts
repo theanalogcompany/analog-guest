@@ -1,9 +1,8 @@
 // TAC-554: the pure scorer behind scripts/measurement/intention-bubble.ts.
 //
 // Split out of the runner for the reason every -language.ts module in this
-// folder is: the runner spends model calls, so its scoring has to be testable
-// without them, and a detector whose own behaviour is unverified is how two
-// TAC-423 runs reported numbers nobody could act on.
+// folder is: the runner spends model calls, so its scoring is kept apart from
+// them.
 //
 // THE JUDGE IS PRODUCTION'S OWN classifyIntentionPrompts, NOT A PHRASE LIST,
 // and that is the whole reason this scorer is safe to compare arms with.
@@ -28,8 +27,7 @@
 /** MAX_BUBBLES_PER_RESPONSE, restated rather than imported. */
 // Deliberately NOT imported from lib/agent/split-message: a scorer that reads
 // the constant under test agrees with it by construction, so a change raising
-// the cap would silently raise this ceiling too. Bound to the shipped value by
-// a test that DOES import it, which is where a divergence should fail.
+// the cap would silently raise this ceiling too.
 export const MAX_BUBBLES_CEILING = 3
 
 export interface JudgeVerdicts {

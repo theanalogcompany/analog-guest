@@ -80,24 +80,17 @@ fresh read is a safe no-op.
 If the final write fails after the embed succeeded, the new row is already live: return the
 error and log loudly, but do not delete what succeeded.
 
-## Source-level guards
+## Copied strings
 
-Some correctness here is invisible to behavioural tests, because a copied string literal
-renders identically to a read one until the constant changes. Two live guards:
+A copied string literal renders identically to a read one until the constant changes. Two rules:
 
-- **No prompt-line literal may be pasted into a component.** Normalize both sides before
-  comparing: `react/no-unescaped-entities` turns a bare apostrophe into `&apos;`, so the
-  repo's own lint rule converts the copy the guard catches into one it would miss, and both
-  current values contain apostrophes. Fold entities and typographic quotes and collapse
-  whitespace, so a prettier-wrapped paste cannot hide behind a newline.
+- **No prompt-line literal may be pasted into a component.** Compare normalized: `react/no-unescaped-entities`
+  turns a bare apostrophe into `&apos;`, and prettier may wrap a paste across a newline, so a
+  copy can hide behind either.
 - **No reuse of `formatTimeDelta`** from `lib/ai/prompts/serializers.ts`. That is the agent's
   prompt vocabulary; importing it couples a prompt rewrite to this page's appearance. There
-  is a local `formatAge` instead, and the guard bans the call - because this reads like
-  duplication and the next person's instinct is to de-duplicate it.
-
-Scan **every** root a string renders in, not one. A guard rooted at one directory missed a
-second surface rendering the same strings, and assert a non-empty file list **per root** or
-it passes vacuously.
+  is a local `formatAge` instead - this reads like duplication and the next person's instinct
+  is to de-duplicate it.
 
 ## Brand
 
@@ -108,8 +101,7 @@ renders on white rather than the canonical cream by re-binding the tokens under
 `[data-surface="admin"]`, which lets every component keep its existing classes.
 
 shadcn tokens are aliased **onto the brand vars**, not onto literals - a literal freezes the
-token to cream and breaks the admin override. `lib/ui/token-bridge.test.ts` parses the CSS
-and fails on an unbridged or dangling token.
+token to cream and breaks the admin override. Every shadcn token must be bridged, none dangling.
 
 `components/ui/*` is vendored shadcn source: treat as third-party, exempt from the no-`any`
 and errors-as-values conventions, and prefer re-running the CLI over hand-edits.

@@ -325,8 +325,7 @@ as $function$
     -- stored with body = '' and is still the message this draft answers; the
     -- Contract says the endpoint sends it as-is and the client decides whether
     -- to show it. The queue's recent_context carries empty bodies for the same
-    -- reason (TAC-395's 22:08 ruling), and reached-guest-condition.test.ts
-    -- asserts no body filter is ever added to this function.
+    -- reason (TAC-395's 22:08 ruling).
     --
     -- Scoped to the same venue AND guest on top of the id. Every writer sets
     -- reply_to_message_id from this guest's own inbound

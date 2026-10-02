@@ -13,8 +13,7 @@
 //
 // THE EXCLUDED CATEGORIES ARE CHECKED HERE AS WELL AS IN THE PROMPT, and that
 // redundancy is the point. The classifier is told to set followUpWorthy false
-// for a complaint, a business inquiry or a crisis message, and the prompt has a
-// test pinning each of those lines. But a prompt instruction is not a gate: a
+// for a complaint, a business inquiry or a crisis message. But a prompt instruction is not a gate: a
 // model that ignored it once would put a cheerful "did that work out?" three
 // hours behind a guest reporting a stale muffin, and that is the worst output
 // this mechanism can produce. So the categories are refused structurally, and
@@ -41,7 +40,7 @@ import type { RuntimeContext } from './types'
  *
  * A narrow structural type rather than the whole `RuntimeContext`, following
  * `VenueOpenStateInput`'s precedent: a caller holding only these can pass them,
- * and a test fixture does not have to build a venue, a persona and a corpus it
+ * and a caller does not have to build a venue, a persona and a corpus it
  * never reads. `RuntimeContext` satisfies it structurally, so handle-inbound
  * passes `ctx` unchanged.
  */

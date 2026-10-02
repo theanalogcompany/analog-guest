@@ -8,7 +8,7 @@ import type { VenueInfo } from '@/lib/schemas/venue-info'
  * of grading, run on every scenario regardless of the LLM grader budget.
  * Pure and import-light: the only non-local import is splitIntoSentences,
  * itself deliberately import-free (see its own module header), so this
- * stays vitest-safe with no SDK init.
+ * loads with no SDK init.
  *
  * These checks are heuristic, not exhaustive NLU — false negatives are
  * possible (a violation phrased in a way the pattern doesn't catch), and

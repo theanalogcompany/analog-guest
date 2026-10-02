@@ -56,8 +56,7 @@ import { waitUntil } from '@vercel/functions'
 import { handleInbound as runInboundAgent } from '@/lib/agent'
 import { createAdminClient } from '@/lib/db/admin'
 // Imported by path, not through a barrel: lib/pos/square/ sets the
-// no-sub-barrel precedent, and a barrel is the thing that lets a future
-// vi.mock hand these tests a stubbed verifier when they need the real one.
+// no-sub-barrel precedent.
 import {
   captureInstagramCardResolvedExternally,
   captureInstagramScanUnattributed,
@@ -111,9 +110,8 @@ export async function GET(request: Request): Promise<Response> {
   // searchParams form-decodes, so a literal '+' in the challenge would arrive
   // as a space. Deliberate: every reference implementation decodes the same
   // way (Express `req.query` included), so matching them is safer than being
-  // uniquely byte-exact. Meta's challenge is numeric in practice. Left
-  // untested on purpose — a test here would pin behaviour we do not want to
-  // promise if Meta ever changes the alphabet.
+  // uniquely byte-exact. Meta's challenge is numeric in practice, and this is
+  // not a behaviour we promise if Meta ever changes the alphabet.
   const params = new URL(request.url).searchParams
   const mode = params.get('hub.mode')
   const token = params.get('hub.verify_token')

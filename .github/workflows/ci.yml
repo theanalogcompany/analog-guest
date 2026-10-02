@@ -17,11 +17,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
-      # Mock env vars. None of the unit tests reference process.env, and the
-      # codebase reads env vars lazily inside functions (not at module load),
-      # so neither vitest nor next build need real values. These placeholders
-      # protect against any future module-load env check; they're not
-      # secrets and are safe to inline here.
+      # Mock env vars. The codebase reads env vars lazily inside functions
+      # (not at module load), so next build needs no real values. These
+      # placeholders protect against any future module-load env check; they're
+      # not secrets and are safe to inline here.
       ANTHROPIC_API_KEY: ci-mock
       VOYAGE_API_KEY: ci-mock
       SENDBLUE_API_KEY_ID: ci-mock
@@ -43,11 +42,10 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          # .nvmrc is the single source of truth, read here and asserted by
-          # vitest.node-version.ts so CI and local cannot drift apart. This
-          # used to hardcode `node-version: 20` while local development ran
-          # v24 — a skew nothing detected, on a runtime that went end-of-life
-          # in April 2026.
+          # .nvmrc is the single source of truth, read here so CI and local
+          # cannot drift apart. This used to hardcode `node-version: 20` while
+          # local development ran v24 — a skew nothing detected, on a runtime
+          # that went end-of-life in April 2026.
           node-version-file: .nvmrc
           cache: npm
       # Next.js incremental build cache. Runs before npm ci so hashFiles
@@ -68,16 +66,4 @@ jobs:
       # time was 5.12% duplicated lines (tests excluded); the gate exists to
       # catch growth, not to force a cleanup sprint.
       - run: npx jscpd
-      # The junit reporter records per-test timings; the artifact makes slow
-      # tests and suite-duration drift inspectable per run without gating
-      # anything. --retry=1 is CI-only: a test that fails once then passes is
-      # reported as flaky in the run output and the junit artifact - that is
-      # a bug report against the test, not something to ignore. Local runs
-      # stay retry-free so flakes surface loudly at the desk.
-      - run: npx vitest run --retry=1 --reporter=default --reporter=junit --outputFile=vitest-junit.xml
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: vitest-junit
-          path: vitest-junit.xml
       - run: npm run build

@@ -2,7 +2,7 @@
 //
 // Split out for the reason `scripts/lib/instagram-smoke.ts` is: the entry
 // script opens a database connection and calls Meta at module scope, so its
-// decisions cannot be tested through it. The two decisions that matter are
+// decisions cannot be imported through it. The two decisions that matter are
 // here — how the arguments parse, and whether this venue is ALLOWED to take
 // the account the token turns out to belong to.
 

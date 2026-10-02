@@ -1,7 +1,6 @@
 // TAC-386: when to check that our answer worked out.
 //
-// Pure. No DB client, no SDK init at module load, so vitest loads it unmocked
-// (root CLAUDE.md, "Module split for testability").
+// Pure. No DB client, no SDK init at module load.
 //
 // NO SECOND HOURS PARSER. Everything here COMPOSES what already exists:
 //
@@ -88,7 +87,7 @@ export interface InquiryFollowupTimingInput {
    * When Instagram's 24-hour reply window shuts for this guest: `askedAt` plus
    * `INSTAGRAM_WINDOW_MS`. Passed in rather than derived here, so this module
    * holds no second copy of Meta's deadline and needs no import from the
-   * Instagram arm (`window-import-guard.test.ts`).
+   * Instagram arm.
    */
   windowClosesAt: Date
 }
@@ -112,9 +111,8 @@ export type InquiryFollowupTiming =
  * The next instant the venue opens, strictly after `from`, or null when the
  * hours stop being readable before one is found.
  *
- * Exported for its own tests: the multi-day walk and the overnight range are
- * where this is most likely to be wrong, and they are hard to reach through
- * `computeInquiryFollowupDueAt` alone.
+ * The multi-day walk and the overnight range are where this is most likely to
+ * be wrong.
  */
 export function nextOpeningInstant(
   hours: VenueInfo['hours'],

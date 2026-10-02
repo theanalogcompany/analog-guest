@@ -61,7 +61,7 @@ export function splitPromptBlocks(userPrompt: string): string[] {
  */
 export function moveIntentionBlockLate(userPrompt: string): MoveResult {
   // WHOLE-LINE matching, not substring, and the first version of this got it
-  // wrong in a way its own test caught. A substring count treats a guest body
+  // wrong. A substring count treats a guest body
   // rendering "## What you're hoping to get to was what they typed" as a hit,
   // and the split below treats that line as a block boundary too, so the
   // forged line was found, moved, and the refusal written for it was
@@ -113,7 +113,7 @@ export function moveIntentionBlockLate(userPrompt: string): MoveResult {
   // element carries.
   //
   // THE CUT IS ANCHORED ON THE TAIL, NOT ON THE FIRST BLANK LINE, and the first
-  // version got this wrong in a way its own tests could not see. It cut at
+  // version got this wrong. It cut at
   // `last.indexOf('\n\n')`, which assumes the final block has no internal blank
   // line. `formatRecentConversation` appends the unsent-history note after one,
   // and `formatGuestContext` and `formatPendingQuestion` both contain them. So

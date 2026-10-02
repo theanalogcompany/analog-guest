@@ -1,11 +1,8 @@
 /**
- * TAC-347 Stage 2. Pure half of preflight.ts, split out per the
- * module-split-for-testability convention (CLAUDE.md) — preflight.ts
+ * TAC-347 Stage 2. Pure half of preflight.ts, split out because preflight.ts
  * originally imported @/lib/agent/stages for findPendingDraft, which
- * transitively imports @/lib/rag and trips vitest's ESM directory-import
- * resolver on `voyageai` (same failure class as lib/tunables/manifest.ts).
- * TAC-394 moved that read to @/lib/agent/pending-slots; the split stays. No
- * @/* imports here, so tests load this file directly.
+ * transitively imports @/lib/rag and the `voyageai` SDK. TAC-394 moved that
+ * read to @/lib/agent/pending-slots; the split stays. No @/* imports here.
  */
 
 export interface GuardrailCounts {

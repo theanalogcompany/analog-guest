@@ -1,8 +1,7 @@
 // Pure half of the venue knowledge loader (scripts/load-venue-knowledge.ts).
 //
-// Split per CLAUDE.md "Module split for testability": the orchestrator builds
-// the Voyage and Supabase admin clients at module load, which runs that init
-// inside vitest. Everything here is pure so the tests can import it directly.
+// The orchestrator builds the Voyage and Supabase admin clients at module
+// load. Everything here is pure, so it loads with no client init.
 //
 // DELIBERATE DEVIATION from the "-pure.ts has no @/* imports" letter: this
 // file imports three @/* modules BY PATH, never via a barrel. All three are

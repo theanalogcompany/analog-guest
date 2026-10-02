@@ -1328,8 +1328,7 @@ export async function handleFollowup(input: {
       // channel is the real discriminator in principle, but the refusal above
       // means only this reason can be here on Instagram at all, and branching
       // on the reason makes the blast radius on the follow-up cron and the
-      // Command Center button provably zero rather than argued. A test pins
-      // that every other reason still calls scheduleAndSend.
+      // Command Center button provably zero rather than argued.
       const dispatched = routesThroughDispatchReply
         ? await dispatchReply(ctx, gen.result, {
             skipHumanFeelDelay: true,

@@ -46,8 +46,8 @@ export interface VoicePackRow {
 
 /**
  * Pure selection: operator_edit first, newest first, id tiebreak;
- * anti_pattern excluded; capped by entries and total chars. Exported for
- * tests — the DB read below is a thin shell around this.
+ * anti_pattern excluded; capped by entries and total chars. The DB read
+ * below is a thin shell around this.
  */
 export function selectVoicePack(
   rows: VoicePackRow[],

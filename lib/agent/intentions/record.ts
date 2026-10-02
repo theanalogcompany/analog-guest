@@ -13,7 +13,7 @@ import type { NewlyEligibleIntention, OpenIntention } from './derive'
 //
 // Since migration 040 guest_intention_prompts holds STATE rows: prompted_at null
 // means eligible-not-yet-raised, prompted_at set means raised and closed for good.
-// Two traps follow from that, each pinned by record.test.ts:
+// Two traps follow from that:
 //
 //   TRAP 2. Recording used to be an upsert with ignoreDuplicates, i.e. ON
 //   CONFLICT DO NOTHING. Against an eligibility row that already exists it
@@ -36,8 +36,7 @@ type Json = string | null
 
 /**
  * One eligibility row. `prompted_at`, `prompt_source` and `message_id` are
- * written as explicit nulls — see trap 3 above. Exported so the test can pin the
- * exact shape with toStrictEqual, where a missing key and a null differ.
+ * written as explicit nulls — see trap 3 above.
  */
 export function buildEligibilityRow(input: {
   venueId: string

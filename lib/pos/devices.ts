@@ -1,5 +1,5 @@
-// eink device helpers. Pure functions (no I/O) so they're unit-testable; the
-// route does the DB work and calls these.
+// eink device helpers. Pure functions (no I/O); the route does the DB work and
+// calls these.
 //
 // The device polls its event feed and, for each new transaction, writes the
 // issued tap_token into the NFC payload. When a guest taps + sends, the

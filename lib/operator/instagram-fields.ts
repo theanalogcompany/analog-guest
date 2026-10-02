@@ -2,16 +2,13 @@
 // draft and every conversation summary, projected from their RPC columns.
 //
 // Both operator reads need the identical rules, so they live here once rather
-// than twice. That also keeps the widening of
-// lib/messaging/instagram/window-import-guard.test.ts to a SINGLE entry: this
-// module imports INSTAGRAM_WINDOW_MS, and queue.ts and conversations.ts import
-// this module. Splitting the constant into an unguarded module to avoid the
-// guard entirely would be gaming it; adding one deliberate importer with a
-// reason is the guard working as designed.
+// than twice. That also keeps the importers of the Instagram window to a
+// SINGLE entry here: this module imports INSTAGRAM_WINDOW_MS, and queue.ts and
+// conversations.ts import this module.
 //
-// Nothing here sends anything. The guard exists so Instagram's send-time
-// constraints never reach the shared or SMS send path, and a read projection
-// is not that path — it computes a deadline for display and routes nothing.
+// Nothing here sends anything. Instagram's send-time constraints must never
+// reach the shared or SMS send path, and a read projection is not that path:
+// it computes a deadline for display and routes nothing.
 
 import { INSTAGRAM_WINDOW_MS } from '@/lib/messaging/instagram/window'
 import {

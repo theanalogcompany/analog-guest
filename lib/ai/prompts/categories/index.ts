@@ -79,7 +79,7 @@ export function getCategoryInstructions(category: MessageCategory): string {
     // between them: it sees only the category, and the choice is a per-turn
     // fact. categoryInstructionsFor below is what picks, and it is the only
     // production caller. The value here is the safe default for anything that
-    // reaches this switch directly (the channel-variant precompute, a test),
+    // reaches this switch directly (the channel-variant precompute),
     // for the reason guestArrivedInstructionsFor documents: an introduction
     // nobody needed is odd, and claiming a conversation that never happened
     // is false.
@@ -94,8 +94,7 @@ export function getCategoryInstructions(category: MessageCategory): string {
 // `unknown` ("texting back" is a claim about the channel), approved on
 // 2026-09-19; every other category is identical on both channels. Each swap
 // must match exactly once or this module throws at load. Adding a row here is
-// adding channel-specific copy, and the scope guard in index.test.ts fails
-// until it is updated on purpose.
+// adding channel-specific copy, so do it on purpose.
 const CATEGORY_CHANNEL_SUBSTITUTIONS = {
   text: {},
   instagram: {
@@ -145,8 +144,7 @@ const CATEGORY_INSTRUCTIONS_BY_CHANNEL: Record<
  *
  * The scan greeting takes NO channel substitution: its copy names no channel
  * (it says the guest scanned the code at the counter and is in the shop), so
- * there is nothing to swap. The scope guard in index.test.ts is what fails if
- * a channel claim is ever introduced into it.
+ * there is nothing to swap. Do not introduce a channel claim into it.
  */
 export function categoryInstructionsFor(
   category: MessageCategory,

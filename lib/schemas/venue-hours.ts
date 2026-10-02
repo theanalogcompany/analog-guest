@@ -15,7 +15,7 @@ import type { VenueInfo } from './venue-info'
  * module does that join in code and hands the model the answer.
  *
  * Pure and dependency-free apart from the VenueInfo type, so it loads in
- * vitest with no SDK init. Sibling to venue-info.ts, which already hosts the
+ * no SDK init. Sibling to venue-info.ts, which already hosts the
  * other pure interpreters of venue_info fields (classifyContextEntry,
  * filterActiveContext).
  *

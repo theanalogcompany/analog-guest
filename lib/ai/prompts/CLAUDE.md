@@ -25,9 +25,7 @@ expensive lesson in this directory and it has been paid for at least six times:
 
 So: **a category instruction governs what the turn is ABOUT.** It may not prescribe
 message structure, length, sentence count, hedging, disclosure, or whether to pursue an
-open goal. Those belong to the universal layer. `categories/index.test.ts` enforces both
-prohibitions with forbidden-pattern sweeps; they are literal-revert canaries, so a
-differently-worded reintroduction passes and needs a human to catch.
+open goal. Those belong to the universal layer.
 
 ## Universal voice rules
 
@@ -36,14 +34,13 @@ trust a number quoted elsewhere, including this sentence.**
 
 Numbering is **positional and append-only.** Never insert mid-list and never reuse a
 retired id (R12 is retired). Renumbering stales every external reference. A consequence:
-`UNIVERSAL_RULES_DISPLAY` curates a deliberately non-contiguous set, and its test asserts
-the exact id sequence rather than contiguity.
+`UNIVERSAL_RULES_DISPLAY` curates a deliberately non-contiguous set.
 
 **`UNIVERSAL_RULES_DISPLAY` is a dual source of truth** with the template, consumed by the
 Voices rail at `app/admin/(authed)/voices/`. Add, remove, renumber or substantially reword
 a rule and update both in the same commit. `UNIVERSAL_RULES_UNDISPLAYED` names every
-mechanical bullet, and a completeness test asserts the two sets account for every bullet in
-the template with none double-classified.
+mechanical bullet; the two sets must account for every bullet in the template with none
+double-classified.
 
 ### Writing a rule
 
@@ -58,11 +55,8 @@ the template with none double-classified.
   clean" pass once; check names, not just punctuation.
 - **No em dashes anywhere in prompt copy.** R3 forbids them in output and the model echoes
   what it is shown, so a dash in an example costs a regen attempt.
-- Pin a new rule in tests as **one contiguous literal**, not several fragments. A sentence
-  can be reversed while every asserted fragment survives - three mutants did exactly that
-  and passed 36 of 36.
 - A quoted example is the thing a model reproduces verbatim. Omit it when templated
-  phrasing is itself the defect, and pin the absence.
+  phrasing is itself the defect.
 
 ## Channel copy
 
@@ -74,11 +68,11 @@ with a table of phrase swaps in `channel-variants.ts`.
 rejected: the SMS copy is correct for a guest who texted a number.
 
 Each `from` phrase must occur **exactly once** or the module throws at load. That is safe
-and deliberate - the inputs are string constants, so a miss fails every importing test and
+and deliberate - the inputs are string constants, so a miss fails every importer and
 cannot ship. Editing an SMS phrase that has an Instagram twin breaks at that phrase instead
 of letting the channels drift silently.
 
-A **scope guard** pins which lines may differ by channel. Widening it is a deliberate
+Which lines may differ by channel is deliberately narrow. Widening it is a deliberate
 change in its own ticket, because once the composer can vary by channel every line becomes
 a candidate.
 
@@ -88,23 +82,19 @@ send on `conversationChannel`.**
 
 ## Serializers
 
-`serializers.ts` renders the user prompt. Block order is asserted whole in
-`serializers.test.ts` - a substring assertion answers "is this fact present", only an exact
-block answers "is this block what we think it is". A whole new line entered `## Right now`
-once with 5,701 tests green because every assertion was a substring.
+`serializers.ts` renders the user prompt.
 
 **The intentions block renders LAST of the content blocks**, immediately before the emoji
 directive. That position is measured, not chosen: from third position the raise rate was
 11%, from last it is 37%. Do not move it without re-running
 `scripts/measurement/first-touch-question.ts --mode ordinary`.
 
-The emoji directive keeps its own last-block position, separately measured. The full
-block-order test is the only thing that catches a move past it.
+The emoji directive keeps its own last-block position, separately measured.
 
 ## Things that are decided and should not be re-litigated
 
 - **Splitting is decided in code, not by the prompt.** `[[BREAK]]` is retired and the
-  template must carry no trace of it; a test asserts the absence. Two prompt-side rounds
+  template must carry no trace of it. Two prompt-side rounds
   failed identically before `lib/agent/sentence-split.ts` took over.
 - **A getting-to-know-you question is separated in code, not by the prompt** (TAC-554).
   Same lesson as splitting, paid for a second time. A persona rule saying the question goes

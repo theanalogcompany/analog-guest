@@ -39,7 +39,7 @@
 // beat a persona rule saying not to. The two strings were changed together
 // because the ticket named this one explicitly; keeping them in step is the
 // whole reason this header records the relationship. Do not restore it here
-// either - categories/index.test.ts pins the absence.
+// either.
 //
 // REGISTER ONLY, per TAC-314 and TAC-327. Neither variant prescribes length
 // beyond the one short line the ruling specified, and neither says what goals

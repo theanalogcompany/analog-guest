@@ -9,8 +9,7 @@
 // recipient query would have had to find all three.
 //
 // This is a PURE EXTRACTION. Every query, every guard and every log line is
-// byte-identical to what the two callers had, which is why their existing
-// tests are unchanged and are the evidence the move is behaviour-preserving.
+// byte-identical to what the two callers had.
 // The log prefixes differed between the two copies ('[apns] loadRecipients'
 // vs '[apns] commitment loadRecipients'), so the prefix is a parameter rather
 // than something unified here — unifying it would be a behaviour change

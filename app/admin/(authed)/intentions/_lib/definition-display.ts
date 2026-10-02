@@ -5,9 +5,8 @@ import {
   type IntentionGate,
 } from '@/lib/agent/intentions/definitions'
 
-// TAC-379: pure display helpers for the read-only intentions viewer. Split out
-// of the components so they're unit-testable — this repo has no React
-// component test harness (no .test.tsx anywhere, no jsdom in vitest.config).
+// TAC-379: pure display helpers for the read-only intentions viewer, split out
+// of the components.
 
 const MS_PER_HOUR = 60 * 60 * 1000
 const MS_PER_DAY = 24 * MS_PER_HOUR

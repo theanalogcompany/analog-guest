@@ -9,7 +9,7 @@
 // NUMBERING IS POSITIONAL AND APPEND-ONLY (TAC-314), AND RETIRED IDS ARE
 // NEVER REUSED (TAC-319). Rules are only ever appended — never inserted
 // mid-list — because renumbering live rule IDs stales every external
-// reference (CLAUDE.md, tickets, tests, anti-pattern prose). The
+// reference (CLAUDE.md, tickets, anti-pattern prose). The
 // consequence: displayed IDs are NOT contiguous. This list curates R1-R11
 // plus R17-R18 plus R21 plus R23-R34. R12 (message splitting, TAC-313) is
 // RETIRED: TAC-319 moved splitting out of the prompt into deterministic
@@ -17,10 +17,9 @@
 // so the undisplayed gap is R12-R16 (retired splitting slot, then greeting /
 // operator-instruction / Last-Visit / Unanswered-question), R19-R20 are
 // undisplayed form-authority bullets (mirroring, ## Length authority), and
-// R22 is an undisplayed prompt-layer-authority bullet (see below). The
-// lockstep test in system-template.test.ts asserts the exact ID sequence and
-// that each displayed rule's anchor phrase is present in both this constant
-// and SYSTEM_TEMPLATE.
+// R22 is an undisplayed prompt-layer-authority bullet (see below). Each
+// displayed rule's anchor phrase must be present in both this constant and
+// SYSTEM_TEMPLATE.
 //
 // TAC-314 appended R17 (price scoping) and R18 (nearby places), both
 // promoted out of lower layers where they kept losing: price scoping only
@@ -117,12 +116,9 @@ export interface UniversalRule {
   summary: string
 }
 
-// TAC-348: every undisplayed SYSTEM_TEMPLATE bullet, by id. Paired with
-// UNIVERSAL_RULES_DISPLAY by system-template.test.ts's classification-guard
-// test, which counts the actual bullet lines in SYSTEM_TEMPLATE's
-// `# Universal voice rules` section and asserts the two lists' combined
-// length matches with no overlap — so a future rule addition that forgets
-// to classify itself here (or in UNIVERSAL_RULES_DISPLAY) fails CI.
+// TAC-348: every undisplayed SYSTEM_TEMPLATE bullet, by id. Together with
+// UNIVERSAL_RULES_DISPLAY it must cover every bullet in SYSTEM_TEMPLATE's
+// `# Universal voice rules` section, with no overlap.
 export const UNIVERSAL_RULES_UNDISPLAYED: ReadonlyArray<`R${number}`> = [
   'R13',
   'R14',

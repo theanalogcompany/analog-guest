@@ -1,8 +1,8 @@
-// TAC-469: the pure halves of the Instagram outbound smoke test, split out so
-// they can be tested. The entry script calls main() at the top level, so
-// importing it would start a run that sends real messages.
+// TAC-469: the pure halves of the Instagram outbound smoke test, split out
+// because the entry script calls main() at the top level, so importing it
+// would start a run that sends real messages.
 //
-// Two things here are worth testing rather than reading.
+// Two things here carry the load.
 //
 // textOfBytes, because check B is a BOUNDARY test: a padding one byte out
 // would send 999 where it means 1000 and report a pass that proves nothing
@@ -75,7 +75,7 @@ export function capVerdictBlocker(
   return CAP_VERDICT_BLOCKERS[kind]
 }
 
-/** The failure kinds this module knows about, for a test that the map is total. */
+/** The failure kinds this module knows about. */
 export const CAP_VERDICT_BLOCKER_KINDS = Object.keys(
   CAP_VERDICT_BLOCKERS,
 ) as InstagramSendFailureKind[]

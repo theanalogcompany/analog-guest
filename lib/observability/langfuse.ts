@@ -389,7 +389,7 @@ function getReadClient(): LangfuseClient | null {
   }
 }
 
-// Test seam: clear cached client and processor. Lets the langfuse env-presence
+// Clear cached client and processor. Lets the langfuse env-presence
 // check on /admin/health probe the current state of process.env without
 // restarting.
 export function _resetLangfuseClientForTest(): void {

@@ -2,7 +2,7 @@
 // whether Instagram is connected.
 //
 // THE CONTRACT IS THE AUTHORITY on every value here, including the 7-day
-// `expiring` threshold. The sibling ticket (TAC-517) transcribes its tests
+// `expiring` threshold. The sibling ticket (TAC-517) transcribes its side
 // from that Contract rather than from this file, which is what makes the two
 // halves agree rather than merely look like they do.
 //

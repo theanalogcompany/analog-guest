@@ -2,17 +2,13 @@
 // stored date is a LOOKUP rather than arithmetic.
 //
 // ITS OWN MODULE, and not for tidiness. `stages.ts` constructs a Voyage client
-// at module load, so a test importing it dies at collection with a `voyageai`
-// ESM directory-import error and the file reports "no tests" while a full run
-// still prints green. That is the split CLAUDE.md prescribes under "Module
-// split for testability", and it is the only reason this pure function does
-// not live beside computeToday.
+// at module load, which is the only reason this pure function does not live
+// beside computeToday.
 
 /**
  * TAC-522: how many days the calendar covers, today included. Ten reaches a
  * week and a bit, which is the horizon "this Friday" and "next Tuesday" cover.
- * Measured cost is well under 1% of a real prompt; the number is pinned by a
- * test so changing it is deliberate.
+ * Measured cost is well under 1% of a real prompt.
  */
 export const CALENDAR_DAYS = 10
 

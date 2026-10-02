@@ -1,6 +1,6 @@
 // Pure projection from form state to the PUT body shape accepted by
 // /admin/conversations/api/review/[messageId] (PR-A). Lives outside the
-// component so the schema mapping has its own unit-test surface — drift
+// component so the schema mapping stays in one place — drift
 // here silently breaks save with a 400 from the route's PutBodySchema.
 //
 // Rules:

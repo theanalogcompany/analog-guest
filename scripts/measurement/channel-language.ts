@@ -4,11 +4,9 @@
 // TAC-495 gave Instagram its own prompt copy — R1, R5, R32, the opener, the
 // opening line, the register line, the plain-text rule, the heads-up examples,
 // the named-speaker persona line, the casual formality line and the `unknown`
-// close all swap "text"/"number" for "message". `compose-prompt.test.ts`
-// already proves those swaps are IN THE PROMPT, and scans every Instagram
-// prompt for channel claims. What no test can show is whether the MODEL obeys
-// them: the prompt is an instruction, and the only way to know what comes out
-// is to generate and read.
+// close all swap "text"/"number" for "message". Whether the MODEL obeys them
+// is the open question: the prompt is an instruction, and the only way to know
+// what comes out is to generate and read.
 //
 // So this is the detector for the output side, and it is deliberately blunt.
 // It reports matches with the phrase and its surrounding text rather than a

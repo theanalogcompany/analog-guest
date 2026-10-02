@@ -5,8 +5,7 @@
 // dispatch decides, with a fair coin.
 //
 // Pure module: the only import is ./split-message, which is itself
-// dependency-free, so everything here loads in vitest with no SDK init (see
-// CLAUDE.md "Module split for testability").
+// dependency-free, so everything here loads with no SDK init.
 //
 // The rule, per the TAC-319 round-3 ruling:
 //   1. Strip any stray [[BREAK]] markers first — the model no longer controls
@@ -181,8 +180,8 @@ function splitToBubbles(
  *
  * ONE implementation, called by both dispatch arms, because two copies of
  * "did the block render" is exactly the drift this repo keeps paying for — the
- * shouldRenderOpenIntentions / renderableIntentions pair had to be bound by a
- * cross-module test after diverging once (TAC-436).
+ * shouldRenderOpenIntentions / renderableIntentions pair has diverged
+ * once (TAC-436).
  *
  * `renderedCount` is options.renderedIntentions.length, which handle-inbound
  * computes ONCE from renderableIntentions above the queue/send fork and threads
@@ -206,7 +205,7 @@ export function intentionTailFor(
  *
  * `rng` must return a number in [0, 1). It is a required parameter here so no
  * randomness hides inside the pure module — the caller supplies Math.random
- * at the boundary and tests inject a constant to pin either branch. It is
+ * at the boundary and a caller can inject a constant to pin either branch. It is
  * consulted exactly once, and only when the sentence count is in the
  * flippable range [2, MAX_BUBBLES_PER_RESPONSE].
  *

@@ -36,11 +36,7 @@ export const VERIFY_CANCELLATION_CLAIM_MAX_OUTPUT_TOKENS = 600
  * is retried once, a truncation is not, because retrying a cap that was already
  * hit spends a second call to hit it again.
  *
- * Imported BY PATH in lib/agent/stages.ts, never via the @/lib/ai barrel:
- * stages.test.ts `vi.mock`s that barrel, and a bare constant arriving
- * `undefined` would make the no-retry branch silently unreachable in every
- * test. Same reasoning VERIFY_GROUNDING_TRUNCATED_ERROR_CODE and
- * VERIFY_PROSE_PROMISE_TRUNCATED_ERROR_CODE both carry.
+ * Imported BY PATH in lib/agent/stages.ts, never via the @/lib/ai barrel.
  */
 export const VERIFY_CANCELLATION_CLAIM_TRUNCATED_ERROR_CODE =
   'ai_verify_cancellation_claim_truncated'

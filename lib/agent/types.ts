@@ -145,7 +145,7 @@ export interface InboundMessage {
   // REQUIRED, not optional, deliberately: this is the only signal that a
   // returning guest is standing at the counter, and an optional field lets
   // every construction site default silently to "no scan" — which is the
-  // failure this ticket exists to remove, not one to reintroduce in a fixture.
+  // failure this ticket exists to remove.
   // Same discipline as `channel` above, RecentMessage.delivery and
   // GenerateMessageResult.unverifiedUrls.
   referralSource: string | null

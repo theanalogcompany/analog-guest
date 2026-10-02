@@ -3,13 +3,8 @@
 Loads when you work on a workflow. Root `CLAUDE.md` has the project-wide rules.
 
 A CI Claude Code session runs under the `claude_args` allowlist in
-`.github/workflows/build-ready.yml`. `scripts/lib/bash-allowlist.test.ts` models that
-allowlist and **binds the lists below to it**: closing a gap, or permitting something this
-file records as refused, fails that test until the list and the allowlist move together.
-
-That test reads this file and locates each block by an exact phrase, and it throws if a
-phrase occurs twice. So when editing: do not paraphrase a heading, and do not repeat one
-in prose.
+`.github/workflows/build-ready.yml`. The lists below record what that allowlist leaves open
+and what it refuses; when the allowlist changes, change them in the same PR.
 
 ## How a Bash rule matches, and what that leaves open
 
@@ -37,15 +32,13 @@ or `--force-create`. These all pass: `git push origin <branch> --force`,
 `git worktree remove .worktrees/<x> --force`, `git worktree remove -ff .worktrees/<x>`,
 `git fetch origin +main:<branch>`, `git pull --ff-only origin +main:<branch>`. Each discards
 uncommitted work, or resets, rewrites or deletes a branch. Each push form and the pull form in that
-list pass from the side folder too, with `-C` and the folder's path, and a test holds that as well.
+list pass from the side folder too, with `-C` and the folder's path.
 Before TAC-471 no force push was denied at all, so this narrows the hole without closing it.
-`scripts/lib/bash-allowlist.test.ts` pins exactly this list as known gaps and holds its own copy
-equal to it, so closing a gap fails a test; a gap found later fails nothing until it is added to
-both. Whether a rule with `*` anywhere else would close them is untested: the test's model covers
-only `Bash(x)` and `Bash(x:*)`, and throws on any other `*`.
+A gap found later is caught by nothing until it is added here. Whether a rule with `*` anywhere
+else would close them is unchecked.
 
-  What stays refused on purpose, with the alternative the prompts teach: `git stash` (the test
-baseline runs in a worktree, see "Testing"); `git checkout <branch>` and `gh pr checkout <number>`
+  What stays refused on purpose, with the alternative the prompts teach: `git stash` (use a throwaway
+worktree); `git checkout <branch>` and `gh pr checkout <number>`
 (step 14's side folder); `git checkout -- <path>` and `git checkout .` (none: they discard work);
 `git reset`, `git clean` and `git branch -D` (none); `gh pr merge <number>` and
 `gh pr ready <number>` (Jaipal merges, and marks a PR ready; the allowlist grants `gh pr` only as
@@ -55,12 +48,12 @@ stage files by name; nothing uncommitted outlives the runner). Facts about a sid
 `.worktrees/`, each checked live on this repo, except where marked. "Live" means Claude Code 2.1.273
 run headless locally under this allowlist, not CI, which runs 2.1.275 or later through
 claude-code-action, so the first fixture resume run after merge is the first real proof:
-`npx tsc --noEmit -p`, `npx eslint` and `npx vitest run --root`, given the folder's absolute path,
+`npx tsc --noEmit -p` and `npx eslint`, given the folder's absolute path,
 resolve this checkout's `node_modules`, so nothing is installed; ESLint 9 reads its config from the
 directory it runs in, so from this checkout it lints the folder with `main`'s config, and
 `--flag v10_config_lookup_from_file` makes it use the folder's own (checked with a rule only the
 folder's config had); the pre-commit hook does not run in it, because husky makes its hook directory
-on `npm install`; while it exists, `npx vitest run` and `npm run lint` in this checkout collect its
+on `npm install`; while it exists, `npm run lint` in this checkout collects its
 copy, where `npx tsc` does not (TypeScript's `**` skips dot-directories, which is why
 `tsconfig.json` names `.next/types` explicitly); **Claude Code refuses `cd` and `git` in one
 command** ("cd before a git command needs approval"), with a relative path or an absolute one,
@@ -75,37 +68,6 @@ the folder's absolute path; and whether Grep and Glob default to the shell's dir
 so step 14 gives them the path too; and the `[TURN-LIMIT]` notice reads each side folder with
 `git -C <path> status --porcelain` (`scripts/lib/run-report.mjs`), because this checkout's own
 status cannot see inside a gitignored folder. It lists that work; it cannot save it.
-
-## Measuring the test baseline
-
-To get a trustworthy before/after on a branch, run the "before" in a throwaway worktree, which
-leaves this checkout and its changes alone (TAC-471; this used to be `git stash`, which CI refuses,
-and a stash a session never pops is lost work):
-
-```
-git worktree add .worktrees/baseline origin/main
-npx vitest run --root .worktrees/baseline
-git worktree remove .worktrees/baseline
-```
-
-**The worktree has to live inside the checkout, which is what `.worktrees/` above is for**: created
-  anywhere else (a session scratchpad under `/private/tmp`, say) Node cannot walk up to this repo's
-  `node_modules`, and the run dies at `Cannot find module 'vitest/config'` while loading the config,
-  which reads as a broken branch rather than a misplaced worktree. Use `HEAD` in place of
-  `origin/main` while your change is still uncommitted, and the parent of your branch's first commit
-  (the oldest one `git log --oneline origin/main..HEAD` lists, with `^` after it) if `main` has
-  moved since you branched. `--root` runs the worktree's own tests under its own `vitest.config.ts`
-  (checked: a config change made only in the worktree changes what runs) and resolves this
-  checkout's `node_modules`, so nothing is installed and nothing needs a `cd`. Remove the worktree
-  straight after: while it is under `.worktrees/`, `npx vitest run` here collects its test files as
-  well. Then run `npx vitest run` here for the "after", adding `--exclude '.claude/**'` in a local
-  checkout that has worktrees there (the TAC-395 gotcha), so both runs collect the same files. On a
-  resume, the "after" is `npx vitest run --root <checkout>/.worktrees/resume`: run here, it would
-  test the side folder's copy against `main`'s code. `npx vitest list --filesOnly <filename>` proves
-  a specific file is actually collected rather than silently skipped: it prints the path, or
-  nothing.
-
-THE-164 covers expanding test coverage.
 
 ## Which token pushed
 
@@ -130,8 +92,7 @@ THE-164 covers expanding test coverage.
   `build-ready.yml` has the same setup.
 
 - **`analog-operator`'s `build-ready.yml` has the same setup**, so a token or allowlist
-  finding here applies there too. The two allowlists are kept in step by
-  `scripts/lib/linear-prompts.test.ts`.
+  finding here applies there too.
 
 ---
 

@@ -639,8 +639,8 @@ export async function buildRuntimeContext(input: {
     // holding Meta's own clock for Instagram rows, which would be strictly more
     // accurate; against understand_order's 3-day window the difference cannot
     // matter, so this is not worth a second read of the row. It is deliberately
-    // not NAMED here: handle-events.test.ts pins the set of files that name it
-    // to the Instagram writer and its outbound readers, and this is neither.
+    // not NAMED here: only the Instagram writer and its outbound readers name
+    // it, and this is neither.
     // TAC-536: a standalone referral carries no message, so it never reaches
     // `currentMessage.referralSource` and the line above cannot see it. The
     // carry-forward is the second source: the guest's most recent scan, if it
@@ -742,7 +742,7 @@ export async function buildRuntimeContext(input: {
     ]
 
     // The brake can only judge a prompt whose answer it can see. See
-    // resolveInboundHistoryFrom; build-runtime-context.test.ts pins this call.
+    // resolveInboundHistoryFrom.
     const inboundHistoryFrom = resolveInboundHistoryFrom({
       recentMessages,
       responseCap: MAX_HISTORY_MESSAGES,

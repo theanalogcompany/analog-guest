@@ -6,22 +6,18 @@
  * 2026-09-23). Before this, both webhooks discarded the AgentResult and
  * eighteen distinct paths could end a turn with nothing queryable behind it.
  *
- * These constants are mirrored by CHECK constraints in the migrations and
- * bound to them by `inbound-turn-outcome.test.ts`, which reads the migration
- * files. Adding a value here without widening the CHECK ships a writer whose
- * every insert fails; the test is what stops that reaching production.
+ * These constants are mirrored by CHECK constraints in the migrations. Adding
+ * a value here without widening the CHECK ships a writer whose every insert
+ * fails.
  *
  * THE REASON LIST LIVES IN 057, NOT 055. TAC-526 widened it by one value, and
  * widening a CHECK means dropping and recreating it, so 057 now carries the
  * live constraint. `outcome`, `layer` and `channel` are still 055's. The
- * binding test reads whichever migration owns each one; migrations are
- * append-only, so a later one that replaces any of these has to update that
- * test itself.
+ * migrations are append-only, so a later one that replaces any of these has to
+ * update this file.
  *
  * Deliberately NOT exported from lib/schemas/index.ts. Every consumer imports
- * it by path, so a barrel entry would add a second import route for no gain —
- * and `dispatch-operator-outbound.test.ts` mocks that barrel, which is the
- * shape `emoji-cadence.ts` is kept out of `lib/ai/index.ts` to avoid.
+ * it by path, so a barrel entry would add a second import route for no gain.
  *
  * Deliberately NO Zod parse schema and no reader. Nothing in this repo reads
  * the table yet — surfacing it is a later ticket — and a parser with no
@@ -119,8 +115,8 @@ export const INBOUND_TURN_REASONS = [
   /**
    * HISTORICAL. The fidelity send floor was retired in the v1.80.0 schema
    * diet; no code writes this value any more. It stays because the DB CHECK
-   * constraint lists it, rows carrying it exist, and the vocabulary test
-   * pins this array against the migration's list.
+   * constraint lists it, rows carrying it exist, and this array must match the
+   * migration's list.
    */
   'low_fidelity',
 

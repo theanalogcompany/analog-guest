@@ -1165,7 +1165,6 @@ export interface AgentLatencyHighProps {
  * PostHog event and is worth nobody's attention in real time.
  *
  * Do not re-add `postToSlack` here without also changing the threshold model.
- * `lib/analytics/posthog.test.ts` pins the absence.
  */
 export async function captureAgentLatencyHigh(
   props: AgentLatencyHighProps,
@@ -1351,7 +1350,7 @@ export interface DemoBypassedApprovalGateProps {
   // TAC-307. True when CATEGORY_REQUIRES_APPROVAL fired from a policy entry a
   // human set for this venue, rather than from the fleet-wide code default.
   // Drives the second Slack relay condition above. Optional so existing
-  // callers and fixtures are unaffected; absent reads as "not explicit".
+  // callers are unaffected; absent reads as "not explicit".
   policyHoldWasExplicit?: boolean
 }
 
@@ -1910,7 +1909,6 @@ export async function captureDraftDropped(
   await postToSlack(formatDraftDropped(props))
 }
 
-/** Exported for tests. */
 export function formatDraftDropped(props: DraftDroppedProps): string {
   const last4 = phoneLast4(props.guestPhone)
   const guest = `guest: ${props.guestFirstName ?? 'unnamed guest'}${
@@ -2563,7 +2561,7 @@ export type InstagramScanUnattributedReason =
    *
    * What it CANNOT see, stated because an earlier version of this comment
    * claimed the opposite: the returning guest who opens the link into a thread
-   * that STILL HAS MESSAGES. `fixtures/README.md` records that such a thread
+   * that STILL HAS MESSAGES. TAC-518's recorded payloads showed that such a thread
    * shows no icebreakers, so there is no postback to report — that guest types,
    * and a typed message with no referral is indistinguishable from an ordinary
    * DM. Device QA answers that case by reading `messages.referral_source` on
@@ -2591,7 +2589,7 @@ export interface InstagramScanUnattributedProps {
   /**
    * Meta's own `referral.source`, or null when none arrived. A vocabulary
    * constant, never guest content — the same reasoning that lets the recorded
-   * fixtures keep `source` and `type` unreplaced.
+   * payloads keep `source` and `type` unreplaced.
    */
   referralSource: string | null
   /** Whether this event created the guest, i.e. their first message to us. */

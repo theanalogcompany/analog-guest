@@ -1,8 +1,7 @@
 import { z } from 'zod'
 // Relative import, not `@/*` — mirrors the existing convention in
 // extract-test-scenarios.ts. lib/recognition/types is leaf code (no DB/SDK
-// deps), safe for both scripts to import directly per the module-split-for-
-// testability convention in CLAUDE.md.
+// deps), safe for both scripts to import directly.
 import { GUEST_STATES, type GuestState } from '../../lib/recognition/types'
 
 export { GUEST_STATES, type GuestState }

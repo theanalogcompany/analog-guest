@@ -18,13 +18,13 @@ second. It was pasted onto bearer data at four call sites.
 **Read a scope through the helpers in `lib/auth/venue-scope.ts`** - `allowsVenue`,
 `bearerAllowsVenue`, `venueScopeDeniesAll`, `venueFilterIds`. Never reach into an arm.
 Narrowing on `kind` typechecks, so `scope.kind === 'venues' && scope.ids.length > 0 && ...`
-is the original bug with one extra clause. A source-level guard bans the property access,
-the destructure and the bracket form.
+is the original bug with one extra clause. Do not use the property access, the
+destructure or the bracket form.
 
 `bearerAllowsVenue` exists separately because `allowsVenue` returns true for the fleet-wide
 arm, so passing a cookie scope into an operator helper would dispatch against any venue.
 
-**What the guard does not catch:** a caller that length-tests `venueFilterIds`' *result*
+**Also wrong, and easy to miss:** a caller that length-tests `venueFilterIds`' *result*
 before applying the filter contains no `.ids`, typechecks, and restores the fleet grant.
 
 ## Out of scope and non-existent are the same 404
@@ -51,9 +51,8 @@ for every operator at that venue, with a TestFlight-length recovery. Consequence
   the Contract names. Never `undefined`, so the client never branches on presence.
 - `phoneFallback` / `guestPhoneFallback` stay non-nullable `''` for a phoneless guest.
 - **`tsc` cannot protect you here.** Regenerated `db/types.ts` types every RPC return column
-  as non-null, so a genuine null is invisible to the compiler. The tests in this directory
-  are the only guard, and `queue.test.ts` carries an exact field-set assertion transcribed
-  from the Contract - not read back out of the implementation.
+  as non-null, so a genuine null is invisible to the compiler. Check each field against the
+  Contract's literal payload, not against what the implementation emits.
 
 `guestChannel` is derived **differently** on the two surfaces, deliberately. On a queue draft
 it is the draft row's own `messages.channel`, because dispatch routes on the card's channel
@@ -68,9 +67,8 @@ conversation with a null here has an *unknown* window, not an expired one.
 ## Card copy
 
 **No card-facing string contains an em dash.** These are read fast on a phone mid-shift,
-where an em dash is a pause the reader has to parse. A test runs every key of the label map
-plus the fallback through `listPendingQueue`; a review-only rule would not have survived the
-next trigger added.
+where an em dash is a pause the reader has to parse. That covers every key of the label map
+plus the fallback.
 
 `labelForTrigger(code, carrier)` is the one resolver behind both `reviewReason` and
 `reviewTriggerLabels`, so a card's primary line and its chips cannot disagree.
@@ -82,7 +80,7 @@ behind an earlier one when the row *was* the replacement. Check what your trigge
 fires on before writing its sentence.
 
 Model-written text (a commitment description) reaching a card is stripped of em and en
-dashes and capped at a word boundary first. The no-em-dash test runs the **static** map and
+dashes and capped at a word boundary first. Checking the **static** map
 cannot see a dash arriving that way.
 
 `messages.review_reason` holds three values outside `APPROVAL_TRIGGERS` -
@@ -114,9 +112,9 @@ and whose `status` is `sending`/`sent`/`delivered`) is written in **three** plac
 PostgREST `.or()` built from `DELIVERED_OUTBOUND_STATUSES`, and in two migrations' SQL. It
 has to run in SQL before the row cap, so it cannot be one function.
 
-`reached-guest-condition.test.ts` binds them and **derives** which migration currently
-defines each function rather than naming one, because a test pinned to a superseded migration
-goes green while the live function goes unchecked - which happened.
+Change all three together, and **find** which migration currently defines each function
+rather than assuming one: a superseded migration reads fine while the live function goes
+unchecked - which happened.
 
 `sending` counts as delivered here and **not** in `count_outbound_responses`. The Sendblue
 webhook maps QUEUED to `sending` and callbacks arrive out of order, so a message the guest
@@ -124,7 +122,7 @@ read can sit there indefinitely. Leaving it out of a reply-rate count under-coun
 it never-sent in a prompt invites the model to say it again.
 
 `recent_context` deliberately has **no** `body <> ''` filter - a photo-only text is context
-the operator needs. A test asserts no body filter is ever added.
+the operator needs. Do not add one.
 
 ---
 

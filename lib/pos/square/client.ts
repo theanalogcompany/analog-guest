@@ -5,8 +5,7 @@
 // Construction is lazy (per call), not at module load: the Square client is
 // only built when a credential is in hand. This mirrors createAdminClient
 // (lib/db/admin.ts) and getCredentials (lib/messaging/sendblue-client.ts) and
-// keeps the module vitest-safe — importing this file never constructs a
-// client, so tests that touch the provider don't need real env.
+// keeps importing this file from constructing a client.
 
 import { SquareClient, SquareEnvironment } from 'square'
 

@@ -22,9 +22,8 @@ array is fine. Cap array length with `.slice(0, N)` after the call.
 **The optional-field budget is 22, against Anthropic's hard cap of 24.** The cap counts
 optional parameters across the whole nested tree, so an optional nested object costs one
 slot for the object plus one per optional leaf inside it. Exceeding it takes generation
-down outright - it has happened. `schema-budget.test.ts` pins the count exactly, not just
-bounded, so a new field is a deliberate decision rather than silent drift. A **required**
-boolean or string is free.
+down outright - it has happened. Count exactly when adding a field, so it is a deliberate
+decision rather than silent drift. A **required** boolean or string is free.
 
 ## Prompt versions are independent by design
 
@@ -45,7 +44,7 @@ A change to one of those never touches the classify/generate contract, so bumpin
 `PROMPT_VERSION` alongside it would be a false signal.
 
 **Bumping `PROMPT_VERSION` is a repo-wide sweep.** See `.claude/rules/prompt-versioning.md` -
-it loads automatically when you touch a prompt or a test.
+it loads automatically when you touch a prompt.
 
 ## The verifier family
 
@@ -85,9 +84,7 @@ was fine when written stops being fine when a field moves.
 Detect it off the SDK's own error (`NoObjectGeneratedError.isInstance(e) && e.finishReason
 === 'length'`), never by pattern-matching provider message text, and report it as a
 distinct `errorCode`. The `*_TRUNCATED_ERROR_CODE` constants are imported **by path** in
-`lib/agent/stages.ts`, never through the `lib/ai` barrel, because `stages.test.ts` mocks
-that barrel and a constant arriving `undefined` makes the fail-closed branch silently
-unreachable.
+`lib/agent/stages.ts`, never through the `lib/ai` barrel.
 
 **When you move an unbounded field earlier in a schema, re-measure the output-token
 distribution in the same change.**
@@ -95,8 +92,7 @@ distribution in the same change.**
 ## Barrel exclusions
 
 `emoji-cadence.ts` and `self-talk-detector.ts` are deliberately **not** exported from
-`index.ts`. They are pure functions that tests need for real, and `stages.test.ts` mocks
-the barrel. Import them by path.
+`index.ts`. They are pure functions. Import them by path.
 
 ## Classifier
 

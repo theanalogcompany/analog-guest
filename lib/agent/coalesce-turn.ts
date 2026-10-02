@@ -49,8 +49,7 @@
  * a rollback is a one-line revert.
  *
  * Never throws. `RAGResult`-shaped per the repo convention, with an injected
- * `{ store, now, sleep }` so no test ever waits the real settle — the
- * `dispatch-instagram-reply.ts` precedent.
+ * `{ store, now, sleep }`, the `dispatch-instagram-reply.ts` precedent.
  */
 
 import { createAdminClient } from '@/lib/db/admin'
@@ -61,9 +60,8 @@ import type { AgentResult } from './types'
  * rollback is a one-line revert and nothing else moves.
  *
  * Read by `handle-inbound.ts` through the `enabled` parameter on
- * `openCoalescedTurn`, which defaults to this constant — so tests can force
- * the gate BOTH ways and the shut-gate behaviour stays covered after the flip,
- * which is what a rollback restores.
+ * `openCoalescedTurn`, which defaults to this constant, so the gate can be
+ * forced either way: a rollback restores the shut-gate behaviour.
  */
 export const INBOUND_COALESCING_ENABLED = true
 
@@ -81,8 +79,8 @@ export const INBOUND_COALESCING_ENABLED = true
  * post-claim adoption folds anything already inserted (the Instagram webhook
  * awaits the whole delivery's inserts before invoking any run), and the
  * pre-dispatch extension check adopts a message that lands mid-pipeline.
- * `coalesce-inbound.test.ts` covers a 5-second-gap burst still producing one
- * reply and no second one via exactly that extension path.
+ * A 5-second-gap burst still produces one reply and no second one via exactly
+ * that extension path.
  *
  * WHAT ZERO COSTS, measured rather than argued: a 30-day
  * `scripts/measurement/coalesce-window.ts` run (2026-09, 251 inbound) found
@@ -280,7 +278,7 @@ export interface CoalesceDeps {
  *
  * `unavailable` is NOT a failure the caller acts on — it means the store could
  * not answer, so the caller proceeds as it does today. Kept distinct from
- * `won` so the difference is visible in a log line and in a test, rather than
+ * `won` so the difference is visible in a log line, rather than
  * being a silent equivalence nobody can see.
  */
 export type ClaimOutcome =
@@ -322,7 +320,7 @@ export async function claimInboundTurn(
     // lands in runInboundTurn's top-level catch and fails the whole turn.
     // That is the fail-CLOSED direction — a guest silenced because a claim
     // table hiccuped — and it is the exact inversion this module exists to
-    // avoid. Caught by flipping the flag, not by a test.
+    // avoid.
     return {
       status: 'unavailable',
       error: `claimInboundTurn threw: ${e instanceof Error ? e.message : String(e)}`,
@@ -367,8 +365,7 @@ async function attemptClaim(
   //
   // Live while `now < expires_at`, so the exact expiry instant counts as
   // EXPIRED. One millisecond either way is immaterial in production; the
-  // boundary is written down because the first test written for it asserted
-  // the opposite and neither reading had been decided.
+  // boundary is written down because neither reading had been decided.
   if (held.claim.expiresAt.getTime() > deps.now().getTime()) {
     return {
       status: 'lost',
@@ -439,8 +436,7 @@ export async function releaseInboundTurn(
 }
 
 /**
- * The Supabase-backed store. Built lazily so a test injecting a fake never
- * constructs a client, which reads env at call time.
+ * The Supabase-backed store. Built lazily: the client reads env at call time.
  */
 export function defaultCoalesceDeps(): CoalesceDeps {
   let cached: ReturnType<typeof createAdminClient> | null = null
@@ -548,9 +544,8 @@ export function defaultCoalesceDeps(): CoalesceDeps {
  * Pure: pick the newest row strictly after `(afterCreatedAt, afterId)` on the
  * PAIR, so a same-millisecond sibling is ordered rather than dropped.
  *
- * Exported for tests. The comparison is the part worth asserting directly:
- * the one Instagram shape that breaks a timestamp-only ordering is two
- * messages of one delivery, and no fixture makes that visible by accident.
+ * The one Instagram shape that breaks a timestamp-only ordering is two
+ * messages of one delivery.
  */
 export function pickNewer(
   rows: readonly { id: string; created_at: string }[],
@@ -660,9 +655,8 @@ export type OpenTurnOutcome =
  * makes the guest wait the later run's settle too, and it leaves a window
  * where nobody holds the turn.
  *
- * `enabled` is a parameter rather than a read of the constant so tests can
- * force the gate BOTH ways. That matters after the flip as much as before it:
- * a rollback restores the shut path, so the shut path must stay covered.
+ * `enabled` is a parameter rather than a read of the constant so the gate can
+ * be forced either way: a rollback restores the shut path.
  */
 export async function openCoalescedTurn(
   input: {
@@ -751,7 +745,7 @@ export async function openCoalescedTurn(
  *   no retry, no alert, nothing in the logs. One failed read, permanent
  *   silence, on the mechanism that exists to stop exactly that.
  *
- * Found in code review, not by a test: the old docstring claimed every null
+ * Found in code review: the old docstring claimed every null
  * "means carry on, because none of them is a reason to withhold a reply",
  * which was false in the handoff position and is the kind of comment CLAUDE.md
  * warns is read INSTEAD of the code it describes.

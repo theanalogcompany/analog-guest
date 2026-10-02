@@ -15,7 +15,7 @@
  * why the orchestrating script always prints the raw claims text for a human
  * to read alongside this score, rather than trusting the count alone.
  *
- * No `@/*` imports — pure and dependency-free, so it loads in vitest with no
+ * No `@/*` imports — pure and dependency-free, so it loads with no
  * SDK init, same posture as lib/agent/comp-backstop.ts and
  * lib/ai/self-talk-detector.ts.
  */

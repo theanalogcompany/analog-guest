@@ -29,16 +29,14 @@
 // `venueLocalNow` builds an `Intl.DateTimeFormat` with it, that throws on an
 // invalid zone exactly as `isValidTimezone`'s own probe does, and
 // `resolveOpenState` maps the throw to `unknown`. Same verdict, one fewer
-// moving part. `venue-open-state.test.ts` pins that equivalence directly so a
-// future change to either side cannot quietly break it.
+// moving part.
 
 import type { OpenState, VenueInfo } from '@/lib/schemas'
 import { resolveOpenState } from '@/lib/schemas'
 
 /**
  * The venue fields an open/closed verdict needs. A `Pick` rather than the whole
- * `VenueContext` so callers that hold only these two can pass them, and so a
- * test fixture does not have to build a venue it never reads.
+ * `VenueContext` so callers that hold only these two can pass them.
  */
 export interface VenueOpenStateInput {
   venueInfo: Pick<VenueInfo, 'hours'>

@@ -77,10 +77,8 @@ export interface MarkSeenTarget {
 }
 
 /**
- * Injected so a test asserts on the calls this actually makes rather than on
- * a mock's opinion of them. `dispatch-instagram-reply.ts`'s shape, and for
- * the same reason: the send target resolution reads a credentials table, and
- * stubbing it at the module boundary would hide which venue was asked about.
+ * Injected, in `dispatch-instagram-reply.ts`'s shape: the send target
+ * resolution reads a credentials table.
  */
 export interface MarkSeenDeps {
   loadTarget: (input: MarkSeenTarget) => Promise<InstagramSendTargetResult>

@@ -35,16 +35,11 @@ import {
   type VoiceCorpusChunk as AiVoiceCorpusChunk,
 } from '@/lib/ai'
 import { resolveEmojiDirective } from '@/lib/ai/emoji-cadence'
-// TAC-367: imported BY PATH, not from the '@/lib/ai' barrel above, because
-// stages.test.ts vi.mocks that barrel — a bare constant arriving as
-// `undefined` would make the fail-closed branch silently unreachable in
-// every test that exercises it. Same reasoning as emoji-cadence.ts's
-// deliberate exclusion from the barrel (TAC-362).
+// TAC-367: imported BY PATH, not from the '@/lib/ai' barrel above. Same
+// reasoning as emoji-cadence.ts's deliberate exclusion from the barrel
+// (TAC-362).
 import { VERIFY_GROUNDING_TRUNCATED_ERROR_CODE } from '@/lib/ai/verify-grounding'
-// TAC-401: imported BY PATH for the same reason as the line above — this
-// file's tests `vi.mock` the '@/lib/ai' barrel, and a bare constant arriving
-// `undefined` would make the no-retry branch silently unreachable in every
-// one of them.
+// TAC-401: imported BY PATH for the same reason as the line above.
 import { VERIFY_PROSE_PROMISE_TRUNCATED_ERROR_CODE } from '@/lib/ai/verify-prose-promise'
 // TAC-513: imported BY PATH for the same reason as the two lines above.
 import { VERIFY_CANCELLATION_CLAIM_TRUNCATED_ERROR_CODE } from '@/lib/ai/verify-cancellation-claim'
@@ -207,7 +202,7 @@ export const KNOWLEDGE_GAP_WINDOW_MS = 5 * 60 * 1000
  * TAC-212 approval-policy triggers. Used as both the keys for the
  * `triggers: string[]` array on a queue decision AND the lookup keys for
  * PRIMARY_TRIGGER_PRIORITY. Exported so the orchestrator (handle-inbound,
- * handle-followup), the PostHog event helper, and tests can reuse the
+ * handle-followup) and the PostHog event helper can reuse the
  * literal strings without copy-paste drift.
  */
 export const APPROVAL_TRIGGERS = {
@@ -369,7 +364,7 @@ export const APPROVAL_TRIGGERS = {
   // pushed with it, which is what keeps the hold and the operator's primary
   // copy exactly as they were. And it is ranked directly BELOW its partner in
   // PRIMARY_TRIGGER_PRIORITY so it can never win the review_reason label off a
-  // trigger it always co-fires with; a test pins that.
+  // trigger it always co-fires with.
   //
   // Why not two distinct primary triggers, which is what this file's own
   // GROUNDING_CHECK_FAILED comment argues for elsewhere: the operator's
@@ -751,8 +746,8 @@ export function knowledgeGapWillQueue(
 // TAC-394: KNOWLEDGE_GAP_CARD_REVIEW_REASONS and isKnowledgeGapCard moved to
 // ./pending-slots, so the persist layer can use them without importing this
 // file. Re-exported here so every existing import keeps working. The moved
-// review_reason values are literals there; stages.test.ts pins them against
-// APPROVAL_TRIGGERS and GENERATION_FAILED_REVIEW_REASON.
+// review_reason values are literals there, matching APPROVAL_TRIGGERS and
+// GENERATION_FAILED_REVIEW_REASON.
 export {
   isKnowledgeGapCard,
   KNOWLEDGE_GAP_CARD_REVIEW_REASONS,
@@ -978,8 +973,7 @@ export async function retrieveKnowledgeStage(
  *
  * WHY TWO CALLS TO THE EXISTING STAGE rather than one widened function: each
  * arm keeps its own tag-preference fallback and its own graceful degrade for
- * free, and `retrieveKnowledgeStage` stays byte-identical so every test that
- * pins it still does.
+ * free, and `retrieveKnowledgeStage` stays byte-identical.
  *
  * NO PRIOR TURN → ONE ARM. When `buildContextQuery` returns '' (a first
  * message, a conversation older than the window, nothing delivered) this
@@ -988,13 +982,12 @@ export async function retrieveKnowledgeStage(
  * byte-identical to today rather than merely similar.
  *
  * That early return is DEFENCE IN DEPTH, and honestly inert today: bypassing
- * it was run as a mutant and survived, because `retrieveKnowledgeStage`
+ * bypassing it changes nothing, because `retrieveKnowledgeStage`
  * short-circuits an empty query to [] on its own, so the merge of
  * [armA, []] reproduces armA exactly. It is kept because it makes the
  * guarantee independent of that second guard — if an empty query ever stopped
  * meaning "return nothing", this path would still run one arm — and because
- * it states the intent where a reader looks for it. Do not read it as the
- * thing the tests are pinning; the single-call assertions are.
+ * it states the intent where a reader looks for it.
  *
  * DEGRADATION. `allSettled`, so one arm's rejection cannot take the other
  * down. Arm B failing leaves arm A alone — exactly today's behaviour. Arm A
@@ -1155,7 +1148,7 @@ export async function generateStage(
  * check passed this draft" and "the check never completed" were the same row.
  * That is this repo's signature defect class (see CLAUDE.md, "Gotchas worth
  * carrying everywhere":
- * comp_regex_backstop, the push `future-add safety` test, is_test_synthetic),
+ * comp_regex_backstop, is_test_synthetic),
  * and a distinct state is what makes the gate's mapping a total switch instead
  * of a ternary chain with a silent default.
  *
@@ -1176,8 +1169,7 @@ export type GroundingBackstopResult =
  * This was a ternary chain (`flagged ? claims : clean ? [] : null`) and the
  * comment above it claimed a sixth state would have to "decide what it
  * records". It would not have: a sixth member of the union fell through to the
- * `null` default, fired no trigger, and SENT — with tsc clean and every test
- * passing. That was caught in code review, by someone adding the state and
+ * `null` default, fired no trigger, and SENT — with tsc clean. That was caught in code review, by someone adding the state and
  * running the tree rather than reading the sentence, and it is this repo's
  * signature defect class committed inside the ticket that exists to close an
  * instance of it (CLAUDE.md, "Gotchas worth carrying everywhere").
@@ -1305,7 +1297,7 @@ export async function verifyGroundingStage(
   // this literal, which doubled the conflict surface inside the one function
   // TAC-502 is going to edit — and TAC-502's whole subject is what the
   // verifier is given, so a duplicated input object is the worst place for it
-  // to land. One site to change, and the parity test catches a divergence.
+  // to land. One site to change.
   const verifyInput = {
     inboundBody: ctx.currentMessage?.body ?? '',
     replyBody: generation.body,
@@ -1342,7 +1334,7 @@ export async function verifyGroundingStage(
   // holds the draft where it used to pass through. Unreachable today
   // (GeneratedMessageSchema.body is z.string().min(1)), and "no code means
   // transient" is the deliberate default direction — the same one the
-  // unrecognized-errorCode test pins — so this is recorded rather than
+  // an unrecognized errorCode takes — so this is recorded rather than
   // special-cased.
   //
   // "One retry" counts OUR attempts. The AI SDK applies its own default
@@ -3018,7 +3010,7 @@ export async function applyApprovalPolicyStage(
     // byte-identical to a genuine pass, so the column could not answer the one
     // question migration 039 built it to answer. `degraded` is its own state
     // now and maps to NULL with the other two no-verdict outcomes. Folding it
-    // back into `[]` is what the mapping test exists to fail on.
+    // back into `[]` would be a regression.
     ungroundedClaims: UNGROUNDED_CLAIMS_BY_STATUS[grounding.status](grounding),
     // TAC-401: the carrier the prose-promise check produced, threaded to the
     // persist layer so an operator approving the card creates a real
@@ -3346,7 +3338,7 @@ function renderedIntentionLines(ctx: RuntimeContext): string[] | undefined {
 
 export function buildAiRuntime(
   ctx: RuntimeContext,
-  // TAC-362: injectable so tests can pin both branches of the emoji coin
+  // TAC-362: injectable so both branches of the emoji coin can be forced
   // without stubbing globals, defaulted here at the boundary so the pure
   // module stays pure. Same split scheduleAndSend uses for
   // resolveDispatchBubbles.
@@ -3485,8 +3477,7 @@ export function buildAiRuntime(
     // live in would be confidently wrong. The helper reaches the same answer on
     // its own (the venue's real timezone makes `venueLocalNow` throw, which
     // resolves to `unknown`), so this branch is belt and braces rather than the
-    // only thing standing between a bad zone and a wrong verdict; a test pins
-    // the equivalence.
+    // only thing standing between a bad zone and a wrong verdict.
     today: {
       ...computeToday(timezone, now),
       openState: timezoneSubstituted

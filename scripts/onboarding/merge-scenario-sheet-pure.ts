@@ -227,7 +227,7 @@ export function groupTombstonesByTopic(
 
 /**
  * Drop any fresh candidate whose message is a near-duplicate (per
- * `similarityLookup`, injected so this stays pure/testable — the real
+ * `similarityLookup`, injected so this stays pure — the real
  * implementation embeds via Voyage and computes cosine similarity, see
  * merge-scenario-sheet.ts) of a tombstoned scenario in the SAME topic.
  * Scoped to topic deliberately: a generic "is this similar to anything

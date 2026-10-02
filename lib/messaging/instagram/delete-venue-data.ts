@@ -17,8 +17,7 @@
 //
 // so nulling both violates `guests_must_have_identity` and the UPDATE fails.
 // Every deletion request would have errored, on the one callback Meta tests
-// directly. Found at implementation time, not by a test, because no fixture
-// enforces a CHECK.
+// directly. Found at implementation time.
 //
 // The fix keeps the ruling intact: the scoped id is REPLACED with an opaque
 // random tombstone rather than removed. It satisfies the identity CHECK, the

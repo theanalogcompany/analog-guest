@@ -1,5 +1,5 @@
 // Pure helpers for find-pattern-cluster. Split out so the verification
-// prompt builder + threshold logic can be tested without dragging Voyage,
+// prompt builder + threshold logic can load without dragging Voyage,
 // Supabase, or Anthropic SDK init through module load.
 //
 // The cluster pipeline is:

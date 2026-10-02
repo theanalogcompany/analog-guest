@@ -35,7 +35,6 @@
 // it there (CLAUDE.md, TAC-380 Probe 1). Bounded to ~23 characters by the
 // title trim, and it was rendered in the body before this too. Called out
 // because on a comp_complaint push the title is the ONLY thing rendered.
-// Asserted in tests against planted guest text, not against key names.
 
 import {
   loadPushRecipients,
@@ -68,7 +67,7 @@ const APNS_BAD_DEVICE_TOKEN_STATUS = 400
 // own question. Two budgets because iOS renders the two differently: the title
 // is one bold line, the body gets about two when collapsed. These are starting
 // values TO BE confirmed on device, which is why the ticket is QA: Device. No
-// test here establishes they are right on a real lock screen.
+// check here establishes they are right on a real lock screen.
 const MAX_PUSH_TITLE_CHARS = 40
 const MAX_PUSH_BODY_CHARS = 110
 
@@ -78,7 +77,7 @@ const MAX_PUSH_BODY_CHARS = 110
 // transitively. This module is the SHARED draft push and loads on the SMS path
 // too, and TAC-469 rule 1 is "branch by channel, don't converge".
 // lib/operator/queue.ts carries the same literal for the same reason.
-// send.test.ts binds the two so a rename cannot drift them apart.
+// Keep the two literals equal.
 const INSTAGRAM_SEND_FAILED_REASON = 'instagram_send_failed'
 
 // TAC-532, ruled 2026-09-23. A complaint gets its own title phrase and NEVER
@@ -176,8 +175,8 @@ export function shouldQuoteGuest(
 ): boolean {
   // TAC-532 code review. crisisSafety is a SEPARATE boolean from category
   // (lib/ai/classify-message.ts), so a self-harm or medical-emergency message
-  // carries whatever category the classifier picked — 'unknown' in this repo's
-  // own crisis fixture — and a category-only gate quotes it. It reaches a push
+  // carries whatever category the classifier picked, and a category-only gate
+  // quotes it. It reaches a push
   // for real: handle-inbound.ts routes a crisis turn whose reply did not fully
   // send into pushSendFailureCard, which passes the guest's message here.
   //

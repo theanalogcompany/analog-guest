@@ -7,8 +7,8 @@
 // The duplication is deliberate — see that file's header for why it was not
 // extracted into a shared module. If a third consumer appears, extract then.
 //
-// Key is read lazily (per call) so importing this module never requires env —
-// keeps it vitest-safe. The key is parsed + length-checked on every use so a
+// Key is read lazily (per call) so importing this module never requires env.
+// The key is parsed + length-checked on every use so a
 // malformed key fails loudly at the call site rather than producing garbage.
 
 import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto'

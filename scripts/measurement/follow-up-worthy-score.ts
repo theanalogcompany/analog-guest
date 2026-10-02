@@ -1,7 +1,6 @@
 // TAC-386: the arithmetic behind arm A, the followUpWorthy classifier run.
 //
-// Pure, and separated from the runner so it can be tested without a model call
-// (root CLAUDE.md, "Module split for testability").
+// Pure, and separated from the runner so it needs no model call.
 //
 // THE LABELS COME FIRST. Every case carries a hand-assigned `expected` written
 // BEFORE the run, which is what makes precision mean anything: scoring a

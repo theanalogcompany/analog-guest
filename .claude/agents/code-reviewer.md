@@ -1,6 +1,6 @@
 ---
 name: code-reviewer
-description: Read-only post-implementation review. Flags AI slop, convention violations, brand drift, and missing tests before the PR opens. MUST BE USED after every implementation phase.
+description: Read-only post-implementation review. Flags AI slop, convention violations, brand drift, and stray tests before the PR opens. MUST BE USED after every implementation phase.
 tools: Read, Grep, Glob, Bash
 ---
 
@@ -24,7 +24,7 @@ A resumed build works in a side folder (`work-ticket.md` step 14), and the hando
 - `any` types → flag, suggest `unknown` + narrowing or a real type.
 - Functions throwing at internal boundaries → should return `{ ok, data } | { ok, error }` or use one of the named aliases (`RAGResult`, `AIResult`, `RequireAdminResult`).
 - Missing Zod at API/route/script boundaries.
-- Imports using relative paths where `@/*` would work (except in `-pure.ts` files where relative is required for vitest — see CLAUDE.md "Module split for testability").
+- Imports using relative paths where `@/*` would work.
 - New top-level directories under `lib/`, `app/`, or `scripts/` without prior approval.
 - Filenames that don't match siblings (kebab-case for files, PascalCase for components).
 - Commit messages not in `TAC-XXX: lowercase imperative` format.
@@ -50,9 +50,8 @@ A resumed build works in a side folder (`work-ticket.md` step 14), and the hando
 - Guest framing should be "recognized," not "enrolled."
 
 ## Tests
-- Pure logic in new code should have colocated `module.test.ts`.
-- Test count delta should be ≥0 on functional changes. If unchanged or down, flag unless the change is pure refactor with equivalent coverage.
-- Tests added match the ticket's Testing → Automated coverage section. If the ticket specified tests that aren't in the diff, flag MAJOR.
+- This repo has no automated tests (`.claude/rules/no-tests.md`). Never ask for tests, never flag their absence, never report a test count or a coverage gap, even if the ticket's Testing section asks for them.
+- Any `*.test.*`, `*.spec.*`, `__tests__/` or `__mocks__/` path in the diff, any test runner or test-library dependency added to `package.json`, and any test step added to `.husky/` or CI: flag BLOCKER. They must be removed.
 
 ## Documentation routing
 - Cross-reference the diff against CLAUDE.md's "Where things are written down" routing table. If the diff introduces a new script, migration, library pattern, convention, gotcha, directory, env var, or workflow rule and it is written down nowhere, flag MAJOR. Check it landed in the place the table names — a subsystem detail belongs in that directory's `CLAUDE.md`, not in the root file. Appending it to root is itself a finding; that is what grew root to 1.34 MB (`docs/decisions/0001-claude-md-is-an-index.md`).
@@ -76,10 +75,8 @@ A resumed build works in a side folder (`work-ticket.md` step 14), and the hando
 - Issue: …
 - Fix: …
 
-### Tests
-- Count: NNN (was MMM, delta +K / unchanged / -K)
-- New tests: [list]
-- Coverage gaps: [list, or none]
+### Stray tests
+- [list of test paths or test dependencies in the diff, or none]
 
 ### Plan adherence
 - Deviations: [list, or none]

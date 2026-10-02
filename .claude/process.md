@@ -79,7 +79,7 @@ Linear allows only one label from the group. Remove it when he answers.
 
 **QA Route**: exactly one, set when the ticket is written, not at close time.
 
-- `QA: Script`: gate is provable by a test or query.
+- `QA: Script`: gate is provable by a query or script.
 - `QA: Device`: gate needs Jaipal on a real device or at the venue.
 
 **Repo**: `analog-guest`, `analog-operator`. A buildable ticket carries
@@ -189,7 +189,7 @@ to `[` and `\]` to `]`, then match with `startsWith`.** Linear can return
 brackets escaped, and a comment opening with a CC prefix in any bracket form
 is CC's own, never human input and never a ruling (TAC-396).
 `scripts/lib/comment-provenance.mjs` implements this rule and the ruling
-rule below, with tests. Extend it rather than writing the check again.
+rule below. Extend it rather than writing the check again.
 
 **Post every comment flat, at the top level. Never set `parentId`.** Jaipal
 reads a ticket top to bottom, and a threaded reply puts an answer inside an
@@ -381,7 +381,7 @@ few hours that its questions left the block or a `[NEEDS-INPUT]` explains
 why not.
 
 **The check after the session also reports the turn limit** (TAC-447), and
-that part is code, tested in `scripts/lib/`. A build run works one ticket, so
+that part is code, in `scripts/lib/`. A build run works one ticket, so
 the limit is that ticket's alone, and the session pushes each planned commit
 as it makes it. A session the CLI stops at the limit gets `[TURN-LIMIT]`, and
 one that finishes over it gets `[OVER-LIMIT]`. Both say what reached GitHub,
@@ -516,8 +516,6 @@ pre-authorized decision is distinguishable from a silent one.
 - **SR-1 Contrast and accessibility figures.** WCAG arithmetic, not taste.
 - **SR-2 Copy that is factually wrong about system behaviour.** Correct it.
   Does not extend to copy in the agent's voice.
-- **SR-3 Test quality.** Mutation verification, real gate vs mock,
-  assertion targets.
 
 Everything else is Jaipal's. In particular: anything in the agent's voice a
 guest can read, anything that changes what auto-sends or when, and anything

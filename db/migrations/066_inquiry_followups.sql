@@ -82,9 +82,8 @@ create table inquiry_followups (
   -- `'pending'` IS in this CHECK and is also the column default. Postgres does
   -- NOT validate a default against the column's own CHECK (migration 046's
   -- trap: `messages.status` carried `default 'pending'` against a CHECK that
-  -- never permitted it, on adjacent lines, for months), so this pairing is
-  -- asserted by a test rather than assumed from the fact that it is written
-  -- here.
+  -- never permitted it, on adjacent lines, for months), so this pairing is not
+  -- safe to assume from the fact that it is written here.
   status text not null default 'pending'
     check (status in ('pending', 'dispatched', 'skipped', 'expired')),
 

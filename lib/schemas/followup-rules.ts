@@ -31,8 +31,7 @@ export type EngineFollowupReason = (typeof FOLLOWUP_REASONS)[number]
  * and so count toward `weekly_cap`, without being added to four exhaustive
  * switches that have no branch to give it.
  *
- * MUST match migration 066's CHECK list exactly. That is asserted against the
- * migration file itself in followup-rules.test.ts, not left to a comment.
+ * MUST match migration 066's CHECK list exactly.
  */
 export const FOLLOWUP_LOG_REASONS = [
   ...FOLLOWUP_REASONS,
@@ -60,8 +59,7 @@ const HhmmSchema = z
  * crash the engine.
  *
  * Source-of-truth invariant: FOLLOWUP_RULES_DEFAULT below must match the
- * literal default written by migration 028's UPDATE. asserted in
- * followup-rules.test.ts.
+ * literal default written by migration 028's UPDATE.
  */
 export const FollowupRulesSchema = z.object({
   // Per-reason kill switches. Operator can disable post-visit / cold-lapsed /
@@ -118,8 +116,7 @@ export const FollowupRulesSchema = z.object({
   //
   // NOT IN MIGRATION 028's BACKFILL LITERAL, because it postdates it. Stored
   // rows written before this key existed simply do not carry it and take the
-  // default below; followup-rules.test.ts pins that 028's own eleven values are
-  // unchanged and asserts this key separately.
+  // default below.
   warm_close_pause_minutes: z.number().int().positive().default(10),
 
   // TAC-386: the per-venue kill switch for the inquiry follow-up, matching the
@@ -133,8 +130,7 @@ export const FollowupRulesSchema = z.object({
   // which this trigger never goes through.
   //
   // NOT IN MIGRATION 028's BACKFILL LITERAL, because it postdates it. Rows
-  // written before this key existed do not carry it and take the default;
-  // followup-rules.test.ts pins 028's own eleven values separately.
+  // written before this key existed do not carry it and take the default.
   inquiry_followup_enabled: z.boolean().default(true),
 
   // TAC-568: the fixed "by the way, you can always message us here" text the
@@ -163,8 +159,7 @@ export const FollowupRulesSchema = z.object({
   //
   // NOT IN MIGRATION 028's BACKFILL LITERAL, because it postdates it. Le Mil's
   // live value was written directly into `followup_rules` (TAC-568 ruling), so
-  // no migration ships with this key; followup-rules.test.ts pins that 028's own
-  // eleven values are unchanged and asserts the post-028 keys separately.
+  // no migration ships with this key.
   warm_close_text: z.string().default(''),
 })
 
@@ -173,9 +168,7 @@ export type FollowupRules = z.infer<typeof FollowupRulesSchema>
 /**
  * Canonical default. Source of truth for the SQL backfill in migration 028
  * (the migration's `update venue_configs set followup_rules = jsonb_build_object(...)`
- * literal must match this object key-by-key). Round-tripped in
- * followup-rules.test.ts via FollowupRulesSchema to guarantee defaults parse
- * to the same shape.
+ * literal must match this object key-by-key).
  */
 export const FOLLOWUP_RULES_DEFAULT: FollowupRules = {
   post_visit_enabled: true,

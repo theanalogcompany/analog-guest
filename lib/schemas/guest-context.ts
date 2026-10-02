@@ -128,7 +128,6 @@ export type GuestContext = z.infer<typeof GuestContextSchema>
 // (structured + observation) = 13. Combined with the TAC-297 commitment (4)
 // and arrivalCapture (3) emissions, GeneratedMessageSchema lands at 20
 // optionals total — under Anthropic's 24-cap with 4 slots of headroom.
-// See lib/ai/schema-budget.test.ts for the CI guardrail.
 //
 // Parse-permissive posture: every field optional, no .strict(), unknown keys
 // silently stripped. A near-miss patch from the model (e.g. an extra slot the
@@ -141,9 +140,8 @@ const GuestDetailsPatchSchema = z.object({
   last_name: z.string().optional(),
   home_base: z.string().optional(),
   workplace: z.string().optional(),
-  // TAC-558. One slot: 20 optionals to 21, against the 22 budget in
-  // lib/ai/schema-budget.test.ts and Anthropic's 24 cap. One slot of headroom
-  // left after this.
+  // TAC-558. One slot: 20 optionals to 21, against the 22 budget and
+  // Anthropic's 24 cap. One slot of headroom left after this.
   history_here: z.string().optional(),
 })
 

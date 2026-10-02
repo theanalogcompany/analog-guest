@@ -5,8 +5,7 @@
 // collapse/strip helper, plus the shared bubble constants.
 //
 // No imports — this module is deliberately dependency-free so the strip logic
-// can be unit-tested without any SDK init (see CLAUDE.md "Module split for
-// testability").
+// loads without any SDK init.
 //
 // collapseToSingleMessage now serves BOTH paths:
 //   - queue path: a draft is one row an operator reads and approves verbatim,

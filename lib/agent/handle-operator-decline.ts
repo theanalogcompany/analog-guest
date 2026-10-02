@@ -11,7 +11,7 @@
 //   1. NEVER calls scheduleAndSend / sendMessage. The "persist-pending, not
 //      auto-send" invariant is structurally enforced by NOT importing those
 //      modules — a regression would have to add the import to silently text
-//      a guest. The colocated test asserts no send-side mock invocation.
+//      a guest.
 //   2. SKIPS applyApprovalPolicyStage entirely. The operator's swipe-left IS
 //      the approval signal; running the policy gate would either rubber-stamp
 //      or queue redundantly. We pass our own primaryTrigger
@@ -78,7 +78,7 @@ export const OPERATOR_DECLINE_PRIMARY_TRIGGER = 'operator_decline_initiated'
  * venue's voice via the rest of the prompt stack.
  *
  * Pure (no `description` validation here — the route guards the empty case
- * before invoking). Exported for testability.
+ * before invoking).
  */
 export function buildDeclineHint(commitmentDescription: string): string {
   // R3 + THE-225: the agent's OUTPUT can't contain em dashes (post-hoc

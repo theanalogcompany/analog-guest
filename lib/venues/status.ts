@@ -41,8 +41,8 @@
  * Every value `venues.status` can hold.
  *
  * The strict half is migration 001's `venues_status_check`, which permits
- * exactly these four. This list moves with it, and `status.test.ts` reads the
- * migration to hold the two equal, because SQL cannot import a constant.
+ * exactly these four. This list moves with it, because SQL cannot import a
+ * constant.
  */
 export const VENUE_STATUSES = [
   'pending',

@@ -115,7 +115,7 @@ function normalizeBody(body: string): string {
  * the ONE definition of "still the same conversation", shared with followups
  * and the intention brake, and a second definition is how the two drift.
  *
- * Exported for the measurement harness and the tests; `buildContextQuery` is
+ * Exported for the measurement harness; `buildContextQuery` is
  * what callers use.
  */
 export function contextTurns(
@@ -133,7 +133,7 @@ export function contextTurns(
   // Date()`, so against wall clock every replay older than the window has an
   // empty context and the contextual arm is silently dead — the TAC-367
   // re-dating trap ("historyEndIso pins message history, NOT the clock")
-  // arriving through a second consumer. Found in code review, by mutant.
+  // arriving through a second consumer. Found in code review.
   const now = (
     ctx.currentMessage?.receivedAt ?? ctx.recognition.computedAt
   ).getTime()
@@ -195,7 +195,7 @@ export function buildContextQuery(
  *     top 2 survive **so long as `limit >= 3`** — A1 sits in slot 3. That
  *     condition is not decorative: KNOWLEDGE_RETRIEVE_LIMIT is an editable
  *     tunable surfaced on /admin/tunables, and at limit 2 the slate is
- *     A0, B0 and A1 is displaced. Pinned by a test.
+ *     A0, B0 and A1 is displaced.
  *
  * The floor cannot change the result when the arms come from
  * `retrieveKnowledgeStage`, which has already applied it — each merged score
@@ -207,7 +207,7 @@ export function mergeKnowledgeMatches(
   arms: KnowledgeMatch[][],
   // Supplied by the caller rather than imported from './stages', which would
   // make this module import the whole agent stage layer (and Voyage init with
-  // it) and create a cycle, costing the purity that lets its tests and the
+  // it) and create a cycle, costing the purity that lets the
   // Voices mirror load it on its own. There is exactly one production caller,
   // `retrieveKnowledgeWithContextStage`, and it passes the canonical
   // KNOWLEDGE_RETRIEVE_LIMIT and KNOWLEDGE_RELEVANCE_FLOOR — so the values
@@ -237,8 +237,8 @@ function selectByScore(
   // `best` is filled in arm order, `Map.set` on an existing key does not move
   // it, and Array.prototype.sort is stable (ES2019) — so a tie already falls
   // out as first arm, then first seen. An explicit tiebreak here was provably
-  // inert for every input and its test could not fail; both were removed in
-  // code review rather than left reading as a guard.
+  // inert for every input; it was removed in code review rather than left
+  // reading as a guard.
   return [...best.values()].sort((a, b) => b.similarity - a.similarity)
 }
 
