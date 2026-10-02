@@ -48,7 +48,7 @@ when the branch was cut.
 ## Sibling versions are independent and must not be bumped along
 
 The verifiers and extractors each carry their own version
-(`VERIFY_GROUNDING_PROMPT_VERSION`, `VERIFY_PROSE_PROMISE_PROMPT_VERSION`,
+(`VERIFY_PROSE_PROMISE_PROMPT_VERSION`,
 `EXTRACT_REPORTED_ORDER_PROMPT_VERSION`, and the rest). They never touch the
 classify/generate contract, so bumping `PROMPT_VERSION` for a change to one of them is a
 false signal - and vice versa.

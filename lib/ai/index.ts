@@ -2,7 +2,6 @@ export { generateMessage } from './generate-message'
 export { classifyMessage } from './classify-message'
 export { extractReportedOrder } from './extract-reported-order'
 export { classifyIntentionPrompts } from './classify-intention-prompts'
-export { verifyGrounding } from './verify-grounding'
 export { verifyMechanicOffer } from './verify-mechanic-offer'
 export { verifyCancellationClaim } from './verify-cancellation-claim'
 export { verifyProsePromise } from './verify-prose-promise'
@@ -29,8 +28,6 @@ export type {
   PendingQuestion,
   RecentMessage,
   RuntimeContext,
-  VerifyGroundingInput,
-  VerifyGroundingResult,
   VerifyMechanicOfferGatedMechanic,
   VerifyMechanicOfferInput,
   VerifyMechanicOfferResult,

@@ -9,8 +9,7 @@ import type {
 
 // TAC-401. Deliberately its OWN version, not SYSTEM_TEMPLATE's PROMPT_VERSION
 // — this verifier never touches the classify/generate contract, same
-// independence rationale as VERIFY_GROUNDING_PROMPT_VERSION and
-// VERIFY_MECHANIC_OFFER_PROMPT_VERSION.
+// independence rationale as VERIFY_MECHANIC_OFFER_PROMPT_VERSION.
 export const VERIFY_PROSE_PROMISE_PROMPT_VERSION = 'v1.1.0'
 
 /**
@@ -122,7 +121,7 @@ function buildUserPrompt(input: VerifyProsePromiseInput): string {
  * TAC-401: independent post-generation check for a promise made in PROSE with
  * no structured commitment behind it.
  *
- * Third instance of the shape verify-grounding.ts and verify-mechanic-offer.ts
+ * Instance of the shape verify-mechanic-offer.ts
  * already set: generateObject, Haiku, AIResult, its own prompt version, no
  * regeneration loop, no gating of its own beyond input validation.
  *
@@ -130,10 +129,8 @@ function buildUserPrompt(input: VerifyProsePromiseInput): string {
  * near zero. Across 220 replies at Le Mil's the model's own
  * `requiresOperatorApproval` self-flag fired 0 times and caught 0 of the 4
  * genuine uncarried promises; the comp regex fired 5 times and caught 0 of
- * them, flagging 3 apology idioms and 1 fabricated comp instead. The promises
- * that were held were held by the grounding check and the mechanic-offer
- * check — neither of them a commitment control, both firing for unrelated
- * reasons. Ruled 2026-09-15: an independent check becomes the primary
+ * them, flagging 3 apology idioms and 1 fabricated comp instead. Ruled
+ * 2026-09-15: an independent check becomes the primary
  * control and nothing may depend on the self-flag.
  *
  * INPUT IS THE REPLY BODY AND THE GUEST'S CURRENT MESSAGE, AND NOTHING ELSE.
@@ -175,7 +172,7 @@ export async function verifyProsePromise(
   // `reasoning` FIRST, and the order is load-bearing. Structured output
   // generates in declaration order, so a verdict declared before the analysis
   // is a verdict the model has not reasoned about yet. TAC-301 part 1.5 found
-  // exactly this on verify-grounding, where the model emitted a flag and then
+  // exactly this on an earlier verifier, where the model emitted a flag and then
   // reasoned its way to the opposite conclusion inside the same object.
   const schema = z.object({
     reasoning: z.string(),
@@ -236,7 +233,7 @@ export async function verifyProsePromise(
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e)
     // Truncation separated from every other failure, exactly as
-    // verify-grounding.ts does it, and read off the SDK's own error rather
+    // the other verifiers do, and read off the SDK's own error rather
     // than inferred from provider-formatted message text. Both still return
     // ok:false — this function makes no policy decision — but the caller
     // retries one of these and not the other.

@@ -1,5 +1,6 @@
 export {
   fetchTrace,
+  fetchTraceResult,
   langfuseInitFailed,
   noopAgentTrace,
   startAgentTrace,
@@ -13,5 +14,7 @@ export type {
   AgentTraceUpdate,
   AgentUsage,
   ApiTraceWithFullDetails,
+  FetchTraceResult,
   StartAgentTraceOptions,
 } from './langfuse'
+export { traceFailureHttpStatus } from './trace-fetch-pure'

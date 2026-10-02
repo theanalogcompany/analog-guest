@@ -121,7 +121,6 @@ export const REASON_BY_REVIEW_REASON = {
   [APPROVAL_TRIGGERS.PROSE_PROMISE_BACKSTOP]: 'promises something',
   [APPROVAL_TRIGGERS.PROSE_CANCELLATION_BACKSTOP]: 'claims a cancellation',
   [APPROVAL_TRIGGERS.UNRESOLVED_CANCELLATION_ID]: 'promise not found',
-  [APPROVAL_TRIGGERS.KNOWLEDGE_GAP_BACKSTOP]: 'unverified claim',
   [APPROVAL_TRIGGERS.KNOWLEDGE_GAP]: 'needs an answer',
   [APPROVAL_TRIGGERS.COMP_REGEX_BACKSTOP]: 'comp request',
   [APPROVAL_TRIGGERS.MODEL_FLAGGED]: 'needs review',
@@ -138,10 +137,6 @@ export const REASON_BY_REVIEW_REASON = {
   [APPROVAL_TRIGGERS.COMPLAINT_COMMITMENT_FLOOR]: 'promise on a complaint',
   // Never renders: PUSH_POLICY skips this trigger. Present so the map is total.
   [APPROVAL_TRIGGERS.PREVIOUS_PENDING_HELD]: 'needs review',
-  [APPROVAL_TRIGGERS.GROUNDING_CHECK_FAILED]: 'unverified, needs a look',
-  // Never renders: it can never win primary, because it always co-fires below
-  // GROUNDING_CHECK_FAILED. Present so the map is total.
-  [APPROVAL_TRIGGERS.GROUNDING_CHECK_DEGRADED]: 'unverified, needs a look',
   [APPROVAL_TRIGGERS.PROSE_PROMISE_CHECK_FAILED]: 'unchecked, needs a look',
   [APPROVAL_TRIGGERS.PROSE_CANCELLATION_CHECK_FAILED]:
     'unchecked, needs a look',

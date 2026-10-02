@@ -1,7 +1,6 @@
 import {
   applyApprovalPolicyStage,
   type ApprovalDecision,
-  type GroundingBackstopResult,
   type ClosedVenueArrivalBackstopResult,
   type ProsePromiseBackstopResult,
 } from '@/lib/agent/stages'
@@ -19,18 +18,10 @@ export type { ApprovalDecision }
  *
  * Never persists a draft, never dispatches to Sendblue, never fires a push.
  * The harness evaluates what WOULD happen without making it happen.
- *
- * TAC-350: `groundingBackstop` is the caller's already-computed
- * `verifyGroundingStage` result (or `undefined`/`null` if not run), threaded
- * straight through as `applyApprovalPolicyStage`'s third argument. This
- * module still makes no AI call and no decision of its own — the caller
- * (run-test-scenarios.ts) owns calling verifyGroundingStage, exactly as it
- * already owns calling generateStage before this function.
  */
 export async function evaluateApprovalDecision(
   ctx: RuntimeContext,
   generation: GenerateMessageResult,
-  groundingBackstop?: GroundingBackstopResult | null,
   // TAC-401: the harness grades the SHIPPED mechanism, so the prose-promise
   // check has to reach the gate here too. Optional with a 'skipped' default
   // so a caller that has not run the stage behaves exactly as before.
@@ -45,7 +36,6 @@ export async function evaluateApprovalDecision(
   return applyApprovalPolicyStage(
     ctx,
     generation,
-    groundingBackstop,
     { status: 'skipped' },
     prosePromiseBackstop ?? { status: 'skipped' },
     { resolution: { status: 'none' }, claim: 'skipped' },

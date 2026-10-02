@@ -53,7 +53,7 @@ The tidy-looking alternative is to keep them apart and send two messages. It is 
 this is the part someone will reach for.
 
 Every post-generation check reads `body`: the dash substitution, self-talk, unverified links,
-the grounding verifier, the prose-promise and cancellation checks, the comp regex. A question
+the prose-promise and cancellation checks, the comp regex. A question
 kept out of `body` **bypasses all of them** - a fabricated link or a reasoning slip inside the
 question would ship unchecked. Keeping `body` whole also means the queue row an operator
 approves verbatim is still one complete reply, and `recordIntentionPrompts` still sees the

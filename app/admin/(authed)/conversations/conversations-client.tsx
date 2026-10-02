@@ -19,6 +19,11 @@ import {
   projectThread,
   type ThreadResponse,
 } from './lib/project-thread'
+import { classifyTraceLoad, type TraceLoadFailure } from './lib/trace-failure'
+
+// Longer than the trace route's own 8s Langfuse deadline, so a slow Langfuse
+// surfaces as the route's 504 and this only fires if the route is not answering.
+const TRACE_CLIENT_TIMEOUT_MS = 15_000
 
 // Client surface that owns selection, the trace fetch cache, and the
 // Realtime subscription. Server (page.tsx) hands over a fully-loaded
@@ -76,8 +81,6 @@ export interface InitialData {
   recentEvents: Array<{ eventType: string; createdAt: Date }>
   /** Raw messages rows, newest-200 window. The thread derives via projectThread. */
   messageRows: ConversationMessageRow[]
-  /** Keyed by response id (= first bubble's row id). */
-  traceMap: Record<string, ApiTraceWithFullDetails | null>
   todayLocalIso: string
   /** Last 50 transactions in the lookback window, newest-first. */
   transactions: Transaction[]
@@ -138,9 +141,16 @@ export function ConversationsClient({
       .find((r) => r.direction === 'outbound')
     return outbound?.id ?? responses[responses.length - 1]?.id ?? null
   })
+  // The server no longer prefetches traces (it blocked the render on Langfuse),
+  // so the default selection fetches here like any other.
   const [traceCache, setTraceCache] = useState<
     Record<string, ApiTraceWithFullDetails | null>
-  >(() => ({ ...initialData.traceMap }))
+  >({})
+  // Transient read failures, kept OUT of the cache so they can be retried.
+  // Only "no such trace" is final and cached as null.
+  const [traceFailures, setTraceFailures] = useState<
+    Record<string, TraceLoadFailure>
+  >({})
 
   const selected = useMemo(
     () =>
@@ -149,44 +159,70 @@ export function ConversationsClient({
   )
 
   // Loading is derived, not state — avoids the setState-in-effect anti-pattern.
-  // True iff we have a trace ID for the selected outbound response but the
-  // cache hasn't been populated yet (either prefetch missed it or the fetch
-  // is still in flight).
+  // True iff we have a trace ID for the selected outbound response and neither
+  // a result nor a failure has been recorded for it yet.
+  const tracedResponseId =
+    selected?.direction === 'outbound' && selected.langfuseTraceId
+      ? selected.id
+      : null
+  const tracedLangfuseId = tracedResponseId
+    ? (selected?.langfuseTraceId ?? null)
+    : null
   const traceLoading =
-    !!selected &&
-    selected.direction === 'outbound' &&
-    !!selected.langfuseTraceId &&
-    !(selected.id in traceCache)
+    tracedResponseId !== null &&
+    !(tracedResponseId in traceCache) &&
+    !(tracedResponseId in traceFailures)
 
-  // Trace fetch on click for outbound responses not in the prefetch cache.
-  // Cache is keyed by response id (not trace id) so re-renders with the same
-  // selection don't re-fetch.
+  // Trace fetch for the selected outbound response. Cache is keyed by response
+  // id (not trace id) so re-renders with the same selection don't re-fetch.
+  // Keyed on the two primitive ids, not `selected`: a realtime update rebuilds
+  // that object and would otherwise restart an in-flight fetch.
+  // The server route gives up on Langfuse after 8s; this deadline is the
+  // backstop for the route itself not answering.
   useEffect(() => {
-    if (
-      !selected ||
-      selected.direction !== 'outbound' ||
-      !selected.langfuseTraceId
-    )
+    if (!tracedResponseId || !tracedLangfuseId) return
+    if (tracedResponseId in traceCache || tracedResponseId in traceFailures)
       return
-    if (selected.id in traceCache) return
     let cancelled = false
+    const responseId = tracedResponseId
     fetch(
-      `/admin/conversations/api/trace/${encodeURIComponent(selected.langfuseTraceId)}`,
+      `/admin/conversations/api/trace/${encodeURIComponent(tracedLangfuseId)}`,
+      { signal: AbortSignal.timeout(TRACE_CLIENT_TIMEOUT_MS) },
     )
       .then(async (r) => {
-        if (!r.ok) return null
-        const json = (await r.json()) as { trace?: ApiTraceWithFullDetails }
-        return json.trace ?? null
+        if (r.ok) {
+          const json = (await r.json()) as { trace?: ApiTraceWithFullDetails }
+          return { trace: json.trace ?? null, outcome: null }
+        }
+        return { trace: null, outcome: classifyTraceLoad(r.status) }
       })
-      .catch(() => null)
-      .then((trace) => {
+      .catch((e: unknown) => ({
+        trace: null,
+        outcome: classifyTraceLoad(null, e),
+      }))
+      .then(({ trace, outcome }) => {
         if (cancelled) return
-        setTraceCache((prev) => ({ ...prev, [selected.id]: trace ?? null }))
+        if (outcome?.kind === 'failed') {
+          setTraceFailures((prev) => ({
+            ...prev,
+            [responseId]: outcome.failure,
+          }))
+          return
+        }
+        setTraceCache((prev) => ({ ...prev, [responseId]: trace }))
       })
     return () => {
       cancelled = true
     }
-  }, [selected, traceCache])
+  }, [tracedResponseId, tracedLangfuseId, traceCache, traceFailures])
+
+  const retryTrace = useCallback((responseId: string) => {
+    setTraceFailures((prev) => {
+      const next = { ...prev }
+      delete next[responseId]
+      return next
+    })
+  }, [])
 
   // Realtime: subscribe to message inserts/updates for this venue. Filter on
   // the wire by venue_id (Realtime supports a single column filter cleanly);
@@ -287,6 +323,8 @@ export function ConversationsClient({
           selected={selected}
           traceCache={traceCache}
           traceLoading={traceLoading}
+          traceFailures={traceFailures}
+          onRetryTrace={retryTrace}
           guestName={guestName}
           guestPhone={initialData.guest.phoneNumber}
           venueTimezone={initialData.venue.timezone}
@@ -340,6 +378,8 @@ interface SidePanelProps {
   selected: ThreadResponse | null
   traceCache: Record<string, ApiTraceWithFullDetails | null>
   traceLoading: boolean
+  traceFailures: Record<string, TraceLoadFailure>
+  onRetryTrace: (responseId: string) => void
   guestName: string
   guestPhone: string | null
   venueTimezone: string
@@ -352,6 +392,8 @@ function SidePanel({
   selected,
   traceCache,
   traceLoading,
+  traceFailures,
+  onRetryTrace,
   guestName,
   guestPhone,
   venueTimezone,
@@ -404,6 +446,8 @@ function SidePanel({
           trace={trace}
           loading={loading}
           langfuseTraceId={selected.langfuseTraceId}
+          failure={traceFailures[selected.id] ?? null}
+          onRetry={() => onRetryTrace(selected.id)}
         />
       </div>
       <div className="h-72 flex-shrink-0 overflow-y-auto border-t border-stone-light/60 bg-paper/50">

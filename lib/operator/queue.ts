@@ -86,16 +86,6 @@ export interface QueueDraft {
   // prose, and the card body reads prose and never needs the codes. The two
   // arrays must stay index-aligned.
   reviewTriggerLabels: string[]
-  // Verbatim claims the grounding verifier flagged.
-  //
-  // `[]` here does NOT mean "no information" — see the migration and the
-  // normalizer below. The COLUMN distinguishes "the check never ran" (NULL)
-  // from "it ran and found nothing" (`[]`), because that is the question
-  // TAC-367 existed because nobody could answer. The WIRE deliberately does
-  // not: both collapse to `[]`, since neither produces a UI element and the
-  // Contract's never-branch-on-presence guarantee is worth more to the client
-  // than a distinction it would never act on. Ask the column, not the card.
-  ungroundedClaims: string[]
   // TAC-394, Contract-locked (TAC-394's description, `## Contract`): how many
   // OTHER pending drafts this guest has at this venue. Always present, 0 when
   // none, never undefined.
@@ -264,7 +254,7 @@ const REVIEW_REASON_LABELS: Record<
     "This reply points at a promise that doesn't exist. Check it before sending.",
   // TAC-513. Deliberately NOT folded under the line above: nothing was caught
   // here, the check just did not complete. Mirrors prose_promise_check_failed
-  // and grounding_check_failed, and claims nothing was found, which is the
+  // and claims nothing was found, which is the
   // wrong-reason-copy rule TAC-364 exists for.
   prose_cancellation_check_failed:
     "I couldn't check this one for a cancellation.",
@@ -290,9 +280,8 @@ const REVIEW_REASON_LABELS: Record<
   // which is a provenance fact the operator does not need on a phone.
   prose_promise_backstop: 'This sounds like a promise to the guest. Your call.',
   // TAC-401. Deliberately NOT folded under the line above: nothing was caught
-  // here, the check just did not complete. Mirrors grounding_check_failed's
-  // copy and claims nothing was found, which is the wrong-reason-copy rule
-  // TAC-364 exists for.
+  // here, the check just did not complete. Claims nothing was found, which is
+  // the wrong-reason-copy rule TAC-364 exists for.
   prose_promise_check_failed: "I couldn't check this one for a promise.",
 
   // --- Something outside the draft needs you --------------------------------
@@ -301,29 +290,6 @@ const REVIEW_REASON_LABELS: Record<
   // ask, in the agent's own voice, because the operator is being asked to
   // supply something only they have.
   knowledge_gap: "A guest asked something I don't have an answer for.",
-  // TAC-350. The distinction from knowledge_gap above is worth the operator's
-  // attention and is carried by the tense: there the agent knew it was stuck,
-  // here it wrote something and a second check disagreed. That check CAN be
-  // wrong — it was, twice, in the first two minutes after TAC-301 part 1.5
-  // deployed — so the sentence reports a doubt rather than a verdict. The
-  // flagged claim itself now rides on `ungroundedClaims` so the operator can
-  // see which sentence is the suspect one.
-  knowledge_gap_backstop: "I wasn't sure this was true, so I didn't send it.",
-  // TAC-367. Deliberately NOT folded under the backstop copy above: nothing
-  // was caught here, the check just didn't complete. Telling an operator a
-  // claim was caught when none was is the wrong-reason-copy problem TAC-364
-  // exists for.
-  grounding_check_failed: "I couldn't finish checking this one.",
-  // TAC-424, copy approved verbatim (2026-09-21). This is a SECONDARY chip: it
-  // only ever renders under grounding_check_failed's line above, never alone,
-  // because the two always co-fire and this one is ranked below.
-  //
-  // The approved wording replaced a draft reading "Nothing was found wrong",
-  // which reads as a clean result — exactly the confusion this ticket exists
-  // to remove. "Nothing in this draft was checked" says the same thing about
-  // the check without making a claim about the draft.
-  grounding_check_degraded:
-    "Tried twice and couldn't run. Nothing in this draft was checked.",
   // Venue-wide policy, ranked last in PRIMARY_TRIGGER_PRIORITY, so this shows
   // only when nothing more specific co-fired. "right now" because the flag is
   // a switch someone threw and can throw back.
@@ -575,26 +541,6 @@ function toReviewTriggerLabels(
   info: CardCarrierInfo | null,
 ): string[] {
   return codes.map((t) => labelForTrigger(t, info))
-}
-
-/**
- * TAC-364: `null` → `[]`, nothing else. The claims are the verifier's verbatim
- * quotations from the draft body and are shown to the operator as written —
- * there is no label map to run them through, and rewriting them would defeat
- * the point of quoting.
- *
- * This collapse is where the column's NULL-vs-`[]` distinction is DELIBERATELY
- * discarded. NULL means the grounding check never ran (followup, demo guest,
- * or the model self-reported a gap so the check was skipped) and `[]` means it
- * ran and found nothing — a real difference, and the one TAC-367 existed
- * because nobody could answer. It stays a property of the row rather than the
- * payload because neither state produces anything on the card: both render no
- * claims. Surfacing it would cost the Contract's never-branch-on-presence
- * guarantee to tell the client something it would not act on. The observability
- * question is asked in SQL against `messages.ungrounded_claims`, not here.
- */
-function normalizeUngroundedClaims(raw: string[] | null): string[] {
-  return raw ?? []
 }
 
 /**
@@ -876,7 +822,6 @@ export async function listPendingQueue(
       reviewReasonCode: row.review_reason ?? '',
       reviewTriggers: reviewTriggerCodes,
       reviewTriggerLabels: toReviewTriggerLabels(reviewTriggerCodes, carrier),
-      ungroundedClaims: normalizeUngroundedClaims(row.ungrounded_claims),
       otherPendingDraftsForGuest: normalizeOtherPendingCount(
         row.other_pending_for_guest,
       ),

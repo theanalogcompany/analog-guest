@@ -6,13 +6,11 @@ import {
   captureDashViolationPersisted,
   captureDemoBypassedApprovalGate,
   captureEmojiDirectiveViolated,
-  captureGroundingVerifierUnavailable,
   captureMechanicOfferBackstopCaught,
   captureClosedVenueArrivalCaught,
   captureProsePromiseCaught,
   captureProsePromiseCheckUnavailable,
   captureRegenerationTriggered,
-  captureUngroundedClaimCaught,
   captureUnverifiedUrlHeld,
   CLASSIFICATION_CONFIDENCE_LOW_THRESHOLD,
   CLASSIFICATION_CONFIDENCE_REROUTE_THRESHOLD,
@@ -28,22 +26,17 @@ import {
   type KnowledgeCorpusChunk as AiKnowledgeCorpusChunk,
   type RuntimeContext as AiRuntimeContext,
   verifyCancellationClaim,
-  verifyGrounding,
   verifyMechanicOffer,
   verifyClosedVenueArrival,
   verifyProsePromise,
   type VoiceCorpusChunk as AiVoiceCorpusChunk,
 } from '@/lib/ai'
 import { resolveEmojiDirective } from '@/lib/ai/emoji-cadence'
-// TAC-367: imported BY PATH, not from the '@/lib/ai' barrel above. Same
-// reasoning as emoji-cadence.ts's deliberate exclusion from the barrel
-// (TAC-362).
-import { VERIFY_GROUNDING_TRUNCATED_ERROR_CODE } from '@/lib/ai/verify-grounding'
-// TAC-401: imported BY PATH for the same reason as the line above.
+// TAC-401: imported BY PATH, not from the barrel above.
 import { VERIFY_PROSE_PROMISE_TRUNCATED_ERROR_CODE } from '@/lib/ai/verify-prose-promise'
-// TAC-513: imported BY PATH for the same reason as the two lines above.
+// TAC-513: imported BY PATH for the same reason as the line above.
 import { VERIFY_CANCELLATION_CLAIM_TRUNCATED_ERROR_CODE } from '@/lib/ai/verify-cancellation-claim'
-// TAC-363: imported BY PATH for the same reason as the three lines above.
+// TAC-363: imported BY PATH for the same reason as the lines above.
 import { VERIFY_CLOSED_VENUE_ARRIVAL_TRUNCATED_ERROR_CODE } from '@/lib/ai/verify-closed-venue-arrival'
 import { isVenueClosed, resolveVenueOpenState } from './venue-open-state'
 import {
@@ -162,7 +155,7 @@ export const KNOWLEDGE_RETRIEVE_LIMIT = 4
  * length and specificity, not answerability.
  *
  * So this stopped trying to judge relevance, and the semantic call moved to
- * `verify-grounding` (`knowledge_gap_backstop`), which reads meaning.
+ * the model's own `knowledge_gap` self-report.
  *
  * Measured before the change rather than assumed: queue volume does not rise.
  * 5/36 queued at 0.5 versus 3/36 at 0.30 across two runs of 18 queries
@@ -244,33 +237,6 @@ export const APPROVAL_TRIGGERS = {
   // elapses, the timer cron sends the guest a holding message. Inbound-only:
   // a followup has no guest question to leave unanswered.
   KNOWLEDGE_GAP: 'knowledge_gap',
-  // TAC-350: independent grounding backstop. `KNOWLEDGE_GAP` is pure
-  // self-report (GenerateMessageResult.knowledgeGap) — the TAC-350 audit
-  // found 8/8 observed fabrications had knowledgeGap=false, so self-report
-  // alone missed every one of them. This trigger fires from a SECOND,
-  // independent check (verifyGroundingStage / lib/ai/verify-grounding.ts)
-  // that inspects the reply against the same source material the generator
-  // saw, and is only ever invoked when the model's own self-report was
-  // false — same relationship COMP_REGEX_BACKSTOP has to MODEL_FLAGGED.
-  // Deliberately a DISTINCT trigger rather than folding into KNOWLEDGE_GAP,
-  // so analytics can separate "the model was honest about not knowing" from
-  // "the model was caught stating something it shouldn't have." The two are
-  // mutually exclusive on any single turn (this trigger only runs when
-  // knowledgeGap is false). The protected-card carve-out treats both
-  // triggers identically. CLOCK
-  // ARMING NO LONGER DOES (TAC-484): a caught fabrication means "do not send
-  // this," not "we owe them an answer" — the model never admitted to a gap,
-  // so there is no question to hold on. Arming the same pending_until clock
-  // off a backstop catch produced a holding message ("sorry for the wait")
-  // asserting a wait that didn't exist, which the guest's next three replies
-  // were then built on top of (the 2026-09-18 Le Mil's incident). BODY
-  // BLANKING ALSO DOESN'T (TAC-301 part 1.5): a self-reported gap blanks,
-  // a backstop catch KEEPS its body, because on this path the model never
-  // admitted to guessing and the flag can be wrong. See the blankBody
-  // rationale at the queue return below, and the pendingUntil computation
-  // further down for the clock. See also isKnowledgeGapCard and
-  // knowledgeGapWillQueue's sibling logic.
-  KNOWLEDGE_GAP_BACKSTOP: 'knowledge_gap_backstop',
   // TAC-355: deterministic backstop. Fires unconditionally when
   // GenerateMessageResult.selfTalkViolationPersisted is true — the reply
   // still contains self-correction or a reference to the agent's own
@@ -307,71 +273,10 @@ export const APPROVAL_TRIGGERS = {
   // failure mode, not a secondary layer (unlike COMP_REGEX_BACKSTOP's
   // relationship to MODEL_FLAGGED) — see lib/ai/verify-mechanic-offer.ts and
   // verifyMechanicOfferStage below. FAILS CLOSED: an errored, timed-out, or
-  // unparseable check queues rather than degrading to pre-check behavior —
-  // a deliberate divergence from verifyGroundingStage (TAC-350), which used
-  // to fail open. An unauthorized perk grant costs the owner money and
-  // control; a failed check costs one unnecessary review. (TAC-424 closed that
-  // divergence: grounding fails closed too now. The sentence stays because the
-  // reasoning is this trigger's own, and it did not depend on the contrast.)
+  // unparseable check queues rather than degrading to pre-check behavior.
+  // An unauthorized perk grant costs the owner money and control; a failed
+  // check costs one unnecessary review.
   MECHANIC_OFFER_BACKSTOP: 'mechanic_offer_backstop',
-  // TAC-367, widened by TAC-424: the grounding backstop did not produce a
-  // readable verdict. Two causes, both fail CLOSED, one trigger:
-  //
-  //   - TRUNCATION — `finishReason: 'length'`, the output cap cut the JSON off
-  //     mid-object. A verdict the model PRODUCED, so discarding it is
-  //     discarding evidence rather than tolerating its absence. It is also
-  //     load-correlated rather than random: the verifier reasons longest on
-  //     the replies hardest to ground, which is exactly the population a
-  //     fabrication check exists for. Same correlation TAC-309 found on the
-  //     generator, where the model reasoned longest on questions it could
-  //     not answer cleanly and truncation preferentially killed the
-  //     knowledge-gap path.
-  //   - A TRANSIENT fault (network, provider 5xx, timeout) that survived one
-  //     immediate retry. **This used to fail OPEN and no longer does**
-  //     (TAC-424, ruled 2026-09-21). The old rationale was that grounding runs
-  //     on every inbound, so queuing every hiccup closed would convert a rare
-  //     provider blip into a fleet-wide queue flood. TAC-401's prose-promise
-  //     check now runs concurrently on nearly every generation and already
-  //     fails closed after one retry, so the reply is held during an outage
-  //     regardless — failing open here bought no availability and left the one
-  //     path where an invented fact could send unchecked.
-  //
-  // The two stay distinguishable on the ROW without being separate triggers:
-  // see GROUNDING_CHECK_DEGRADED below.
-  //
-  // DISTINCT trigger rather than folding into KNOWLEDGE_GAP_BACKSTOP, even
-  // though MECHANIC_OFFER_BACKSTOP sets the opposite precedent by covering
-  // both 'flagged' and 'check_failed' under one code. Reusing it here would
-  // tell the operator "ungrounded claim caught" for a turn where nothing was
-  // caught and the check merely failed to parse — a third instance of the
-  // wrong-reason-copy problem TAC-364 was filed for. The cost is that every
-  // Record<ApprovalTrigger, …> total map needs a decision for this code,
-  // which is the mechanism working rather than friction (see CLAUDE.md
-  // "sets keyed on approval triggers must be TOTAL maps").
-  //
-  // Deliberately NOT part of `isGapTurn`: see its definition below.
-  GROUNDING_CHECK_FAILED: 'grounding_check_failed',
-  // TAC-424: which of GROUNDING_CHECK_FAILED's two causes it was. Ruling 2 B
-  // (2026-09-21) requires a degraded check, a truncated check and a clean pass
-  // to be three-way distinguishable by SQL alone, and ruling 1 C forbids both
-  // a migration on `messages` and touching `ungrounded_claims` — which leaves
-  // review_triggers, the one existing per-message field that already means
-  // "everything that fired". So this rides ALONGSIDE GROUNDING_CHECK_FAILED on
-  // a degraded turn rather than replacing it.
-  //
-  // It is a SUB-CAUSE marker, not a second reason to hold, and two things
-  // follow from that. It NEVER fires alone — GROUNDING_CHECK_FAILED is always
-  // pushed with it, which is what keeps the hold and the operator's primary
-  // copy exactly as they were. And it is ranked directly BELOW its partner in
-  // PRIMARY_TRIGGER_PRIORITY so it can never win the review_reason label off a
-  // trigger it always co-fires with.
-  //
-  // Why not two distinct primary triggers, which is what this file's own
-  // GROUNDING_CHECK_FAILED comment argues for elsewhere: the operator's
-  // decision is identical either way (nothing was checked, read it yourself),
-  // and the ruling named the trigger the draft is held under. The cause is a
-  // thing SQL asks later, not a thing the card should say twice.
-  GROUNDING_CHECK_DEGRADED: 'grounding_check_degraded',
   // TAC-401: independent post-generation check for a promise made in PROSE
   // with no structured commitment behind it. THE PRIMARY CONTROL for that
   // failure (ruled 2026-09-15, question 1, option c), not a secondary layer.
@@ -380,10 +285,7 @@ export const APPROVAL_TRIGGERS = {
   // same 220 replies: the model's own `requiresOperatorApproval` self-flag
   // fired 0 times and caught 0 of the 4 genuine uncarried promises, and the
   // comp regex fired 5 times and caught 0 of them (3 apology idioms, 1
-  // fabricated comp). What held the promises that were held was the grounding
-  // check and the mechanic-offer check — neither a commitment control, both
-  // firing for unrelated reasons, and both fail-open on paths this one covers.
-  // Nothing may depend on the self-flag; it stays only as a secondary signal.
+  // fabricated comp). Nothing may depend on the self-flag; it stays only as a secondary signal.
   //
   // Unlike every other backstop here, this one can PRODUCE the carrier: the
   // check names the commitment type and description, which ride the queue
@@ -396,24 +298,17 @@ export const APPROVAL_TRIGGERS = {
   // TAC-401: the prose-promise check produced no readable verdict.
   //
   // FAILS CLOSED on every failure mode, after one retry on a transient fault
-  // (ruled 2026-09-21). TAC-424 gave GROUNDING_CHECK_FAILED the same shape, so
-  // the contrast this comment used to draw — that grounding fails open on a
-  // transient fault while this one does not — is gone, and the sentence
-  // asserting it was corrected there and here.
+  // (ruled 2026-09-21).
   //
-  // What has NOT changed is why this one must never be loosened, even if
-  // grounding's posture is revisited again: grounding at least degrades to a
-  // defensible prior, the model's own knowledgeGap self-report, which it is a
-  // second opinion on. This check has no prior to degrade to — the self-flag
-  // caught 0 of 220 and the ruling forbids depending on it — so failing open
-  // here returns to nothing at all. The retry is what pays for the closed
-  // posture on a check this broad: the flood case narrows from "any hiccup" to
-  // "a fault that survives two immediate attempts".
+  // This one must never be loosened: it has no prior to degrade to — the
+  // self-flag caught 0 of 220 and the ruling forbids depending on it — so
+  // failing open here returns to nothing at all. The retry is what pays for
+  // the closed posture on a check this broad: the flood case narrows from "any
+  // hiccup" to "a fault that survives two immediate attempts".
   //
-  // A DISTINCT trigger rather than folding into PROSE_PROMISE_BACKSTOP, for
-  // the reason TAC-367 split GROUNDING_CHECK_FAILED out: telling an operator
-  // a promise was caught on a turn where nothing was caught is the
-  // wrong-reason-copy problem TAC-364 exists for. It also means a sustained
+  // A DISTINCT trigger rather than folding into PROSE_PROMISE_BACKSTOP:
+  // telling an operator a promise was caught on a turn where nothing was
+  // caught is the wrong-reason-copy problem TAC-364 exists for. It also means a sustained
   // outage is countable in SQL separately from a wave of real catches.
   //
   // Deliberately carries NO carrier: we do not know what was promised, so
@@ -453,11 +348,11 @@ export const APPROVAL_TRIGGERS = {
   // this check for exactly that gap.
   //
   // FAILS CLOSED, and 'flagged' and 'check_failed' ride ONE trigger, following
-  // MECHANIC_OFFER_BACKSTOP rather than the grounding and prose-promise splits.
-  // Those exist so an operator is never told "a claim was caught" on a turn
-  // where nothing was caught; here the operator's decision is identical either
-  // way (the venue is shut and this reply may be sending someone over, read
-  // it), which is the test that precedent turns on.
+  // MECHANIC_OFFER_BACKSTOP rather than the prose-promise split. That split
+  // exists so an operator is never told "a claim was caught" on a turn where
+  // nothing was caught; here the operator's decision is identical either way
+  // (the venue is shut and this reply may be sending someone over, read it),
+  // which is the test that precedent turns on.
   CLOSED_VENUE_ARRIVAL_BACKSTOP: 'closed_venue_arrival_backstop',
   // TAC-513: the draft carries a structured cancellation, resolved against
   // this guest's own open commitments. ALWAYS queues, whatever else is true:
@@ -587,7 +482,7 @@ export const PRIMARY_TRIGGER_PRIORITY = [
   // priority as an unauthorized comp/hold/discount.
   APPROVAL_TRIGGERS.MECHANIC_OFFER_BACKSTOP,
   // TAC-401: third, in the same obligation group as the two above and ABOVE
-  // every grounding, regex and self-report trigger below.
+  // every regex and self-report trigger below.
   //
   // It is the primary control for the uncarried-promise failure, and it is the
   // only trigger in the group that can arrive carrying the commitment itself —
@@ -622,15 +517,6 @@ export const PRIMARY_TRIGGER_PRIORITY = [
   // and above everything else because a knowledge-gap card is the only card
   // with a running clock and a guest sitting in silence. A gap-only turn —
   // the overwhelmingly common case — still wins the label.
-  //
-  // TAC-350: KNOWLEDGE_GAP_BACKSTOP ranks ABOVE the self-reported
-  // KNOWLEDGE_GAP, mirroring COMP_REGEX_BACKSTOP's rank above MODEL_FLAGGED
-  // — a caught claim is a more specific, more useful operator label than an
-  // honest "I don't know." The two can never co-fire on the same turn (the
-  // backstop only runs when knowledgeGap is already false), so this ordering
-  // is a documentation choice today, not a live tie-break — but a real one,
-  // consistent with the existing backstop-outranks-self-report pattern.
-  APPROVAL_TRIGGERS.KNOWLEDGE_GAP_BACKSTOP,
   APPROVAL_TRIGGERS.KNOWLEDGE_GAP,
   APPROVAL_TRIGGERS.COMP_REGEX_BACKSTOP,
   APPROVAL_TRIGGERS.MODEL_FLAGGED,
@@ -659,8 +545,7 @@ export const PRIMARY_TRIGGER_PRIORITY = [
   //
   // The two are mutually exclusive by construction — the backstop skips
   // whenever the structural condition already fired — so this ordering is
-  // documentation rather than a live tie-break, the same caveat
-  // KNOWLEDGE_GAP_BACKSTOP's comment carries.
+  // documentation rather than a live tie-break.
   APPROVAL_TRIGGERS.CLOSED_VENUE_ARRIVAL_EMITTED,
   APPROVAL_TRIGGERS.CLOSED_VENUE_ARRIVAL_BACKSTOP,
   APPROVAL_TRIGGERS.UNVERIFIED_URL,
@@ -671,30 +556,14 @@ export const PRIMARY_TRIGGER_PRIORITY = [
   // promise still fires a push rather than being treated as a silent re-draft.
   APPROVAL_TRIGGERS.COMPLAINT_COMMITMENT_FLOOR,
   APPROVAL_TRIGGERS.PREVIOUS_PENDING_HELD,
-  // TAC-367: ranked below every trigger that names something about this
-  // draft, and above the two venue-wide policy signals. It is the only
-  // trigger that reports an ABSENCE of signal — "we could not check" — so
-  // whenever it co-fires with any concrete finding the concrete finding is
-  // the more useful operator label. It still outranks the policy triggers
-  // because it is at least specific to this message.
-  APPROVAL_TRIGGERS.GROUNDING_CHECK_FAILED,
-  // TAC-424: directly below its partner, and the order is load-bearing rather
-  // than cosmetic. This code only ever appears alongside
-  // GROUNDING_CHECK_FAILED, so ranking it above would silently take over
-  // review_reason on every degraded turn and change what the operator card
-  // says — the copy would become a sub-cause note standing in for a reason.
-  // Below, it can never win, which is what makes it a record rather than a
-  // label. It sits above the two venue-wide policy signals for the same reason
-  // its partner does: it is at least specific to this message.
-  APPROVAL_TRIGGERS.GROUNDING_CHECK_DEGRADED,
-  // TAC-401: beside GROUNDING_CHECK_FAILED and for the identical reason. It
-  // reports an ABSENCE of information about the reply, so any trigger naming
-  // something concrete is the more useful operator label, and it still ranks
-  // above the two venue-wide policy signals because it is at least specific to
-  // this message.
+  // TAC-401: ranked below every trigger that names something about this draft.
+  // It reports an ABSENCE of information about the reply ("we could not check"),
+  // so any trigger naming something concrete is the more useful operator label,
+  // and it still ranks above the two venue-wide policy signals because it is at
+  // least specific to this message.
   APPROVAL_TRIGGERS.PROSE_PROMISE_CHECK_FAILED,
   // TAC-513: beside its sibling, and low for the same reason
-  // GROUNDING_CHECK_FAILED is: it reports an ABSENCE of signal, so any
+  // the other check-failed trigger: it reports an ABSENCE of signal, so any
   // concrete co-firing finding is the more useful operator label.
   APPROVAL_TRIGGERS.PROSE_CANCELLATION_CHECK_FAILED,
   // v1.24.0: category routing is a POLICY signal, not a claim about this
@@ -746,8 +615,8 @@ export function knowledgeGapWillQueue(
 // TAC-394: KNOWLEDGE_GAP_CARD_REVIEW_REASONS and isKnowledgeGapCard moved to
 // ./pending-slots, so the persist layer can use them without importing this
 // file. Re-exported here so every existing import keeps working. The moved
-// review_reason values are literals there, matching APPROVAL_TRIGGERS and
-// GENERATION_FAILED_REVIEW_REASON.
+// review_reason values are literals there and must match APPROVAL_TRIGGERS
+// and GENERATION_FAILED_REVIEW_REASON.
 export {
   isKnowledgeGapCard,
   KNOWLEDGE_GAP_CARD_REVIEW_REASONS,
@@ -981,8 +850,8 @@ export async function retrieveKnowledgeStage(
  * second RPC, no merge. That is what makes a standalone first message
  * byte-identical to today rather than merely similar.
  *
- * That early return is DEFENCE IN DEPTH, and honestly inert today: bypassing
- * bypassing it changes nothing, because `retrieveKnowledgeStage`
+ * That early return is DEFENCE IN DEPTH, and honestly inert today:
+ * `retrieveKnowledgeStage`
  * short-circuits an empty query to [] on its own, so the merge of
  * [armA, []] reproduces armA exactly. It is kept because it makes the
  * guarantee independent of that second guard — if an empty query ever stopped
@@ -1129,280 +998,6 @@ export async function generateStage(
 }
 
 /**
- * TAC-350, widened by TAC-367. What verifyGroundingStage concluded.
- *
- * Was `{ claims: string[] } | null`, where null flattened four different
- * situations into one: skipped, the call degrading, the call truncating, and
- * the call running clean. That was fine while every non-finding meant "do
- * nothing" — and it stopped being fine the moment truncation needed to queue,
- * because a two-state shape has nowhere to put "we could not read the
- * verdict" that is distinguishable from "there was nothing to report."
- *
- * Four states at TAC-367, mirroring TAC-355's MechanicOfferBackstopResult
- * exactly rather than inventing a second vocabulary for the same idea.
- *
- * TAC-424 adds a FIFTH, `degraded`, and the reason it has to be its own state
- * rather than reusing `clean` is the whole ticket: a transient fault used to
- * return `clean`, which the gate then recorded on messages.ungrounded_claims
- * as `[]` — byte-identical to what a genuine pass writes. After the fact "the
- * check passed this draft" and "the check never completed" were the same row.
- * That is this repo's signature defect class (see CLAUDE.md, "Gotchas worth
- * carrying everywhere":
- * comp_regex_backstop, is_test_synthetic),
- * and a distinct state is what makes the gate's mapping a total switch instead
- * of a ternary chain with a silent default.
- *
- * `flagged`, `truncated` and `degraded` all queue now; `skipped` and `clean`
- * are the only two that let a draft through. See GROUNDING_CHECK_FAILED.
- */
-export type GroundingBackstopResult =
-  | { status: 'skipped' }
-  | { status: 'clean' }
-  | { status: 'flagged'; claims: string[] }
-  | { status: 'truncated' }
-  | { status: 'degraded' }
-
-/**
- * TAC-364, made TOTAL by TAC-424. What each grounding state records on
- * messages.ungrounded_claims.
- *
- * This was a ternary chain (`flagged ? claims : clean ? [] : null`) and the
- * comment above it claimed a sixth state would have to "decide what it
- * records". It would not have: a sixth member of the union fell through to the
- * `null` default, fired no trigger, and SENT — with tsc clean. That was caught in code review, by someone adding the state and
- * running the tree rather than reading the sentence, and it is this repo's
- * signature defect class committed inside the ticket that exists to close an
- * instance of it (CLAUDE.md, "Gotchas worth carrying everywhere").
- *
- * `satisfies Record<GroundingBackstopResult['status'], …>` is what makes the
- * claim true. A sixth state now fails to compile here until someone says what
- * it writes to the row. Keyed on `status` rather than written as a switch
- * because the map is also the thing to read when answering "what does this
- * column mean" — the three-state contract migration 039 documents, plus the
- * two no-verdict states, in five lines.
- */
-const UNGROUNDED_CLAIMS_BY_STATUS = {
-  // The check ran and flagged these. Verbatim, so the operator can see which
-  // sentence is the suspect one.
-  flagged: (g) => (g.status === 'flagged' ? g.claims : null),
-  // The check RAN and found nothing. Distinct from null, and that distinction
-  // is the whole reason the column is nullable.
-  clean: () => [],
-  // It ran but the cap cut the verdict off, so we have no claim information.
-  truncated: () => null,
-  // Two attempts both faulted, so likewise none. TAC-424: this used to be
-  // `[]`, byte-identical to a clean pass, which was the defect.
-  degraded: () => null,
-  // The check did not run at all (demo guest, or the model self-reported).
-  skipped: () => null,
-} as const satisfies Record<
-  GroundingBackstopResult['status'],
-  (grounding: GroundingBackstopResult) => string[] | null
->
-
-/**
- * TAC-350: independent grounding backstop. Runs a second, deterministic-in-
- * spirit check (lib/ai/verify-grounding.ts) against a reply the model has
- * ALREADY self-certified as grounded (`knowledgeGap === false`) — the exact
- * population the TAC-350 audit found fabricating: all 8 observed cases had
- * knowledgeGap=false, so self-report alone caught none of them. Same
- * relationship the COMP_REGEX_BACKSTOP trigger has to MODEL_FLAGGED — a
- * second, independent check for a self-report that's already proven
- * unreliable under real traffic.
- *
- * TAC-376: no longer inbound-only. Three call sites now reach here —
- * handle-inbound.ts, handle-followup.ts (both engine and manual followups),
- * and handle-holding-message.ts (the knowledge-gap holding message) — per the
- * 2026-09-17 ruling: same verifier, same triggers, same failure posture as
- * inbound, no parallel check built for the no-guest-message case.
- * `isProactive` is derived HERE, from `ctx.currentMessage === null`, rather
- * than threaded in by callers — same boundary this stage already owned for
- * its other two skip conditions, so the two orchestrators that used to pass
- * `null` for this stage's result just start getting a real one.
- *
- * Skips (returns null without calling the model) when:
- *   - the guest is a demo guest — TAC-284's bypass ships regardless of any
- *     trigger, so spending a Haiku call here buys nothing.
- *   - the model already self-reported knowledgeGap=true — trust it; this is
- *     also what keeps the added cost to roughly half of inbound traffic
- *     (only turns where the model claims confidence pay for the check). A
- *     followup/holding-message generation always has knowledgeGap=false (the
- *     field only means something on the inbound path), so neither of those
- *     two callers ever hits this skip either — every one of their turns pays
- *     for the check.
- *
- * FAILS CLOSED on every failure, after ONE immediate retry on a transient
- * fault (TAC-424, ruled 2026-09-21). Truncation is not retried — retrying a
- * cap that was already hit spends a second call to hit it again, and the fix
- * is the cap. Same shape verifyProsePromiseStage already uses, deliberately:
- * one retry policy in this file, not two.
- *
- * THIS REVERSES TAC-367's fail-OPEN posture for transient faults, and the
- * reasoning that overturned it is worth keeping. Fail-open was chosen because
- * holding every reply during a provider outage looked too costly for a check
- * that runs on every inbound. TAC-401's prose-promise check now runs
- * CONCURRENTLY on nearly every generation and already fails closed after one
- * retry — so during an outage the reply is held anyway, by that check. Failing
- * open here bought no availability at all; it only left the one path where an
- * invented fact could reach a guest unchecked. The retry is what pays for the
- * closed posture: the flood case narrows from a single Haiku blip to a fault
- * that survives two immediate attempts OF OURS, which is an outage rather than
- * a hiccup — and rather more than two in provider terms, since this call does
- * not set `maxRetries` and the AI SDK's own default applies inside each one.
- * That strengthens the affordability argument; it just means "one retry"
- * should not be read as two round trips.
- *
- * TAC-367's truncation carve-out is unchanged in effect and no longer a
- * carve-out: the model produced a verdict and the cap made it unreadable, and
- * that cause correlates with the replies hardest to ground rather than
- * occurring at random. Both failures now queue via GROUNDING_CHECK_FAILED;
- * they stay SEPARATELY LABELLED on the row (ruling 2 B) through
- * GROUNDING_CHECK_DEGRADED, which rides alongside on a degraded turn. Either
- * way the stage EMITS (captureGroundingVerifierUnavailable): a failure path
- * with no signal is how the truncation hole went unobserved from TAC-301
- * part 1.5 until it was measured.
- *
- * Deliberately reuses the SAME venueInfo + knowledgeCorpus the generator saw
- * (ctx.venue.venueInfo, ctx.knowledgeCorpus) rather than re-fetching either —
- * "what the verifier checks against" must never drift from "what the
- * generator actually had."
- */
-export async function verifyGroundingStage(
-  ctx: Pick<
-    RuntimeContext,
-    | 'agentRunId'
-    | 'currentMessage'
-    | 'guest'
-    | 'venue'
-    | 'knowledgeCorpus'
-    | 'conversationChannel'
-  >,
-  generation: Pick<
-    GenerateMessageResult,
-    'knowledgeGap' | 'body' | 'userPrompt'
-  >,
-  // Decision 0003 (rewritten 2026-09-29): 'held' when the caller runs this
-  // check pre-send and its finding can still hold the draft (followups, the
-  // holding message); 'sent' when post-send-checks.ts runs it after the
-  // inbound reply already dispatched. Event-layer only — the verdict logic
-  // is identical either way.
-  disposition: CheckDisposition = 'held',
-): Promise<GroundingBackstopResult> {
-  if (ctx.guest.isDemo === true) return { status: 'skipped' }
-  if (generation.knowledgeGap === true) return { status: 'skipped' }
-
-  const isProactive = ctx.currentMessage === null
-
-  // TAC-424: built once and passed twice. The retry below used to restate
-  // this literal, which doubled the conflict surface inside the one function
-  // TAC-502 is going to edit — and TAC-502's whole subject is what the
-  // verifier is given, so a duplicated input object is the worst place for it
-  // to land. One site to change.
-  const verifyInput = {
-    inboundBody: ctx.currentMessage?.body ?? '',
-    replyBody: generation.body,
-    venueInfo: ctx.venue.venueInfo,
-    knowledgeChunks: ctx.knowledgeCorpus ?? undefined,
-    isProactive,
-    // TAC-301 part 1.5: hand over the generator's OWN composed user prompt,
-    // unmodified. Do not rebuild this from ctx — the identity is the point.
-    // Everything the generator knew about this guest and this moment lives
-    // here (## Right now, ## What this guest can access, ## Active
-    // commitments, ## Visit history, ## Guest context, ## Recent
-    // conversation), and without it every fact drawn from those blocks reads
-    // to the verifier as unsupported. Six of six were measured doing exactly
-    // that against Le Mil's live config. (## Operator instruction renders on
-    // the followup path too, since TAC-376, so it can now appear here.)
-    runtimeContext: generation.userPrompt,
-    // TAC-502: the conversation's own channel, straight off the context.
-    // Without it the verifier holds only `venue_info.contact`'s static list
-    // and flags "just text here, this is the number" as an unsupported claim
-    // while the guest is mid-text-conversation. Not re-resolved here: the
-    // value the generator's copy was chosen from is the value the check must
-    // judge against, the same identity rule runtimeContext above carries.
-    conversationChannel: ctx.conversationChannel,
-  }
-
-  let r = await verifyGrounding(verifyInput)
-  // TAC-424: one immediate retry, transient faults only. Truncation is
-  // excluded by errorCode rather than by message text, which is
-  // provider-formatted and not a contract. Same guard verifyProsePromiseStage
-  // uses, and it must stay keyed on the code for the same reason.
-  //
-  // `invalid_input` carries NO errorCode, so it lands on the transient side
-  // and is retried: one wasted call on a deterministic failure, and it now
-  // holds the draft where it used to pass through. Unreachable today
-  // (GeneratedMessageSchema.body is z.string().min(1)), and "no code means
-  // transient" is the deliberate default direction — the same one the
-  // an unrecognized errorCode takes — so this is recorded rather than
-  // special-cased.
-  //
-  // "One retry" counts OUR attempts. The AI SDK applies its own default
-  // maxRetries inside each call, so a degraded verdict means roughly six
-  // provider attempts with backoff, not two. That makes the affordability
-  // argument stronger, not weaker, but the figure should not be misread.
-  let retried = false
-  if (!r.ok && r.errorCode !== VERIFY_GROUNDING_TRUNCATED_ERROR_CODE) {
-    retried = true
-    r = await verifyGrounding(verifyInput)
-  }
-  if (!r.ok) {
-    // TAC-367: truncation and transient faults both land here and are NOT
-    // the same event. Emit either way — the whole reason the truncation hole
-    // survived unnoticed is that this branch was a console.warn and nothing
-    // else, so neither PostHog nor Slack ever saw a turn where the only
-    // fabrication check that fires under real traffic did not run.
-    const truncated = r.errorCode === VERIFY_GROUNDING_TRUNCATED_ERROR_CODE
-    console.warn(
-      `[agent] grounding backstop ${truncated ? 'TRUNCATED' : 'degraded'} (${disposition === 'held' ? 'failing CLOSED' : 'post-send, reply already dispatched'}) for venue=${ctx.venue.id}: ${r.error}${r.errorCode ? ` (${r.errorCode})` : ''}`,
-    )
-    // Decided BEFORE the emit, deliberately. The emit cannot throw today
-    // (capturePostHogEvent and postToSlack both swallow their own errors),
-    // but if one ever did, this stage would reject, handle-inbound's
-    // allSettled would degrade it to `skipped`, and the truncation would
-    // silently fail OPEN — the exact hole this ticket closes. Computing the
-    // verdict first makes that structurally impossible instead of true only
-    // by transitive luck.
-    const verdict: GroundingBackstopResult = truncated
-      ? { status: 'truncated' }
-      : { status: 'degraded' }
-    await captureGroundingVerifierUnavailable({
-      agentRunId: ctx.agentRunId,
-      venueId: ctx.venue.id,
-      guestId: ctx.guest.id,
-      outcome: truncated ? 'truncated' : 'degraded',
-      // TAC-424: true on both outcomes when the check runs pre-send. It stays
-      // as its own field rather than being re-derived from `outcome` so a
-      // query for "turns that sent without a grounding verdict" is one
-      // boolean filter. Decision 0003 rewrite: on the post-send path nothing
-      // holds, so the claim follows the disposition.
-      failedClosed: disposition === 'held',
-      retried,
-      error: r.error,
-      errorCode: r.errorCode,
-      disposition,
-    })
-    return verdict
-  }
-  if (!r.data.hasUngroundedClaim) return { status: 'clean' }
-
-  await captureUngroundedClaimCaught({
-    agentRunId: ctx.agentRunId,
-    venueId: ctx.venue.id,
-    guestId: ctx.guest.id,
-    // TAC-376: no inbound on a proactive turn (followup / holding message).
-    // `(none — proactive)` reads as a fact on the Slack card rather than as
-    // an empty, unexplained pair of quotes.
-    inboundBody: ctx.currentMessage?.body ?? '(none — proactive)',
-    replyBody: generation.body,
-    ungroundedClaims: r.data.ungroundedClaims,
-    disposition,
-  })
-
-  return { status: 'flagged', claims: r.data.ungroundedClaims }
-}
-
-/**
  * TAC-355: true when the model self-flagged a resource commitment via
  * requiresOperatorApproval. Extracted so verifyMechanicOfferStage's skip
  * condition ("don't spend a Haiku call re-confirming a signal that already
@@ -1458,16 +1053,8 @@ function isClosedVenueArrivalEmitted(
  * comment on APPROVAL_TRIGGERS) means "the check errored" is a DISTINCT,
  * queue-worthy outcome from "the check ran and found nothing."
  *
- * TAC-367: this used to contrast with GroundingBackstopFinding's two-state
- * shape. That type is gone — GroundingBackstopResult is the same kind of
- * shape as this one — so the two backstops no longer differ in SHAPE.
- *
- * TAC-424: they no longer differ in POSTURE either. Grounding used to fail
- * closed only on truncation and stay fail-open for transient faults; it now
- * fails closed on both, after one retry, exactly as this one and
- * verifyProsePromiseStage do. All three post-generation checks in this file
- * have one failure policy, which is worth more than any of the individual
- * contrasts the comments here used to draw.
+ * Every post-generation check in this file has one failure policy: closed
+ * after one retry on a transient fault.
  */
 export type MechanicOfferBackstopResult =
   | { status: 'skipped' }
@@ -1485,11 +1072,9 @@ export type MechanicOfferBackstopResult =
  * nothing in the prompt links a mechanic grant to that field in the first
  * place; see the audit trail on the ticket).
  *
- * Unlike verifyGroundingStage (TAC-350), this runs on BOTH the inbound and
- * followup paths — a mechanic can be offered on a proactive outbound message
- * exactly as easily as in reply to a guest's question, so there is no
- * inbound-only concept to gate on here (contrast knowledge-gap grounding,
- * which is inherently about answering a guest's question).
+ * This runs on BOTH the inbound and followup paths — a mechanic can be
+ * offered on a proactive outbound message exactly as easily as in reply to a
+ * guest's question, so there is no inbound-only concept to gate on here.
  *
  * Skips (returns 'skipped' without calling the model) when:
  *   - the guest is a demo guest — TAC-284's bypass ships regardless of any
@@ -1585,7 +1170,7 @@ export type ProsePromiseBackstopResult =
  * TAC-401: the primary control for a promise made in prose with no structured
  * commitment behind it.
  *
- * Third sibling to verifyGroundingStage and verifyMechanicOfferStage, and the
+ * Sibling to verifyMechanicOfferStage, and the
  * ruling (2026-09-15, question 2) picked this shape deliberately: option (b),
  * changing generation so a promise cannot be written without a carrier, has
  * effectively been tried. `# Commitments` (system-template.ts) already tells
@@ -1619,14 +1204,9 @@ export type ProsePromiseBackstopResult =
  * narrows to a fault that survives two immediate attempts, which is an outage
  * rather than a blip.
  *
- * There is no longer a divergence from verifyGroundingStage's posture: TAC-424
- * made that check fail closed after one retry too, so the retry-then-hold
- * shape below is the shape all three post-generation checks share. What was
- * once the argument for the divergence is still the argument for never
- * loosening THIS one: grounding at least degrades to a defensible prior, the
- * model's own self-report, which it is a second opinion on. This check has no
- * prior — the self-flag caught 0 of 220 and the ruling forbids depending on
- * it — so failing open returns to nothing at all.
+ * Never loosen this: the check has no prior to degrade to — the self-flag
+ * caught 0 of 220 and the ruling forbids depending on it — so failing open
+ * returns to nothing at all.
  */
 export async function verifyProsePromiseStage(
   ctx: Pick<
@@ -1641,10 +1221,8 @@ export async function verifyProsePromiseStage(
   if (generation.body.trim().length === 0) return { status: 'skipped' }
 
   // TAC-527: built once, passed twice. The retry below used to restate this
-  // literal, and TAC-424 removed exactly that shape from verifyGroundingStage
-  // for the reason it applies here too — a duplicated input object is where
-  // the two calls silently diverge, and this is now the function whose input
-  // someone will edit next.
+  // literal. A duplicated input object is where the two calls silently
+  // diverge.
   //
   // `currentMessage` is null on every PROACTIVE turn by the inbound-XOR-outbound
   // invariant (followups, the holding message), so those paths pass null,
@@ -1838,8 +1416,7 @@ export type CancellationBackstopResult = {
  * TAC-513: resolve the model's cancellation emission, and independently read
  * the body for a cancellation it claims but did not carry.
  *
- * Fourth sibling to verifyGroundingStage, verifyMechanicOfferStage and
- * verifyProsePromiseStage. See lib/ai/verify-cancellation-claim.ts for why this
+ * Sibling to verifyMechanicOfferStage and verifyProsePromiseStage. See lib/ai/verify-cancellation-claim.ts for why this
  * is a separate check rather than a second question on TAC-401's.
  *
  * Skips the model call (never the resolution, which is pure and always runs)
@@ -2001,32 +1578,6 @@ export type ApprovalDecision =
       action: 'queue'
       triggers: string[]
       primaryTrigger: string
-      // TAC-364: the verbatim claims the grounding verifier flagged, threaded
-      // to the persist layer so they land on messages.ungrounded_claims and
-      // reach the operator card.
-      //
-      // THREE-STATE, and the null is load-bearing:
-      //   string[] non-empty → the check ran and flagged these
-      //   []                 → the check RAN and found nothing
-      //   null               → the check DID NOT RUN
-      //
-      // That last distinction is the question TAC-367 existed because nobody
-      // could answer: a grounding check that silently didn't run was invisible
-      // everywhere, and the whole point of recording this on the row is to be
-      // able to ask it later in SQL. Collapsing "didn't run" into "found
-      // nothing" would rebuild the blind spot in a new column on day one, and
-      // it is free to avoid while the column is new.
-      //
-      // `truncated` maps to NULL, not `[]`: the check ran but produced no
-      // readable verdict, so we have no claim information — which is what NULL
-      // says. `[]` would assert it found nothing, and the paired
-      // review_reason ('grounding_check_failed' → "I couldn't finish checking
-      // this one") already carries the didn't-complete signal, so the two read
-      // coherently together.
-      //
-      // The WIRE still collapses both to `[]` — see QueueDraft in
-      // lib/operator/queue.ts for why the client doesn't get this distinction.
-      ungroundedClaims: string[] | null
       // TAC-401: the commitment the prose-promise check named, already minted
       // with its verification code. Non-null ONLY when that check flagged a
       // promise AND could name a usable type and description for it.
@@ -2100,11 +1651,6 @@ export type ApprovalDecision =
       // including when it co-fires with commitment_type_gated — a model that
       // admitted it couldn't ground the answer has no business pre-writing a
       // comp, so pending_commitment is nulled alongside the body.
-      //
-      // FALSE for knowledge_gap_backstop (TAC-301 part 1.5), which is the one
-      // asymmetry between the two gap triggers. There the model claimed no
-      // gap and the verifier's flag is a second opinion that can be wrong;
-      // blanking destroyed correct replies in production.
       blankBody: boolean
     }
   // TAC-397: the guest's message needed no answer and a card is already
@@ -2156,7 +1702,7 @@ export type ApprovalDecision =
  * avoid. It exists to decide whether to show the guest typing dots before the
  * expensive half of the turn runs, so it can only consult what is knowable
  * that early. Most of `applyApprovalPolicyStage`'s triggers are not: the
- * fidelity floor, the model's self-flag, the comp regex and all five
+ * fidelity floor, the model's self-flag, the comp regex and all four
  * post-generation backstops need a draft that does not exist yet. A turn can
  * pass this and still queue.
  *
@@ -2229,21 +1775,10 @@ export function mayAutoSendAfterClassification(ctx: RuntimeContext): boolean {
 export async function applyApprovalPolicyStage(
   ctx: RuntimeContext,
   generation: GenerateMessageResult,
-  // TAC-350: result of verifyGroundingStage, run by the orchestrator between
-  // generateStage and this gate (needs an async AI call the gate itself
-  // can't make mid-synchronous-evaluation). Five states (TAC-367, TAC-424):
-  // 'skipped' (demo, or the model already self-reported), 'clean' (ran and
-  // found nothing), 'flagged' (fires KNOWLEDGE_GAP_BACKSTOP), 'truncated' and
-  // 'degraded' (both fire GROUNDING_CHECK_FAILED; 'degraded' additionally
-  // fires GROUNDING_CHECK_DEGRADED so the row says which it was).
-  // `null` is accepted for callers that didn't run the stage at all and is
-  // normalized to 'skipped' below.
-  groundingBackstop: GroundingBackstopResult | null = null,
-  // TAC-355: result of verifyMechanicOfferStage, run by the orchestrator
-  // alongside verifyGroundingStage (both are independent Haiku calls with no
-  // dependency on each other). 'skipped' | 'clean' never fire the trigger;
-  // 'flagged' | 'check_failed' both do — the fail-closed branch is
-  // deliberate, see MECHANIC_OFFER_BACKSTOP's own comment above.
+  // TAC-355: result of verifyMechanicOfferStage, run by the orchestrator.
+  // 'skipped' | 'clean' never fire the trigger; 'flagged' | 'check_failed'
+  // both do — the fail-closed branch is deliberate, see
+  // MECHANIC_OFFER_BACKSTOP's own comment above.
   mechanicOfferBackstop: MechanicOfferBackstopResult = { status: 'skipped' },
   // TAC-401: result of verifyProsePromiseStage, run by the orchestrator
   // CONCURRENTLY with the two checks above (ruled 2026-09-21, ruling 2) rather
@@ -2428,43 +1963,6 @@ export async function applyApprovalPolicyStage(
     triggers.push(APPROVAL_TRIGGERS.KNOWLEDGE_GAP)
   }
 
-  // Trigger 9b (TAC-350): independent grounding backstop. Only ever reaches
-  // 'flagged' when the orchestrator ran verifyGroundingStage AND it found
-  // something — which itself only happens when generation.knowledgeGap was
-  // false. Mutually exclusive with trigger 9 by construction, same as
-  // COMP_REGEX_BACKSTOP is independent of MODEL_FLAGGED.
-  //
-  // TAC-367: `null` (caller didn't run it) is normalized to 'skipped' rather
-  // than handled separately — the gate has never distinguished "not run" from
-  // "ran and found nothing", and the harness + followup callers both rely on
-  // being able to omit the argument entirely.
-  const grounding: GroundingBackstopResult = groundingBackstop ?? {
-    status: 'skipped',
-  }
-  const backstopFired = grounding.status === 'flagged'
-  if (backstopFired) {
-    triggers.push(APPROVAL_TRIGGERS.KNOWLEDGE_GAP_BACKSTOP)
-  }
-
-  // Trigger 9c (TAC-367, widened by TAC-424): the grounding check did not
-  // produce a readable verdict. Two causes, both fail CLOSED now —
-  // `truncated` (the model answered and the output cap cut it off) and
-  // `degraded` (two immediate attempts both faulted). One trigger, because
-  // the operator's decision is identical either way: nothing was checked, so
-  // read it yourself. Which cause it was is recorded separately on the row by
-  // GROUNDING_CHECK_DEGRADED; see its own comment on APPROVAL_TRIGGERS.
-  const groundingCheckIncomplete =
-    grounding.status === 'truncated' || grounding.status === 'degraded'
-  if (groundingCheckIncomplete) {
-    triggers.push(APPROVAL_TRIGGERS.GROUNDING_CHECK_FAILED)
-  }
-  // TAC-424: the sub-cause, recorded on the row beside the trigger that held
-  // the draft. Pushed second so `triggers` reads in the order the checks
-  // decided, and ranked below its partner so it never wins the label.
-  if (grounding.status === 'degraded') {
-    triggers.push(APPROVAL_TRIGGERS.GROUNDING_CHECK_DEGRADED)
-  }
-
   // Trigger 10 (TAC-355): deterministic self-talk backstop. Unconditional —
   // no category scoping, no demo-guest exemption beyond the bypass below.
   if (generation.selfTalkViolationPersisted) {
@@ -2491,9 +1989,7 @@ export async function applyApprovalPolicyStage(
   // Trigger 11 (TAC-355): independent mechanic-offer verification backstop.
   // Fires on 'flagged' (the check found a gated mechanic offered) OR
   // 'check_failed' (the check errored/timed out/didn't parse) — fail CLOSED.
-  // Until TAC-424 that was a deliberate divergence from the grounding
-  // backstop; grounding fails closed too now, so it is simply the house
-  // posture. 'skipped' and 'clean' never fire.
+  // 'skipped' and 'clean' never fire.
   if (
     mechanicOfferBackstop.status === 'flagged' ||
     mechanicOfferBackstop.status === 'check_failed'
@@ -2507,7 +2003,7 @@ export async function applyApprovalPolicyStage(
   //
   // The two are separate triggers on purpose — see PROSE_PROMISE_CHECK_FAILED
   // on APPROVAL_TRIGGERS. Both queue: this check fails CLOSED on every failure
-  // mode, the deliberate divergence from the grounding backstop above.
+  // mode.
   if (prosePromiseBackstop.status === 'flagged') {
     triggers.push(APPROVAL_TRIGGERS.PROSE_PROMISE_BACKSTOP)
   }
@@ -2623,40 +2119,10 @@ export async function applyApprovalPolicyStage(
     triggers.push(APPROVAL_TRIGGERS.PROSE_CANCELLATION_CHECK_FAILED)
   }
 
-  // TAC-350: the umbrella "is this turn a knowledge-gap-card turn" signal,
-  // covering EITHER the self-reported trigger or the independent backstop.
-  // The protected-card carve-out and the drop logic key on this, so a
-  // caught-but-unflagged fabrication is never sent and always queued, exactly
-  // like an honest self-report.
-  //
-  // TAC-484: CLOCK ARMING NO LONGER KEYS ON THIS. A backstop catch queuing
-  // and protecting its slot is still correct — an operator has to look at
-  // it — but starting the "still owed an answer" clock off it is what
-  // produced a holding message with nothing to hold. Only a self-reported
-  // gap on an inbound that actually reads as a question may start the clock
-  // now; see the narrower pendingUntil computation below.
-  //
-  // BODY BLANKING IS ALSO AN EXCEPTION and does not key on this (TAC-301 part
-  // 1.5) — see the blankBody rationale at the return below.
-  //
-  // TAC-367: GROUNDING_CHECK_FAILED is deliberately NOT part of this, and
-  // TAC-424 keeps it out for BOTH of its causes. An incomplete check is an
-  // absence of information about the reply, not a finding against it, and
-  // what isGapTurn still grants would be wrong to grant on that basis: the
-  // protected-card carve-out, which silently DROPS the guest's next turn if
-  // that turn queues for any other reason. An incomplete check queues the
-  // draft for a human to glance at. That is the whole intended consequence,
-  // and it needs none of the above. What it DOES need is the drop exemption,
-  // which is `checkDidNotComplete` below and is a separate thing from this
-  // flag.
-  //
-  // The clock used to be the other half of that argument: an unread verdict
-  // would have put a "still looking into it" holding message in front of a
-  // guest whose reply was most likely fine, for a question they may not have
-  // asked. TAC-484 makes that structural rather than a consequence of this
-  // exclusion — pendingUntil no longer reads isGapTurn at all, so no trigger
-  // added to this flag can reach the clock by being added to it.
-  const isGapTurn = knowledgeGapFired || backstopFired
+  // Is this turn a knowledge-gap-card turn. The protected-card carve-out and
+  // the drop logic key on this. Clock arming is narrower (TAC-484): see the
+  // pendingUntil computation below.
+  const isGapTurn = knowledgeGapFired
 
   // ---- Pending-row resolution (TAC-308, TAC-394) ----
   //
@@ -2873,49 +2339,22 @@ export async function applyApprovalPolicyStage(
   // TAC-308 case 3: a knowledge-gap card holds the slot and this turn queues
   // for some reason OTHER than gapping itself. Regen-in-place would overwrite
   // the question an operator is about to answer, and the slot's index forbids a
-  // second pending row, so the draft is discarded rather than stored. TAC-350: a
-  // turn the backstop caught is just as much "gapping itself" as a
-  // self-reported one, which is why this keys on isGapTurn.
-  //
-  // TAC-367: a TRUNCATED grounding check is exempt too, and this is the one
-  // place `isGapTurn` alone gives the wrong answer. Excluding `truncated` from
-  // `isGapTurn` is right FORWARD (don't arm a clock, don't make this card
-  // protected for later turns) and wrong BACKWARD: without the exemption the
-  // trigger pushed above makes `triggers.length > 0`, which cancels the
-  // protected-card carve-out and would DROP a turn that, before TAC-367, fired
-  // no trigger at all and SENT. A draft nobody could read the verdict for is
-  // handed to an operator, never destroyed: queuing regenerates in place over
-  // the card and preserves its original `pending_until` (the UPDATE payload
-  // omits the column), so the guest's question keeps its clock.
+  // second pending row, so the draft is discarded rather than stored.
   //
   // TAC-394: the obligation slot holds a DIFFERENT commitment (a comp for
   // another item, or another gated type). The existing card wins and this
   // draft is dropped with an alert naming both commitments. And a manual
   // followup that would queue into any occupied slot is refused.
-  // TAC-401 widened this from grounding's truncation alone, and the rename
-  // came with it: the flag was never "truncation was the only trigger", it is
-  // "a check on this turn did not complete".
   //
-  // The exemption is the one TAC-367 spells out twenty lines above, and
-  // prose_promise_check_failed has the identical property: it reports an
-  // ABSENCE of information about the reply, not a finding against it, and it
-  // is deliberately excluded from isGapTurn. Without the exemption the trigger
-  // it pushes makes triggers.length > 0, which cancels the protected-card
-  // carve-out and DROPS a turn that fired no trigger at all before this ticket
-  // and SENT. A guest already waiting on a knowledge-gap card would get
-  // silence because a Haiku call failed twice — the one outcome worse than
-  // either failing open or failing closed.
-  //
-  // TAC-424: `degraded` joins `truncated` here, and this is the load-bearing
-  // line of that ticket. Without it, a guest already holding a knowledge-gap
-  // card gets SILENCE the next time the verifier faults twice: the new trigger
-  // makes triggers.length > 0, which cancels the carve-out and drops a turn
-  // that before this ticket fired no trigger at all and SENT. A record-keeping
-  // change would have introduced a guest-facing regression.
-  const checkDidNotComplete =
-    grounding.status === 'truncated' ||
-    grounding.status === 'degraded' ||
-    prosePromiseBackstop.status === 'check_failed'
+  // `checkDidNotComplete` exempts a turn whose check did not complete from the
+  // protected-card drop. prose_promise_check_failed reports an ABSENCE of
+  // information about the reply, not a finding against it, and is deliberately
+  // excluded from isGapTurn. Without the exemption the trigger it pushes makes
+  // triggers.length > 0, which cancels the protected-card carve-out and DROPS a
+  // turn that fired no trigger at all before. A guest already waiting on a
+  // knowledge-gap card would get silence because a Haiku call failed twice -
+  // the one outcome worse than either failing open or failing closed.
+  const checkDidNotComplete = prosePromiseBackstop.status === 'check_failed'
   const slotDecision = decideSlotAction({
     rows: pendingRows,
     draftCommitment,
@@ -2961,25 +2400,15 @@ export async function applyApprovalPolicyStage(
   //   - gap turn beside a gap card in the OTHER slot → undefined (TAC-394).
   //     The clock is the guest's, not the slot's: the timeout scan fires per
   //     card, so a second clock would send the guest a second holding message.
-  //     A self-reported gap card and a backstop-flagged comp are the realistic
-  //     pair. anyKnowledgeGapCard covers the same-slot cases above as well.
+  //     anyKnowledgeGapCard covers the same-slot cases above as well.
   //
-  // TAC-484 narrows all of the above to a subset of isGapTurn, on the
-  // 2026-09-18 incident's ruling: a caught fabrication (backstopFired) never
-  // arms the clock, and a self-report (knowledgeGapFired) arms it only when
-  // the inbound it replies to actually READS as a question
-  // (looksLikeQuestion, ./looks-like-question.ts). The holding message text
-  // is "still tracking that down, sorry for the wait" — a wait that does not
-  // exist when nothing was asked, or when the "gap" was the backstop catching
-  // an unprompted claim rather than the model admitting it couldn't answer
-  // something. `knowledgeGapFired` already implies `ctx.currentMessage !==
+  // TAC-484: a self-report (knowledgeGapFired) arms the clock only when the
+  // inbound it replies to actually READS as a question (looksLikeQuestion,
+  // ./looks-like-question.ts). The holding message text is "still tracking
+  // that down, sorry for the wait" — a wait that does not exist when nothing
+  // was asked. `knowledgeGapFired` already implies `ctx.currentMessage !==
   // null` (see knowledgeGapWillQueue), but TypeScript can't narrow through
   // that boolean, so the check is repeated here to read `.body` safely.
-  //
-  // Deliberately unchanged: everything else `isGapTurn` still drives (the
-  // protected-card carve-out, the drop logic, blankBody) stays keyed on the
-  // umbrella signal, because a caught fabrication still needs a human to look
-  // at it even though it no longer tells the guest one is coming.
   const pendingUntil =
     knowledgeGapFired &&
     ctx.currentMessage !== null &&
@@ -2992,26 +2421,6 @@ export async function applyApprovalPolicyStage(
     action: 'queue',
     triggers,
     primaryTrigger: pickPrimaryTrigger(triggers),
-    // TAC-364. All four grounding states map here, and the mapping is the
-    // whole point of the field being nullable — see ApprovalDecision above.
-    //
-    //   flagged   → the claims
-    //   clean     → []    the check ran and found nothing
-    //   skipped   → null  the check did not run (demo guest, or the model
-    //                     self-reported a gap so we trusted it)
-    //   truncated → null  it ran but the verdict was unreadable, so we have no
-    //                     claim information — 'grounding_check_failed' on
-    //                     review_reason is what says it didn't complete
-    //   degraded  → null  two attempts both faulted, so likewise no claim
-    //                     information
-    //
-    // TAC-424 CLOSES the hole this comment used to record as known and
-    // accepted: a transient fault returned `clean` and landed here as `[]`,
-    // byte-identical to a genuine pass, so the column could not answer the one
-    // question migration 039 built it to answer. `degraded` is its own state
-    // now and maps to NULL with the other two no-verdict outcomes. Folding it
-    // back into `[]` would be a regression.
-    ungroundedClaims: UNGROUNDED_CLAIMS_BY_STATUS[grounding.status](grounding),
     // TAC-401: the carrier the prose-promise check produced, threaded to the
     // persist layer so an operator approving the card creates a real
     // guest_commitments row. Null whenever the check supplied nothing, and
@@ -3032,48 +2441,9 @@ export async function applyApprovalPolicyStage(
     slot,
     otherSlotOccupied: otherSlotOccupied(pendingRows, draftCommitment),
     pendingUntil,
-    // TAC-301 part 1.5 REVERSES TAC-350 here, deliberately: blank on a
-    // self-reported gap, KEEP the body on a backstop catch.
-    //
-    // TAC-309's reason for blanking is specific to the self-report path. There
-    // the model ADMITTED it could not ground the answer, so the body is an
-    // acknowledged guess and an operator approving it in one swipe is the
-    // failure being prevented.
-    //
-    // On the backstop path the model admitted nothing. The body is its
-    // confident answer, and the verifier's flag is a second opinion that can
-    // be WRONG — on 2026-09-13 it was wrong twice in the first two minutes
-    // after deploy, on replies that were entirely correct ("we're closed for
-    // the night, back at 7 tomorrow"). Blanking destroyed a correct message
-    // and left the operator an empty card with nothing to approve or edit,
-    // so the guest got silence instead of an answer that already existed.
-    //
-    // Keeping the body makes a false positive recoverable in one swipe instead
-    // of destructive. Two costs are accepted knowingly rather than by
-    // omission, both surfaced in code review:
-    //
-    //   1. `ungroundedClaims` does NOT reach the card. It goes to PostHog /
-    //      Slack (captureUngroundedClaimCaught) and the Langfuse span; the
-    //      operator sees a fluent draft plus the generic "unverified claim"
-    //      label and has to spot which part is wrong themselves. Worse on a
-    //      co-firing turn, where PRIMARY_TRIGGER_PRIORITY hands the label to
-    //      commitment_type_gated and nothing on the card mentions grounding
-    //      at all. Blanking used to make one-swipe approval structurally
-    //      impossible; it no longer is. Surfacing the claim list on the card
-    //      is the real fix and is deliberately NOT in this change.
-    //   2. pending_commitment now rides along with the body. It was stripped
-    //      before because it was INVISIBLE on a blank card; the body being
-    //      visible is a convention that it names the commitment, not a
-    //      guarantee that it does.
-    //
-    // Both are judged better than destroying a correct reply, which is what
-    // the previous behavior did twice in production within two minutes.
-    //
-    // pendingUntil above is NO LONGER keyed on isGapTurn (TAC-484) — a
-    // backstop catch never arms it, whatever the body says, because the model
-    // never admitted to a gap and there is no question to hold on. A
-    // self-reported gap still arms it, and only when the inbound it replies
-    // to reads as a question — see the pendingUntil computation above.
+    // TAC-309: blank on a self-reported gap. The model ADMITTED it could not
+    // ground the answer, so the body is an acknowledged guess and an operator
+    // approving it in one swipe is the failure being prevented.
     blankBody,
   }
 }
@@ -3338,7 +2708,7 @@ function renderedIntentionLines(ctx: RuntimeContext): string[] | undefined {
 
 export function buildAiRuntime(
   ctx: RuntimeContext,
-  // TAC-362: injectable so both branches of the emoji coin can be forced
+  // TAC-362: injectable so both branches of the emoji coin are reachable
   // without stubbing globals, defaulted here at the boundary so the pure
   // module stays pure. Same split scheduleAndSend uses for
   // resolveDispatchBubbles.
@@ -3526,7 +2896,8 @@ export function buildAiRuntime(
     // don't vary (never, sparingly) — the serializer then renders no block.
     emojiDirective,
     // TAC-308: the outstanding knowledge-gap question. Rendered as
-    // `## Unanswered question` immediately before `## Recent conversation`.
+    // `## Unanswered question` immediately before the unsent-drafts block
+    // (the history itself is chat turns, not a block).
     // null → undefined so the serializer's presence check omits the block.
     pendingQuestion: ctx.pendingQuestion ?? undefined,
     // TAC-244: derive `followup` here at the single mapping seam.

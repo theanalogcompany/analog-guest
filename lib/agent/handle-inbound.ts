@@ -445,6 +445,7 @@ function buildGenerationFailureGeneration(): GenerateMessageResult {
     attemptHistory: [],
     systemPrompt: '',
     userPrompt: '',
+    conversation: '',
     promptVersion: PROMPT_VERSION,
     cacheReadTokens: 0,
     cacheWriteTokens: 0,
@@ -1154,7 +1155,7 @@ async function runInboundTurn(
       }
       if (opened.answerMessageId !== invoked.message.id) {
         // The settle caught a fragment. Answer the newest message; every
-        // earlier one is already in `## Recent conversation` via the existing
+        // earlier one is already in the history turns via the existing
         // history query, so nothing the guest said is dropped.
         //
         // Guarded: a reload that fails costs the adoption, never the reply.
@@ -1772,7 +1773,7 @@ async function runInboundTurn(
     // after a response is sent"
     // (developers.facebook.com/docs/graph-api/reference/page/messages/), and
     // generation alone runs to ~11s at p90 on top of classification's ~2.8s.
-    // Without this the dots would routinely die before the five checks, the
+    // Without this the dots would routinely die before the four checks, the
     // gate and the send had even started.
     //
     // Only when the dots are already showing: if this turn was predicted to
@@ -1978,7 +1979,7 @@ async function runInboundTurn(
       )
     }
 
-    // Decision 0003, rewritten 2026-09-29: the five post-generation LLM
+    // Decision 0003, rewritten 2026-09-29: the four post-generation LLM
     // checks no longer run here. They run AFTER dispatch, off the guest's
     // critical path, in runPostSendChecks (see the send branch below and
     // ./post-send-checks.ts for the full contract). The gate keeps every
@@ -1998,7 +1999,6 @@ async function runInboundTurn(
     const approval = await applyApprovalPolicyStage(
       ctx,
       gen.result,
-      null,
       { status: 'skipped' },
       { status: 'skipped' },
       {
@@ -2161,7 +2161,6 @@ async function runInboundTurn(
             pendingUntil: approval.pendingUntil,
             blankBody: approval.blankBody,
             reviewTriggers: approval.triggers,
-            ungroundedClaims: approval.ungroundedClaims,
             callerPolicy: 'regen',
             // TAC-397: keep what a correction replaced, and let 23505 recovery
             // re-decide with the same disposition the gate used.
@@ -2512,7 +2511,7 @@ async function runInboundTurn(
         if (dispatched.undelivered.cardId !== null)
           pushSendFailureCard(ctx, dispatched.undelivered.cardId)
       }
-      // Decision 0003 rewrite: the five post-generation checks run HERE, off
+      // Decision 0003 rewrite: the four post-generation checks run HERE, off
       // the critical path, against the reply that just went out. waitUntil
       // composes with the webhook's outer keep-alive window; the module never
       // throws and flushes its own spans. Only the sent path runs them — a

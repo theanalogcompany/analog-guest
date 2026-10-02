@@ -14,8 +14,7 @@
  * `Bash(node scripts/linear.mjs:*)`, this helper and no other node command
  * (TAC-449).
  *
- * No I/O at module load, and none outside `run`'s injected dependencies, so
- * the tests drive it with a fake fetch and a fake key.
+ * No I/O at module load, and none outside `run`'s injected dependencies.
  *
  * The key: read from the environment by the caller and passed in. It is only
  * ever sent as the Authorization header. Every line this module prints goes

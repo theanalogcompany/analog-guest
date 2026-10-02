@@ -152,27 +152,6 @@ export interface PersistQueuedDraftOptions {
    */
   reviewTriggers?: string[]
   /**
-   * TAC-364: verbatim claims the grounding verifier flagged, landing on
-   * `messages.ungrounded_claims`.
-   *
-   * THREE-STATE, and the null carries meaning rather than absence:
-   *   string[] non-empty → the check ran and flagged these
-   *   []                 → the check RAN and found nothing
-   *   null / omitted     → the check DID NOT RUN
-   *
-   * `null` and omitted are the same write (both NULL the column) because they
-   * mean the same thing: a caller that passes null ran the gate and learned
-   * the check was skipped; a caller that omits it never ran the gate at all.
-   * Neither has claim information.
-   *
-   * The distinction exists because TAC-367 was filed over exactly this blind
-   * spot — a grounding check that silently didn't run was invisible
-   * everywhere — and rebuilding it in a brand-new column would have been a
-   * free mistake to avoid. `select count(*) from messages where
-   * review_state='pending' and ungrounded_claims is null` is now a question
-   * with an answer.
-   */
-  ungroundedClaims?: string[] | null
   /**
    * TAC-394: how this caller treats an occupied slot when a unique violation
    * on INSERT reveals a card it did not know about. See SlotCallerPolicy in
@@ -198,7 +177,7 @@ export interface PersistQueuedDraftOptions {
    * offer the classifier intentions this draft never raised, and a classifier
    * double-failure closes everything it is offered (TAC-380 ruling 4).
    *
-   * NULLED under `blankBody`, alongside `ungrounded_claims` (ruled
+   * NULLED under `blankBody` (ruled
    * 2026-09-15). A blank knowledge-gap card's dispatched text is entirely
    * operator-authored, so the model's rendered set is not a claim about it,
    * and recording against it would attribute an operator's words to the agent.
@@ -1254,7 +1233,6 @@ async function tryQueueInsert(
           // both mean "no claim information", one because the gate never ran
           // and one because the check inside it didn't. `[]` is a THIRD value
           // here and survives as itself — see the option's docstring.
-          ungrounded_claims: options.ungroundedClaims ?? null,
           // TAC-385 PR 1: the rendered set, so the operator dispatch path can
           // record the ask. Omitted -> null, which reads as "record nothing".
           rendered_intentions:
@@ -1281,17 +1259,6 @@ async function tryQueueInsert(
           // it. Given this repo's history with unauthorized comps, a model
           // that could not ground an answer does not get to bind one
           // invisibly.
-          // TAC-364: `ungrounded_claims` is nulled here too — a claim is a
-          // quotation FROM the body, and there is no body on a blank card, so
-          // keeping it would point the operator at text they cannot see.
-          // `review_triggers` deliberately SURVIVES blanking: why the card
-          // exists is still true and still renders, body or no body.
-          //
-          // On the gate path this is belt-and-braces — `blankBody` keys on the
-          // self-reported gap, and verifyGroundingStage only runs when the
-          // model did NOT self-report, so the two can't both be set. It is
-          // load-bearing for the direct callers (the generation-failure card)
-          // and for any future one that doesn't inherit that exclusion.
           // TAC-385 PR 1: `rendered_intentions` is nulled here too (ruled
           // 2026-09-15). The dispatched text on a blank card is entirely the
           // operator's, so recording the model's rendered set against it would
@@ -1302,7 +1269,6 @@ async function tryQueueInsert(
             ? {
                 body: '',
                 pending_commitment: null,
-                ungrounded_claims: null,
                 rendered_intentions: null,
               }
             : {}),
@@ -1418,7 +1384,6 @@ async function tryRegenUpdate(
       // describes the GUEST'S wait, which the regen didn't reset, so that one
       // is preserved.
       review_triggers: options.reviewTriggers ?? null,
-      ungrounded_claims: blank ? null : (options.ungroundedClaims ?? null),
       // TAC-385 PR 1: overwrite-wholesale on regen, with the same reasoning as
       // the two columns above — this draft's rendered set, not the previous
       // attempt's. Nulled when blank, per the INSERT path.

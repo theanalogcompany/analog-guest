@@ -24,9 +24,8 @@
 // WHAT CAN CONTRADICT A ZERO, because a number nobody can contradict is not
 // evidence, and every bar here counts a BAD thing so a broken run reads clean:
 //
-//   - THE DETECTORS ARE DRIVEN FROM BOTH SIDES in the score file's tests, on the
-//     device transcript verbatim. That is where the real risk sits: a detector
-//     that cannot fire turns all three bars into decoration.
+//   - THE DETECTORS are where the real risk sits: a detector that cannot fire
+//     turns all three bars into decoration.
 //   - MEASURE_ARM=control runs the real derivation with isFirstConversation FALSE,
 //     which restores the pre-ticket eligibility AND drops the first-conversation
 //     restraint, on the same guest, venue and turn bodies. It produces off-target
@@ -243,7 +242,7 @@ async function main(): Promise<void> {
       controlIs:
         'branch code with isFirstConversation=false in the derivation, so pre-ticket eligibility and no first-conversation restraint. NOT origin/main: both arms carry the new opener text and the new two-question gate, neither of which a boolean can vary.',
       bar3HasNoInProcessControl:
-        'the opener is a compiled constant; its contrast is the ticket mutation pass, not this run',
+        'the opener is a compiled constant, so this run has no in-process contrast for it',
     },
   })
 

@@ -5,9 +5,7 @@
  *   agent: ...best with milk to balance it out, as espresso or moka pot...
  *   guest: got it and how should o brew it
  *
- * Runs the REAL classify, retrieve, generate and grounding backstop. The
- * backstop matters: the device draft was HELD by it, so a generation-only run
- * would measure something other than what ships.
+ * Runs the REAL classify, retrieve and generate.
  *
  * Two arms, one variable — whether the contextual retrieval arm runs. Context
  * is built ONCE and cloned per rep, because `buildRuntimeContext` can persist
@@ -25,7 +23,6 @@ import {
   retrieveCorpusStage,
   retrieveKnowledgeStage,
   retrieveKnowledgeWithContextStage,
-  verifyGroundingStage,
 } from '@/lib/agent/stages'
 import { startAgentTrace } from '@/lib/observability/langfuse'
 import type { AgentRunId, RuntimeContext } from '@/lib/agent/types'
@@ -112,13 +109,11 @@ export async function runBhadraE2E({ reps }: { reps: number }) {
     },
   })
 
-  const summary: Record<
-    string,
-    { met: number; ran: number; failed: number; held: number }
-  > = {}
+  const summary: Record<string, { met: number; ran: number; failed: number }> =
+    {}
 
   for (const arm of ['control', 'change'] as const) {
-    summary[arm] = { met: 0, ran: 0, failed: 0, held: 0 }
+    summary[arm] = { met: 0, ran: 0, failed: 0 }
     for (let rep = 0; rep < reps; rep += 1) {
       const ctx: RuntimeContext = { ...base, recentMessages: [...history] }
       try {
@@ -144,12 +139,10 @@ export async function runBhadraE2E({ reps }: { reps: number }) {
           process.stdout.write('!')
           continue
         }
-        const grounding = await verifyGroundingStage(ctx, gen.result)
         const verdict = classifyBhadraReply(gen.result.body)
         const met = meetsBar(verdict)
         summary[arm].ran += 1
         if (met) summary[arm].met += 1
-        if (grounding.status === 'flagged') summary[arm].held += 1
 
         log.appendUnit({
           arm,
@@ -157,9 +150,6 @@ export async function runBhadraE2E({ reps }: { reps: number }) {
           body: gen.result.body,
           met,
           verdict,
-          grounding: grounding.status,
-          ungroundedClaims:
-            grounding.status === 'flagged' ? grounding.claims : null,
           retrievedEntries: ctx.knowledgeCorpus.map((c) => ({
             id: c.knowledgeCorpusId,
             similarity: Number(c.similarity.toFixed(4)),
@@ -187,7 +177,7 @@ export async function runBhadraE2E({ reps }: { reps: number }) {
   for (const [arm, s] of Object.entries(summary)) {
     console.log(
       `${arm.padEnd(8)} meets bar ${s.met}/${s.ran}` +
-        `${s.failed > 0 ? `  DISQUALIFIED ${s.failed}` : ''}  (grounding held ${s.held})`,
+        `${s.failed > 0 ? `  DISQUALIFIED ${s.failed}` : ''}`,
     )
   }
   console.log(

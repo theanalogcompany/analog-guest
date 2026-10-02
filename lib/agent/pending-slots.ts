@@ -370,8 +370,8 @@ export function mostRecentlyOpenedConversationCard(
 
 /**
  * THE per-guest pending read. Every caller that needs "this guest's pending
- * card" goes through here and then names the slot it wants. Do not add another
- * single-row pending read for a guest anywhere in the repo.
+ * card" goes through here and then names the slot it wants. No other
+ * single-row pending read for a guest may exist.
  *
  * It replaced `findPendingDraft` (stages.ts) and `findOpenPendingRow`
  * (schedule-and-send.ts). Both were `.limit(1).maybeSingle()` with no ordering,
@@ -560,8 +560,8 @@ export interface ConversationDispositionInput {
  *    no_answer.
  *
  *    The AND is doing the safety work here, not looksLikeQuestion. That
- *    function is deliberately precision-biased (TAC-484) —
- *    `looksLikeQuestion('tell me the wifi password') === false` — and TAC-484
+ *    function is deliberately precision-biased (TAC-484), so
+ *    `looksLikeQuestion('tell me the wifi password')` is false, and TAC-484
  *    uses it where a false return costs a nudge. Here a false return argues
  *    for SILENCE, the opposite direction, so it is never trusted alone: an
  *    imperative request would also have to classify as acknowledgment or
@@ -654,9 +654,9 @@ export interface SlotDecisionInput {
   rows: PendingRowsBySlot
   /** The carrier the draft will persist: `draftCommitmentIdentity(...)`. */
   draftCommitment: CommitmentIdentity | null
-  /** A knowledge-gap turn: the self-reported or backstop trigger fired. */
+  /** A knowledge-gap turn: the self-reported trigger fired. */
   isGapTurn: boolean
-  /** The grounding check truncated (TAC-367). Exempt from gap-card protection. */
+  /** A check did not complete (TAC-401). Exempt from gap-card protection. */
   checkDidNotComplete: boolean
   callerPolicy: SlotCallerPolicy
   /**
@@ -884,9 +884,10 @@ export function otherSlotOccupied(
  * The two gap flags decideSlotAction needs, recovered from a draft's trigger
  * set. For the persist layer, which receives the trigger set
  * (`reviewTriggers`) but not the gate's intermediate booleans. Mirrors the
- * gate: a gap turn is the self-reported or the backstop knowledge-gap trigger,
- * and a truncated check is grounding_check_failed. Literals for the reason
- * given at KNOWLEDGE_GAP_CARD_REVIEW_REASONS below. A caller with no trigger set (the
+ * gate: a gap turn is the self-reported knowledge-gap trigger, and an
+ * incomplete check is prose_promise_check_failed. Literals for the reason
+ * given at KNOWLEDGE_GAP_CARD_REVIEW_REASONS below, and matching
+ * APPROVAL_TRIGGERS. A caller with no trigger set (the
  * decline, the crash card) reads as neither, which is what their own policies
  * assume.
  */
@@ -896,25 +897,12 @@ export function gapFlagsFromTriggers(triggers: readonly string[] | undefined): {
 } {
   const set = triggers ?? []
   return {
-    isGapTurn:
-      set.includes('knowledge_gap') || set.includes('knowledge_gap_backstop'),
-    // Both absence-of-information triggers, and they must stay in step with
-    // the gate's own computation in stages.ts — this is what 23505 race
-    // recovery decides with, so a divergence means the gate spares a draft and
-    // recovery destroys it.
-    //
-    // TAC-424: `grounding_check_degraded` is listed too, as defence in depth
-    // rather than because it is reachable alone. The gate always co-pushes
-    // `grounding_check_failed` with it, so today the first clause already
-    // covers every degraded turn — but the invariant making that safe lives in
-    // another file, and "the marker is more specific, push only that" is a
-    // plausible future tidy. If anyone made it, this function would stop
-    // exempting the turn and recovery would DESTROY a draft the gate spared,
-    // which is the exact divergence the comment above warns about.
-    checkDidNotComplete:
-      set.includes('grounding_check_failed') ||
-      set.includes('grounding_check_degraded') ||
-      set.includes('prose_promise_check_failed'),
+    isGapTurn: set.includes('knowledge_gap'),
+    // An absence-of-information trigger, and it must stay in step with the
+    // gate's own computation in stages.ts — this is what 23505 race recovery
+    // decides with, so a divergence means the gate spares a draft and recovery
+    // destroys it.
+    checkDidNotComplete: set.includes('prose_promise_check_failed'),
   }
 }
 
@@ -925,7 +913,7 @@ export function gapFlagsFromTriggers(triggers: readonly string[] | undefined): {
 // decideSlotAction needs the predicate and the persist layer cannot import
 // stages.ts. The review_reason values are string literals here for the same
 // reason: APPROVAL_TRIGGERS and GENERATION_FAILED_REVIEW_REASON live in
-// stages.ts.
+// stages.ts. The literals must match those constants.
 
 /**
  * Every `messages.review_reason` that marks a pending row as a knowledge-gap
@@ -934,12 +922,11 @@ export function gapFlagsFromTriggers(triggers: readonly string[] | undefined): {
  * SHARED with `findPendingQuestion` (lib/agent/pending-question.ts), which has
  * to express the same predicate as a PostgREST filter so it can run
  * server-side. That duplication used to be by hand and it DRIFTED: the query
- * carried one value where the predicate below carried two, so a
- * `knowledge_gap_backstop` card whose clock had already fired was recognized
- * here and invisible there — the `## Unanswered question` block silently
- * vanished for that guest while the card still sat in the operator's queue,
- * and the comment at the query claimed the two mirrored each other the whole
- * time. TAC-364 found it while adding a third value.
+ * carried one value where the predicate below carried two, so a card whose
+ * clock had already fired was recognized here and invisible there — the
+ * `## Unanswered question` block silently vanished for that guest while the
+ * card still sat in the operator's queue, and the comment at the query
+ * claimed the two mirrored each other the whole time.
  *
  * Exported as one array so the next value added lands in both places at once
  * rather than being caught by a reader. Do not inline these back into either
@@ -947,7 +934,6 @@ export function gapFlagsFromTriggers(triggers: readonly string[] | undefined): {
  */
 export const KNOWLEDGE_GAP_CARD_REVIEW_REASONS = [
   'knowledge_gap',
-  'knowledge_gap_backstop',
   'generation_failed',
 ] as const
 
@@ -970,20 +956,6 @@ export const KNOWLEDGE_GAP_CARD_REVIEW_REASONS = [
  * longer recognized. Rare (the model has to do both in one turn) and it
  * degrades to pre-TAC-308 behavior rather than to something worse. Closing it
  * needs a column, which the ticket ruled out.
- *
- * TAC-484 WIDENS that residual for a BACKSTOP-caught comp specifically. That
- * card can no longer arm a clock at all, so it is unrecognized from creation
- * rather than from the moment a clock fires. The consequences are the same two
- * as before, just reached earlier: findPendingQuestion's filter matches
- * neither leg, and anyKnowledgeGapCard reads false. Inert while the holding
- * message is disabled; it is written down because the window widened, not
- * because the behaviour changed.
- *
- * TAC-350: the review_reason leg checks BOTH `knowledge_gap` (self-reported)
- * and `knowledge_gap_backstop` (independently caught) — a card protected by
- * the backstop trigger must get identical eviction protection to one the
- * model flagged itself, or a regen of a backstop-caught card would silently
- * lose its clock the moment the label won by a co-firing trigger changed.
  *
  * TAC-364 adds `generation_failed` as a third value on that leg, and it is
  * REQUIRED rather than tidy. The crash card arms `pending_until` like any

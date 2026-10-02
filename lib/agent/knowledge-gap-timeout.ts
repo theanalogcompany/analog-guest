@@ -39,8 +39,8 @@
 // DISABLED as of TAC-484 — see KNOWLEDGE_GAP_HOLDING_MESSAGE_ENABLED below.
 // The code stays; nothing in this file was deleted. The 2026-09-18 incident
 // (Le Mil's) was a holding message that fired with nothing to hold — the
-// draft it was covering for had already been caught by the grounding
-// backstop, so there was no gap the guest was actually owed an answer to, and
+// draft it was covering for had already been caught by an independent check,
+// so there was no gap the guest was actually owed an answer to, and
 // "still tracking that down, sorry for the wait" asserted a wait that never
 // existed. Firing on every held card costs more than it returns; the
 // mechanism returns in a dynamic form under its own ticket, where naming what
@@ -58,10 +58,8 @@ import { loadInboundQuestion } from './pending-question'
  * re-enables the PROCESSOR, and that part is a one-line change. It does not
  * restore the pre-TAC-484 behaviour, and the docstring used to claim it did:
  * what may arm the clock changed in the same ticket (stages.ts now requires a
- * self-reported gap on an inbound that reads as a question), so a guest
- * holding a backstop-caught card can no longer get a clock at all, including
- * for a later genuine gap, because anyKnowledgeGapCard suppresses the arm.
- * Restoring the old behaviour means reverting that too. Mirrors
+ * self-reported gap on an inbound that reads as a question). Restoring the old
+ * behaviour means reverting that too. Mirrors
  * lib/messaging/instagram/agent-gate.ts's INSTAGRAM_AGENT_REPLIES_ENABLED
  * shape: a named constant plus an `enabled` parameter on the function it
  * gates, so the send path can still be exercised explicitly without

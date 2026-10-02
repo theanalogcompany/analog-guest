@@ -169,7 +169,7 @@ the unique constraint.
 
 **A redaction list written from the columns you remember is a list of the columns you
 remember.** Enumerate from the schema. `messages.ungrounded_claims` holds verbatim guest
-excerpts and `pending_commitment` holds model-written descriptions of them.
+excerpts (legacy rows) and `pending_commitment` holds model-written descriptions of them.
 
 ---
 

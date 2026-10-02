@@ -30,7 +30,7 @@ stylistic.
 | --- | --- | --- |
 | voice pack load (inbound) | **closed** | voice failure breaks the thing we sell; followups proceed with what loaded |
 | knowledge retrieval | **open** (degrade to `[]`) | a less specific reply still ships |
-| the five post-generation checks | **closed** after one retry | no prior to degrade to |
+| the four post-generation checks | **closed** after one retry | no prior to degrade to |
 | coalescing claim table | **open** | a guest silenced by a claim-table hiccup is a worse, newly-introduced failure |
 | config/JSONB parse at a **live** boundary | **open** to defaults | a typo must not take down every agent run for that venue |
 | the same parse at an **offline** boundary | **closed**, loudly | a seed-time crash is catchable |
@@ -56,7 +56,7 @@ a `try/catch`, and a type cannot express that claim.
 message permanently: the caller's fail-open default was right for one call site and exactly
 backwards for the other.
 
-Same shape elsewhere: a grounding verdict is `skipped | clean | flagged | degraded`, not a
+Same shape elsewhere: a check verdict is `skipped | clean | flagged | degraded`, not a
 boolean, because "the check did not complete" must be distinguishable from "it found
 nothing"; a venue's opening state is `open | closed | unknown`, because guessing past a
 stated closure discards the only fact you had; a null precision means "nobody recorded one",

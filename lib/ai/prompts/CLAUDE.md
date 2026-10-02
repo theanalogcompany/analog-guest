@@ -39,7 +39,7 @@ retired id (R12 is retired). Renumbering stales every external reference. A cons
 **`UNIVERSAL_RULES_DISPLAY` is a dual source of truth** with the template, consumed by the
 Voices rail at `app/admin/(authed)/voices/`. Add, remove, renumber or substantially reword
 a rule and update both in the same commit. `UNIVERSAL_RULES_UNDISPLAYED` names every
-mechanical bullet; the two sets must account for every bullet in the template with none
+mechanical bullet; the two sets should account for every bullet in the template with none
 double-classified.
 
 ### Writing a rule
@@ -68,12 +68,11 @@ with a table of phrase swaps in `channel-variants.ts`.
 rejected: the SMS copy is correct for a guest who texted a number.
 
 Each `from` phrase must occur **exactly once** or the module throws at load. That is safe
-and deliberate - the inputs are string constants, so a miss fails every importer and
-cannot ship. Editing an SMS phrase that has an Instagram twin breaks at that phrase instead
+and deliberate - the inputs are string constants, so a miss fails at import. Editing an SMS phrase that has an Instagram twin breaks at that phrase instead
 of letting the channels drift silently.
 
-Which lines may differ by channel is deliberately narrow. Widening it is a deliberate
-change in its own ticket, because once the composer can vary by channel every line becomes
+The substitution table is the scope of what may differ by channel. Widening it is a
+deliberate change in its own ticket, because once the composer can vary by channel every line becomes
 a candidate.
 
 Unresolved channel (`null`) gets the Instagram copy, because that copy is false on neither
@@ -81,6 +80,14 @@ channel. It is a property of the copy, not a claim about the guest: **nothing ma
 send on `conversationChannel`.**
 
 ## Serializers
+
+**Past messages are chat turns, not a block** (v1.81.0). `splitHistory` maps guest messages to
+`user` turns and delivered venue messages to `assistant` turns, merging same-role runs so roles
+alternate, and `generateMessage` sends them between the system blocks and the final user
+message. A draft the guest never received is never an assistant turn; it renders in the user
+prompt under `## Drafts the guest has not received`. There is no timing block, and a venue
+message before the guest's first one in the window is left out. A harness that calls `generateObject` itself must send `historyTurns` too, or it
+silently measures a conversation with no history.
 
 `serializers.ts` renders the user prompt.
 

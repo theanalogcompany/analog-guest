@@ -9,6 +9,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import { PendingNotice } from '../../../_components/pending-notice'
 import { guestNameWithPhone } from '../../_lib/guest-name'
 import { FollowUpButton } from './follow-up-button'
 
@@ -116,6 +117,8 @@ export function Filters({
           </SelectContent>
         </Select>
       </Field>
+
+      {isPending && <PendingNotice />}
 
       {/* Manual outbound trigger. Only meaningful with both filters set —
           requires a {venueId, guestId} for the API call. Aligned to the

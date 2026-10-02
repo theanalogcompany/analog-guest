@@ -9,9 +9,8 @@ import type {
 
 // TAC-363. Its OWN version, not SYSTEM_TEMPLATE's PROMPT_VERSION — this
 // verifier never touches the classify/generate contract, the same
-// independence rationale VERIFY_GROUNDING_PROMPT_VERSION,
-// VERIFY_MECHANIC_OFFER_PROMPT_VERSION and VERIFY_PROSE_PROMISE_PROMPT_VERSION
-// each carry.
+// independence rationale VERIFY_MECHANIC_OFFER_PROMPT_VERSION and
+// VERIFY_PROSE_PROMISE_PROMPT_VERSION each carry.
 export const VERIFY_CLOSED_VENUE_ARRIVAL_PROMPT_VERSION = 'v1.0.0'
 
 /**
@@ -65,7 +64,7 @@ function buildUserPrompt(input: VerifyClosedVenueArrivalInput): string {
  * TAC-363: independent post-generation check for a same-moment arrival
  * confirmation sent while the venue is closed.
  *
- * Fourth instance of the shape verify-grounding.ts, verify-mechanic-offer.ts
+ * Instance of the shape verify-mechanic-offer.ts
  * and verify-prose-promise.ts already set: generateObject, Haiku, AIResult,
  * its own prompt version, no regeneration loop, no gating of its own beyond
  * input validation.
@@ -106,7 +105,7 @@ export async function verifyClosedVenueArrival(
   // `reasoning` FIRST, and the order is load-bearing. Structured output
   // generates in declaration order, so a verdict declared before the analysis
   // is a verdict the model has not reasoned about yet. TAC-301 part 1.5 found
-  // exactly this on verify-grounding, where the model emitted a flag and then
+  // exactly this on an earlier verifier, where the model emitted a flag and then
   // reasoned its way to the opposite conclusion inside the same object.
   const schema = z.object({
     reasoning: z.string(),

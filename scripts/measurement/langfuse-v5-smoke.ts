@@ -29,7 +29,7 @@ const SMOKE_MODEL = 'claude-haiku-4-5-20251001'
  * The token counts written, and the exact `usageDetails` Langfuse must store back.
  *
  * WHY THE EXPECTED VALUES ARE PINNED rather than checked for mere presence.
- * A mutant renaming the wrapper's native `usageDetails` field to `usage` SURVIVED
+ * Renaming the wrapper's native `usageDetails` field to `usage` passes
  * a non-emptiness check: Langfuse fell back to tokenizing the span's own
  * input/output text and returned `{input: 5, output: 5, total: 10}` - plausible,
  * priced, charted, and nothing to do with the call. That is this repo's recurring

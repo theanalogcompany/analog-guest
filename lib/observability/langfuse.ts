@@ -5,12 +5,18 @@ import {
   startObservation,
 } from '@langfuse/tracing'
 
+import { logger } from './logger'
 import {
   _resetSpanProcessorForTest,
   getLangfuseSpanProcessor,
   langfuseInitFailed,
   readLangfuseConfig,
 } from './span-processor'
+import {
+  TRACE_FETCH_REQUEST_OPTIONS,
+  classifyTraceFetchError,
+  type TraceFetchFailure,
+} from './trace-fetch-pure'
 
 // Thin wrapper around Langfuse so the agent code never touches the SDK
 // directly — keeps lib/agent provider-agnostic and lets the rest of the
@@ -397,36 +403,76 @@ export function _resetLangfuseClientForTest(): void {
   _resetSpanProcessorForTest()
 }
 
+export type FetchTraceResult =
+  | { ok: true; data: TraceWithFullDetails; durationMs: number }
+  | {
+      ok: false
+      error: TraceFetchFailure
+      status: number | null
+      durationMs: number
+    }
+
 /**
- * Server-only. Fetch a single trace by ID from Langfuse Cloud's read API.
- * Used by the conversation viewer admin route (THE-201) to render the
- * agent's reasoning inline next to its outbound message.
+ * Server-only. Fetch a single trace by ID from Langfuse Cloud's read API,
+ * bounded: 8s timeout, no retries (`TRACE_FETCH_REQUEST_OPTIONS`). The SDK
+ * default is 60s plus two retries honoring `Retry-After` up to 60s, which on a
+ * 429 held a server render for minutes. See `trace-fetch-pure.ts`.
  *
- * Returns null on:
- *   - empty/blank traceId (don't bother calling the SDK)
- *   - wrapper in no-op mode (no client configured)
- *   - SDK throw (network failure, 404, auth failure, anything)
- *
- * Same never-throw discipline as the rest of the wrapper. Callers render
- * "trace unavailable" UI on null. No retry — the API route handler issues
- * fresh fetches per click, so transient failures self-heal on user retry.
+ * Never throws. Failure is a value and its cause is kept (`not_found` vs
+ * `rate_limited` vs `timeout`), because callers answer them differently.
+ * Every read logs one line with its duration, success included: the read API
+ * is the one third-party call on the admin path, and its latency was
+ * previously visible nowhere.
+ */
+export async function fetchTraceResult(
+  traceId: string,
+): Promise<FetchTraceResult> {
+  const startedAt = performance.now()
+  const elapsed = () => Math.round(performance.now() - startedAt)
+  const trimmed = traceId.trim()
+  if (!trimmed) {
+    return { ok: false, error: 'empty_id', status: null, durationMs: 0 }
+  }
+  const client = getReadClient()
+  if (!client) {
+    return { ok: false, error: 'not_configured', status: null, durationMs: 0 }
+  }
+  try {
+    const data = await client.api.trace.get(
+      trimmed,
+      {},
+      TRACE_FETCH_REQUEST_OPTIONS,
+    )
+    const durationMs = elapsed()
+    logger.info('[observability] fetchTrace ok', {
+      traceId: trimmed,
+      durationMs,
+    })
+    return { ok: true, data, durationMs }
+  } catch (e) {
+    const durationMs = elapsed()
+    const { error, status } = classifyTraceFetchError(e)
+    logger.warn('[observability] fetchTrace failed', {
+      traceId: trimmed,
+      outcome: error,
+      status,
+      durationMs,
+      message: e instanceof Error ? e.message : String(e),
+    })
+    return { ok: false, error, status, durationMs }
+  }
+}
+
+/**
+ * Server-only. Same read as `fetchTraceResult`, flattened to null on any
+ * failure for callers that only render "trace unavailable". Used by the
+ * Langfuse smoke script, which polls through ingestion lag itself.
  */
 export async function fetchTrace(
   traceId: string,
 ): Promise<TraceWithFullDetails | null> {
-  const trimmed = traceId.trim()
-  if (!trimmed) return null
-  const client = getReadClient()
-  if (!client) return null
-  try {
-    return await client.fetchTrace(trimmed)
-  } catch (e) {
-    console.warn(
-      '[observability] fetchTrace failed',
-      e instanceof Error ? e.message : String(e),
-    )
-    return null
-  }
+  const result = await fetchTraceResult(traceId)
+  return result.ok ? result.data : null
 }
 
 export function startAgentTrace(opts: StartAgentTraceOptions): AgentTrace {

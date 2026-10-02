@@ -104,8 +104,8 @@ reply.
 
 ## Approval gates
 
-`applyApprovalPolicyStage(ctx, generation, grounding?, mechanicOffer?, prosePromise?, ...)`
-returns `send`, `queue`, `drop`, or `silence`. **Twenty-two triggers compose; any one
+`applyApprovalPolicyStage(ctx, generation, mechanicOffer?, prosePromise?, ...)`
+returns `send`, `queue`, `drop`, or `silence`. **Nineteen triggers compose; any one
 queues.** The set is `APPROVAL_TRIGGERS`; check it against the constant, never against a
 list in prose.
 
@@ -116,10 +116,9 @@ most severe first:
 ```
 commitment_type_gated > commitment_cancellation_gated > mechanic_offer_backstop >
 prose_promise_backstop > prose_cancellation_backstop > unresolved_cancellation_id >
-knowledge_gap_backstop > knowledge_gap > comp_regex_backstop > model_flagged >
+knowledge_gap > comp_regex_backstop > model_flagged >
 closed_venue_arrival_emitted > closed_venue_arrival_backstop > unverified_url >
 self_talk_detected > complaint_commitment_floor > previous_pending_held >
-grounding_check_failed > grounding_check_degraded >
 prose_promise_check_failed > prose_cancellation_check_failed >
 category_requires_approval > hold_all_outbound
 ```
@@ -129,18 +128,18 @@ about it, which beats **venue-wide policy**.
 
 ### Post-generation checks: post-send on inbound, fail CLOSED on the pre-send paths
 
-`verify_grounding`, `verify_mechanic_offer`, `verify_prose_promise`,
-`verify_cancellation_claim`, `verify_closed_venue_arrival`. Decision 0003 (rewritten
-2026-09-29) split the posture by path:
+`verify_mechanic_offer`, `verify_prose_promise`, `verify_cancellation_claim`,
+`verify_closed_venue_arrival`. Decision 0003 (rewritten 2026-09-29) split the posture by
+path:
 
-- **Inbound**: the five run AFTER dispatch in `post-send-checks.ts` (waitUntil, never
+- **Inbound**: the four run AFTER dispatch in `post-send-checks.ts` (waitUntil, never
   throws, `disposition: 'sent'` on every capture so Slack says the reply already went out).
   The gate receives the neutral values; only the deterministic triggers hold a draft. A
   queued/dropped/silenced turn runs no checks.
 - **Followups and the holding message**: unchanged - pre-send, one immediate retry on a
   transient fault, then hold. Truncation is never retried; the fix is the cap.
 
-**Treat a posture change to any one of them as a change to all five.** Both batches run
+**Treat a posture change to any one of them as a change to all four.** Both batches run
 under `Promise.allSettled` so one fault cannot discard another's finding.
 
 `checkDidNotComplete` (not `isGapTurn`) is what exempts an incomplete check from the
