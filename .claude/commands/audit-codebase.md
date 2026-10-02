@@ -30,7 +30,7 @@ This is not a per-file code review. Don't relitigate the per-PR `code-reviewer`'
 - Migrations on disk whose own header does not say why they exist. There is no migration log; the numbered files are the record.
 - Gotchas that have been resolved by code changes and could be removed.
 - Conventions or patterns referenced in code in 3+ places that aren't documented in CLAUDE.md (promote to documented convention).
-- Workarounds that no longer have a reason — e.g. `<name>-pure.ts` splits that existed only so a test could import them. List them; do not remove them without a ticket.
+- Workarounds that no longer have a reason — e.g. `<name>-pure.ts` module splits whose original reason no longer applies. List them; do not remove them without a ticket.
 
 ## Documentation routing from past week's PRs
 - For each PR merged in last 7 days, the PR description should include "Documentation routing considered: ..." per /work-ticket Phase 3 step 19. List PRs that skipped this note. List PRs that included a note but landed code that should have been written down somewhere. Check it landed in the place CLAUDE.md's "Where things are written down" table names — subsystem detail appended to the root file is itself a finding.

@@ -42,7 +42,7 @@ A resumed build works in a side folder (`work-ticket.md` step 14), and the hando
 - Try/catch wrapping that drops original error context.
 - Single-use "helper" functions that should be inlined.
 - Unused imports, exports, dead code.
-- `console.log` in non-test code (`console.warn` is fine when intentional).
+- `console.log` (`console.warn` is fine when intentional).
 - Type assertions (`as Foo`) bypassing real narrowing.
 
 ## Brand and product drift

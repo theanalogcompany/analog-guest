@@ -1,6 +1,6 @@
 ---
 name: qa-runner
-description: Runs typecheck, lint and build after an implementation phase. Reports pass/fail. Runs no tests and writes none - this repo has none. MUST BE USED after every implementation phase.
+description: Runs typecheck, lint and build after an implementation phase. Reports pass/fail. MUST BE USED after every implementation phase.
 tools: Bash, Read
 ---
 

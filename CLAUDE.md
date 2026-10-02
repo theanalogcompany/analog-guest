@@ -18,7 +18,7 @@ This file holds what **every** task needs. Everything else is routed:
 | a rule one directory needs | that directory's `CLAUDE.md` |
 | a rule that follows a file pattern | `.claude/rules/` |
 | why a decision was made | that source file's header comment |
-| an incident, a measurement run, mutation results | the PR body |
+| an incident, a measurement run | the PR body |
 | a cross-cutting decision people re-litigate | `docs/decisions/README.md` indexes them |
 | per-ticket narrative | nowhere. Git has it. |
 
