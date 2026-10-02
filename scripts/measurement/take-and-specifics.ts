@@ -338,7 +338,7 @@ async function main() {
       referralSource: null,
     }
 
-    let composed: { systemPrompt: string; userPrompt: string } | null = null
+    let composed: ReturnType<typeof composePrompt> | null = null
     let category: string | null = null
     let knowledgeChunkIds: string[] = []
     let entryRetrieved = false
@@ -425,7 +425,10 @@ async function main() {
                 const { object } = await generateObject({
                   model: getGenerationModel(),
                   system,
-                  prompt: composed.userPrompt,
+                  messages: [
+                    ...composed.historyTurns,
+                    { role: 'user', content: composed.userPrompt },
+                  ],
                   schema: GeneratedMessageSchema,
                   temperature: 0.7,
                   maxOutputTokens: MAX_OUTPUT_TOKENS,

@@ -24,7 +24,7 @@
 //     automates setting them.
 //   - "text" / "number" / "DM" in Instagram replies: measured, 0 phone claims
 //     in 24 Instagram generations across two configurations, the second with
-//     the grounding backstop in the loop. The control was recorded as SPENT
+//     a verifier in the loop. The control was recorded as SPENT
 //     rather than passed — every fix that cleaned the Instagram arm also
 //     removed a control provocation. Not proof; enough for a one-venue pilot
 //     behind an operator queue.

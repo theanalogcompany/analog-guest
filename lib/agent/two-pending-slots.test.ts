@@ -45,7 +45,6 @@ vi.mock('@/lib/rag', () => ({
 vi.mock('@/lib/ai', () => ({
   classifyMessage: vi.fn(),
   generateMessage: vi.fn(),
-  verifyGrounding: vi.fn(),
   verifyMechanicOffer: vi.fn(),
   verifyProsePromise: vi.fn(),
 }))
@@ -62,11 +61,9 @@ vi.mock('@/lib/analytics/posthog', () => ({
   captureDashViolationPersisted: vi.fn(),
   captureDemoBypassedApprovalGate: vi.fn(),
   captureEmojiDirectiveViolated: vi.fn(),
-  captureGroundingVerifierUnavailable: vi.fn(),
   captureMechanicOfferBackstopCaught: vi.fn(),
   capturePostHogEvent: vi.fn(),
   captureRegenerationTriggered: vi.fn(),
-  captureUngroundedClaimCaught: vi.fn(),
   CLASSIFICATION_CONFIDENCE_LOW_THRESHOLD: 0.7,
   CLASSIFICATION_CONFIDENCE_REROUTE_THRESHOLD: 0.3,
 }))
@@ -181,6 +178,7 @@ function generation(
     attemptHistory: [],
     systemPrompt: '',
     userPrompt: '',
+    conversation: '',
     promptVersion: PROMPT_VERSION,
     cacheReadTokens: 0,
     cacheWriteTokens: 0,
@@ -209,7 +207,6 @@ async function runTurn(
   const decision = await applyApprovalPolicyStage(
     ctx,
     gen,
-    { status: 'clean' },
     { status: 'skipped' },
     prosePromise,
     cancellation,
@@ -224,7 +221,6 @@ async function runTurn(
       pendingUntil: decision.pendingUntil,
       blankBody: decision.blankBody,
       reviewTriggers: decision.triggers,
-      ungroundedClaims: decision.ungroundedClaims,
       // TAC-401: the carrier the gate resolved. Dropping this line is the
       // mutant the end-to-end tests below exist to kill — every per-mock
       // assertion in the repo would stay green without it, because a mock
@@ -534,7 +530,7 @@ describe('race recovery decides a card the gate never saw (TAC-394)', () => {
       venue_id: VENUE,
       guest_id: GUEST,
       review_state: 'pending',
-      review_reason: 'knowledge_gap_backstop',
+      review_reason: 'knowledge_gap',
       pending_until: '2026-09-14T16:30:00.000Z',
       pending_commitment: compA,
       body: "Sorry about that. The next one's on us.",
@@ -644,7 +640,7 @@ describe('race recovery decides a card the gate never saw (TAC-394)', () => {
       venue_id: VENUE,
       guest_id: GUEST,
       review_state: 'pending',
-      review_reason: 'knowledge_gap_backstop',
+      review_reason: 'knowledge_gap',
       pending_until: '2026-09-14T16:30:00.000Z',
       pending_commitment: compA,
       body: "Sorry about that. The next one's on us.",
@@ -854,7 +850,7 @@ describe('findPendingQuestion with a knowledge-gap card in each slot (TAC-394)',
       venue_id: VENUE,
       guest_id: GUEST,
       review_state: 'pending',
-      review_reason: 'knowledge_gap_backstop',
+      review_reason: 'knowledge_gap',
       pending_until: '2026-09-14T16:25:00.000Z',
       pending_commitment: compA,
       reply_to_message_id: 'in-oat',

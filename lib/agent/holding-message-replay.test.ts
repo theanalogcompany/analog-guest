@@ -78,7 +78,6 @@ vi.mock('@/lib/rag', () => ({
 vi.mock('@/lib/ai', () => ({
   classifyMessage: vi.fn(),
   generateMessage: vi.fn(),
-  verifyGrounding: vi.fn(),
   verifyMechanicOffer: vi.fn(),
   verifyProsePromise: vi.fn(),
 }))
@@ -95,11 +94,9 @@ vi.mock('@/lib/analytics/posthog', () => ({
   captureDashViolationPersisted: vi.fn(),
   captureDemoBypassedApprovalGate: vi.fn(),
   captureEmojiDirectiveViolated: vi.fn(),
-  captureGroundingVerifierUnavailable: vi.fn(),
   captureMechanicOfferBackstopCaught: vi.fn(),
   capturePostHogEvent: vi.fn(),
   captureRegenerationTriggered: vi.fn(),
-  captureUngroundedClaimCaught: vi.fn(),
   CLASSIFICATION_CONFIDENCE_LOW_THRESHOLD: 0.7,
   CLASSIFICATION_CONFIDENCE_REROUTE_THRESHOLD: 0.3,
 }))
@@ -107,8 +104,7 @@ vi.mock('@/lib/analytics/posthog', () => ({
 import { KNOWLEDGE_GAP_HOLDING_MESSAGE_ENABLED } from './knowledge-gap-timeout'
 import { looksLikeQuestion } from './looks-like-question'
 import { findPendingQuestion } from './pending-question'
-import { persistOrRegenQueuedDraft } from './schedule-and-send'
-import { applyApprovalPolicyStage, isKnowledgeGapCard } from './stages'
+import { applyApprovalPolicyStage } from './stages'
 // By path, not through the mocked `@/lib/ai` barrel: a barrel mock would hand
 // this back as `undefined` and the R35 assertion would pass against nothing.
 import { SYSTEM_TEMPLATE } from '@/lib/ai/prompts/system-template'
@@ -190,6 +186,7 @@ function generation(
     attemptHistory: [],
     systemPrompt: '',
     userPrompt: '',
+    conversation: '',
     promptVersion: PROMPT_VERSION,
     cacheReadTokens: 0,
     cacheWriteTokens: 0,
@@ -200,23 +197,10 @@ function generation(
   }
 }
 
-/** The grounding backstop catching the draft, which is what happened. */
-const BACKSTOP_FLAGGED = {
-  status: 'flagged' as const,
-  claims: ['the guest had the same drink two days running'],
-}
-
-async function runTurn(
-  ctx: RuntimeContext,
-  gen: GenerateMessageResult,
-  grounding: Parameters<typeof applyApprovalPolicyStage>[2] = {
-    status: 'clean',
-  },
-) {
+async function runTurn(ctx: RuntimeContext, gen: GenerateMessageResult) {
   return applyApprovalPolicyStage(
     ctx,
     gen,
-    grounding,
     { status: 'skipped' },
     { status: 'skipped' },
     {
@@ -237,50 +221,6 @@ afterEach(() => {
 })
 
 describe('TAC-484 leg A: the card that started it arms no clock', () => {
-  it('queues the backstop-caught draft and arms NO clock, so the timer has nothing to pick up', async () => {
-    useFake()
-    const decision = await runTurn(
-      ctxFor(REPORTED_ORDER),
-      generation(),
-      BACKSTOP_FLAGGED,
-    )
-
-    expect(decision.action).toBe('queue')
-    if (decision.action !== 'queue') return
-    // The incident in one assertion: this is the clock the timer read.
-    expect(decision.pendingUntil).toBeUndefined()
-    expect(decision.triggers).toContain('knowledge_gap_backstop')
-  })
-
-  it('still protects the card, so the operator keeps seeing it', async () => {
-    const fake = useFake()
-    const ctx = ctxFor(REPORTED_ORDER)
-    const decision = await runTurn(ctx, generation(), BACKSTOP_FLAGGED)
-    if (decision.action !== 'queue') throw new Error('expected a queue')
-
-    const persisted = await persistOrRegenQueuedDraft(
-      ctx,
-      generation(),
-      decision.primaryTrigger,
-      decision.existingPendingDraftId,
-      {
-        pendingUntil: decision.pendingUntil,
-        blankBody: decision.blankBody,
-        reviewTriggers: decision.triggers,
-        ungroundedClaims: decision.ungroundedClaims,
-        callerPolicy: 'regen',
-      },
-    )
-
-    expect(persisted.action).toBe('inserted')
-    const row = fake.rows.find((r) => r.id === persisted.outboundMessageId)
-    expect(row).toBeDefined()
-    // No clock on the row, and still a knowledge-gap card: the fix removes the
-    // automated message, not the human review.
-    expect(row?.pending_until).toBeNull()
-    expect(isKnowledgeGapCard(row as never)).toBe(true)
-  })
-
   it('arms no clock on the HONEST path either, when the self-report lands on the same statement', async () => {
     useFake()
     const decision = await runTurn(
@@ -331,7 +271,7 @@ describe('TAC-484 leg B: the prompt block reads the card, not the current turn',
       venue_id: VENUE,
       guest_id: GUEST,
       review_state: 'pending',
-      review_reason: 'knowledge_gap_backstop',
+      review_reason: 'knowledge_gap',
       pending_until: null,
       reply_to_message_id: 'in-reported-order',
       created_at: '2026-09-18T15:41:07.900Z',

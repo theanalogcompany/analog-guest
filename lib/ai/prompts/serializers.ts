@@ -29,8 +29,6 @@ import type {
   VoiceCorpusChunk,
 } from '../types'
 
-const MAX_HISTORY_BODY_CHARS = 200
-
 const FORMALITY_GUIDANCE: Record<BrandPersona['formality'], string> = {
   casual:
     'Use contractions; lowercase starts are fine; write the way you would text a friend.',
@@ -775,10 +773,15 @@ export function formatTimeDelta(then: Date, now: Date): string {
   return `${days} days ago`
 }
 
+// v1.81.0: history bodies render IN FULL. They used to be cut at 200 characters
+// with a trailing "…", and the model cannot tell a cut made to save prompt
+// tokens from a message that was really cut off in front of the guest. A
+// 332-character recipe was shown ending at "(longer …", the guest then asked
+// for more detail, and the model "continued where the previous message cut off"
+// by repeating steps 5 and 6. Do not reintroduce a cap here; if token cost
+// ever forces one, the line has to SAY the guest received the full text.
 function normalizeHistoryBody(body: string): string {
-  const collapsed = body.replace(/\s*\n\s*/g, ' ').trim()
-  if (collapsed.length <= MAX_HISTORY_BODY_CHARS) return collapsed
-  return `${collapsed.slice(0, MAX_HISTORY_BODY_CHARS)}…`
+  return body.replace(/\s*\n\s*/g, ' ').trim()
 }
 
 // TAC-394: the bracket marker for a history line the guest never received, or
@@ -813,20 +816,25 @@ export function historyDeliveryMarker(
 export const UNSENT_HISTORY_NOTE =
   'Lines marked NOT SENT or NEVER SENT never reached the guest. They have not read them.'
 
-function formatRecentConversation(
+function formatHistoryLine(m: RecentMessage, now: Date): string {
+  const speaker = m.direction === 'inbound' ? 'guest' : 'venue'
+  const delta = formatTimeDelta(m.createdAt, now)
+  const body = normalizeHistoryBody(m.body)
+  const marker = historyDeliveryMarker(m.delivery)
+  return marker === null
+    ? `[${speaker}, ${delta}] ${body}`
+    : `[${speaker}, ${delta}, ${marker}] ${body}`
+}
+
+// The whole history as ONE text block, every line in full. The generating model
+// does not read this (it gets the history as chat turns, see splitHistory); it
+// is the readable form recorded on the trace.
+export function formatConversationTranscript(
   messages: readonly RecentMessage[],
   now: Date,
 ): string | null {
   if (messages.length === 0) return null
-  const lines = messages.map((m) => {
-    const speaker = m.direction === 'inbound' ? 'guest' : 'venue'
-    const delta = formatTimeDelta(m.createdAt, now)
-    const body = normalizeHistoryBody(m.body)
-    const marker = historyDeliveryMarker(m.delivery)
-    return marker === null
-      ? `[${speaker}, ${delta}] ${body}`
-      : `[${speaker}, ${delta}, ${marker}] ${body}`
-  })
+  const lines = messages.map((m) => formatHistoryLine(m, now))
   const block = `## Recent conversation\n${lines.join('\n')}`
   // A history with nothing unsent renders exactly as it did before TAC-394:
   // the note is appended only when a marker is present.
@@ -840,6 +848,53 @@ function formatRecentConversation(
   // overwritten is the gate's job (TAC-394 PR 2), not the prompt's.
   if (!messages.some((m) => m.delivery !== 'delivered')) return block
   return `${block}\n\n${UNSENT_HISTORY_NOTE}`
+}
+
+export type HistoryTurn = { role: 'user' | 'assistant'; content: string }
+
+export type SplitHistory = {
+  // Alternating roles, first turn is `user`. Only what the guest actually
+  // received or sent: an assistant turn is a message the venue DELIVERED.
+  turns: HistoryTurn[]
+  // Venue drafts the guest never received. Never an assistant turn: the model
+  // would read them as things it already said to the guest.
+  undelivered: RecentMessage[]
+}
+
+// Past messages as real chat turns. Consecutive same-role messages merge into
+// one turn (a venue reply is often several bubbles) so roles strictly alternate,
+// and bodies keep their own line breaks and full length. A chat must open on a
+// user turn, so a venue message before the guest's first one in the window is
+// left out.
+export function splitHistory(messages: readonly RecentMessage[]): SplitHistory {
+  const turns: HistoryTurn[] = []
+  const undelivered: RecentMessage[] = []
+  for (const m of messages) {
+    if (m.direction === 'outbound' && m.delivery !== 'delivered') {
+      undelivered.push(m)
+      continue
+    }
+    const content = m.body.trim()
+    if (content === '') continue
+    const role = m.direction === 'inbound' ? 'user' : 'assistant'
+    if (turns.length === 0 && role === 'assistant') continue
+    const last = turns[turns.length - 1]
+    if (last !== undefined && last.role === role) {
+      last.content = `${last.content}\n${content}`
+    } else {
+      turns.push({ role, content })
+    }
+  }
+  return { turns, undelivered }
+}
+
+function formatUndeliveredDrafts(
+  messages: readonly RecentMessage[],
+  now: Date,
+): string | null {
+  if (messages.length === 0) return null
+  const lines = messages.map((m) => formatHistoryLine(m, now))
+  return `## Drafts the guest has not received\n${lines.join('\n')}\n\n${UNSENT_HISTORY_NOTE}`
 }
 
 // TAC-244: human-readable label for a FollowupReason. Internal taxonomy
@@ -1954,9 +2009,15 @@ export function runtimeToProse(
   if (runtime.pendingQuestion) {
     blocks.push(formatPendingQuestion(runtime.pendingQuestion, now))
   }
+  // v1.81.0: the history itself is not a block. It travels as chat turns
+  // (splitHistory, sent by generateMessage); only what a turn cannot carry
+  // renders here: drafts the guest never received.
   if (runtime.recentMessages && runtime.recentMessages.length > 0) {
-    const recent = formatRecentConversation(runtime.recentMessages, now)
-    if (recent) blocks.push(recent)
+    const drafts = formatUndeliveredDrafts(
+      splitHistory(runtime.recentMessages).undelivered,
+      now,
+    )
+    if (drafts) blocks.push(drafts)
   }
 
   // TAC-519: ## What you're hoping to get to renders LAST of the content blocks,

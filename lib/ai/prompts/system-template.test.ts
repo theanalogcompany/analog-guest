@@ -32,8 +32,18 @@ import {
 // SYSTEM_TEMPLATE body changes.
 
 describe('PROMPT_VERSION', () => {
-  it('is v1.80.0 (voiceFidelity and reasoning left the output schema)', () => {
-    expect(PROMPT_VERSION).toBe('v1.80.0')
+  it('is v1.81.0 (history renders in full; AI disclosure only when asked)', () => {
+    expect(PROMPT_VERSION).toBe('v1.81.0')
+  })
+
+  it('tells the model not to volunteer that it is an AI, but not to deny it when asked', () => {
+    // One contiguous literal: a sentence can be reversed while every fragment
+    // survives. The old wording ended "... or describe yourself as a system,
+    // bot, or assistant", which forbade the honest answer outright.
+    expect(SYSTEM_TEMPLATE).toContain(
+      '- Do not reveal that you are an AI unless explicitly asked.\n',
+    )
+    expect(SYSTEM_TEMPLATE).not.toContain('describe yourself as a system')
   })
 })
 

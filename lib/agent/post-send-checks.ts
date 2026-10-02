@@ -1,5 +1,5 @@
 /**
- * Decision 0003, rewritten 2026-09-29: on the INBOUND path the five
+ * Decision 0003, rewritten 2026-09-29: on the INBOUND path the four
  * post-generation checks run AFTER dispatch, off the guest's critical path.
  *
  * WHY. The verifier batch cost ~2-3s p50 on every auto-send inbound reply —
@@ -16,7 +16,7 @@
  * comp regex, commitment-type gating, the PURE cancellation resolution
  * (triggers 13/16 still hold a draft whose emission cancels or dangles), the
  * structural closed-venue emission, unverified URLs, pending-slot rules,
- * per-category policy, hold_all_outbound. Only the five second-opinion LLM
+ * per-category policy, hold_all_outbound. Only the four second-opinion LLM
  * checks defer.
  *
  * WHO STILL RUNS THEM PRE-SEND: handle-followup.ts and the holding message.
@@ -26,9 +26,9 @@
  * FAILS OPEN BY CONSTRUCTION. This module runs inside the webhook's
  * `waitUntil` window after the reply is gone. It never throws (outer catch),
  * and a failure here can only lose an alert, never a reply — the inverse of
- * the posture the same five calls keep on the pre-send paths.
+ * the posture the same four calls keep on the pre-send paths.
  *
- * SPAN NAMES ARE UNCHANGED ('verify_grounding' and siblings) so existing
+ * SPAN NAMES ARE UNCHANGED ('verify_mechanic_offer' and siblings) so existing
  * Langfuse queries keep working; each span's input carries
  * `disposition: 'sent'` to keep the two placements countable apart.
  */
@@ -37,7 +37,6 @@ import type { AgentSpanUpdate, AgentTrace } from '@/lib/observability'
 import type { GenerateMessageResult } from '@/lib/ai'
 import type { RuntimeContext } from './types'
 import {
-  verifyGroundingStage,
   verifyMechanicOfferStage,
   verifyProsePromiseStage,
   verifyCancellationClaimStage,
@@ -54,7 +53,7 @@ export interface PostSendChecksArgs {
 }
 
 /**
- * Run the five checks against a reply that already reached the guest.
+ * Run the four checks against a reply that already reached the guest.
  * Never throws; never returns a verdict — the stages' own captures
  * (PostHog + Slack, disposition 'sent') are the entire output surface.
  */
@@ -105,65 +104,41 @@ export async function runPostSendChecks(
     // (TAC-355): a hypothetical throw in one stage must not discard a
     // sibling's finding. Post-send there is no verdict to degrade to — the
     // rejection handlers below only keep the console trail honest.
-    const [
-      grounding,
-      mechanicOffer,
-      prosePromise,
-      cancellation,
-      closedVenueArrival,
-    ] = await Promise.allSettled([
-      timedCheck(
-        'verify_grounding',
-        { knowledgeGap: generation.knowledgeGap },
-        () => verifyGroundingStage(ctx, generation, 'sent'),
-        (value) => ({
-          output: {
-            ran: generation.knowledgeGap === false && ctx.guest.isDemo !== true,
-            status: value.status,
-            hasUngroundedClaim: value.status === 'flagged',
-            claimCount: value.status === 'flagged' ? value.claims.length : 0,
-          },
-          content: trace.captureContent
-            ? {
-                ungroundedClaims:
-                  value.status === 'flagged' ? value.claims : [],
-              }
-            : undefined,
-        }),
-      ),
-      timedCheck(
-        'verify_mechanic_offer',
-        { gatedMechanicCount },
-        () => verifyMechanicOfferStage(ctx, generation, 'sent'),
-        (value) => ({ output: { status: value.status } }),
-      ),
-      timedCheck(
-        'verify_prose_promise',
-        {},
-        () => verifyProsePromiseStage(ctx, generation, 'sent'),
-        (value) => ({
-          output: {
-            status: value.status,
-            namedCommitment:
-              value.status === 'flagged' && value.commitment !== null,
-          },
-        }),
-      ),
-      timedCheck(
-        'verify_cancellation_claim',
-        {},
-        () => verifyCancellationClaimStage(ctx, generation, 'sent'),
-        (value) => ({
-          output: { claim: value.claim, resolution: value.resolution.status },
-        }),
-      ),
-      timedCheck(
-        'verify_closed_venue_arrival',
-        {},
-        () => verifyClosedVenueArrivalStage(ctx, generation, 'sent'),
-        (value) => ({ output: { status: value.status } }),
-      ),
-    ])
+    const [mechanicOffer, prosePromise, cancellation, closedVenueArrival] =
+      await Promise.allSettled([
+        timedCheck(
+          'verify_mechanic_offer',
+          { gatedMechanicCount },
+          () => verifyMechanicOfferStage(ctx, generation, 'sent'),
+          (value) => ({ output: { status: value.status } }),
+        ),
+        timedCheck(
+          'verify_prose_promise',
+          {},
+          () => verifyProsePromiseStage(ctx, generation, 'sent'),
+          (value) => ({
+            output: {
+              status: value.status,
+              namedCommitment:
+                value.status === 'flagged' && value.commitment !== null,
+            },
+          }),
+        ),
+        timedCheck(
+          'verify_cancellation_claim',
+          {},
+          () => verifyCancellationClaimStage(ctx, generation, 'sent'),
+          (value) => ({
+            output: { claim: value.claim, resolution: value.resolution.status },
+          }),
+        ),
+        timedCheck(
+          'verify_closed_venue_arrival',
+          {},
+          () => verifyClosedVenueArrivalStage(ctx, generation, 'sent'),
+          (value) => ({ output: { status: value.status } }),
+        ),
+      ])
 
     const statusOf = (
       settled: PromiseSettledResult<{ status: string } | { claim: string }>,
@@ -174,7 +149,6 @@ export async function runPostSendChecks(
         : settled.value.claim
     }
     for (const [name, settled] of [
-      ['verify_grounding', grounding],
       ['verify_mechanic_offer', mechanicOffer],
       ['verify_prose_promise', prosePromise],
       ['verify_cancellation_claim', cancellation],
@@ -197,7 +171,6 @@ export async function runPostSendChecks(
       agentRunId,
       outboundMessageId,
       allChecksElapsedMs: Date.now() - startedAt,
-      grounding: statusOf(grounding),
       mechanicOffer: statusOf(mechanicOffer),
       prosePromise: statusOf(prosePromise),
       cancellationClaim: statusOf(cancellation),

@@ -278,7 +278,7 @@ export type RuntimeContext = {
     //
     // Why the model needs it: asked to say "September 25" the way a person
     // would, it answered "This Thursday" 3 times out of 3 against a Friday,
-    // and the grounding backstop caught none of them.
+    // and no check caught any of them.
     calendar: ReadonlyArray<{ weekday: string; monthDay: string }>
     // TAC-301: whether the venue is open at this moment, resolved in code from
     // venue_info.hours rather than left for the model to derive from the
@@ -318,7 +318,7 @@ export type RuntimeContext = {
   // the classifier side — same single source of truth.
   recognition?: { state: GuestState }
   // TAC-296: per-guest accumulating context. The serializer renders a
-  // `## Guest context` block (between Visit history and Recent conversation)
+  // `## Guest context` block (between Visit history and the history context)
   // when this is set and isEmptyGuestContext returns false. Loaded by
   // build-runtime-context.ts via toParsedGuestContext (expired life_context
   // entries dropped, observations truncated to OBSERVATION_RENDER_LIMIT).
@@ -326,7 +326,7 @@ export type RuntimeContext = {
   guestContext?: ParsedGuestContext
   // TAC-297: open + pending_ack commitments for this guest at this venue.
   // The serializer renders a `## Active commitments` block between Guest
-  // context and Recent conversation when this is non-empty. Loaded by
+  // context and the history context when this is non-empty. Loaded by
   // build-runtime-context.ts via findActiveCommitmentsForGuest +
   // toActiveCommitment projection. Surfacing tells the model what's already
   // been promised so it can ask for arrival timing if natural — soft, woven
@@ -658,6 +658,13 @@ export type GenerateMessageResult = {
   // when present and falls back to this parent.
   systemPrompt: string
   userPrompt: string
+  // The conversation history as one readable text block, or '' when there is
+  // none. The model received it as chat turns before `userPrompt`, so it is not
+  // inside `userPrompt`; this is recorded on the trace so the Command Center can
+  // show what the model was sent. Nothing else reads it.
+  // Required so each construction site decides
+  // rather than defaulting to no history.
+  conversation: string
   promptVersion: string
   // Anthropic prompt-cache accounting for this call, summed across attempts.
   //
@@ -872,92 +879,8 @@ export type ClassifyIntentionPromptsResult = {
   promptVersion: string
 }
 
-// TAC-350: independent grounding backstop, deliberately decoupled from the
-// classify/generate contract — same posture as ExtractReportedOrderInput
-// above. venueInfo + knowledgeChunks are the SAME values the orchestrator
-// passed to generateMessage for this turn (not re-fetched), so "what the
-// verifier checks against" can never drift from "what the generator saw."
-// knowledgeChunks omitted/undefined is treated as [] (no knowledge retrieved
-// or retrieval gated off) — verify-grounding.ts renders the same explicit
-// no-match framing knowledgeChunksToProse uses for generation.
-export type VerifyGroundingInput = {
-  inboundBody: string
-  replyBody: string
-  venueInfo: VenueInfo
-  knowledgeChunks?: KnowledgeCorpusChunk[]
-  // TAC-301 part 1.5: the generator's composed USER prompt, verbatim — i.e.
-  // `GenerateMessageResult.userPrompt`, the literal string the generating
-  // model received. NOT a re-derived summary and NOT a curated subset.
-  //
-  // Without it the verifier holds only venue_info + knowledge chunks, and
-  // every fact the generator drew from a runtime block reads as unsupported.
-  // Measured against Le Mil's live config, SIX of six fact-bearing blocks
-  // produced a false flag: the open/closed status line, eligible mechanics,
-  // active commitments, visit history, guest context, and recent
-  // conversation. All six are correct replies the backstop would suppress.
-  //
-  // REQUIRED, deliberately. A prose note asking callers to remember is the
-  // only thing that would stand between a third call site and a silent
-  // regression to all six false-positive classes, and this repo's convention
-  // for that situation is structural enforcement (see the `satisfies
-  // Record<ApprovalTrigger, ...>` total maps). Both production callers already
-  // pass it; making it required costs nothing and fails `tsc` on the next one.
-  runtimeContext: string
-  // TAC-502: the channel this conversation is happening on, exactly as
-  // `RuntimeContext.conversationChannel` holds it. NEVER re-resolved here —
-  // the same identity rule runtimeContext above is chosen for.
-  //
-  // Without it the verifier checks a reply like "just text here, this is the
-  // number" against `venue_info.contact`, finds no phone listed, and flags a
-  // statement that is true as the guest reads it. Le Mil's has no PUBLIC
-  // phone number, correctly, so the static contact list can never support a
-  // claim about the medium the guest is already using; the conversation is
-  // the evidence, and it was the one thing the verifier never saw. Measured
-  // 5 of 6 suspect bodies flagging even with the venue's own "no public phone
-  // number" knowledge entry removed from the source material entirely, so the
-  // entry was not the cause.
-  //
-  // `null` means the channel could not be resolved (a data-integrity edge
-  // case — see lib/agent/conversation-channel.ts) and gets NO exemption: the
-  // section simply does not render, and a channel claim is checked exactly as
-  // it was before this field existed. Generation already renders
-  // channel-neutral copy on an unresolved channel, so there is no
-  // channel-specific claim for an exemption to protect there, and "still
-  // checked" is the conservative direction.
-  //
-  // REQUIRED, same convention as runtimeContext and isProactive above: every
-  // call site decides rather than silently inheriting one channel's answer.
-  // The stages.ts <-> lib/voices/regenerate-with-critique.ts seam has drifted
-  // once on record: TAC-350 shipped the retrieval relevance floor to
-  // stages.ts and the regen path kept the old semantics until TAC-366 made
-  // the two share one helper. A required field is what turns the next one
-  // into a `tsc` failure rather than a prose reminder someone has to
-  // remember. TAC-350's VERIFIER half was mirrored correctly at the time —
-  // it is the seam that has the history, not this particular check.
-  conversationChannel: MessageChannel | null
-  // TAC-376: true when there is no guest message this turn — a followup or
-  // the knowledge-gap holding message, both generated with no inbound to
-  // answer. REQUIRED, same convention as runtimeContext above: every call
-  // site has to decide rather than silently defaulting. Gates two things,
-  // both inside buildSystemPrompt/buildUserPrompt: the "Guest's message"
-  // framing line (there is none to quote), and one additional rule — a claim
-  // about what the GUEST did ("brought a friend in") is in remit on a
-  // proactive turn, because the assistant is the one asserting it rather than
-  // restating something the guest said. `false` renders the exact prompt this
-  // verifier always rendered before this field existed; the addendum is
-  // appended only when `true`, never woven into the base prompt, so an
-  // inbound call's prompt is byte-identical to what it was pre-TAC-376.
-  isProactive: boolean
-}
-
-export type VerifyGroundingResult = {
-  hasUngroundedClaim: boolean
-  ungroundedClaims: string[]
-  promptVersion: string
-}
-
-// TAC-355: independent mechanic-approval verification backstop. Same
-// independence rationale as VerifyGroundingInput above — a self-report field
+// TAC-355: independent mechanic-approval verification backstop. Deliberately
+// decoupled from the classify/generate contract — a self-report field
 // (requiresOperatorApproval / commitment.type) has already missed a real
 // approval-gated mechanic grant twice, so this checks the drafted body
 // against the SAME eligible-mechanics bullets rendered into the prompt
@@ -1030,9 +953,7 @@ export type VerifyProsePromiseInput = {
    * clean, no carrier was persisted, and approving it created nothing.
    *
    * This is the guest's CURRENT inbound and nothing else. Not the prompt, not
-   * retrieved knowledge, not the persona, not conversation history. The
-   * sibling grounding check has taken `inboundBody` since TAC-301 part 1.5;
-   * this brings the two into line rather than opening a new door.
+   * retrieved knowledge, not the persona, not conversation history.
    */
   guestInboundBody: string | null
 }

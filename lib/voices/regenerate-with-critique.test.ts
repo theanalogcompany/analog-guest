@@ -29,7 +29,6 @@ vi.mock('@/lib/agent/stages', () => ({
 vi.mock('@/lib/ai', () => ({
   classifyMessage: vi.fn(),
   generateMessage: vi.fn(),
-  verifyGrounding: vi.fn(),
   verifyMechanicOffer: vi.fn(),
   // TAC-401: the advisory prose-promise check this path mirrors.
   verifyProsePromise: vi.fn(),
@@ -55,25 +54,12 @@ import {
 import {
   classifyMessage,
   generateMessage,
-  verifyGrounding,
   verifyMechanicOffer,
   verifyProsePromise,
 } from '@/lib/ai'
 import { createAdminClient } from '@/lib/db/admin'
 import { loadVoicePack } from '@/lib/rag'
 import { regenerateWithCritique } from './regenerate-with-critique'
-
-// TAC-350: default grounding-backstop result — "nothing to flag" — used by
-// every describe block below unless a test explicitly overrides it to
-// exercise the catch path.
-const NO_UNGROUNDED_CLAIM = {
-  ok: true as const,
-  data: {
-    hasUngroundedClaim: false,
-    ungroundedClaims: [],
-    promptVersion: 'v1.0.0',
-  },
-}
 
 const VENUE_ID = '11111111-1111-4111-8111-111111111111'
 const OUTBOUND_ID = '22222222-2222-4222-8222-222222222222'
@@ -221,7 +207,6 @@ beforeEach(() => {
   // own; without a default the stage resolves undefined and regen throws on
   // .map, which reads as a wiring bug rather than a fixture one.
   vi.mocked(retrieveKnowledgeWithContextStage).mockResolvedValue([])
-  vi.mocked(verifyGrounding).mockReset()
   vi.mocked(verifyMechanicOffer).mockReset()
   vi.mocked(verifyProsePromise).mockReset()
   // Advisory and fail-open on this path: a check that returns nothing leaves
@@ -423,13 +408,8 @@ describe('regenerateWithCritique — happy path', () => {
         attempts: 1,
         attemptHistory: [],
         systemPrompt: '',
-        // TAC-301 part 1.5: non-empty on purpose. Every fixture in this file
-        // used '' , which meant the mirrored `runtimeContext: gen.data.userPrompt`
-        // line could be DELETED with all 20 tests still passing — proved by
-        // mutation during code review. An empty string is indistinguishable
-        // from a missing field at the assertion boundary.
-        userPrompt:
-          '## Right now\n- Status: OPEN right now, closes at 3:00 PM.',
+        userPrompt: '',
+        conversation: '',
         promptVersion: 'v1.8.0',
         cacheReadTokens: 0,
         cacheWriteTokens: 0,
@@ -438,57 +418,6 @@ describe('regenerateWithCritique — happy path', () => {
         emojiDirectiveViolated: false,
       },
     })
-    vi.mocked(verifyGrounding).mockResolvedValue(NO_UNGROUNDED_CLAIM)
-  })
-
-  // This file carries a standing obligation to mirror lib/agent/stages.ts's
-  // gating. TAC-301 part 1.5 added runtimeContext there; without this
-  // assertion the mirror has no test pressure at all.
-  it("forwards the generator's composed userPrompt to the grounding check", async () => {
-    await regenerateWithCritique({
-      venueId: VENUE_ID,
-      originalMessageId: OUTBOUND_ID,
-      critique: 'too eager',
-    })
-    expect(vi.mocked(verifyGrounding)).toHaveBeenCalledWith(
-      expect.objectContaining({
-        runtimeContext:
-          '## Right now\n- Status: OPEN right now, closes at 3:00 PM.',
-      }),
-    )
-  })
-
-  // TAC-502: same standing obligation, one ticket later. The playground is
-  // where an operator decides what a good reply looks like, so a false
-  // "ungrounded claim" warning on a reply that correctly names the medium the
-  // guest is on teaches exactly the wrong lesson. This seam has drifted once
-  // on record — TAC-350's retrieval relevance floor reached stages.ts and not
-  // here until TAC-366 — which is why the field is required on
-  // VerifyGroundingInput rather than optional.
-  it("forwards the context's conversation channel to the grounding check", async () => {
-    await regenerateWithCritique({
-      venueId: VENUE_ID,
-      originalMessageId: OUTBOUND_ID,
-      critique: 'too eager',
-    })
-    expect(vi.mocked(verifyGrounding)).toHaveBeenCalledWith(
-      expect.objectContaining({ conversationChannel: 'text' }),
-    )
-  })
-
-  it("forwards an instagram conversation's channel to the grounding check", async () => {
-    vi.mocked(buildRuntimeContext).mockResolvedValue({
-      ...baseCtx,
-      conversationChannel: 'instagram',
-    } as unknown as Awaited<ReturnType<typeof buildRuntimeContext>>)
-    await regenerateWithCritique({
-      venueId: VENUE_ID,
-      originalMessageId: OUTBOUND_ID,
-      critique: 'too eager',
-    })
-    expect(vi.mocked(verifyGrounding)).toHaveBeenCalledWith(
-      expect.objectContaining({ conversationChannel: 'instagram' }),
-    )
   })
 
   // TAC-495: this file mirrors generateStage, and the channel is part of what
@@ -628,43 +557,6 @@ describe('regenerateWithCritique — happy path', () => {
     expect(r.data.emojiDirective).toBeUndefined()
   })
 
-  // TAC-350
-  it('surfaces knowledgeGap and calls the grounding backstop when it is false', async () => {
-    const r = await regenerateWithCritique({
-      venueId: VENUE_ID,
-      originalMessageId: OUTBOUND_ID,
-      critique: 'x',
-    })
-    expect(verifyGrounding).toHaveBeenCalledTimes(1)
-    expect(r.ok).toBe(true)
-    if (!r.ok) return
-    expect(r.data.knowledgeGap).toBe(false)
-    expect(r.data.hasUngroundedClaim).toBe(false)
-    expect(r.data.ungroundedClaims).toEqual([])
-  })
-
-  it('surfaces a caught ungrounded claim from the backstop', async () => {
-    vi.mocked(verifyGrounding).mockResolvedValue({
-      ok: true,
-      data: {
-        hasUngroundedClaim: true,
-        ungroundedClaims: ['invents an oat milk surcharge not in venue facts'],
-        promptVersion: 'v1.0.0',
-      },
-    })
-    const r = await regenerateWithCritique({
-      venueId: VENUE_ID,
-      originalMessageId: OUTBOUND_ID,
-      critique: 'x',
-    })
-    expect(r.ok).toBe(true)
-    if (!r.ok) return
-    expect(r.data.hasUngroundedClaim).toBe(true)
-    expect(r.data.ungroundedClaims).toEqual([
-      'invents an oat milk surcharge not in venue facts',
-    ])
-  })
-
   // TAC-355: mechanic-offer backstop, advisory only on this path (no gate
   // to feed — the operator reviews the raw attempt directly). Deliberately
   // does NOT skip on requiresOperatorApproval/commitment.type, unlike the
@@ -764,66 +656,6 @@ describe('regenerateWithCritique — happy path', () => {
     if (!r.ok) return
     expect(r.data.offersGatedMechanic).toBe(false)
     expect(r.data.offeredMechanicId).toBeNull()
-  })
-
-  it('skips the grounding backstop entirely when the model already self-reported a gap', async () => {
-    vi.mocked(generateMessage).mockResolvedValue({
-      ok: true,
-      data: {
-        body: 'not sure, let me check',
-        unverifiedUrls: [],
-        requiresOperatorApproval: false,
-        approvalReason: '',
-        complaintIntent: 'none' as const,
-        knowledgeGap: true,
-        contextUpdate: {},
-        commitment: {},
-        arrivalCapture: {},
-        cancelsCommitmentId: '',
-        intentionQuestion: '',
-        closedTheConversation: false,
-        intentionQuestionDuplicateStripped: false,
-        intentionQuestionDroppedForBodyQuestion: false,
-        attempts: 1,
-        attemptHistory: [],
-        systemPrompt: '',
-        userPrompt: '',
-        promptVersion: 'v1.8.0',
-        cacheReadTokens: 0,
-        cacheWriteTokens: 0,
-        dashViolationPersisted: false,
-        selfTalkViolationPersisted: false,
-        emojiDirectiveViolated: false,
-      },
-    })
-    const r = await regenerateWithCritique({
-      venueId: VENUE_ID,
-      originalMessageId: OUTBOUND_ID,
-      critique: 'x',
-    })
-    expect(verifyGrounding).not.toHaveBeenCalled()
-    expect(r.ok).toBe(true)
-    if (!r.ok) return
-    expect(r.data.knowledgeGap).toBe(true)
-    expect(r.data.hasUngroundedClaim).toBe(false)
-    expect(r.data.ungroundedClaims).toEqual([])
-  })
-
-  it('degrades gracefully (hasUngroundedClaim=false) when the backstop call fails', async () => {
-    vi.mocked(verifyGrounding).mockResolvedValue({
-      ok: false,
-      error: 'model unavailable',
-      errorCode: 'ai_verify_grounding_failed',
-    })
-    const r = await regenerateWithCritique({
-      venueId: VENUE_ID,
-      originalMessageId: OUTBOUND_ID,
-      critique: 'x',
-    })
-    expect(r.ok).toBe(true)
-    if (!r.ok) return
-    expect(r.data.hasUngroundedClaim).toBe(false)
-    expect(r.data.ungroundedClaims).toEqual([])
   })
 })
 
@@ -971,6 +803,7 @@ describe('regenerateWithCritique — knowledge retrieval delegates to stages.ts 
         intentionQuestionDuplicateStripped: false,
         intentionQuestionDroppedForBodyQuestion: false,
         userPrompt: 'p',
+        conversation: '',
         systemPrompt: 's',
         dashViolationPersisted: false,
         selfTalkViolationPersisted: false,
@@ -978,7 +811,6 @@ describe('regenerateWithCritique — knowledge retrieval delegates to stages.ts 
         unverifiedUrls: [],
       },
     } as unknown as Awaited<ReturnType<typeof generateMessage>>)
-    vi.mocked(verifyGrounding).mockResolvedValue(NO_UNGROUNDED_CLAIM)
   })
 
   it('calls the shared stage with the category and the original inbound body', async () => {

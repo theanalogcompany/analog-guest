@@ -35,7 +35,6 @@ const retrieveKnowledgeStageMock = vi.fn<
 ])
 const generateStageMock = vi.fn()
 const applyApprovalPolicyStageMock = vi.fn()
-const verifyGroundingStageMock = vi.fn()
 const verifyProsePromiseStageMock = vi.fn()
 const verifyClosedVenueArrivalStageMock = vi.fn()
 // TAC-513: default CLEAN, not undefined. The './stages' factory below is an
@@ -67,7 +66,6 @@ vi.mock('@/lib/rag', () => ({
 }))
 vi.mock('@/lib/ai', () => ({
   generateMessage: vi.fn(),
-  verifyGrounding: vi.fn(),
   verifyMechanicOffer: vi.fn(),
 }))
 vi.mock('./stages', async () => {
@@ -92,7 +90,6 @@ vi.mock('./stages', async () => {
     generateStage: (...a: unknown[]) => generateStageMock(...a),
     applyApprovalPolicyStage: (...a: unknown[]) =>
       applyApprovalPolicyStageMock(...a),
-    verifyGroundingStage: (...a: unknown[]) => verifyGroundingStageMock(...a),
     // TAC-401: this factory is an explicit ALLOW-LIST. A stage missing here
     // arrives `undefined` at the call site, which in an allSettled array is a
     // TypeError swallowed into a rejected settlement — the check would read as
@@ -250,6 +247,7 @@ function successResult() {
     attemptHistory: [],
     systemPrompt: '',
     userPrompt: '',
+    conversation: '',
     promptVersion: PROMPT_VERSION,
     dashViolationPersisted: false,
     selfTalkViolationPersisted: false,
@@ -263,7 +261,6 @@ beforeEach(() => {
   retrieveKnowledgeStageMock.mockReset()
   generateStageMock.mockReset()
   applyApprovalPolicyStageMock.mockReset()
-  verifyGroundingStageMock.mockReset()
   verifyProsePromiseStageMock.mockReset()
   verifyClosedVenueArrivalStageMock.mockReset()
   verifyCancellationClaimStageMock.mockReset()
@@ -292,10 +289,6 @@ beforeEach(() => {
     status: 'success',
     result: successResult(),
   })
-  // TAC-376: default to 'skipped', matching production's most common case
-  // (a followup with no gap-shaped finding). Tests that need a real verdict
-  // override with mockResolvedValueOnce.
-  verifyGroundingStageMock.mockResolvedValue({ status: 'skipped' })
   // TAC-401: 'skipped' by default, so every pre-existing test in this file
   // behaves exactly as it did before the check existed.
   verifyProsePromiseStageMock.mockResolvedValue({ status: 'skipped' })
@@ -360,11 +353,6 @@ describe('handleFollowup — mechanic-offer backstop wiring (TAC-355)', () => {
       triggers: ['mechanic_offer_backstop'],
       primaryTrigger: 'mechanic_offer_backstop',
       compMatchedPattern: null,
-      // TAC-364: the gate ALWAYS returns this on a queue decision (it is
-      // required on ApprovalDecision), so a fixture omitting it would feed
-      // `undefined` down a path production never produces. null is what a
-      // followup / skipped-check turn actually carries — see ruling 3.
-      ungroundedClaims: null,
       existingPendingDraftId: null,
       blankBody: false,
       slot: 'conversation',
@@ -384,213 +372,18 @@ describe('handleFollowup — mechanic-offer backstop wiring (TAC-355)', () => {
 
     expect(verifyMechanicOfferStageMock).toHaveBeenCalledTimes(1)
     expect(applyApprovalPolicyStageMock).toHaveBeenCalledTimes(1)
-    const [, , groundingArg, mechanicOfferArg] =
-      applyApprovalPolicyStageMock.mock.calls[0]
-    // TAC-376: followups now run verifyGroundingStage — the default fixture
-    // resolves 'skipped' (this test's own finding is on the mechanic-offer
-    // side), so the gate receives the real skipped result, not null.
-    expect(groundingArg).toEqual({ status: 'skipped' })
+    const [, , mechanicOfferArg] = applyApprovalPolicyStageMock.mock.calls[0]
     expect(mechanicOfferArg).toEqual({
       status: 'flagged',
       mechanicId: 'mech-1',
     })
 
-    // TAC-364: the followup path threads the gate's trigger set and claims to
-    // the persist layer exactly as inbound does.
+    // TAC-364: the followup path threads the gate's trigger set to the persist
+    // layer exactly as inbound does.
     const [, , , , persistOpts] = persistOrRegenQueuedDraftMock.mock.calls[0]
     expect(persistOpts.reviewTriggers).toEqual(['mechanic_offer_backstop'])
-    expect(persistOpts.ungroundedClaims).toBeNull()
     expect(result.status).toBe('queued')
     expect(scheduleAndSendMock).not.toHaveBeenCalled()
-  })
-
-  // TAC-376: the actual new wiring this ticket adds. A followup whose
-  // grounding backstop flags something must thread that finding into the
-  // gate exactly as an inbound catch would, and the flagged claims must
-  // reach the persist layer's ungroundedClaims — not silently stay null the
-  // way every followup row was forced to before this ticket.
-  it('threads a "flagged" grounding result into applyApprovalPolicyStage and the persisted ungroundedClaims', async () => {
-    verifyGroundingStageMock.mockResolvedValueOnce({
-      status: 'flagged',
-      claims: ['thanks the guest for a referral with no referral on record'],
-    })
-    verifyMechanicOfferStageMock.mockResolvedValueOnce({ status: 'skipped' })
-    applyApprovalPolicyStageMock.mockResolvedValue({
-      action: 'queue',
-      triggers: ['knowledge_gap_backstop'],
-      primaryTrigger: 'knowledge_gap_backstop',
-      compMatchedPattern: null,
-      ungroundedClaims: [
-        'thanks the guest for a referral with no referral on record',
-      ],
-      existingPendingDraftId: null,
-      blankBody: false,
-      slot: 'conversation',
-      otherSlotOccupied: false,
-    })
-    persistOrRegenQueuedDraftMock.mockResolvedValue({
-      outboundMessageId: 'queued-flagged-1',
-      action: 'inserted',
-      priorReviewReason: null,
-    })
-
-    const result = await handleFollowup({
-      venueId: VENUE_ID,
-      guestId: GUEST_ID,
-      trigger: { reason: 'perk_unlock', triggeredAt: new Date() },
-    })
-
-    expect(verifyGroundingStageMock).toHaveBeenCalledTimes(1)
-    const [, , groundingArg] = applyApprovalPolicyStageMock.mock.calls[0]
-    expect(groundingArg).toEqual({
-      status: 'flagged',
-      claims: ['thanks the guest for a referral with no referral on record'],
-    })
-    const [, , , , persistOpts] = persistOrRegenQueuedDraftMock.mock.calls[0]
-    expect(persistOpts.reviewTriggers).toEqual(['knowledge_gap_backstop'])
-    expect(persistOpts.ungroundedClaims).toEqual([
-      'thanks the guest for a referral with no referral on record',
-    ])
-    expect(result.status).toBe('queued')
-    expect(scheduleAndSendMock).not.toHaveBeenCalled()
-  })
-
-  // TAC-424 RENAMES this test to what it actually asserts. It was called "a
-  // degraded grounding call does not queue on its own (fail-open reaches
-  // send)" while mocking `{ status: 'clean' }` — so it described a posture
-  // through a fixture that could never exercise it, and after TAC-424 made a
-  // degraded call queue, it would have gone on passing while certifying the
-  // opposite of the shipped behaviour. That is this repo's catalogued pair (a
-  // test name is not evidence of what the test checks; a mocked flag that
-  // contradicts production certifies the bug), and the real degraded case is
-  // the test directly below.
-  it('a clean grounding call reaches send', async () => {
-    verifyGroundingStageMock.mockResolvedValueOnce({ status: 'clean' })
-    verifyMechanicOfferStageMock.mockResolvedValueOnce({ status: 'skipped' })
-    applyApprovalPolicyStageMock.mockResolvedValue({ action: 'send' })
-
-    const result = await handleFollowup({
-      venueId: VENUE_ID,
-      guestId: GUEST_ID,
-      trigger: { reason: 'day_1', triggeredAt: new Date() },
-    })
-
-    const [, , groundingArg] = applyApprovalPolicyStageMock.mock.calls[0]
-    expect(groundingArg).toEqual({ status: 'clean' })
-    expect(result.status).toBe('sent')
-    expect(scheduleAndSendMock).toHaveBeenCalledTimes(1)
-  })
-
-  // TAC-424: the posture both directions, at the orchestrator boundary. A
-  // degraded result must reach the gate as `degraded` — not be flattened to
-  // `clean` on the way — and must queue.
-  it('a degraded grounding call queues (fail-closed since TAC-424)', async () => {
-    verifyGroundingStageMock.mockResolvedValueOnce({ status: 'degraded' })
-    verifyMechanicOfferStageMock.mockResolvedValueOnce({ status: 'skipped' })
-    applyApprovalPolicyStageMock.mockResolvedValue({
-      action: 'queue',
-      triggers: ['grounding_check_failed', 'grounding_check_degraded'],
-      primaryTrigger: 'grounding_check_failed',
-      compMatchedPattern: null,
-      ungroundedClaims: null,
-      existingPendingDraftId: null,
-      blankBody: false,
-      slot: 'conversation',
-      otherSlotOccupied: false,
-    })
-    persistOrRegenQueuedDraftMock.mockResolvedValue({
-      outboundMessageId: 'queued-degraded-1',
-      action: 'inserted',
-      priorReviewReason: null,
-    })
-
-    const result = await handleFollowup({
-      venueId: VENUE_ID,
-      guestId: GUEST_ID,
-      trigger: { reason: 'day_1', triggeredAt: new Date() },
-    })
-
-    // The verdict reaches the gate as `degraded`, not flattened to `clean` on
-    // the way. That flattening IS the defect this ticket closed, so asserting
-    // the queue alone would not distinguish the fix from a gate mock that
-    // queues whatever it is handed.
-    const [, , groundingArg] = applyApprovalPolicyStageMock.mock.calls[0]
-    expect(groundingArg).toEqual({ status: 'degraded' })
-    expect(result.status).toBe('queued')
-    expect(scheduleAndSendMock).not.toHaveBeenCalled()
-  })
-
-  it('a truncated grounding call queues (fail-closed)', async () => {
-    verifyGroundingStageMock.mockResolvedValueOnce({ status: 'truncated' })
-    verifyMechanicOfferStageMock.mockResolvedValueOnce({ status: 'skipped' })
-    applyApprovalPolicyStageMock.mockResolvedValue({
-      action: 'queue',
-      triggers: ['grounding_check_failed'],
-      primaryTrigger: 'grounding_check_failed',
-      compMatchedPattern: null,
-      ungroundedClaims: null,
-      existingPendingDraftId: null,
-      blankBody: false,
-      slot: 'conversation',
-      otherSlotOccupied: false,
-    })
-    persistOrRegenQueuedDraftMock.mockResolvedValue({
-      outboundMessageId: 'queued-truncated-1',
-      action: 'inserted',
-      priorReviewReason: null,
-    })
-
-    const result = await handleFollowup({
-      venueId: VENUE_ID,
-      guestId: GUEST_ID,
-      trigger: { reason: 'cold_lapsed', triggeredAt: new Date() },
-    })
-
-    const [, , groundingArg] = applyApprovalPolicyStageMock.mock.calls[0]
-    expect(groundingArg).toEqual({ status: 'truncated' })
-    expect(result.status).toBe('queued')
-    expect(scheduleAndSendMock).not.toHaveBeenCalled()
-  })
-
-  // A hypothetical future throw inside verifyGroundingStage must not silently
-  // discard verifyMechanicOfferStage's finding — the whole reason this file
-  // uses Promise.allSettled rather than Promise.all, mirroring handle-inbound.
-  it('degrades to skipped, not a rejection, when verifyGroundingStage throws (allSettled)', async () => {
-    verifyGroundingStageMock.mockRejectedValueOnce(new Error('boom'))
-    verifyMechanicOfferStageMock.mockResolvedValueOnce({
-      status: 'flagged',
-      mechanicId: 'mech-2',
-    })
-    applyApprovalPolicyStageMock.mockResolvedValue({
-      action: 'queue',
-      triggers: ['mechanic_offer_backstop'],
-      primaryTrigger: 'mechanic_offer_backstop',
-      compMatchedPattern: null,
-      ungroundedClaims: null,
-      existingPendingDraftId: null,
-      blankBody: false,
-      slot: 'conversation',
-      otherSlotOccupied: false,
-    })
-    persistOrRegenQueuedDraftMock.mockResolvedValue({
-      outboundMessageId: 'queued-reject-1',
-      action: 'inserted',
-      priorReviewReason: null,
-    })
-
-    await handleFollowup({
-      venueId: VENUE_ID,
-      guestId: GUEST_ID,
-      trigger: { reason: 'day_3', triggeredAt: new Date() },
-    })
-
-    const [, , groundingArg, mechanicOfferArg] =
-      applyApprovalPolicyStageMock.mock.calls[0]
-    expect(groundingArg).toEqual({ status: 'skipped' })
-    expect(mechanicOfferArg).toEqual({
-      status: 'flagged',
-      mechanicId: 'mech-2',
-    })
   })
 
   // TAC-367 PR 3 (option B). The original defect was retrieving against
@@ -662,11 +455,6 @@ describe('handleFollowup — mechanic-offer backstop wiring (TAC-355)', () => {
       triggers: ['mechanic_offer_backstop'],
       primaryTrigger: 'mechanic_offer_backstop',
       compMatchedPattern: null,
-      // TAC-364: the gate ALWAYS returns this on a queue decision (it is
-      // required on ApprovalDecision), so a fixture omitting it would feed
-      // `undefined` down a path production never produces. null is what a
-      // followup / skipped-check turn actually carries — see ruling 3.
-      ungroundedClaims: null,
       existingPendingDraftId: null,
       blankBody: false,
       slot: 'conversation',
@@ -685,7 +473,7 @@ describe('handleFollowup — mechanic-offer backstop wiring (TAC-355)', () => {
     })
 
     expect(verifyMechanicOfferStageMock).toHaveBeenCalledTimes(1)
-    const [, , , mechanicOfferArg] = applyApprovalPolicyStageMock.mock.calls[0]
+    const [, , mechanicOfferArg] = applyApprovalPolicyStageMock.mock.calls[0]
     expect(mechanicOfferArg).toEqual({ status: 'check_failed' })
     expect(result.status).toBe('queued')
     expect(persistOrRegenQueuedDraftMock).toHaveBeenCalledTimes(1)
@@ -703,7 +491,7 @@ describe('handleFollowup — mechanic-offer backstop wiring (TAC-355)', () => {
     })
 
     expect(verifyMechanicOfferStageMock).toHaveBeenCalledTimes(1)
-    const [, , , mechanicOfferArg] = applyApprovalPolicyStageMock.mock.calls[0]
+    const [, , mechanicOfferArg] = applyApprovalPolicyStageMock.mock.calls[0]
     expect(mechanicOfferArg).toEqual({ status: 'skipped' })
     expect(result.status).toBe('sent')
     expect(scheduleAndSendMock).toHaveBeenCalledTimes(1)
@@ -716,7 +504,6 @@ describe('handleFollowup: a draft with nowhere to go (TAC-394)', () => {
     triggers: ['category_requires_approval'],
     primaryTrigger: 'category_requires_approval',
     compMatchedPattern: null,
-    ungroundedClaims: null,
     existingPendingDraftId: null,
     blankBody: false,
     slot: 'conversation',
@@ -1146,7 +933,7 @@ describe('handleFollowup — prose-promise backstop (TAC-401)', () => {
     })
 
     expect(verifyProsePromiseStageMock).toHaveBeenCalledTimes(1)
-    const [, , , , prosePromiseArg] = applyApprovalPolicyStageMock.mock.calls[0]
+    const [, , , prosePromiseArg] = applyApprovalPolicyStageMock.mock.calls[0]
     expect(prosePromiseArg).toEqual({ status: 'flagged', commitment })
   })
 
@@ -1160,7 +947,6 @@ describe('handleFollowup — prose-promise backstop (TAC-401)', () => {
       triggers: ['prose_promise_backstop'],
       primaryTrigger: 'prose_promise_backstop',
       compMatchedPattern: null,
-      ungroundedClaims: [],
       existingPendingDraftId: null,
       blankBody: false,
       slot: 'obligation',
@@ -1242,7 +1028,6 @@ describe('handleFollowup — cancellation carrier (TAC-513)', () => {
       triggers: ['commitment_cancellation_gated'],
       primaryTrigger: 'commitment_cancellation_gated',
       compMatchedPattern: null,
-      ungroundedClaims: null,
       existingPendingDraftId: null,
       blankBody: false,
       pendingCancellation,
@@ -1285,7 +1070,6 @@ describe('handleFollowup — cancellation carrier (TAC-513)', () => {
       triggers: ['prose_cancellation_check_failed'],
       primaryTrigger: 'prose_cancellation_check_failed',
       compMatchedPattern: null,
-      ungroundedClaims: null,
       existingPendingDraftId: null,
       blankBody: false,
     })
@@ -1301,8 +1085,7 @@ describe('handleFollowup — cancellation carrier (TAC-513)', () => {
       trigger: { reason: 'day_7', triggeredAt: new Date() },
     })
 
-    const [, , , , , cancellationArg] =
-      applyApprovalPolicyStageMock.mock.calls[0]
+    const [, , , , cancellationArg] = applyApprovalPolicyStageMock.mock.calls[0]
     expect(cancellationArg).toEqual({
       resolution: {
         status: 'resolved',
@@ -1380,7 +1163,6 @@ describe('handleFollowup — the warm close (TAC-560)', () => {
       guestId: GUEST_ID,
       trigger: warmTrigger(),
     })
-    expect(verifyGroundingStageMock).not.toHaveBeenCalled()
     expect(verifyMechanicOfferStageMock).not.toHaveBeenCalled()
     expect(verifyProsePromiseStageMock).not.toHaveBeenCalled()
     expect(verifyCancellationClaimStageMock).not.toHaveBeenCalled()

@@ -117,12 +117,6 @@ const PUSH_POLICY = {
   // never sees a holding note) reachable at all.
   [APPROVAL_TRIGGERS.KNOWLEDGE_GAP]: 'push',
 
-  // TAC-350. Same clock, same urgency as KNOWLEDGE_GAP above — the
-  // independent grounding backstop caught a claim the model didn't
-  // self-report, and the card carries the identical pending_until timer.
-  // No reason for this one to be quieter than the self-reported case.
-  [APPROVAL_TRIGGERS.KNOWLEDGE_GAP_BACKSTOP]: 'push',
-
   // TAC-355. The reply itself is broken (self-talk/reasoning leakage) and
   // ships broken unless an operator edits it — no reason to hold the push.
   [APPROVAL_TRIGGERS.SELF_TALK_DETECTED]: 'push',
@@ -152,27 +146,6 @@ const PUSH_POLICY = {
   // this failure mode (see the trigger's own comment in stages.ts), so it
   // gets the same urgency as the other primary/structural triggers above.
   [APPROVAL_TRIGGERS.MECHANIC_OFFER_BACKSTOP]: 'push',
-
-  // TAC-367. The grounding check produced a verdict we couldn't read, so the
-  // draft is queued without anyone having established anything about it. That
-  // is precisely a card nobody will look at unless told to — unlike
-  // KNOWLEDGE_GAP above it carries no timer, so there is no cron fallback
-  // that eventually surfaces it. Push.
-  [APPROVAL_TRIGGERS.GROUNDING_CHECK_FAILED]: 'push',
-
-  // TAC-424. INERT, and worth saying so rather than leaving the next reader to
-  // work it out: shouldSendDraftFlaggedPush reads the PRIMARY trigger only,
-  // this code always co-fires with GROUNDING_CHECK_FAILED, and it is ranked
-  // below that partner in PRIMARY_TRIGGER_PRIORITY — so it can never be the
-  // value this map is consulted for. The entry exists because the map is
-  // TOTAL, which is the mechanism doing its job (CLAUDE.md, "sets keyed on
-  // approval triggers must be TOTAL maps"): a new trigger has to be given a
-  // decision rather than silently dropped, as two were for two months.
-  //
-  // 'push' rather than 'skip' so that IF the ranking ever changes and this
-  // does reach the primary slot, the card still surfaces. Failing toward the
-  // loud side is the house rule here.
-  [APPROVAL_TRIGGERS.GROUNDING_CHECK_DEGRADED]: 'push',
 
   // TAC-363: the venue is closed and this reply may be sending the guest over
   // anyway. Both push.

@@ -37,7 +37,6 @@ import {
   retrieveCorpusStage,
   retrieveKnowledgeStage,
   shouldRetrieveKnowledge,
-  verifyGroundingStage,
 } from '@/lib/agent/stages'
 import { startAgentTrace } from '@/lib/observability/langfuse'
 import { PROMPT_VERSION } from '@/lib/ai/prompts/system-template'
@@ -223,19 +222,6 @@ async function main(): Promise<void> {
           generated.status === 'success' ? generated.result.body : null
         const matches = body ? findChannelLanguage(body) : []
 
-        // THE BACKSTOP IN THE LOOP. Without this the run measures GENERATION,
-        // not what ships: in production a flagged reply is queued for an
-        // operator rather than sent, so a claim the backstop catches never
-        // reaches a guest. Every earlier round is therefore an upper bound.
-        // This is the same call the gate makes, so `flagged` here is what the
-        // gate would see. It is a second model call per generation and roughly
-        // doubles the run's cost, which is the price of measuring the question
-        // the pre-flight is actually asking.
-        const grounding =
-          generated.status === 'success'
-            ? await verifyGroundingStage(ctx, generated.result)
-            : null
-
         log.appendUnit({
           scenarioId: scenario.id,
           inbound: scenario.body,
@@ -250,17 +236,11 @@ async function main(): Promise<void> {
           // dash, self-talk or unverified-link violation.
           attempts:
             generated.status === 'success' ? generated.result.attempts : null,
-          // skipped | clean | flagged | truncated. `flagged` means production
-          // would have queued this rather than sent it.
-          groundingStatus: grounding?.status ?? null,
-          groundingClaims:
-            grounding?.status === 'flagged' ? grounding.claims : [],
           phoneClaims: matches.filter((m) => m.kind === 'phone_claim'),
           instagramIdioms: matches.filter((m) => m.kind === 'instagram_idiom'),
         })
 
         const claims = matches.filter((m) => m.kind === 'phone_claim')
-        const held = grounding?.status === 'flagged' ? ' [backstop HELD]' : ''
         const mark =
           generated.status !== 'success' ? '·' : claims.length > 0 ? '✗' : '✓'
         console.log(
@@ -270,7 +250,7 @@ async function main(): Promise<void> {
               : claims.length > 0
                 ? claims.map((c) => `"${c.phrase}"`).join(', ')
                 : ''
-          }${held}`,
+          }`,
         )
       }
     }

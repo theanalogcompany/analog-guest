@@ -723,7 +723,7 @@ describe('anyKnowledgeGapCard', () => {
   it('finds a gap card in the obligation slot', () => {
     const gapComp = pendingRow({
       id: 'gap-comp',
-      review_reason: 'knowledge_gap_backstop',
+      review_reason: 'knowledge_gap',
       pending_until: '2026-09-14T16:36:34.000Z',
       pending_commitment: compA,
     })
@@ -1069,7 +1069,7 @@ describe('decideSlotAction', () => {
     it('TAC-308: still protects a knowledge-gap card in the OBLIGATION slot', () => {
       const gapComp = pendingRow({
         id: 'gap-comp',
-        review_reason: 'knowledge_gap_backstop',
+        review_reason: 'knowledge_gap',
         pending_until: '2026-09-14T16:36:34.000Z',
         pending_commitment: compA,
       })
@@ -1090,7 +1090,7 @@ describe('decideSlotAction', () => {
     it('TAC-367: an obligation gap card is regenerated when only a check did not complete', () => {
       const gapComp = pendingRow({
         id: 'gap-comp',
-        review_reason: 'knowledge_gap_backstop',
+        review_reason: 'knowledge_gap',
         pending_until: '2026-09-14T16:36:34.000Z',
         pending_commitment: compA,
       })

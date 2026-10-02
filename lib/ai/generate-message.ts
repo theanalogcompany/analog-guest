@@ -298,7 +298,7 @@ export const GeneratedMessageSchema = z.object({
   // directly from here. composeReplyWithIntention CONCATENATES it back onto the
   // body immediately below, so `GenerateMessageResult.body` stays the complete
   // reply exactly as it always has, and every check that reads the body — the
-  // dash substitution, self-talk, unverified links, the grounding verifier, the
+  // dash substitution, self-talk, unverified links, the
   // prose-promise and cancellation checks, the comp regex — still sees the
   // question. The field rides alongside as the exact TAIL of the body, true by
   // construction because we did the joining. Dispatch peels it off.
@@ -511,6 +511,8 @@ export async function generateMessage(
     cacheableSystemPrefix,
     volatileSystemSuffix,
     userPrompt,
+    historyTurns,
+    conversationTranscript,
   } = composePrompt(input)
   // Same bytes as systemPrompt, split at the stability boundary so a cache
   // breakpoint can sit between them. (Through v1.79.0 a voice-fidelity
@@ -646,6 +648,7 @@ export async function generateMessage(
             },
           },
           { role: 'system', content: volatileSystemBlock },
+          ...historyTurns,
           { role: 'user', content: userPromptForAttempt },
         ],
         schema: GeneratedMessageSchema,
@@ -808,6 +811,7 @@ export async function generateMessage(
         attemptHistory,
         systemPrompt,
         userPrompt,
+        conversation: conversationTranscript,
         promptVersion: PROMPT_VERSION,
         cacheReadTokens,
         cacheWriteTokens,

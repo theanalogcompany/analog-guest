@@ -4,6 +4,7 @@ import { Eyebrow } from '@/lib/ui'
 import type { ApiTraceWithFullDetails } from '@/lib/observability'
 import { extractRecognition } from '../lib/extract-recognition'
 import { type TraceStage, selectTraceStages } from '../lib/select-trace-stages'
+import { type TraceLoadFailure, traceFailureCopy } from '../lib/trace-failure'
 import { PipelineCard } from './pipeline-card'
 import { RecognitionCard } from './recognition-card'
 
@@ -19,17 +20,36 @@ interface TracePanelProps {
   trace: ApiTraceWithFullDetails | null
   loading: boolean
   langfuseTraceId: string | null
+  /** Transient read failure (not "no such trace"); renders a retry. */
+  failure: TraceLoadFailure | null
+  onRetry: () => void
 }
 
 export function TracePanel({
   trace,
   loading,
   langfuseTraceId,
+  failure,
+  onRetry,
 }: TracePanelProps) {
   if (loading) {
     return (
       <PanelChrome>
         <div className="text-sm text-ink-soft">Loading trace…</div>
+      </PanelChrome>
+    )
+  }
+  if (failure) {
+    return (
+      <PanelChrome>
+        <div className="text-sm text-ink-soft">{traceFailureCopy(failure)}</div>
+        <button
+          type="button"
+          onClick={onRetry}
+          className="mt-3 text-sm underline underline-offset-2 text-ink hover:text-ink-soft"
+        >
+          Retry
+        </button>
       </PanelChrome>
     )
   }
@@ -47,8 +67,8 @@ export function TracePanel({
     return (
       <PanelChrome>
         <div className="text-sm text-ink-soft">
-          Trace ID set on this message but Langfuse returned no trace. Could be
-          a fetch failure, or the trace hasn&apos;t flushed yet.
+          Trace ID set on this message but Langfuse has no such trace. It may
+          not have flushed yet.
         </div>
       </PanelChrome>
     )

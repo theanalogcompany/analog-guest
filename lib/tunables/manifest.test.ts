@@ -32,9 +32,9 @@ const VALID_TYPES: readonly TunableType[] = [
 ]
 
 describe('TUNABLES manifest', () => {
-  it('contains exactly 49 entries (locks the audit set)', () => {
+  it('contains exactly 48 entries (locks the audit set)', () => {
     // TAC-350 added knowledge_relevance_floor; TAC-367 added
-    // verify_grounding_max_output_tokens. TAC-380 added six intention entries.
+    // verify_grounding_max_output_tokens (removed with the grounding verifier). TAC-380 added six intention entries.
     // TAC-421 removed the four lib/agent/timing.ts entries with the module.
     // 2026-09-29: agent_latency_high_threshold_ms split into per-kind inbound
     // and followup entries (+1), because inbound p50 is 18.0s against followup
@@ -52,8 +52,9 @@ describe('TUNABLES manifest', () => {
     //
     // v1.80.0 schema diet removed the four voice-fidelity entries
     // (min_voice_fidelity, send_fidelity_floor, auto_send_fidelity_floor,
-    // voice_fidelity_low_threshold) with the score itself (-4).
-    expect(TUNABLES.length).toBe(45)
+    // voice_fidelity_low_threshold) with the score itself (-4), and the
+    // grounding verifier's verify_grounding_max_output_tokens went with it (-1).
+    expect(TUNABLES.length).toBe(44)
   })
 
   // Per-category counts catch silent rebalancing — a future writer adding to
@@ -73,8 +74,8 @@ describe('TUNABLES manifest', () => {
     expect(counts).toEqual({
       // 24 with the per-kind latency split, minus corpus_top_similarity_low_threshold
       // (decision 0008), minus the four voice-fidelity entries (v1.80.0
-      // schema diet).
-      agent_runtime: 19,
+      // schema diet) and verify_grounding_max_output_tokens.
+      agent_runtime: 18,
       classification: 3,
       // TAC-421 took this from 11 to 7: the four lib/agent/timing.ts
       // constants went with the deleted module. The remaining seven are

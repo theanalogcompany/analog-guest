@@ -32,12 +32,11 @@ boolean or string is free.
 `correctsPendingReply`, `followUpWorthy`. None is `.optional()`, which is what makes the
 compiler name every site synthesizing a `Classification`.
 
-`PROMPT_VERSION` (`prompts/system-template.ts`, currently v1.80.0) covers the
+`PROMPT_VERSION` (`prompts/system-template.ts`, currently v1.81.0) covers the
 classify/generate contract. Every other module here carries its own, and they are
 deliberately not linked:
 
-`VERIFY_GROUNDING_PROMPT_VERSION` · `VERIFY_PROSE_PROMISE_PROMPT_VERSION` ·
-`VERIFY_MECHANIC_OFFER_PROMPT_VERSION` · `VERIFY_CANCELLATION_CLAIM_PROMPT_VERSION` ·
+`VERIFY_PROSE_PROMISE_PROMPT_VERSION` · `VERIFY_MECHANIC_OFFER_PROMPT_VERSION` · `VERIFY_CANCELLATION_CLAIM_PROMPT_VERSION` ·
 `VERIFY_CLOSED_VENUE_ARRIVAL_PROMPT_VERSION` · `EXTRACT_REPORTED_ORDER_PROMPT_VERSION` ·
 `CLASSIFY_INTENTION_PROMPTS_PROMPT_VERSION`
 
@@ -49,12 +48,11 @@ it loads automatically when you touch a prompt or a test.
 
 ## The verifier family
 
-Five independent second-opinion checks, all the same shape: a cheap `generateObject` call,
+Four independent second-opinion checks, all the same shape: a cheap `generateObject` call,
 its own prompt version, narrow inputs, `AIResult`.
 
 | module | asks |
 | --- | --- |
-| `verify-grounding.ts` | does the reply state a fact the source material does not support |
 | `verify-prose-promise.ts` | does it promise something with no structured carrier behind it |
 | `verify-mechanic-offer.ts` | does it offer an approval-gated mechanic |
 | `verify-cancellation-claim.ts` | does it claim a cancellation with no carrier |
@@ -67,8 +65,7 @@ Three properties they share, each load-bearing:
    analysis. This was a live defect: reasoning that reversed itself and ended "the claim is
    grounded" while the boolean stayed `true`.
 2. **Narrow inputs.** They get the drafted body and the minimum context needed, not the
-   whole prompt - except `verify-grounding`, which gets `generation.userPrompt` **verbatim**
-   and must never be handed a curated subset. A maintained subset fell behind four times.
+   whole prompt.
 3. **Their callers fail CLOSED.** That policy lives in `lib/agent/stages.ts`, not here.
 
 A per-call `z.enum` built from the caller's actual valid set, never a bare `z.string()`,
@@ -78,7 +75,7 @@ wherever the model must return one of a known list. `verify-mechanic-offer`,
 ## Truncation is a distinct failure
 
 `MAX_OUTPUT_TOKENS` is 1500 for generation; each verifier has its own
-(`VERIFY_GROUNDING_MAX_OUTPUT_TOKENS` 2000, prose-promise 1000, the rest 600). An
+(prose-promise 1000, the rest 600). An
 unbounded `reasoning` field declared early burns budget before the verdict, so a cap that
 was fine when written stops being fine when a field moves.
 

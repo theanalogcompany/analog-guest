@@ -1,12 +1,15 @@
-# 0003 - The five post-generation checks: fail closed pre-send, run post-send on inbound
+# 0003 - The four post-generation checks: fail closed pre-send, run post-send on inbound
 
 **Date:** 2026-09-21, rewritten 2026-09-29 (owner ruling)
 **Status:** accepted
 
 ## Decision
 
-The five checks: `verify_grounding`, `verify_mechanic_offer`, `verify_prose_promise`,
+The four checks: `verify_mechanic_offer`, `verify_prose_promise`,
 `verify_cancellation_claim`, `verify_closed_venue_arrival`.
+A fifth, `verify_grounding`, was removed by owner ruling on 2026-09-30, to be re-added later.
+The `messages.ungrounded_claims` column was deliberately kept (nothing writes it; old rows
+still hold verbatim guest excerpts, so Instagram deletion still nulls it).
 
 **On the inbound path they run AFTER dispatch**, off the guest's critical path, in
 `lib/agent/post-send-checks.ts` inside the webhook's `waitUntil` window.
@@ -26,10 +29,10 @@ own self-flag, the comp regex, commitment-type gating, the pure cancellation res
 (triggers 13/16 still hold a draft whose emission cancels or dangles), the structural
 closed-venue emission, unverified URLs, pending-slot rules, per-category policy,
 `hold_all_outbound`.
-Only the five second-opinion LLM calls defer.
+Only the four second-opinion LLM calls defer.
 
-**Treat a proposal to change the posture of any one of them as a change to all five.**
-That rule survives the rewrite; this rewrite itself changed all five together.
+**Treat a proposal to change the posture of any one of them as a change to all four.**
+That rule survives the rewrite; this rewrite itself changed all of them together.
 
 ## Why the 2026-09-29 rewrite
 
@@ -46,11 +49,7 @@ are all carried by the deterministic triggers, which never left the gate.
 
 ## Why the 2026-09-21 half (pre-send paths fail closed) still stands
 
-They used to differ. Grounding failed **open** on a transient fault, on the reasoning that it
-runs on every inbound and queuing every provider hiccup would flood the queue, and that it
-degrades to a defensible prior - the model's own `knowledgeGap` self-report.
-
-Both halves stopped being true:
+Both halves of an earlier split posture stopped being true:
 
 - **The prior is worthless.** Measured over 220 replies, the model's own
   `requiresOperatorApproval` fired **0 times** and caught **0 of the 4** genuine uncarried
@@ -70,7 +69,6 @@ decision, not a correctness one, and it is one line of orchestration plus this f
 
 The subtler invariant to protect in either direction: a check that fails open is
 indistinguishable, in the row it leaves behind, from a check that ran and found nothing.
-`messages.ungrounded_claims` exists precisely to tell those apart.
 Post-send, the analogous claim is the event's `disposition` field - an alert that says "held"
 about a reply a guest already read is the same defect in a different medium, which is why the
 field is required on every check event rather than defaulted.
@@ -81,7 +79,7 @@ field is required on every check event rather than defaulted.
 construction; it can lose an alert, never a reply).
 `lib/agent/handle-inbound.ts` - passes the documented neutral values to the gate and hands
 the batch to `waitUntil` on the sent path only.
-`lib/agent/stages.ts` - the five `verify*Stage` functions (now taking
+`lib/agent/stages.ts` - the four `verify*Stage` functions (now taking
 `disposition: 'held' | 'sent' = 'held'`) and `checkDidNotComplete`.
 `lib/analytics/posthog.ts` - `CheckDisposition` and the disposition-aware headlines.
 `lib/ai/verify-*.ts` - the calls. The `*_TRUNCATED_ERROR_CODE` constants are imported **by

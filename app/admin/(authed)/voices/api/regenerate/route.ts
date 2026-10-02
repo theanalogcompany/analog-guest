@@ -71,8 +71,6 @@ export async function POST(request: Request): Promise<NextResponse> {
     // these to the operator, but nothing on this path gates or blanks
     // anything (the operator reviews the raw attempt directly).
     knowledgeGap: result.data.knowledgeGap,
-    hasUngroundedClaim: result.data.hasUngroundedClaim,
-    ungroundedClaims: result.data.ungroundedClaims,
     // TAC-355: same advisory-only posture as the TAC-350 fields above.
     selfTalkViolationPersisted: result.data.selfTalkViolationPersisted,
     offersGatedMechanic: result.data.offersGatedMechanic,

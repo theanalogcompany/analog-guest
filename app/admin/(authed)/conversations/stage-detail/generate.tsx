@@ -29,6 +29,7 @@ export function GenerateDetail({ stage }: { stage: TraceStage }) {
 
   const content = readContent(stage.observation.output)
   const systemPrompt = readString(content?.systemPrompt)
+  const conversation = readString(content?.conversation)
   const userPrompt = readString(content?.userPrompt)
   const model = readString(content?.model)
 
@@ -65,6 +66,12 @@ export function GenerateDetail({ stage }: { stage: TraceStage }) {
               <KvRow
                 label="systemPrompt"
                 value={<LongText text={systemPrompt} />}
+              />
+            ) : null}
+            {conversation !== null && conversation !== '' ? (
+              <KvRow
+                label="conversation (sent as chat turns)"
+                value={<LongText text={conversation} />}
               />
             ) : null}
             {userPrompt !== null ? (

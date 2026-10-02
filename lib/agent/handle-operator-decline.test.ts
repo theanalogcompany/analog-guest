@@ -291,6 +291,7 @@ function makeGenerationResult() {
     attemptHistory: [],
     systemPrompt: '',
     userPrompt: '',
+    conversation: '',
     requiresOperatorApproval: false,
     approvalReason: '',
     contextUpdate: {},

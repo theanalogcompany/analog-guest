@@ -514,7 +514,7 @@ async function main() {
               relevanceScore: c.similarity,
             }))
 
-      const { systemPrompt, userPrompt } = composePrompt({
+      const { systemPrompt, userPrompt, historyTurns } = composePrompt({
         category,
         persona: ctx.venue.brandPersona,
         venueInfo: ctx.venue.venueInfo,
@@ -571,7 +571,10 @@ async function main() {
             const { object } = await generateObject({
               model: getGenerationModel(),
               system,
-              prompt: userPrompt,
+              messages: [
+                ...historyTurns,
+                { role: 'user', content: userPrompt },
+              ],
               schema: GeneratedMessageSchema,
               maxOutputTokens: MAX_OUTPUT_TOKENS,
             })

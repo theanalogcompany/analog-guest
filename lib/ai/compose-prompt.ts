@@ -1,10 +1,13 @@
 import { categoryInstructionsFor } from './prompts/categories'
 import {
+  formatConversationTranscript,
   knowledgeChunksToProse,
   personaToProse,
   ragChunksToProse,
   runtimeToProse,
+  splitHistory,
   venueInfoToProse,
+  type HistoryTurn,
 } from './prompts/serializers'
 import { systemTemplateFor } from './prompts/system-template'
 import type { GenerateMessageInput } from './types'
@@ -45,9 +48,17 @@ export function composePrompt(input: GenerateMessageInput): {
   cacheableSystemPrefix: string
   volatileSystemSuffix: string
   userPrompt: string
+  // Past messages as chat turns, to sit between the system blocks and the final
+  // user message. `userPrompt` no longer contains them.
+  historyTurns: HistoryTurn[]
+  // The same history as one text block, for the trace only. Empty string when
+  // there is no history. Never sent to the generating model.
+  conversationTranscript: string
 } {
   const { category, persona, venueInfo, ragChunks, knowledgeChunks, runtime } =
     input
+  const now = new Date()
+  const recentMessages = runtime.recentMessages ?? []
 
   // TAC-495: the channel picks the channel copy in both prompts. The system
   // template's variant for 'text' is SYSTEM_TEMPLATE itself, unedited.
@@ -87,6 +98,9 @@ export function composePrompt(input: GenerateMessageInput): {
       .slice(0, CACHEABLE_SECTION_COUNT)
       .join('\n\n'),
     volatileSystemSuffix: sections.slice(CACHEABLE_SECTION_COUNT).join('\n\n'),
-    userPrompt: runtimeToProse(runtime, category, undefined, input.channel),
+    userPrompt: runtimeToProse(runtime, category, now, input.channel),
+    historyTurns: splitHistory(recentMessages).turns,
+    conversationTranscript:
+      formatConversationTranscript(recentMessages, now) ?? '',
   }
 }

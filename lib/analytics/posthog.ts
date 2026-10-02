@@ -70,36 +70,11 @@
  *     Properties: { agentRunId, venueId, guestId, wouldHaveQueuedTriggers,
  *                   generatedBody }
  *
- * - grounding_verifier_unavailable
- *     TAC-367, widened by TAC-424. Fires from verifyGroundingStage
- *     (lib/agent/stages.ts) when the grounding backstop returned no verdict —
- *     `outcome: 'truncated'` (output cap hit mid-JSON, never retried) or
- *     `outcome: 'degraded'` (transient fault that survived one retry). BOTH
- *     fail CLOSED and queue the draft since TAC-424; `degraded` used to fail
- *     open, which is the defect that ticket closed. Slack-relays both: the
- *     property that let the truncation hole survive was that nothing was
- *     emitted at all. `failedClosed=false` now selects only rows written
- *     before TAC-424, i.e. the turns that shipped with no grounding verdict.
- *     Properties: { agentRunId, venueId, guestId, outcome, failedClosed,
- *                   retried, error, errorCode }
- *
  * - webhook_silence
  *     Daily cron event. Fires when no inbound webhook has landed in 24+
  *     hours, but only when there's been at least one prior inbound (i.e.,
  *     skipped on initial venue state). Filtered to non-test venues.
  *     Properties: { hoursWithoutWebhook, lastWebhookAt }
- *
- * - ungrounded_claim_caught
- *     TAC-350. Fires from verifyGroundingStage (lib/agent/stages.ts) when the
- *     independent grounding backstop flags a reply the model itself had
- *     already self-certified as grounded (knowledgeGap=false) — distinct
- *     from draft_queued's generic primaryTrigger field so "how often is the
- *     model getting caught fabricating, per venue" is directly queryable
- *     without filtering the whole queue-decision stream. Slack-relays: this
- *     is exactly the failure class (a guest almost receiving an invented
- *     fact) TAC-350 exists to make visible.
- *     Properties: { agentRunId, venueId, guestId, inboundBody, replyBody,
- *                   ungroundedClaims }
  */
 
 import { PostHog } from 'posthog-node'
@@ -371,11 +346,6 @@ function formatClassificationLowConfidence(
 // pack, so there is no similarity left to be thin. Historical PostHog rows
 // under that event name describe the retrieval era.
 
-// TAC-350: emitted from verifyGroundingStage (lib/agent/stages.ts) when the
-// independent grounding backstop catches an unverified claim in a reply the
-// model already self-certified as grounded. Slack relay yes — this is the
-// exact failure (a guest nearly receiving an invented fact) TAC-350 exists
-// to surface, same posture as captureDraftQueued.
 /**
  * TAC-509: a reply carried a link that is not on the venue's curated
  * `venue_info.links` allowlist, and it survived every regen attempt. The draft
@@ -429,127 +399,6 @@ export async function captureUnverifiedUrlHeld(
  */
 export type CheckDisposition = 'held' | 'sent'
 
-export interface UngroundedClaimCaughtProps {
-  agentRunId: string
-  venueId: string
-  guestId: string
-  inboundBody: string
-  // The reply text that was caught. Under disposition 'held' it was never
-  // sent (the approval gate blanks it before persisting); under 'sent' it
-  // already reached the guest and is logged so the claim can be fixed
-  // upstream.
-  replyBody: string
-  ungroundedClaims: string[]
-  disposition: CheckDisposition
-}
-
-export async function captureUngroundedClaimCaught(
-  props: UngroundedClaimCaughtProps,
-): Promise<void> {
-  await capturePostHogEvent('ungrounded_claim_caught', props.guestId, {
-    ...props,
-  })
-  await postToSlack(formatUngroundedClaimCaught(props))
-}
-
-/**
- * TAC-367: emitted from verifyGroundingStage when the grounding backstop did
- * NOT return a verdict — i.e. the only fabrication check that fires under
- * real traffic did not run for this turn.
- *
- * Two outcomes, deliberately ONE event with a discriminator rather than two
- * events, because the question anyone actually asks is "how often is the
- * backstop not running", and that should be one PostHog query rather than a
- * union the next person has to know to write.
- *
- *   - `truncated`  — the model produced a verdict and the output cap cut it
- *                    off mid-JSON. Never retried: the cap would be hit again.
- *   - `degraded`   — a transient fault (network, provider error, timeout)
- *                    that survived one immediate retry.
- *
- * TAC-424: BOTH fail CLOSED now. `degraded` used to fail open, so the draft
- * proceeded and the row recorded it as a clean pass; that was the defect.
- *
- * `failedClosed` is therefore `true` on both outcomes today, and it stays as
- * its own field rather than being dropped or re-derived from `outcome`: a
- * query for "turns that sent without a grounding verdict" should keep working
- * across old rows (where it is false) and new ones, and the day a third
- * outcome lands its consequence has to be stated rather than inferred.
- *
- * `retried` says whether the second attempt happened. It is false for every
- * truncation by construction, and true for every degraded outcome — which
- * makes it the field that distinguishes "one call faulted" from "two did"
- * if the retry is ever made conditional.
- *
- * BOTH Slack-relay. The degraded case is the one worth arguing about, and it
- * relays because a held reply during an outage is a thing an operator needs to
- * know is happening — the same class as captureUngroundedClaimCaught, and the
- * precise property that let the truncation bug survive unnoticed was that
- * nothing was emitted at all. Known cost: a sustained provider outage will
- * relay once per inbound. That is noisy by design — the alternative is a
- * fleet-wide silent bypass — but if the volume proves unworkable the lever is
- * a PostHog-side filter on `outcome`, not deleting the emit.
- */
-export interface GroundingVerifierUnavailableProps {
-  agentRunId: string
-  venueId: string
-  guestId: string
-  outcome: 'truncated' | 'degraded'
-  /**
-   * True when the draft did not send as a result.
-   *
-   * Hardcoded `true` by the only producer since TAC-424, so `false` selects
-   * exactly the rows written before it. Deliberately not "queued": on the
-   * holding-message path a failed check produces a FALLBACK send rather than a
-   * queued card, and the field still reads correctly there.
-   */
-  failedClosed: boolean
-  /** TAC-424: true when a second, immediate attempt was made and also failed. */
-  retried: boolean
-  /** Provider/SDK error text. Never contains guest or venue content. */
-  error: string
-  errorCode?: string
-  disposition: CheckDisposition
-}
-
-export async function captureGroundingVerifierUnavailable(
-  props: GroundingVerifierUnavailableProps,
-): Promise<void> {
-  await capturePostHogEvent('grounding_verifier_unavailable', props.guestId, {
-    ...props,
-  })
-  await postToSlack(formatGroundingVerifierUnavailable(props))
-}
-
-function formatGroundingVerifierUnavailable(
-  props: GroundingVerifierUnavailableProps,
-): string {
-  // TAC-424, under SR-2. The degraded branch used to read "reply proceeded
-  // ungated", which stopped being true the moment that outcome started
-  // queueing — a Slack line that misstates what the system just did is worse
-  // than none, because it is the line someone reads mid-incident.
-  // The `false` branch is unreachable from the current producer (TAC-424
-  // hardcodes `true`). Kept rather than deleted because the field is kept:
-  // if the posture is ever revisited, the headline must not have to be
-  // rediscovered, and a formatter that cannot express "it proceeded" is how
-  // the pre-TAC-424 line came to say the wrong thing for a whole ticket.
-  const headline =
-    props.disposition === 'sent'
-      ? '*Grounding check did not complete* — no verdict, and the reply was ALREADY SENT (post-send check)'
-      : props.failedClosed
-        ? '*Grounding check did not complete* — no verdict, draft queued for review'
-        : '*Grounding check did not complete* — no verdict, reply proceeded ungated'
-  return [
-    headline,
-    `venue: \`${props.venueId}\``,
-    `guest: \`${props.guestId}\``,
-    `run: \`${props.agentRunId}\``,
-    `outcome: ${props.outcome}${props.errorCode ? ` (${props.errorCode})` : ''}`,
-    `retried: ${props.retried ? 'yes, once' : 'no'}`,
-    `error: "${truncate(props.error, SLACK_FIELD_TRUNCATE_CHARS)}"`,
-  ].join('\n')
-}
-
 // TAC-436 ruling 5: the post-send recorder RAISED an intention. Until this,
 // a successful raise was a bare console.log on both send paths, so the only
 // intention signals that reached PostHog or Slack were the two failures below
@@ -589,8 +438,8 @@ export interface IntentionPromptRaisedProps {
   /**
    * The body as SENT. Truncated in Slack, full in PostHog. Without it the
    * first production raise is a key name with nothing to judge, which is the
-   * whole point of the event; the two existing agent-quality Slack events
-   * (ungrounded claim, mechanic offer) carry message text on the same basis.
+   * whole point of the event; the other agent-quality Slack events (mechanic
+   * offer, prose promise) carry message text on the same basis.
    */
   sentBody: string
 }
@@ -707,26 +556,6 @@ function formatUnverifiedUrlHeld(props: UnverifiedUrlHeldProps): string {
   return lines.join('\n')
 }
 
-function formatUngroundedClaimCaught(
-  props: UngroundedClaimCaughtProps,
-): string {
-  const claimList = props.ungroundedClaims
-    .map((c) => `"${truncate(c, SLACK_FIELD_TRUNCATE_CHARS)}"`)
-    .join(', ')
-  const lines = [
-    props.disposition === 'sent'
-      ? `*Ungrounded claim caught* — reply ALREADY SENT (post-send check); fix upstream`
-      : `*Ungrounded claim caught* — reply never sent, queued for review`,
-    `venue: \`${props.venueId}\``,
-    `guest: \`${props.guestId}\``,
-    `run: \`${props.agentRunId}\``,
-    `inbound: "${truncate(props.inboundBody, SLACK_FIELD_TRUNCATE_CHARS)}"`,
-    `caught claim(s): ${claimList}`,
-    `flagged reply: "${truncate(props.replyBody, SLACK_FIELD_TRUNCATE_CHARS)}"`,
-  ]
-  return lines.join('\n')
-}
-
 // TAC-401: the independent prose-promise check caught a reply committing the
 // venue to something of value with no structured commitment behind it.
 //
@@ -822,10 +651,8 @@ function formatProsePromiseCaught(props: ProsePromiseCaughtProps): string {
 // TAC-401: the prose-promise check did not produce a readable verdict, so the
 // draft was queued on an absence of information rather than a finding.
 //
-// Emitted for the reason TAC-367 gives for captureGroundingVerifierUnavailable:
-// a failure path with no signal is how a hole survives unobserved. This one
-// matters more than that one, because the check FAILS CLOSED — a sustained
-// provider outage queues nearly every reply, and this event plus the operator
+// A failure path with no signal is how a hole survives unobserved. The check
+// FAILS CLOSED, so a sustained provider outage queues nearly every reply, and this event plus the operator
 // push are what make that legible as an outage while it is happening rather
 // than as a wave of caught promises.
 export interface ProsePromiseCheckUnavailableProps {
@@ -1043,10 +870,7 @@ function formatCancellationCheckUnavailable(
 
 // TAC-355: independent mechanic-offer verification backstop caught a reply
 // promising an approval-gated mechanic the model didn't self-flag via either
-// existing signal (requiresOperatorApproval or commitment.type). Mirrors
-// UngroundedClaimCaughtProps/captureUngroundedClaimCaught's shape — same
-// "how often is the model caught doing the thing self-report was supposed to
-// catch" observability need, different failure mode.
+// existing signal (requiresOperatorApproval or commitment.type).
 // TAC-363: a reply that would have sent a guest to a closed venue, caught and
 // queued. Modelled on captureMechanicOfferBackstopCaught.
 //

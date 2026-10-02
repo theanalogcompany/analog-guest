@@ -258,6 +258,7 @@ function makeGeneration(): GenerateMessageResult {
     attemptHistory: [],
     systemPrompt: '',
     userPrompt: '',
+    conversation: '',
     promptVersion: 'v1.16.0',
     cacheReadTokens: 0,
     cacheWriteTokens: 0,
@@ -1347,7 +1348,7 @@ describe('persistOrRegenQueuedDraft — delimiter strip (TAC-313)', () => {
 })
 
 // ---------------------------------------------------------------------------
-// TAC-364: review_triggers + ungrounded_claims at both persist sites
+// TAC-364: review_triggers at both persist sites
 // ---------------------------------------------------------------------------
 //
 // `review_reason` keeps holding the priority-selected primary; these two carry
@@ -1360,7 +1361,7 @@ describe('persistOrRegenQueuedDraft — TAC-364 review detail', () => {
     scenario = freshScenario()
   })
 
-  it('writes both columns on the INSERT path', async () => {
+  it('writes review_triggers on the INSERT path', async () => {
     scenario.insertResponses.push({ data: { id: 'new-msg-1' }, error: null })
 
     await persistOrRegenQueuedDraft(
@@ -1370,18 +1371,16 @@ describe('persistOrRegenQueuedDraft — TAC-364 review detail', () => {
       null,
       {
         reviewTriggers: ['model_flagged', 'commitment_type_gated'],
-        ungroundedClaims: ['We open at 6am on Sundays.'],
       },
     )
 
     expect(scenario.inserts[0]).toMatchObject({
       review_reason: 'commitment_type_gated',
       review_triggers: ['model_flagged', 'commitment_type_gated'],
-      ungrounded_claims: ['We open at 6am on Sundays.'],
     })
   })
 
-  it('writes NULL for both when the caller passes neither', async () => {
+  it('writes NULL when the caller passes no triggers', async () => {
     // The two non-gate callers — the generation-failure card and the operator
     // decline — never ran applyApprovalPolicyStage, so they have no trigger SET
     // to record, only the single reason they stamp themselves. NULL says that;
@@ -1398,43 +1397,17 @@ describe('persistOrRegenQueuedDraft — TAC-364 review detail', () => {
 
     expect(scenario.inserts[0]).toMatchObject({
       review_triggers: null,
-      ungrounded_claims: null,
     })
   })
 
-  it('nulls ungrounded_claims on a blank card but KEEPS review_triggers', async () => {
-    // A claim is a quotation FROM the body, and a blank card has no body — so
-    // keeping it would point the operator at text they cannot see. Why the card
-    // exists is still true with or without a body, so the triggers stay.
-    scenario.insertResponses.push({ data: { id: 'new-msg-1' }, error: null })
-
-    await persistOrRegenQueuedDraft(
-      makeCtx(),
-      makeGeneration(),
-      'knowledge_gap',
-      null,
-      {
-        blankBody: true,
-        reviewTriggers: ['knowledge_gap'],
-        ungroundedClaims: ['should not survive blanking'],
-      },
-    )
-
-    expect(scenario.inserts[0]).toMatchObject({
-      body: '',
-      ungrounded_claims: null,
-      review_triggers: ['knowledge_gap'],
-    })
-  })
-
-  it('OVERWRITES both on the regen UPDATE path', async () => {
+  it('OVERWRITES review_triggers on the regen UPDATE path', async () => {
     // The distinction that matters, and the reason these three columns sit
     // together in the payload: `pending_until` below is preserve-by-default
     // because it describes the GUEST'S wait, which a regen didn't reset. These
     // two describe THIS draft. A regen that no longer fabricates must not keep
     // the previous attempt's flagged claim.
     scenario.priorReasonResponses.push({
-      data: { review_reason: 'knowledge_gap_backstop' },
+      data: { review_reason: 'knowledge_gap' },
       error: null,
     })
     scenario.updateResponses.push({
@@ -1447,89 +1420,18 @@ describe('persistOrRegenQueuedDraft — TAC-364 review detail', () => {
       makeGeneration(),
       'model_flagged',
       'existing-msg-1',
-      { reviewTriggers: ['model_flagged'], ungroundedClaims: [] },
+      { reviewTriggers: ['model_flagged'] },
     )
 
     const payload = scenario.updates[0].payload
     expect(payload).toMatchObject({
       review_reason: 'model_flagged',
       review_triggers: ['model_flagged'],
-      ungrounded_claims: [],
     })
     // Not preserve-by-default — the key is PRESENT in the payload, which is
     // what makes it an overwrite rather than a no-op. Contrast pending_until,
     // whose absence from the payload is load-bearing.
-    expect(payload).toHaveProperty('ungrounded_claims')
     expect(payload).not.toHaveProperty('pending_until')
-  })
-
-  // TAC-364 ruling 3: the column is three-state and the write path has to
-  // preserve all three. `[]` is NOT a spelling of null here — it is the
-  // positive record that the grounding check ran and found nothing, and the
-  // whole reason to record it is that TAC-367 was filed over a check that
-  // silently didn't run being invisible everywhere.
-  it('writes [] — not null — when the check ran and found nothing', async () => {
-    scenario.insertResponses.push({ data: { id: 'new-msg-1' }, error: null })
-
-    await persistOrRegenQueuedDraft(
-      makeCtx(),
-      makeGeneration(),
-      'model_flagged',
-      null,
-      {
-        reviewTriggers: ['model_flagged'],
-        ungroundedClaims: [],
-      },
-    )
-
-    expect(scenario.inserts[0]!.ungrounded_claims).toEqual([])
-    expect(scenario.inserts[0]!.ungrounded_claims).not.toBeNull()
-  })
-
-  it('writes null when the caller says the check did not run', async () => {
-    scenario.insertResponses.push({ data: { id: 'new-msg-1' }, error: null })
-
-    await persistOrRegenQueuedDraft(
-      makeCtx(),
-      makeGeneration(),
-      'model_flagged',
-      null,
-      {
-        reviewTriggers: ['model_flagged'],
-        ungroundedClaims: null,
-      },
-    )
-
-    expect(scenario.inserts[0]!.ungrounded_claims).toBeNull()
-  })
-
-  it('keeps [] and null distinguishable end to end at the persist boundary', async () => {
-    // The pair, asserted together — a `?? []` or `|| null` anywhere on this
-    // path collapses them and passes each single-state test above.
-    scenario.insertResponses.push({ data: { id: 'a' }, error: null })
-    scenario.insertResponses.push({ data: { id: 'b' }, error: null })
-
-    await persistOrRegenQueuedDraft(
-      makeCtx(),
-      makeGeneration(),
-      'model_flagged',
-      null,
-      {
-        ungroundedClaims: [],
-      },
-    )
-    await persistOrRegenQueuedDraft(
-      makeCtx(),
-      makeGeneration(),
-      'model_flagged',
-      null,
-      {
-        ungroundedClaims: null,
-      },
-    )
-
-    expect(scenario.inserts[0]!.ungrounded_claims).toEqual([])
-    expect(scenario.inserts[1]!.ungrounded_claims).toBeNull()
   })
 
   it('nulls BOTH columns on regen when the caller passes no options', async () => {
@@ -1548,7 +1450,7 @@ describe('persistOrRegenQueuedDraft — TAC-364 review detail', () => {
     // requires approval" next to "Something went wrong writing this one", for
     // a draft that no longer exists.
     scenario.priorReasonResponses.push({
-      data: { review_reason: 'knowledge_gap_backstop' },
+      data: { review_reason: 'knowledge_gap' },
       error: null,
     })
     scenario.updateResponses.push({
@@ -1566,12 +1468,10 @@ describe('persistOrRegenQueuedDraft — TAC-364 review detail', () => {
     const payload = scenario.updates[0].payload
     expect(payload).toMatchObject({
       review_triggers: null,
-      ungrounded_claims: null,
     })
     // Present-and-null, not absent. An absent key is the preserve-by-default
     // shape, and that is exactly the mutation above.
     expect(payload).toHaveProperty('review_triggers')
-    expect(payload).toHaveProperty('ungrounded_claims')
   })
 })
 
