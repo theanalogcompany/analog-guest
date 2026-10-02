@@ -47,10 +47,6 @@ This is not a per-file code review. Don't relitigate the per-PR `code-reviewer`'
 - Inline code comments that contradict current behavior (the code was changed, the comment wasn't).
 - Type definitions in `db/types.ts` patches that should have been overwritten by `db:types` regeneration (per CLAUDE.md migration workflow).
 
-## Stray tests (this repo has none, by rule: `.claude/rules/no-tests.md`)
-- Any `*.test.*`, `*.spec.*`, `__tests__/` or `__mocks__/` path, any test runner or test-library dependency in `package.json`, and any test step in `.husky/` or `.github/workflows/ci.yml`. List each; they should not exist.
-- Do not report test counts or coverage gaps.
-
 # Output
 
 Produce a structured report in chat:
@@ -68,7 +64,7 @@ Produce a structured report in chat:
 ### Findings
 
 **[HIGH | MEDIUM | LOW] — one-line summary**
-- Category: drift / dead code / staleness / convention / docs / stray tests
+- Category: drift / dead code / staleness / convention / docs
 - Evidence: file paths with line numbers
 - Proposed action: create ticket / update CLAUDE.md / delete / refactor / no action
 - If creating ticket: draft title + 2-line description

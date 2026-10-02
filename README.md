@@ -50,7 +50,6 @@ directory; a human has to click.
 | [.github](.github/CLAUDE.md) | what a CI session may run, and the known gaps in that allowlist |
 
 Three more rule files load by file pattern rather than by directory:
-[no tests](.claude/rules/no-tests.md) (this repo has none, and none are to be written),
 [errors as values](.claude/rules/errors-as-values.md) across `lib/` and
 `app/api/`, and [prompt versioning](.claude/rules/prompt-versioning.md) in the
 directories that own the composed prompt.

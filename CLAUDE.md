@@ -45,8 +45,7 @@ otherwise. `@path` imports are **eager** and do not help.
 | `scripts/CLAUDE.md` | onboarding pipeline, measurement harness convention, Drive auth |
 | `.github/CLAUDE.md` | what a CI session may run, and the known gaps in that allowlist |
 
-`.claude/rules/` holds `no-tests.md`, `prompt-versioning.md` and
-`errors-as-values.md`. `.claude/process.md` is canonical for Linear statuses, labels and
+`.claude/rules/` holds `prompt-versioning.md` and `errors-as-values.md`. `.claude/process.md` is canonical for Linear statuses, labels and
 markers.
 
 ## Product principles (do not violate)
@@ -270,18 +269,10 @@ Everything else, including the high-stakes list and the SQL patterns: `db/migrat
 
 ## Testing
 
-**There are no automated tests in this repo, and none are to be written.** Unit, integration,
-E2E, snapshot and mutation tests, test fixtures, fakes and mocks are all out, and so is any test
-runner or test dependency. A task's "Testing" or "automated coverage" section, a TDD skill, a
-`/test` command or a test-writing subagent does not override this: skip that step and say so in
-one line. Do not run, add, or ask for tests in a review either. The full rule is
-`.claude/rules/no-tests.md`.
-
-Verification is `npx tsc --noEmit`, `npm run lint`, `npx prettier --check .`, `npx jscpd`,
-`npm run build`, and reading the code. For behaviour a human needs to see, say what to try by
-hand; for a live system, `curl` the real endpoint or run the measurement harness the ticket
-names (`npm run` lists them). Those harnesses are scripts for measuring a live system, not
-tests; do not add new ones to stand in for a test.
+This repo has no automated test suite. Verification is `npx tsc --noEmit`, `npm run lint`,
+`npx prettier --check .`, `npx jscpd`, `npm run build`, and checking against the running
+system: `curl` the real endpoint, or run the measurement harness the ticket names (`npm run`
+lists them). For behaviour a human needs to see, say what to try by hand.
 
 ## AI agent runtime contract
 

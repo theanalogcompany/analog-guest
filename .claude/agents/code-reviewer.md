@@ -1,6 +1,6 @@
 ---
 name: code-reviewer
-description: Read-only post-implementation review. Flags AI slop, convention violations, brand drift, and stray tests before the PR opens. MUST BE USED after every implementation phase.
+description: Read-only post-implementation review. Flags AI slop, convention violations, and brand drift before the PR opens. MUST BE USED after every implementation phase.
 tools: Read, Grep, Glob, Bash
 ---
 
@@ -49,10 +49,6 @@ A resumed build works in a side folder (`work-ticket.md` step 14), and the hando
 - Loyalty-program language: "points," "rewards," "tier," "earn," "badges," "progress bar." Forbidden in operator-facing AND guest-facing surfaces. Flag every instance.
 - Guest framing should be "recognized," not "enrolled."
 
-## Tests
-- This repo has no automated tests (`.claude/rules/no-tests.md`). Never ask for tests, never flag their absence, never report a test count or a coverage gap, even if the ticket's Testing section asks for them.
-- Any `*.test.*`, `*.spec.*`, `__tests__/` or `__mocks__/` path in the diff, any test runner or test-library dependency added to `package.json`, and any test step added to `.husky/` or CI: flag BLOCKER. They must be removed.
-
 ## Documentation routing
 - Cross-reference the diff against CLAUDE.md's "Where things are written down" routing table. If the diff introduces a new script, migration, library pattern, convention, gotcha, directory, env var, or workflow rule and it is written down nowhere, flag MAJOR. Check it landed in the place the table names — a subsystem detail belongs in that directory's `CLAUDE.md`, not in the root file. Appending it to root is itself a finding; that is what grew root to 1.34 MB (`docs/decisions/0001-claude-md-is-an-index.md`).
 - The PR description should carry the "Documentation routing considered: ..." note. If absent entirely, flag MINOR.
@@ -74,9 +70,6 @@ A resumed build works in a side folder (`work-ticket.md` step 14), and the hando
 - File: path:line
 - Issue: …
 - Fix: …
-
-### Stray tests
-- [list of test paths or test dependencies in the diff, or none]
 
 ### Plan adherence
 - Deviations: [list, or none]

@@ -126,7 +126,7 @@ Nothing protects a session before its claim lands or its first push: until then 
 
 # Phase 2 — Plan
 8. Output a written plan: scope, file paths to touch, function decomposition, sequence of operations, the commits the build will make in order, existing patterns reused, edge cases, what you intentionally chose NOT to do, open questions. Each commit leaves the tree typechecking, because each is pushed as soon as it is made (step 15): a session that runs out of turns keeps every commit it pushed.
-9. This repo has no automated tests (`.claude/rules/no-tests.md`). If the ticket's Testing section asks for any, do not plan them; say in one line that they are skipped, and propose manual verification instead (what a human should try, or the `curl` that proves the gate).
+9. This repo has no automated test suite. If the ticket's Testing section is blank or partial, propose manual verification instead: what a human should try, or the `curl` that proves the gate.
 10. If `## Gate` names no QA route, propose one — `QA: Script` if the gate is provable by a query or script, `QA: Device` if it needs Jaipal on a real device or at the venue. If it is currently device-only, say what would make it script-provable.
 11. If the plan has open questions:
     - Post `[NEEDS-INPUT]` with questions numbered, each written in the format under "Asking Jaipal a question" in `.claude/process.md`. State the options; do not recommend one.
@@ -183,7 +183,7 @@ Everything else is Jaipal's. In particular: anything in the agent's voice a gues
 # Phase 4 — Verify
 20. `npx tsc --noEmit` — must pass. On a resume, `npx tsc --noEmit -p <checkout>/.worktrees/resume`: run here, TypeScript skips `.worktrees/` and passes whatever the branch holds.
 21. `npm run lint` — must pass. On a resume, `npx eslint --flag v10_config_lookup_from_file <checkout>/.worktrees/resume`, which lints the branch with its own config.
-22. Do not run, write or report tests; there are none. For a change a human should see, say in the PR what to try by hand.
+22. There is no test suite to run. For a change a human should see, say in the PR what to try by hand.
 23. Invoke the `qa-runner` subagent for the build check (`npm run build`) and the diff categorisation.
 24. Invoke the `code-reviewer` subagent on the diff. Address BLOCKER and MAJOR findings; explain skips on MINOR.
 
