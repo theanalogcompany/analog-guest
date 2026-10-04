@@ -5,6 +5,7 @@ import { usePathname } from 'next/navigation'
 import {
   Activity,
   AudioLines,
+  FlaskConical,
   Home,
   MessagesSquare,
   SlidersHorizontal,
@@ -40,6 +41,7 @@ const NAV_ICONS: Record<string, LucideIcon> = {
   '/admin/conversations': MessagesSquare,
   '/admin/voices': AudioLines,
   '/admin/venues': Store,
+  '/admin/playground': FlaskConical,
   '/admin/tunables': SlidersHorizontal,
   '/admin/intentions': Target,
   '/admin/health': Activity,

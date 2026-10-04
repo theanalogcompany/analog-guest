@@ -1,6 +1,6 @@
 import { redirect } from 'next/navigation'
 import { formatInTimeZone } from 'date-fns-tz'
-import { AuthError, verifyAnalogAdminAccess } from '@/lib/auth'
+import { AuthError, devAuthBypass, verifyAnalogAdminAccess } from '@/lib/auth'
 import { createAdminClient } from '@/lib/db/admin'
 import { createServerClient } from '@/lib/db/server'
 import { logger } from '@/lib/observability/logger'
@@ -120,19 +120,26 @@ async function renderConversations(
   timer: StageTimer,
 ) {
   // Resolve operator + allowed venues
-  const supabaseSession = await createServerClient()
-  const {
-    data: { session },
-  } = await supabaseSession.auth.getSession()
-  if (!session) redirect('/admin/sign-in')
-
   let venueScope: VenueScope
-  try {
-    const op = await verifyAnalogAdminAccess(session.user.id)
-    venueScope = op.venueScope
-  } catch (e) {
-    if (e instanceof AuthError && e.status === 403) redirect('/admin')
-    throw e
+  // Local-dev bypass (lib/auth/dev-bypass.ts): triple-guarded, null anywhere
+  // but a developer's own `next dev` on localhost.
+  const bypass = await devAuthBypass()
+  if (bypass) {
+    venueScope = bypass.venueScope
+  } else {
+    const supabaseSession = await createServerClient()
+    const {
+      data: { session },
+    } = await supabaseSession.auth.getSession()
+    if (!session) redirect('/admin/sign-in')
+
+    try {
+      const op = await verifyAnalogAdminAccess(session.user.id)
+      venueScope = op.venueScope
+    } catch (e) {
+      if (e instanceof AuthError && e.status === 403) redirect('/admin')
+      throw e
+    }
   }
   timer.mark('auth')
 

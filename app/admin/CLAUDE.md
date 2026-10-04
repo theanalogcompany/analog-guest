@@ -22,6 +22,10 @@ authorization); admin renders the shell.
 Granting access is a hand-written Studio `UPDATE` on `operators.is_analog_admin`. Nothing
 automates it.
 
+For local testing only, `ADMIN_AUTH_DISABLED=1` bypasses the whole gate -
+`lib/auth/dev-bypass.ts` holds the guards (dev build + localhost host + refusal on any
+Vercel marker). Set it per shell; it must never be written into `.env.local`.
+
 ## Loaders
 
 One loader per surface under `_lib/`, `cache()`-wrapped, allowlist-scoped. Conventions:

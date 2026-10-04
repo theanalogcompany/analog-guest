@@ -1,3 +1,4 @@
+export { DEV_BYPASS_OPERATOR_ID, devAuthBypass } from './dev-bypass'
 export { getCurrentOperator } from './get-current-operator'
 export {
   type NextRouteContext,

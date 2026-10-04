@@ -39,3 +39,4 @@ decision.
 | [0006](0006-two-pending-slots-per-guest.md) | A guest holds two pending cards, one per slot |
 | [0007](0007-intention-question-is-its-own-bubble.md) | A getting-to-know-you question is its own last message, guaranteed in code |
 | [0008](0008-voice-is-a-static-pack.md) | Voice is a static per-venue pack, not a similarity retrieval |
+| [0009](0009-relationship-engine-v2.md) | v2: behaviour is three versioned data artifacts (graph, template, rubric), not code |

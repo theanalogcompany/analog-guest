@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { z } from 'zod'
-import { AuthError, verifyAnalogAdminAccess } from '@/lib/auth'
+import { AuthError, devAuthBypass, verifyAnalogAdminAccess } from '@/lib/auth'
 import { createServerClient } from '@/lib/db/server'
 import { classifyCritique } from '@/lib/voices'
 
@@ -22,20 +22,25 @@ export const dynamic = 'force-dynamic'
 
 export async function POST(request: Request): Promise<NextResponse> {
   // Auth — analog admin scope only, no per-venue check needed.
-  try {
-    const supabase = await createServerClient()
-    const {
-      data: { session },
-    } = await supabase.auth.getSession()
-    if (!session) {
-      return NextResponse.json({ error: 'unauthorized' }, { status: 401 })
+  // Local-dev bypass (lib/auth/dev-bypass.ts): triple-guarded, null anywhere
+  // but a developer's own `next dev` on localhost.
+  const bypass = await devAuthBypass()
+  if (!bypass) {
+    try {
+      const supabase = await createServerClient()
+      const {
+        data: { session },
+      } = await supabase.auth.getSession()
+      if (!session) {
+        return NextResponse.json({ error: 'unauthorized' }, { status: 401 })
+      }
+      await verifyAnalogAdminAccess(session.user.id)
+    } catch (e) {
+      if (e instanceof AuthError) {
+        return NextResponse.json({ error: e.message }, { status: e.status })
+      }
+      return NextResponse.json({ error: 'auth check failed' }, { status: 500 })
     }
-    await verifyAnalogAdminAccess(session.user.id)
-  } catch (e) {
-    if (e instanceof AuthError) {
-      return NextResponse.json({ error: e.message }, { status: e.status })
-    }
-    return NextResponse.json({ error: 'auth check failed' }, { status: 500 })
   }
 
   let body: z.infer<typeof PostBodySchema>

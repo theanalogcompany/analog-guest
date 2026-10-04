@@ -1,7 +1,7 @@
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import { Eyebrow, SectionHeader } from '@/lib/ui'
-import { AuthError, verifyAnalogAdminAccess } from '@/lib/auth'
+import { AuthError, devAuthBypass, verifyAnalogAdminAccess } from '@/lib/auth'
 import { createServerClient } from '@/lib/db/server'
 import { loadVenues } from '../_lib/load-venues'
 import { type VenueScope } from '@/lib/auth/venue-scope'
@@ -14,19 +14,26 @@ import { type VenueScope } from '@/lib/auth/venue-scope'
 export const dynamic = 'force-dynamic'
 
 export default async function VenuesIndexPage() {
-  const supabase = await createServerClient()
-  const {
-    data: { session },
-  } = await supabase.auth.getSession()
-  if (!session) redirect('/admin/sign-in')
-
   let venueScope: VenueScope
-  try {
-    const op = await verifyAnalogAdminAccess(session.user.id)
-    venueScope = op.venueScope
-  } catch (e) {
-    if (e instanceof AuthError && e.status === 403) redirect('/admin')
-    throw e
+  // Local-dev bypass (lib/auth/dev-bypass.ts): triple-guarded, null anywhere
+  // but a developer's own `next dev` on localhost.
+  const bypass = await devAuthBypass()
+  if (bypass) {
+    venueScope = bypass.venueScope
+  } else {
+    const supabase = await createServerClient()
+    const {
+      data: { session },
+    } = await supabase.auth.getSession()
+    if (!session) redirect('/admin/sign-in')
+
+    try {
+      const op = await verifyAnalogAdminAccess(session.user.id)
+      venueScope = op.venueScope
+    } catch (e) {
+      if (e instanceof AuthError && e.status === 403) redirect('/admin')
+      throw e
+    }
   }
 
   const venues = await loadVenues(venueScope)

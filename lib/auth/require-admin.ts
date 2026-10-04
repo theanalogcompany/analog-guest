@@ -20,6 +20,7 @@ import { NextResponse } from 'next/server'
 import { z } from 'zod'
 import { createAdminClient } from '../db/admin'
 import { createServerClient } from '../db/server'
+import { devAuthBypass } from './dev-bypass'
 import { AuthError } from './types'
 import { verifyAnalogAdminAccess } from './verify-analog-admin'
 import { allowsVenue, type VenueScope } from './venue-scope'
@@ -34,6 +35,17 @@ async function authenticateAdmin(): Promise<
   | { ok: true; operatorId: string; venueScope: VenueScope }
   | { ok: false; response: NextResponse }
 > {
+  // Local-dev bypass (lib/auth/dev-bypass.ts): triple-guarded, null anywhere
+  // but a developer's own `next dev` on localhost.
+  const bypass = await devAuthBypass()
+  if (bypass) {
+    return {
+      ok: true,
+      operatorId: bypass.operatorId,
+      venueScope: bypass.venueScope,
+    }
+  }
+
   try {
     const supabase = await createServerClient()
     const {

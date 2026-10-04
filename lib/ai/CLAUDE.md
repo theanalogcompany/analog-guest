@@ -17,7 +17,10 @@ only at an outer boundary.
 **No `.min()` or `.max()` on a number field in an LLM-output schema.** Anthropic's
 structured output rejects them. Use `.refine()` or validate after the call. The same
 rejection applies to `.max()` on a `z.array()` (`maxItems` unsupported); `.min()` on an
-array is fine. Cap array length with `.slice(0, N)` after the call.
+array is fine. Cap array length with `.slice(0, N)` after the call. **`.int()` counts
+too**: Zod 4 renders it as `integer` plus safe-integer `minimum`/`maximum` bounds, which
+Anthropic rejects identically (caught live in the v2 judge, 2026-10-04) - use a bare
+`z.number()` and round after the call.
 
 **The optional-field budget is 22, against Anthropic's hard cap of 24.** The cap counts
 optional parameters across the whole nested tree, so an optional nested object costs one

@@ -38,6 +38,7 @@ otherwise. `@path` imports are **eager** and do not help.
 | `lib/messaging/instagram/CLAUDE.md` | the Meta half: signatures, echoes, the reply window, tokens, deletion |
 | `db/migrations/CLAUDE.md` | apply order, high-stakes tables, the SQL patterns this schema uses |
 | `lib/operator/CLAUDE.md` | venue scope, queue Contract fields, card copy, dispatch |
+| `lib/relationship/CLAUDE.md` | **the v2 relationship engine** (graph, missions, moves, profiles, memory, policy gate, judge) - replaces intentions + recognition bands when the per-venue flag flips; read before touching either |
 | `lib/guests/CLAUDE.md` | commitment CAS and dedup, guest context, visit precision |
 | `lib/notifications/CLAUDE.md` | APNs env validation, `PUSH_POLICY`, payload privacy, badges |
 | `lib/observability/CLAUDE.md` | the Langfuse wrapper, the span tree, and **where the latency and prompt-cache numbers already live** - read before answering any latency question |
@@ -88,6 +89,9 @@ Webhooks live on `webhooks.theanalog.company`; future integrations inherit that 
 | `lib/guests/` | per-guest context, commitments, cron processors |
 | `lib/operator/` | operator API building blocks |
 | `lib/notifications/` | APNs push |
+| `lib/relationship/` | v2 relationship engine: graph, state, profile/memory, turn runner (detail: its `CLAUDE.md`) |
+| `lib/policy/` | v2 policy gate: registry, Jev semantic check, decision table (detail: `lib/relationship/CLAUDE.md`) |
+| `lib/eval/` | v2 maitre d' judge (detail: `lib/relationship/CLAUDE.md`) |
 | `lib/followups/` | the follow-up engine and its detectors |
 | `lib/schemas/` | Zod schemas for JSONB fields. Read JSONB through these, never raw SQL paths |
 | `lib/auth/` | cookie-session admin gate, bearer operator gate, venue scope |
