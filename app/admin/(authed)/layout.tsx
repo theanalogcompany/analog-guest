@@ -1,7 +1,8 @@
 import { redirect } from 'next/navigation'
-import { AuthError, verifyAnalogAdminAccess } from '@/lib/auth'
+import { AuthError, devAuthBypass, verifyAnalogAdminAccess } from '@/lib/auth'
 import { createServerClient } from '@/lib/db/server'
 import { AdminShell } from '../_components/admin-shell'
+import { DevAuthBanner } from '../_components/dev-auth-banner'
 import { NotAuthorized } from '../_components/not-authorized'
 
 // Auth gate for the protected admin tree. Lives under a (authed) route
@@ -22,6 +23,18 @@ export default async function AuthedAdminLayout({
 }: {
   children: React.ReactNode
 }) {
+  // Local-dev bypass (lib/auth/dev-bypass.ts): triple-guarded, null anywhere
+  // but a developer's own `next dev` on localhost.
+  const bypass = await devAuthBypass()
+  if (bypass) {
+    return (
+      <AdminShell email="AUTH DISABLED - LOCAL DEV">
+        <DevAuthBanner />
+        {children}
+      </AdminShell>
+    )
+  }
+
   const supabase = await createServerClient()
   const {
     data: { session },

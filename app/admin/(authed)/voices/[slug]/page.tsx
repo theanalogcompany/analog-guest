@@ -1,5 +1,5 @@
 import { notFound, redirect } from 'next/navigation'
-import { AuthError, verifyAnalogAdminAccess } from '@/lib/auth'
+import { AuthError, devAuthBypass, verifyAnalogAdminAccess } from '@/lib/auth'
 import { createServerClient } from '@/lib/db/server'
 import { VoicesClient } from './voices-client'
 import { loadVoicePage } from './_lib/load-voice-page'
@@ -37,19 +37,26 @@ export default async function VoicePage({ params, searchParams }: PageProps) {
   const { slug } = await params
   const { guest } = await searchParams
 
-  const supabase = await createServerClient()
-  const {
-    data: { session },
-  } = await supabase.auth.getSession()
-  if (!session) redirect('/admin/sign-in')
-
   let venueScope: VenueScope
-  try {
-    const op = await verifyAnalogAdminAccess(session.user.id)
-    venueScope = op.venueScope
-  } catch (e) {
-    if (e instanceof AuthError && e.status === 403) redirect('/admin')
-    throw e
+  // Local-dev bypass (lib/auth/dev-bypass.ts): triple-guarded, null anywhere
+  // but a developer's own `next dev` on localhost.
+  const bypass = await devAuthBypass()
+  if (bypass) {
+    venueScope = bypass.venueScope
+  } else {
+    const supabase = await createServerClient()
+    const {
+      data: { session },
+    } = await supabase.auth.getSession()
+    if (!session) redirect('/admin/sign-in')
+
+    try {
+      const op = await verifyAnalogAdminAccess(session.user.id)
+      venueScope = op.venueScope
+    } catch (e) {
+      if (e instanceof AuthError && e.status === 403) redirect('/admin')
+      throw e
+    }
   }
 
   const data = await loadVoicePage({ slug, selectedGuestId: guest ?? null })

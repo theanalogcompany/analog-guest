@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { z } from 'zod'
 import type { Json } from '@/db/types'
-import { AuthError, verifyAnalogAdminAccess } from '@/lib/auth'
+import { AuthError, devAuthBypass, verifyAnalogAdminAccess } from '@/lib/auth'
 import { createAdminClient } from '@/lib/db/admin'
 import { createServerClient } from '@/lib/db/server'
 import {
@@ -62,22 +62,30 @@ export async function PUT(
   // ---- auth ----
   let operatorId: string
   let venueScope: VenueScope
-  try {
-    const supabaseSession = await createServerClient()
-    const {
-      data: { session },
-    } = await supabaseSession.auth.getSession()
-    if (!session) {
-      return NextResponse.json({ error: 'unauthorized' }, { status: 401 })
+  // Local-dev bypass (lib/auth/dev-bypass.ts): triple-guarded, null anywhere
+  // but a developer's own `next dev` on localhost.
+  const bypass = await devAuthBypass()
+  if (bypass) {
+    operatorId = bypass.operatorId
+    venueScope = bypass.venueScope
+  } else {
+    try {
+      const supabaseSession = await createServerClient()
+      const {
+        data: { session },
+      } = await supabaseSession.auth.getSession()
+      if (!session) {
+        return NextResponse.json({ error: 'unauthorized' }, { status: 401 })
+      }
+      const op = await verifyAnalogAdminAccess(session.user.id)
+      operatorId = op.operatorId
+      venueScope = op.venueScope
+    } catch (e) {
+      if (e instanceof AuthError) {
+        return NextResponse.json({ error: e.message }, { status: e.status })
+      }
+      return NextResponse.json({ error: 'auth check failed' }, { status: 500 })
     }
-    const op = await verifyAnalogAdminAccess(session.user.id)
-    operatorId = op.operatorId
-    venueScope = op.venueScope
-  } catch (e) {
-    if (e instanceof AuthError) {
-      return NextResponse.json({ error: e.message }, { status: e.status })
-    }
-    return NextResponse.json({ error: 'auth check failed' }, { status: 500 })
   }
 
   // ---- params + body ----

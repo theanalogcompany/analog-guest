@@ -143,6 +143,60 @@ export type Database = {
           },
         ]
       }
+      eval_judgments: {
+        Row: {
+          axes: Json
+          created_at: string
+          graph_version: number | null
+          guest_id: string | null
+          id: string
+          judge_version: string
+          message_id: string | null
+          prompt_version: string | null
+          source: string
+          venue_id: string
+        }
+        Insert: {
+          axes: Json
+          created_at?: string
+          graph_version?: number | null
+          guest_id?: string | null
+          id?: string
+          judge_version: string
+          message_id?: string | null
+          prompt_version?: string | null
+          source: string
+          venue_id: string
+        }
+        Update: {
+          axes?: Json
+          created_at?: string
+          graph_version?: number | null
+          guest_id?: string | null
+          id?: string
+          judge_version?: string
+          message_id?: string | null
+          prompt_version?: string | null
+          source?: string
+          venue_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "eval_judgments_guest_id_fkey"
+            columns: ["guest_id"]
+            isOneToOne: false
+            referencedRelation: "guests"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "eval_judgments_venue_id_fkey"
+            columns: ["venue_id"]
+            isOneToOne: false
+            referencedRelation: "venues"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       followup_log: {
         Row: {
           created_at: string
@@ -383,6 +437,96 @@ export type Database = {
           },
           {
             foreignKeyName: "guest_intention_prompts_venue_id_fkey"
+            columns: ["venue_id"]
+            isOneToOne: false
+            referencedRelation: "venues"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      guest_profiles: {
+        Row: {
+          guest_id: string
+          memory: Json
+          profile: Json
+          updated_at: string
+          venue_id: string
+        }
+        Insert: {
+          guest_id: string
+          memory?: Json
+          profile?: Json
+          updated_at?: string
+          venue_id: string
+        }
+        Update: {
+          guest_id?: string
+          memory?: Json
+          profile?: Json
+          updated_at?: string
+          venue_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "guest_profiles_guest_id_fkey"
+            columns: ["guest_id"]
+            isOneToOne: false
+            referencedRelation: "guests"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "guest_profiles_venue_id_fkey"
+            columns: ["venue_id"]
+            isOneToOne: false
+            referencedRelation: "venues"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      guest_relationship_states: {
+        Row: {
+          decided_by: string
+          entered_at: string
+          evidence: Json
+          exited_at: string | null
+          graph_version: number
+          guest_id: string
+          id: string
+          state_key: string
+          venue_id: string
+        }
+        Insert: {
+          decided_by: string
+          entered_at?: string
+          evidence?: Json
+          exited_at?: string | null
+          graph_version: number
+          guest_id: string
+          id?: string
+          state_key: string
+          venue_id: string
+        }
+        Update: {
+          decided_by?: string
+          entered_at?: string
+          evidence?: Json
+          exited_at?: string | null
+          graph_version?: number
+          guest_id?: string
+          id?: string
+          state_key?: string
+          venue_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "guest_relationship_states_guest_id_fkey"
+            columns: ["guest_id"]
+            isOneToOne: false
+            referencedRelation: "guests"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "guest_relationship_states_venue_id_fkey"
             columns: ["venue_id"]
             isOneToOne: false
             referencedRelation: "venues"
@@ -1728,6 +1872,82 @@ export type Database = {
           signature_verified?: boolean
         }
         Relationships: []
+      }
+      prompt_templates: {
+        Row: {
+          activated_at: string | null
+          created_at: string
+          id: string
+          status: string
+          template: string
+          venue_id: string | null
+          version: number
+        }
+        Insert: {
+          activated_at?: string | null
+          created_at?: string
+          id?: string
+          status?: string
+          template: string
+          venue_id?: string | null
+          version: number
+        }
+        Update: {
+          activated_at?: string | null
+          created_at?: string
+          id?: string
+          status?: string
+          template?: string
+          venue_id?: string | null
+          version?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "prompt_templates_venue_id_fkey"
+            columns: ["venue_id"]
+            isOneToOne: false
+            referencedRelation: "venues"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      relationship_graphs: {
+        Row: {
+          activated_at: string | null
+          created_at: string
+          graph: Json
+          id: string
+          status: string
+          venue_id: string
+          version: number
+        }
+        Insert: {
+          activated_at?: string | null
+          created_at?: string
+          graph: Json
+          id?: string
+          status?: string
+          venue_id: string
+          version: number
+        }
+        Update: {
+          activated_at?: string | null
+          created_at?: string
+          graph?: Json
+          id?: string
+          status?: string
+          venue_id?: string
+          version?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "relationship_graphs_venue_id_fkey"
+            columns: ["venue_id"]
+            isOneToOne: false
+            referencedRelation: "venues"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       transactions: {
         Row: {
