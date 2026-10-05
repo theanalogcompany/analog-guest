@@ -1793,6 +1793,34 @@ function formatOpenIntentions(
 }
 
 /**
+ * The once-ever review-ask block (v1.82.0). Rendered only when the runtime
+ * carries `reviewAsk`, which lib/agent/review-ask.ts sets on an eligible
+ * praise turn and nothing else sets, so this block cannot appear on a
+ * followup, decline, or holding turn by construction.
+ *
+ * The url is rendered verbatim from the venue's curated `venue_info.links`
+ * entry — the same string the url-detector's allowlist carries — so a model
+ * that copies it character for character always passes the link check. The
+ * closing "no other question" line is the prompt half of the one-ask-per-turn
+ * rule; composeReplyWithReviewAsk is the structural half.
+ */
+function formatReviewAsk(reviewAsk: { url: string; label: string }): string {
+  return [
+    '## Ask for a review',
+    '',
+    'This guest just said something genuinely good about their experience,',
+    'and they have never been asked for a review before. After answering',
+    'them in `body`, write the review invitation in the `reviewAsk` field.',
+    '',
+    `The only link you may use, exactly as written: ${reviewAsk.url}`,
+    '',
+    'Thank them for the kind words in your own way, invite them to share it',
+    'as a review if they feel like it, and include the link. Do not offer',
+    'anything in return. Do not ask the guest any other question this turn.',
+  ].join('\n')
+}
+
+/**
  * TAC-362: categories where no per-message emoji permission may render.
  *
  * Mirrors shouldRenderOpenIntentions / shouldRenderVisitHistory above, and
@@ -2045,6 +2073,15 @@ export function runtimeToProse(
       runtime.firstConversation === true,
     )
     if (block) blocks.push(block)
+  }
+
+  // The review-ask block occupies the same last-content-slot position the
+  // intentions block does, and the two never co-render: the eligibility
+  // predicate's flag empties renderableIntentions on a review-ask turn
+  // (lib/agent/review-ask.ts), so no turn ever carries two asks. The slot is
+  // TAC-519's measured one — asks raise from last position, not from third.
+  if (runtime.reviewAsk) {
+    blocks.push(formatReviewAsk(runtime.reviewAsk))
   }
 
   // TAC-362: last block in, so it is the most-proximate instruction before

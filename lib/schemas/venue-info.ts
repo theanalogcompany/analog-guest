@@ -253,10 +253,18 @@ export type VenueInfo = z.infer<typeof VenueInfoSchema>
  * The label is not decoration. It is what the model reads to decide whether a
  * link answers what the guest actually asked, so it should be phrased the way
  * a guest would ask for the thing ("Budan beans", "Shipping policy").
+ *
+ * `kind` marks an entry that a feature looks up by role rather than by label.
+ * 'review' is the venue's Google review deep link, which the review-ask flow
+ * finds via `findReviewLink`. The URL lives HERE rather than in a separate
+ * venue_info field because the allowlist is character-exact and derived
+ * exclusively from this list: a second stored copy drifting by one character
+ * would fire `unverified_url` on every eligible turn.
  */
 export interface VenueLink {
   label: string
   url: string
+  kind?: 'review'
 }
 
 /**
@@ -267,6 +275,10 @@ export interface VenueLink {
 const VenueLinkEntrySchema = z.object({
   label: z.string().trim().min(1),
   url: z.url(),
+  // A typo'd kind ("reviews") degrades the entry to a plain link: the URL
+  // STAYS on the allowlist and only the role lookup misses, so the failure
+  // mode is "feature quietly off", never "draft held" or "entry deleted".
+  kind: z.enum(['review']).optional().catch(undefined),
 })
 
 /**
@@ -309,7 +321,29 @@ export function parseVenueLinks(raw: unknown): VenueLink[] {
       })
       continue
     }
-    out.push({ label: parsed.data.label, url: parsed.data.url })
+    out.push({
+      label: parsed.data.label,
+      url: parsed.data.url,
+      ...(parsed.data.kind !== undefined ? { kind: parsed.data.kind } : {}),
+    })
   }
   return out
+}
+
+/**
+ * The venue's review link, if one is curated: the first entry marked
+ * `kind: 'review'`. More than one is a Studio editing mistake; the first wins
+ * deterministically and the duplicate is logged rather than guessed between.
+ */
+export function findReviewLink(links: VenueLink[]): VenueLink | null {
+  const marked = links.filter((l) => l.kind === 'review')
+  if (marked.length > 1) {
+    console.warn(
+      '[venue-info] multiple review links curated; using the first',
+      {
+        labels: marked.map((l) => l.label),
+      },
+    )
+  }
+  return marked[0] ?? null
 }

@@ -86,11 +86,14 @@ function fixedWarmCloseGeneration(text: string): GenerateMessageResult {
     arrivalCapture: {},
     cancelsCommitmentId: '',
     intentionQuestion: '',
+    // No model ran, so no review ask either; stated rather than omitted.
+    reviewAsk: '',
     // The close is not itself a report that a conversation closed: this IS the
     // close, and the marker was already claimed by the processor.
     closedTheConversation: false,
     intentionQuestionDuplicateStripped: false,
     intentionQuestionDroppedForBodyQuestion: false,
+    reviewAskDroppedForBodyQuestion: false,
     attempts: 0,
     attemptHistory: [],
     systemPrompt: '',
@@ -548,6 +551,9 @@ export async function handleFollowup(input: {
       // on, and this is the structural half of ruling 7's "one send, never
       // repeated": even a generated follow-up cannot loop.
       followUpWorthy: false,
+      // A synthetic classification praises nothing; the review ask is armed
+      // only by a real inbound praise turn (lib/agent/review-ask.ts).
+      praisedExperience: false,
     }
 
     // Load the static voice pack (decision 0008; span name kept for

@@ -277,6 +277,9 @@ export async function handleHoldingMessage(input: {
       // check back on. The guest's original inbound is classified on its own
       // turn and arms the follow-up there if it qualifies.
       followUpWorthy: false,
+      // A synthetic classification praises nothing; the review ask is armed
+      // only by a real inbound praise turn (lib/agent/review-ask.ts).
+      praisedExperience: false,
     }
 
     // Knowledge corpus: SKIPPED, unconditionally (TAC-367). A holding message
@@ -627,11 +630,16 @@ function buildFallbackGeneration(): GenerateMessageResult {
     // TAC-554: the fixed fallback holding line, with no generation behind
     // it, so there is no getting-to-know-you question to bubble.
     intentionQuestion: '',
+    // No generation behind it, so no review ask either; stated rather than
+    // omitted.
+    reviewAsk: '',
     // TAC-560: a holding message is never the warm close. It asserts nothing and closes nothing.
     closedTheConversation: false,
     intentionQuestionDuplicateStripped: false,
     // TAC-567: this path composes no question, so the gate never fired.
     intentionQuestionDroppedForBodyQuestion: false,
+    // This path composes no review ask, so that gate never fired either.
+    reviewAskDroppedForBodyQuestion: false,
     attempts: 0,
     attemptHistory: [],
     systemPrompt: '',

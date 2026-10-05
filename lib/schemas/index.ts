@@ -29,6 +29,7 @@ export {
   type VenueLink,
   VenueMenuSchema,
   parseVenueLinks,
+  findReviewLink,
   type VenueServices,
   VenueServicesSchema,
 } from './venue-info'

@@ -473,6 +473,53 @@ function formatIntentionPromptRaised(
   ].join('\n')
 }
 
+// The once-ever Google review ask (lib/agent/review-ask.ts).
+//
+// Two events, deliberately a denominator and a numerator:
+//   review_ask_raised — the eligibility predicate fired on an inbound turn.
+//     Every raise fires this, whatever the draft's fate (auto-send, queue,
+//     drop), so classifier precision on `praisedExperience` is measurable
+//     against what operators then approve or skip.
+//   review_ask_sent — the link actually reached the guest and the once-ever
+//     marker was stamped (or found already stamped by a racing run). This is
+//     the feature's true-positive history; a gate whose history cannot be
+//     produced is an unproven gate.
+// PostHog only, no Slack: neither is an anomaly, and the queue path already
+// Slack-relays through the ordinary card flow.
+export interface ReviewAskRaisedProps {
+  agentRunId: string
+  venueId: string
+  guestId: string
+  /** The curated link's label — which entry the predicate found. */
+  linkLabel: string
+  /** The inbound that read as praise, for judging the classifier's call. */
+  inboundBody: string
+}
+
+export async function captureReviewAskRaised(
+  props: ReviewAskRaisedProps,
+): Promise<void> {
+  await capturePostHogEvent('review_ask_raised', props.guestId, { ...props })
+}
+
+export interface ReviewAskSentProps {
+  /** Null on the operator dispatch path: that draft's run ended at queue time. */
+  agentRunId: string | null
+  /** Which send path delivered it. A third path has to decide, not inherit. */
+  via: 'auto_send' | 'operator_dispatch'
+  venueId: string
+  guestId: string
+  messageId: string
+  /** 'marked' = this write owns the once-ever stamp; 'already_marked' = a racing run beat it. */
+  outcome: 'marked' | 'already_marked'
+}
+
+export async function captureReviewAskSent(
+  props: ReviewAskSentProps,
+): Promise<void> {
+  await capturePostHogEvent('review_ask_sent', props.guestId, { ...props })
+}
+
 // TAC-380: the post-send intention recorder could not record normally. Both
 // outcomes Slack-relay, because both change what a guest will be asked:
 //   - closed_pessimistically: the classifier failed on every attempt, so every

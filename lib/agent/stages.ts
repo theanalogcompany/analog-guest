@@ -51,6 +51,7 @@ import {
 import {
   resolveCategoryPolicy,
   resolvePolicyDecision,
+  resolveReviewAskDisposition,
 } from '@/lib/schemas/approval-policy'
 import { parseVenueLinks } from '@/lib/schemas/venue-info'
 import { loadVoicePack, retrieveKnowledgeContext } from '@/lib/rag'
@@ -412,6 +413,16 @@ export const APPROVAL_TRIGGERS = {
   // an operator a cancellation was caught on a turn where nothing was caught
   // is the wrong-reason-copy problem.
   PROSE_CANCELLATION_CHECK_FAILED: 'prose_cancellation_check_failed',
+  // The once-ever Google review ask (lib/agent/review-ask.ts). Fires when the
+  // draft carries a composed review ask AND the venue's approval_policy says
+  // asks queue (resolveReviewAskDisposition; the code default is queue,
+  // fleet-wide). NOT a risk finding: this is an expected, policy-driven
+  // queue — the launch posture is every ask in front of an operator until
+  // the praise classifier's precision is proven on real traffic, and the
+  // flip to auto-send is one Studio JSONB edit ("reviewAsk": "auto_send"),
+  // no deploy. The link itself is independently safe either way: it is on
+  // the curated allowlist or UNVERIFIED_URL fires.
+  REVIEW_ASK: 'review_ask',
 } as const
 
 /**
@@ -566,6 +577,14 @@ export const PRIMARY_TRIGGER_PRIORITY = [
   // the other check-failed trigger: it reports an ABSENCE of signal, so any
   // concrete co-firing finding is the more useful operator label.
   APPROVAL_TRIGGERS.PROSE_CANCELLATION_CHECK_FAILED,
+  // The review ask is an expected, policy-driven queue, not a risk finding —
+  // every claim-about-this-draft trigger above keeps its label on a co-fire
+  // (a co-firing comp still reads as a comp). It sits ABOVE the two
+  // venue-wide policy signals because on the overwhelmingly common ask-only
+  // turn, "this asks for a review, your call" is the decision the card
+  // actually puts in front of the operator, and it is more specific than a
+  // category route or a blanket hold.
+  APPROVAL_TRIGGERS.REVIEW_ASK,
   // v1.24.0: category routing is a POLICY signal, not a claim about this
   // draft. Every trigger above names a concrete risk in the specific message
   // and should carry the operator-facing label instead. Ranked above
@@ -688,6 +707,10 @@ export async function classifyStage(
     // are. Whether our answer is the kind a guest acts on is a fact about what
     // they wrote, not about how confident the category call was.
     followUpWorthy: r.data.followUpWorthy,
+    // Passed through unmodified, for the same reason the three above are.
+    // Whether the guest praised their experience is a fact about what they
+    // wrote, not about how confident the category call was.
+    praisedExperience: r.data.praisedExperience,
     // Passed through unmodified so the orchestrator can price the `classify`
     // generation in Langfuse. These describe the call that was made, so the
     // confidence reroute above must not touch them.
@@ -1986,6 +2009,23 @@ export async function applyApprovalPolicyStage(
     })
   }
 
+  // Trigger 10c: the once-ever Google review ask. The draft carries a
+  // composed ask (non-empty only when the `## Ask for a review` block
+  // genuinely rendered — composeReplyWithReviewAsk normalizes an un-offered
+  // emission to ''), and the venue's policy says asks queue, which is the
+  // code default fleet-wide. Flipping a venue to auto-send is a Studio edit
+  // of approval_policy.reviewAsk; no category scoping, because the ask is
+  // not a category (see the schema field's comment). The demo-guest bypass
+  // below overrides this like every trigger, which is the intended
+  // on-device test path.
+  if (
+    generation.reviewAsk !== '' &&
+    resolveReviewAskDisposition(ctx.venue.approvalPolicy) ===
+      'operator_approval'
+  ) {
+    triggers.push(APPROVAL_TRIGGERS.REVIEW_ASK)
+  }
+
   // Trigger 11 (TAC-355): independent mechanic-offer verification backstop.
   // Fires on 'flagged' (the check found a gated mechanic offered) OR
   // 'check_failed' (the check errored/timed out/didn't parse) — fail CLOSED.
@@ -2702,6 +2742,7 @@ function renderedIntentionLines(ctx: RuntimeContext): string[] | undefined {
     ctx.openIntentions,
     ctx.classification?.category ?? null,
     ctx.pendingQuestion !== null,
+    ctx.reviewAsk !== null,
   )
   return rendered.length > 0 ? rendered.map((o) => o.promptLine) : undefined
 }
@@ -2892,6 +2933,12 @@ export function buildAiRuntime(
     // TAC-386: undefined rather than null on every other turn, matching how the
     // optional RuntimeContext fields around it read.
     inquiryFollowup: ctx.inquiryFollowup ?? undefined,
+    // The once-ever review ask. Set only by handle-inbound's eligibility
+    // predicate (lib/agent/review-ask.ts); null → undefined so the serializer
+    // omits the `## Ask for a review` block and composeReplyWithReviewAsk
+    // reads "not offered". Never co-present with a non-empty openIntentions —
+    // renderableIntentions above vetoes the block when this is set.
+    reviewAsk: ctx.reviewAsk ?? undefined,
     // TAC-362: this message's emoji call. undefined for the policies that
     // don't vary (never, sparingly) — the serializer then renders no block.
     emojiDirective,

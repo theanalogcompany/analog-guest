@@ -535,6 +535,7 @@ async function main(): Promise<void> {
           crisisSafety: false,
           correctsPendingReply: false,
           followUpWorthy: false,
+          praisedExperience: false,
         },
       }
 
@@ -598,6 +599,7 @@ async function main(): Promise<void> {
           ctx.openIntentions,
           ctx.classification?.category ?? null,
           ctx.pendingQuestion !== null,
+          ctx.reviewAsk !== null,
         )
         row.renderedBlock = rendered.length > 0
 

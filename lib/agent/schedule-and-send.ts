@@ -33,7 +33,7 @@ import {
   type SlotDropReason,
   type PendingRowsBySlot,
 } from './pending-slots'
-import { intentionTailFor, resolveDispatchBubbles } from './sentence-split'
+import { resolveDispatchBubbles, resolveOutboundTail } from './sentence-split'
 import { INTER_BUBBLE_GAP_MS, collapseToSingleMessage } from './split-message'
 import type { RuntimeContext } from './types'
 
@@ -476,11 +476,14 @@ export async function scheduleAndSend(
   // on this path.
   // TAC-554: the getting-to-know-you question rides as its own last message,
   // gated on the intentions block having actually rendered this turn. '' means
-  // this is exactly the call it was before TAC-554.
+  // this is exactly the call it was before TAC-554. resolveOutboundTail picks
+  // the review ask over the intention question; at most one is non-empty by
+  // construction (the review-ask turn suppresses the intentions block).
   const bubbles = resolveDispatchBubbles(
     generation.body,
     options.rng ?? Math.random,
-    intentionTailFor(
+    resolveOutboundTail(
+      generation.reviewAsk,
       generation.intentionQuestion,
       options.renderedIntentions?.length ?? 0,
     ),

@@ -32,6 +32,7 @@ import {
   captureCommitmentCancelled,
   captureIntentionPromptRaised,
   captureIntentionPromptRecordingFailed,
+  captureReviewAskSent,
 } from '@/lib/analytics/posthog'
 import { createAdminClient } from '@/lib/db/admin'
 import {
@@ -41,6 +42,8 @@ import {
 import { sendMessage } from '@/lib/messaging/send'
 import { logger } from '@/lib/observability/logger'
 import {
+  findReviewLink,
+  parseVenueLinks,
   PendingCancellationSchema,
   PendingCommitmentSchema,
 } from '@/lib/schemas'
@@ -54,6 +57,7 @@ import {
 // TAC-385 PR 1: imported BY PATH, not through a barrel.
 import { parseRenderedIntentionsForRecording } from '@/lib/agent/intentions/rendered'
 import { recordIntentionPrompts } from '@/lib/agent/intentions/record'
+import { bodyContainsReviewLink, markReviewAsked } from '@/lib/agent/review-ask'
 import { bearerAllowsVenue, type VenueScope } from '@/lib/auth/venue-scope'
 
 export type DispatchAction = 'approve' | 'edit'
@@ -667,6 +671,75 @@ export async function dispatchOperatorOutbound(
         }),
     )
   }
+
+  // ---- 9. The once-ever review-ask stamp ----
+  //
+  // Judged against `sendBody`, THE DISPATCHED TEXT, never `row.body` — the
+  // step-8 mechanism verbatim: an operator who edited the link OUT does not
+  // stamp (guest stays eligible), and one who typed it INTO any draft does.
+  // The link is re-resolved from venue_configs here because the queued row
+  // does not carry it; one read on an operator tap, not on a guest-facing
+  // path.
+  //
+  // waitUntil and wrapped, like step 8 and for the same reason: the guest
+  // already has the message, so neither a config read nor a marker write may
+  // reject a dispatch that already succeeded. A failed stamp is a possible
+  // second ask later — logged, never a 500 on the approve tap.
+  waitUntil(
+    (async () => {
+      const { data: configRow, error: configErr } = await supabase
+        .from('venue_configs')
+        .select('venue_info')
+        .eq('venue_id', row.venue_id)
+        .maybeSingle()
+      if (configErr) {
+        logger.warn('[operator] review-ask stamp: venue_info unreadable', {
+          messageId: row.id,
+          error: configErr.message,
+        })
+        return
+      }
+      const links = parseVenueLinks(
+        configRow?.venue_info !== null &&
+          typeof configRow?.venue_info === 'object' &&
+          'links' in configRow.venue_info
+          ? (configRow.venue_info as { links?: unknown }).links
+          : undefined,
+      )
+      const reviewLink = findReviewLink(links)
+      if (reviewLink === null) return
+      if (!bodyContainsReviewLink(sendBody, reviewLink.url)) return
+      const marked = await markReviewAsked({
+        venueId: row.venue_id,
+        guestId: row.guest_id,
+        now: new Date(),
+      })
+      if (!marked.ok) {
+        logger.warn(
+          '[operator] review-ask marker write failed; guest may be asked again',
+          { messageId: row.id, error: marked.error },
+        )
+        return
+      }
+      await captureReviewAskSent({
+        agentRunId: null,
+        via: 'operator_dispatch',
+        venueId: row.venue_id,
+        guestId: row.guest_id,
+        messageId: row.id,
+        outcome: marked.data,
+      })
+      logger.info('[operator] review ask sent', {
+        messageId: row.id,
+        outcome: marked.data,
+      })
+    })().catch((e) => {
+      logger.error('[operator] review-ask stamp threw unexpectedly', {
+        messageId: row.id,
+        error: e instanceof Error ? e.message : String(e),
+      })
+    }),
+  )
 
   return {
     ok: true,

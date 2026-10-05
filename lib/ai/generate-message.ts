@@ -306,6 +306,20 @@ export const GeneratedMessageSchema = z.object({
   // sits at 20 against a repo budget of 22, and
   // a required string costs zero.
   intentionQuestion: z.string(),
+  // The review invitation this reply is making, alone, and NOT in `body`.
+  // Empty string on every turn the runtime context carries no `## Ask for a
+  // review` block, which is almost every turn.
+  //
+  // Same mechanism as intentionQuestion above, one field over:
+  // composeReplyWithReviewAsk CONCATENATES it back onto the body, so `body`
+  // stays the complete reply and every backstop — including the unverified-url
+  // detector, which is what verifies the link the ask carries — still reads
+  // it. Dispatch peels it off as its own last bubble.
+  //
+  // A BARE REQUIRED STRING, the intentionQuestion reasoning verbatim:
+  // Anthropic counts only optionals against the 24-property cap and a
+  // required string costs zero.
+  reviewAsk: z.string(),
 })
 
 /**
@@ -462,6 +476,81 @@ export function composeReplyWithIntention(
 }
 
 /**
+ * Join the reply and the review invitation, mirroring
+ * composeReplyWithIntention one seam later. A MIRROR, not a generalization:
+ * the two gates differ in kind (rendered-intentions count there, an
+ * offered-flag here), and one N-tail composer over both would couple them.
+ * Bounded, stated duplication — the hasRenderableContent reasoning.
+ *
+ * Runs on the ALREADY-COMPOSED body, which is what makes the precedence
+ * structural: a surviving intention question put a `?` into the body, so the
+ * review ask drops and the order can never invert. (In practice the two never
+ * co-render — the review-ask turn suppresses the intentions block — so this
+ * is belt.)
+ *
+ * `offered` is whether the runtime actually carried the `## Ask for a review`
+ * block this turn. When false, ANY emission is normalized to '' — a followup
+ * or decline turn can never grow a review ask the prompt never offered, no
+ * matter what the model hallucinates into the field.
+ */
+export function composeReplyWithReviewAsk(
+  rawBody: string,
+  rawAsk: string,
+  offered: boolean,
+): {
+  body: string
+  reviewAsk: string
+  duplicateStripped: boolean
+  droppedForBodyQuestion: boolean
+} {
+  const answerIn = replaceDashes(rawBody)
+  const ask = replaceDashes(rawAsk)
+
+  if (!offered || ask.trim() === '' || !hasRenderableContent(ask)) {
+    return {
+      body: answerIn,
+      reviewAsk: '',
+      duplicateStripped: false,
+      droppedForBodyQuestion: false,
+    }
+  }
+
+  const answer = stripTrailingDuplicate(answerIn, ask)
+  const duplicateStripped = answer !== answerIn
+
+  // The model put the whole reply in the field, or the answer was nothing but
+  // a repeat of the ask. One message, which is the ask.
+  if (answer.trim() === '') {
+    return {
+      body: ask,
+      reviewAsk: ask,
+      duplicateStripped,
+      droppedForBodyQuestion: false,
+    }
+  }
+
+  // Never two asks in one turn — TAC-567's rule, applied to this tail. The
+  // reply keeps its own question; nothing is stamped (the guest only stops
+  // being eligible when the link actually reaches them), so the failure
+  // direction is an invitation extended later, never two asks at once.
+  if (answer.includes('?')) {
+    return {
+      body: answer,
+      reviewAsk: '',
+      duplicateStripped,
+      droppedForBodyQuestion: true,
+    }
+  }
+
+  return {
+    body: `${answer} ${ask}`,
+    reviewAsk: ask,
+    duplicateStripped,
+    droppedForBodyQuestion: false,
+  }
+}
+
+/**
  * Generate an outbound message in the venue's voice.
  *
  * Calls the model up to MAX_ATTEMPTS (3) times, retrying only on a self-talk
@@ -537,6 +626,7 @@ export async function generateMessage(
       arrivalCapture: z.infer<typeof ArrivalCaptureEmissionSchema>
       cancelsCommitmentId: string
       intentionQuestion: string
+      reviewAsk: string
       closedTheConversation: boolean
     } | null = null
     const attemptHistory: GenerateMessageAttempt[] = []
@@ -593,6 +683,9 @@ export async function generateMessage(
     let duplicateStripped = false
     // TAC-567: whether the two-question gate fired on the shipped attempt.
     let droppedForBodyQuestion = false
+    // Whether the one-ask-per-turn gate dropped the review ask on the shipped
+    // attempt. Same per-attempt assignment discipline as the two flags above.
+    let reviewAskDropped = false
     // Order-preserving and deduped, so a link flagged on attempt 1 is still
     // named on attempt 3 alongside anything new attempt 2 invented.
     const unverifiedUrlsSeen: string[] = []
@@ -701,14 +794,36 @@ export async function generateMessage(
           '[ai] generateMessage: dropped the intention question, the reply already asked one',
         )
       }
+      // The review-ask compose runs on the ALREADY-COMPOSED body, which is
+      // what makes the precedence structural (a surviving intention question
+      // is a `?` in the body, so the ask drops) — and it runs BEFORE the URL
+      // check below, so findUnverifiedUrls judges the body WITH the ask's
+      // link in it.
+      const withAsk = composeReplyWithReviewAsk(
+        composed.body,
+        rawObject.reviewAsk,
+        input.runtime.reviewAsk != null,
+      )
+      if (withAsk.duplicateStripped) {
+        console.warn(
+          '[ai] generateMessage: stripped a duplicated review ask from the answer',
+        )
+      }
+      if (withAsk.droppedForBodyQuestion) {
+        console.warn(
+          '[ai] generateMessage: dropped the review ask, the reply already asked a question',
+        )
+      }
       const object = {
         ...rawObject,
-        body: composed.body,
+        body: withAsk.body,
         intentionQuestion: composed.intentionQuestion,
+        reviewAsk: withAsk.reviewAsk,
       }
       lastResult = object
       duplicateStripped = composed.duplicateStripped
       droppedForBodyQuestion = composed.droppedForBodyQuestion
+      reviewAskDropped = withAsk.droppedForBodyQuestion
       attemptHistory.push({
         body: object.body,
         requiresOperatorApproval: object.requiresOperatorApproval,
@@ -720,6 +835,7 @@ export async function generateMessage(
         arrivalCapture: object.arrivalCapture,
         cancelsCommitmentId: object.cancelsCommitmentId,
         intentionQuestion: object.intentionQuestion,
+        reviewAsk: object.reviewAsk,
         closedTheConversation: object.closedTheConversation,
         userPromptOverride:
           userPromptForAttempt !== userPrompt
@@ -805,6 +921,14 @@ export async function generateMessage(
         // Carried for the same reason as the line above: it edits guest-facing
         // text, so its firing rate has to be countable rather than inferred.
         intentionQuestionDroppedForBodyQuestion: droppedForBodyQuestion,
+        // The exact tail of `body` when non-empty, the intentionQuestion
+        // identity one field over. Dispatch peels it off as its own last
+        // bubble; '' means this turn carries no review ask.
+        reviewAsk: lastResult.reviewAsk,
+        // Whether the one-ask-per-turn gate dropped the review ask this turn.
+        // Countable for the same reason the two intention flags are; nothing
+        // is stamped on a drop, so the guest stays eligible.
+        reviewAskDroppedForBodyQuestion: reviewAskDropped,
         attempts,
         attemptHistory,
         systemPrompt,

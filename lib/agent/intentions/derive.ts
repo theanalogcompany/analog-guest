@@ -811,6 +811,13 @@ export function applyCurrentTurnSuppression(
  * - A pending knowledge-gap question (ruling 6): the venue owes the guest an
  *   answer before it asks anything new. This burns a turn, not the intention —
  *   a suppressed intention is never recorded, so it stays open.
+ * - A raised review ask (`reviewAskRaised`): the once-ever review invitation
+ *   takes this turn's one ask, so the intentions block never co-renders with
+ *   the `## Ask for a review` block and no turn carries two asks. Same
+ *   cost shape as the pending-question case: one turn, never the intention —
+ *   nothing is recorded, so everything comes back open next turn. Putting the
+ *   veto HERE is what keeps the prompt mapper and the recording gate in step
+ *   by construction rather than by two call sites agreeing.
  *
  * A null category (no classification yet) suppresses nothing here; the
  * serializer keeps its own opt_out check as a second line of defence.
@@ -819,11 +826,13 @@ export function renderableIntentions(
   open: readonly OpenIntention[],
   category: MessageCategory | null,
   hasPendingQuestion: boolean,
+  reviewAskRaised: boolean,
 ): OpenIntention[] {
   if (
     category === 'opt_out' ||
     category === 'comp_complaint' ||
-    hasPendingQuestion
+    hasPendingQuestion ||
+    reviewAskRaised
   )
     return []
   return [...open]

@@ -90,8 +90,8 @@ import {
   persistOrRegenQueuedDraft,
 } from './schedule-and-send'
 import {
-  intentionTailFor,
   resolveDispatchBubbles,
+  resolveOutboundTail,
   splitIntoSentences,
 } from './sentence-split'
 import {
@@ -521,8 +521,10 @@ export async function dispatchInstagramReply(
   const deps: InstagramDispatchDeps = { ...defaultDeps(), ...injected }
   const reply = collapseToSingleMessage(generation.body)
   // TAC-554: same gate and same tail as the text arm, through the one shared
-  // helper so the two arms cannot disagree about when a question bubbles.
-  const intentionTail = intentionTailFor(
+  // helper so the two arms cannot disagree about when a question bubbles —
+  // or, since the review ask landed, about which tail a turn carries.
+  const intentionTail = resolveOutboundTail(
+    generation.reviewAsk,
     generation.intentionQuestion,
     options.renderedIntentions?.length ?? 0,
   )

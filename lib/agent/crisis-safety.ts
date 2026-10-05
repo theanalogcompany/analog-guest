@@ -75,11 +75,17 @@ export function buildCrisisSafetyResult(): GenerateMessageResult {
     // extra. Stated rather than omitted — the field is required for exactly
     // this reason.
     intentionQuestion: '',
+    // The crisis reply never carries a review ask, for the same reason it
+    // carries no question. Stated rather than omitted — the field is
+    // required for exactly this reason.
+    reviewAsk: '',
     // TAC-560: a fixed crisis reply is never the warm close.
     closedTheConversation: false,
     intentionQuestionDuplicateStripped: false,
     // TAC-567: this path composes no question, so the gate never fired.
     intentionQuestionDroppedForBodyQuestion: false,
+    // This path composes no review ask, so that gate never fired either.
+    reviewAskDroppedForBodyQuestion: false,
     attempts: 1,
     attemptHistory: [
       {
@@ -93,6 +99,7 @@ export function buildCrisisSafetyResult(): GenerateMessageResult {
         arrivalCapture: {},
         cancelsCommitmentId: '',
         intentionQuestion: '',
+        reviewAsk: '',
         // TAC-560: a fixed crisis reply is never the warm close.
         closedTheConversation: false,
       },

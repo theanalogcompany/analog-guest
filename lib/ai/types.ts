@@ -405,6 +405,16 @@ export type RuntimeContext = {
   // this message CANCELS the promise it is being shown, and inviting the guest
   // over for something the same message withdraws is the failure it prevents.
   isOperatorDecline?: boolean
+  // Set only on an inbound praise turn that passed every condition of the
+  // once-ever review-ask predicate (lib/agent/review-ask.ts): the serializer
+  // renders an `## Ask for a review` block in the slot the intentions block
+  // occupies (the two never co-render — the predicate's flag suppresses
+  // renderableIntentions), and composeReplyWithReviewAsk gates the model's
+  // `reviewAsk` emission on this being present, so a turn that was never
+  // offered the ask can never grow one. The url is copied verbatim from the
+  // venue's curated `venue_info.links` entry, so the composed body always
+  // passes the allowlist check.
+  reviewAsk?: { url: string; label: string }
 }
 
 /**
@@ -525,6 +535,10 @@ export type GenerateMessageAttempt = {
   // TAC-554: this attempt's getting-to-know-you question, already composed
   // onto `body`. Kept per attempt so a trace shows what each one asked.
   intentionQuestion: string
+  // This attempt's review invitation, already composed onto `body` (same
+  // seam, same identity-by-construction as intentionQuestion). '' on every
+  // turn the runtime offered no ask, which is almost all of them.
+  reviewAsk: string
   /**
    * TAC-560: did this reply close the guest's first conversation, in the way the
    * venue's own voice rules describe? Required, so it costs nothing against the
@@ -639,6 +653,24 @@ export type GenerateMessageResult = {
    * card) say `false` because they never compose a question at all.
    */
   intentionQuestionDroppedForBodyQuestion: boolean
+  // The review invitation this reply carries, and the exact TAIL of `body` —
+  // composeReplyWithReviewAsk joined them, the TAC-554 identity-by-construction
+  // verbatim. '' on every turn the runtime offered no ask (which is almost all)
+  // and on every turn the one-ask-per-turn gate dropped it. Dispatch peels it
+  // off as its own last bubble; `body` stays the complete reply every backstop
+  // reads — including the url-detector, which is what verifies the link.
+  //
+  // REQUIRED, the cancelsCommitmentId reasoning verbatim: the paths with no
+  // generation behind them must SAY '' rather than omit it.
+  reviewAsk: string
+  /**
+   * Whether the one-ask-per-turn gate dropped this turn's review invitation
+   * because the reply already asked a question. Same countability contract as
+   * the two intention flags above: the gate removes guest-facing text the
+   * model meant to send, so its firing rate is reported rather than silent.
+   * Nothing is stamped on a dropped ask, so the guest stays eligible.
+   */
+  reviewAskDroppedForBodyQuestion: boolean
   attempts: number
   // Per-attempt body + flags, in attempt order. Surfaced for trace
   // observability (THE-216) so each `generate.attempt_N` span can carry the
@@ -789,6 +821,13 @@ export type ClassifyMessageResult = {
   // `inquiry_followups` row a few venue-hours later; false is the only value
   // that reaches anything for every other message.
   followUpWorthy: boolean
+  // Independent of category. True when the guest expresses genuine, specific
+  // enthusiasm about something they got or experienced at the venue. Read by
+  // handle-inbound.ts as one condition of the once-ever Google review ask
+  // (lib/agent/review-ask.ts); false for bare thanks, anticipation, and any
+  // message that also reports a problem - the classifier prompt prefers false
+  // when unsure because the ask it arms comes once per guest ever.
+  praisedExperience: boolean
 }
 
 export type AIResult<T> =
