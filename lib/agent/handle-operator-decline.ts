@@ -213,6 +213,9 @@ export async function handleOperatorDecline(input: {
       // TAC-386: a decline is the venue saying no, which is not help the guest
       // then acts on.
       followUpWorthy: false,
+      // A synthetic classification praises nothing; the review ask is armed
+      // only by a real inbound praise turn (lib/agent/review-ask.ts).
+      praisedExperience: false,
     }
 
     // Voice corpus — fail-CLOSED. A decline still needs to be in the venue's

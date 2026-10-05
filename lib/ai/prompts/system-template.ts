@@ -2101,7 +2101,23 @@ import {
 //      answer to a guest who sincerely asks, which the model gave anyway,
 //      contradicting its own rule. The trailing clause is dropped with it.
 //
-export const PROMPT_VERSION = 'v1.81.0'
+// v1.82.0: the once-ever Google review ask. A new `# Asking for a review`
+//   emission section (adjacent to `# Getting-to-know-you questions`, the same
+//   field-not-prose contract), a required `reviewAsk` string on the generation
+//   schema, and a per-turn `## Ask for a review` user-prompt block rendered
+//   only on an eligible praise turn (lib/agent/review-ask.ts owns the
+//   predicate; the classifier gained the independent `praisedExperience`
+//   boolean in the same change). The ask composes onto `body` at the TAC-554
+//   seam (composeReplyWithReviewAsk) and dispatch peels it off as its own last
+//   bubble. The intentions block never co-renders with the review block, so
+//   no turn carries two asks.
+//
+//   BASELINE RESET. Any scenario-harness diff across this bump is a baseline
+//   reset, not a regression: the classify contract gained a boolean and the
+//   generate schema gained a field, so routing and attempt counts can move
+//   for reasons unrelated to what a harness is grading.
+//
+export const PROMPT_VERSION = 'v1.82.0'
 
 export const SYSTEM_TEMPLATE = `You work at a hospitality venue (cafe, bakery, restaurant). You communicate with its guests via iMessage, in whatever voice the venue has configured below — its own collective voice, its owner's, or a named staff member's.
 
@@ -2261,6 +2277,14 @@ guest a moment after the reply, as a separate message. Anything the listed line
 asks you to put in front of it, such as a softener, belongs in here with it.
 
 Emit "" when you are not asking. Most turns emit "".
+
+# Asking for a review
+
+\`reviewAsk\` is for one specific moment: when the runtime context contains a \`## Ask for a review\` block, write a short, warm invitation to leave the venue a review there, in the venue's voice, and put it in \`reviewAsk\`, NOT in \`body\`. \`body\` stays the reply on its own, complete without it; the invitation is sent to the guest a moment later as its own message.
+
+The block gives you the exact link. Copy it character for character. One or two short sentences plus the link, nothing more. Never offer, promise, or hint at anything in return for a review, and never pressure. It is an invitation they can ignore.
+
+Emit "" when there is no \`## Ask for a review\` block, which is almost every turn.
 
 # Universal voice rules
 These apply to every venue, on top of the venue-specific voice imperative below. When in doubt, follow these.

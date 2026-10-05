@@ -201,6 +201,32 @@ export function intentionTailFor(
 }
 
 /**
+ * The ONE tail this turn's dispatch peels off: the review ask when the turn
+ * carries one, otherwise the intention question through its own gate above.
+ *
+ * One implementation for both dispatch arms, the intentionTailFor reasoning
+ * verbatim: two copies of this precedence is the drift this module exists to
+ * prevent. At most one of the two inputs is non-empty by construction — a
+ * review-ask turn suppresses the intentions block (renderableIntentions), and
+ * composeReplyWithReviewAsk drops the ask when the body already carries a
+ * question — so the ordering here is belt, not a live choice.
+ *
+ * `reviewAsk` needs no renderedCount-style gate: composeReplyWithReviewAsk
+ * already normalizes an un-offered emission to '', so a non-empty value here
+ * means the `## Ask for a review` block genuinely rendered. Takes primitives
+ * so this module stays import-free.
+ */
+export function resolveOutboundTail(
+  reviewAsk: string,
+  intentionQuestion: string,
+  renderedCount: number,
+): string {
+  return reviewAsk !== ''
+    ? reviewAsk
+    : intentionTailFor(intentionQuestion, renderedCount)
+}
+
+/**
  * The one entry point dispatch calls: body in, bubbles out.
  *
  * `rng` must return a number in [0, 1). It is a required parameter here so no

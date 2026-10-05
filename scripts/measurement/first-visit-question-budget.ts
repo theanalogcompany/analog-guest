@@ -474,6 +474,7 @@ async function main(): Promise<void> {
           // counter conversation, and rendering it would put a second authority on
           // what to ask into a run measuring exactly that.
           followUpWorthy: false,
+          praisedExperience: false,
         },
       }
 
@@ -537,6 +538,7 @@ async function main(): Promise<void> {
           ctx.openIntentions,
           ctx.classification?.category ?? null,
           ctx.pendingQuestion !== null,
+          ctx.reviewAsk !== null,
         )
         turnRow.renderedKeys = rendered.map((r) => r.key)
 

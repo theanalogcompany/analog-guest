@@ -105,7 +105,7 @@ reply.
 ## Approval gates
 
 `applyApprovalPolicyStage(ctx, generation, mechanicOffer?, prosePromise?, ...)`
-returns `send`, `queue`, `drop`, or `silence`. **Nineteen triggers compose; any one
+returns `send`, `queue`, `drop`, or `silence`. **Twenty triggers compose; any one
 queues.** The set is `APPROVAL_TRIGGERS`; check it against the constant, never against a
 list in prose.
 
@@ -120,7 +120,7 @@ knowledge_gap > comp_regex_backstop > model_flagged >
 closed_venue_arrival_emitted > closed_venue_arrival_backstop > unverified_url >
 self_talk_detected > complaint_commitment_floor > previous_pending_held >
 prose_promise_check_failed > prose_cancellation_check_failed >
-category_requires_approval > hold_all_outbound
+review_ask > category_requires_approval > hold_all_outbound
 ```
 
 The shape of that order: a claim about **this draft** beats an **absence** of information

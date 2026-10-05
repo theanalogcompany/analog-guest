@@ -143,6 +143,8 @@ export const REASON_BY_REVIEW_REASON = {
   // Generic on purpose: the trigger is generic. The complaint case it routes
   // today is carried by COMPLAINT_REASON instead, off the category.
   [APPROVAL_TRIGGERS.CATEGORY_REQUIRES_APPROVAL]: 'held for review',
+  // The once-ever Google review ask, queue-first at launch.
+  [APPROVAL_TRIGGERS.REVIEW_ASK]: 'review ask, your call',
   [APPROVAL_TRIGGERS.HOLD_ALL_OUTBOUND]: 'needs review',
   [GENERATION_FAILED_REVIEW_REASON]: "couldn't write it",
   [INSTAGRAM_SEND_FAILED_REASON]: "didn't send",

@@ -4,7 +4,7 @@
  * `classify-message.ts`.
  *
  * WHY. Classification is the measured 2.5s p50 / 3.6s p90 of the inbound hot
- * path, and it is a pure decision task: a 13-way category pick and two
+ * path, and it is a pure decision task: a 13-way category pick and three
  * booleans. Jev answers typed questions with calibrated probabilities in one
  * parallel pass (~150-250ms measured from this codebase's network), and its
  * confidence is trained calibration rather than a model's self-report - which
@@ -50,11 +50,12 @@ import { checkTypesafeEnv } from './typesafe-env'
 
 export const JEV_CLASSIFICATION_ENABLED = true
 
+// jev-v1.2.0: added the `praise` noul behind the once-ever Google review ask.
 // jev-v1.1.0: crisis question gained explicit true/false criteria carrying
 // the prefer-true-on-ambiguity asymmetry. v1.0.0 scored an ambiguous "I want
 // to end it soon" at p(yes)=0.06 - it read "end it" as ending the
 // conversation - and the fixture eval's zero-false-negative ceiling caught it.
-export const CLASSIFY_JEV_PROMPT_VERSION = 'jev-v1.1.0'
+export const CLASSIFY_JEV_PROMPT_VERSION = 'jev-v1.2.0'
 
 export const TYPESAFE_SYSTEMONE_URL = 'https://api.typesafe.ai/v1/systemone'
 export const JEV_MODEL = 'jev-latest'
@@ -79,6 +80,16 @@ export const JEV_CRISIS_THRESHOLD = 0.2
  * wrongly-false one only means a second, separate reply.
  */
 export const JEV_CORRECTS_PENDING_THRESHOLD = 0.75
+
+/**
+ * P(yes) at or above this sets praisedExperience. High on purpose, the same
+ * posture as correctsPending: a wrongly-true value spends the once-ever
+ * review ask on a lukewarm message, a wrongly-false one just waits for the
+ * guest's next praise. Provisional until the replay eval measures the praise
+ * noul's distribution (`scripts/measurement/jev-classify-eval.ts`); move it
+ * on that evidence, not on argument.
+ */
+export const JEV_PRAISE_THRESHOLD = 0.75
 
 /** The classifier's 13 inbound categories. Must match the Haiku enum exactly. */
 export const CLASSIFIER_CATEGORIES = [
@@ -156,6 +167,20 @@ const CRISIS_CRITERIA = {
     'The message is clearly innocuous, including hyperbole and idiom that merely borrow this language ("this coffee is to die for", "dying to try this place", "I\'m dying laughing", "a matter of life and death" about something trivial). A false negative misses a guest who needs help, so only choose false when the innocuous reading is the only plausible one.',
 } as const
 
+const PRAISE_INSTRUCTIONS =
+  'Does `inbound_message` express genuine, specific enthusiasm about something the guest got or experienced at the venue: an item they ordered ("that croissant was unreal", "best latte I have had in ages"), a visit ("we had such a great time today"), or the service or space itself ("you guys are the best", "love this place")?'
+
+/**
+ * The noul's true/false criteria carry the Haiku paragraph's prefer-false
+ * asymmetry (the inverse of CRISIS_CRITERIA's prefer-true): the ask this flag
+ * arms is once per guest ever, so an unclear signal belongs to FALSE.
+ */
+const PRAISE_CRITERIA = {
+  true: 'The message contains genuine, specific enthusiasm about something the guest received or experienced at the venue: food, drink, service, the space, or a visit. A wrongly-missed signal costs nothing; the guest will praise again.',
+  false:
+    'Bare thanks or sign-offs ("thanks", "thanks so much", "ok great", "got it"); politeness attached to a question or request; anticipation about something that has not happened yet ("cannot wait to try it"); compliments about this conversation or about texting with the venue rather than about the venue itself; any message that also reports a problem, disappointment, or complaint, even when it contains praise too; and any genuinely unclear case - a wrongly-true answer spends a moment that only comes once.',
+} as const
+
 const CORRECTS_PENDING_INSTRUCTIONS =
   'In `recent_conversation`, a venue line may be marked NOT SENT - a reply the venue drafted but has not approved; that marker also appears on replies the venue decided not to send, so judge only against one that is waiting for approval, and only the most recent such line. ' +
   'Does `inbound_message` clearly correct, amend, or change the question that NOT SENT reply is answering ("actually make that oat milk", "wait, I meant tomorrow")? ' +
@@ -190,6 +215,7 @@ const SystemOneResponseSchema = z.object({
     category: ChoiceAnswerSchema,
     crisis: NoulAnswerSchema,
     corrects_pending: NoulAnswerSchema,
+    praise: NoulAnswerSchema,
   }),
 })
 
@@ -211,6 +237,7 @@ function serializeReasoning(
   probabilities: Record<string, number>,
   crisis: number,
   correctsPending: number,
+  praise: number,
 ): string {
   const runnerUp = Object.entries(probabilities)
     .filter(([category]) => category !== choice)
@@ -221,7 +248,8 @@ function serializeReasoning(
   const chosen = probabilities[choice]
   return (
     `${model}: category=${choice}(${(chosen ?? 0).toFixed(2)})${runnerUpText}; ` +
-    `crisis p(yes)=${crisis.toFixed(2)}; corrects_pending p(yes)=${correctsPending.toFixed(2)}`
+    `crisis p(yes)=${crisis.toFixed(2)}; corrects_pending p(yes)=${correctsPending.toFixed(2)}; ` +
+    `praise p(yes)=${praise.toFixed(2)}`
   )
 }
 
@@ -274,6 +302,11 @@ export async function classifyMessageViaJev(
             type: 'noul',
             instructions: CORRECTS_PENDING_INSTRUCTIONS,
           },
+          praise: {
+            type: 'noul',
+            instructions: PRAISE_INSTRUCTIONS,
+            criteria: PRAISE_CRITERIA,
+          },
         },
       }),
     })
@@ -324,6 +357,7 @@ export async function classifyMessageViaJev(
     category,
     crisis,
     corrects_pending: correctsPending,
+    praise,
   } = parsed.data.answers
   if (!isClassifierCategory(category.choice)) {
     // The API cannot choose an option we did not offer, so this is a contract
@@ -346,11 +380,13 @@ export async function classifyMessageViaJev(
         category.probabilities,
         crisis.noul,
         correctsPending.noul,
+        praise.noul,
       ),
       promptVersion: CLASSIFY_JEV_PROMPT_VERSION,
       crisisSafety: crisis.noul >= JEV_CRISIS_THRESHOLD,
       correctsPendingReply:
         correctsPending.noul >= JEV_CORRECTS_PENDING_THRESHOLD,
+      praisedExperience: praise.noul >= JEV_PRAISE_THRESHOLD,
       // TAC-386 KNOWN GAP: the Jev unit (v1.13.0) has no followUpWorthy
       // question, so a Jev-classified turn never arms an inquiry follow-up.
       // False is the cheap direction by TAC-386's own posture (a missed

@@ -86,6 +86,17 @@ export const ClassifiedMessageSchema = z.object({
   // (lib/agent/schedule-inquiry-followup.ts), because a prompt instruction
   // nothing enforces is not a gate.
   followUpWorthy: z.boolean(),
+  // Independent of category, same shape and same reasoning as the three
+  // booleans above — one more field on the existing call, never `.optional()`.
+  //
+  // True only for genuine, specific enthusiasm about something the guest got
+  // or experienced at the venue. It is what arms the once-ever Google review
+  // ask (lib/agent/review-ask.ts); the eligibility gate there ALSO refuses the
+  // categories that must never carry an ask, because a prompt instruction
+  // nothing enforces is not a gate. Prefer-false asymmetry is deliberate: a
+  // missed signal waits for the next praise, a wrongly-true one spends a
+  // moment that only comes once per guest.
+  praisedExperience: z.boolean(),
 })
 
 const CLASSIFY_SYSTEM_PROMPT = `You classify inbound text messages from guests of a hospitality venue (cafe, bakery, restaurant) into one of these categories:
@@ -126,6 +137,10 @@ Set followUpWorthy to false when the guest says they are already arriving or on 
 A question can be factual and still qualify, but only when the answer is something the guest then goes and does. Asking when you close is not. Asking how to get there is.
 
 Set followUpWorthy to false for everything else.
+
+Separately again, set praisedExperience. Set it to true only when the guest expresses genuine, specific enthusiasm about something they got or experienced at the venue: an item they ordered ("that croissant was unreal", "best latte I've had in ages"), a visit ("we had such a great time today"), or the service or space itself ("you guys are the best", "love this place").
+
+Set praisedExperience to false for: bare thanks or sign-offs ("thanks", "thanks so much", "ok great", "got it"); politeness attached to a question or request; anticipation about something that has not happened yet ("can't wait to try it"); compliments about this conversation or about texting with the venue rather than about the venue's food, drink, service, or space; and any message that also reports a problem, disappointment, or complaint, even when it contains praise too. When genuinely unsure, prefer false: a missed signal costs nothing, while a wrongly-true one spends a moment that only comes once.
 
 Return your classification with a confidence score (DECIMAL between 0.0 and 1.0, NOT a 1-10 score) and a one-sentence reasoning. Be conservative with confidence. If the message is genuinely ambiguous, score lower so the operator can review it.
 
@@ -309,6 +324,7 @@ export async function classifyMessage(
         crisisSafety: object.crisisSafety,
         correctsPendingReply: object.correctsPendingReply,
         followUpWorthy: object.followUpWorthy,
+        praisedExperience: object.praisedExperience,
         // Returned so the orchestrator can price this call on the Langfuse
         // `classify` generation. Read from the SDK result rather than from the
         // model factory, because `response.modelId` is what the provider

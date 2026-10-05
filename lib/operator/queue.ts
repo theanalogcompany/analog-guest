@@ -317,6 +317,14 @@ const REVIEW_REASON_LABELS: Record<
   // makes the distinction for the demo-bypass event — but it needs the source
   // on the wire, which is a Contract change and its own ticket.
   category_requires_approval: 'Replies like this one always come to you.',
+  // The once-ever Google review ask, queue-first at launch. Copy approved
+  // verbatim in the plan (2026-10-04). Names the moment (they said something
+  // nice) and whose call it is; nothing is wrong with the draft, which is why
+  // it sits in this policy group rather than with the risk findings. True on
+  // every case the trigger fires for: it fires only when the draft carries a
+  // composed review ask.
+  review_ask:
+    'This asks the guest for a Google review after they said something nice. Your call.',
 
   // --- The draft came out wrong --------------------------------------------
   // The model's own self-flag, which carries a free-text approvalReason we

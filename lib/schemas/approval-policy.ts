@@ -54,6 +54,20 @@ export const ApprovalPolicySchema = z.object({
   /** Disposition for any category without an explicit entry. */
   default: DispositionSchema,
   perCategory: PerCategorySchema,
+  /**
+   * Disposition for the once-ever Google review ask (lib/agent/review-ask.ts).
+   *
+   * NOT a perCategory entry, deliberately: the ask is not a category — it
+   * rides whatever category the praise turn classified as, and a category
+   * route would hold the whole turn's reply class rather than the ask. A
+   * dedicated knob also keeps the flip-to-auto-send a one-field Studio edit
+   * ("reviewAsk": "auto_send") that cannot collide with category routing.
+   *
+   * Optional, and the DEFAULT IS QUEUE — owned by resolveReviewAskDisposition
+   * below, NOT by APPROVAL_POLICY_DEFAULT, so every fallback path (missing
+   * field, malformed policy, degraded context) lands on operator approval.
+   */
+  reviewAsk: DispositionSchema.optional(),
 })
 
 export type ApprovalPolicy = z.infer<typeof ApprovalPolicySchema>
@@ -177,6 +191,22 @@ export function resolveCategoryPolicy(
   category: MessageCategory | undefined,
 ): ApprovalDisposition {
   return resolvePolicyDecision(policy, category).disposition
+}
+
+/**
+ * Effective disposition for the once-ever review ask.
+ *
+ * The default is 'operator_approval', here and nowhere else: a missing field
+ * resolves here, a malformed policy falls back to APPROVAL_POLICY_DEFAULT
+ * (which deliberately carries no reviewAsk key) and resolves here, and a
+ * degraded context with no policy at all resolves here. Every failure
+ * direction lands on queue, which is the launch posture — flipping a venue
+ * to auto-send is one Studio JSONB edit, no deploy.
+ */
+export function resolveReviewAskDisposition(
+  policy: ApprovalPolicy | null | undefined,
+): ApprovalDisposition {
+  return policy?.reviewAsk ?? 'operator_approval'
 }
 
 /**

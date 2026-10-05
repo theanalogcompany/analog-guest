@@ -181,7 +181,7 @@ export async function buildRuntimeContext(input: {
     supabase
       .from('guests')
       .select(
-        'id, phone_number, instagram_scoped_id, first_name, created_at, created_via, first_contacted_at, is_demo, context, last_visit_at, warm_close_sent_at',
+        'id, phone_number, instagram_scoped_id, first_name, created_at, created_via, first_contacted_at, is_demo, context, last_visit_at, warm_close_sent_at, review_asked_at',
       )
       .eq('id', input.guestId)
       .single(),
@@ -457,6 +457,11 @@ export async function buildRuntimeContext(input: {
     // recentVisits[0]).
     lastVisitAt: guestRow.last_visit_at
       ? new Date(guestRow.last_visit_at)
+      : null,
+    // Once-ever review-ask marker; null means never asked. Only
+    // handle-inbound's eligibility predicate reads it.
+    reviewAskedAt: guestRow.review_asked_at
+      ? new Date(guestRow.review_asked_at)
       : null,
   }
 
@@ -878,6 +883,9 @@ export async function buildRuntimeContext(input: {
     // TAC-308: null when nothing is outstanding (the overwhelmingly common
     // case) — the serializer omits the block entirely at zero token cost.
     pendingQuestion: pendingQuestionResult?.question ?? null,
+    // Always null here. handle-inbound.ts is the only writer, post-classify,
+    // which is what keeps the review ask off every other path.
+    reviewAsk: null,
     corpus: null,
     knowledgeCorpus: null,
     classification: null,

@@ -127,6 +127,11 @@ export interface GuestContext {
   // reasons; the post_visit_* reasons default to `recentVisits[0]` and
   // ignore this field.
   lastVisitAt: Date | null
+  // guests.review_asked_at: when the Google review ask reached this guest,
+  // null for never. Read as one condition of the once-ever eligibility
+  // predicate (lib/agent/review-ask.ts); written only post-dispatch via the
+  // markReviewAsked CAS, never here.
+  reviewAskedAt: Date | null
 }
 
 export interface InboundMessage {
@@ -303,6 +308,9 @@ export interface Classification {
   // TAC-386: independent of category — see lib/ai/types.ts's
   // ClassifyMessageResult.followUpWorthy for the full contract.
   followUpWorthy: boolean
+  // Independent of category — see lib/ai/types.ts's
+  // ClassifyMessageResult.praisedExperience for the full contract.
+  praisedExperience: boolean
   // Model id and token usage for the classify call, carried so the orchestrator
   // can price the `classify` Langfuse generation. Passed through unmodified from
   // ClassifyMessageResult — unlike `category`, these describe the call that was
@@ -424,6 +432,17 @@ export interface RuntimeContext {
   // 'writing_holding' on the context it builds, which is what turns this
   // block from "don't promise anything" into the holding message's brief.
   pendingQuestion: PendingQuestion | null
+  // The once-ever Google review ask this turn raises, or null on every other
+  // turn — which is every turn on every path except an eligible inbound
+  // praise turn. buildRuntimeContext always initializes it null;
+  // handle-inbound.ts is the ONLY writer (post-classify, via the predicate in
+  // lib/agent/review-ask.ts), which is what makes followups, declines, the
+  // holding message and every proactive path structurally incapable of
+  // raising the ask. `url` is copied verbatim from the venue's curated
+  // `venue_info.links` entry; `label` rides along for events. buildAiRuntime
+  // maps it onto the AI runtime, where it renders the `## Ask for a review`
+  // block and gates composeReplyWithReviewAsk.
+  reviewAsk: { url: string; label: string } | null
   corpus: CorpusMatch[] | null
   // Retrieved knowledge_corpus chunks. Populated by retrieveKnowledgeStage
   // when shouldRetrieveKnowledge fires (always for inbound; followups

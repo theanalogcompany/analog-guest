@@ -9,6 +9,8 @@ import {
   captureDraftRegenerated,
   captureIntentionPromptRaised,
   captureIntentionPromptRecordingFailed,
+  captureReviewAskRaised,
+  captureReviewAskSent,
   captureWarmCloseSent,
 } from '@/lib/analytics/posthog'
 import { createAdminClient } from '@/lib/db/admin'
@@ -47,6 +49,11 @@ import {
   loadPendingRowsBySlot,
 } from './pending-slots'
 import { extractReportedOrder } from './extract-reported-order'
+import {
+  bodyContainsReviewLink,
+  deriveReviewAsk,
+  markReviewAsked,
+} from './review-ask'
 import { scheduleInquiryFollowup } from './schedule-inquiry-followup'
 import { renderableIntentions } from './intentions/derive'
 import {
@@ -436,11 +443,15 @@ function buildGenerationFailureGeneration(): GenerateMessageResult {
     // TAC-554: the crash card. Generation failed, so there is no
     // getting-to-know-you question, and the card is blank anyway.
     intentionQuestion: '',
+    // Generation failed, so no review ask either; stated rather than omitted.
+    reviewAsk: '',
     // TAC-560: the crash card is a blank draft for an operator, not a close.
     closedTheConversation: false,
     intentionQuestionDuplicateStripped: false,
     // TAC-567: this path composes no question, so the gate never fired.
     intentionQuestionDroppedForBodyQuestion: false,
+    // This path composes no review ask, so that gate never fired either.
+    reviewAskDroppedForBodyQuestion: false,
     attempts: 2,
     attemptHistory: [],
     systemPrompt: '',
@@ -1577,6 +1588,36 @@ async function runInboundTurn(
         }),
     )
 
+    // The once-ever Google review ask. Placed here, post-classify, because
+    // `praisedExperience` is what it reads, and after the crisis
+    // short-circuit's early return above, so a guest in crisis never sees
+    // one (the predicate re-checks crisisSafety anyway; the placement is not
+    // the only thing stopping it). This is the ONLY write to ctx.reviewAsk
+    // anywhere — buildRuntimeContext initializes it null and every other
+    // path leaves it there — which is what makes the ask structurally
+    // impossible on followups, declines and the holding message.
+    //
+    // Setting it BEFORE renderableIntentions runs below is load-bearing: the
+    // raised ask vetoes the intentions block (one ask per turn), and both
+    // the prompt mapper and the recording gate read that veto through the
+    // same predicate.
+    ctx.reviewAsk = deriveReviewAsk(ctx)
+    if (ctx.reviewAsk !== null) {
+      console.log('[agent] review ask raised', {
+        agentRunId,
+        linkLabel: ctx.reviewAsk.label,
+      })
+      waitUntil(
+        captureReviewAskRaised({
+          agentRunId,
+          venueId: ctx.venue.id,
+          guestId: ctx.guest.id,
+          linkLabel: ctx.reviewAsk.label,
+          inboundBody: ctx.currentMessage.body,
+        }).catch(() => {}),
+      )
+    }
+
     // Voice pack. TAC-540: the load was STARTED above, next to
     // classification; this is where its result is consumed, unchanged in
     // position, in outcome and in what it alerts on. A turn that returned
@@ -2131,6 +2172,7 @@ async function runInboundTurn(
       ctx.openIntentions,
       ctx.classification.category,
       ctx.pendingQuestion !== null,
+      ctx.reviewAsk !== null,
     )
 
     if (approval.action === 'queue') {
@@ -2538,6 +2580,57 @@ async function runInboundTurn(
         },
         content: { body: gen.result.body },
       })
+      // The once-ever review-ask stamp. Judged against deliveredBody, not
+      // gen.result.body: on a partly delivered Instagram split the ask is the
+      // LAST bubble, so it is exactly the text most likely to have died, and
+      // stamping an ask the guest never saw would spend their one ask on
+      // nothing (the same reason intention recording below reads
+      // deliveredBody). Fire-and-forget: the send already happened, so a
+      // marker failure is a possible second ask later — logged, never a
+      // broken turn.
+      if (
+        ctx.reviewAsk !== null &&
+        bodyContainsReviewLink(dispatched.deliveredBody, ctx.reviewAsk.url)
+      ) {
+        const reviewAskLabel = ctx.reviewAsk.label
+        const reviewAskVenueId = ctx.venue.id
+        const reviewAskGuestId = ctx.guest.id
+        waitUntil(
+          markReviewAsked({
+            venueId: reviewAskVenueId,
+            guestId: reviewAskGuestId,
+            now: new Date(),
+          })
+            .then(async (marked) => {
+              if (!marked.ok) {
+                console.warn(
+                  '[agent] review-ask marker write failed; guest may be asked again',
+                  { agentRunId, error: marked.error },
+                )
+                return
+              }
+              await captureReviewAskSent({
+                agentRunId,
+                via: 'auto_send',
+                venueId: reviewAskVenueId,
+                guestId: reviewAskGuestId,
+                messageId: outboundMessageId,
+                outcome: marked.data,
+              })
+              console.log('[agent] review ask sent', {
+                agentRunId,
+                outcome: marked.data,
+                linkLabel: reviewAskLabel,
+              })
+            })
+            .catch((e) => {
+              console.error('[agent] markReviewAsked threw unexpectedly', {
+                agentRunId,
+                error: e instanceof Error ? e.message : String(e),
+              })
+            }),
+        )
+      }
       // TAC-324 / TAC-380: close the intentions this send raised. Fire-and-
       // forget, mirroring extractReportedOrder's waitUntil posture: it never
       // blocks the reply. Uses the SENT body.

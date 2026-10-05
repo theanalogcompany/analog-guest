@@ -616,6 +616,7 @@ export type Database = {
           last_visit_precision: string | null
           opted_out_at: string | null
           phone_number: string | null
+          review_asked_at: string | null
           status: string
           updated_at: string
           venue_id: string
@@ -647,6 +648,7 @@ export type Database = {
           last_visit_precision?: string | null
           opted_out_at?: string | null
           phone_number?: string | null
+          review_asked_at?: string | null
           status?: string
           updated_at?: string
           venue_id: string
@@ -678,6 +680,7 @@ export type Database = {
           last_visit_precision?: string | null
           opted_out_at?: string | null
           phone_number?: string | null
+          review_asked_at?: string | null
           status?: string
           updated_at?: string
           venue_id?: string

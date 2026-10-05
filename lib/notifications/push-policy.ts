@@ -156,6 +156,13 @@ const PUSH_POLICY = {
   [APPROVAL_TRIGGERS.CLOSED_VENUE_ARRIVAL_EMITTED]: 'push',
   [APPROVAL_TRIGGERS.CLOSED_VENUE_ARRIVAL_BACKSTOP]: 'push',
 
+  // The once-ever review ask, queue-first at launch. The push is
+  // load-bearing: the guest's WHOLE reply is held behind this card (any
+  // trigger queues the whole draft), it carries no timer, and nothing else
+  // surfaces it — an operator who is never told has a guest whose thank-you
+  // went unanswered.
+  [APPROVAL_TRIGGERS.REVIEW_ASK]: 'push',
+
   // The ONLY skip. A pending draft already exists in this draft's slot, and
   // persistOrRegenQueuedDraft UPDATEs that row IN PLACE rather than inserting
   // a new one (TAC-264). Since TAC-394 a card in the OTHER slot never fires
