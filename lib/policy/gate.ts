@@ -1,3 +1,4 @@
+import { extractUrls } from '@/lib/ai/url-detector'
 import type { SemanticCheckOutcome } from './semantic-check'
 import type { PolicyRow, PolicySet } from './schema'
 
@@ -65,10 +66,20 @@ export const POLICY_EXEMPT_SITUATIONS: readonly string[] = ['opt_out_request']
 /**
  * Tripwire text: the cheap structural signal that a draft is talking about
  * the things fail-closed policies guard - money, quantities, links.
+ *
+ * extractUrls (lib/ai/url-detector.ts) is the one definition of "the draft
+ * carries a link": it catches the schemeless path form ("venue.com/products/x")
+ * the regex alone misses, which is exactly how a model writes a link in a DM.
+ * The regex keeps the scheme and www. branches anyway - over-tripping is
+ * harmless here (this only scopes fail-closed on a Jev outage), and a bare
+ * "www." mention is still a draft talking about the web.
  */
 export function hasTripwireText(messages: readonly string[]): boolean {
   const joined = messages.join('\n')
-  return /[0-9$€£%]|https?:\/\/|www\./i.test(joined)
+  return (
+    /[0-9$€£%]|https?:\/\/|www\./i.test(joined) ||
+    extractUrls(joined).length > 0
+  )
 }
 
 function conditionsApply(

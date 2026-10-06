@@ -1914,6 +1914,139 @@ export type Database = {
           },
         ]
       }
+      regression_run_units: {
+        Row: {
+          id: string
+          run_id: string
+          sample: number
+          scenario_key: string
+          unit: Json
+        }
+        Insert: {
+          id?: string
+          run_id: string
+          sample: number
+          scenario_key: string
+          unit: Json
+        }
+        Update: {
+          id?: string
+          run_id?: string
+          sample?: number
+          scenario_key?: string
+          unit?: Json
+        }
+        Relationships: [
+          {
+            foreignKeyName: "regression_run_units_run_id_fkey"
+            columns: ["run_id"]
+            isOneToOne: false
+            referencedRelation: "regression_runs"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      regression_runs: {
+        Row: {
+          assessor_version: string
+          finished_at: string | null
+          full_run: boolean
+          git_sha: string | null
+          id: string
+          judge_version: string
+          pack_rows: number
+          prompt_version: string
+          samples: number
+          scenarios_passed: number
+          scenarios_total: number
+          started_at: string
+          venue_id: string
+          verdicts: Json
+        }
+        Insert: {
+          assessor_version: string
+          finished_at?: string | null
+          full_run: boolean
+          git_sha?: string | null
+          id?: string
+          judge_version: string
+          pack_rows: number
+          prompt_version: string
+          samples: number
+          scenarios_passed: number
+          scenarios_total: number
+          started_at?: string
+          venue_id: string
+          verdicts?: Json
+        }
+        Update: {
+          assessor_version?: string
+          finished_at?: string | null
+          full_run?: boolean
+          git_sha?: string | null
+          id?: string
+          judge_version?: string
+          pack_rows?: number
+          prompt_version?: string
+          samples?: number
+          scenarios_passed?: number
+          scenarios_total?: number
+          started_at?: string
+          venue_id?: string
+          verdicts?: Json
+        }
+        Relationships: [
+          {
+            foreignKeyName: "regression_runs_venue_id_fkey"
+            columns: ["venue_id"]
+            isOneToOne: false
+            referencedRelation: "venues"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      regression_scenarios: {
+        Row: {
+          created_at: string
+          enabled: boolean
+          expect_first_name: string | null
+          expect_reply_contains: string | null
+          forbid_policy_keys: Json
+          key: string
+          lesson: string
+          no_turn_one_name_ask: boolean
+          script: Json
+          target: Json
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          enabled?: boolean
+          expect_first_name?: string | null
+          expect_reply_contains?: string | null
+          forbid_policy_keys?: Json
+          key: string
+          lesson: string
+          no_turn_one_name_ask?: boolean
+          script: Json
+          target?: Json
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          enabled?: boolean
+          expect_first_name?: string | null
+          expect_reply_contains?: string | null
+          forbid_policy_keys?: Json
+          key?: string
+          lesson?: string
+          no_turn_one_name_ask?: boolean
+          script?: Json
+          target?: Json
+          updated_at?: string
+        }
+        Relationships: []
+      }
       relationship_graphs: {
         Row: {
           activated_at: string | null
