@@ -77,6 +77,7 @@ import {
   resolveCardAnsweredExternally,
 } from '@/lib/messaging/instagram/resolve-external'
 import { recordInstagramTurnNotRun } from '@/lib/messaging/instagram/record-turn'
+import { runScanGreetingFastPath } from '@/lib/agent/instagram-scan-greeting'
 import { scheduleScanArrival } from '@/lib/agent/scan-arrival-store'
 import { summarizeInstagramPayload } from '@/lib/messaging/instagram/summarize-payload'
 import {
@@ -266,13 +267,20 @@ export async function POST(request: Request): Promise<Response> {
         waitUntil(runInboundAgent(handoff.messageId))
       } else if (handoff.kind === 'schedule_arrival') {
         // TAC-536: a scan with no message. Nothing is generated now and no
-        // ledger row is written here: the turn stays open for five minutes,
-        // and whichever way it resolves, the cron that resolves it records
-        // the row. A guest who writes inside those five minutes is answered
-        // by that message's own turn.
+        // ledger row is written here: the turn stays open for the greeting
+        // delay (twenty seconds), and whichever way it resolves, the runner
+        // that resolves it records the row. A guest who writes inside that
+        // delay is answered by that message's own turn.
         //
-        // waitUntil, never awaited: two writes must not sit inside Meta's
-        // delivery deadline.
+        // THE FAST PATH RIDES THE SAME waitUntil: once the row is written it
+        // sleeps out the delay and runs the cron's own per-row check, so the
+        // greeting lands about twenty seconds after the scan rather than at
+        // the next cron tick after it. The cron stays as the backstop, and
+        // the claim both share is what stops them both greeting. See
+        // runScanGreetingFastPath.
+        //
+        // waitUntil, never awaited: two writes and then a twenty-second sleep
+        // must not sit inside Meta's delivery deadline.
         waitUntil(
           scheduleScanArrival(supabase, {
             messageId: handoff.messageId,
@@ -280,7 +288,9 @@ export async function POST(request: Request): Promise<Response> {
             guestId: handoff.guestId,
             hadPriorConversation: handoff.hadPriorConversation,
           }).then((scheduled) => {
-            if (scheduled.ok) return
+            if (scheduled.ok) {
+              return runScanGreetingFastPath(supabase, scheduled.data)
+            }
             console.error(
               'instagram webhook: scan greeting could not be scheduled',
               {

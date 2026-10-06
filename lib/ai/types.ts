@@ -53,7 +53,7 @@ export const MESSAGE_CATEGORIES = [
   'perk_unlock',
   'event_invite',
   // TAC-536: the greeting sent after a guest scans the counter code and says
-  // nothing for five minutes. Outbound only. Widening messages_category_check
+  // nothing for the greeting delay (twenty seconds). Outbound only. Widening messages_category_check
   // is a SEPARATE gate (migration 063), and without it the first insert fails.
   'guest_arrived',
 ] as const

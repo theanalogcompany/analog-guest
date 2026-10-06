@@ -4,7 +4,8 @@ Loads only when you work in this directory.
 
 Layout: `scripts/*.ts` are thin orchestrators (read args, set up clients, call helpers, log).
 `scripts/onboarding/` holds one helper module per pipeline step. `scripts/lib/` holds pure
-`.mjs` helpers used inside GitHub Actions steps. `scripts/measurement/` holds harnesses.
+`.mjs` helpers used inside GitHub Actions steps. `scripts/measurement/` holds harnesses. `scripts/harness/` holds
+hand-run behavioural harnesses that make no model calls (each has its own README).
 
 Add a script with a `package.json` entry of the form
 `"<name>": "tsx --env-file=.env.local scripts/<file>.ts"`.

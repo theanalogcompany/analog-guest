@@ -2562,7 +2562,7 @@ export interface InstagramScanGreetingProps {
  * This is the one scheduled path in the repo that messages a guest with no
  * operator and no inbound behind it, and at pilot volume the relay IS the
  * answer to "has it ever fired". The suppressions are PostHog only: they are
- * the common case (a guest who writes within five minutes suppresses their
+ * the common case (a guest who writes within the greeting delay suppresses their
  * own greeting, which is the flow working) and relaying them would drown the
  * signal.
  */
@@ -2575,7 +2575,7 @@ export async function captureInstagramScanGreeting(
   if (props.outcome !== 'greeted') return
   await postToSlack(
     [
-      '*An Instagram guest scanned the counter code and was greeted*: no message from them, five minutes of silence.',
+      '*An Instagram guest scanned the counter code and was greeted*: no message from them before the greeting delay ran out.',
       props.hadPriorConversation === true
         ? 'they have messaged this venue before, so the greeting does not introduce itself'
         : 'no messages with them on record, so the greeting says who they have reached',
