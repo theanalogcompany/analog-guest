@@ -337,7 +337,7 @@ export type ScanArrivalRowResult =
       kind: 'suppressed'
       outcome: Exclude<ScanArrivalOutcome, 'greeted' | 'errored'>
     }
-  /** The other runner claimed this row first. Nothing written. */
+  /** The other runner claimed this row first, or resolved it. Nothing written. */
   | { kind: 'cas_lost' }
   /** This call claimed the row and generated a greeting for it. */
   | { kind: 'greeted' }

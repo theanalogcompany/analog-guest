@@ -8,13 +8,14 @@
 //
 //   update instagram_scan_arrivals
 //      set claimed_at = now(), venue_local_date = $2
-//    where id = $1 and claimed_at is null
+//    where id = $1 and claimed_at is null and resolved_at is null
 //
 // against the partial unique index on (venue_id, guest_id, venue_local_date)
 // where claimed_at is not null. Three outcomes, and all three matter:
 //
-//   rowcount 1  this tick owns the greeting
-//   rowcount 0  another tick already claimed THIS row
+//   rowcount 1  this runner owns the greeting
+//   rowcount 0  another runner already claimed THIS row, or resolved it
+//               without a greeting
 //   23505       this guest already has a claimed row for this venue-local
 //               day, from ANY scan: they have been greeted today
 //
@@ -27,6 +28,13 @@
 // backstop. They share one per-row function and therefore this one claim, and
 // the claim is the only thing that makes a double greeting impossible when
 // both arrive together. Nothing else here may be relied on for that.
+//
+// `resolved_at is null` IS PART OF THE CLAIM for the same reason (ruled
+// 2026-10-06). One runner can decide to suppress a scan (the guest wrote, the
+// venue closed) in the instant between the other runner's own checks and its
+// claim. Without the filter that claim still succeeded and the guest was
+// greeted over a decision not to greet them. A suppressed row now comes back
+// `lost`.
 //
 // CLAIM BEFORE THE SIDE EFFECT, the house rule (window_warning_pushed_at,
 // pending_until, followup_log). A process that dies between the claim and the
@@ -189,9 +197,9 @@ export async function loadDueScanArrivals(
 }
 
 export type ClaimResult =
-  /** This tick owns the greeting. */
+  /** This runner owns the greeting. */
   | { status: 'claimed' }
-  /** Another tick claimed this same row first. */
+  /** Another runner claimed this same row first, or resolved it ungreeted. */
   | { status: 'lost' }
   /** This guest has already been greeted on this venue-local day. */
   | { status: 'already_greeted_today' }
@@ -212,6 +220,7 @@ export async function claimScanArrival(
     .update({ claimed_at: now.toISOString(), venue_local_date: venueLocalDate })
     .eq('id', id)
     .is('claimed_at', null)
+    .is('resolved_at', null)
     .select('id')
   if (error) {
     if (error.code === UNIQUE_VIOLATION)
