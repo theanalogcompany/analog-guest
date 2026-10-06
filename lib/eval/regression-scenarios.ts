@@ -138,6 +138,74 @@ export const BUILTIN_REGRESSION_SCENARIOS: RegressionScenario[] = [
     forbidPolicyKeys: ['unverified_link', 'comp_leak'],
     enabled: true,
   },
+  // ── knowledge retrieval, added 2026-10-06 with the lemils.com site ingest ──
+  // Each bar is a DISTINCTIVE TOKEN that exists in exactly one corpus entry,
+  // never a generic word. "Dogs are welcome" could be produced by a model
+  // being agreeable about a question it cannot answer; "Butter and Rose" and
+  // "Straus" cannot. That is the difference between asserting retrieval worked
+  // and asserting the reply sounded right, and the whole reason these
+  // scenarios exist: every one of them FAILED before the ingest, with
+  // retrieval handing the model seating advice when asked about Wi-Fi.
+  {
+    key: 'knowledge-wifi',
+    lesson:
+      'Guest-phrased cafe question answered from the venue site. Pre-ingest this retrieved "window seats on weekdays for reading" - seating advice for a Wi-Fi question - because no corpus row carried the answer. The bar is "password" rather than "wifi": the entry says guests should ask the team for the current password, so the token can only come from that entry and not from a model being agreeable.',
+    script: ['do u have wifi?'],
+    target: [],
+    expectFirstName: null,
+    noTurnOneNameAsk: false,
+    expectReplyContains: 'password',
+    forbidPolicyKeys: [],
+    enabled: true,
+  },
+  {
+    key: 'knowledge-pastries',
+    lesson:
+      'Pre-ingest this retrieved "what Malenad tastes like" for a pastry question. "Butter and Rose" is the Foster City micro-bakery and appears in exactly one entry, so the bar cannot be met by a plausible guess. This fact was also one of the 11 lost when voicenote transcripts stopped being knowledge, and it is now sourced from the venue site instead (lib/rag/knowledge-source-roles.ts).',
+    script: ['what pastries do you have?'],
+    target: [],
+    expectFirstName: null,
+    noTurnOneNameAsk: false,
+    expectReplyContains: 'Butter and Rose',
+    forbidPolicyKeys: [],
+    enabled: true,
+  },
+  {
+    key: 'knowledge-milk',
+    lesson:
+      'A dietary question needs the real answer, not a hedge. "Straus" is the organic A2 dairy and appears in one entry; a model with no retrieval would say "we have oat milk" or deflect, and both fail this bar. Guards the specific-fact half of retrieval rather than the register half.',
+    script: ['what milk do you use?'],
+    target: [],
+    expectFirstName: null,
+    noTurnOneNameAsk: false,
+    expectReplyContains: 'Straus',
+    forbidPolicyKeys: [],
+    enabled: true,
+  },
+  {
+    key: 'knowledge-cafe-address',
+    lesson:
+      'The fabricated-address case, and the reason for template v2.10.0. The cafe is at 1330 Polk St. That did NOT reach the prompt: run-turn.ts rendered the venue section as a 4000-char slice of the venue_info JSON, Le Mil\'s row is 22,258 chars, so the cut landed inside `menu` and menu was the only key the model ever saw. Measured 2026-10-05 on v2.9.0: "where are you located?" and "what\'s your address?" each returned a Polk Street number found nowhere in the venue\'s data, differing between two runs of the identical prompt, and the gate sent both. Retrieval cannot rescue this - the ingest added roughly ten stockist and farmers-market addresses, so all four chunks on this question are OTHER locations, and the one corpus row carrying the cafe\'s own address frames it as a grand opening on 15 August 2026, in the past. The bar is the address itself because nothing downstream can catch a fabricated fact.',
+    script: ['where are you located?'],
+    target: [],
+    expectFirstName: null,
+    noTurnOneNameAsk: false,
+    expectReplyContains: '1330 Polk',
+    forbidPolicyKeys: [],
+    enabled: true,
+  },
+  {
+    key: 'knowledge-outside-food',
+    lesson:
+      'The regression test for the self-dedupe bug. "Outside food and drinks are not permitted at Le Mil\'s cafe" was extracted correctly and then DROPPED as a 0.8966 duplicate of "walk-in only and does not take reservations" - a different fact entirely. Short policy sentences about one subject embed close because they share shape, and the numeric-and-names guard cannot save them because they carry neither. The fix is that entries from one source page are never collapsed (scripts/ingest-venue-site-pure.ts). NOTE on what this scenario now proves: the same fact is also in venue_info.amenities.notes, which template v2.10.0 renders into every prompt, so a pass no longer tells you the corpus row is back - it tells you the fact is reachable by some route. The corpus half is checked by re-crawling, not here.',
+    script: ['can i bring my own food?'],
+    target: [],
+    expectFirstName: null,
+    noTurnOneNameAsk: false,
+    expectReplyContains: 'outside food',
+    forbidPolicyKeys: [],
+    enabled: true,
+  },
   {
     key: 'service-desk',
     lesson:

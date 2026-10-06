@@ -28,7 +28,11 @@ import { execSync } from 'node:child_process'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { createAdminClient } from '@/lib/db/admin'
-import { embedText } from '@/lib/rag'
+import {
+  embedText,
+  isRetrievableSourceType,
+  unknownKnowledgeSourceTypes,
+} from '@/lib/rag'
 import { EMBEDDING_MODEL } from '@/lib/rag/client'
 import { chunkText } from '@/lib/rag/chunk'
 import {
@@ -203,6 +207,20 @@ async function main(): Promise<void> {
   if (rowsErr || !existingRows)
     throw new Error(`knowledge_corpus read failed: ${rowsErr?.message}`)
 
+  // Retrieval filters source_type through an ALLOW-list
+  // (lib/rag/knowledge-source-roles.ts), so a value nobody has classified is
+  // excluded from every prompt without anyone deciding that. This read is the
+  // one moment a human is deliberately looking at the table, so it is where
+  // the drift surfaces. Warn, never block: an unclassified type elsewhere in
+  // the corpus is not a reason to refuse a load of unrelated entries.
+  const unclassified = unknownKnowledgeSourceTypes(existingRows)
+  if (unclassified.length > 0) {
+    console.warn(
+      `[dedup] WARNING source_type(s) not classified in lib/rag/knowledge-source-roles.ts, ` +
+        `so rows carrying them are INVISIBLE to retrieval: ${unclassified.join(', ')}`,
+    )
+  }
+
   const { data: embRows, error: embErr } = await supabase
     .from('knowledge_embeddings')
     .select('corpus_id, chunk_index, embedding')
@@ -360,7 +378,11 @@ async function main(): Promise<void> {
     if (replacedIds.has(r.id)) continue
     postLoad.push({
       label: r.id,
-      kind: 'existing',
+      // A row retrieval cannot reach is not live coverage. Labelling it is
+      // what stops "duplicates an existing entry" meaning two things at once.
+      kind: isRetrievableSourceType(r.source_type)
+        ? 'existing'
+        : 'existing_unreachable',
       content: r.content,
       chunks: storedChunks.get(r.id)!,
       rowId: null,
@@ -563,6 +585,29 @@ async function main(): Promise<void> {
   const counts = new Map<string, number>()
   for (const r of results)
     counts.set(r.suggested, (counts.get(r.suggested) ?? 0) + 1)
+
+  // What each above-band proposal is actually NEAR. Without this split, one
+  // number covers three different situations and reads as the worst of them:
+  // restating a live row (real redundancy), restating a row retrieval cannot
+  // reach (the replacement we wanted), and restating another proposal in this
+  // same batch (the extractor duplicating itself).
+  const nearness = { existing: 0, unreachable: 0, proposal: 0, below_band: 0 }
+  for (const r of results) {
+    const top = r.neighbours[0]
+    if (top === undefined || top.score < band) {
+      nearness.below_band += 1
+      continue
+    }
+    if (top.kind === 'existing') nearness.existing += 1
+    else if (top.kind === 'existing_unreachable') nearness.unreachable += 1
+    else nearness.proposal += 1
+  }
+  console.log(
+    `[dedup] above band, nearest is: live existing row=${nearness.existing} ` +
+      `UNREACHABLE existing row=${nearness.unreachable} (replacements, not duplicates) ` +
+      `another proposal=${nearness.proposal} (this batch duplicating itself); ` +
+      `below band=${nearness.below_band}`,
+  )
   console.log(
     `[dedup] control pairs=${control.count} p99(band)=${band.toFixed(4)} max=${control.max.toFixed(4)}`,
   )

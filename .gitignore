@@ -65,6 +65,10 @@ next-env.d.ts
 .claude/scheduled_tasks.lock
 supabase/.temp/
 
+# Playwright MCP scratch output (page snapshots, console logs) from browser
+# verification. Dropped into the repo dir by the tool, never source.
+.playwright-mcp/
+
 # Measurement run logs (scripts/measurement). createRunLog writes them to
 # measurement-runs/ by default; the bare *.jsonl line covers the ones earlier
 # runs dropped at the repo root, and any a caller points elsewhere. They are

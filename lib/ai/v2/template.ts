@@ -77,7 +77,27 @@
 // strip's pattern. Deliberately NO "never ask either/or" frame line: the
 // v2.5.0 measurement showed generic prohibitions underperform, and the
 // normalizer is the guarantee.
-export const V2_PROMPT_VERSION = 'v2.9.0-draft'
+// v2.10.0 (owner-ruled 2026-10-05): the venue profile is RENDERED, not a
+// sliced JSON blob. No template text changed in this bump; what changed is
+// the content {venue_profile} receives. run-turn.ts had been passing
+// `JSON.stringify(venue_info, null, 1).slice(0, 4000)`, and at Le Mil's that
+// row is 22,258 characters, so the cut landed inside `menu` and menu was the
+// only key the model ever saw - no address, hours, contact, amenities,
+// services, staff or currentContext in any v2 prompt to date. Measured: "where
+// are you located?" and "what's your address?" each returned a Polk Street
+// number found nowhere in the venue's data, differing between two runs of the
+// identical prompt, and the gate sent both. The renderer
+// (lib/ai/v2/venue-profile.ts) has no character budget by owner ruling - every
+// section is a fact needed to answer, so a budget can only pick which question
+// to get wrong - and it reports any stored key that reached no renderer.
+// WATCH ITEM, deliberately NOT fixed with copy: the hard lines forbid
+// inventing a GUEST fact and inventing a link, and say nothing about inventing
+// a VENUE fact. A generic prohibition is what v2.5.0 measured as the weakest
+// available instrument (eight variants, every generic form 0/3) and what
+// v2.9.0 declined on the same grounds, so the fix here is supplying the facts.
+// If a fabricated venue fact survives this bump, that is the evidence a line
+// would need.
+export const V2_PROMPT_VERSION = 'v2.10.0-draft'
 
 /** Tier 0: stable across every venue. Cache breakpoint after. */
 export const V2_FRAME = `You are the maitre d' of {venue_name}, and this is your phone - guests text this number, you text back.
