@@ -161,7 +161,7 @@ export const BUILTIN_REGRESSION_SCENARIOS: RegressionScenario[] = [
   {
     key: 'knowledge-pastries',
     lesson:
-      'Pre-ingest this retrieved "what Malenad tastes like" for a pastry question. "Butter and Rose" is the Foster City micro-bakery and appears in exactly one entry, so the bar cannot be met by a plausible guess. This fact was also one of the 11 lost when voicenote transcripts stopped being knowledge, and it is now sourced from the venue site instead (lib/rag/knowledge-source-roles.ts).',
+      'Pre-ingest this retrieved "what Malenad tastes like" for a pastry question. "Butter and Rose" is the Foster City micro-bakery and appears in exactly one entry, so the bar cannot be met by a plausible guess. This fact was also one of the 11 lost when voicenote transcripts stopped being knowledge, and it is now sourced from the venue site instead (lib/rag/knowledge-source-roles.ts). MEASURED on v2.10.0 against a quorum of BAR_MIN=2: this bar hit 4/6 and 3/6 across two n=6 runs, and "Foster City" (the same entry\'s other unguessable token) 5/6 - all passing, so the bar was kept as pre-registered. This is the LOOSEST of the five knowledge bars and the one to watch. Recorded because a single sample reads it as a failure: the agent commonly answers with the full pastry list and "a micro-baker in Foster City" without naming the bakery, and the two tokens are complementary rather than nested (one run named the bakery and not the town). One such sample is not a bar failure.',
     script: ['what pastries do you have?'],
     target: [],
     expectFirstName: null,
