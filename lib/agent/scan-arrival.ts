@@ -111,10 +111,23 @@ export function isScanGreetingDue(
 }
 
 /**
+ * Slept on top of the exact remainder, so the fast path wakes on a due row.
+ *
+ * Node resolves a timer up to a millisecond early a few percent of the time
+ * (measured in review: about 3% of 3000 trials on Node 24). Without a margin
+ * that wake finds the row "not yet" by 1 ms and silently hands the greeting to
+ * the cron, up to a minute later. A quarter of a second is far past any timer
+ * jitter and invisible against a twenty-second delay.
+ */
+export const SCAN_FAST_PATH_WAKE_MARGIN_MS = 250
+
+/**
  * How long the fast path should sleep before the greeting is due.
  *
- * Measured from `scannedAt`, the same clock `isScanGreetingDue` reads, so a
- * sleep of this length ends on a row that predicate calls due.
+ * Measured from `scannedAt`, the same clock `isScanGreetingDue` reads. It is
+ * the EXACT remainder, and a timer can fire a millisecond short of what it
+ * was asked for, so a caller that wants the row due on waking adds
+ * SCAN_FAST_PATH_WAKE_MARGIN_MS.
  *
  * Floored at zero: a delivery Meta held for longer than the delay is already
  * due. CAPPED at twice the delay: `scannedAt` is Meta's clock, and a

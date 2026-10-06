@@ -229,24 +229,41 @@ export async function claimScanArrival(
  * day can still be greeted: the guard is on having been GREETED, not on having
  * scanned.
  *
- * A CAS ON `resolved_at IS NULL`, and `data` says whether THIS call won it.
- * Two runners reach every row now, and two that both decide to suppress the
- * same scan would otherwise each write a ledger row and an event for it. The
- * caller gates those on `data === true`. It also means a resolved row is
- * never rewritten: the first outcome recorded is the one that stands.
+ * WHO IS WRITING DECIDES THE PREDICATE, because two runners reach every row
+ * now and they are not equals once one of them has claimed it:
+ *
+ *   'unclaimed'    a runner that has NOT claimed the row (every suppression,
+ *                  and a throw before the claim). A CAS on
+ *                  `claimed_at IS NULL AND resolved_at IS NULL`. Two runners
+ *                  that both decide to suppress one scan would otherwise each
+ *                  write a ledger row and an event for it, and a runner still
+ *                  walking its checks must never resolve a row the other has
+ *                  already claimed and is greeting: that would leave a row
+ *                  reading `inbound_during_window` for a greeting that went
+ *                  out, and cost the guest the thirty-minute anchor
+ *                  `loadScanCarryForward` reads off `greeted`.
+ *   'claim_owner'  the runner whose claim won. Unconditional by id: the
+ *                  greeting is its to record, whatever is on the row.
+ *
+ * `data` says whether THIS call wrote the row. A caller writing as
+ * 'unclaimed' gates its ledger row and event on it.
  */
 export async function resolveScanArrival(
   supabase: AdminSupabaseClient,
   id: string,
   outcome: ScanArrivalOutcome,
   now: Date,
+  as: 'unclaimed' | 'claim_owner',
 ): Promise<StoreResult<boolean>> {
-  const { data, error } = await supabase
+  const update = supabase
     .from('instagram_scan_arrivals')
     .update({ outcome, resolved_at: now.toISOString() })
     .eq('id', id)
-    .is('resolved_at', null)
-    .select('id')
+  const { data, error } = await (
+    as === 'claim_owner'
+      ? update
+      : update.is('claimed_at', null).is('resolved_at', null)
+  ).select('id')
   if (error) return { ok: false, error: error.message }
   return { ok: true, data: (data ?? []).length === 1 }
 }

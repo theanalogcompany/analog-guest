@@ -62,6 +62,7 @@ import {
   isScanGreetingDue,
   isScanTooStale,
   msUntilScanGreetingDue,
+  SCAN_FAST_PATH_WAKE_MARGIN_MS,
   venueLocalDate,
 } from './scan-arrival'
 import {
@@ -294,10 +295,17 @@ async function suppress(
   outcome: Exclude<ScanArrivalOutcome, 'greeted' | 'errored'>,
   now: Date,
 ): Promise<void> {
-  const resolved = await resolveScanArrival(supabase, row.id, outcome, now)
-  // The other runner resolved this row first, so the ledger row and the event
-  // for this scan are its to write. Only a POSITIVE loss returns: an
-  // unreadable result still records, as it did before the resolve was a CAS.
+  const resolved = await resolveScanArrival(
+    supabase,
+    row.id,
+    outcome,
+    now,
+    'unclaimed',
+  )
+  // The other runner resolved this row first, or claimed it and is greeting,
+  // so the ledger row and the event for this scan are its to write. Only a
+  // POSITIVE loss returns: an unreadable result still records, as it did
+  // before the resolve was a CAS.
   if (resolved.ok && !resolved.data) return
   await recordLedger(
     row,
@@ -355,6 +363,10 @@ export async function processScanArrival(
   row: PendingScanArrival,
   now: Date,
 ): Promise<ScanArrivalRowResult> {
+  // What this call has done to the row so far, for the catch below: a throw
+  // before the claim and a throw after it are not the same event.
+  let claimed = false
+  let recordedGreeting = false
   try {
     if (!isScanGreetingDue(row.scannedAt, now)) {
       return { kind: 'not_yet' }
@@ -428,6 +440,8 @@ export async function processScanArrival(
       return { kind: 'errored' }
     }
 
+    claimed = true
+
     const agentRunId = randomUUID()
     const outcome = await handleFollowup({
       venueId: row.venueId,
@@ -443,7 +457,14 @@ export async function processScanArrival(
       },
     })
 
-    await resolveScanArrival(supabase, row.id, 'greeted', new Date())
+    await resolveScanArrival(
+      supabase,
+      row.id,
+      'greeted',
+      new Date(),
+      'claim_owner',
+    )
+    recordedGreeting = true
     // TAC-386: the shared proactive-send spacing marker, so the warm close and
     // the inquiry follow-up can both see that this guest has just heard from
     // us unprompted. On a confirmed send only: a queued card is an operator's
@@ -466,9 +487,22 @@ export async function processScanArrival(
       scanArrivalId: row.id,
       error: e instanceof Error ? e.message : String(e),
     })
-    await resolveScanArrival(supabase, row.id, 'errored', now).catch(
-      () => undefined,
-    )
+    // A greeting already recorded stays recorded: it went out, and a later
+    // bookkeeping throw does not change that. Otherwise `errored` is written
+    // as whoever this call is. Unclaimed, it can lose to the other runner,
+    // and then the row and its ledger entry are that runner's.
+    if (!recordedGreeting) {
+      const resolved = await resolveScanArrival(
+        supabase,
+        row.id,
+        'errored',
+        now,
+        claimed ? 'claim_owner' : 'unclaimed',
+      ).catch(() => null)
+      if (!claimed && resolved?.ok === true && !resolved.data) {
+        return { kind: 'errored' }
+      }
+    }
     await recordLedger(row, ledgerEntryForUnexpected(e), null).catch(
       () => undefined,
     )
@@ -568,8 +602,9 @@ const FAST_PATH_DEPS: ScanGreetingFastPathDeps = {
  *
  * The row is re-read rather than carried across the sleep: `null` means the
  * cron or a second delivery got there first, and that is a normal ending.
- * A row not yet due on waking (Meta's clock ahead of ours) is left for the
- * cron rather than slept on again.
+ * A row not yet due on waking (Meta's clock well ahead of ours) is left for
+ * the cron rather than slept on again; the wake margin covers timer jitter,
+ * not clock skew.
  *
  * Never throws and never rejects: it runs under `waitUntil`, where an
  * escaping rejection is an unhandled one. supabase-js throws on some failures
@@ -581,7 +616,10 @@ export async function runScanGreetingFastPath(
   deps: ScanGreetingFastPathDeps = FAST_PATH_DEPS,
 ): Promise<void> {
   try {
-    await deps.sleep(msUntilScanGreetingDue(scheduled.scannedAt, deps.now()))
+    await deps.sleep(
+      msUntilScanGreetingDue(scheduled.scannedAt, deps.now()) +
+        SCAN_FAST_PATH_WAKE_MARGIN_MS,
+    )
 
     const pending = await loadPendingScanArrival(supabase, scheduled.id)
     if (!pending.ok) {

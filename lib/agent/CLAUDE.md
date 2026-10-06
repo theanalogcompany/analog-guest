@@ -301,7 +301,8 @@ Prompt wording cannot reach any of this: see `docs/decisions/0007-intention-ques
 
 ## Proactive sends (TAC-386)
 
-Three paths reach a guest with no inbound behind them: the scan greeting (TAC-536), the warm
+Three paths reach a guest with no inbound behind them: the scan greeting (TAC-536; started by
+the Instagram webhook's fast path, cron as backstop, so only pausing the venue stops it), the warm
 close (TAC-560), the inquiry follow-up (TAC-386, `lib/followups/`). **No two within 60
 minutes**, via `proactive-spacing.ts` and `guests.last_proactive_send_at`. A follow-up is NOT
 a warm-close anchor, excluded inside `loadWarmCloseCandidates`. Reasons in those headers.

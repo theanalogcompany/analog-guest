@@ -2562,7 +2562,7 @@ export interface InstagramScanGreetingProps {
  * This is the one scheduled path in the repo that messages a guest with no
  * operator and no inbound behind it, and at pilot volume the relay IS the
  * answer to "has it ever fired". The suppressions are PostHog only: they are
- * the common case (a guest who writes within five minutes suppresses their
+ * the common case (a guest who writes within the greeting delay suppresses their
  * own greeting, which is the flow working) and relaying them would drown the
  * signal.
  */
