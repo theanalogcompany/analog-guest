@@ -7,6 +7,10 @@ import {
   type GenerationOutput,
 } from './actions'
 import type { ComposedPrompt } from './compose'
+import {
+  replaceDashesWithPeriod,
+  stripEitherOrQuestion,
+} from './normalize-output'
 
 // The v2 generation call: composed prompt in, {messages, actions?} out.
 // Cache control rides the composer's breakpoint flags - both system blocks
@@ -19,6 +23,12 @@ import type { ComposedPrompt } from './compose'
 // guest's words stay verbatim in their own block.
 
 export const V2_GENERATE_MAX_OUTPUT_TOKENS = 1_000
+
+// Lowest (owner call, 2026-10-05). Unset, the provider default (1.0) applied
+// and regression runs showed the tail of that distribution: register drift
+// and question stacking. 0 picks the head of the distribution every time;
+// per-guest variety comes from the situation brief differing, not sampling.
+export const V2_GENERATE_TEMPERATURE = 0
 
 export interface V2GenerationResult {
   output: GenerationOutput
@@ -51,12 +61,15 @@ export async function generateV2Reply(
       ],
       schema: GenerationOutputSchema,
       maxOutputTokens: V2_GENERATE_MAX_OUTPUT_TOKENS,
+      temperature: V2_GENERATE_TEMPERATURE,
     })
     return {
       ok: true,
       data: {
         output: {
-          messages: object.messages.slice(0, MAX_MESSAGES),
+          messages: object.messages
+            .slice(0, MAX_MESSAGES)
+            .map((m) => stripEitherOrQuestion(replaceDashesWithPeriod(m))),
           actions: object.actions,
         },
         usage: {

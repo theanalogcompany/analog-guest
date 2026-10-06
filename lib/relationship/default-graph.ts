@@ -3,7 +3,9 @@ import { RelationshipGraphSchema, type RelationshipGraph } from './schema'
 // The seed graph every venue starts from. Ruled in the v2 redesign
 // conversation (2026-10-03); the six states and the first five missions are
 // the owner's own wording, edited only to make them venue-neutral ("Le Mil"
-// generalized). The `routine` mission is DRAFT wording, not yet approved -
+// generalized) - except first_contact's final sentence, owner-approved
+// 2026-10-04 from the turn-one-move round-5 winner (see its header). The
+// `routine` mission is DRAFT wording, not yet approved -
 // flagged in the phase 1 report. Mission text is prompt-facing: changing a
 // line here is a guest-facing-copy change under the plan gate.
 //
@@ -22,8 +24,17 @@ const DEFAULT_GRAPH_INPUT = {
       key: 'first_contact',
       label: 'First contact',
       objective: 'Establish presence',
+      // Final sentence appended 2026-10-04 (owner-approved, measured by
+      // turn-one-move round 5): without it 1/3 of thin openers got the name
+      // ask as the entire first reply. Mission-level etiquette, never a
+      // scripted ask - the moves below stay goal-and-gap only.
+      // "Establish a recognizable personality" CUT 2026-10-05 (owner-ruled):
+      // personality is the voice pack's job - the owner's own corpus and,
+      // eventually, what the venue actually sends - never a mission
+      // instruction. The clause licensed performative wit ("anything catch
+      // your eye, or want a nudge in a direction?").
       mission:
-        'Make the guest comfortable interacting with you. Establish a recognizable personality and a welcoming atmosphere without demanding their attention.',
+        'Make the guest comfortable interacting with you. Keep the welcome warm without demanding their attention. The first thing a guest ever gets from you is a welcome in the house voice; your curiosity about them earns its turn as the exchange warms up.',
       rank: 0,
       requires: [],
     },
@@ -98,11 +109,14 @@ const DEFAULT_GRAPH_INPUT = {
     {
       key: 'learn_name',
       homeState: 'first_contact',
-      // "right after being useful is the natural opening" was CUT (owner
-      // goal, 2026-10-04, measured by turn-one-move): on a thin opener the
-      // model has not been useful yet, so that clause deferred the move
-      // forever - 0/3 pursuit across four prompt arms; this wording 3/3.
-      goal: 'Learn their name, early - a first exchange that goes well usually ends with it. A thin opener ("hey") is itself the opening: when there is nothing else to react to, a warm, casual ask for their name is the host\'s natural reply.',
+      // Goal-and-gap only (owner-ruled 2026-10-04, turn-one-move rounds
+      // 4-5). The round-3 wording scripted the ask ("a warm, casual ask
+      // ... is the host's natural reply") and the model obeyed literally -
+      // the name ask became the entire first reply, 9/9 samples. Listing
+      // "the welcome" among what attaches to the name re-licensed the same
+      // ask; this wording plus the mission's welcome-first sentence went
+      // 0 turn-one asks across 9 samples while still pursuing.
+      goal: 'Their name. You do not have it yet, and everything you remember about them later - the memory, the recognition - attaches to it.',
       closedWhen: [{ profileField: 'first_name' }],
     },
     {
@@ -111,8 +125,9 @@ const DEFAULT_GRAPH_INPUT = {
       // "or what they'd want" CUT (owner-ruled 2026-10-04): the move means
       // what they ordered WITH US - the clause licensed generic taste
       // questions ("what are you drinking these days?") on guests with no
-      // order to ask about.
-      goal: 'Learn what they ordered with us - what they got this visit, or what they usually get. If they have not been in yet, this move waits; it is about their order, not their tastes in general.',
+      // order to ask about. Rephrased goal-and-gap in round 5 alongside
+      // learn_name; same meaning, measured together with it.
+      goal: 'What they order with us - what they got this visit, or what they usually get. You do not know yet. If they have not been in, there is nothing to ask about.',
       closedWhen: [{ profileField: 'usual_order' }],
     },
     {
@@ -123,8 +138,20 @@ const DEFAULT_GRAPH_INPUT = {
     },
     {
       key: 'find_their_thing',
-      homeState: 'first_visit',
-      goal: "Find their thing - the drink or pastry that becomes their reason to come back. Point, don't quiz: offer something specific and see what lands.",
+      // first_contact, not first_visit (owner-ruled 2026-10-05): on a guest
+      // with no order yet, offering a pointer is okay behavior from the very
+      // first exchange - the 2026-10-05 regression run produced exactly that
+      // reply 6/6 on hi-then-good and the assessor could not credit it
+      // because the move was not yet open. Empty closedWhen keeps it
+      // evergreen either way.
+      homeState: 'first_contact',
+      // Goal flattened 2026-10-05 (owner-approved verbatim): the old
+      // aphoristic wording ("Point, don't quiz: offer something specific and
+      // see what lands") was read back to the guest nearly verbatim - "want
+      // a pointer?" / "a nudge in a direction?" - the v2.8.0 instruction-echo
+      // family, and its register bled into the reply. Goal-and-gap only,
+      // nothing quotable.
+      goal: 'Their thing - the one drink or pastry they would come back for. You do not know it yet. Offering one specific thing from the menu is how you find out.',
       closedWhen: [],
     },
     {
