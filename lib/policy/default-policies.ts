@@ -65,6 +65,14 @@ const DEFAULT_POLICIES_INPUT = {
       onCheckFailure: 'open',
     },
     {
+      key: 'private_event_inquiry_requires_approval',
+      label: 'Reply to a private event or booking inquiry',
+      detection: { kind: 'always' },
+      conditions: { situations: ['private_event_inquiry'] },
+      then: 'queue',
+      onCheckFailure: 'open',
+    },
+    {
       key: 'needs_human_requires_approval',
       label: 'Message that needs a human first',
       detection: { kind: 'always' },

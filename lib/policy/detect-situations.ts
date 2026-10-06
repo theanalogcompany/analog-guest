@@ -23,13 +23,20 @@ import { checkTypesafeEnv } from '@/lib/ai/typesafe-env'
 // act on opt_out_request regardless - POLICY_EXEMPT_SITUATIONS in gate.ts);
 // detection of it here is observability and phase 6 routing.
 
-export const SITUATION_DETECT_VERSION = 'situations-jev-v1.0.0'
+// situations-jev-v1.1.0: mechanic_request narrowed to favor-scale perk asks
+// after "can i rent out your space" scored 0.55 and "can i book the loft for
+// a birthday party" 0.95 under the v1.0.0 wording (playground, 2026-10-05);
+// those belong to the new private_event_inquiry situation (venue-hire leads:
+// rental, buyout, catering), which scores them 0.97/0.98 while attending-an-
+// event questions ("when's the next open mic") stay at 0.02-0.06.
+export const SITUATION_DETECT_VERSION = 'situations-jev-v1.1.0'
 export const SITUATION_DETECT_TIMEOUT_MS = 1_500
 
 export const SITUATION_KEYS = [
   'complaint',
   'opt_out_request',
   'mechanic_request',
+  'private_event_inquiry',
   'needs_human',
 ] as const
 export type SituationKey = (typeof SITUATION_KEYS)[number]
@@ -44,6 +51,7 @@ export const SITUATION_THRESHOLDS: Record<SituationKey, number> = {
   complaint: 0.5,
   opt_out_request: 0.3,
   mechanic_request: 0.5,
+  private_event_inquiry: 0.5,
   needs_human: 0.5,
 }
 
@@ -66,7 +74,21 @@ const QUESTIONS: Record<
   },
   mechanic_request: {
     instructions:
-      'In `inbound_message`, is the guest invoking or requesting something concrete from the venue - holding or reserving an item or seat, redeeming or claiming a perk, getting on a list?',
+      'In `inbound_message`, is the guest invoking or claiming a small personal perk or favor from the venue - asking them to hold or set aside a specific item or seat for them, asking whether a specific item is free or on the house for them, redeeming something offered to them, or getting on a sign-up list?',
+    criteria: {
+      true: 'The guest asks the venue for a concrete favor-scale thing for them personally: hold the couch, set aside a pastry, put them on the open mic list, whether their tea is on the house, claiming a drink that was offered.',
+      false:
+        'Business and booking inquiries are not perk requests: renting or booking the space or a room, private events or buyouts, catering, wholesale, pricing questions, or asking how perks work in general.',
+    },
+  },
+  private_event_inquiry: {
+    instructions:
+      'In `inbound_message`, is the guest asking about booking or hiring the venue itself - renting the space or a room, a private event or buyout, catering, or hosting their own gathering there?',
+    criteria: {
+      true: 'The guest wants the venue for their own purpose: rent the space, book a room or the loft, a private party or buyout, catering an event, a large private group.',
+      false:
+        'Asking about or attending the venue\'s own events ("when is the next open mic", "what is on this weekend"), ordinary visits or table-for-two type requests, perks, holds, or anything else.',
+    },
   },
   needs_human: {
     instructions:
