@@ -652,10 +652,11 @@ export async function buildRuntimeContext(input: {
     // is recent enough that they are still at the counter.
     //
     // TWO ANCHORS (ruled 2026-09-25), and the second is what makes the flow
-    // pay off. The greeting waits five minutes and then asks what the guest
-    // got, so their answer necessarily lands OUTSIDE the five-minute window; a
-    // single anchor would leave understand_order unarmed on exactly the turn
-    // the whole mechanism exists to capture. scanCarryForwardAt owns the rule.
+    // pay off for a guest who answers slowly. The greeting asks what the guest
+    // got, and an answer more than five minutes after the scan lands OUTSIDE
+    // the scan's own window; a single anchor would leave understand_order
+    // unarmed on exactly the turn the whole mechanism exists to capture.
+    // scanCarryForwardAt owns the rule.
     //
     // Read only when the current message is Instagram and carries no scan
     // referral of its own: zero cost on Sendblue and on a turn that already

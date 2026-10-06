@@ -180,7 +180,7 @@ export const INBOUND_TURN_REASONS = [
 
   // ---- outcome 'not_run' (TAC-536): a scan that did not become a greeting ----
   /**
-   * The guest wrote within the five minutes the scan started, so their own
+   * The guest wrote within the greeting delay the scan started, so their own
    * message was the turn and this scan needed no greeting of its own.
    *
    * A DECISION and the commonest of these five, not a miss: it is the flow

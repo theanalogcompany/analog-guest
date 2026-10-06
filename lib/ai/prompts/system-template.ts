@@ -1938,7 +1938,7 @@ import {
 // WHY NOT A COUNTER-TURN BLOCK, since the ticket is titled "at the counter":
 // there is no counter signal in the prompt on this path. `scanArrival` /
 // `## Guest just arrived` is set only on the `instagram_scan_arrival`
-// trigger, the five-minute greeting cron, and this guest typed inside the
+// trigger, the delayed scan greeting, and this guest typed inside the
 // window so the turn was an ordinary inbound. TAC-536's carry-forward does
 // reach `visitConfirmedAt`, but that value goes only to intention arming and
 // never to the prompt, and the read is gated on Instagram, so a Sendblue

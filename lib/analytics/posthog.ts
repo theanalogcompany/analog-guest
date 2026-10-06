@@ -2575,7 +2575,7 @@ export async function captureInstagramScanGreeting(
   if (props.outcome !== 'greeted') return
   await postToSlack(
     [
-      '*An Instagram guest scanned the counter code and was greeted*: no message from them, five minutes of silence.',
+      '*An Instagram guest scanned the counter code and was greeted*: no message from them before the greeting delay ran out.',
       props.hadPriorConversation === true
         ? 'they have messaged this venue before, so the greeting does not introduce itself'
         : 'no messages with them on record, so the greeting says who they have reached',

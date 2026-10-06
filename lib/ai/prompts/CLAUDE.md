@@ -125,7 +125,7 @@ The emoji directive keeps its own last-block position, separately measured.
   exact trigger. **R23's carve-out looks redundant and is not:** R23 renders after R21, so on
   most-proximate-wins it beats the recognition clause, and its own "you come in so often"
   example pulls the model the other way. Delete it and the change is silently vetoed. Not
-  counter-scoped: `scanArrival` is set only on the five-minute greeting cron, and TAC-536's
+  counter-scoped: `scanArrival` is set only on the delayed scan greeting, and TAC-536's
   carry-forward reaches `visitConfirmedAt`, which goes to intention arming and never to the
   prompt. Full reasoning is the v1.75.0 header in `system-template.ts`.
 - **SHIPPED UNDER ITS BAR, on a reading of the bodies rather than a rate** (ruled

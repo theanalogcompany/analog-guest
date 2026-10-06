@@ -6,23 +6,32 @@
 // without a database.
 //
 // THE SHAPE OF THE FLOW, so the four constants below read as one rule rather
-// than four numbers (ruled 2026-09-25):
+// than four numbers (ruled 2026-09-25, retimed 2026-10-06):
 //
 //   A guest follows the venue's ig.me link into a thread Instagram already
 //   has. No icebreaker is shown, so no message comes with it.
 //
-//   The scan does NOT get an immediate reply. It starts a five-minute timer.
+//   The scan does NOT get an immediate reply. It starts a twenty-second
+//   timer.
 //
-//   Anything the guest sends inside those five minutes is treated as
-//   at-counter: order capture arms off the scan, and there is no separate
-//   greeting, because their own message is the turn.
+//   Anything the guest sends inside those twenty seconds replaces the
+//   greeting: their own message is the turn.
 //
-//   Silence for five minutes sends the greeting.
+//   Twenty seconds of silence sends the greeting.
+//
+//   Separately, anything the guest sends within FIVE MINUTES of the scan is
+//   treated as at-counter, greeted or not: order capture arms off the scan.
 //
 // WHY A DELAY AT ALL. Scanning is a deliberate act at the counter, so silence
 // is a worse answer than a greeting; but a guest who scans and then types is
 // mid-sentence, and greeting over them would talk across the thing they were
 // about to say. The timer is what lets both be true.
+//
+// WHY TWENTY SECONDS AND NOT FIVE MINUTES (ruled 2026-10-06). At five minutes
+// plus the cron's lag the greeting landed about six minutes after the scan,
+// by which time a to-go guest had left. The cost, accepted in the same
+// ruling: a guest still typing at twenty seconds is greeted anyway, and a
+// message that lands while the greeting is generating crosses it.
 
 import { venueLocalDate } from '@/lib/schemas'
 
@@ -30,12 +39,12 @@ import { venueLocalDate } from '@/lib/schemas'
  * How long a scan waits for the guest to say something before the venue
  * greets them.
  *
- * FIVE MINUTES, from the ruling. It is also the window inside which an inbound
- * is read as at-counter, and the two are the same number ON PURPOSE: the
- * question "did they write instead of being greeted" and the question "were
- * they standing there when they wrote" have one answer.
+ * TWENTY SECONDS, ruled 2026-10-06. It was five minutes, and the same number
+ * as SCAN_CARRY_FORWARD_MS below on purpose; the two are now separate
+ * questions with separate answers. This one is only "did they write instead
+ * of being greeted".
  */
-export const SCAN_GREETING_DELAY_MS = 5 * 60 * 1000
+export const SCAN_GREETING_DELAY_MS = 20 * 1000
 
 /**
  * How late a greeting may still fire.
@@ -54,19 +63,22 @@ export const SCAN_GREETING_MAX_AGE_MS = 15 * 60 * 1000
 /**
  * How long after a scan an inbound is still at the counter.
  *
- * The same five minutes as the greeting delay, and the first of the two
- * carry-forward anchors. See the module header.
+ * FIVE MINUTES, and the first of the two carry-forward anchors. Its own
+ * literal, deliberately NOT derived from SCAN_GREETING_DELAY_MS (ruled
+ * 2026-10-06): how long we wait before speaking and how long the guest's own
+ * first message still counts as part of the scan are different facts, and
+ * shortening the first to twenty seconds must not shorten this.
  */
-export const SCAN_CARRY_FORWARD_MS = SCAN_GREETING_DELAY_MS
+export const SCAN_CARRY_FORWARD_MS = 5 * 60 * 1000
 
 /**
  * How long after a SCAN GREETING an inbound is still at the counter.
  *
  * THIRTY MINUTES, from the ruling, and the second anchor. Without it the
- * flow's own payoff is lost: the greeting asks what the guest got, and their
- * answer necessarily lands AFTER the five minutes the greeting waited, so a
- * single five-minute anchor would leave `understand_order` unarmed on exactly
- * the turn the whole mechanism exists to capture.
+ * flow's payoff depends on the guest answering quickly: the greeting asks
+ * what they got, and an answer more than SCAN_CARRY_FORWARD_MS after the scan
+ * would leave `understand_order` unarmed on exactly the turn the whole
+ * mechanism exists to capture.
  *
  * It matters only for a guest the scan did NOT create. One the scan created
  * carries `created_via: 'qr_scan'`, which is a permanent confirmed-visit
@@ -84,11 +96,11 @@ export interface ScanArrivalTiming {
 }
 
 /**
- * Has the five minutes elapsed?
+ * Has the greeting delay elapsed?
  *
  * `>=` rather than `>`: the delay is a floor the guest has had, not a deadline
- * to beat, and a tick landing on the exact millisecond should fire rather than
- * wait another minute.
+ * to beat, and a check landing on the exact millisecond should fire rather
+ * than leave the row for the next cron tick.
  */
 export function isScanGreetingDue(
   scannedAt: Date,
@@ -96,6 +108,28 @@ export function isScanGreetingDue(
   delayMs: number = SCAN_GREETING_DELAY_MS,
 ): boolean {
   return now.getTime() - scannedAt.getTime() >= delayMs
+}
+
+/**
+ * How long the fast path should sleep before the greeting is due.
+ *
+ * Measured from `scannedAt`, the same clock `isScanGreetingDue` reads, so a
+ * sleep of this length ends on a row that predicate calls due.
+ *
+ * Floored at zero: a delivery Meta held for longer than the delay is already
+ * due. CAPPED at twice the delay: `scannedAt` is Meta's clock, and a
+ * timestamp ahead of ours (or simply wrong) must not hold a webhook
+ * invocation open for however long it says. Past the cap the row is not due
+ * when the sleep ends, the fast path leaves it, and the cron takes it.
+ */
+export function msUntilScanGreetingDue(
+  scannedAt: Date,
+  now: Date,
+  delayMs: number = SCAN_GREETING_DELAY_MS,
+): number {
+  const remaining = scannedAt.getTime() + delayMs - now.getTime()
+  if (!Number.isFinite(remaining)) return 0
+  return Math.min(Math.max(remaining, 0), 2 * delayMs)
 }
 
 /**

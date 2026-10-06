@@ -1,6 +1,10 @@
 // TAC-536: the every-minute tick that greets a guest who scanned the counter
 // code and said nothing.
 //
+// THE BACKSTOP, since 2026-10-06. The Instagram webhook now starts a fast path
+// that checks each scan about twenty seconds after it (runScanGreetingFastPath)
+// and this tick picks up whatever that missed. Both run the same per-row path.
+//
 // Hit by an external HTTP cron (cron-job.org), NOT by Vercel cron (Hobby caps
 // granularity at daily) and NOT by GitHub Actions, which TAC-428 measured
 // missing whole hours at a time. Authenticated with EXTERNAL_CRON_SECRET, the
@@ -11,12 +15,12 @@
 // which is what TAC-473 chose for its sibling and was right to. The difference
 // is what this one does: it SENDS UNPROMPTED MESSAGES TO GUESTS. It is the only
 // scheduled path in this repo that talks to a guest with no operator and no
-// inbound behind it, and a dedicated job can be paused at cron-job.org in one
-// click without also switching off the operator window warnings. The cost is
-// one more entry to create and monitor.
+// inbound behind it. PAUSING THIS JOB AT CRON-JOB.ORG NO LONGER STOPS THE
+// GREETINGS, because the fast path does not go through it; the emergency switch
+// is pausing the venue (ruled 2026-10-06).
 //
 // IDEMPOTENT, and by a column rather than an interval. Two ticks landing
-// together cannot both greet: the processor's claim is a CAS against a partial
+// together, or a tick and the fast path, cannot both greet: the processor's claim is a CAS against a partial
 // unique index that also enforces one greeting per guest per venue-local day.
 // See lib/agent/scan-arrival-store.ts for the single UPDATE that does both.
 //

@@ -22,6 +22,12 @@
 // enforced by Postgres rather than by a read-then-decide. The tick is every
 // minute; a read-then-decide at that cadence loses to itself.
 //
+// TWO RUNNERS NOW REACH EVERY ROW (2026-10-06): the webhook's own fast path,
+// about twenty seconds after the scan, and the cron behind it as the
+// backstop. They share one per-row function and therefore this one claim, and
+// the claim is the only thing that makes a double greeting impossible when
+// both arrive together. Nothing else here may be relied on for that.
+//
 // CLAIM BEFORE THE SIDE EFFECT, the house rule (window_warning_pushed_at,
 // pending_until, followup_log). A process that dies between the claim and the
 // send loses one greeting rather than sending two.
@@ -77,9 +83,13 @@ export type StoreResult<T> =
  * path already inside waitUntil, and it means the pending row's clock and the
  * message row's clock cannot disagree about when the guest scanned.
  *
- * Meta's clock when the delivery carried one, ours when it did not: the five
- * minutes and the staleness bound both run from this, and Meta's is the one
- * the guest's own action happened on.
+ * Meta's clock when the delivery carried one, ours when it did not: the
+ * greeting delay and the staleness bound both run from this, and Meta's is the
+ * one the guest's own action happened on.
+ *
+ * Returns the row's id AND the `scannedAt` it was written with, so the fast
+ * path can time its sleep from the same instant the due check will read
+ * without a second round trip.
  */
 export async function scheduleScanArrival(
   supabase: AdminSupabaseClient,
@@ -89,7 +99,7 @@ export async function scheduleScanArrival(
     guestId: string
     hadPriorConversation: boolean
   },
-): Promise<StoreResult<string>> {
+): Promise<StoreResult<{ id: string; scannedAt: Date }>> {
   const scan = await supabase
     .from('messages')
     .select('provider_sent_at, created_at')
@@ -113,7 +123,53 @@ export async function scheduleScanArrival(
   if (inserted.error || !inserted.data) {
     return { ok: false, error: inserted.error?.message ?? 'no row returned' }
   }
-  return { ok: true, data: inserted.data.id }
+  return {
+    ok: true,
+    data: { id: inserted.data.id, scannedAt: new Date(scannedAt) },
+  }
+}
+
+const PENDING_COLUMNS =
+  'id, venue_id, guest_id, scan_message_id, scanned_at, had_prior_conversation'
+
+function toPendingScanArrival(row: {
+  id: string
+  venue_id: string
+  guest_id: string
+  scan_message_id: string | null
+  scanned_at: string
+  had_prior_conversation: boolean
+}): PendingScanArrival {
+  return {
+    id: row.id,
+    venueId: row.venue_id,
+    guestId: row.guest_id,
+    scanMessageId: row.scan_message_id,
+    scannedAt: new Date(row.scanned_at),
+    hadPriorConversation: row.had_prior_conversation,
+  }
+}
+
+/**
+ * One pending row by id, for the fast path.
+ *
+ * The SAME two filters as `loadDueScanArrivals`, on purpose: a row the cron
+ * would not pick up is a row the fast path must not act on either. `null` is
+ * the ordinary answer when the cron (or anything else) got there first.
+ */
+export async function loadPendingScanArrival(
+  supabase: AdminSupabaseClient,
+  id: string,
+): Promise<StoreResult<PendingScanArrival | null>> {
+  const { data, error } = await supabase
+    .from('instagram_scan_arrivals')
+    .select(PENDING_COLUMNS)
+    .eq('id', id)
+    .is('claimed_at', null)
+    .is('resolved_at', null)
+    .maybeSingle()
+  if (error) return { ok: false, error: error.message }
+  return { ok: true, data: data ? toPendingScanArrival(data) : null }
 }
 
 /** Unclaimed, unresolved rows, oldest first. */
@@ -123,25 +179,13 @@ export async function loadDueScanArrivals(
 ): Promise<StoreResult<PendingScanArrival[]>> {
   const { data, error } = await supabase
     .from('instagram_scan_arrivals')
-    .select(
-      'id, venue_id, guest_id, scan_message_id, scanned_at, had_prior_conversation',
-    )
+    .select(PENDING_COLUMNS)
     .is('claimed_at', null)
     .is('resolved_at', null)
     .order('scanned_at', { ascending: true })
     .limit(limit)
   if (error) return { ok: false, error: error.message }
-  return {
-    ok: true,
-    data: (data ?? []).map((row) => ({
-      id: row.id,
-      venueId: row.venue_id,
-      guestId: row.guest_id,
-      scanMessageId: row.scan_message_id,
-      scannedAt: new Date(row.scanned_at),
-      hadPriorConversation: row.had_prior_conversation,
-    })),
-  }
+  return { ok: true, data: (data ?? []).map(toPendingScanArrival) }
 }
 
 export type ClaimResult =
@@ -184,19 +228,27 @@ export async function claimScanArrival(
  * null, so the row stays out of the once-per-day index and a later scan that
  * day can still be greeted: the guard is on having been GREETED, not on having
  * scanned.
+ *
+ * A CAS ON `resolved_at IS NULL`, and `data` says whether THIS call won it.
+ * Two runners reach every row now, and two that both decide to suppress the
+ * same scan would otherwise each write a ledger row and an event for it. The
+ * caller gates those on `data === true`. It also means a resolved row is
+ * never rewritten: the first outcome recorded is the one that stands.
  */
 export async function resolveScanArrival(
   supabase: AdminSupabaseClient,
   id: string,
   outcome: ScanArrivalOutcome,
   now: Date,
-): Promise<StoreResult<null>> {
-  const { error } = await supabase
+): Promise<StoreResult<boolean>> {
+  const { data, error } = await supabase
     .from('instagram_scan_arrivals')
     .update({ outcome, resolved_at: now.toISOString() })
     .eq('id', id)
+    .is('resolved_at', null)
+    .select('id')
   if (error) return { ok: false, error: error.message }
-  return { ok: true, data: null }
+  return { ok: true, data: (data ?? []).length === 1 }
 }
 
 /**

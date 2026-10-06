@@ -1,5 +1,5 @@
 // TAC-536: what to say to a guest who scanned the counter code and said
-// nothing for five minutes.
+// nothing for the greeting delay (SCAN_GREETING_DELAY_MS, twenty seconds).
 //
 // TWO VARIANTS, chosen by whether the guest has any message on our record.
 // They are not a stylistic pair: one introduces the venue and one is told not

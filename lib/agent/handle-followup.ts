@@ -458,9 +458,9 @@ export async function handleFollowup(input: {
     // way: nothing routes on null.
     //
     // TAC-536 carves out ONE reason, and only that one: a scan greeting. The
-    // premise above does not hold for it. It fires five minutes after the
-    // guest opened the venue's own link, which reopens Meta's window on its
-    // own, so the window is open rather than almost always shut. The send
+    // premise above does not hold for it. It fires about twenty seconds (and
+    // never more than fifteen minutes) after the guest opened the venue's own
+    // link, which reopens Meta's window on its own, so the window is open rather than almost always shut. The send
     // still re-derives it immediately before going out
     // (dispatch-instagram-reply.ts), so nothing here is trusting the window
     // rather than checking it.
