@@ -12,7 +12,14 @@ import type {
   SuggestedVerdict,
 } from './load-venue-knowledge-pure'
 
-export type EntryKind = 'existing' | 'replacement' | 'proposal'
+/**
+ * `existing_unreachable` is an existing row whose `source_type` retrieval
+ * excludes (a voice-note transcript today). It is still compared, because a
+ * proposal restating one is a REPLACEMENT for information the agent lost, not
+ * a duplicate of information it has. Collapsing the two inverts the number.
+ */
+export type EntryKind =
+  'existing' | 'existing_unreachable' | 'replacement' | 'proposal'
 
 export interface Neighbour {
   label: string

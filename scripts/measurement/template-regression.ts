@@ -271,6 +271,16 @@ async function runSample(
       }`
       return outcome
     }
+    // A stored venue_info key that reached no renderer means the model
+    // answered without a fact the venue has on file. v2.10.0 exists because a
+    // silent drop of exactly that kind sent two fabricated addresses, so this
+    // DISQUALIFIES the sample rather than scoring it: a run measured against
+    // an incomplete venue profile is not a result (convention #5).
+    const unrendered = trace.venueProfileRender?.unrendered ?? []
+    if (unrendered.length > 0) {
+      outcome.disqualified = `venue_info keys reached no renderer: ${unrendered.join(', ')}`
+      return outcome
+    }
 
     const reply = trace.generation.output.messages
     const tagged = assessor.result.output.memoryEntries

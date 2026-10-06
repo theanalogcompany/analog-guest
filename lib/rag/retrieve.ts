@@ -1,5 +1,6 @@
 import { createAdminClient } from '@/lib/db/admin'
 import { embedText } from './embed'
+import { RETRIEVABLE_SOURCE_TYPES } from './knowledge-source-roles'
 import type {
   KnowledgeCorpusChunk,
   RAGResult,
@@ -31,7 +32,15 @@ function toVectorLiteral(embedding: number[]): string {
  * Voyage-embeds the query, filters at SIMILARITY_FLOOR, fails as a value on
  * error. Calls match_knowledge_corpus (migration 013, RPC shape updated by
  * 017) with three optional filters:
- *   - source_type_filter: surface-type narrowing (unused at call sites today).
+ *   - source_type_filter: defaults to RETRIEVABLE_SOURCE_TYPES, which excludes
+ *     voicenote transcripts - a voice note is voice, not fact (owner ruling
+ *     2026-10-05; see ./knowledge-source-roles.ts for the full reasoning).
+ *     Defaulted HERE rather than at the call sites deliberately: v1
+ *     (lib/agent/stages.ts) and v2 (lib/relationship/run-turn.ts) both reach
+ *     the corpus through this function, and a ruling about what counts as
+ *     knowledge must not be something a third caller can forget to pass. An
+ *     explicit `sourceTypeFilter` still overrides, which is the escape hatch
+ *     for a diagnostic that needs to read the excluded rows back.
  *   - min_confidence: defaults to KNOWLEDGE_CONFIDENCE_FLOOR_DEFAULT (0.7) so
  *     low-confidence chunks don't slip into the prompt.
  *   - primary_tag_filter: array-overlap routing preference derived per-call
@@ -66,9 +75,13 @@ export async function retrieveKnowledgeContext(
     query_embedding: toVectorLiteral(queryEmbed.data.embedding),
     match_count: limit,
     min_confidence: minConfidence,
-    ...(input.sourceTypeFilter !== undefined && {
-      source_type_filter: input.sourceTypeFilter,
-    }),
+    // Always sent: the exclusion is the default, not an opt-in. Filtering in
+    // the RPC rather than after it matters because `match_count` is applied
+    // inside - a post-hoc filter would return 4 rows and hand the prompt
+    // however few survived.
+    source_type_filter: [
+      ...(input.sourceTypeFilter ?? RETRIEVABLE_SOURCE_TYPES),
+    ],
     ...(input.primaryTagPreference !== undefined && {
       primary_tag_filter: input.primaryTagPreference,
     }),

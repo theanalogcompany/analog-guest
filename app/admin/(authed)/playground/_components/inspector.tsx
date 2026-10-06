@@ -263,6 +263,7 @@ function TraceInspector({
           value={edits.venueProfileText}
           onChange={(v) => set('venueProfileText', v)}
           busy={busy}
+          note={<VenueProfileNote render={trace.venueProfileRender} />}
         />
 
         <InspectorSection title="Composed prompt">
@@ -448,14 +449,17 @@ function BriefSection({
   value,
   onChange,
   busy,
+  note,
 }: {
   title: string
   value: string
   onChange: (value: string) => void
   busy: boolean
+  note?: React.ReactNode
 }) {
   return (
     <InspectorSection title={title}>
+      {note}
       <EditArea value={value} onChange={onChange} disabled={busy} />
     </InspectorSection>
   )
@@ -478,6 +482,40 @@ function EditArea({
       rows={5}
       className="min-h-20 font-mono text-[11px] leading-[1.5]"
     />
+  )
+}
+
+/**
+ * The venue profile used to be a 4000-char slice of the venue_info JSON, which
+ * silently dropped the address at Le Mil's and got two fabricated ones sent.
+ * There is no budget now, so the only thing left to watch is a stored key that
+ * reached no renderer - shown here loudly rather than left to be inferred from
+ * a bad reply (lib/ai/v2/venue-profile.ts).
+ */
+function VenueProfileNote({
+  render,
+}: {
+  render: TurnTrace['venueProfileRender']
+}) {
+  if (render === null)
+    return <EditLabel>no venue_info row for this venue</EditLabel>
+  return (
+    <div className="flex flex-col gap-1">
+      <EditLabel>
+        {render.charCount.toLocaleString()} chars rendered
+        {render.overridden ? ' · OVERRIDDEN, not the venue’s own' : ''}
+      </EditLabel>
+      {render.unrendered.length > 0 && (
+        <span
+          className="text-[11px] font-bold uppercase tracking-wider text-red-700"
+          role="alert"
+        >
+          {render.unrendered.length} stored key
+          {render.unrendered.length === 1 ? '' : 's'} reached no renderer:{' '}
+          {render.unrendered.join(', ')}
+        </span>
+      )}
+    </div>
   )
 }
 

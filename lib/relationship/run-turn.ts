@@ -9,6 +9,7 @@ import {
   type HistoryTurn,
 } from '@/lib/ai/v2/compose'
 import { generateV2Reply } from '@/lib/ai/v2/generate'
+import { renderVenueProfile } from '@/lib/ai/v2/venue-profile'
 import { declaredActionTypes, type GenerationOutput } from '@/lib/ai/v2/actions'
 import { judgeResponse, type JudgeResult } from '@/lib/eval/judge'
 import { DEFAULT_POLICY_SET } from '@/lib/policy/default-policies'
@@ -154,6 +155,19 @@ export interface TurnTrace {
     interactionMemory: string
     openMoves: string
   }
+  /**
+   * How the venue profile was built. null when the venue has no venue_info
+   * row at all. `unrendered` must be empty: a non-empty entry is a stored
+   * fact that reached no renderer, which is the defect class that put a
+   * fabricated address in two replies (lib/ai/v2/venue-profile.ts).
+   * `overridden` says the playground supplied the text, so a clean
+   * `unrendered` on an overridden turn proves nothing about the venue.
+   */
+  venueProfileRender: {
+    unrendered: string[]
+    charCount: number
+    overridden: boolean
+  } | null
   history: HistoryTurn[]
   composed: ComposedPrompt
   /** Inbound situation detection (fast axis); null only on pre-generation failures. */
@@ -243,13 +257,14 @@ export async function runTurn(input: RunTurnInput): Promise<TurnTrace> {
     .select('venue_info')
     .eq('venue_id', input.venueId)
     .maybeSingle()
-  // Crude serialization for now; the section registry's venue-profile
-  // renderer (phase 3 polish) replaces this. Override covers the gap.
-  const venueProfile =
-    o.venueProfileText ??
-    (configRow.data?.venue_info
-      ? JSON.stringify(configRow.data.venue_info, null, 1).slice(0, 4000)
-      : venueName)
+  // lib/ai/v2/venue-profile.ts renders this; it throws on a malformed row,
+  // same as v1's buildRuntimeContext. The "section registry" named in
+  // lib/relationship/CLAUDE.md does not exist in code yet, so this is a
+  // direct call rather than a registry lookup.
+  const rendered = configRow.data?.venue_info
+    ? renderVenueProfile(configRow.data.venue_info, now)
+    : null
+  const venueProfile = o.venueProfileText ?? rendered?.text ?? venueName
 
   // The curated link allowlist (TAC-509): `venue_info.links` and nothing
   // else - not retrieved knowledge, not the composed prompt. Deriving it
@@ -391,6 +406,14 @@ export async function runTurn(input: RunTurnInput): Promise<TurnTrace> {
       o.interactionMemoryText ?? renderInteractionMemory(memory),
     openMoves: o.openMovesText ?? renderOpenMoves(moves, memory),
   }
+  const venueProfileRender: TurnTrace['venueProfileRender'] =
+    rendered === null
+      ? null
+      : {
+          unrendered: rendered.unrendered,
+          charCount: rendered.charCount,
+          overridden: o.venueProfileText !== undefined,
+        }
 
   const composed = composePrompt({
     venueName,
@@ -420,6 +443,7 @@ export async function runTurn(input: RunTurnInput): Promise<TurnTrace> {
       overridden: o.stateKey !== undefined || o.mission !== undefined,
     },
     sections,
+    venueProfileRender,
     history,
     composed,
   }
