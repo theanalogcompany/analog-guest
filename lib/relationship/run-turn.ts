@@ -1,6 +1,7 @@
 import { createAdminClient } from '@/lib/db/admin'
 import { loadVoicePack } from '@/lib/rag/voice-pack'
 import { retrieveKnowledgeContext } from '@/lib/rag/retrieve'
+import { parseVenueLinks } from '@/lib/schemas/venue-info'
 import { DELIVERED_OUTBOUND_STATUSES } from '@/lib/agent/group-responses'
 import {
   composePrompt,
@@ -250,6 +251,24 @@ export async function runTurn(input: RunTurnInput): Promise<TurnTrace> {
       ? JSON.stringify(configRow.data.venue_info, null, 1).slice(0, 4000)
       : venueName)
 
+  // The curated link allowlist (TAC-509): `venue_info.links` and nothing
+  // else - not retrieved knowledge, not the composed prompt. Deriving it
+  // from the knowledge section held every Le Mil's draft that mentioned the
+  // bare site (the corpus writes "on lemils.com", which no URL regex run
+  // over knowledge text should turn into an allowlist), and a link the model
+  // legitimately carries from an earlier turn would vanish whenever this
+  // turn's retrieval missed the chunk. lib/ai/url-detector.ts states the
+  // rule; `unverified_link` in default-policies.ts asks Jev the matching
+  // question.
+  const venueInfo = configRow.data?.venue_info
+  const providedLinks = parseVenueLinks(
+    venueInfo !== null &&
+      typeof venueInfo === 'object' &&
+      !Array.isArray(venueInfo)
+      ? venueInfo.links
+      : undefined,
+  ).map((l) => l.url)
+
   let voicePackText = o.voicePackText
   if (voicePackText === undefined) {
     const pack = await loadVoicePack({ venueId: input.venueId })
@@ -488,7 +507,7 @@ export async function runTurn(input: RunTurnInput): Promise<TurnTrace> {
           {
             draft_messages: output.messages,
             declared_actions: JSON.stringify(output.actions ?? []),
-            provided_links: extractLinks(sections.knowledge),
+            provided_links: providedLinks,
             recent_conversation: transcript.slice(-3000),
           },
           DEFAULT_POLICY_SET,
@@ -590,10 +609,6 @@ export async function runTurn(input: RunTurnInput): Promise<TurnTrace> {
     assessor: assessorTrace,
     totalDurationMs: Date.now() - started,
   }
-}
-
-function extractLinks(text: string): string[] {
-  return text.match(/https?:\/\/\S+|www\.\S+/gi) ?? []
 }
 
 function renderPredicate(p: StatePredicate): string {

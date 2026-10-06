@@ -28,12 +28,61 @@
  * header) + the learn_name goal rewording in default-graph.ts; baseline
  * then passed BOTH scenarios 3/3.
  *
+ * ROUND 4 (owner-ruled 2026-10-04 evening): the round-3 winner overshot.
+ * "a warm, casual ask for their name is the host's natural reply" scripts
+ * the ask, and the model obeys it literally - the entire first reply to
+ * "hi" became "hey! welcome - what do I call you?", which reads abrupt.
+ * Ruling: move goals must specify the GOAL and the GAP only - no scripted
+ * ask, no scripted timing - and the model decides which gap to fill when.
+ * The name must NOT be asked in the first reply; pursuit must still happen
+ * across the exchange. Arms iterate the gap wording (and one arm the
+ * mission) until both hold.
+ *
+ * ROUND 4 OUTCOME (runs 2026-10-04 23:06-23:19Z): baseline breached
+ * ceiling 2 on every scenario (9/9 samples asked turn one - instrument
+ * validated). gap-pure breached on bare-hey and hi-then-good (1/3 each).
+ * gap-value never asked - 0/3 pursuit on hi-then-good, the pre-registered
+ * risk; family dead. gap+mission closest: PASS hi-then-good (2/3) and
+ * order-after-name (3/3), but 1/3 turn-one asks on bare-hey.
+ *
+ * ROUND 5: the residual turn-one pressure is in GAP_NAME itself - "the
+ * welcome, the memory, the recognition all attach to it" tells the model
+ * the WELCOME needs the name, which licenses asking inside it. One lever
+ * at a time: gap2 drops the welcome from the attach-list; mission2
+ * sharpens the first-touch clause so the welcome is complete in itself.
+ *
+ * ROUND 5 OUTCOME (run 2026-10-04T23:26Z): gap2+mission passed ALL
+ * scenarios - 0 turn-one asks and 0 ceiling-1 breaches across 9 samples.
+ * Both levers are needed: gap2-pure breached hi-then-good (1/3) and
+ * round-4 gap+mission breached bare-hey (1/3), each alone. mission2
+ * ("complete in itself") breached hi-then-good 3/3 - wording dead.
+ * Winning copy = GAP_NAME_2 + GAP_ORDER goals and MISSION_WELCOME;
+ * landed in default-graph.ts (owner-approved 2026-10-04 evening).
+ *
+ * CONFIRMATION (run 2026-10-04T23:38Z) FALSIFIED the round-5 pass on
+ * hi-then-good: baseline on the landed copy asked turn one 3/3 there
+ * (bare-hey and order-after-name stayed clean). The composed prompt was
+ * verified CHARACTER-IDENTICAL to the winning override (scripts/CLAUDE.md
+ * #9), so round 5's 0/3 vs the confirmation's 3/3 is sampling variance at
+ * n=3 - pooled, "hi" breaches ~3/6. Root cause found by reading the
+ * breach bodies (#7): every breach in every round is the verbatim voice
+ * pack exemplar "just so we know what to call you 🙂" - voice_corpus row
+ * 8d090421 (operator_approve, 2026-09-26). A static corpus exemplar
+ * outranks any move-goal wording; fixing it is a voice_corpus data
+ * decision (owner), not another wording arm. The landed copy stands on
+ * its own result: bare-hey went 9/9 breaches -> 0/6 with pursuit intact.
+ *
  * Pre-registered, evaluated in code (scripts/CLAUDE.md #5/#8):
- *   BAR     - per scenario: >= 2/3 samples have an assessor moveKey tag in
- *             {learn_name, understand_order} by the final turn. Tags are
- *             the instrument, never a '?' heuristic (a freelance question
- *             would fool a count - seen live).
- *   CEILING - every reply in every sample carries at most one question.
+ *   BAR       - per scenario: >= 2/3 samples have an assessor moveKey tag
+ *               in the scenario's target set by the final turn. Tags are
+ *               the instrument, never a '?' heuristic (a freelance question
+ *               would fool a count - seen live).
+ *   CEILING 1 - every reply in every sample carries at most one question.
+ *   CEILING 2 - no sample's FIRST reply carries a learn_name tag: the
+ *               first thing a guest ever gets is a welcome, not an intake
+ *               question. (Every scenario opens thin, so this applies to
+ *               all of them.) Baseline is expected to breach this - it is
+ *               the defect reproducing, which validates the instrument.
  *   A sample with a failed generation or assessor DISQUALIFIES its arm for
  *   that scenario - a failure is not a zero.
  */
@@ -45,13 +94,7 @@ import {
   type TurnOverrides,
 } from '@/lib/relationship/run-turn'
 import type { HistoryTurn } from '@/lib/ai/v2/compose'
-import { DEFAULT_RELATIONSHIP_GRAPH } from '@/lib/relationship/default-graph'
-import {
-  EMPTY_MEMORY,
-  EMPTY_PROFILE,
-  openMoves,
-  renderOpenMoves,
-} from '@/lib/relationship/profile'
+import { EMPTY_MEMORY, EMPTY_PROFILE } from '@/lib/relationship/profile'
 import { V2_PROMPT_VERSION } from '@/lib/ai/v2/template'
 import { ASSESSOR_PROMPT_VERSION } from '@/lib/relationship/assessor'
 import { createRunLog } from './run-log'
@@ -68,36 +111,52 @@ interface Scenario {
 }
 
 const SCENARIOS: Scenario[] = [
-  // The canonical failure: a bare low-content opener.
-  { key: 'bare-hey', script: ['hey'] },
-  // The aimless-question case from the playground: pleasantry answered,
-  // the model asks SOMETHING - the bar is whether it serves an aim.
-  { key: 'hi-then-good', script: ['hi', 'good'] },
-  // Past the name: once first_name lands (turn 2), learn_name closes and
-  // understand_order is the remaining first_contact aim - does the model
-  // pick it up, or does the question budget go idle/freelance again? The
-  // bar is understand_order SPECIFICALLY: the name tag alone cannot pass.
+  // The canonical thin opener, extended a turn: with the first reply now
+  // required to be a welcome, pursuit has to land on turn 2+ - a one-turn
+  // script could only measure the ceiling, never the bar.
+  {
+    key: 'bare-hey',
+    script: [
+      'hey',
+      'haha just saw the number at the counter, figured i would text',
+    ],
+  },
+  // The aimless-question case from the playground. Turn-2 line is a
+  // low-content continuation that answers almost any welcome shape - the
+  // round-3 'good' only parsed as a reply to "how's it going?".
+  { key: 'hi-then-good', script: ['hi', 'all good, just checking this out'] },
+  // Past the name: the guest volunteers it plus a visit (turn 2), so
+  // learn_name is satisfied mid-exchange and understand_order is the live
+  // aim - does the model pick it up, or does the question budget go
+  // idle/freelance again? The bar is understand_order SPECIFICALLY: the
+  // name tag alone cannot pass.
   {
     key: 'order-after-name',
-    script: ['hey', 'Alex', 'nice to meet you too!'],
+    script: ['hey', "i'm alex btw - was in this morning actually"],
     target: ['understand_order'],
   },
 ]
 
-const MISSION_REWRITE =
-  'Make them glad they texted. A first message is an opening: meet it with light, specific interest in them - what they got, or what to call them - not pleasantry alone. One question at most, and drop it the moment they show hurry or trouble.'
+// Round 5 arms: still goal-and-gap only in the moves; etiquette may live in
+// the mission (the arm the ruling allows to iterate). One lever at a time so
+// a pass is attributable.
+//
+// gap2-pure    the de-pressured gap alone - the most emergent candidate.
+// gap2+mission the de-pressured gap plus the round-4 mission (the round-4
+//              near-winner with the hypothesized leak fixed).
+// gap+mission2 the round-4 gap unchanged, mission sharpened - isolates
+//              whether the mission lever alone can hold the ceiling.
 
-const MOVES_DIRECTIVE =
-  '\n\nPick ONE of these and work it into this reply naturally. Skip only if the guest shows trouble or hurry.'
-
-// Round 3: learn_name's own timing clause ("right after being useful is the
-// natural opening") defers the move forever on a thin opener - the model has
-// not been useful yet, so the move text itself says wait. Reworded so the
-// thin opener IS an opening.
-const LEARN_NAME_REWRITE =
-  '- Learn their name, early - a first exchange that goes well usually ends with it. A thin opener ("hey") is itself the opening: when there is nothing else to react to, a warm, casual ask for their name is the host\'s natural reply.'
-const UNDERSTAND_ORDER_LINE =
-  "- Learn what they order - what they got, or what they'd want. Curiosity about their taste, not a survey."
+const GAP_NAME =
+  '- Their name. You do not have it yet, and it is the hinge of everything later - the welcome, the memory, the recognition all attach to it.'
+const GAP_NAME_2 =
+  '- Their name. You do not have it yet, and everything you remember about them later - the memory, the recognition - attaches to it.'
+const GAP_ORDER =
+  '- What they order with us - what they got this visit, or what they usually get. You do not know yet. If they have not been in, there is nothing to ask about.'
+const MISSION_WELCOME =
+  'Make the guest comfortable interacting with you. Establish a recognizable personality and a welcoming atmosphere without demanding their attention. The first thing a guest ever gets from you is a welcome in the house voice; your curiosity about them earns its turn as the exchange warms up.'
+const MISSION_WELCOME_2 =
+  "Make the guest comfortable interacting with you. Establish a recognizable personality and a welcoming atmosphere without demanding their attention. You are the host: a stranger's first word gets a welcome that is complete in itself, and your curiosity about them earns its turn as the exchange warms up."
 
 interface ArmSpec {
   arm: string
@@ -105,39 +164,27 @@ interface ArmSpec {
 }
 
 function buildArms(): ArmSpec[] {
-  const movesText = renderOpenMoves(
-    openMoves(
-      DEFAULT_RELATIONSHIP_GRAPH,
-      DEFAULT_RELATIONSHIP_GRAPH.initialState,
-      EMPTY_PROFILE,
-    ),
-    EMPTY_MEMORY,
-  )
   return [
+    // Control: the landed round-3 copy. Breached ceiling 2 on 9/9 samples
+    // in round 4 - instrument validated; rerun only as the post-landing
+    // confirmation.
     { arm: 'baseline' },
-    { arm: 'mission', overrides: { mission: MISSION_REWRITE } },
     {
-      arm: 'moves-directive',
-      overrides: { openMovesText: movesText + MOVES_DIRECTIVE },
+      arm: 'gap2-pure',
+      overrides: { openMovesText: `${GAP_NAME_2}\n${GAP_ORDER}` },
     },
     {
-      arm: 'both',
+      arm: 'gap2+mission',
       overrides: {
-        mission: MISSION_REWRITE,
-        openMovesText: movesText + MOVES_DIRECTIVE,
+        mission: MISSION_WELCOME,
+        openMovesText: `${GAP_NAME_2}\n${GAP_ORDER}`,
       },
     },
     {
-      arm: 'name-goal',
+      arm: 'gap+mission2',
       overrides: {
-        openMovesText: `${LEARN_NAME_REWRITE}\n${UNDERSTAND_ORDER_LINE}`,
-      },
-    },
-    {
-      arm: 'name-goal+mission',
-      overrides: {
-        mission: MISSION_REWRITE,
-        openMovesText: `${LEARN_NAME_REWRITE}\n${UNDERSTAND_ORDER_LINE}`,
+        mission: MISSION_WELCOME_2,
+        openMovesText: `${GAP_NAME}\n${GAP_ORDER}`,
       },
     },
   ]
@@ -151,6 +198,8 @@ interface SampleOutcome {
   disqualified: string | null
   pursued: boolean
   maxQuestions: number
+  /** Ceiling 2: the first reply carried a learn_name tag - the abrupt ask. */
+  turnOneNameAsk: boolean
   turns: Array<{ inbound: string; reply: string[]; tagged: string[] }>
 }
 
@@ -170,6 +219,7 @@ async function runSample(
     disqualified: null,
     pursued: false,
     maxQuestions: 0,
+    turnOneNameAsk: false,
     turns: [],
   }
 
@@ -198,6 +248,8 @@ async function runSample(
       .filter((k) => k.length > 0)
     outcome.turns.push({ inbound, reply, tagged })
     outcome.maxQuestions = Math.max(outcome.maxQuestions, questionCount(reply))
+    if (outcome.turns.length === 1 && tagged.includes('learn_name'))
+      outcome.turnOneNameAsk = true
     if (tagged.some((k) => target.has(k))) outcome.pursued = true
 
     history = [
@@ -275,6 +327,7 @@ async function main(): Promise<void> {
           disqualified: s.disqualified,
           pursued: s.pursued,
           maxQuestions: s.maxQuestions,
+          turnOneNameAsk: s.turnOneNameAsk,
           turns: s.turns,
         })
       }
@@ -282,14 +335,17 @@ async function main(): Promise<void> {
       const failed = samples.filter((s) => s.disqualified !== null)
       const pursuing = samples.filter((s) => s.pursued).length
       const ceilingBreach = samples.some((s) => s.maxQuestions > 1)
+      const abruptBreach = samples.some((s) => s.turnOneNameAsk)
       const verdict =
         failed.length > 0
           ? `DISQUALIFIED (${failed.length}/${SAMPLES} samples failed)`
           : ceilingBreach
             ? 'CEILING BREACHED (a reply carried more than one question)'
-            : pursuing >= BAR_MIN_PURSUING
-              ? `PASS (${pursuing}/${SAMPLES} pursued a target move)`
-              : `FAIL (${pursuing}/${SAMPLES} pursued a target move)`
+            : abruptBreach
+              ? 'ABRUPT (a first reply asked for the name)'
+              : pursuing >= BAR_MIN_PURSUING
+                ? `PASS (${pursuing}/${SAMPLES} pursued a target move)`
+                : `FAIL (${pursuing}/${SAMPLES} pursued a target move)`
       console.log(`  -> ${verdict}\n`)
       log.appendUnit({
         arm: spec.arm,
@@ -303,7 +359,7 @@ async function main(): Promise<void> {
       scenariosPassed === SCENARIOS.length &&
       scenarios.length === SCENARIOS.length
     ) {
-      console.log(`*** arm ${spec.arm}: passes BOTH scenarios ***\n`)
+      console.log(`*** arm ${spec.arm}: passes ALL scenarios ***\n`)
       anyArmPassedAll = true
     }
   }

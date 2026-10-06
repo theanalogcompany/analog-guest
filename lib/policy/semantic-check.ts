@@ -36,7 +36,10 @@ export const SEMANTIC_CHECK_TIMEOUT_MS = 1_500
 export interface SemanticCheckState {
   draft_messages: string[]
   declared_actions: string
-  /** Links the composer actually supplied this turn; unverified_link judges against it. */
+  /**
+   * The venue's curated link allowlist (`venue_info.links`, TAC-509) -
+   * never derived from retrieved knowledge; unverified_link judges against it.
+   */
   provided_links: string[]
   recent_conversation?: string
 }

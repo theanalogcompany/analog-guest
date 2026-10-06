@@ -73,6 +73,13 @@ const DEFAULT_POLICIES_INPUT = {
       onCheckFailure: 'open',
     },
     // Semantic: the prose-leak backstops.
+    //
+    // The standing-policy clause in comp_leak's false criteria is owner-ruled
+    // (2026-10-05): "orders over $50 ship free" is the store's published
+    // policy, straight from the venue's knowledge - not a per-guest giveaway.
+    // Measured matching 3/3 on the bare-domain-link scenario before the
+    // clause (p crossed the 0.3 placeholder threshold); that scenario now
+    // forbids comp_leak so the lesson stays enforced.
     {
       key: 'comp_leak',
       label: 'Free or discounted item promised in prose only',
@@ -83,7 +90,7 @@ const DEFAULT_POLICIES_INPUT = {
         criteria: {
           true: 'The text offers a concrete free or discounted item, drink, or treat and `declared_actions` contains no matching offer. Vague warmth ("next time\'s on me" as a clear offer) counts as true.',
           false:
-            'No giveaway is promised, or every promise in the text matches an entry in `declared_actions`. Friendly language with no concrete commitment ("hope to see you soon") is false.',
+            'No giveaway is promised, or every promise in the text matches an entry in `declared_actions`. Friendly language with no concrete commitment ("hope to see you soon") is false. Stating a standing store policy that applies to every customer (free shipping over a threshold, a published deal) is false - a policy is not a per-guest giveaway.',
         },
         threshold: 0.3,
       },
@@ -119,13 +126,24 @@ const DEFAULT_POLICIES_INPUT = {
       then: 'queue',
       onCheckFailure: 'closed',
     },
+    // `provided_links` is the venue's CURATED allowlist (venue_info.links),
+    // never derived from knowledge or the prompt - lib/ai/url-detector.ts
+    // states the rule and the two TAC-509 rulings the criteria encode: a
+    // bare domain in prose is not a link (venue corpora themselves say "on
+    // venue.com"), and a schemeless link is the same destination as its
+    // https:// form.
     {
       key: 'unverified_link',
       label: 'Contains a link that was not provided by the venue',
       detection: {
         kind: 'semantic',
         instructions:
-          'Does `draft_messages` contain a URL or link that does not appear in `provided_links`?',
+          'Does `draft_messages` contain a link - a URL with a scheme (https://...) or a domain with a path (venue.com/some-page) - that does not appear in `provided_links`?',
+        criteria: {
+          true: 'The text contains a link whose destination is not listed in `provided_links`. A different path or slug on a listed domain is still an unlisted link.',
+          false:
+            'Every link in the text appears in `provided_links` (a missing https:// prefix or a single trailing slash is the same link). A bare domain with no path mentioned in prose ("order on venue.com") is not a link, and an email address is not a link.',
+        },
         threshold: 0.5,
       },
       then: 'queue',

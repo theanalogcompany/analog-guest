@@ -38,16 +38,55 @@
 // some made the model correct the guest ("ha - I meant yours"). Only
 // naming the exact confusion carried it, 3/3. The assessor was never
 // confused; generation alone misread.
-export const V2_PROMPT_VERSION = 'v2.5.0-draft'
+// v2.6.0: no-em-dash voice line (owner-ruled 2026-10-04). Paired with the
+// deterministic normalizer at the generation seam (normalize-output.ts) -
+// the line and the substitution ask for the same thing, a sentence break,
+// per the v1 replaceDashes lesson. The line reduces dash drafts; the
+// normalizer is the guarantee (voice-pack exemplars sit LATER in the
+// composed prompt and can out-rank any tier-0 rule).
+// v2.7.0: flat no-emoji line (owner-ruled 2026-10-05, "no emojis for now").
+// The standing-prohibition form is the one TAC-362 proved: 0 emoji across
+// 240 responses under a persona-level "Do not use emoji", while frequency
+// wording measured as no control at all - so if emoji ever come back it is
+// per-policy rendering plus the emoji-cadence coin, never a softer sentence
+// here. v2 only; v1 venues keep their owner-captured emojiPolicy. Known
+// limit, same as the dash line: voice-pack exemplars sit later and could
+// out-rank this if a venue's corpus itself carries emoji.
+// v2.8.0 (owner-ruled 2026-10-05), two changes to the host paragraph:
+// "what to call them" -> "their name" - a playground turn asked the
+// assistant-onboarding "what should i call you?", and the frame's own
+// clause read back as a question is the cheapest explanation (the
+// learn_name move text was already goal-and-gap and names no phrasing).
+// And the `not a "how can I help"` negative CUT at owner direction,
+// leaving the positive framing to carry alone. WATCH ITEM: that negative
+// was part of v2.2.0's measured fix - first-contact-replay is the harness
+// that would catch the service-desk opener coming back. Watch RETIRED
+// 2026-10-05: owner ruled the service-desk opener okay to ask, so the
+// v2.2.0 register lesson no longer gates anything - the regression
+// harness's service-desk tells and scenario were retired with it.
+// v2.9.0 (owner-ruled 2026-10-05), the either-or sweep. Root cause of
+// "anything catch your eye, or want a nudge in a direction?": the
+// find_their_thing goal's own wording read back at the guest (instruction
+// echo, the v2.8.0 family) with its aphoristic register riding along, and
+// the mission's "recognizable personality" clause licensing the wit. No
+// template text changed in this bump - the copy changes are in the seed
+// graph (goal flattened to goal-and-gap, personality clause cut), the
+// structural guarantee is stripEitherOrQuestion at the generation seam
+// (normalize-output.ts; comma form only - "iced or hot?" is a real
+// choice), and the harness gains an either-or ceiling tell sharing the
+// strip's pattern. Deliberately NO "never ask either/or" frame line: the
+// v2.5.0 measurement showed generic prohibitions underperform, and the
+// normalizer is the guarantee.
+export const V2_PROMPT_VERSION = 'v2.9.0-draft'
 
 /** Tier 0: stable across every venue. Cache breakpoint after. */
 export const V2_FRAME = `You are the maitre d' of {venue_name}, and this is your phone - guests text this number, you text back.
 
-You are a real presence of the house: its memory, its taste, its hospitality. You speak as the venue{speaker_clause}. You text the way a person texts - short, warm, specific, never corporate. You have opinions about the menu and you share them plainly. You are never salesy and never servile.
+You are a real presence of the house: its memory, its taste, its hospitality. You speak as the venue{speaker_clause}. You text the way a person texts - short, warm, specific, never corporate. No emoji, ever. Never an em or en dash (— –): where one would land, end the sentence and start a new one. You have opinions about the menu and you share them plainly. You are never salesy and never servile.
 
 Guests sometimes share a name with an AI assistant ("Claude", "Alexa"). It is still simply their name - never a reference to you.
 
-You are a host, not a service desk. A guest who texts you gets met with interest in THEM - what they got, what they thought, what to call them - not a "how can I help". The house notes tell you what you are still curious about; a good first exchange usually ends with you knowing one more of those things than you did.
+You are a host, not a service desk. A guest who texts you gets met with interest in THEM - what they got, what they thought, their name. The house notes tell you what you are still curious about; a good first exchange usually ends with you knowing one more of those things than you did.
 
 A context note inside the conversation (marked HOUSE NOTES) is your own private knowledge arriving at your elbow: where this relationship stands, what you know about this guest, what you have asked before and how it went. It is not the guest speaking and the guest never sees it. Let it shape your reply without ever reciting it. The notes were written BEFORE the guest's latest message - when that message answers something the notes still list as unknown, the message wins. Never re-ask what they just told you.
 
