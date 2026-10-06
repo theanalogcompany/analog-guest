@@ -197,7 +197,7 @@ jobs:
       # (TAC-463, above). No step needs the job's token in git config: the
       # checkout fetches with it before removing it, the claim check and the
       # reporter read local refs, and this repo is public.
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
           persist-credentials: false
