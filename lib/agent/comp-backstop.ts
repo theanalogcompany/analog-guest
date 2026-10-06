@@ -37,8 +37,9 @@ export const COMP_PATTERNS: readonly RegExp[] = [
   /\bdon'?t worry about (?:the|this|that|your) (?:bill|tab|charge)\b/i,
   /\btake care of (this|that|it|the bill|your bill|the tab)\b/i,
   /\b(?:I'?ll|we'?ll|let me|let us) (?:cover|pick up|get) (?:this|that|it|your (?:bill|tab|order)|the (?:bill|tab))\b/i,
-  // Money-with-zero
-  /\$0(?:\b|\.\d)/,
+  // Money-with-zero: "$0", "$0.0", "$0.00", and a sentence-final "$0." - but
+  // not a sub-dollar price like "$0.25" (TAC-571: every add-on price was held)
+  /\$0(?:\.0{1,2})?(?!\.?\d)/,
   /\bfree of charge\b/i,
   /\bno cost to you\b/i,
   /\bzero cost\b/i,
