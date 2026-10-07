@@ -22,7 +22,10 @@ import type { RuntimeContext } from './types'
 //
 // Non-blocking by design: called from handle-inbound.ts via `waitUntil`
 // right after classification succeeds, so a slow or failed Haiku call can
-// never delay or block the reply. One consequence, called out explicitly
+// never delay or block the reply. ONE EXCEPTION (TAC-575): a turn that armed
+// "how is it so far?" awaits it, bounded by ORDER_READ_WAIT_MS, because whether
+// an order was recorded is what decides that question (orderTurnVerdict,
+// visit-checkin.ts). One consequence, called out explicitly
 // because it's easy to mistake for a bug later: the extracted order is NOT
 // available to generateStage, so the reply itself can never reference it.
 //
@@ -59,7 +62,7 @@ export type ExtractReportedOrderOutcome =
   | { kind: 'vague_past_report' }
   // TAC-325: an ongoing report whose every item was already present on the
   // same-local-day transaction it would have merged into. Nothing written.
-  | { kind: 'no_new_items_ongoing' }
+  | { kind: 'no_new_items_ongoing'; occurredAtIso: string }
   | {
       kind: 'recorded'
       transactionId: string
@@ -717,11 +720,7 @@ async function advanceLastVisit(
 }
 
 /**
- * Never throws. Every branch — including DB and LLM failures — returns a
- * typed outcome and is logged (console.warn/console.error), matching the
- * updateGuestContext failure-handling precedent already in handle-inbound.ts
- * (log + continue, no red alert — this side effect isn't part of the
- * voice/reply contract fireRedAlert exists to protect).
+ * The read half: one model call, no table touched. Never throws.
  */
 export async function readReportedOrder(
   ctx: ReportedOrderContext,
@@ -798,10 +797,21 @@ export function isOrderOnTheMessagesDay(
 }
 
 /**
- * Did the extractor RECORD an order for the visit this message arrived on?
- * The three outcomes that wrote or extended a transaction, and only those: an
- * order that was understood and then failed to write is not one, which costs
- * one unasked question and never asks about a row that does not exist.
+ * Is an order on file for the visit this message arrived on, as far as this
+ * run of the extractor can say?
+ *
+ * The three outcomes that wrote or extended a transaction, plus
+ * `no_new_items_ongoing`: every item named is ALREADY on today's row (the
+ * guest said "grabbing a cortado" before they scanned, then answered our
+ * question with "cortado"). Nothing was written on this turn, and the order
+ * is on file all the same, so the question is asked. That fourth outcome is a
+ * choice the ruling ("it recorded an order") does not spell out.
+ *
+ * An order that was understood and then failed to write is not one, which
+ * costs one unasked question and never asks about a row that does not exist.
+ *
+ * KNOWN SOFT EDGE: resolveOccurredAt falls back to the message's own time for
+ * a date it cannot read, and that fallback now also reads as "today's order".
  */
 export function recordedOrderForThisVisit(
   outcome: ExtractReportedOrderOutcome,
@@ -811,7 +821,8 @@ export function recordedOrderForThisVisit(
   if (
     outcome.kind !== 'recorded' &&
     outcome.kind !== 'recorded_ongoing' &&
-    outcome.kind !== 'merged_ongoing'
+    outcome.kind !== 'merged_ongoing' &&
+    outcome.kind !== 'no_new_items_ongoing'
   ) {
     return false
   }
@@ -822,6 +833,13 @@ export function recordedOrderForThisVisit(
   )
 }
 
+/**
+ * Never throws. Every branch — including DB and LLM failures — returns a
+ * typed outcome and is logged (console.warn/console.error), matching the
+ * updateGuestContext failure-handling precedent already in handle-inbound.ts
+ * (log + continue, no red alert — this side effect isn't part of the
+ * voice/reply contract fireRedAlert exists to protect).
+ */
 export async function extractReportedOrder(
   ctx: ReportedOrderContext,
 ): Promise<ExtractReportedOrderOutcome> {
@@ -974,7 +992,7 @@ export async function extractReportedOrder(
 
       const itemsToAdd = dropAlreadyRecordedItems(resolved, existingParsed)
       if (itemsToAdd.length === 0) {
-        return { kind: 'no_new_items_ongoing' }
+        return { kind: 'no_new_items_ongoing', occurredAtIso }
       }
 
       const mergedRawLineItems: Json[] = [

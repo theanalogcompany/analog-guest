@@ -34,6 +34,11 @@
  *   - The guest is new, created by the sign thirty seconds ago, with a
  *     three-message thread. A rate here is not a production rate.
  *   - It does not show what the reply then says. That is the device UAT.
+ *   - The five non-orders name nothing on the menu, so they never arm and
+ *     their skip cannot fail. They are evidence about arming, not about the
+ *     extractor.
+ *   - Every phrase is a fresh guest. A guest whose order is already on
+ *     today's row (`no_new_items_ongoing`) is not reached here.
  *
  * Reads one venue's config. Writes nothing but the run log.
  *
@@ -100,12 +105,14 @@ async function main(): Promise<void> {
 
   const venueSlug = process.env.MEASURE_VENUE ?? 'le-mils-coffee'
   const db = createAdminClient()
-  const { data: venue } = await db
+  const { data: venue, error: venueError } = await db
     .from('venues')
     .select('id, timezone, venue_configs(venue_info, brand_persona)')
     .eq('slug', venueSlug)
     .single()
-  if (!venue) throw new Error(`venue ${venueSlug} not found`)
+  if (venueError || !venue) {
+    throw new Error(`venue ${venueSlug}: ${venueError?.message ?? 'not found'}`)
+  }
   const config = Array.isArray(venue.venue_configs)
     ? venue.venue_configs[0]
     : venue.venue_configs
@@ -211,6 +218,7 @@ async function main(): Promise<void> {
     if (!classified.ok) {
       failed += 1
       log.appendUnit({ ...phrase, armed, error: classified.error })
+      notes.push(`FAILED classify "${phrase.body}": ${classified.error}`)
       continue
     }
     const ctx: ReportedOrderContext = {
@@ -225,6 +233,7 @@ async function main(): Promise<void> {
       if (read.kind === 'failed') {
         failed += 1
         log.appendUnit({ ...phrase, repeat, armed, error: read.error })
+        notes.push(`FAILED read "${phrase.body}" #${repeat}: ${read.error}`)
         continue
       }
       readMs.push(elapsed)

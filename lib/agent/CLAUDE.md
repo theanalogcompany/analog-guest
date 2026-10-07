@@ -231,8 +231,8 @@ the answer, so a one-in-three raise rate would make them a matter of luck.
 - It arms on `same_visit_order`: the guest is ANSWERING A QUESTION OF OURS, a counter visit
   is live, and the message names a menu item (`resolveSameVisitOrderAt`, `visit-checkin.ts`).
   The menu-name prefilter over-matches by design, so the armed turn then WAITS for the order
-  extractor (`ORDER_READ_WAIT_MS`) and `orderTurnVerdict` asks only when it recorded an order
-  dated the message's own day (ruled 2026-10-07; the classifier's category could not tell
+  extractor (`ORDER_READ_WAIT_MS`) and `orderTurnVerdict` asks only when an order is on file
+  dated the message's own day (`recordedOrderForThisVisit`) (ruled 2026-10-07; the classifier's category could not tell
   "pour over" from a question about it). The classifier still decides two things: a complaint
   is recorded `bad`, and a message that already praises the item is recorded `good` with no
   question. Anything else arms nothing and leaves no row. This is the one turn where the
