@@ -7,8 +7,8 @@
 // THE SHAPE OF THE FLOW, so the constants read as one rule rather than three
 // numbers (ruled 2026-09-29):
 //
-//   A guest scans the counter code, has their first conversation with the shop,
-//   and then stops replying.
+//   A guest has their first conversation with the shop, whether they scanned
+//   the counter code or simply messaged (TAC-575), and then stops replying.
 //
 //   Ten minutes of silence after OUR last message sends the warm close: the
 //   line is open, and here is what you can message us about anytime. Once per
@@ -197,6 +197,57 @@ export function isFirstConversation(
 }
 
 /**
+ * How many messages a guest has to send after the warm close before the venue
+ * asks them anything again.
+ *
+ * TWO, from the TAC-575 ruling (2026-10-06): "after a warm close, answer
+ * anything they ask; our questions resume only if they send two or more further
+ * messages, never in the very next reply." The Oct 6 device test is the case it
+ * was written against: the close went out and the very next reply asked whether
+ * the guest was new here.
+ */
+export const QUESTIONS_RESUME_AFTER_CLOSE_INBOUNDS = 2
+
+/**
+ * Is the guest still inside the quiet that follows a warm close?
+ *
+ * False for a guest who has never been closed. Otherwise true until BOTH
+ * halves of the ruling hold:
+ *
+ *   two further messages   the guest has sent
+ *                          QUESTIONS_RESUME_AFTER_CLOSE_INBOUNDS messages after
+ *                          the marker, the current one included;
+ *   never the next reply   a reply of ours has already reached them since the
+ *                          first of those messages.
+ *
+ * THE SECOND HALF IS NOT IMPLIED BY THE FIRST. Two messages sent five seconds
+ * apart are answered in one reply, which is the very next reply after the
+ * close. So is the second message's reply when the first one's was held for
+ * approval, dropped or never delivered. Counting the guest's messages alone
+ * lets a question through in both.
+ *
+ * STRICTLY AFTER the marker. The in-conversation close claims the marker during
+ * the turn that sends it, which is after that turn's own inbound arrived, so the
+ * guest's goodbye is never counted as a message past the close.
+ *
+ * Both lists come from the loaded history, which has a horizon. A message
+ * beyond it is not counted, which can only keep the quiet on for longer.
+ */
+export function isQuietAfterWarmClose(
+  warmCloseSentAt: Date | null,
+  inboundTimes: readonly Date[],
+  deliveredOutboundTimes: readonly Date[],
+): boolean {
+  if (warmCloseSentAt === null) return false
+  const closedAt = warmCloseSentAt.getTime()
+  if (!Number.isFinite(closedAt)) return false
+  const since = inboundTimes.map((t) => t.getTime()).filter((t) => t > closedAt)
+  if (since.length < QUESTIONS_RESUME_AFTER_CLOSE_INBOUNDS) return true
+  const firstSince = Math.min(...since)
+  return !deliveredOutboundTimes.some((t) => t.getTime() > firstSince)
+}
+
+/**
  * The rng handed to dispatch so the close is always ONE message.
  *
  * resolveDispatchBubbles splits a 2-to-3-sentence body when `rng() < 0.5`, so a
@@ -212,80 +263,41 @@ export const NEVER_SPLIT_RNG = (): number => 1
 /**
  * Is THIS reply the one that closes the guest's first conversation?
  *
- * TAC-568. Both in-conversation paths' whole decision, pure, so every boundary
+ * TAC-568. The in-conversation path's whole decision, pure, so every boundary
  * is drivable without a database or a model.
  *
- * TWO WAYS TO CLOSE, ORed at the top level, each gated by the same two
- * preconditions. A first conversation ends either because the guest said
- * goodbye, or because we just learned their name — and after the TAC-568
- * follow-on the second is the ordinary case, not the exception.
+ * ONE WAY TO CLOSE: THE GOODBYE. Two signals, ANDed, and the AND is the point.
+ * They answer the two halves of the ruling's own sentence ("the guest signed
+ * off AND the agent answered with a goodbye"), and both already existed for
+ * TAC-560:
  *
- * WAY ONE: THE GOODBYE. TWO SIGNALS, ANDed, and the AND is the point. They
- * answer the two halves of the ruling's own sentence ("the guest signed off AND
- * the agent answered with a goodbye"), and both already existed for TAC-560:
- *
- *   guestSignedOff   the inbound classified `acknowledgment`. This is the timer's
- *                    own belt (loadLastInboundCategory), read off the current
- *                    turn instead of a query. Venue-neutral and structural.
+ *   guestSignedOff   the inbound classified `acknowledgment`. Venue-neutral and
+ *                    structural.
  *   agentSaidGoodbye the model's closedTheConversation self-report, reworded in
  *                    v1.78.0 from "this reply IS the warm close" to "this reply
- *                    says goodbye" — the old meaning dies with Le Mil's rule 15.
- *
- * WAY TWO: THE NAME (TAC-568 follow-on, ruled 2026-09-30). Learning the guest's
- * name IS the closing moment of a first conversation. The device test that
- * prompted this ruling never reached a goodbye at all: the visit stalled on "jp,
- * nice to meet you" because the one remaining question was optional and the
- * model declined to raise it. So the close now rides on something that either
- * happened or did not.
- *
- * `nameJustStored` IS A COLUMN WRITE, AND THAT IS NOT THE SAME AS A VERIFIED
- * NAME. Stated precisely because the first version of this comment claimed the
- * arm "never asks the model anything", and that was false.
- *
- * The caller builds it from updateGuestContext's `identityColumnsChanged` — the
- * `first_name` column actually written on this turn — ANDed with the guest
- * having had no name before it. What that buys is real but narrow: the write
- * happened, and it happened once. WHAT TO WRITE still came from the model, via
- * `contextUpdate.structured.guest_details.first_name` (lib/guests/context.ts),
- * with nothing between the model and this marker checking that the guest said a
- * name at all. So a fabrication spends the guest's one close, permanently, on
- * what is now the ordinary path — the same failure class TAC-350 records (8 of 8
- * fabrications self-reported clean) and the reason "way one" is ANDed with
- * something structural.
- *
- * `nameOnRecordBefore` BOUNDS THE DAMAGE RATHER THAN PREVENTING IT: at most one
- * wrong close per guest, never a repeat. That is the honest claim.
- *
- * Verifying the name against the inbound body was proposed and deliberately NOT
- * taken (2026-09-30) — it is a design change with its own cost, since the
- * extractor normalises nicknames and casing. TAC-569 carries it.
- *
- * Requiring "no name before" is what makes it LEARNING a name rather than
- * re-asserting one. It is CLOSE TO learn_name's own isSatisfied (`hasFirstName`)
- * but not identical: that one trim-checks and this one does not, so a blank
- * `first_name` fires the close while leaving the intention open. Also TAC-569.
- *
- * THE RISK DIRECTION IS THE OPPOSITE OF weAskedAQuestion'S, which is why this
- * narrows where that one widens. A FALSE POSITIVE is the expensive direction
- * here: it spends the guest's one close, for ever, on a turn that was not
- * closing anything.
- *
- * A false negative is the cheap mistake FOR THE POPULATION THE TIMER SERVES —
- * and only for that one. The pause timer gates on `created_via = 'qr_scan'` and
- * an Instagram identifier (warm-close-timeout.ts), while this predicate
- * deliberately checks neither, so an SMS or non-scan guest has NO backup: a miss
- * here is permanent for them. The narrowing above is still right, because a
- * wrong close is worse than a missing one either way, but "the timer will catch
- * it" is true of Instagram scan guests and false of everyone else. TAC-569.
+ *                    says goodbye".
  *
  * Self-report is not trusted alone, on this repo's record (TAC-350: 8 of 8
- * fabrications self-reported clean) — which is the second reason it is ANDed
- * with something structural rather than read on its own.
+ * fabrications self-reported clean), which is why it is ANDed with something
+ * structural rather than read on its own.
  *
- * NO qr_scan CHECK AND NO CHANNEL CHECK, unlike the timer. Ruling 5: the pause
- * path stays scan-only, the in-conversation paths are any first conversation.
- * The close happens on SMS too, and the marker has always meant "this guest has
- * been closed", not "the timer ran".
+ * THERE WAS A SECOND WAY, AND TAC-575 REMOVED IT (ruled 2026-10-06: "the warm
+ * close is triggered by a natural lull, not by a stored name"). TAC-568's
+ * follow-on closed on the turn that stored the guest's name, because the name
+ * was then the last thing a first visit gathered. With the name ask now the
+ * FIRST of several questions, closing on it would end the conversation at the
+ * point the ruling says it starts. It also spent the guest's one close on a
+ * column write the model proposed and nothing verified (TAC-569).
+ *
+ * WHAT A MISS COSTS NOW. A guest who never says goodbye is closed by the pause
+ * timer, which since TAC-575 covers any first Instagram conversation, scanned
+ * or not. A text-message guest still has no timer, so for them a miss here is
+ * permanent. The narrowing is still right: a FALSE POSITIVE is the expensive
+ * direction, because it spends the guest's one close, for ever, on a turn that
+ * was not closing anything.
+ *
+ * NO qr_scan CHECK AND NO CHANNEL CHECK. The close happens on SMS too, and the
+ * marker has always meant "this guest has been closed", not "the timer ran".
  *
  * `warmCloseText` empty means the venue has no close configured, and no path
  * sends one. Checked here rather than at dispatch so the claim is never taken
@@ -294,19 +306,80 @@ export const NEVER_SPLIT_RNG = (): number => 1
 export function closesFirstConversation(input: {
   guestSignedOff: boolean
   agentSaidGoodbye: boolean
-  /**
-   * This turn wrote `guests.first_name` for a guest who had none. Built from
-   * updateGuestContext's identityColumnsChanged, never from the model's
-   * proposed contextUpdate — see the note above.
-   */
-  nameJustStored: boolean
   isFirstConversation: boolean
   warmCloseText: string
 }): boolean {
   if (input.warmCloseText.trim() === '') return false
   if (!input.isFirstConversation) return false
-  if (input.nameJustStored) return true
   return input.guestSignedOff && input.agentSaidGoodbye
+}
+
+/** Why a first conversation gets no automated warm close at all. */
+export type WarmCloseBlocker =
+  /** Staff answered this guest in their own words. */
+  | 'staff_replied'
+  /** The conversation contains a complaint. */
+  | 'complaint_in_conversation'
+
+/** The columns of one message row that warmCloseBlocker reads. */
+export interface WarmCloseBlockerRow {
+  direction: string
+  status: string
+  generatedBy: string | null
+  reviewState: string | null
+  category: string | null
+}
+
+/** The message category a complaint turn's reply is stored under. */
+const COMPLAINT_CATEGORY = 'comp_complaint'
+
+/**
+ * Should this first conversation get NO automated warm close, from either path?
+ *
+ * TAC-575, ruled 2026-10-06 on PR 324's review. Two cases, and each skips the
+ * close entirely rather than delaying it:
+ *
+ *   STAFF REPLIED BY HAND. A reply typed in the Instagram app arrives as an
+ *   echo row with no `generated_by` (handle-events.ts; reply-check.ts reads the
+ *   same marker), and a draft an operator rewrote before sending carries
+ *   `review_state = 'edited'`. Either way a person is in the thread, and a
+ *   fixed "the line is open" landing ten minutes under their message answers
+ *   for them. Widening the pause timer to guests who never scanned made this
+ *   the common case, since a cold DM is what staff most often answer by hand.
+ *
+ *   A COMPLAINT. The category is stamped on our REPLY's row, never on the
+ *   guest's inbound (nothing writes `category` on an inbound), and it is there
+ *   whether the reply was sent, is still held for approval, or was skipped.
+ *   Any of those means the guest raised a problem, and a cheerful close on top
+ *   of an unresolved one reads as though nobody read it.
+ *
+ * AN ECHO OF OUR OWN SEND IS NOT STAFF. It also lands with no `generated_by`
+ * until insertOrReconcileEcho fills it in, a moment later. Both callers run
+ * well after that: the timer at least ten minutes on, the goodbye path on a
+ * later turn. If one ever caught the gap the cost is a missed close, which is
+ * the direction this whole mechanism is biased toward.
+ *
+ * Only delivered rows count as a staff reply; a complaint counts in any state.
+ */
+export function warmCloseBlocker(
+  rows: readonly WarmCloseBlockerRow[],
+  deliveredStatuses: ReadonlySet<string>,
+): WarmCloseBlocker | null {
+  let staffReplied = false
+  for (const row of rows) {
+    if (row.direction !== 'outbound') continue
+    if (row.category === COMPLAINT_CATEGORY) return 'complaint_in_conversation'
+    // A tapback is the one outbound row our own code writes with no
+    // `generated_by` (lib/messaging/expressions.ts). It is not a person.
+    if (row.category === 'reaction') continue
+    if (
+      deliveredStatuses.has(row.status) &&
+      (row.generatedBy === null || row.reviewState === 'edited')
+    ) {
+      staffReplied = true
+    }
+  }
+  return staffReplied ? 'staff_replied' : null
 }
 
 /**

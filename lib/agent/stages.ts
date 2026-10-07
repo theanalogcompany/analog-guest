@@ -2944,6 +2944,12 @@ export function buildAiRuntime(
     // the prompt and the derivation cannot disagree about which turn is a first
     // conversation.
     firstConversation: ctx.firstConversation,
+    // TAC-575: inbound turns only. A proactive turn's own instruction may be
+    // to ask something.
+    askNothing:
+      ctx.currentMessage !== null &&
+      ctx.followupTrigger === null &&
+      (ctx.firstConversation || ctx.intentionDerivation.quietAfterWarmClose),
     // TAC-572: null on every turn but the one that opted the guest back in.
     reOptIn: ctx.reOptIn ?? undefined,
     // TAC-389: only handle-operator-decline.ts sets this, on the trigger it

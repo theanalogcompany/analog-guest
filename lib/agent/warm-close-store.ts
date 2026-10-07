@@ -30,6 +30,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import type { Database } from '@/db/types'
 import { isInquiryFollowupMessage } from '@/lib/followups/inquiry-followup-store'
 import { DELIVERED_OUTBOUND_STATUSES } from './group-responses'
+import { warmCloseBlocker, type WarmCloseBlocker } from './warm-close'
 
 type AdminSupabaseClient = SupabaseClient<Database>
 
@@ -68,7 +69,6 @@ export interface WarmCloseCandidate {
 
 /** The guest facts every check needs, in one read. */
 export interface WarmCloseGuestFacts {
-  createdVia: string | null
   /**
    * TAC-386: when a proactive message last reached this guest, from ANY of the
    * three mechanisms. Read before the claim to keep PROACTIVE_SPACING_MINUTES
@@ -234,7 +234,7 @@ export async function loadWarmCloseGuestFacts(
   const { data, error } = await supabase
     .from('guests')
     .select(
-      'created_via, first_contacted_at, warm_close_sent_at, opted_out_at, instagram_scoped_id, phone_number, last_proactive_send_at',
+      'first_contacted_at, warm_close_sent_at, opted_out_at, instagram_scoped_id, phone_number, last_proactive_send_at',
     )
     .eq('id', guestId)
     .maybeSingle()
@@ -253,7 +253,6 @@ export async function loadWarmCloseGuestFacts(
   return {
     ok: true,
     data: {
-      createdVia: data.created_via ?? null,
       lastProactiveSendAt:
         typeof data.last_proactive_send_at === 'string' &&
         Number.isFinite(new Date(data.last_proactive_send_at).getTime())
@@ -313,6 +312,56 @@ export async function loadLastInboundCategory(
     return null
   }
   return data?.category ?? null
+}
+
+/** How many of a first conversation's rows the blocker read looks at. */
+export const WARM_CLOSE_BLOCKER_ROW_LIMIT = 200
+
+/**
+ * TAC-575: is there a reason this first conversation gets no automated close?
+ *
+ * One read of the guest's rows since the conversation began, handed to the
+ * pure warmCloseBlocker. Called by BOTH paths before they claim the marker, so
+ * the timer and the goodbye cannot disagree about what blocks a close.
+ *
+ * FAILS CLOSED, as an error rather than as "nothing blocks": the answer decides
+ * whether a message goes out under a member of staff or on top of a complaint,
+ * and an unreadable thread has not shown that neither is there. The callers
+ * treat an error as "do not close now". The timer comes round again next tick.
+ *
+ * Newest first with a cap: past WARM_CLOSE_BLOCKER_ROW_LIMIT rows in one first
+ * conversation the oldest are not read. A conversation that long has a person
+ * in it by any reasonable reading, and the cap keeps the read bounded.
+ */
+export async function loadWarmCloseBlocker(
+  supabase: AdminSupabaseClient,
+  venueId: string,
+  guestId: string,
+  conversationStartedAt: Date,
+): Promise<StoreResult<WarmCloseBlocker | null>> {
+  const { data, error } = await supabase
+    .from('messages')
+    .select('direction, status, generated_by, review_state, category')
+    .eq('venue_id', venueId)
+    .eq('guest_id', guestId)
+    .eq('direction', 'outbound')
+    .gte('created_at', conversationStartedAt.toISOString())
+    .order('created_at', { ascending: false })
+    .limit(WARM_CLOSE_BLOCKER_ROW_LIMIT)
+  if (error) return { ok: false, error: error.message }
+  return {
+    ok: true,
+    data: warmCloseBlocker(
+      (data ?? []).map((row) => ({
+        direction: row.direction,
+        status: row.status,
+        generatedBy: row.generated_by ?? null,
+        reviewState: row.review_state ?? null,
+        category: row.category ?? null,
+      })),
+      DELIVERED_OUTBOUND_STATUSES,
+    ),
+  }
 }
 
 export type WarmCloseClaimResult =

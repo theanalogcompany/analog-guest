@@ -297,4 +297,9 @@ export const UNIVERSAL_RULES_DISPLAY: ReadonlyArray<UniversalRule> = [
     summary:
       'Never talk about a guest\'s history as something the venue keeps. No records, no file, no system, nothing "on our end", and no saying that you can or cannot find a visit. When what a guest says about their own visits differs from what you know, go by their words and by what was said in this conversation, never by anything stored. Added after a guest who corrected themselves was told there was no record of them, which was false and read as suspicion.',
   },
+  {
+    id: 'R41',
+    summary:
+      'Never reuse a line already sent to this guest. Greetings, questions about the guest, check-ins and sign-offs are the lines most likely to come out the same every time, so the agent looks at what it has already sent in this conversation and says it a different way. About wording, not facts: a fact the guest asks for again is still given plainly.',
+  },
 ]

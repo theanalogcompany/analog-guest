@@ -41,6 +41,8 @@ export interface IntentionDerivation {
   newlyEligible: NewlyEligibleIntention[]
   /** True when the unanswered-prompt brake suppressed every intention this turn. */
   brakeEngaged: boolean
+  /** TAC-575: true when the quiet after a warm close suppressed every intention this turn. */
+  quietAfterWarmClose: boolean
 }
 
 export type AgentRunId = string

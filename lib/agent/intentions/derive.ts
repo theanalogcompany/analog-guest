@@ -264,6 +264,19 @@ export interface DeriveOpenIntentionsInput {
   responseRate: number
   /** Lifetime inbound message count at this venue (RawSignals.repliedMessageCount). */
   repliedMessageCount: number
+  /**
+   * TAC-575: has the venue already answered something this guest wrote?
+   *
+   * False means the reply being written now is the FIRST one, and no
+   * replies_only intention may ride on it (ruled 2026-10-06). Resolved by the
+   * caller through hasAnsweredGuestBefore (lib/agent/retrieval-context.ts)
+   * from the messages that actually reached the guest.
+   *
+   * READ FROM OUR SIDE OF THE THREAD, NOT FROM A COUNT OF THEIRS. The inbound
+   * count cannot say "first reply": three quick messages before we answer, or
+   * a scan plus two, reach a count of three with nothing yet said back.
+   */
+  venueHasAnsweredBefore: boolean
   rules: IntentionRules
   facts: IntentionSatisfactionFacts
   /**
@@ -319,33 +332,39 @@ export interface DeriveOpenIntentionsInput {
    * several places, never re-derived.
    *
    * True suppresses every intention whose definition says `onFirstConversation`
-   * is 'suppressed', and every 'after_warm_close' one until warmCloseSent. See
-   * isSuppressedOnFirstConversation.
+   * is 'suppressed'. See isSuppressedOnFirstConversation.
    */
   isFirstConversation: boolean
   /**
-   * TAC-568: has this guest's warm close already gone out
-   * (`guests.warm_close_sent_at` is not null)?
+   * TAC-575: has the warm close gone out, with the guest not yet two messages
+   * past it? (Ruled 2026-10-06: "after a warm close, answer anything they ask;
+   * our questions resume only if they send two or more further messages, never
+   * in the very next reply.")
    *
-   * Resolved by the caller, like isFirstConversation, and read ONLY through the
-   * 'after_warm_close' policy. Outside a first conversation it changes nothing.
+   * Resolved by the caller through isQuietAfterWarmClose (lib/agent/warm-close.ts)
+   * for the reason isFirstConversation is: one definition, next to the close it
+   * is about. It reads both halves of the ruling: two messages from the guest,
+   * and a reply of ours already delivered in between. True renders nothing, exactly as the brake does, and like the
+   * brake it writes nothing and closes nothing, so every intention comes back
+   * open once the guest has kept talking.
    *
-   * THE TURN THAT SENDS THE CLOSE STILL SEES `false`, AND THAT IS THE POINT
-   * RATHER THAN A RACE. Intentions are derived during context-build, before the
-   * reply is generated or the marker claimed, so the closing turn itself cannot
-   * raise an 'after_warm_close' intention — it is the turn the close ends. The
-   * guest's NEXT message is the first that sees `true`, which is exactly the
-   * ruled behaviour: available if they keep chatting after the close.
+   * NOT LIMITED TO A FIRST CONVERSATION. The marker is once per guest ever, so
+   * in practice this only bites in the stretch right after the close.
    */
-  warmCloseSent: boolean
+  quietAfterWarmClose: boolean
 }
 
 export interface DeriveOpenIntentionsResult {
-  /** Open intentions in priority order. Always empty while the brake is engaged. */
+  /**
+   * Open intentions in priority order. Always empty while the brake is engaged
+   * or the guest is still inside the quiet after a warm close.
+   */
   open: OpenIntention[]
   /** Seen eligible this turn with no row yet, or re-armed — the caller persists these. */
   newlyEligible: NewlyEligibleIntention[]
   brakeEngaged: boolean
+  /** Echoes the input, so the caller can log why a turn rendered nothing. */
+  quietAfterWarmClose: boolean
 }
 
 /** One arming of an intention: the anchor it records, and the event behind it. */
@@ -513,33 +532,15 @@ function lastPromptWentUnanswered(
 }
 
 /**
- * TAC-436: whether this is the guest's FIRST-EVER inbound at this venue.
- *
- * Read off `repliedMessageCount`, the lifetime inbound count the gate already
- * compares against, rather than a separately-plumbed flag that could drift from
- * it. The webhook INSERTs the inbound before handing off to the agent
- * (app/api/webhooks/sendblue/route.ts), so on a first-ever message the count is
- * 1; `<= 1` also covers a count of 0 rather than depending on that ordering.
- *
- * Deliberately NOT `recentMessages.length === 0`, which is a 14-day window and
- * is also true for a guest returning after a long gap.
- *
- * Safe because deriveOpenIntentions only ever runs on an inbound turn:
- * build-runtime-context guards the whole derivation on `input.currentMessage`
- * and sets `openIntentions: []` otherwise.
- */
-export function isFirstEverInboundTurn(repliedMessageCount: number): boolean {
-  return repliedMessageCount <= 1
-}
-
-/**
  * The right to ask. An exhaustive switch, so a fourth gate kind fails `tsc`
  * until someone decides what it requires.
  *
  * `replies_only` (TAC-436 ruling 2) drops the response-rate floor, which is
  * unreachable in a guest's first turns by construction — see IntentionGate.
- * Its first-message count is stated per intention and is NOT venue-overridable:
- * `min_replies` tunes the ongoing stagger, not the opening exchange.
+ *
+ * It is shut outright until the venue has answered the guest once (TAC-575),
+ * whatever the count and whatever the venue's `min_replies` says: that setting
+ * tunes the ongoing stagger, not whether a first reply may carry a question.
  */
 function gateOpen(
   def: IntentionDefinition,
@@ -549,9 +550,9 @@ function gateOpen(
     case 'none':
       return true
     case 'replies_only': {
-      const minReplies = isFirstEverInboundTurn(input.repliedMessageCount)
-        ? def.gate.firstMessageMinReplies
-        : (input.rules.min_replies[def.key] ?? def.gate.defaultMinReplies)
+      if (!input.venueHasAnsweredBefore) return false
+      const minReplies =
+        input.rules.min_replies[def.key] ?? def.gate.defaultMinReplies
       return input.repliedMessageCount >= minReplies
     }
     case 'conversational': {
@@ -587,7 +588,6 @@ function gateOpen(
 function isSuppressedOnFirstConversation(
   key: IntentionKey,
   isFirstConversation: boolean,
-  warmCloseSent: boolean,
 ): boolean {
   if (!isFirstConversation) return false
   const policy = INTENTION_DEFINITION_BY_KEY[key].onFirstConversation
@@ -596,8 +596,6 @@ function isSuppressedOnFirstConversation(
       return false
     case 'suppressed':
       return true
-    case 'after_warm_close':
-      return !warmCloseSent
   }
 }
 
@@ -636,7 +634,12 @@ export function deriveOpenIntentions(
   input: DeriveOpenIntentionsInput,
 ): DeriveOpenIntentionsResult {
   if (input.rows === null)
-    return { open: [], newlyEligible: [], brakeEngaged: false }
+    return {
+      open: [],
+      newlyEligible: [],
+      brakeEngaged: false,
+      quietAfterWarmClose: input.quietAfterWarmClose,
+    }
 
   const entries = new Map<IntentionKey, IntentionStateEntry>()
   const keysWithRows = new Set<IntentionKey>()
@@ -670,13 +673,7 @@ export function deriveOpenIntentions(
     // eligible_at row during the first conversation and its window does not
     // start ticking on a question nobody may ask. It arms fresh on the second.
     // The open-set filter below is what actually guarantees it never renders.
-    if (
-      isSuppressedOnFirstConversation(
-        def.key,
-        input.isFirstConversation,
-        input.warmCloseSent,
-      )
-    )
+    if (isSuppressedOnFirstConversation(def.key, input.isFirstConversation))
       continue
     const existing = entries.get(def.key)
     // Sticky unless this intention re-arms: an existing row decides.
@@ -736,29 +733,33 @@ export function deriveOpenIntentions(
   })
 
   return {
-    open: brakeEngaged
-      ? []
-      : deriveIntentionState({
-          entries,
-          facts: input.facts,
-          now: input.now,
-        }).filter(
-          (o) =>
-            !held.has(o.key) &&
-            // TAC-567. NOT redundant with the arming-loop skip above: that one
-            // stops a row being written, this one stops a row already on file
-            // from rendering. First-contact eligibility is sticky, so every
-            // guest mid-first-conversation when this shipped has rows for
-            // intentions the ruling now suppresses, and only this filter sees
-            // them.
-            !isSuppressedOnFirstConversation(
-              o.key,
-              input.isFirstConversation,
-              input.warmCloseSent,
-            ),
-        ),
+    // TAC-575: the quiet after a warm close sits beside the brake because it
+    // has the brake's shape. Nothing renders, nothing is recorded, and arming
+    // above still ran, so a first-contact window starts on time.
+    open:
+      brakeEngaged || input.quietAfterWarmClose
+        ? []
+        : deriveIntentionState({
+            entries,
+            facts: input.facts,
+            now: input.now,
+          }).filter(
+            (o) =>
+              !held.has(o.key) &&
+              // TAC-567. NOT redundant with the arming-loop skip above: that one
+              // stops a row being written, this one stops a row already on file
+              // from rendering. First-contact eligibility is sticky, so every
+              // guest mid-first-conversation when this shipped has rows for
+              // intentions the ruling now suppresses, and only this filter sees
+              // them.
+              !isSuppressedOnFirstConversation(
+                o.key,
+                input.isFirstConversation,
+              ),
+          ),
     newlyEligible,
     brakeEngaged,
+    quietAfterWarmClose: input.quietAfterWarmClose,
   }
 }
 

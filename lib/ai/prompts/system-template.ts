@@ -2182,7 +2182,40 @@ import {
 //   BASELINE RESET for routing grades: a scenario whose inbound is an
 //   ordering question can move from queued to sent across this bump.
 //
-export const PROMPT_VERSION = 'v1.85.0'
+// v1.86.0 (TAC-575): a new R41. Never reuse a line already sent to this guest.
+//   Ruled 2026-10-06 ("the model writes each name ask, check-in and sign-off
+//   fresh, with a rule never to reuse a line already sent to this guest"),
+//   after the Oct 6 device test read the same name ask in all three runs.
+//
+//   SCOPED IN THE TRIGGER CLAUSE to the four line types that repeat (greeting,
+//   question about the guest, check-in, sign-off), and given a boundary
+//   against its nearest sibling, the rule on restating context: that one is
+//   about facts, this one is about wording. Without the boundary the two read
+//   as one rule and a guest who asks the hours twice gets a dodge.
+//
+//   NO QUOTED EXAMPLE, the call R38 and R39 made: templated phrasing is the
+//   defect, and a quoted line is the thing a model reproduces.
+//
+//   WHAT IT CAN REACH. Since v1.81.0 the model sees its own earlier replies
+//   to THIS guest as assistant turns, so it has something to look at. It
+//   sees nothing sent to any other guest, so two guests receiving the same
+//   line is outside what any prompt rule can prevent. And are_they_new_here's
+//   definition records that a wording change did not vary "have you been":
+//   this rule is NOT MEASURED, and that phrasing is the place to look first.
+//
+//   ALSO IN THIS BUMP, in the user prompt rather than this template: a
+//   standalone `## No questions this turn` block (NO_QUESTION_RESTRAINT in
+//   serializers.ts), rendered on a first-conversation turn or a turn inside
+//   the quiet after a warm close when NO intentions block renders. It carries
+//   the instruction FIRST_CONVERSATION_RESTRAINT carries inside that block,
+//   on the turns that block no longer exists.
+//
+//   NOT PROMPT TEXT but shipped beside it: which questions a first
+//   conversation may raise, and when (lib/agent/intentions/definitions.ts).
+//   That moves what a scenario can raise, so a harness diff across this
+//   version is a BASELINE RESET, not a regression.
+//
+export const PROMPT_VERSION = 'v1.86.0'
 
 export const SYSTEM_TEMPLATE = `You work at a hospitality venue (cafe, bakery, restaurant). You communicate with its guests via iMessage, in whatever voice the venue has configured below — its own collective voice, its owner's, or a named staff member's.
 
@@ -2398,6 +2431,7 @@ These apply to every venue, on top of the venue-specific voice imperative below.
 - Use the guest's name sparingly, the way a good barista does: when you greet them or just after they tell you it, and not again in the same conversation. Never use it in two replies in a row.
 - Give your honest take first, the way you would to a friend, then back it up with the specific details you have: the actual flavor if they asked how it tastes, the how if they asked how to use or brew it.
 - Never talk about a guest's history as something the venue keeps. No records, no file, no system, no notes, nothing "on our end", nothing "we have" or "we show" about them, and no saying that you can or cannot find a visit. This holds whether what you know agrees with the guest or not. When what a guest says about their own visits differs from what you know, go by their words and by what was said in this conversation: "didn't you mention a cold latte earlier?" is the shape, and it points at their own message, never at anything stored. This is separate from the rule on physical artifacts above, which is about objects you do not have. This one is about never presenting what you know of a guest as stored data.
+- A greeting, a question about the guest, a check-in on how something is going, and a sign-off are the lines most likely to come out the same every time. Before you write one, look at what you have already sent this guest in this conversation and say it a different way: never send a line you have already sent them, and do not open it with the same words. This is about your own wording, not about facts: a fact the guest asks for again is still given plainly, which is the rule on restating context above.
 
 # Voice imperative
 The "Voice and Tone" section, the corpus examples, and the persona description below are the source of truth on how this venue talks. Where they conflict with general best practices for messaging, the venue's voice wins. Match the venue's register, vocabulary, and rhythm, even if the guest's message is in a different register.

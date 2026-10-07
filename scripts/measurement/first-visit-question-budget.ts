@@ -16,8 +16,9 @@
 // appear if it is going to.
 //
 // THE THREE BARS, all absolute zeros, in first-visit-question-budget-score.ts:
-//   1. questions asked: only the order and the name (TAC-568 moved the
-//      first-visit question behind the warm close, so it is off-target here)
+//   1. questions asked: only the ones the TAC-575 ruling allows on a first
+//      conversation (ALLOWED_KEYS in the scorer). NOT RE-RUN since that ruling
+//      widened the set, so the figures recorded on TAC-567 are a different bar.
 //   2. turns carrying two questions (body question plus bubble): 0
 //   3. "you've reached" or equivalent in the opener: 0
 //
@@ -80,6 +81,7 @@ import {
   deriveOpenIntentions,
   renderableIntentions,
 } from '@/lib/agent/intentions/derive'
+import { hasAnsweredGuestBefore } from '@/lib/agent/retrieval-context'
 import {
   INTENTION_DEFINITION_BY_KEY,
   INTENTION_KEYS,
@@ -97,6 +99,7 @@ import type { RuntimeContext } from '@/lib/agent/types'
 import { createAdminClient } from '@/lib/db/admin'
 import { startAgentTrace } from '@/lib/observability/langfuse'
 import {
+  ALLOWED_KEYS,
   answerPartOf,
   scoreConversation,
   splitQuestions,
@@ -153,7 +156,11 @@ const NEUTRAL_CONTINUATION = 'cool, thanks'
 // the control arm and suppressed in `after`. That line is printed run output
 // that gets pasted onto a ticket, which is the one place a stale count does the
 // most damage.
-const ARMS_CAN_DIFFER_ON = ['are_they_local', 'are_they_new_here'] as const
+//
+// TAC-575 EMPTIED IT. Both are allowed on a first conversation now, so in this
+// fixture the arms no longer differ on eligibility at all, only on the
+// restraint paragraph. The control is a restraint control and nothing else.
+const ARMS_CAN_DIFFER_ON: readonly string[] = []
 
 async function main(): Promise<void> {
   const arm = process.env.MEASURE_ARM as Arm | undefined
@@ -220,11 +227,7 @@ async function main(): Promise<void> {
       guest,
       conversations,
       guestTurns: GUEST_TURNS,
-      allowedIntentions: [
-        'understand_order',
-        'learn_name',
-        'are_they_new_here',
-      ],
+      allowedIntentions: [...ALLOWED_KEYS],
       bars: {
         offTargetQuestions: 0,
         twoQuestionTurns: 0,
@@ -412,16 +415,18 @@ async function main(): Promise<void> {
         recordedOrderTimes: orderOnRecord ? [orderAt] : [],
         rows: { prompted, eligible: [] },
         inboundTimes: [receivedAt],
+        // The in-memory thread, read the way production reads the stored one.
+        venueHasAnsweredBefore: hasAnsweredGuestBefore(history),
         conversationWindowMs: CONVERSATION_WINDOW_MS,
         inboundHistoryFrom: new Date(startedAt.getTime() - 14 * MS_PER_DAY),
         // THE ONE THING THE ARMS VARY. `after` is production for this population:
         // a fresh scan, five turns inside one sitting. `control` restores
         // pre-ticket eligibility and drops the restraint paragraph.
         isFirstConversation: arm === 'after',
-        // TAC-568: both arms model the first-visit flow before any close, so
-        // this does not vary by arm. Holding it false keeps the arms differing
-        // in exactly one variable, which is what the control is for.
-        warmCloseSent: false,
+        // Both arms model the first-visit flow before any close, so this does
+        // not vary by arm. Holding it false keeps the arms differing in exactly
+        // one variable, which is what the control is for.
+        quietAfterWarmClose: false,
       })
 
       const ctx: RuntimeContext = {
@@ -785,7 +790,7 @@ async function main(): Promise<void> {
       `[tac567] NOTE control = isFirstConversation:false. Both arms carry the new opener text and the two-question gate, so bar 3 cannot differ by arm and bar 2 is partly floored by the gate in both.`,
     )
     console.log(
-      `[tac567] NOTE this arm does NOT test the eligibility suppression. In a ${GUEST_TURNS}-turn fixture ${ARMS_CAN_DIFFER_ON.join(' and ')} can differ by arm; the rest never arm or never gate open. The off-target questions here are mostly invented with no restraint to stop them. derive.test.ts covers eligibility.`,
+      `[tac567] NOTE this arm does NOT test the eligibility suppression. In a ${GUEST_TURNS}-turn fixture ${ARMS_CAN_DIFFER_ON.length === 0 ? 'no intention' : ARMS_CAN_DIFFER_ON.join(' and ')} can differ by arm; the rest are allowed in both, never arm, or never gate open. The off-target questions here are mostly invented with no restraint to stop them. derive.test.ts covers eligibility.`,
     )
   }
   // The harness's own divergences from production, printed rather than left in a

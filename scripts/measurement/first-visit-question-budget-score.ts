@@ -6,8 +6,8 @@
 //
 // THE THREE BARS, all absolute zeros, transcribed from the acceptance criteria:
 //
-//   1. the questions asked, per conversation: only the order, the name and the
-//      first-visit question. 0 others.
+//   1. the questions asked, per conversation: only the ones in ALLOWED_KEYS.
+//      0 others.
 //   2. turns carrying two questions (a body question plus an intention bubble): 0.
 //   3. "you've reached" or equivalent in the opener: 0.
 //
@@ -16,29 +16,32 @@
 // printed PASS is exactly such a claim.
 
 /**
- * The intentions a first conversation may raise BEFORE the warm close
- * (TAC-567, amended by TAC-568). Kept as a literal transcribed from the ruling
- * rather than read off `onFirstConversation`, because a scorer that derives its
- * expectation from the code under test can only confirm that code equals itself.
+ * The intentions a first conversation may raise. Kept as a literal transcribed
+ * from the ruling rather than read off `onFirstConversation`, because a scorer
+ * that derives its expectation from the code under test can only confirm that
+ * code equals itself.
  *
- * TAC-568 MOVED are_they_new_here OUT OF THIS SET, and it is named here rather
- * than silently deleted: a run scored before 2026-09-30 counted it as allowed,
- * so a figure carried across that date is comparing two different bars.
+ * THE SET HAS MOVED THREE TIMES, and a figure carried across any of these
+ * dates is comparing two different bars:
+ *   TAC-567 (2026-09-30): order, name, first-visit question.
+ *   TAC-568 (2026-09-30): order and name; the first-visit question moved
+ *     behind the warm close.
+ *   TAC-575 (2026-10-06): order, name, first time or regular, then local,
+ *     rhythm and why they are here, "only while they keep engaging".
  *
- * WHY THE PRE-CLOSE SET IS THE RIGHT BAR HERE, rather than a limitation being
- * papered over: `are_they_new_here` is `'after_warm_close'`, so it IS allowed on
- * a first conversation once `guests.warm_close_sent_at` is set. Both harnesses
- * that feed this scorer pass `warmCloseSent: false` — they model the opening
- * flow, which is the thing this measurement is about — so no turn they generate
- * can legitimately raise it. That input is what makes this constant correct rather than merely
- * conservative.
- *
- * KNOWN LIMIT, stated rather than discovered: point this scorer at a transcript
- * that continues PAST the close and it will report are_they_new_here as
- * off-target when the ruling now allows it. Teaching it the close is a
- * follow-up, not tonight's work.
+ * WHAT THIS BAR NO LONGER CATCHES: with six of the eight allowed, "off-target"
+ * now means only a question about a past order or suggestion. The interview
+ * TAC-567 was written against is held off by reply counts and one question per
+ * turn, and bar 2 below is the one that measures the second of those.
  */
-export const ALLOWED_KEYS = ['understand_order', 'learn_name'] as const
+export const ALLOWED_KEYS = [
+  'understand_order',
+  'learn_name',
+  'are_they_new_here',
+  'are_they_local',
+  'their_rhythm',
+  'why_theyre_here',
+] as const
 
 export type AllowedKey = (typeof ALLOWED_KEYS)[number]
 

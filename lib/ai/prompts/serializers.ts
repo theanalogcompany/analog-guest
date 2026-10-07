@@ -1718,9 +1718,10 @@ export function firstTouchOpenerFor(channel: MessageChannel | null): string {
  *
  * KNOWN LIMIT, stated rather than discovered: this rides the intentions block,
  * so it does not render on a first-conversation turn where nothing is open. That
- * turn carries no bubble either, so "never two questions" still holds; "no
- * invented question" does not. Through the ruled flow at least one of the three
- * allowed intentions is always open.
+ * turn carries no bubble either, so "never two questions" still holds. Since
+ * TAC-575 those turns are the common case (nothing is open on a guest's first
+ * reply), so NO_QUESTION_RESTRAINT below carries the same instruction as a
+ * block of its own on exactly the turns this one cannot reach.
  *
  * NO QUOTED QUESTION, deliberately and unlike most rules here. A worked example
  * is the thing a model reproduces verbatim, and an invented question is the
@@ -1733,6 +1734,35 @@ const FIRST_CONVERSATION_RESTRAINT = [
   'here. The only question this turn is the one listed above, and only if a',
   'line above fits.',
 ] as const
+
+/**
+ * TAC-575: the same restraint on a turn where NO intention renders, so it has
+ * no block to ride.
+ *
+ * Two turns need it. A guest's first reply (ruled 2026-10-06: "answer their
+ * question with no questions back"), where every getting-to-know-you gate is
+ * still shut. And the replies inside the quiet after a warm close ("answer
+ * anything they ask", our questions resume later). Before TAC-575 learn_name
+ * was open on a first reply, so the intentions block and
+ * FIRST_CONVERSATION_RESTRAINT rendered there; closing that gate would
+ * otherwise have removed the only text telling the model not to invent a
+ * question of its own.
+ *
+ * A BLOCK OF ITS OWN IS SAFE HERE, where the docstring above argues against
+ * one: it renders only when the intentions block does NOT, in the slot that
+ * block would have taken, so the measured last-block position is never shared.
+ *
+ * THE EXCEPTION CLAUSE IS LOAD-BEARING. Other blocks do ask the model to put a
+ * question (TAC-573's check on a visit the guest takes back is one), and an
+ * absolute ban rendered after them would win on proximity.
+ */
+const NO_QUESTION_RESTRAINT = [
+  '## No questions this turn',
+  '',
+  'Answer what they wrote and leave it there. The reply asks them nothing:',
+  'no question of your own, however natural one would be here. The one',
+  'exception is a question another block in this prompt tells you to ask.',
+].join('\n')
 
 function formatOpenIntentions(
   lines: readonly string[],
@@ -2141,6 +2171,15 @@ export function runtimeToProse(
       runtime.firstConversation === true,
     )
     if (block) blocks.push(block)
+  } else if (
+    runtime.askNothing === true &&
+    shouldRenderOpenIntentions(category) &&
+    runtime.reviewAsk == null
+  ) {
+    // The review-ask block carries its own "no other question", and the two
+    // suppressed categories are apology and opt-out turns, which this is not
+    // for.
+    blocks.push(NO_QUESTION_RESTRAINT)
   }
 
   // The review-ask block occupies the same last-content-slot position the
