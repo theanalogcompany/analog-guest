@@ -49,6 +49,12 @@ export interface IntentionDerivation {
 
 export type AgentRunId = string
 
+/**
+ * TAC-575: the two sign-offs. `happy` is for a guest who said their order is
+ * good and carries the review invitation; `plain` is the warm close.
+ */
+export type SignOffKind = 'happy' | 'plain'
+
 export interface VenueContext {
   id: string
   slug: string
@@ -79,9 +85,12 @@ export interface VenueContext {
   // MORE operator oversight, never less.
   approvalPolicy: ApprovalPolicy
   /**
-   * TAC-568: `followup_rules.warm_close_text`, the fixed close this venue sends
-   * word for word on both paths. '' when the venue has none configured, which
-   * means no close is sent at all rather than some fallback wording.
+   * `followup_rules.warm_close_text`: what this venue's warm close covers. '' when
+   * the venue has none configured, which means no plain close is sent at all.
+   *
+   * TAC-568 sent it word for word. Since TAC-575 the model writes the close and
+   * this is rendered into the prompt as a guide to its content
+   * (`## Closing this conversation`), never sent.
    *
    * Carried on the context rather than re-read at dispatch for the reason
    * conversationWindowMs is: build-runtime-context already parses
@@ -257,6 +266,21 @@ export interface FollowupTrigger {
    */
   warmClose?: {
     answersMessageId: string
+    /**
+     * TAC-575: which sign-off this is. `happy` carries the review invitation
+     * for a guest whose check-in reads good; `plain` is the warm close with no
+     * link. Decided by the processor, which is the one place that has read
+     * the check-in, the marker and the venue's links together.
+     */
+    signOff: SignOffKind
+    /** The venue's review link, on a `happy` sign-off only. */
+    reviewAsk?: { url: string; label: string }
+    /**
+     * When the processor claimed the once-ever review marker for a `happy`
+     * sign-off, so the claim can be given back, scoped to this timestamp, if
+     * the invitation does not reach the guest.
+     */
+    reviewClaimedAt?: Date
   }
   /**
    * TAC-386: set only when `reason === 'inquiry_followup'`. Typed channel rather
@@ -397,10 +421,10 @@ export interface RuntimeContext {
    * carried rather than re-derived so the intention derivation and the prompt
    * cannot disagree about which turn is a first conversation.
    *
-   * Three readers: deriveOpenIntentions applies each intention's
-   * `onFirstConversation` policy; the serializer renders the first-conversation
-   * restraint into the intentions block; and closesFirstConversation (TAC-568)
-   * gates the warm close on it.
+   * Two readers on a turn: deriveOpenIntentions applies each intention's
+   * `onFirstConversation` policy, and the serializer renders the
+   * first-conversation restraint. (The pause timer applies the same definition
+   * to its own clock for the plain close; it does not read this field.)
    *
    * IT IS TRUE ON A PROACTIVE TURN TOO, AND THAT IS NOT WHAT MAKES IT SAFE. This
    * is clock-derived and computed unconditionally, so a cron follow-up, a holding
@@ -478,6 +502,19 @@ export interface RuntimeContext {
   // message read as. While true no intention renders (renderableIntentions)
   // and the prompt is told to ask nothing (buildAiRuntime).
   visitCheckinHold: boolean
+  // TAC-575: true when this turn belongs to a visit check-in: the guest is
+  // inside the answer window of "how is it so far?", or has just answered it
+  // in the message that named their order. Praise on such a turn must not
+  // raise the review ask, which is saved for the sign-off (deriveReviewAsk).
+  // False as built; handleInbound sets it before deriveReviewAsk runs.
+  insideVisitCheckin: boolean
+  // TAC-575: which sign-off this turn is, or null on every turn that is not
+  // one. Set by build-runtime-context from the pause timer's trigger and by
+  // nothing else: no inbound turn is a sign-off (ruled 2026-10-06, because a
+  // goodbye and an "ok cool" classify the same). The serializer renders the matching
+  // block, and the approval gate reads `happy` to route the review invitation
+  // by `approval_policy.signOffReviewAsk` instead of `reviewAsk`.
+  signOff: SignOffKind | null
   // TAC-380: the rest of this turn's derivation. Empty/false on followup runs.
   intentionDerivation: IntentionDerivation
   // TAC-308: the question this guest is still owed an answer to, when a
@@ -492,11 +529,12 @@ export interface RuntimeContext {
   pendingQuestion: PendingQuestion | null
   // The once-ever Google review ask this turn raises, or null on every other
   // turn — which is every turn on every path except an eligible inbound
-  // praise turn. buildRuntimeContext always initializes it null;
-  // handle-inbound.ts is the ONLY writer (post-classify, via the predicate in
-  // lib/agent/review-ask.ts), which is what makes followups, declines, the
-  // holding message and every proactive path structurally incapable of
-  // raising the ask. `url` is copied verbatim from the venue's curated
+  // praise turn, or on a happy guest's sign-off (TAC-575). TWO WRITERS, both
+  // through lib/agent/review-ask.ts: handle-inbound.ts post-classify (the
+  // praise ask only), and buildRuntimeContext from a `warm_close` trigger
+  // whose processor decided the sign-off is a happy one. Every other followup, declines, the holding
+  // message and every other proactive path leave it null and cannot raise the
+  // ask. `url` is copied verbatim from the venue's curated
   // `venue_info.links` entry; `label` rides along for events. buildAiRuntime
   // maps it onto the AI runtime, where it renders the `## Ask for a review`
   // block and gates composeReplyWithReviewAsk.

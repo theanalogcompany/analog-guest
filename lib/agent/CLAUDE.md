@@ -256,9 +256,8 @@ the default, not a detection. Bad is final, good is not.
 question**; a required one still renders, which is how the check-back gets through
 (`ctx.visitCheckinHold`, set by `handleInbound` after classification and read by
 `renderableIntentions`; `CHECKIN_ANSWER_WINDOW_MS` bounds it, and a `bad` answer holds for the
-whole of it). **Interim until TAC-575's PR 4:** praise inside a check-in still raises the
-review ask on that turn, as any praise does; the ruled behaviour (saved for the sign-off)
-lands with the sign-off, as one condition at the marked line in `deriveReviewAsk`. It is decided
+whole of it). Praise inside a check-in does not raise the review ask on that turn; it is
+saved for the sign-off (see the sign-offs below). The hold is decided
 post-classification on purpose: the message saying "it's great" has to lift the hold on the
 turn it arrives.
 
@@ -344,11 +343,55 @@ its `switch` is over the closed union. "First conversation" is TAC-560's `isFirs
 `conversationWindowMs` the brake reads, anchored on `first_contacted_at ?? created_at`, and
 carried on `RuntimeContext.firstConversation`.
 
-**The warm close is triggered by a lull, never by a stored name.** In conversation it needs
-the guest's sign-off AND the model's goodbye (`closesFirstConversation`); otherwise the pause
-timer sends it, for any first Instagram conversation, scanned or not. **Neither path closes a
-conversation staff answered by hand or one that contains a complaint** (`warmCloseBlocker`,
-one check called by both, before the marker is claimed).
+**The warm close is triggered by a lull, and by nothing else.** Not by a stored name, and
+not by the guest saying goodbye: the pause timer sends it after about ten quiet minutes, for
+any first Instagram conversation, scanned or not.
+
+### Two sign-offs, both written by the model (TAC-575)
+
+| kind | who | carries | once per guest of |
+| --- | --- | --- | --- |
+| `plain` | a FIRST conversation ending without a "good" check-in | the warm close; `followup_rules.warm_close_text` is a guide to its content, never sent | the close, `warm_close_sent_at` |
+| `happy` | a guest whose visit check-in reads `good`, never asked, venue has a review link; first conversation OR NOT | the review invitation, in the `reviewAsk` field | the review ask, `review_asked_at` |
+
+`deriveSignOffReviewAsk` (`review-ask.ts`) is the one rule for `happy`. `ctx.signOff` carries
+the kind; the serializer renders `## Sign off` or `## Closing this conversation`.
+
+- **ONLY THE PAUSE TIMER SIGNS OFF. No inbound turn does** (ruled 2026-10-06). The one
+  category that means goodbye is `acknowledgment`, which is also "ok cool", "thanks" and
+  "got a cortado" (that last one measured), and nothing tells them apart before the reply is
+  written. So "bye" gets an ordinary reply and the sign-off follows ten quiet minutes later.
+  Text-message guests have no timer and get none; accepted with the ruling. An earlier
+  version of this PR decided a sign-off on the goodbye turn and closed a first-visit guest
+  on their order message.
+- **Decided BEFORE generation**, because the model writes it: the timer picks the kind and
+  hands it, with the link, through the `warm_close` trigger.
+- **The link rides `reviewAsk`**, never `body`: that field is what dispatch sends as its own
+  message, what the approval gate reads, and what the once-ever marker is stamped from.
+- **Its approval is `approval_policy.signOffReviewAsk`**, default hold, read when
+  `ctx.signOff === 'happy'`. The praise-triggered ask keeps `reviewAsk`. Turning one on must
+  not turn the other on.
+- **The timer CLAIMS `review_asked_at` before sending a happy sign-off** (two ticks would
+  otherwise both find the guest unasked) and gives it back only if the send fails
+  (`releaseReviewAskClaim`). A held card keeps the claim, so a skipped one uses up the ask.
+- **A happy sign-off that goes out WITHOUT its link still spends the ask.** Giving the marker
+  back on a sent reply made the timer send the sign-off again every ten minutes. Logged, so
+  the rate can be counted.
+- **Praise inside a visit check-in never raises the praise ask** (`ctx.insideVisitCheckin`,
+  condition 5a of `deriveReviewAsk`): that guest is asked at the sign-off.
+- Three things stop either kind: a check-back still owed, staff in the thread, a complaint
+  (`warmCloseBlocker`, before any marker is claimed).
+- **"The same visit" is two hours, not the day.** The check-in row is keyed on the
+  venue-local day; only a fresh one makes a sign-off happy (`isCheckinFresh`,
+  `visit-checkin.ts`), so "so good" at nine does not turn a quiet spell at four into a review
+  ask.
+- **A close may hope to see them again, softly. It may not invite them in for something
+  specific, or name an item they did not mention** (ruled 2026-10-06, after the first
+  generated closes did both). In the plain block and the timed-close instruction.
+- **The model's `closedTheConversation` report is read by nothing.** It was the goodbye
+  path's second signal; that path is gone. Still emitted, pending removal.
+- **Repetition across guests is not solved.** A prompt cannot see what another guest was
+  sent. `npm run measure-warm-close` measures it against a bar fixed in advance.
 
 **After a warm close, no question until the guest is two messages past it AND one reply of
 ours has reached them in between** (`isQuietAfterWarmClose`, `warm-close.ts`); two messages

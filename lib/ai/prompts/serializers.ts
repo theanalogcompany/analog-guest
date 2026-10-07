@@ -1920,6 +1920,92 @@ function formatOpenIntentions(
 }
 
 /**
+ * TAC-575: the sign-off for a guest who said their order is good. Carries the
+ * review invitation. Wording approved verbatim 2026-10-06.
+ *
+ * TWO FIELDS, AND THAT SPLIT IS THE ONE CHANGE from the single instruction the
+ * plan first approved. The link has to ride `reviewAsk`: that is what dispatch
+ * peels off as its own message, what the approval gate reads, and what the
+ * once-ever marker is stamped from (lib/agent/review-ask.ts). So the warm half
+ * goes in `body` and the invitation in `reviewAsk`.
+ *
+ * NO QUOTED SIGN-OFF. The ruling's own example ("so glad you're enjoying it.
+ * no pressure at all...") is the line every guest would then receive, and the
+ * acceptance criterion is that no two guests get the same close.
+ *
+ * "NEVER ASK FOR A PARTICULAR RATING" is here as well as in the universal
+ * `# Asking for a review` section, because this block renders later and on
+ * most-proximate-wins it is the one the model reads last. Asking for stars is
+ * also against Google's own review policy, not only this venue's taste.
+ *
+ * The url is rendered verbatim, as formatReviewAsk's is and for its reason: it
+ * is the string the url-detector's allowlist carries.
+ */
+function formatHappySignOff(reviewAsk: { url: string }): string {
+  return [
+    '## Sign off',
+    '',
+    'The conversation has reached a natural pause and this guest told you',
+    'they are enjoying what they got. In `body`, write a short, warm sign-off',
+    'that says you are glad they are enjoying it. In `reviewAsk`, invite',
+    'them, with no pressure, to leave a review if they have a moment, and',
+    'include the link.',
+    '',
+    `The only link you may use, exactly as written: ${reviewAsk.url}`,
+    '',
+    'Never ask for a particular rating or number of stars. Do not offer',
+    'anything in return. Ask nothing else.',
+  ].join('\n')
+}
+
+/**
+ * TAC-575: the warm close with no link, for every first conversation that ends
+ * without a "good" check-in. Wording approved verbatim 2026-10-06; the
+ * sentences about a visit were added the same day on a ruling (below).
+ *
+ * THE VENUE'S TEXT IS A GUIDE TO CONTENT, NOT COPY. TAC-568 sent
+ * `followup_rules.warm_close_text` word for word, on the ruling that the close
+ * is the same every time; the Oct 6 device test is what that reads like across
+ * guests, and TAC-575 reversed it. The text still decides WHAT the close
+ * covers, because that is a per-venue product decision (which topics a guest
+ * may message about), and the block says outright not to reuse its words.
+ *
+ * "A SOFT HOPE TO SEE THEM AGAIN IS FINE..." was added on a ruling
+ * (2026-10-06) after the first generated closes: four of ten said "hope to see
+ * you soon", which is allowed, and one invited a guest in for a drink they had
+ * never mentioned, which is not. The venue's guide names topics ("what to get
+ * next time"), and that is where an invented item comes from.
+ *
+ * An empty guide renders the block without that sentence. The callers do not
+ * send a plain close for a venue with no text (the setting's empty default
+ * still means "this venue has not been given a close"), so this is the
+ * defensive branch, not a path.
+ */
+function formatPlainClose(guidance: string): string {
+  // One line, whatever the stored value holds. It is a hand-edited setting, and
+  // a line break or a leading `#` in it would end this block early or start a
+  // new one in the middle of the instruction.
+  const guide = guidance
+    .replace(/\s+/g, ' ')
+    .replace(/^#+\s*/, '')
+    .trim()
+  return [
+    '## Closing this conversation',
+    '',
+    'The conversation has reached a natural pause. Close it warmly and leave',
+    'the door open: they can message here anytime.' +
+      (guide === ''
+        ? ''
+        : ` This is what this venue's close usually covers, as a guide to its content and not as words to reuse: ${guide}`),
+    '',
+    'Say it in your own words, different from anything you have already sent',
+    'this guest. A soft hope to see them again is fine. Do not invite them in',
+    'for anything specific, and do not name any item they did not mention',
+    'themselves. Ask nothing.',
+  ].join('\n')
+}
+
+/**
  * TAC-572: the turn that opts a guest back in after an opt-out. Both texts were
  * approved verbatim on 2026-10-06; changing either is a copy change.
  *
@@ -2105,20 +2191,11 @@ export function runtimeToProse(
   if (runtime.scanArrival) {
     blocks.push(formatScanArrival(runtime.scanArrival))
   }
-  // TAC-560: beside `## Guest just arrived` because both are facts about this
-  // moment, and above everything else in the user prompt for the same reason
-  // that one is: the turn's own situation comes before the history it draws on.
-  //
-  // The two are mutually exclusive in practice (a scan greeting is the FIRST
-  // thing said to a guest, a warm close the last), but nothing enforces that and
-  // nothing needs to: they make different claims and neither contradicts the
-  // other.
-  //
-  // The POSITION is a choice, not a measurement, exactly as TAC-536's is.
-  // TAC-568 removed the warm close's block from this slot. The close is no
-  // longer generated at all: it is a fixed per-venue string
-  // (`followup_rules.warm_close_text`) that the dispatch layer sends, so there
-  // is nothing here for a prompt to steer.
+  // TAC-560 rendered a warm-close block in this slot, beside `## Guest just
+  // arrived`, and TAC-568 removed it when the close became a fixed string.
+  // TAC-575 generates the close again, but its blocks render further down, in
+  // the review-ask slot (formatHappySignOff, formatPlainClose): a sign-off is
+  // an ask-shaped last word, and that slot is the measured last-content one.
   if (runtime.inquiryFollowup) {
     blocks.push(formatInquiryFollowup(runtime.inquiryFollowup))
   }
@@ -2263,7 +2340,17 @@ export function runtimeToProse(
   // predicate's flag empties renderableIntentions on a review-ask turn
   // (lib/agent/review-ask.ts), so no turn ever carries two asks. The slot is
   // TAC-519's measured one — asks raise from last position, not from third.
-  if (runtime.reviewAsk) {
+  //
+  // TAC-575: a sign-off takes this slot instead. `happy` is the review
+  // invitation's other occasion, so it replaces `## Ask for a review` rather
+  // than joining it (one ask per turn, and its premise is different: the
+  // guest answered a question, where the block above says they "just said
+  // something genuinely good"). `plain` is the close with no link.
+  if (runtime.signOff === 'happy' && runtime.reviewAsk) {
+    blocks.push(formatHappySignOff(runtime.reviewAsk))
+  } else if (runtime.signOff === 'plain') {
+    blocks.push(formatPlainClose(runtime.warmCloseGuidance ?? ''))
+  } else if (runtime.reviewAsk) {
     blocks.push(formatReviewAsk(runtime.reviewAsk))
   }
 

@@ -185,6 +185,30 @@ export function isAwaitingCheckinAnswer(
 }
 
 /**
+ * Is this check-in still about the visit that is happening?
+ *
+ * The check-in row is keyed on the venue-local DAY, but a visit is not a day.
+ * A guest who said "so good" at nine and asks what time the shop closes at
+ * four is on a different errand, and a sign-off telling them we are glad they
+ * are enjoying it, with a review link, would be about a drink from seven hours
+ * ago. Ruled 2026-10-06: the link is offered at the sign-off of the SAME visit.
+ *
+ * So "the same visit" is the answer window again: within
+ * CHECKIN_ANSWER_WINDOW_MS of the latest thing that happened on the row, the
+ * question or the answer. One number for "this visit is still going".
+ */
+export function isCheckinFresh(checkin: VisitCheckin, at: Date): boolean {
+  const latest = Math.max(
+    checkin.askedAt.getTime(),
+    checkin.answeredAt?.getTime() ?? 0,
+  )
+  const since = at.getTime() - latest
+  return (
+    Number.isFinite(since) && since >= 0 && since <= CHECKIN_ANSWER_WINDOW_MS
+  )
+}
+
+/**
  * Read one reply as an answer.
  *
  * NO NEW MODEL CALL AND NO CLASSIFIER CHANGE. Both signals already exist on

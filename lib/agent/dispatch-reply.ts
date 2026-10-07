@@ -49,17 +49,10 @@ export async function dispatchReply(
         reviewReason: options.reviewReason,
         rng: options.rng,
         renderedIntentions: options.renderedIntentions,
-        warmCloseBubble: options.warmCloseBubble,
       })
       // The text arm sends the whole reply or throws, so what was delivered is
       // the generated body, verbatim: recording on this path is byte-for-byte
       // what it was before TAC-469.
-      //
-      // TAC-568 does NOT add the warm close here, and that is deliberate.
-      // deliveredBody feeds the intention recorder, which judges what this reply
-      // ASKED; the close is a fixed venue string that asks nothing, so folding it
-      // in would put 143 bytes of unrelated copy in front of that judgement. The
-      // close's own record is guests.warm_close_sent_at.
       return {
         kind: 'sent',
         ...sent,

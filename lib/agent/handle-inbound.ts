@@ -11,7 +11,6 @@ import {
   captureIntentionPromptRecordingFailed,
   captureReviewAskRaised,
   captureReviewAskSent,
-  captureWarmCloseSent,
 } from '@/lib/analytics/posthog'
 import { createAdminClient } from '@/lib/db/admin'
 import { isEmptyContextUpdate, updateGuestContext } from '@/lib/guests/context'
@@ -76,24 +75,17 @@ import {
   recordIntentionPrompts,
 } from './intentions/record'
 import {
-  loadWarmCloseBlocker,
-  markWarmCloseSent,
-  releaseWarmCloseClaim,
-} from './warm-close-store'
-import {
   classifyCheckinAnswer,
   isAwaitingCheckinAnswer,
-  isCheckbackTooLate,
   nextCheckinAnswer,
   orderTurnVerdict,
-  owesCheckback,
 } from './visit-checkin'
 import {
   claimVisitCheckback,
   recordVisitCheckinAnswer,
   recordVisitCheckinAsked,
 } from './visit-checkin-store'
-import { closesFirstConversation, SIGN_OFF_CATEGORY } from './warm-close'
+import { SIGN_OFF_CATEGORY } from './warm-close'
 import { recordInboundTurnOutcome } from './record-inbound-turn-outcome'
 import { isVenueProcessingHalted } from '@/lib/venues/status'
 import { persistOrRegenQueuedDraft } from './schedule-and-send'
@@ -611,138 +603,6 @@ function buildGenerationFailureGeneration(): GenerateMessageResult {
  * fails OPEN on a value outside PUSH_POLICY's total map, so this card pushes,
  * as it should: nobody is coming to look at it otherwise.
  */
-/**
- * TAC-568: a warm close this turn owns, and the text it will send.
- *
- * `null` everywhere else, which is the ordinary case: the guest is not closing a
- * first conversation, or another path already closed them.
- */
-interface ClaimedWarmClose {
-  /** The venue's fixed text, byte for byte as the setting holds it. */
-  text: string
-  /** The guest whose one close this is. */
-  guestId: string
-  /** The timestamp written into the marker, so a release can scope to it. */
-  claimedAt: Date
-}
-
-/**
- * Take this guest's one warm close, or find it already taken.
- *
- * markWarmCloseSent is a CAS (`... where warm_close_sent_at is null`), so
- * `already_marked` is the answer for a guest the pause timer closed ten minutes
- * ago, or one this venue closed on an earlier turn. Either way no second close
- * goes out, and that is the acceptance criterion: delete the `already_marked`
- * branch and a guest can be closed twice.
- *
- * FAILS CLOSED. A marker write that errors returns null, so the bubble is NOT
- * appended. The alternative — sending on an unknown marker state — is the one
- * outcome this mechanism is built to avoid. For an Instagram guest the pause
- * timer will try again inside its own window; for an SMS guest there is no
- * second attempt, and failing closed is still right, because
- * a duplicated close is worse than a missing one (TAC-569).
- */
-async function claimWarmCloseForTurn(
-  ctx: RuntimeContext,
-  agentRunId: string,
-): Promise<ClaimedWarmClose | null> {
-  // TAC-575: the check-back comes before the close. A guest who says "thanks!"
-  // while their visit is still owed one is not closed on this turn; the timer
-  // checks back if they stay quiet, and the pause timer closes after that. The
-  // pause timer applies the same order (`checkback_pending`).
-  if (
-    ctx.visitCheckin !== null &&
-    ctx.visitCheckinHold &&
-    owesCheckback(ctx.visitCheckin) &&
-    !isCheckbackTooLate(ctx.visitCheckin.orderedAt, new Date())
-  ) {
-    console.log('[agent] warm close not sent on this turn', {
-      agentRunId,
-      guestId: ctx.guest.id,
-      reason: 'checkback_pending',
-    })
-    return null
-  }
-
-  // TAC-575 (ruled 2026-10-06): no automated close where staff answered by hand
-  // or the conversation contains a complaint. The pause timer runs the same
-  // check through the same function. BEFORE the marker write, because the
-  // marker is what spends the guest's one close. An unreadable thread fails
-  // closed, like everything else here.
-  const supabase = createAdminClient()
-  const blocker = await loadWarmCloseBlocker(
-    supabase,
-    ctx.venue.id,
-    ctx.guest.id,
-    ctx.guest.firstContactedAt ?? ctx.guest.createdAt,
-  ).catch((e: unknown) => ({
-    ok: false as const,
-    error: e instanceof Error ? e.message : String(e),
-  }))
-  if (!blocker.ok || blocker.data !== null) {
-    console.log('[agent] warm close not sent on this turn', {
-      agentRunId,
-      guestId: ctx.guest.id,
-      reason: blocker.ok ? blocker.data : 'thread_unreadable',
-      ...(blocker.ok ? {} : { error: blocker.error }),
-    })
-    return null
-  }
-
-  const claimedAt = new Date()
-  const marked = await markWarmCloseSent(
-    supabase,
-    ctx.guest.id,
-    claimedAt,
-  ).catch((e: unknown) => ({
-    ok: false as const,
-    error: e instanceof Error ? e.message : String(e),
-  }))
-
-  if (!marked.ok) {
-    console.warn('[agent] warm close marker write failed; not closing', {
-      agentRunId,
-      guestId: ctx.guest.id,
-      error: marked.error,
-    })
-    return null
-  }
-  if (marked.data === 'already_marked') {
-    console.log(
-      '[agent] warm close already sent to this guest; not repeating',
-      {
-        agentRunId,
-        guestId: ctx.guest.id,
-      },
-    )
-    return null
-  }
-  return { text: ctx.venue.warmCloseText, guestId: ctx.guest.id, claimedAt }
-}
-
-/**
- * Give back a claim whose close never reached the guest.
- *
- * Scoped to the exact timestamp this turn wrote (releaseWarmCloseClaim's own
- * guard), so it can never clear a marker the timer set in between. A no-op when
- * nothing was claimed.
- */
-async function releaseClaimedWarmClose(
-  claimed: ClaimedWarmClose | null,
-  agentRunId: string,
-): Promise<void> {
-  if (claimed === null) return
-  console.warn('[agent] warm close did not reach the guest; claim released', {
-    agentRunId,
-    guestId: claimed.guestId,
-  })
-  await releaseWarmCloseClaim(
-    createAdminClient(),
-    claimed.guestId,
-    claimed.claimedAt,
-  )
-}
-
 function pushSendFailureCard(ctx: RuntimeContext, cardId: string): void {
   pushOperatorCard(ctx, cardId, INSTAGRAM_SEND_FAILED_REVIEW_REASON)
 }
@@ -1954,7 +1814,9 @@ async function runInboundTurn(
       // They said how it is in the same breath as what it is. That IS the
       // visit's check-in, so it is recorded without a question having been
       // asked: the sign-off and the next-visit follow-up read this row either
-      // way.
+      // way. It also makes this a check-in turn, so "iced sofi, so good" does
+      // not raise the review ask here; that is the sign-off's.
+      if (verdict === 'good' || verdict === 'bad') ctx.insideVisitCheckin = true
       if (
         (verdict === 'good' || verdict === 'bad') &&
         ctx.visitLocalDate !== null
@@ -2065,6 +1927,9 @@ async function runInboundTurn(
       // renderableIntentions runs, like ctx.reviewAsk below.
       const answerNow = answer ?? checkin.answer
       ctx.visitCheckinHold = answerNow !== 'good'
+      // Praise on this turn is the answer to our own question, so the review
+      // ask it would raise is saved for the sign-off (deriveReviewAsk).
+      ctx.insideVisitCheckin = true
       // THREE TURNS THE CHECK-BACK MUST NOT RIDE, even when the clock says it
       // is due. Removed from the eligibility write too, as for the order turn
       // above: a row would keep a required question open on their next message.
@@ -2215,15 +2080,24 @@ async function runInboundTurn(
     // short-circuit's early return above, so a guest in crisis never sees
     // one (the predicate re-checks crisisSafety anyway; the placement is not
     // the only thing stopping it). This is the ONLY write to ctx.reviewAsk
-    // anywhere — buildRuntimeContext initializes it null and every other
-    // path leaves it there — which is what makes the ask structurally
-    // impossible on followups, declines and the holding message.
+    // on an inbound turn apart from the sign-off just below. Followups,
+    // declines and the holding message never get one; the pause timer's happy
+    // sign-off is handed its link through the trigger (build-runtime-context).
     //
     // Setting it BEFORE renderableIntentions runs below is load-bearing: the
     // raised ask vetoes the intentions block (one ask per turn), and both
     // the prompt mapper and the recording gate read that veto through the
     // same predicate.
     ctx.reviewAsk = deriveReviewAsk(ctx)
+
+    // NO SIGN-OFF IS DECIDED ON AN INBOUND TURN (TAC-575, ruled 2026-10-06).
+    // The only message that classifies as a goodbye is `acknowledgment`, which
+    // is also "ok cool", "thanks" and "got a cortado", and nothing tells those
+    // apart before the reply is written. So a guest who says "bye" gets an
+    // ordinary reply here, and the pause timer signs them off after about ten
+    // quiet minutes (warm-close-timeout.ts). Silence is the one trigger, which
+    // is the "natural lull" the ruling names. Text-message guests have no
+    // timer and get no sign-off; accepted with the ruling.
     if (ctx.reviewAsk !== null) {
       console.log('[agent] review ask raised', {
         agentRunId,
@@ -3120,45 +2994,11 @@ async function runInboundTurn(
     // and, when applyApprovalPolicyStage short-circuited the gate, the send is
     // stamped review_reason='demo_bypass' (approval.reason is undefined on a
     // normal untriggered send).
-    // TAC-568: does this reply close the guest's first conversation?
-    //
-    // ONE WAY IN, decided by closesFirstConversation: the guest said goodbye
-    // and we answered with one. TAC-575 removed the second (the turn that
-    // learned their name); a guest who simply goes quiet is the pause timer's.
-    //
-    // Decided BEFORE the send, and the marker is CLAIMED before the send too,
-    // because the claim is what makes "once per guest, ever" a fact Postgres
-    // enforces rather than an argument about ordering. This is the timer's own
-    // claim-before-the-side-effect rule (warm-close-timeout.ts), applied on the
-    // path that actually talks to a guest who is still in the conversation.
-    //
-    // The pause timer cannot race this: its candidate scan only produces a guest
-    // whose NEWEST message is our outbound, and an inbound turn in flight means
-    // the guest's own message is newest. The CAS is the belt anyway.
-    //
-    // TAC-572: never on an opt_out turn. The confirmation is the last thing a
-    // guest who asked to stop should read, and a close that invites them back
-    // in riding behind it is a message they did not ask for.
-    const claimedWarmClose =
-      ctx.classification.category !== 'opt_out' &&
-      closesFirstConversation({
-        guestSignedOff: ctx.classification.category === SIGN_OFF_CATEGORY,
-        agentSaidGoodbye: gen.result.closedTheConversation,
-        isFirstConversation: ctx.firstConversation,
-        warmCloseText: ctx.venue.warmCloseText,
-      })
-        ? await claimWarmCloseForTurn(ctx, agentRunId)
-        : null
-
     const sendSpan = trace.span('send', { bodyLength: gen.result.body.length })
     try {
       const dispatched = await dispatchReply(ctx, gen.result, {
         skipHumanFeelDelay: ctx.guest.isDemo === true,
         reviewReason: approval.reason,
-        // TAC-568: the fixed close rides as this response's own last bubble,
-        // 1.5s after the goodbye. '' whenever the claim was not taken — which
-        // includes a guest who has already been closed by either path.
-        warmCloseBubble: claimedWarmClose?.text ?? '',
         // TAC-436 ruling 4: the SAME hoisted value the queue branch stores
         // and this branch records against, so what a card carries and what
         // an auto-send carries cannot drift. The recording below is what
@@ -3181,12 +3021,6 @@ async function runInboundTurn(
           output: { outcome: dispatched.kind },
         })
         trace.update({ output: { status: dispatched.kind } })
-        // TAC-568: nothing reached the guest, so the close did not happen. Give
-        // the marker back rather than spending this guest's one close on a
-        // message they never saw. An Instagram guest then gets the timer's
-        // own two-hour window; on SMS this turn was the only chance, which is
-        // the more reason to release rather than keep a claim nothing spent.
-        await releaseClaimedWarmClose(claimedWarmClose, agentRunId)
         return undeliveredAgentResult(ctx, dispatched)
       }
       const {
@@ -3196,10 +3030,6 @@ async function runInboundTurn(
         bubbleCount,
       } = dispatched
       if (dispatched.undelivered !== null) {
-        // TAC-568: the close is the LAST bubble, so a partly delivered reply is
-        // precisely the case where it did not go out. Release before anything
-        // else reads the marker.
-        await releaseClaimedWarmClose(claimedWarmClose, agentRunId)
         // Part of a split Instagram reply went out; the rest became a card (or
         // couldn't, and the Slack event says why).
         console.warn('[agent] inbound reply partly delivered', {
@@ -3578,25 +3408,6 @@ async function runInboundTurn(
             }),
         )
       }
-      // TAC-568: the close went out as this response's last bubble. The marker
-      // was already claimed before the send (see claimWarmCloseForTurn), so
-      // nothing is written here — this only reports it.
-      //
-      // WHY THE CLAIM MOVED. Before TAC-568 the model WROTE the close itself and
-      // this block recorded that it had, after the fact. Now the close is a fixed
-      // string this code appends, so "did we send it" and "is it marked" are one
-      // decision and belong in one statement. Marking after the send would leave
-      // a window in which a second path could claim the same guest.
-      if (claimedWarmClose !== null && dispatched.undelivered === null) {
-        await captureWarmCloseSent({
-          agentRunId,
-          venueId: ctx.venue.id,
-          guestId: ctx.guest.id,
-          via: 'in_conversation',
-          answersMessageId: ctx.currentMessage?.id ?? null,
-          markerOutcome: 'marked',
-        })
-      }
       console.log('[agent] inbound sent + persisted', {
         agentRunId,
         outboundMessageId,
@@ -3628,27 +3439,6 @@ async function runInboundTurn(
       const stage: 'send' | 'persist' = errMsg.includes('persist failed')
         ? 'persist'
         : 'send'
-      // TAC-568: RELEASE HERE TOO, and this arm is the one that bites.
-      //
-      // The two returns above release on a dispatch that reported failure. A
-      // dispatch that THROWS took neither, so the marker stayed claimed for a
-      // close that never went out — and `failed` is a retrying status
-      // (shouldRetryTurn in coalesce-turn.ts), so the retry read `already_marked`
-      // and the guest could never be closed by any path. Permanently, on one
-      // transient send error.
-      //
-      // Safe on every throwing case, because scheduleAndSend only throws while
-      // NOTHING has been committed (`persistedIds.length === 0`); once a bubble
-      // is out it truncates instead. The close is the LAST bubble, so a throw
-      // always means it did not reach the guest. The release is CAS-scoped to
-      // the exact timestamp this turn wrote, so it cannot clear a marker the
-      // pause timer set in between.
-      //
-      // Not covered: a throw between claimWarmCloseForTurn and this `try`. That
-      // is two statements with no I/O, and `claimedWarmClose` is out of scope in
-      // the outer catch, so closing it would mean restructuring rather than
-      // adding a line. Stated rather than silently left.
-      await releaseClaimedWarmClose(claimedWarmClose, agentRunId)
       sendSpan.end({
         level: 'ERROR',
         statusMessage: errMsg,

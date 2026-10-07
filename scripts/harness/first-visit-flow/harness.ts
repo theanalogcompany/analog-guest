@@ -19,12 +19,14 @@ import {
 import { INTENTION_DEFINITION_BY_KEY } from '@/lib/agent/intentions/definitions'
 import type { PromptedIntentionRow } from '@/lib/agent/intentions/load'
 import { hasAnsweredGuestBefore } from '@/lib/agent/retrieval-context'
+import { deriveSignOffReviewAsk } from '@/lib/agent/review-ask'
 import {
   classifyCheckinAnswer,
   isAwaitingCheckinAnswer,
   checkbackWentUnanswered,
   hasBeenQuietLongEnough,
   isCheckbackTooLate,
+  isCheckinFresh,
   lastProactiveWasThisVisit,
   nextCheckinAnswer,
   orderTurnVerdict,
@@ -34,6 +36,7 @@ import {
   type VisitCheckin,
 } from '@/lib/agent/visit-checkin'
 import { isQuietAfterWarmClose } from '@/lib/agent/warm-close'
+import { categoryInstructionsFor } from '@/lib/ai/prompts/categories'
 import { runtimeToProse } from '@/lib/ai/prompts/serializers'
 import type { RecentMessage, RuntimeContext } from '@/lib/ai/types'
 import { INTENTION_RULES_DEFAULT } from '@/lib/schemas/intention-rules'
@@ -838,6 +841,222 @@ check(
   'not on an ordinary turn',
   prose({}).includes('## No questions this turn'),
   false,
+)
+
+// ---------------------------------------------------------------------------
+// 7. The sign-off.
+// ---------------------------------------------------------------------------
+
+const REVIEW_URL = 'https://reviews.example.test/write?id=abc'
+const links = [{ label: 'Leave a review', url: REVIEW_URL, kind: 'review' }]
+check(
+  'happy: check-in good, never asked, venue has a link',
+  deriveSignOffReviewAsk({ checkinAnswer: 'good', reviewAskedAt: null, links }),
+  { url: REVIEW_URL, label: 'Leave a review' },
+)
+check(
+  'not happy: they never said it was good',
+  deriveSignOffReviewAsk({
+    checkinAnswer: 'not_yet',
+    reviewAskedAt: null,
+    links,
+  }),
+  null,
+)
+check(
+  'not happy: they complained',
+  deriveSignOffReviewAsk({ checkinAnswer: 'bad', reviewAskedAt: null, links }),
+  null,
+)
+check(
+  'not happy: no check-in at all',
+  deriveSignOffReviewAsk({ checkinAnswer: null, reviewAskedAt: null, links }),
+  null,
+)
+check(
+  'not happy: already asked once',
+  deriveSignOffReviewAsk({
+    checkinAnswer: 'good',
+    reviewAskedAt: at(-DAY),
+    links,
+  }),
+  null,
+)
+check(
+  'not happy: the venue has no review link',
+  deriveSignOffReviewAsk({
+    checkinAnswer: 'good',
+    reviewAskedAt: null,
+    links: [],
+  }),
+  null,
+)
+check(
+  'not happy: a link that is not marked as the review link',
+  deriveSignOffReviewAsk({
+    checkinAnswer: 'good',
+    reviewAskedAt: null,
+    links: [{ label: 'Menu', url: REVIEW_URL }],
+  }),
+  null,
+)
+
+check(
+  'same visit: answered "so good" twenty minutes ago',
+  isCheckinFresh(
+    checkin({
+      askedAt: at(-30 * MIN),
+      answer: 'good',
+      answeredAt: at(-20 * MIN),
+    }),
+    NOW,
+  ),
+  true,
+)
+check(
+  'not the same visit: answered "so good" seven hours ago',
+  isCheckinFresh(
+    checkin({
+      askedAt: at(-7 * HOUR - 600),
+      answer: 'good',
+      answeredAt: at(-7 * HOUR),
+    }),
+    NOW,
+  ),
+  false,
+)
+check(
+  'same visit: asked three hours ago but answered an hour ago',
+  isCheckinFresh(
+    checkin({ askedAt: at(-3 * HOUR), answer: 'good', answeredAt: at(-HOUR) }),
+    NOW,
+  ),
+  true,
+)
+
+const happyTurn = prose(
+  { signOff: 'happy', reviewAsk: { url: REVIEW_URL, label: 'Leave a review' } },
+  'acknowledgment',
+)
+check('happy turn: the sign-off block', happyTurn.includes('## Sign off'), true)
+check(
+  'happy turn: the link, character for character',
+  happyTurn.includes(`exactly as written: ${REVIEW_URL}`),
+  true,
+)
+check(
+  'happy turn: never a rating',
+  happyTurn.includes('Never ask for a particular rating or number of stars.'),
+  true,
+)
+check(
+  'happy turn: not the praise block as well',
+  happyTurn.includes('## Ask for a review'),
+  false,
+)
+check(
+  'happy turn: not the plain close as well',
+  happyTurn.includes('## Closing this conversation'),
+  false,
+)
+const praiseTurn = prose({
+  reviewAsk: { url: REVIEW_URL, label: 'Leave a review' },
+})
+check(
+  'CONTROL praise turn: the praise block, not the sign-off',
+  [
+    praiseTurn.includes('## Ask for a review'),
+    praiseTurn.includes('## Sign off'),
+  ],
+  [true, false],
+)
+check(
+  'happy with no link handed over renders no sign-off block',
+  prose({ signOff: 'happy' }, 'acknowledgment').includes('## Sign off'),
+  false,
+)
+const plainTurn = prose(
+  {
+    signOff: 'plain',
+    warmCloseGuidance: 'coffee and beans, what to get next time',
+  },
+  'acknowledgment',
+)
+check(
+  'plain turn: the close block',
+  plainTurn.includes('## Closing this conversation'),
+  true,
+)
+check(
+  'plain turn: the venue text, as a guide',
+  plainTurn.includes(
+    'not as words to reuse: coffee and beans, what to get next time',
+  ),
+  true,
+)
+check(
+  'plain turn: a soft hope to see them is allowed, an invitation for something specific is not',
+  [
+    plainTurn.includes('A soft hope to see them again is fine.'),
+    plainTurn.includes('Do not invite them in'),
+    plainTurn.includes('do not name any item they did not mention'),
+  ],
+  [true, true, true],
+)
+check(
+  'plain turn: no link block',
+  [
+    plainTurn.includes('## Sign off'),
+    plainTurn.includes('## Ask for a review'),
+  ],
+  [false, false],
+)
+check(
+  'plain turn with no venue text: the block, without the guide sentence',
+  (() => {
+    const p = prose({ signOff: 'plain' }, 'acknowledgment')
+    return [
+      p.includes('## Closing this conversation'),
+      p.includes('as a guide to its content'),
+    ]
+  })(),
+  [true, false],
+)
+check(
+  'CONTROL ordinary turn: neither block',
+  [
+    prose({}).includes('## Sign off'),
+    prose({}).includes('## Closing this conversation'),
+  ],
+  [false, false],
+)
+
+const timedClose = categoryInstructionsFor(
+  'acknowledgment',
+  'instagram',
+  null,
+  false,
+  false,
+  true,
+)
+const goodbye = categoryInstructionsFor(
+  'acknowledgment',
+  'instagram',
+  null,
+  false,
+  false,
+  false,
+)
+check(
+  'timed close: says the guest went quiet',
+  timedClose.includes('The guest has gone quiet'),
+  true,
+)
+check('timed close: not the goodbye text', timedClose === goodbye, false)
+check(
+  'CONTROL goodbye turn: says the guest is wrapping up',
+  goodbye.includes('wrapping up'),
+  true,
 )
 
 console.log(

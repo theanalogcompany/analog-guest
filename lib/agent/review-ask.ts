@@ -18,9 +18,11 @@
  *   ONCE EVER          — markReviewAsked, a CAS on guests.review_asked_at
  *                        (`... where review_asked_at is null`, migration 068).
  *                        The column is also the claim, the warm_close_sent_at
- *                        design one feature over. Never written at queue time:
- *                        a skipped card leaves the guest re-eligible on their
- *                        next praise.
+ *                        design one feature over. For the PRAISE ask it is
+ *                        never written at queue time: a skipped card leaves
+ *                        the guest re-eligible on their next praise. The timed
+ *                        SIGN-OFF (TAC-575) is the exception and claims it
+ *                        before sending; see releaseReviewAskClaim.
  *
  * Failure directions, chosen not inherited:
  *   - The predicate fails toward NOT asking (any unreadable input reads as
@@ -34,6 +36,7 @@
 import { createAdminClient } from '@/lib/db/admin'
 import { findReviewLink, parseVenueLinks } from '@/lib/schemas'
 import type { RuntimeContext } from './types'
+import type { VisitCheckinAnswer } from './visit-checkin'
 
 /**
  * Categories that must never carry the review ask, as a deny-list (decision
@@ -53,13 +56,15 @@ const REVIEW_ASK_DENIED_CATEGORIES = new Set([
  * Should THIS turn raise the review ask? {url, label} from the venue's
  * curated `venue_info.links` entry when every condition holds, null otherwise.
  *
- * All seven conditions, in cheap-first order:
+ * All eight conditions, in cheap-first order:
  *   1. the classifier read genuine praise (praisedExperience)
  *   2. not a crisis turn (belt — the crisis short-circuit already returned)
  *   3. category not on the deny-list above
  *   4. the venue owes this guest no answer (same rule intentions follow)
  *   5. not the guest's first conversation (its choreography is already ruled:
  *      TAC-567/568's two questions and the warm close)
+ *   5a. not inside a visit check-in (TAC-575: that guest is asked at the
+ *      sign-off, by deriveSignOffReviewAsk)
  *   6. never asked before (guests.review_asked_at is null)
  *   7. the venue curated a review link (kind: 'review' in venue_info.links)
  */
@@ -73,20 +78,51 @@ export function deriveReviewAsk(
   if (REVIEW_ASK_DENIED_CATEGORIES.has(classification.category)) return null
   if (ctx.pendingQuestion !== null) return null
   if (ctx.firstConversation !== false) return null
-  // TAC-575, INTERIM UNTIL PR 4 OF THAT TICKET (ruled 2026-10-06). A guest who
-  // answers "how is it so far?" with praise is, by the ruling, asked for a
-  // review at the SIGN-OFF, not here. The sign-off does not exist until PR 4,
-  // so until then this predicate is left exactly as it was and that praise
-  // raises the ask on this turn, as any praise does.
-  //
-  // PR 4 removes this fallback by adding ONE condition at this line:
-  //   if (isInsideVisitCheckin(ctx)) return null
-  // where "inside" is a check-in row for the visit still within
-  // CHECKIN_ANSWER_WINDOW_MS (lib/agent/visit-checkin.ts), or this turn's
-  // orderTurnVerdict being 'good'. Nothing else here needs to change, and
-  // nothing in this PR depends on the ask being raised.
+  // TAC-575: a guest inside a visit check-in is asked at the SIGN-OFF, not on
+  // the turn they say it is good (ruled 2026-10-06). "It's great" in answer to
+  // "how is it so far?" is praise, and praise is condition 1 above, so without
+  // this the answer to our own question would raise the ask mid-visit and take
+  // the turn from the name ask. handleInbound sets the flag; the sign-off's own
+  // ask is deriveSignOffReviewAsk below.
+  if (ctx.insideVisitCheckin) return null
   if (ctx.guest.reviewAskedAt !== null) return null
   const link = findReviewLink(parseVenueLinks(ctx.venue.venueInfo.links))
+  if (link === null) return null
+  return { url: link.url, label: link.label }
+}
+
+/**
+ * Should a SIGN-OFF carry the review invitation? (TAC-575.)
+ *
+ * The other half of the ruling deriveReviewAsk's check-in condition serves: a
+ * guest who said their order is good is invited at the sign-off, whether they
+ * said goodbye or simply went quiet.
+ *
+ * PURE, and it takes its three facts as arguments rather than a RuntimeContext,
+ * because it has two callers that hold them differently: handleInbound on a
+ * goodbye turn, and the pause timer, which has no context built yet when it
+ * decides which sign-off to send.
+ *
+ *   the check-in reads `good`   Nothing weaker. `not_yet` is a guest who never
+ *                               said they liked it, and `bad` is the next
+ *                               visit's follow-up.
+ *   never asked before          The once-ever marker, shared with the praise
+ *                               ask: one invitation per guest, whichever path
+ *                               gets there.
+ *   the venue has a review link
+ *
+ * NOT limited to a first conversation, unlike the close it rides on (ruled
+ * 2026-10-06): every guest who answers "how is it?" is eventually offered the
+ * link, and a regular answers it too.
+ */
+export function deriveSignOffReviewAsk(input: {
+  checkinAnswer: VisitCheckinAnswer | null
+  reviewAskedAt: Date | null
+  links: unknown
+}): { url: string; label: string } | null {
+  if (input.checkinAnswer !== 'good') return null
+  if (input.reviewAskedAt !== null) return null
+  const link = findReviewLink(parseVenueLinks(input.links))
   if (link === null) return null
   return { url: link.url, label: link.label }
 }
@@ -148,5 +184,47 @@ export async function markReviewAsked(args: {
     // {error} on others; a module whose contract is "never throws" needs both
     // handled (errors-as-values rule).
     return { ok: false, error: e instanceof Error ? e.message : String(e) }
+  }
+}
+
+/**
+ * Give back a marker that was CLAIMED for a sign-off the guest never got.
+ *
+ * The praise ask stamps the marker after the send, from what was delivered.
+ * The timed sign-off cannot: two ticks a minute apart would both find the
+ * guest unasked and both send. So that path takes the marker BEFORE generating
+ * (markReviewAsked is already the compare-and-set) and gives it back here if
+ * the invitation did not reach them: the send failed, or the reply went out
+ * without the link.
+ *
+ * Scoped to the exact timestamp the claim wrote, so it can only undo its own.
+ * A sign-off HELD for an operator keeps the claim, and a skipped card
+ * therefore uses up the guest's one ask (accepted 2026-10-06, to avoid a claim
+ * column of its own).
+ */
+export async function releaseReviewAskClaim(args: {
+  venueId: string
+  guestId: string
+  claimedAt: Date
+}): Promise<void> {
+  try {
+    const supabase = createAdminClient()
+    const { error } = await supabase
+      .from('guests')
+      .update({ review_asked_at: null })
+      .eq('id', args.guestId)
+      .eq('venue_id', args.venueId)
+      .eq('review_asked_at', args.claimedAt.toISOString())
+    if (error) {
+      console.error('[review-ask] claim release failed', {
+        guestId: args.guestId,
+        error: error.message,
+      })
+    }
+  } catch (e) {
+    console.error('[review-ask] claim release threw', {
+      guestId: args.guestId,
+      error: e instanceof Error ? e.message : String(e),
+    })
   }
 }

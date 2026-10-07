@@ -86,6 +86,24 @@ export const ApprovalPolicySchema = z.object({
    * venue that has not been asked sends nothing unprompted.
    */
   visitCheckback: DispositionSchema.optional(),
+  /**
+   * Disposition for the review invitation carried by a happy guest's SIGN-OFF
+   * (TAC-575): the guest said their order is good, and the conversation is
+   * closing.
+   *
+   * A KEY OF ITS OWN, NOT `reviewAsk` (ruled 2026-10-06, "option A"). The two
+   * asks have different evidence behind them. `reviewAsk` covers praise the
+   * classifier noticed in passing, and launched held "until the praise
+   * classifier's precision is proven on real traffic". This one follows a
+   * question we asked and an answer the guest gave to it, and was ruled to
+   * auto-send at the pilot venue "as a venue-level approval setting, not a
+   * global default". Reusing `reviewAsk` would have flipped the first to
+   * auto-send as a side effect of turning on the second.
+   *
+   * Optional, and the DEFAULT IS QUEUE, owned by
+   * resolveSignOffReviewAskDisposition below, like the two above it.
+   */
+  signOffReviewAsk: DispositionSchema.optional(),
 })
 
 export type ApprovalPolicy = z.infer<typeof ApprovalPolicySchema>
@@ -238,6 +256,18 @@ export function resolveVisitCheckbackDisposition(
   policy: ApprovalPolicy | null | undefined,
 ): ApprovalDisposition {
   return policy?.visitCheckback ?? 'operator_approval'
+}
+
+/**
+ * Effective disposition for the review invitation on a happy guest's sign-off.
+ *
+ * 'operator_approval' on every fallback path. A venue opts in with
+ * "signOffReviewAsk": "auto_send", one Studio JSONB edit and no deploy.
+ */
+export function resolveSignOffReviewAskDisposition(
+  policy: ApprovalPolicy | null | undefined,
+): ApprovalDisposition {
+  return policy?.signOffReviewAsk ?? 'operator_approval'
 }
 
 /**

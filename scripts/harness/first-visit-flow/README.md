@@ -38,6 +38,7 @@ database. So these are covered by reading, not by this harness:
   closes the intention once a check-in exists). The first check marked `EXPECTED` shows why
   they matter: the derivation alone re-arms on a second order event;
 - "our last message asked something", which is computed from stored history.
+- which sign-off the pause timer picks, and the claim and release of either marker;
 - the timed check-back processor (`visit-checkin-timeout.ts`): its gate order, the claim,
   the release and the sent stamp. Its pure timing rules are covered here; the processor that
   strings them together against a database is not;
@@ -66,5 +67,9 @@ Each was mutated in the source, the harness run, and the source restored (2026-1
 | a required intention surviving the hold in `renderableIntentions` | the check-back itself survives the hold |
 | the claim fallback in `checkbackWentUnanswered` | held for an operator, nothing from the guest since |
 | a "not yet" restarting the wait in `resolveCheckbackDueAt` | "not yet" two minutes ago restarts the wait |
+| the good-check-in condition in `deriveSignOffReviewAsk` | not happy: never said it was good; complained; no check-in |
+| the once-ever marker in `deriveSignOffReviewAsk` | not happy: already asked once |
+| the window in `isCheckinFresh` (replaced with `return true`) | not the same visit: seven hours ago |
+| the happy branch in the serializer's sign-off slot | happy turn: the sign-off block; never a rating; not the praise block |
 
 A check not in that table has not been shown able to fail.

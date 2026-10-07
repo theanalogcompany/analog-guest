@@ -21,8 +21,8 @@ import type { CommitmentIdentity, SlotDropReason } from './pending-slots'
 import { dispatchReply } from './dispatch-reply'
 import { undeliveredAgentResult } from './handle-inbound'
 import { persistOrRegenQueuedDraft, scheduleAndSend } from './schedule-and-send'
+import { bodyContainsReviewLink } from './review-ask'
 import { NEVER_SPLIT_RNG } from './warm-close'
-import { PROMPT_VERSION } from '@/lib/ai/prompts/system-template'
 import {
   applyApprovalPolicyStage,
   operatorInstructionQuery,
@@ -46,7 +46,6 @@ import {
   buildKnowledgeCorpusContent,
   buildRecognitionContent,
 } from './trace-content'
-import type { GenerateMessageResult } from '@/lib/ai'
 import type {
   AgentResult,
   Classification,
@@ -54,62 +53,6 @@ import type {
   RuntimeContext,
 } from './types'
 import { resolveCancellation } from '@/lib/schemas/guest-commitment'
-
-/**
- * TAC-568: the warm close, as a generation that no model produced.
- *
- * Ruling 1 is that this message is FIXED — the same words every time, approved
- * verbatim, stored per venue. So the pause path stops asking a model for it and
- * hands the pipeline the venue's own string instead. Everything downstream is
- * untouched: the approval gate, NEVER_SPLIT_RNG, dispatchReply, persistence,
- * RELEASES_CLAIM and recordProactiveSend all see an ordinary generation.
- *
- * A TOTAL CONSTRUCTION over GenerateMessageResult, deliberately, the way
- * buildGenerationFailureGeneration in handle-inbound.ts is. A field added to
- * that type later fails `tsc` here until someone decides what a fixed message
- * should say for it, rather than inheriting a default that quietly misdescribes
- * this path.
- *
- * Every self-flag below is false because they report what a model did, and no
- * model ran.
- */
-function fixedWarmCloseGeneration(text: string): GenerateMessageResult {
-  return {
-    body: text,
-    unverifiedUrls: [],
-    requiresOperatorApproval: false,
-    approvalReason: '',
-    complaintIntent: 'none',
-    knowledgeGap: false,
-    contextUpdate: {},
-    commitment: {},
-    arrivalCapture: {},
-    cancelsCommitmentId: '',
-    intentionQuestion: '',
-    // No model ran, so no review ask either; stated rather than omitted.
-    reviewAsk: '',
-    // The close is not itself a report that a conversation closed: this IS the
-    // close, and the marker was already claimed by the processor.
-    closedTheConversation: false,
-    // TAC-573: no generation behind this, so nothing is being corrected.
-    reportedVisitCorrection: 'none',
-    intentionQuestionDuplicateStripped: false,
-    intentionQuestionDroppedForBodyQuestion: false,
-    askDroppedForVisitCorrection: false,
-    reviewAskDroppedForBodyQuestion: false,
-    attempts: 0,
-    attemptHistory: [],
-    systemPrompt: '',
-    userPrompt: '',
-    conversation: '',
-    promptVersion: PROMPT_VERSION,
-    cacheReadTokens: 0,
-    cacheWriteTokens: 0,
-    dashViolationPersisted: false,
-    selfTalkViolationPersisted: false,
-    emojiDirectiveViolated: false,
-  }
-}
 
 /**
  * TAC-394: report a followup draft that had nowhere to go.
@@ -682,18 +625,18 @@ export async function handleFollowup(input: {
       ctx.knowledgeCorpus = []
     }
 
-    // Generate — unless this is the warm close, which is not generated at all.
+    // Generate. Every followup is generated now, the warm close included:
+    // TAC-568 sent that one as a fixed per-venue string, and TAC-575 reversed
+    // it (ruled 2026-10-06: the model writes each sign-off fresh). The venue's
+    // text reaches the prompt as a guide to what the close covers.
     //
-    // TAC-568 ruling 1: the close is a FIXED per-venue string. Asking a model to
-    // reproduce fixed text is the one job a model cannot do better than a
-    // constant, and it was the source of the stiff, off-moment wording this
-    // ticket exists to replace. The venue's setting IS the message.
-    //
-    // An empty setting is refused rather than sent: the processor checks it too
-    // and never claims the guest's close, so reaching here empty means the
-    // venue's config changed between the scan and the run.
-    const isFixedWarmClose = input.trigger.reason === 'warm_close'
-    if (isFixedWarmClose && ctx.venue.warmCloseText.trim() === '') {
+    // A PLAIN close with no text configured is still refused rather than
+    // improvised: the empty default means "this venue has not been given a
+    // close". The processor checks it too and never claims the guest's close,
+    // so reaching here empty means the config changed between the scan and
+    // the run. A happy sign-off does not need the text; it needs the link,
+    // which the processor resolved and handed over.
+    if (ctx.signOff === 'plain' && ctx.venue.warmCloseText.trim() === '') {
       const reason = 'no_warm_close_text'
       console.warn('[agent] warm close refused: venue has no warm_close_text', {
         agentRunId,
@@ -704,12 +647,7 @@ export async function handleFollowup(input: {
       return { status: 'refused', reason }
     }
     const generateSpan = trace.span('generate', { category })
-    const gen = isFixedWarmClose
-      ? ({
-          status: 'ok',
-          result: fixedWarmCloseGeneration(ctx.venue.warmCloseText),
-        } as const)
-      : await generateStage(ctx, category)
+    const gen = await generateStage(ctx, category)
     if (gen.status === 'failed') {
       generateSpan.end({ level: 'ERROR', statusMessage: gen.error })
       await fireRedAlert({
@@ -872,50 +810,19 @@ export async function handleFollowup(input: {
       cancellationSettled,
       closedVenueArrivalSettled,
     ] = await Promise.allSettled(
-      // TAC-568 (Q1, ruled 2026-09-30): THE FOUR CHECKS DO NOT RUN ON THE FIXED
-      // WARM CLOSE, and this is a recorded change to decision 0003 rather than
-      // an exception smuggled in beside it.
-      //
-      // 0003 says the four fail closed on MODEL OUTPUT, and that a proposal to
-      // loosen one is a proposal about all four. The premise does not hold here:
-      // no model ran. Every one of the four asks a question about something a
-      // model might have invented — a mechanic it offered, a promise it made
-      // in prose, a cancellation it claimed, an arrival at a closed venue —
-      // and a per-venue constant a human approved
-      // can contain none of them, on this turn or any other, because it is the
-      // same 143 bytes every time.
-      //
-      // What running them would buy is not safety but exposure: four verifier
-      // calls that fail closed after one retry, on text that cannot be wrong, so
-      // the only outcome they can produce is refusing a message that is correct.
-      //
-      // THE GOODBYE PATH IS NOT AFFECTED. There the model writes the reply and
-      // all four run on it exactly as before; only the appended fixed bubble is
-      // unchecked, for the reason above.
-      isFixedWarmClose
-        ? [
-            Promise.resolve<MechanicOfferBackstopResult>({ status: 'skipped' }),
-            Promise.resolve<ProsePromiseBackstopResult>({ status: 'skipped' }),
-            Promise.resolve<CancellationBackstopResult>({
-              // This type is the odd one out: a resolution plus a claim verdict,
-              // not a single status. A fixed string cancels nothing and claims
-              // nothing, so both say so.
-              resolution: { status: 'none' },
-              claim: 'skipped',
-            }),
-            Promise.resolve<ClosedVenueArrivalBackstopResult>({
-              status: 'skipped',
-            }),
-          ]
-        : [
-            verifyMechanicOfferStage(ctx, gen.result),
-            verifyProsePromiseStage(ctx, gen.result),
-            verifyCancellationClaimStage(ctx, gen.result),
-            // TAC-363: fifth independent check. Skips without a model call
-            // unless the venue is positively closed, so it costs nothing during
-            // service.
-            verifyClosedVenueArrivalStage(ctx, gen.result),
-          ],
+      // TAC-575: all four run on the warm close again. TAC-568 skipped them
+      // because that close was a fixed string no model had written; it is
+      // generated now, so decision 0003's premise holds for it like any other
+      // followup.
+      [
+        verifyMechanicOfferStage(ctx, gen.result),
+        verifyProsePromiseStage(ctx, gen.result),
+        verifyCancellationClaimStage(ctx, gen.result),
+        // TAC-363: fifth independent check. Skips without a model call
+        // unless the venue is positively closed, so it costs nothing during
+        // service.
+        verifyClosedVenueArrivalStage(ctx, gen.result),
+      ],
     )
     if (prosePromiseSettled.status === 'rejected') {
       console.warn(
@@ -1318,12 +1225,13 @@ export async function handleFollowup(input: {
         ? await dispatchReply(ctx, gen.result, {
             skipHumanFeelDelay: true,
             reviewReason: demoBypassReviewReason,
-            // TAC-560: the warm close is ONE message, always. Rule 15 asks for
-            // one and so does this ticket's acceptance criteria, and
-            // resolveDispatchBubbles would otherwise split a two-sentence close
-            // on a fair coin about half the time. NEVER_SPLIT_RNG removes the
-            // coin rather than tuning it, using the rng parameter TAC-319 built
-            // for exactly this kind of caller.
+            // TAC-560: the warm close's own text is ONE message. Rule 15 asks
+            // for one, and resolveDispatchBubbles would otherwise split a
+            // two-sentence close on a fair coin about half the time.
+            // NEVER_SPLIT_RNG removes the coin rather than tuning it, using
+            // the rng parameter TAC-319 built for exactly this kind of caller.
+            // A happy sign-off (TAC-575) is two messages all the same: that
+            // one, then the review invitation as the reply's tail.
             //
             // A scan greeting keeps the ordinary coin: nothing in TAC-536 asks
             // for one bubble.
@@ -1389,6 +1297,39 @@ export async function handleFollowup(input: {
         outboundMessageId,
         providerMessageId,
       })
+      // TAC-575: a happy sign-off went out. Did the invitation go with it?
+      //
+      // The pause timer claimed the once-ever review marker BEFORE this ran,
+      // on the expectation that the reply would carry the link. It can fail
+      // to: the model may leave `reviewAsk` empty, or composeReplyWithReviewAsk
+      // drops it when the sign-off itself asks a question.
+      //
+      // THE CLAIM IS KEPT EITHER WAY. An earlier version gave the marker back
+      // here, and that turned one missing link into a loop: the sign-off just
+      // sent becomes our newest message, the guest is unasked again, nothing
+      // else on the happy path says "already signed off", and ten minutes
+      // later they get "so glad you're enjoying it" a second time, then a
+      // third. A sign-off that went out without its link costs this guest
+      // their one invitation, the same accepted cost as a held card an
+      // operator skips. It is logged so the rate can be counted.
+      if (ctx.signOff === 'happy' && ctx.reviewAsk !== null) {
+        const carried = bodyContainsReviewLink(
+          dispatched.deliveredBody,
+          ctx.reviewAsk.url,
+        )
+        if (carried) {
+          console.log('[agent] sign-off review ask sent', {
+            agentRunId,
+            guestId: ctx.guest.id,
+            linkLabel: ctx.reviewAsk.label,
+          })
+        } else {
+          console.warn(
+            '[agent] happy sign-off went out without the review link; the ask is spent',
+            { agentRunId, guestId: ctx.guest.id, outboundMessageId },
+          )
+        }
+      }
       await capturePostHogEvent('followup_message_handled', ctx.guest.id, {
         agentRunId,
         venueId: ctx.venue.id,

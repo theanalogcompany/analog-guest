@@ -483,8 +483,8 @@ export async function buildRuntimeContext(input: {
     lastVisitAt: guestRow.last_visit_at
       ? new Date(guestRow.last_visit_at)
       : null,
-    // Once-ever review-ask marker; null means never asked. Only
-    // handle-inbound's eligibility predicate reads it.
+    // Once-ever review-ask marker; null means never asked. Read by the two
+    // review-ask predicates (lib/agent/review-ask.ts).
     reviewAskedAt: guestRow.review_asked_at
       ? new Date(guestRow.review_asked_at)
       : null,
@@ -1104,9 +1104,14 @@ export async function buildRuntimeContext(input: {
     // TAC-308: null when nothing is outstanding (the overwhelmingly common
     // case) — the serializer omits the block entirely at zero token cost.
     pendingQuestion: pendingQuestionResult?.question ?? null,
-    // Always null here. handle-inbound.ts is the only writer, post-classify,
-    // which is what keeps the review ask off every other path.
-    reviewAsk: null,
+    // Null on every path but one. handle-inbound.ts sets it post-classify, and
+    // TAC-575's pause timer hands the link in on a `happy` sign-off: it has
+    // already read the check-in, claimed the once-ever marker and resolved the
+    // venue's link, so this is a pass-through of a decision made upstream, not
+    // a second place that decides.
+    reviewAsk: input.followupTrigger?.warmClose?.reviewAsk ?? null,
+    signOff: input.followupTrigger?.warmClose?.signOff ?? null,
+    insideVisitCheckin: false,
     // TAC-574: always null here, for the same reason. handle-inbound.ts sets
     // it once it knows what arrived beside the text.
     inboundMedia: null,

@@ -323,6 +323,29 @@ export type RuntimeContext = {
    * not passed as data: their own message naming it is in the chat history.
    */
   visitCheckback?: boolean
+  /**
+   * TAC-575: this turn is a sign-off, and which one. `happy` renders the
+   * `## Sign off` block in place of `## Ask for a review` (it needs
+   * `reviewAsk` set, which carries the link); `plain` renders
+   * `## Closing this conversation` with `warmCloseGuidance`. Absent on every
+   * other turn.
+   */
+  signOff?: 'happy' | 'plain'
+  /**
+   * TAC-575: the venue's own close text (`followup_rules.warm_close_text`),
+   * handed to a `plain` sign-off as a guide to what the close covers. It used
+   * to be SENT, word for word (TAC-568); since TAC-575 the model writes the
+   * close and this says what it is about.
+   */
+  warmCloseGuidance?: string
+  /**
+   * TAC-575: true on the pause timer's sign-off, where the guest sent nothing.
+   * Reaches composePrompt to swap the stored category's instructions
+   * (`acknowledgment`: "the guest is wrapping up the thread"), which are false
+   * on that turn. A goodbye turn does not set it: there the guest did sign off
+   * and the category text is right.
+   */
+  timedClose?: boolean
   recentMessages?: RecentMessage[]
   // Mechanics this guest is currently eligible for. The serializer renders
   // a "What this guest can access" block when this is provided. An empty
@@ -604,9 +627,8 @@ export type GenerateMessageAttempt = {
   /**
    * TAC-560: did this reply close the guest's first conversation, in the way the
    * venue's own voice rules describe? Required, so it costs nothing against the
-   * optional-field budget. handle-inbound.ts writes guests.warm_close_sent_at
-   * post-dispatch when it is true, which is what stops the pause timer sending a
-   * second close.
+   * optional-field budget. Not read by anything since TAC-575, when the goodbye
+   * path began deciding before generation.
    */
   closedTheConversation: boolean
   // TAC-573: see ReportedVisitCorrection.
@@ -696,9 +718,8 @@ export type GenerateMessageResult = {
   /**
    * TAC-560: did this reply close the guest's first conversation, in the way the
    * venue's own voice rules describe? Required, so it costs nothing against the
-   * optional-field budget. handle-inbound.ts writes guests.warm_close_sent_at
-   * post-dispatch when it is true, which is what stops the pause timer sending a
-   * second close.
+   * optional-field budget. Not read by anything since TAC-575, when the goodbye
+   * path began deciding before generation.
    */
   closedTheConversation: boolean
   // TAC-573: see ReportedVisitCorrection.
