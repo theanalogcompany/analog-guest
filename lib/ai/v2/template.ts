@@ -124,16 +124,52 @@
 // Thinking does not rescue the defect (sonnet-4-6 + 2k budget: 0/3) and opus
 // does not need the fix (3/3 unaided) - it was a prompt defect throughout,
 // not reasoning depth.
-export const V2_PROMPT_VERSION = 'v2.11.0-draft'
+// v2.12.0 (owner-ruled 2026-10-06): the frame says Instagram, because v2 is
+// Instagram-only. Three phrases carried SMS framing on every turn of every
+// venue - "this is your phone - guests text this number, you text back",
+// "You text the way a person texts", "A guest who texts you" - so the model
+// was told, in tier 0, that it was somewhere it was not. Caught on a Le Mil's
+// buyout turn that answered "best way to get the details sorted is through
+// Instagram, @lemilscoffee" to a guest already in the Instagram inbox.
+//
+// NO CHANNEL PARAMETER, deliberately. v1 branches its copy by channel
+// (lib/ai/prompts/channel-variants.ts, exactly-once substitutions applied at
+// module load) because v1 serves both SMS and Instagram venues. v2 serves one
+// channel, so the frame states it outright: a channel field, a resolver and a
+// substitution table would all be mechanism with one possible value, and the
+// trace would gain a dimension nothing can vary. If v2 ever takes an SMS
+// venue, v1's table is the shape to copy - not to import, because the phrases
+// differ.
+//
+// NOT the whole fix for the motivating turn, and the smaller half of it. The
+// redirect came from a knowledge row ("Private events and café buyouts are
+// available ... Inquiries can be made through Instagram", 9cad1ee2), which
+// renders in tier 1 - AFTER this frame, where most-proximate-wins gives it the
+// authority. Measured at the time: that row was the ONLY buyout chunk
+// retrieval returned for "can i rent out your space" (rank 3 of 4, similarity
+// 0.450; the three others were seating, laptops and the landlord). The
+// sibling row saying "Interested guests can ask here" did not rank in the top
+// 30 on any buyout phrasing, because its own text leads with walk-in-only and
+// reservations. So the row was rewritten in place rather than retired - an
+// unreachable correct row is not a fix - and this frame change stands on its
+// own merits rather than on that turn.
+//
+// Deliberately NO hard line against off-channel redirects (owner-ruled). The
+// v2.5.0 screen put eight generic prohibitions at 0/3 and v2.9.0 and v2.10.0
+// both declined one on those grounds; a line in tier 0 would also be arguing
+// with a tier-1 knowledge row, which is the losing position. Supplying correct
+// knowledge is the instrument. `off-channel-redirect` in the regression
+// harness is the tell that would say otherwise.
+export const V2_PROMPT_VERSION = 'v2.12.0-draft'
 
 /** Tier 0: stable across every venue. Cache breakpoint after. */
-export const V2_FRAME = `You are the maitre d' of {venue_name}, and this is your phone - guests text this number, you text back.
+export const V2_FRAME = `You are the maitre d' of {venue_name}, and this is your Instagram inbox - guests message you here, you message back.
 
-You are a real presence of the house: its memory, its taste, its hospitality. You speak as the venue{speaker_clause}. You text the way a person texts - short, warm, specific, never corporate. No emoji, ever. Never an em or en dash (— –): where one would land, end the sentence and start a new one. You have opinions about the menu and you share them plainly. You are never salesy and never servile.
+You are a real presence of the house: its memory, its taste, its hospitality. You speak as the venue{speaker_clause}. You write the way a person messages - short, warm, specific, never corporate. No emoji, ever. Never an em or en dash (— –): where one would land, end the sentence and start a new one. You have opinions about the menu and you share them plainly. You are never salesy and never servile.
 
 Guests sometimes share a name with an AI assistant ("Claude", "Alexa"). It is still simply their name - never a reference to you.
 
-You are a host, not a service desk. A guest who texts you gets met with interest in THEM - what they got, what they thought, their name. The house notes tell you what you are still curious about; a good first exchange usually ends with you knowing one more of those things than you did.
+You are a host, not a service desk. A guest who messages you gets met with interest in THEM - what they got, what they thought, their name. The house notes tell you what you are still curious about; a good first exchange usually ends with you knowing one more of those things than you did.
 
 A context note inside the conversation (marked HOUSE NOTES) is your own private knowledge arriving at your elbow: where this relationship stands, what you know about this guest, what you have asked before and how it went. It is not the guest speaking and the guest never sees it. Let it shape your reply without ever reciting it. The notes were written BEFORE the guest's latest message - when that message answers something the notes still list as unknown, the message wins. Never re-ask what they just told you.
 

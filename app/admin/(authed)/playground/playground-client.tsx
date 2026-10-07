@@ -6,12 +6,26 @@ import type {
   TurnOverrides,
 } from '@/lib/relationship/run-turn'
 import type { VenueListRow } from '../_lib/load-venues'
-import { fetchGuests, fetchTimeline, postRun } from './_lib/api'
-import { buildReplayContext, sessionHistoryFromTurns } from './_lib/history'
+import {
+  deleteSavedConversation,
+  fetchGuests,
+  fetchSavedConversation,
+  fetchSavedConversations,
+  fetchTimeline,
+  postRun,
+  postSaveConversation,
+} from './_lib/api'
+import {
+  buildReplayContext,
+  savedTurnsFromPlayground,
+  sessionHistoryFromTurns,
+  turnsFromSaved,
+} from './_lib/history'
 import type {
   GuestListItem,
   PlaygroundTurn,
   RunRequestBody,
+  SavedConversationSummary,
   TimelineMessage,
 } from './_lib/types'
 import { ChatPane } from './_components/chat-pane'
@@ -19,10 +33,20 @@ import { Inspector } from './_components/inspector'
 import { ReplayPane } from './_components/replay-pane'
 import { SetupBar, type PlaygroundMode } from './_components/setup-bar'
 
-// Client orchestrator for the v2 playground. All state is deliberately
-// ephemeral (nothing in the URL, nothing persisted): a playground session is
-// a scratch conversation against a dry-run engine, and reload-to-reset is a
-// feature on a debugging surface.
+// Client orchestrator for the v2 playground. Live state is ephemeral -
+// nothing in the URL, reload-to-reset is a feature on a debugging surface -
+// with ONE deliberate exception: a sandbox conversation can be saved to
+// playground_conversations (migration 074) and read back.
+//
+// That exception exists because the ephemerality had a cost the rest of the
+// design did not: getting a guest ten turns deep is ten runs at 15-45s each,
+// and a reload meant typing all ten again to look at the eleventh. A save
+// restores the chat with no model calls; rerunning from any point still costs
+// exactly one run, because each turn carries the session it ran with.
+//
+// A SAVE IS NOT A SNAPSHOT OF THE TRACES. Restored turns have bubbles and no
+// trace, and every consumer branches on that rather than filling the gap -
+// see PlaygroundTurn.restored.
 //
 // Sandbox session discipline: the running PlaygroundSession advances ONLY
 // when a NEW turn completes with an ok assessor - a regenerate never touches
@@ -61,6 +85,12 @@ export function PlaygroundClient({ venues }: { venues: VenueListRow[] }) {
   const [timelineHasMore, setTimelineHasMore] = useState(false)
   const [timelineLoading, setTimelineLoading] = useState(false)
 
+  // Saved conversations (migration 074), sandbox only.
+  const [saved, setSaved] = useState<SavedConversationSummary[]>([])
+  const [savedError, setSavedError] = useState<string | null>(null)
+  const [savedHasMore, setSavedHasMore] = useState(false)
+  const [saving, setSaving] = useState(false)
+
   // Guards state updates from fetches that resolve after a venue/mode/guest
   // switch already reset the pane.
   const epochRef = useRef(0)
@@ -82,6 +112,9 @@ export function PlaygroundClient({ venues }: { venues: VenueListRow[] }) {
       setGuests([])
       setGuestsError(null)
       setActivityDegraded(false)
+      setSaved([])
+      setSavedError(null)
+      setSavedHasMore(false)
       resetConversation()
     },
     [resetConversation],
@@ -94,6 +127,27 @@ export function PlaygroundClient({ venues }: { venues: VenueListRow[] }) {
     },
     [resetConversation],
   )
+
+  // Load the saved-conversation picker when sandbox mode has a venue. Keyed
+  // on venueId only (not on `saved`), so a save refreshing the list cannot
+  // re-trigger the fetch that produced it.
+  const refreshSaved = useCallback((id: string) => {
+    void fetchSavedConversations(id).then((result) => {
+      if (result.ok) {
+        setSaved(result.data.conversations)
+        setSavedHasMore(result.data.hasMore)
+        setSavedError(null)
+      } else {
+        setSaved([])
+        setSavedError(result.error)
+      }
+    })
+  }, [])
+
+  useEffect(() => {
+    if (mode !== 'sandbox' || venueId === null) return
+    refreshSaved(venueId)
+  }, [mode, venueId, refreshSaved])
 
   // Load the guest picker when replay mode has a venue.
   useEffect(() => {
@@ -293,7 +347,74 @@ export function PlaygroundClient({ venues }: { venues: VenueListRow[] }) {
     [turns, selectedTurnId, busy],
   )
 
+  const onSaveConversation = useCallback(
+    (name: string) => {
+      if (venueId === null || busy || saving) return
+      const payload = savedTurnsFromPlayground(turns)
+      if (payload.length === 0) return
+      setSaving(true)
+      void postSaveConversation(venueId, {
+        name,
+        turns: payload,
+        // The live session, which is the state AFTER the last completed turn
+        // - not any turn's own `request.session`, which is the state it ran
+        // WITH. Getting these two confused restores a conversation one turn
+        // stale, silently.
+        nextSession: session,
+      }).then((result) => {
+        setSaving(false)
+        if (result.ok) {
+          setSaved((prev) => [result.data, ...prev])
+          setSavedError(null)
+        } else {
+          setSavedError(result.error)
+        }
+      })
+    },
+    [venueId, busy, saving, turns, session],
+  )
+
+  const onLoadConversation = useCallback(
+    (conversationId: string) => {
+      if (venueId === null || busy) return
+      epochRef.current += 1
+      const epoch = epochRef.current
+      void fetchSavedConversation(venueId, conversationId).then((result) => {
+        if (epochRef.current !== epoch) return
+        if (!result.ok) {
+          setSavedError(result.error)
+          return
+        }
+        const restored = turnsFromSaved(venueId, result.data.turns, nextTurnId)
+        setTurns(restored)
+        setSession(result.data.nextSession)
+        // Nothing selected: every restored turn opens the "trace not saved"
+        // panel, so auto-selecting one would greet the load with an explanation
+        // of what is missing rather than the conversation itself.
+        setSelectedTurnId(null)
+        setSavedError(null)
+      })
+    },
+    [venueId, busy],
+  )
+
+  const onDeleteConversation = useCallback(
+    (conversationId: string) => {
+      if (venueId === null) return
+      void deleteSavedConversation(venueId, conversationId).then((result) => {
+        if (result.ok) {
+          setSaved((prev) => prev.filter((c) => c.id !== conversationId))
+          setSavedError(null)
+        } else {
+          setSavedError(result.error)
+        }
+      })
+    },
+    [venueId],
+  )
+
   const selectedTurn = turns.find((t) => t.id === selectedTurnId) ?? null
+  const savableTurnCount = savedTurnsFromPlayground(turns).length
 
   return (
     <div className="flex h-[calc(100vh-8rem)] min-h-0 flex-col overflow-hidden rounded-[2px] border border-stone-light/60 bg-paper">
@@ -302,8 +423,13 @@ export function PlaygroundClient({ venues }: { venues: VenueListRow[] }) {
         selectedVenueId={venueId}
         mode={mode}
         busy={busy}
+        saved={saved}
+        savedError={savedError}
+        savedHasMore={savedHasMore}
         onVenueChange={onVenueChange}
         onModeChange={onModeChange}
+        onLoadConversation={onLoadConversation}
+        onDeleteConversation={onDeleteConversation}
       />
 
       <div className="grid min-h-0 flex-1 grid-cols-[1fr_440px]">
@@ -342,6 +468,9 @@ export function PlaygroundClient({ venues }: { venues: VenueListRow[] }) {
             showComposer={mode === 'sandbox'}
             onSend={onSend}
             onSelectTurn={setSelectedTurnId}
+            savableTurnCount={savableTurnCount}
+            saving={saving}
+            onSaveConversation={onSaveConversation}
           />
         </div>
 

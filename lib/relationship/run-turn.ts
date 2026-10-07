@@ -14,6 +14,7 @@ import { declaredActionTypes, type GenerationOutput } from '@/lib/ai/v2/actions'
 import { judgeResponse, type JudgeResult } from '@/lib/eval/judge'
 import { DEFAULT_POLICY_SET } from '@/lib/policy/default-policies'
 import { decideDispatch, type GateDecision } from '@/lib/policy/gate'
+import { fireGateNotifications } from '@/lib/policy/notify'
 import {
   detectSituations,
   type SituationDetectionOutcome,
@@ -104,6 +105,24 @@ export interface RunTurnInput {
    * ground truth the judge's scores must agree with (phase 4 calibration).
    */
   actualReply?: string[]
+  /**
+   * Absent or `dry_run` writes nothing, dispatches nothing and notifies
+   * nobody. The playground and every measurement harness leave it absent,
+   * which is what keeps a sandbox complaint from paging the owner on each
+   * sent bubble.
+   *
+   * `live` is the phase 6 seam, and carries the run id rather than taking it
+   * as a sibling optional: an event attributed to a fabricated id is worse
+   * than no event, so the type is what refuses a live turn with nothing to
+   * attribute it to.
+   *
+   * TODAY NOTHING PASSES `live` - the only reader is the notify call after
+   * the gate, and v2 has no production caller at all yet. Declared, not
+   * exercised: it is here so the production wiring is a field on an existing
+   * input rather than a second pipeline, per this file's own "production must
+   * go through this same function" rule.
+   */
+  dispatch?: { mode: 'dry_run' } | { mode: 'live'; agentRunId: string }
   now?: Date
 }
 
@@ -585,6 +604,22 @@ export async function runTurn(input: RunTurnInput): Promise<TurnTrace> {
     // gate refuses opt_out_request regardless (POLICY_EXEMPT_SITUATIONS).
     situations: detectedSituations,
   })
+
+  // Notify-row hits reach the venue here. Dry-run fires nothing: the trace
+  // still carries gate.notifications, and the playground renders them under
+  // "Notify-only hits", so the decision is inspectable without the side
+  // effect. A sandbox guest has no guestId to attribute an event to, which is
+  // a second reason the same branch cannot fire on a playground turn.
+  if (input.dispatch?.mode === 'live' && input.guestId !== null) {
+    await fireGateNotifications(gate, {
+      agentRunId: input.dispatch.agentRunId,
+      venueId: input.venueId,
+      guestId: input.guestId,
+      situations: detectedSituations,
+      inboundBody: input.inbound.at(-1) ?? null,
+      draftMessages: output.messages,
+    })
+  }
 
   let assessorTrace: TurnTrace['assessor']
   if (assessed.ok) {
