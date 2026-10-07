@@ -274,8 +274,10 @@ export const GeneratedMessageSchema = z.object({
   //
   // NOTHING READS IT SINCE TAC-575. handle-inbound.ts used to write
   // guests.warm_close_sent_at from this report; the goodbye path now decides
-  // before generation. The field is still emitted, and whether it goes back to
-  // being the goodbye path's second signal is an open question on that ticket.
+  // before generation, and then (ruled 2026-10-06) stopped signing off on a
+  // reply at all: only the pause timer does. The field is still emitted and is
+  // dead; removing it changes the generation schema and the prompt section
+  // that asks for it, so it is left for a change of its own.
   //
   // SELF-REPORT IS NOT TRUSTED ALONE, on this repo's own record (TAC-350: 8 of 8
   // fabrications self-reported clean). The timer carries an independent belt: a

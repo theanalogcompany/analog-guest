@@ -148,9 +148,6 @@ export interface GuestContext {
   // predicate (lib/agent/review-ask.ts); written only post-dispatch via the
   // markReviewAsked CAS, never here.
   reviewAskedAt: Date | null
-  // guests.warm_close_sent_at: when this guest's one warm close went out, or
-  // null. The marker's writers are the two close paths (warm-close-store.ts).
-  warmCloseSentAt: Date | null
 }
 
 export interface InboundMessage {
@@ -424,10 +421,10 @@ export interface RuntimeContext {
    * carried rather than re-derived so the intention derivation and the prompt
    * cannot disagree about which turn is a first conversation.
    *
-   * Three readers: deriveOpenIntentions applies each intention's
-   * `onFirstConversation` policy; the serializer renders the first-conversation
-   * restraint into the intentions block; and closesFirstConversation (TAC-568)
-   * gates the warm close on it.
+   * Two readers on a turn: deriveOpenIntentions applies each intention's
+   * `onFirstConversation` policy, and the serializer renders the
+   * first-conversation restraint. (The pause timer applies the same definition
+   * to its own clock for the plain close; it does not read this field.)
    *
    * IT IS TRUE ON A PROACTIVE TURN TOO, AND THAT IS NOT WHAT MAKES IT SAFE. This
    * is clock-derived and computed unconditionally, so a cron follow-up, a holding
@@ -512,8 +509,9 @@ export interface RuntimeContext {
   // False as built; handleInbound sets it before deriveReviewAsk runs.
   insideVisitCheckin: boolean
   // TAC-575: which sign-off this turn is, or null on every turn that is not
-  // one. Set by build-runtime-context from the pause timer's trigger, and by
-  // handleInbound on a goodbye turn. The serializer renders the matching
+  // one. Set by build-runtime-context from the pause timer's trigger and by
+  // nothing else: no inbound turn is a sign-off (ruled 2026-10-06, because a
+  // goodbye and an "ok cool" classify the same). The serializer renders the matching
   // block, and the approval gate reads `happy` to route the review invitation
   // by `approval_policy.signOffReviewAsk` instead of `reviewAsk`.
   signOff: SignOffKind | null
@@ -532,9 +530,9 @@ export interface RuntimeContext {
   // The once-ever Google review ask this turn raises, or null on every other
   // turn — which is every turn on every path except an eligible inbound
   // praise turn, or on a happy guest's sign-off (TAC-575). TWO WRITERS, both
-  // through lib/agent/review-ask.ts: handle-inbound.ts post-classify, and
-  // buildRuntimeContext from a `warm_close` trigger whose processor decided
-  // the sign-off is a happy one. Every other followup, declines, the holding
+  // through lib/agent/review-ask.ts: handle-inbound.ts post-classify (the
+  // praise ask only), and buildRuntimeContext from a `warm_close` trigger
+  // whose processor decided the sign-off is a happy one. Every other followup, declines, the holding
   // message and every other proactive path leave it null and cannot raise the
   // ask. `url` is copied verbatim from the venue's curated
   // `venue_info.links` entry; `label` rides along for events. buildAiRuntime

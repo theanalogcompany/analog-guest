@@ -260,50 +260,6 @@ export function isQuietAfterWarmClose(
  */
 export const NEVER_SPLIT_RNG = (): number => 1
 
-/**
- * May this turn be the warm close of the guest's first conversation?
- *
- * The in-conversation path's precondition, pure, so every boundary is drivable
- * without a database or a model.
- *
- * ONE SIGNAL NOW: THE GUEST SIGNED OFF. TAC-568 ANDed that with the model's
- * own `closedTheConversation` report ("the guest signed off AND the agent
- * answered with a goodbye"). That AND made sense while the close was a fixed
- * string appended AFTER the reply was written: the report said whether the
- * reply was a goodbye worth appending to. TAC-575 has the model WRITE the
- * close, so the decision is made before there is a reply to report on, and the
- * `## Closing this conversation` block is what makes the reply a close. A
- * self-report was never trusted alone here (TAC-350: 8 of 8 fabrications
- * self-reported clean), and it is no longer consulted at all.
- *
- * TAC-575 ALSO REMOVED the name trigger (the turn that stored the guest's
- * name), ruled 2026-10-06: "the warm close is triggered by a natural lull, not
- * by a stored name".
- *
- * WHAT A MISS COSTS. A guest who never says goodbye is closed by the pause
- * timer, for any first Instagram conversation. A text-message guest has no
- * timer, so for them a miss is permanent. A FALSE POSITIVE is still the
- * expensive direction: `acknowledgment` covers "ok cool" as well as "bye", and
- * a close on a turn that was not closing anything spends the guest's one.
- *
- * `alreadyClosed` is the once-ever marker, read by the caller before
- * generation. `warmCloseText` empty means the venue has not been given a
- * close, and no path sends a plain one.
- *
- * NO qr_scan CHECK AND NO CHANNEL CHECK. The close happens on SMS too.
- */
-export function closesFirstConversation(input: {
-  guestSignedOff: boolean
-  isFirstConversation: boolean
-  alreadyClosed: boolean
-  warmCloseText: string
-}): boolean {
-  if (input.warmCloseText.trim() === '') return false
-  if (!input.isFirstConversation) return false
-  if (input.alreadyClosed) return false
-  return input.guestSignedOff
-}
-
 /** Why a first conversation gets no automated warm close at all. */
 export type WarmCloseBlocker =
   /** Staff answered this guest in their own words. */
@@ -373,11 +329,12 @@ export function warmCloseBlocker(
 }
 
 /**
- * The inbound category that means the guest signed off.
+ * The inbound category a goodbye classifies as.
  *
- * Named rather than spelled at both call sites: the timer compares
- * loadLastInboundCategory against it and the goodbye path compares
- * ctx.classification.category against it, and two string literals is how those
- * two drift into two different ideas of "signed off".
+ * NOT "the guest signed off": it is also "ok cool", "thanks" and "got a
+ * cortado". That is why no reply is a sign-off (ruled 2026-10-06) and only the
+ * pause timer sends one. Its one reader today keeps the check-back question
+ * off such a turn (handle-inbound.ts), where reading an "ok" as a goodbye
+ * costs nothing.
  */
 export const SIGN_OFF_CATEGORY = 'acknowledgment'

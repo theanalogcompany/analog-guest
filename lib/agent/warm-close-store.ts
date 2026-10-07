@@ -297,48 +297,6 @@ export async function loadWarmCloseGuestFacts(
   }
 }
 
-/**
- * The guest's most recent inbound category, or null.
- *
- * Written for TAC-560 as the belt behind the model's `closedTheConversation`
- * self-report: a last inbound that classified `acknowledgment` was the sign-off
- * turn, so the in-conversation close had already gone out and the timer stood
- * down. Since TAC-575 nothing consults that self-report, and the goodbye path
- * decides before generation.
- *
- * READ WHAT IT CAN SEE BEFORE RELYING ON IT. It reads `messages.category` on an
- * INBOUND row, and the classification is stamped on our reply's row, not on
- * the guest's message. Unless something writes a category onto inbound rows
- * this returns null for every guest, and the marker is what actually stops a
- * second close.
- *
- * Fails to null, which means "no signal" and lets the other checks decide.
- */
-export async function loadLastInboundCategory(
-  supabase: AdminSupabaseClient,
-  venueId: string,
-  guestId: string,
-): Promise<string | null> {
-  const { data, error } = await supabase
-    .from('messages')
-    .select('category')
-    .eq('venue_id', venueId)
-    .eq('guest_id', guestId)
-    .eq('direction', 'inbound')
-    .order('created_at', { ascending: false })
-    .limit(1)
-    .maybeSingle()
-  if (error) {
-    console.warn('[warm-close] last inbound category unreadable', {
-      venueId,
-      guestId,
-      error: error.message,
-    })
-    return null
-  }
-  return data?.category ?? null
-}
-
 /** How many of a first conversation's rows the blocker read looks at. */
 export const WARM_CLOSE_BLOCKER_ROW_LIMIT = 200
 

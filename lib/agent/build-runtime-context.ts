@@ -483,11 +483,6 @@ export async function buildRuntimeContext(input: {
     lastVisitAt: guestRow.last_visit_at
       ? new Date(guestRow.last_visit_at)
       : null,
-    // TAC-575: read by handleInbound to decide, BEFORE generation, whether a
-    // goodbye turn may be the guest's one warm close.
-    warmCloseSentAt: guestRow.warm_close_sent_at
-      ? new Date(guestRow.warm_close_sent_at)
-      : null,
     // Once-ever review-ask marker; null means never asked. Read by the two
     // review-ask predicates (lib/agent/review-ask.ts).
     reviewAskedAt: guestRow.review_asked_at

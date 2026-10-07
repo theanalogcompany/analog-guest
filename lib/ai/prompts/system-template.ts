@@ -2318,6 +2318,10 @@ import {
 //   4. A category instruction for the pause timer's sign-off
 //      (categories/warm-close.ts), restored: TAC-568 deleted it with the
 //      generated close.
+//   5. The plain close block and that instruction both say what a close may
+//      say about a visit (ruled 2026-10-06, after reading the first twenty):
+//      a soft hope to see them again is fine; no invitation for anything
+//      specific; no item the guest did not mention.
 //
 //   MEASURED ONCE, for wording variety only, and it FAILED its bar:
 //   scripts/measurement/warm-close-variety.ts, bar fixed before the run. The

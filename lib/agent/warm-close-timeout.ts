@@ -89,7 +89,6 @@ import {
 } from './warm-close'
 import {
   claimWarmClose,
-  loadLastInboundCategory,
   loadWarmCloseBlocker,
   loadWarmCloseCandidates,
   loadWarmCloseGuestFacts,
@@ -113,8 +112,6 @@ export type WarmCloseSkipReason =
   | 'too_late'
   /** Already closed, from either path. */
   | 'already_closed'
-  /** Their last inbound was a sign-off, so the in-conversation close went out. */
-  | 'closed_in_conversation'
   /** Past their first conversation. */
   | 'not_first_conversation'
   /** TAC-575: staff answered this guest by hand. No automated close at all. */
@@ -481,17 +478,11 @@ async function considerCandidate(
     }
   }
 
-  // An older belt: a last inbound stored as a sign-off means the goodbye path
-  // has had its turn. See loadLastInboundCategory for what it can and cannot see.
-  if (
-    (await loadLastInboundCategory(
-      supabase,
-      candidate.venueId,
-      candidate.guestId,
-    )) === 'acknowledgment'
-  ) {
-    return 'closed_in_conversation'
-  }
+  // NO "ALREADY CLOSED IN CONVERSATION" CHECK ANY MORE. TAC-560 stood the timer
+  // down when the guest's last message was a sign-off, because the goodbye
+  // reply had carried the close. Ruled 2026-10-06, no reply carries one: a
+  // guest who says "bye" is signed off HERE, ten quiet minutes later, so that
+  // check would now refuse exactly the guests this is for.
 
   // An operator holding a card for this guest is mid-decision; a warm close
   // landing under them would answer for them. loadPendingRowsBySlot is the ONE

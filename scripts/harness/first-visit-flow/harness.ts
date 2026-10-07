@@ -35,10 +35,7 @@ import {
   resolveSameVisitOrderAt,
   type VisitCheckin,
 } from '@/lib/agent/visit-checkin'
-import {
-  closesFirstConversation,
-  isQuietAfterWarmClose,
-} from '@/lib/agent/warm-close'
+import { isQuietAfterWarmClose } from '@/lib/agent/warm-close'
 import { categoryInstructionsFor } from '@/lib/ai/prompts/categories'
 import { runtimeToProse } from '@/lib/ai/prompts/serializers'
 import type { RecentMessage, RuntimeContext } from '@/lib/ai/types'
@@ -937,38 +934,6 @@ check(
   true,
 )
 
-const closing = {
-  guestSignedOff: true,
-  isFirstConversation: true,
-  alreadyClosed: false,
-  warmCloseText: 'coffee, beans, events',
-}
-check(
-  'plain close: a goodbye in a first conversation',
-  closesFirstConversation(closing),
-  true,
-)
-check(
-  'plain close: not without a goodbye',
-  closesFirstConversation({ ...closing, guestSignedOff: false }),
-  false,
-)
-check(
-  'plain close: not after a first conversation',
-  closesFirstConversation({ ...closing, isFirstConversation: false }),
-  false,
-)
-check(
-  'plain close: not twice',
-  closesFirstConversation({ ...closing, alreadyClosed: true }),
-  false,
-)
-check(
-  'plain close: not at a venue with no close configured',
-  closesFirstConversation({ ...closing, warmCloseText: '  ' }),
-  false,
-)
-
 const happyTurn = prose(
   { signOff: 'happy', reviewAsk: { url: REVIEW_URL, label: 'Leave a review' } },
   'acknowledgment',
@@ -1028,6 +993,15 @@ check(
     'not as words to reuse: coffee and beans, what to get next time',
   ),
   true,
+)
+check(
+  'plain turn: a soft hope to see them is allowed, an invitation for something specific is not',
+  [
+    plainTurn.includes('A soft hope to see them again is fine.'),
+    plainTurn.includes('Do not invite them in'),
+    plainTurn.includes('do not name any item they did not mention'),
+  ],
+  [true, true, true],
 )
 check(
   'plain turn: no link block',

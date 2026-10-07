@@ -19,5 +19,14 @@
 // A goodbye turn does NOT use this. There the guest did sign off, and the
 // acknowledgment text is true.
 //
-// Wording approved verbatim, 2026-10-06. No em dash.
-export const WARM_CLOSE_INSTRUCTIONS = `The guest has gone quiet after a conversation with you. This message closes it. It is not a reply to anything they said, and it does not ask them to come in.`
+// No em dash.
+//
+// THE LAST TWO SENTENCES WERE REWRITTEN ON A RULING (2026-10-06). The first
+// version said the close "does not ask them to come in". Read against twenty
+// generated closes that was both too strict and too loose: "hope to see you
+// soon" is a normal thing to say and was being forbidden, while one close
+// invited a guest in "for that Blossom Tonic", a drink they had never
+// mentioned, which is the thing actually worth forbidding. So a soft hope to
+// see them is allowed, and an invitation for something specific, or naming
+// an item the guest did not bring up, is not.
+export const WARM_CLOSE_INSTRUCTIONS = `The guest has gone quiet after a conversation with you. This message closes it. It is not a reply to anything they said. A soft hope to see them again is fine. Do not invite them in for anything specific, and do not name any item they did not mention themselves.`

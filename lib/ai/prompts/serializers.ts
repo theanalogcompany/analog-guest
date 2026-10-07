@@ -1960,7 +1960,8 @@ function formatHappySignOff(reviewAsk: { url: string }): string {
 
 /**
  * TAC-575: the warm close with no link, for every first conversation that ends
- * without a "good" check-in. Wording approved verbatim 2026-10-06.
+ * without a "good" check-in. Wording approved verbatim 2026-10-06; the
+ * sentences about a visit were added the same day on a ruling (below).
  *
  * THE VENUE'S TEXT IS A GUIDE TO CONTENT, NOT COPY. TAC-568 sent
  * `followup_rules.warm_close_text` word for word, on the ruling that the close
@@ -1968,6 +1969,12 @@ function formatHappySignOff(reviewAsk: { url: string }): string {
  * guests, and TAC-575 reversed it. The text still decides WHAT the close
  * covers, because that is a per-venue product decision (which topics a guest
  * may message about), and the block says outright not to reuse its words.
+ *
+ * "A SOFT HOPE TO SEE THEM AGAIN IS FINE..." was added on a ruling
+ * (2026-10-06) after the first generated closes: four of ten said "hope to see
+ * you soon", which is allowed, and one invited a guest in for a drink they had
+ * never mentioned, which is not. The venue's guide names topics ("what to get
+ * next time"), and that is where an invented item comes from.
  *
  * An empty guide renders the block without that sentence. The callers do not
  * send a plain close for a venue with no text (the setting's empty default
@@ -1992,7 +1999,9 @@ function formatPlainClose(guidance: string): string {
         : ` This is what this venue's close usually covers, as a guide to its content and not as words to reuse: ${guide}`),
     '',
     'Say it in your own words, different from anything you have already sent',
-    'this guest. Ask nothing.',
+    'this guest. A soft hope to see them again is fine. Do not invite them in',
+    'for anything specific, and do not name any item they did not mention',
+    'themselves. Ask nothing.',
   ].join('\n')
 }
 

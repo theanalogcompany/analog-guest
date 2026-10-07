@@ -213,7 +213,7 @@ async function main(): Promise<void> {
   // Each thread ends ten minutes before "now", the pause the timer waits out.
   const at = (minutesAgo: number): Date =>
     new Date(startedAt.getTime() - minutesAgo * 60_000)
-  const units: Unit[] = [
+  const allUnits: Unit[] = [
     ...PLAIN_EXCHANGES.slice(0, PER_KIND).map((x, i) => ({
       id: `plain-${String(i + 1).padStart(2, '0')}`,
       kind: 'plain' as const,
@@ -242,10 +242,27 @@ async function main(): Promise<void> {
     }),
   ]
 
+  // MEASURE_KINDS=plain (or happy) runs one kind only. That is an
+  // INFORMATIONAL re-run, never the pre-registered verdict, which is over the
+  // pooled 20: the run says so in its log and prints no PASS or FAIL.
+  const kindsEnv = process.env.MEASURE_KINDS
+  const kinds: readonly SignOffKind[] =
+    kindsEnv === undefined
+      ? ['plain', 'happy']
+      : kindsEnv
+          .split(',')
+          .map((k) => k.trim())
+          .filter((k): k is SignOffKind => k === 'plain' || k === 'happy')
+  if (kinds.length === 0) {
+    throw new Error(`MEASURE_KINDS="${kindsEnv}" names no kind (plain, happy)`)
+  }
+  const partial = kinds.length < 2
+  const units = allUnits.filter((u) => kinds.includes(u.kind))
+
   const log = createRunLog({
     name: 'tac575-warm-close-variety',
     meta: {
-      arm: 'treatment-only',
+      arm: partial ? `informational-${kinds.join('+')}` : 'treatment-only',
       promptVersion: PROMPT_VERSION,
       venue: venueSlug,
       venueName: venue.name,
@@ -287,6 +304,7 @@ async function main(): Promise<void> {
   const closes: { id: string; kind: SignOffKind; body: string }[] = []
   const failed: { id: string; error: string }[] = []
   let happyWithLink = 0
+  const namedUnmentioned: { id: string; items: string[] }[] = []
 
   for (const unit of units) {
     const ctx: RuntimeContext = {
@@ -299,7 +317,6 @@ async function main(): Promise<void> {
         createdAt: at(20),
         firstContactedAt: at(20),
         reviewAskedAt: null,
-        warmCloseSentAt: null,
       },
       recentMessages: unit.history,
       recentVisits: [],
@@ -352,6 +369,21 @@ async function main(): Promise<void> {
     }
 
     const body = gen.data.body
+    // Ruled 2026-10-06: a close names no item the guest did not mention. A
+    // full menu-item name in the close that appears in none of the guest's own
+    // lines is flagged. Exact names only, so it UNDER-detects (a nickname, or
+    // "that tonic", gets past it); the bodies are printed to be read.
+    const guestSaid = unit.history
+      .filter((m) => m.direction === 'inbound')
+      .map((m) => m.body.toLowerCase())
+      .join(' ')
+    const unmentionedItems = menuNames.filter((name) => {
+      const n = name.toLowerCase()
+      return body.toLowerCase().includes(n) && !guestSaid.includes(n)
+    })
+    if (unmentionedItems.length > 0) {
+      namedUnmentioned.push({ id: unit.id, items: unmentionedItems })
+    }
     const linkCarried =
       unit.kind === 'happy' && bodyContainsReviewLink(body, reviewLink.url)
     if (linkCarried) happyWithLink += 1
@@ -363,6 +395,7 @@ async function main(): Promise<void> {
       body,
       reviewAsk: gen.data.reviewAsk,
       linkCarried: unit.kind === 'happy' ? linkCarried : null,
+      unmentionedItems,
       attempts: gen.data.attempts,
       lastGuestLine: unit.history
         .filter((m) => m.direction === 'inbound')
@@ -397,7 +430,12 @@ async function main(): Promise<void> {
   }
 
   const pooled = scoreVariety(closes)
-  printVerdict('POOLED (the pre-registered bar)', pooled)
+  printVerdict(
+    partial
+      ? `ALL ${closes.length} GENERATED (information; one kind only, not the bar)`
+      : 'POOLED (the pre-registered bar)',
+    pooled,
+  )
   printVerdict(
     'plain only (information)',
     scoreVariety(closes.filter((c) => c.kind === 'plain')),
@@ -412,6 +450,9 @@ async function main(): Promise<void> {
     `\n[tac575] happy closes carrying the review link: ${happyWithLink}/${happyTotal} (not part of the bar)`,
   )
   console.log(
+    `[tac575] closes naming a menu item the guest did not mention: ${namedUnmentioned.length}${namedUnmentioned.map((n) => ` [${n.id}: ${n.items.join(', ')}]`).join('')} (exact menu names only)`,
+  )
+  console.log(
     `[tac575] guest_states rows before/after: ${statesBefore}/${statesAfter}`,
   )
 
@@ -424,9 +465,30 @@ async function main(): Promise<void> {
     process.exit(2)
   }
 
+  if (partial) {
+    // One kind only: information. The pre-registered bar is over the pooled
+    // 20, so this prints no PASS or FAIL and cannot be mistaken for one.
+    log.appendUnit({
+      summary: true,
+      void: false,
+      informational: true,
+      kinds,
+      duplicateGroups: pooled.duplicateGroups,
+      overusedOpenings: pooled.overusedOpenings,
+      namedUnmentioned,
+      statesBefore,
+      statesAfter,
+    })
+    console.log(
+      '\n[tac575] INFORMATIONAL RUN (one kind): no verdict against the pre-registered bar.',
+    )
+    process.exit(0)
+  }
+
   log.appendUnit({
     summary: true,
     void: false,
+    namedUnmentioned,
     pass: pooled.pass,
     duplicateGroups: pooled.duplicateGroups,
     overusedOpenings: pooled.overusedOpenings,
