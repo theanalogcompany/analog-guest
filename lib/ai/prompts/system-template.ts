@@ -2251,7 +2251,23 @@ import {
 //   device UAT. BASELINE RESET for any scenario whose inbound names a menu
 //   item on a scan visit: its reply now carries a question it did not before.
 //
-export const PROMPT_VERSION = 'v1.87.0'
+// v1.88.0 (TAC-386): the inquiry follow-up may ask how it went, and may not
+//   presume the visit. In the user prompt, not this template: one sentence of
+//   `## Following up on what they asked` (formatInquiryFollowup in
+//   serializers.ts) is replaced, approved verbatim 2026-10-06.
+//
+//   Ruling 11 of 2026-09-17 barred asking or asserting whether the guest came
+//   in. It was loosened on 2026-10-06 to a line between a question and a
+//   statement: asking how the thing we helped with turned out is hospitality,
+//   and writing as though we know they came in is not. The old sentence
+//   forbade the first and could not see the second ("hope your pup had a good
+//   time", shipped as a known gap on 2026-09-30).
+//
+//   Reaches only the inquiry follow-up turn. MEASURED: fifteen generated
+//   follow-ups on the old sentence and fifteen on the new, same detectors,
+//   bodies and hand-read on TAC-386 (scripts/measurement/inquiry-followup.ts).
+//
+export const PROMPT_VERSION = 'v1.88.0'
 
 export const SYSTEM_TEMPLATE = `You work at a hospitality venue (cafe, bakery, restaurant). You communicate with its guests via iMessage, in whatever voice the venue has configured below — its own collective voice, its owner's, or a named staff member's.
 

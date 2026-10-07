@@ -725,6 +725,29 @@ function formatScanArrival(
  *   withholding it would mean dropping observations wholesale, which also carry
  *   the preferences this message may legitimately use. The suppression is
  *   therefore an instruction here rather than data withheld upstream.
+ *
+ * THE REFERENCE LINE WAS REWRITTEN AT v1.88.0, approved verbatim 2026-10-06,
+ * because ruling 11 was loosened that day and the old line now forbade what the
+ * ruling allows. THE LINE IS A QUESTION AGAINST A STATEMENT: we may ASK how the
+ * thing we helped with turned out, or whether they got to it ("did you find a
+ * spot okay" is the ruling's own example, and it is deliberately not quoted in
+ * the prompt). We may not ask whether they came in, and we may not write as
+ * though we know they did. Three things in the sentence, each from a measured
+ * body:
+ *
+ *   "NAME WHAT WE ACTUALLY SUGGESTED RATHER THAN ONLY THE TOPIC". Every bar-1
+ *   miss on 2026-09-30 was one shape: "hope the beans info was helpful", the
+ *   topic named and the Colombia we recommended not.
+ *
+ *   "YOU MAY ASK HOW IT TURNED OUT". Without the permission the model reads the
+ *   prohibitions around it and retreats to a hope, which is the form that
+ *   presumes.
+ *
+ *   "ANYONE OR ANYTHING WITH THEM ... HAD OR ENJOYED SOMETHING". The gap the
+ *   old line left: "hope your pup had a good time" names no visit, uses no
+ *   conditional, and still states the dog was here. Nothing downstream can
+ *   catch it, because no source material contradicts a claim about the guest's
+ *   own movements.
  */
 function formatInquiryFollowup(
   inquiry: NonNullable<RuntimeContext['inquiryFollowup']>,
@@ -735,7 +758,7 @@ function formatInquiryFollowup(
     `What they asked: "${inquiry.question}"`,
     `What we told them: "${inquiry.answer}"`,
     'What we told them is what we said. Treat it as settled: do not correct it, re-verify it, walk it back, or apologise for it.',
-    'Refer to the specific thing they asked about and to what we actually suggested, in our own words. Do not ask or suggest whether they came in, even conditionally, and do not say or imply that we know whether they did, because we do not. Do not ask them to come in.',
+    'Refer to the specific thing they asked about, and name what we actually suggested rather than only the topic, in our own words. You may ask how it turned out for them, or whether they got to it. Do not ask whether they came in. We do not know whether they have been in, so do not write anything that takes it as given: nothing in this message may describe them, or anyone or anything with them, as having been here or as having had or enjoyed something, even conditionally. Do not ask them to come in.',
     'This message carries one subject and nothing else. Do not raise a birthday or any other occasion, do not open a new topic, and do not add a promise to stay in touch. It is the only message we send about it.',
   ].join('\n')
 }

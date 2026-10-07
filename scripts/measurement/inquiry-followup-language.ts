@@ -223,6 +223,10 @@ const VISIT_ASKS: RegExp[] = [
   /\bwere you able to (come|make it|stop)\b/,
   /\bif you (made it|came|stopped|were|got) (in|by|here|over)\b/,
   /\bhow was (your|the) (visit|trip)\b/,
+  // An ask in statement form, found in the 2026-10-06 treatment run: "hope you
+  // got a chance to bring your pup by". It presumes nothing, and it is still
+  // about the coming-in and not about how our help turned out.
+  /\bhope you (got|get|had|found) (a|the) (chance|time) to (come|stop|swing|pop|drop|bring|make it)\b/,
 ]
 
 /**
@@ -251,6 +255,10 @@ const VISIT_PRESUMED: RegExp[] = [
   /\bwhen you (came|were) (in|here|by)\b/,
   /\byou (came|stopped|swung|popped) (in|by|through)\b/,
   /\b(had|enjoyed|liked|loved) [a-z' ]{0,30}?\b(here|with us)\b/,
+  // Found in the 2026-10-06 control run, which the lines above read as clean:
+  // "hoping the Pink Panther or the cortado hit the spot for you" states that
+  // they had the drink. A hope about how something we recommended WAS.
+  /\b(hope|hoping) [a-z' ,]{0,48}?\b(hit the spot|went down|was (good|great|tasty|nice))\b/,
 ]
 
 /** Phrasings that push the guest to come in, also barred by ruling 2. */
@@ -315,11 +323,21 @@ const VISIT_CASES: {
   { body: 'hope your pup had a good time 🐾', clean: false, via: 'presumed' },
   { body: 'hope you enjoyed the cortado', clean: false, via: 'presumed' },
   {
+    body: 'hoping the Pink Panther or the cortado hit the spot for you.',
+    clean: false,
+    via: 'presumed',
+  },
+  {
     body: 'let us know if you have any questions before your next visit',
     clean: false,
     via: 'presumed',
   },
   { body: 'did you make it in?', clean: false, via: 'asks' },
+  {
+    body: 'hope you got a chance to bring your pup by 🐾',
+    clean: false,
+    via: 'asks',
+  },
   { body: 'hope it helped if you made it in', clean: false, via: 'asks' },
   { body: 'swing by whenever', clean: false, via: 'pushes' },
 ]
