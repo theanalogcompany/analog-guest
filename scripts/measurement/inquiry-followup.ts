@@ -1,6 +1,11 @@
 // TAC-386 arm B: fifteen generated follow-ups, across inquiry types.
 //
-//   npm run measure-inquiry-followup -- [venue-slug]
+//   npm run measure-inquiry-followup -- [venue-slug] [--arm <label>]
+//   npm run measure-inquiry-followup -- --rescore <run-log.jsonl>
+//
+// `--arm` only labels the run log (control, treatment). `--rescore` generates
+// nothing: it re-reads the bodies of an earlier run through today's detectors,
+// which is how a detector change is checked against a run that was hand-read.
 //
 // READ-ONLY apart from the one write buildRuntimeContext makes on its own
 // (a guest_states row), same as TAC-560's harness. Nothing here sends a message.
@@ -8,7 +13,8 @@
 // THE THREE BARS, pre-registered on TAC-386 before this generated:
 //
 //   1. references what was asked AND what we suggested   15/15
-//   2. never asks or asserts the visit, never pushes one  15/15
+//   2. never asks whether they came in, never presumes
+//      that they did, never pushes them to come in        15/15
 //   3. no wording in more than a quarter of the set       <= 3 of 15
 //
 // ALL THREE ARE HAND-READ. The detectors in inquiry-followup-language.ts narrow
@@ -21,6 +27,7 @@
 // nothing about whether the voice is templated.
 
 import { randomUUID } from 'node:crypto'
+import { readFileSync } from 'node:fs'
 import { generateObject } from 'ai'
 
 import { buildRuntimeContext } from '@/lib/agent/build-runtime-context'
@@ -43,6 +50,7 @@ import { startAgentTrace } from '@/lib/observability/langfuse'
 import type { VoiceCorpusChunk as AiVoiceCorpusChunk } from '@/lib/ai'
 import { createRunLog } from './run-log'
 import {
+  checkDetectors,
   findsReference,
   findsRepetition,
   findsVisitClaim,
@@ -149,8 +157,98 @@ const CASES: { kind: string; question: string; answer: string }[] = [
   },
 ]
 
+interface Args {
+  venueSlug: string
+  arm: string
+  rescorePath: string | null
+}
+
+function parseArgs(argv: readonly string[]): Args {
+  const args: Args = {
+    venueSlug: 'le-mils-coffee',
+    arm: 'shipped',
+    rescorePath: null,
+  }
+  for (let i = 0; i < argv.length; i += 1) {
+    const flag = argv[i]!
+    if (flag === '--arm') args.arm = argv[++i] ?? args.arm
+    else if (flag === '--rescore') args.rescorePath = argv[++i] ?? null
+    else if (flag.startsWith('--')) throw new Error(`unknown flag: ${flag}`)
+    else args.venueSlug = flag
+  }
+  return args
+}
+
+function describeVisit(visit: ReturnType<typeof findsVisitClaim>): string {
+  return visit.clean
+    ? 'yes'
+    : `NO asks=${visit.asks.join('|')} presumed=${visit.presumed.join('|')} pushes=${visit.pushes.join('|')}`
+}
+
+/** Re-read an earlier run's bodies through today's detectors. No model call. */
+function rescore(path: string): void {
+  const units = readFileSync(path, 'utf8')
+    .trim()
+    .split('\n')
+    .map(
+      (line) =>
+        JSON.parse(line) as {
+          index?: number
+          question?: string
+          answer?: string
+          body?: string | null
+        },
+    )
+    .filter(
+      (u) =>
+        typeof u.index === 'number' &&
+        typeof u.body === 'string' &&
+        typeof u.question === 'string' &&
+        typeof u.answer === 'string',
+    )
+  if (units.length === 0) throw new Error(`no scored units in ${path}`)
+
+  let bar1 = 0
+  let suggestion = 0
+  let bar2 = 0
+  for (const u of units) {
+    const reference = findsReference(u.body!, u.question!, u.answer!)
+    const visit = findsVisitClaim(u.body!)
+    if (reference.referencesBoth) bar1 += 1
+    if (reference.namesSuggestion) suggestion += 1
+    if (visit.clean) bar2 += 1
+    console.log(`#${u.index} ${u.body}`)
+    console.log(
+      `  bar1 references both: ${reference.referencesBoth ? 'yes' : 'NO'}  names our suggestion: ${reference.namesSuggestion ? 'yes' : 'NO'}  q=[${reference.sharedWithQuestion.join(' ')}] a=[${reference.sharedWithAnswerOnly.join(' ')}]`,
+    )
+    console.log(`  bar2 clean: ${describeVisit(visit)}`)
+  }
+  console.log(`\n=== rescore of ${path} ===`)
+  console.log(`  bar 1 detector: ${bar1}/${units.length}`)
+  console.log(`  names our suggestion: ${suggestion}/${units.length}`)
+  console.log(`  bar 2 detector: ${bar2}/${units.length}`)
+  console.log(
+    '  Compare with the hand-read recorded for that run. The difference is the finding.',
+  )
+}
+
 async function main(): Promise<void> {
-  const venueSlug = process.argv[2] ?? 'le-mils-coffee'
+  const args = parseArgs(process.argv.slice(2))
+
+  // Before anything is spent or read: do the detectors agree with sentences
+  // whose verdict is already known?
+  const detectorProblems = checkDetectors()
+  if (detectorProblems.length > 0) {
+    console.error('refusing to run: the detectors disagree with their labels')
+    for (const p of detectorProblems) console.error(`  - ${p}`)
+    process.exit(1)
+  }
+  if (args.rescorePath !== null) {
+    rescore(args.rescorePath)
+    return
+  }
+
+  const venueSlug = args.venueSlug
   const db = createAdminClient()
 
   const { data: venue, error: venueError } = await db
@@ -272,14 +370,20 @@ async function main(): Promise<void> {
   const log = createRunLog({
     name: 'tac386-inquiry-followup',
     meta: {
-      arm: 'shipped',
+      arm: args.arm,
+      // The harness builds context at the moment it runs. Recorded so a reader
+      // can tell whether the prompt told the model the venue was shut.
+      openStatusLine:
+        /^- Status: .*$/m.exec(first.composed.userPrompt)?.[0] ??
+        /^- Status: .*$/m.exec(first.composed.systemPrompt)?.[0] ??
+        null,
       promptVersion: PROMPT_VERSION,
       venueSlug: venue.slug,
       guestId: guest.id,
       cases: CASES.length,
       bars: {
         one: 'references what was asked AND what we suggested, 15/15',
-        two: 'never asks or asserts the visit, never pushes one, 15/15',
+        two: 'never asks whether they came in, never presumes it, never pushes, 15/15',
         three: 'no wording in more than a quarter of the set',
       },
     },
@@ -364,13 +468,11 @@ async function main(): Promise<void> {
     console.log(`  BODY:   ${body ?? `(failed: ${error})`}`)
     if (reference) {
       console.log(
-        `  bar1 references both: ${reference.referencesBoth ? 'yes' : 'NO'}  q=[${reference.sharedWithQuestion.join(' ')}] a=[${reference.sharedWithAnswerOnly.join(' ')}]`,
+        `  bar1 references both: ${reference.referencesBoth ? 'yes' : 'NO'}  names our suggestion: ${reference.namesSuggestion ? 'yes' : 'NO'}  q=[${reference.sharedWithQuestion.join(' ')}] a=[${reference.sharedWithAnswerOnly.join(' ')}]`,
       )
     }
     if (visit) {
-      console.log(
-        `  bar2 clean: ${visit.clean ? 'yes' : `NO claims=${visit.claims.join('|')} pushes=${visit.pushes.join('|')}`}`,
-      )
+      console.log(`  bar2 clean: ${describeVisit(visit)}`)
     }
     if (
       voice &&
@@ -390,6 +492,11 @@ async function main(): Promise<void> {
       ? false
       : findsReference(bodies[i], c.question, c.answer).referencesBoth,
   ).length
+  const suggestion = CASES.filter((c, i) =>
+    bodies[i] === undefined
+      ? false
+      : findsReference(bodies[i], c.question, c.answer).namesSuggestion,
+  ).length
   const bar2 = bodies.filter((b) => findsVisitClaim(b).clean).length
   const repetition = findsRepetition(bodies)
 
@@ -399,7 +506,10 @@ async function main(): Promise<void> {
     `  bar 1 references both halves: ${bar1}/${units} ${bar1 === units ? 'PASS' : 'FAIL'}`,
   )
   console.log(
-    `  bar 2 never asks or asserts the visit: ${bar2}/${units} ${bar2 === units ? 'PASS' : 'FAIL'}`,
+    `  names our suggestion (candidate only, see ReferenceVerdict): ${suggestion}/${units}`,
+  )
+  console.log(
+    `  bar 2 never asks about, presumes or pushes the visit: ${bar2}/${units} ${bar2 === units ? 'PASS' : 'FAIL'}`,
   )
   console.log(
     `  bar 3 worst shared phrase in ${repetition.worst} of ${units} (limit ${repetition.limit}): ${repetition.withinBar ? 'PASS' : 'FAIL'}`,
