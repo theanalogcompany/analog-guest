@@ -319,33 +319,38 @@ export interface DeriveOpenIntentionsInput {
    * several places, never re-derived.
    *
    * True suppresses every intention whose definition says `onFirstConversation`
-   * is 'suppressed', and every 'after_warm_close' one until warmCloseSent. See
-   * isSuppressedOnFirstConversation.
+   * is 'suppressed'. See isSuppressedOnFirstConversation.
    */
   isFirstConversation: boolean
   /**
-   * TAC-568: has this guest's warm close already gone out
-   * (`guests.warm_close_sent_at` is not null)?
+   * TAC-575: has the warm close gone out, with the guest not yet two messages
+   * past it? (Ruled 2026-10-06: "after a warm close, answer anything they ask;
+   * our questions resume only if they send two or more further messages, never
+   * in the very next reply.")
    *
-   * Resolved by the caller, like isFirstConversation, and read ONLY through the
-   * 'after_warm_close' policy. Outside a first conversation it changes nothing.
+   * Resolved by the caller through isQuietAfterWarmClose (lib/agent/warm-close.ts)
+   * for the reason isFirstConversation is: one definition, next to the close it
+   * is about. True renders nothing, exactly as the brake does, and like the
+   * brake it writes nothing and closes nothing, so every intention comes back
+   * open once the guest has kept talking.
    *
-   * THE TURN THAT SENDS THE CLOSE STILL SEES `false`, AND THAT IS THE POINT
-   * RATHER THAN A RACE. Intentions are derived during context-build, before the
-   * reply is generated or the marker claimed, so the closing turn itself cannot
-   * raise an 'after_warm_close' intention — it is the turn the close ends. The
-   * guest's NEXT message is the first that sees `true`, which is exactly the
-   * ruled behaviour: available if they keep chatting after the close.
+   * NOT LIMITED TO A FIRST CONVERSATION. The marker is once per guest ever, so
+   * in practice this only bites in the stretch right after the close.
    */
-  warmCloseSent: boolean
+  quietAfterWarmClose: boolean
 }
 
 export interface DeriveOpenIntentionsResult {
-  /** Open intentions in priority order. Always empty while the brake is engaged. */
+  /**
+   * Open intentions in priority order. Always empty while the brake is engaged
+   * or the guest is still inside the quiet after a warm close.
+   */
   open: OpenIntention[]
   /** Seen eligible this turn with no row yet, or re-armed — the caller persists these. */
   newlyEligible: NewlyEligibleIntention[]
   brakeEngaged: boolean
+  /** Echoes the input, so the caller can log why a turn rendered nothing. */
+  quietAfterWarmClose: boolean
 }
 
 /** One arming of an intention: the anchor it records, and the event behind it. */
@@ -587,7 +592,6 @@ function gateOpen(
 function isSuppressedOnFirstConversation(
   key: IntentionKey,
   isFirstConversation: boolean,
-  warmCloseSent: boolean,
 ): boolean {
   if (!isFirstConversation) return false
   const policy = INTENTION_DEFINITION_BY_KEY[key].onFirstConversation
@@ -596,8 +600,6 @@ function isSuppressedOnFirstConversation(
       return false
     case 'suppressed':
       return true
-    case 'after_warm_close':
-      return !warmCloseSent
   }
 }
 
@@ -636,7 +638,12 @@ export function deriveOpenIntentions(
   input: DeriveOpenIntentionsInput,
 ): DeriveOpenIntentionsResult {
   if (input.rows === null)
-    return { open: [], newlyEligible: [], brakeEngaged: false }
+    return {
+      open: [],
+      newlyEligible: [],
+      brakeEngaged: false,
+      quietAfterWarmClose: input.quietAfterWarmClose,
+    }
 
   const entries = new Map<IntentionKey, IntentionStateEntry>()
   const keysWithRows = new Set<IntentionKey>()
@@ -670,13 +677,7 @@ export function deriveOpenIntentions(
     // eligible_at row during the first conversation and its window does not
     // start ticking on a question nobody may ask. It arms fresh on the second.
     // The open-set filter below is what actually guarantees it never renders.
-    if (
-      isSuppressedOnFirstConversation(
-        def.key,
-        input.isFirstConversation,
-        input.warmCloseSent,
-      )
-    )
+    if (isSuppressedOnFirstConversation(def.key, input.isFirstConversation))
       continue
     const existing = entries.get(def.key)
     // Sticky unless this intention re-arms: an existing row decides.
@@ -736,29 +737,33 @@ export function deriveOpenIntentions(
   })
 
   return {
-    open: brakeEngaged
-      ? []
-      : deriveIntentionState({
-          entries,
-          facts: input.facts,
-          now: input.now,
-        }).filter(
-          (o) =>
-            !held.has(o.key) &&
-            // TAC-567. NOT redundant with the arming-loop skip above: that one
-            // stops a row being written, this one stops a row already on file
-            // from rendering. First-contact eligibility is sticky, so every
-            // guest mid-first-conversation when this shipped has rows for
-            // intentions the ruling now suppresses, and only this filter sees
-            // them.
-            !isSuppressedOnFirstConversation(
-              o.key,
-              input.isFirstConversation,
-              input.warmCloseSent,
-            ),
-        ),
+    // TAC-575: the quiet after a warm close sits beside the brake because it
+    // has the brake's shape. Nothing renders, nothing is recorded, and arming
+    // above still ran, so a first-contact window starts on time.
+    open:
+      brakeEngaged || input.quietAfterWarmClose
+        ? []
+        : deriveIntentionState({
+            entries,
+            facts: input.facts,
+            now: input.now,
+          }).filter(
+            (o) =>
+              !held.has(o.key) &&
+              // TAC-567. NOT redundant with the arming-loop skip above: that one
+              // stops a row being written, this one stops a row already on file
+              // from rendering. First-contact eligibility is sticky, so every
+              // guest mid-first-conversation when this shipped has rows for
+              // intentions the ruling now suppresses, and only this filter sees
+              // them.
+              !isSuppressedOnFirstConversation(
+                o.key,
+                input.isFirstConversation,
+              ),
+          ),
     newlyEligible,
     brakeEngaged,
+    quietAfterWarmClose: input.quietAfterWarmClose,
   }
 }
 

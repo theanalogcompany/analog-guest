@@ -31,7 +31,7 @@ import { isScanReferral } from '@/lib/schemas/referral-source'
 import { scanCarryForwardAt } from './scan-arrival'
 // TAC-567: TAC-560's predicate, reused rather than a second definition of
 // "first conversation". warm-close.ts is pure and builds no client at import.
-import { isFirstConversation } from './warm-close'
+import { isFirstConversation, isQuietAfterWarmClose } from './warm-close'
 import { loadScanCarryForward } from './scan-arrival-store'
 import {
   resolveConversationChannel,
@@ -569,6 +569,7 @@ export async function buildRuntimeContext(input: {
     open: [],
     newlyEligible: [],
     brakeEngaged: false,
+    quietAfterWarmClose: false,
   }
   if (input.currentMessage) {
     // "Have we heard what they ordered" reuses the visit-history query rather
@@ -781,16 +782,21 @@ export async function buildRuntimeContext(input: {
       rows: intentionRows,
       inboundTimes,
       inboundHistoryFrom,
-      // TAC-567, amended by TAC-568: while this is true, only understand_order
-      // and learn_name may be raised — plus are_they_new_here once the warm
-      // close has gone out.
+      // TAC-567, reopened by TAC-575: while this is true, the two intentions
+      // about a past order or suggestion are held back. Everything else waits
+      // on its own reply count.
       isFirstConversation: firstConversation,
-      // TAC-568: the 'after_warm_close' policy's one input. Read straight off
-      // the guest row rather than re-derived, and it is null on every guest the
-      // close has not reached. The turn that SENDS the close still reads false
-      // here, because this runs before the reply is generated — see the field's
-      // docstring on DeriveOpenIntentionsInput.
-      warmCloseSent: guestRow.warm_close_sent_at !== null,
+      // TAC-575: no question until the guest is two messages past the warm
+      // close. Read straight off the guest row, which is null on every guest
+      // the close has not reached. The turn that SENDS the close still reads
+      // false here, because this runs before the reply is generated; the
+      // guest's next message is the first that sees the marker.
+      quietAfterWarmClose: isQuietAfterWarmClose(
+        guestRow.warm_close_sent_at
+          ? new Date(guestRow.warm_close_sent_at)
+          : null,
+        inboundTimes,
+      ),
       // Ruling 1: one definition of "still in the same conversation" across
       // followups and intentions. Le Mil's carries no explicit
       // recent_conversation_hours, so it runs on the code default (48h), at
@@ -880,6 +886,7 @@ export async function buildRuntimeContext(input: {
     intentionDerivation: {
       newlyEligible: intentions.newlyEligible,
       brakeEngaged: intentions.brakeEngaged,
+      quietAfterWarmClose: intentions.quietAfterWarmClose,
     },
     // TAC-308: null when nothing is outstanding (the overwhelmingly common
     // case) — the serializer omits the block entirely at zero token cost.

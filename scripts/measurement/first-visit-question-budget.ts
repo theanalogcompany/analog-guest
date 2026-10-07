@@ -16,8 +16,9 @@
 // appear if it is going to.
 //
 // THE THREE BARS, all absolute zeros, in first-visit-question-budget-score.ts:
-//   1. questions asked: only the order and the name (TAC-568 moved the
-//      first-visit question behind the warm close, so it is off-target here)
+//   1. questions asked: only the ones the TAC-575 ruling allows on a first
+//      conversation (ALLOWED_KEYS in the scorer). NOT RE-RUN since that ruling
+//      widened the set, so the figures recorded on TAC-567 are a different bar.
 //   2. turns carrying two questions (body question plus bubble): 0
 //   3. "you've reached" or equivalent in the opener: 0
 //
@@ -418,10 +419,10 @@ async function main(): Promise<void> {
         // a fresh scan, five turns inside one sitting. `control` restores
         // pre-ticket eligibility and drops the restraint paragraph.
         isFirstConversation: arm === 'after',
-        // TAC-568: both arms model the first-visit flow before any close, so
-        // this does not vary by arm. Holding it false keeps the arms differing
-        // in exactly one variable, which is what the control is for.
-        warmCloseSent: false,
+        // Both arms model the first-visit flow before any close, so this does
+        // not vary by arm. Holding it false keeps the arms differing in exactly
+        // one variable, which is what the control is for.
+        quietAfterWarmClose: false,
       })
 
       const ctx: RuntimeContext = {

@@ -197,6 +197,45 @@ export function isFirstConversation(
 }
 
 /**
+ * How many messages a guest has to send after the warm close before the venue
+ * asks them anything again.
+ *
+ * TWO, from the TAC-575 ruling (2026-10-06): "after a warm close, answer
+ * anything they ask; our questions resume only if they send two or more further
+ * messages, never in the very next reply." The Oct 6 device test is the case it
+ * was written against: the close went out and the very next reply asked whether
+ * the guest was new here.
+ */
+export const QUESTIONS_RESUME_AFTER_CLOSE_INBOUNDS = 2
+
+/**
+ * Is the guest still inside the quiet that follows a warm close?
+ *
+ * False for a guest who has never been closed. Otherwise true until they have
+ * sent QUESTIONS_RESUME_AFTER_CLOSE_INBOUNDS messages after the marker, the
+ * current one included, so the first message after a close is answered with no
+ * question and the second is the earliest that may carry one.
+ *
+ * STRICTLY AFTER the marker. The in-conversation close claims the marker during
+ * the turn that sends it, which is after that turn's own inbound arrived, so the
+ * guest's goodbye is never counted as a message past the close.
+ *
+ * `inboundTimes` is the loaded history, which has a horizon. A message beyond it
+ * is not counted, which can only keep the quiet on for longer, and never past
+ * the guest's next two messages: those are always inside the horizon.
+ */
+export function isQuietAfterWarmClose(
+  warmCloseSentAt: Date | null,
+  inboundTimes: readonly Date[],
+): boolean {
+  if (warmCloseSentAt === null) return false
+  const closedAt = warmCloseSentAt.getTime()
+  if (!Number.isFinite(closedAt)) return false
+  const since = inboundTimes.filter((t) => t.getTime() > closedAt).length
+  return since < QUESTIONS_RESUME_AFTER_CLOSE_INBOUNDS
+}
+
+/**
  * The rng handed to dispatch so the close is always ONE message.
  *
  * resolveDispatchBubbles splits a 2-to-3-sentence body when `rng() < 0.5`, so a

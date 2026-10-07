@@ -444,24 +444,17 @@ async function main(): Promise<void> {
         // longer appear in it. A re-run after that ticket is not comparable to
         // the runs recorded on TAC-558.
         isFirstConversation: true,
-        // TAC-568, and THIS PAIRING IS WHAT MAKES THE HARNESS MEASURE ANYTHING.
+        // TAC-575 took the warm close out of are_they_new_here's eligibility
+        // (it was 'after_warm_close', and this harness had to pass
+        // `warmCloseSent: true` for the target ever to be open). It is plainly
+        // allowed on a first conversation now, so no close is modelled.
         //
-        // are_they_new_here is TARGET_KEY: the whole point of this harness. Its
-        // policy is 'after_warm_close', so `isFirstConversation: true` with
-        // `warmCloseSent: false` suppresses it in BOTH the arming loop and the
-        // open-set filter, and `derived.open` can never contain the target on
-        // any turn, in either arm. The harness would then report a clean zero
-        // for the treatment arm - indistinguishable from a real voice
-        // regression, which is the worst shape a measurement can take.
-        //
-        // `true` models the turn the ruling actually made the question
-        // available on: the guest kept talking after the close. That is the
-        // only first-conversation state in which production can raise it, so it
-        // is the only one worth measuring.
-        //
-        // The integrity guard below is the belt: if the target is never open,
-        // the run is invalid rather than zero.
-        warmCloseSent: true,
+        // NOT RE-RUN SINCE, AND NOT COMPARABLE TO TAC-558'S RUNS: the same
+        // ruling put learn_name ahead of the target (priority 40 against 45),
+        // so on the turn both are open the model is told to take the name
+        // first. The integrity guard below still holds: if the target is never
+        // open, the run is invalid rather than zero.
+        quietAfterWarmClose: false,
       })
 
       const derivedOpenKeys = derived.open.map((o) => o.key)

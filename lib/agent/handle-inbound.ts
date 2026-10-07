@@ -1248,6 +1248,8 @@ async function runInboundTurn(
             .filter((e) => e.rearm)
             .map((e) => e.key),
           intentionBrakeEngaged: ctx.intentionDerivation.brakeEngaged,
+          // TAC-575: a suppression nobody can count is not a guarantee.
+          quietAfterWarmClose: ctx.intentionDerivation.quietAfterWarmClose,
         },
         content: trace.captureContent
           ? buildRecognitionContent(ctx.recognition)
