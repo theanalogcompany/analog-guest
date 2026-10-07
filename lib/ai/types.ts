@@ -404,6 +404,14 @@ export type RuntimeContext = {
   // which is the safe direction: it renders no extra restraint rather than
   // silencing a question on a turn that is not a first conversation.
   firstConversation?: boolean
+  // TAC-575: true on an inbound turn that must carry no question of the
+  // venue's own even though no intention is open to say so: a guest's first
+  // reply, a first-conversation turn with nothing open, and the replies inside
+  // the quiet after a warm close. The serializer renders a standalone
+  // restraint for it ONLY when the intentions block does not render. Never set
+  // on a followup or proactive turn, where the instruction may itself be to
+  // ask something (the scan greeting asks what they got).
+  askNothing?: boolean
   // TAC-389: true only on an operator-initiated decline turn. Computed in
   // buildAiRuntime from ctx.followupTrigger.isOperatorDecline; the serializer
   // reads it to render the decline-specific `## Active commitments` intro,

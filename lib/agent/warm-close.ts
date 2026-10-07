@@ -211,28 +211,40 @@ export const QUESTIONS_RESUME_AFTER_CLOSE_INBOUNDS = 2
 /**
  * Is the guest still inside the quiet that follows a warm close?
  *
- * False for a guest who has never been closed. Otherwise true until they have
- * sent QUESTIONS_RESUME_AFTER_CLOSE_INBOUNDS messages after the marker, the
- * current one included, so the first message after a close is answered with no
- * question and the second is the earliest that may carry one.
+ * False for a guest who has never been closed. Otherwise true until BOTH
+ * halves of the ruling hold:
+ *
+ *   two further messages   the guest has sent
+ *                          QUESTIONS_RESUME_AFTER_CLOSE_INBOUNDS messages after
+ *                          the marker, the current one included;
+ *   never the next reply   a reply of ours has already reached them since the
+ *                          first of those messages.
+ *
+ * THE SECOND HALF IS NOT IMPLIED BY THE FIRST. Two messages sent five seconds
+ * apart are answered in one reply, which is the very next reply after the
+ * close. So is the second message's reply when the first one's was held for
+ * approval, dropped or never delivered. Counting the guest's messages alone
+ * lets a question through in both.
  *
  * STRICTLY AFTER the marker. The in-conversation close claims the marker during
  * the turn that sends it, which is after that turn's own inbound arrived, so the
  * guest's goodbye is never counted as a message past the close.
  *
- * `inboundTimes` is the loaded history, which has a horizon. A message beyond it
- * is not counted, which can only keep the quiet on for longer, and never past
- * the guest's next two messages: those are always inside the horizon.
+ * Both lists come from the loaded history, which has a horizon. A message
+ * beyond it is not counted, which can only keep the quiet on for longer.
  */
 export function isQuietAfterWarmClose(
   warmCloseSentAt: Date | null,
   inboundTimes: readonly Date[],
+  deliveredOutboundTimes: readonly Date[],
 ): boolean {
   if (warmCloseSentAt === null) return false
   const closedAt = warmCloseSentAt.getTime()
   if (!Number.isFinite(closedAt)) return false
-  const since = inboundTimes.filter((t) => t.getTime() > closedAt).length
-  return since < QUESTIONS_RESUME_AFTER_CLOSE_INBOUNDS
+  const since = inboundTimes.map((t) => t.getTime()).filter((t) => t > closedAt)
+  if (since.length < QUESTIONS_RESUME_AFTER_CLOSE_INBOUNDS) return true
+  const firstSince = Math.min(...since)
+  return !deliveredOutboundTimes.some((t) => t.getTime() > firstSince)
 }
 
 /**

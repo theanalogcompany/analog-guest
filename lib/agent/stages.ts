@@ -2927,6 +2927,12 @@ export function buildAiRuntime(
     // the prompt and the derivation cannot disagree about which turn is a first
     // conversation.
     firstConversation: ctx.firstConversation,
+    // TAC-575: inbound turns only. A proactive turn's own instruction may be
+    // to ask something.
+    askNothing:
+      ctx.currentMessage !== null &&
+      ctx.followupTrigger === null &&
+      (ctx.firstConversation || ctx.intentionDerivation.quietAfterWarmClose),
     // TAC-389: only handle-operator-decline.ts sets this, on the trigger it
     // hands to buildRuntimeContext. Every other path (inbound, cron follow-up,
     // ordinary Command Center manual follow-up) leaves it false, so the

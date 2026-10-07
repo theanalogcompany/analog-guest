@@ -2193,14 +2193,9 @@ async function runInboundTurn(
     // Measured before the change, at Le Mil's: five guests enrolled by scanning,
     // understand_order armed for every one of them and recorded as asked once.
     //
-    // RESIDUAL, on the record rather than assumed away. learn_name is open on
-    // this turn too, and the opener asks the model to say who the guest has
-    // reached. Introducing yourself is not asking someone's name, and the
-    // classifier is told to omit anything it is unsure of, so this should not
-    // false-positive — but if it does, learn_name closes for that guest forever
-    // and silently, which is precisely what TAC-332 existed to prevent. The
-    // observable: a learn_name prompt recorded against an opener message whose
-    // text asks nothing about a name.
+    // (A residual recorded here until TAC-575: learn_name used to be open on
+    // the opener turn too, so a false-positive name prompt could close it for
+    // good. No replies_only intention is open on a guest's first reply now.)
     const renderedIntentions = renderableIntentions(
       ctx.openIntentions,
       ctx.classification.category,

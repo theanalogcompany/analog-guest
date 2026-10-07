@@ -99,6 +99,39 @@ export function reachedGuest(message: RecentMessage): boolean {
   }
 }
 
+/**
+ * TAC-575: has the venue already answered something this guest wrote?
+ *
+ * True when a venue message that reached the guest follows a guest message in
+ * the loaded history. That is what "not the first reply" means, and it is why
+ * the unprompted scan greeting does not count: a scan's own row has an empty
+ * body and is not in `recentMessages`, so a greeting has no guest message in
+ * front of it. A reply staff typed in the Instagram app does count. The guest
+ * has been answered, whoever answered.
+ *
+ * The history has a horizon (build-runtime-context's MAX_HISTORY_DAYS), so a
+ * guest back after a longer gap reads as never answered and their first reply
+ * carries no question. That is the cheap direction and costs one turn.
+ */
+export function hasAnsweredGuestBefore(
+  recentMessages: readonly RecentMessage[],
+): boolean {
+  let firstInboundAt: number | null = null
+  for (const m of recentMessages) {
+    if (m.direction !== 'inbound') continue
+    const at = m.createdAt.getTime()
+    if (firstInboundAt === null || at < firstInboundAt) firstInboundAt = at
+  }
+  if (firstInboundAt === null) return false
+  const since = firstInboundAt
+  return recentMessages.some(
+    (m) =>
+      m.direction === 'outbound' &&
+      reachedGuest(m) &&
+      m.createdAt.getTime() > since,
+  )
+}
+
 function normalizeBody(body: string): string {
   const collapsed = body.replace(/\s*\n\s*/g, ' ').trim()
   return collapsed.length <= MAX_CONTEXT_BODY_CHARS

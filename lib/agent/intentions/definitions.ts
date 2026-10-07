@@ -168,28 +168,19 @@ export type IntentionGate =
    * orthogonal here on purpose: a future first-contact intention that should
    * wait for a proven responder writes `conversational` and gets it. Nothing in
    * this file branches on `armsOn.kind` to decide a gate.
+   *
+   * NEVER OPEN BEFORE THE VENUE HAS ANSWERED THIS GUEST ONCE (TAC-575, ruled
+   * 2026-10-06: "never ask the name in the first reply"). That is a rule of
+   * the gate kind, applied in derive.ts off `venueHasAnsweredBefore`, and not
+   * a per-intention number: this type carried a `firstMessageMinReplies` until
+   * then, on which `learn_name` alone said 0, and every cold DM got a name ask
+   * as the second bubble of its first reply. A count cannot say "first reply"
+   * anyway. A guest who sends three messages before we answer has a count of
+   * three and has still been told nothing.
    */
   | {
       kind: 'replies_only'
       defaultMinReplies: number
-      /**
-       * The count required on a guest's FIRST-EVER message, stated separately
-       * from the ongoing one (TAC-436 audit question 1, ruled 2026-09-17:
-       * "explicit per intention, not a blanket zero").
-       *
-       * 0 would mean the intention is free to be raised in the opening
-       * exchange. NOTHING CARRIES 0 since TAC-575 (ruled 2026-10-06: "never
-       * ask the name in the first reply"). `learn_name` did, and every cold
-       * DM got a name ask as the second bubble of the first reply. Every
-       * intention now repeats its ongoing count here, and says so explicitly
-       * so that a new replies_only intention has to choose rather than inherit.
-       *
-       * NOT venue-overridable, unlike defaultMinReplies, AND THAT IS NOW WHAT
-       * THE FIELD IS FOR: `min_replies` is the ongoing stagger a venue tunes,
-       * so a venue that sets `min_replies.learn_name` to 0 still cannot put
-       * a question in a guest's first reply. This is the floor under it.
-       */
-      firstMessageMinReplies: number
     }
 
 export interface IntentionSatisfactionFacts {
@@ -250,8 +241,8 @@ export interface IntentionSatisfactionFacts {
 export type FirstConversationPolicy =
   /**
    * Raisable during the first conversation, once its own gate opens. Not "from
-   * the very first message": no gate opens on a guest's first-ever message
-   * (see IntentionGate's firstMessageMinReplies).
+   * the very first message": a replies_only gate stays shut until the venue
+   * has answered the guest once (see IntentionGate).
    */
   | 'allowed'
   /** Never on a first conversation; arrives intact on the second. */
@@ -268,12 +259,12 @@ export interface IntentionDefinition {
   armsOn: IntentionArmsOn
   gate: IntentionGate
   /**
-   * TAC-567, amended twice by TAC-568: may this intention be raised during the
-   * guest's FIRST conversation, and when?
+   * TAC-567, amended twice by TAC-568 and again by TAC-575: may this intention
+   * be raised during the guest's FIRST conversation?
    *
-   * THREE STATES, NOT A BOOLEAN, and the third is the whole reason this stopped
-   * being one. The ruling history is worth carrying because both amendments
-   * landed on 2026-09-30 and the second reverses half of the first:
+   * It had a third state for a week ('after_warm_close'). The ruling history is
+   * worth carrying because the first two amendments landed on 2026-09-30 and
+   * the second reverses half of the first:
    *
    *   TAC-567 allowed three intentions on a first conversation
    *   (understand_order, learn_name, are_they_new_here), after a fresh scan
@@ -388,8 +379,8 @@ const DEFINITIONS = {
     priority: 10,
     armsOn: { kind: 'visit_confirmed' },
     gate: { kind: 'none' },
-    // TAC-567: one of the two a first conversation asks unconditionally. It is
-    // the reason the guest scanned at all, and the opener asks it outright.
+    // The one question with no gate: it is the reason the guest scanned at
+    // all, and the opener asks it outright.
     onFirstConversation: 'allowed',
     promptLine: "You haven't heard what this guest ordered yet.",
     // Deliberately says nothing about how the drink or food WAS: that belongs
@@ -415,18 +406,14 @@ const DEFINITIONS = {
     priority: 45,
     armsOn: { kind: 'first_recorded_order' },
     // Rung 3, shared with learn_name, which is what gives `priority` real work
-    // to do: both open, this one renders first, and the restraint paragraph says
-    // take the first only.
-    //
-    // NO FIRST-MESSAGE WAIVER, and stated rather than inherited per the field's
-    // own docstring. Arming needs a captured order, which is impossible on a
-    // guest's first-ever message, so a waiver here could never fire.
+    // to do: both open, the name renders first, and the restraint paragraph
+    // says take the first only.
     gate: {
       kind: 'replies_only',
       defaultMinReplies: 3,
-      firstMessageMinReplies: 3,
     },
-    // TAC-568: AFTER THE WARM CLOSE, on a first conversation.
+    // HISTORY, superseded by the last paragraph below. Under TAC-568 this was
+    // held until after the warm close on a first conversation.
     //
     // TAC-567 put this on the first conversation because the ruled flow was
     // meant to END on it. The device test showed the opposite: armed and open,
@@ -541,14 +528,19 @@ const DEFINITIONS = {
     key: 'learn_name',
     priority: 40,
     armsOn: { kind: 'first_contact' },
-    // TAC-575 (ruled 2026-10-06): NEVER IN THE FIRST REPLY, and not before the
-    // guest has sent three messages. The waiver this carried (0 on a first-ever
-    // message) put "by the way, what's your name?" in the second bubble of every
-    // cold DM's first reply, including a real guest's who never wrote again.
+    // TAC-575 (ruled 2026-10-06): not before the guest has sent three messages,
+    // and never in the first reply (the gate kind's own rule, see IntentionGate).
+    // It used to waive the count on a first-ever message, which put "by the way,
+    // what's your name?" in the second bubble of every cold DM's first reply,
+    // including a real guest's who never wrote again.
+    //
+    // THE COUNT IS INBOUND ROWS, and a counter scan is one (its body is empty).
+    // So a guest who scanned reaches three on their second typed message, and a
+    // guest who simply messaged on their third. A venue can lower the count
+    // through intention_rules.min_replies; it cannot open the first reply.
     gate: {
       kind: 'replies_only',
       defaultMinReplies: 3,
-      firstMessageMinReplies: 3,
     },
     // The first of the getting-to-know-you questions (TAC-575). It is no longer
     // the first conversation's closing moment: TAC-568 sent the warm close on
@@ -587,7 +579,6 @@ const DEFINITIONS = {
     gate: {
       kind: 'replies_only',
       defaultMinReplies: 5,
-      firstMessageMinReplies: 5,
     },
     // TAC-575: back on a first visit, behind its own reply count. See
     // onFirstConversation.
@@ -607,7 +598,6 @@ const DEFINITIONS = {
     gate: {
       kind: 'replies_only',
       defaultMinReplies: 8,
-      firstMessageMinReplies: 8,
     },
     // TAC-575: back on a first visit, behind its own reply count. See
     // onFirstConversation.
@@ -632,7 +622,6 @@ const DEFINITIONS = {
     gate: {
       kind: 'replies_only',
       defaultMinReplies: 11,
-      firstMessageMinReplies: 11,
     },
     // TAC-575: back on a first visit, behind its own reply count. See
     // onFirstConversation.

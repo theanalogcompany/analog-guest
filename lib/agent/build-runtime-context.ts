@@ -31,6 +31,7 @@ import { isScanReferral } from '@/lib/schemas/referral-source'
 import { scanCarryForwardAt } from './scan-arrival'
 // TAC-567: TAC-560's predicate, reused rather than a second definition of
 // "first conversation". warm-close.ts is pure and builds no client at import.
+import { hasAnsweredGuestBefore, reachedGuest } from './retrieval-context'
 import { isFirstConversation, isQuietAfterWarmClose } from './warm-close'
 import { loadScanCarryForward } from './scan-arrival-store'
 import {
@@ -815,7 +816,13 @@ export async function buildRuntimeContext(input: {
           ? new Date(guestRow.warm_close_sent_at)
           : null,
         inboundTimes,
+        recentMessages
+          .filter((m) => m.direction === 'outbound' && reachedGuest(m))
+          .map((m) => m.createdAt),
       ),
+      // TAC-575: false means this reply is the first one the guest gets, and
+      // no getting-to-know-you question may ride on it.
+      venueHasAnsweredBefore: hasAnsweredGuestBefore(recentMessages),
       // Ruling 1: one definition of "still in the same conversation" across
       // followups and intentions. Le Mil's carries no explicit
       // recent_conversation_hours, so it runs on the code default (48h), at

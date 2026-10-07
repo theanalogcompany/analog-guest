@@ -264,6 +264,19 @@ export interface DeriveOpenIntentionsInput {
   responseRate: number
   /** Lifetime inbound message count at this venue (RawSignals.repliedMessageCount). */
   repliedMessageCount: number
+  /**
+   * TAC-575: has the venue already answered something this guest wrote?
+   *
+   * False means the reply being written now is the FIRST one, and no
+   * replies_only intention may ride on it (ruled 2026-10-06). Resolved by the
+   * caller through hasAnsweredGuestBefore (lib/agent/retrieval-context.ts)
+   * from the messages that actually reached the guest.
+   *
+   * READ FROM OUR SIDE OF THE THREAD, NOT FROM A COUNT OF THEIRS. The inbound
+   * count cannot say "first reply": three quick messages before we answer, or
+   * a scan plus two, reach a count of three with nothing yet said back.
+   */
+  venueHasAnsweredBefore: boolean
   rules: IntentionRules
   facts: IntentionSatisfactionFacts
   /**
@@ -330,7 +343,8 @@ export interface DeriveOpenIntentionsInput {
    *
    * Resolved by the caller through isQuietAfterWarmClose (lib/agent/warm-close.ts)
    * for the reason isFirstConversation is: one definition, next to the close it
-   * is about. True renders nothing, exactly as the brake does, and like the
+   * is about. It reads both halves of the ruling: two messages from the guest,
+   * and a reply of ours already delivered in between. True renders nothing, exactly as the brake does, and like the
    * brake it writes nothing and closes nothing, so every intention comes back
    * open once the guest has kept talking.
    *
@@ -518,33 +532,15 @@ function lastPromptWentUnanswered(
 }
 
 /**
- * TAC-436: whether this is the guest's FIRST-EVER inbound at this venue.
- *
- * Read off `repliedMessageCount`, the lifetime inbound count the gate already
- * compares against, rather than a separately-plumbed flag that could drift from
- * it. The webhook INSERTs the inbound before handing off to the agent
- * (app/api/webhooks/sendblue/route.ts), so on a first-ever message the count is
- * 1; `<= 1` also covers a count of 0 rather than depending on that ordering.
- *
- * Deliberately NOT `recentMessages.length === 0`, which is a 14-day window and
- * is also true for a guest returning after a long gap.
- *
- * Safe because deriveOpenIntentions only ever runs on an inbound turn:
- * build-runtime-context guards the whole derivation on `input.currentMessage`
- * and sets `openIntentions: []` otherwise.
- */
-export function isFirstEverInboundTurn(repliedMessageCount: number): boolean {
-  return repliedMessageCount <= 1
-}
-
-/**
  * The right to ask. An exhaustive switch, so a fourth gate kind fails `tsc`
  * until someone decides what it requires.
  *
  * `replies_only` (TAC-436 ruling 2) drops the response-rate floor, which is
  * unreachable in a guest's first turns by construction — see IntentionGate.
- * Its first-message count is stated per intention and is NOT venue-overridable:
- * `min_replies` tunes the ongoing stagger, not the opening exchange.
+ *
+ * It is shut outright until the venue has answered the guest once (TAC-575),
+ * whatever the count and whatever the venue's `min_replies` says: that setting
+ * tunes the ongoing stagger, not whether a first reply may carry a question.
  */
 function gateOpen(
   def: IntentionDefinition,
@@ -554,9 +550,9 @@ function gateOpen(
     case 'none':
       return true
     case 'replies_only': {
-      const minReplies = isFirstEverInboundTurn(input.repliedMessageCount)
-        ? def.gate.firstMessageMinReplies
-        : (input.rules.min_replies[def.key] ?? def.gate.defaultMinReplies)
+      if (!input.venueHasAnsweredBefore) return false
+      const minReplies =
+        input.rules.min_replies[def.key] ?? def.gate.defaultMinReplies
       return input.repliedMessageCount >= minReplies
     }
     case 'conversational': {

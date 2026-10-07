@@ -223,8 +223,8 @@ conversation it happened in ("did you try it?" a minute later is absurd), while
 the only moment it fits.
 
 `are_they_new_here` and `understand_order` can never be open on one turn: the first arms
-only once a transaction exists, and a transaction satisfies the second. That is why its
-priority is 15 rather than 5 - the two never compete for a turn.
+only once a transaction exists, and a transaction satisfies the second, so the two never
+compete for a turn. Its priority (45) orders it against `learn_name` (40), not against that.
 
 Two predicates must move together: `shouldRenderOpenIntentions` (render side) and
 `renderableIntentions` (record side). Suppressing on one only means the post-send
@@ -238,10 +238,19 @@ FIRST conversation six of the eight may be raised, in `priority` order: `underst
 `learn_name`, `are_they_new_here`, then `are_they_local`, `their_rhythm`, `why_theyre_here`.
 The two about a PAST order or suggestion stay suppressed.
 
-**Nothing is asked in a guest's first reply.** Every `replies_only` gate now carries a
-`firstMessageMinReplies` of at least 3, and that field is not venue-overridable, so it is the
-floor under `intention_rules.min_replies`. What keeps six from reading as an interview is the
-reply counts (3, 3, 5, 8, 11), one question per turn, and the brake - not this policy.
+**No getting-to-know-you question rides on a guest's first reply** (the order question is
+the one exception: it has no gate and the opener asks it). A `replies_only` gate is shut until
+`venueHasAnsweredBefore`, read from OUR side of the thread (`hasAnsweredGuestBefore`,
+`retrieval-context.ts`) because an inbound count cannot say "first reply": three quick
+messages reach a count of three with nothing yet said back. A venue's
+`intention_rules.min_replies` tunes the count and cannot open that reply. What keeps six from
+reading as an interview is the reply counts (3, 3, 5, 8, 11), one question per turn, and the
+brake - not this policy.
+
+**A turn with no intentions block still tells the model to ask nothing** on a first
+conversation and inside the post-close quiet (`NO_QUESTION_RESTRAINT`, `serializers.ts`), and
+a question the model emits with no block rendered is dropped in `generate-message.ts`. The
+restraint reaches `body`; the drop reaches the field. Neither alone covers both.
 
 `onFirstConversation` on the definition is the one declaration - `'allowed' | 'suppressed'` -
 so a new intention must answer it or fail `tsc`; nothing in `derive.ts` branches on a key, and
@@ -254,8 +263,9 @@ carried on `RuntimeContext.firstConversation`.
 the guest's sign-off AND the model's goodbye (`closesFirstConversation`); otherwise the pause
 timer sends it, for any first Instagram conversation, scanned or not.
 
-**After a warm close, no question until the guest is two messages past it**
-(`isQuietAfterWarmClose`, `warm-close.ts`). It has the brake's shape: nothing renders, nothing
+**After a warm close, no question until the guest is two messages past it AND one reply of
+ours has reached them in between** (`isQuietAfterWarmClose`, `warm-close.ts`); two messages
+five seconds apart are answered by one reply, which is still the very next one. It has the brake's shape: nothing renders, nothing
 is recorded, so every intention comes back open. Not limited to a first conversation.
 
 **`deriveOpenIntentions` applies the first-conversation policy TWICE and neither is

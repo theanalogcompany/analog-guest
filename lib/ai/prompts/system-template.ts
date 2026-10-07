@@ -2175,7 +2175,14 @@ import {
 //   definition records that a wording change did not vary "have you been":
 //   this rule is NOT MEASURED, and that phrasing is the place to look first.
 //
-//   NOT PART OF THIS BUMP but shipped beside it: which questions a first
+//   ALSO IN THIS BUMP, in the user prompt rather than this template: a
+//   standalone `## No questions this turn` block (NO_QUESTION_RESTRAINT in
+//   serializers.ts), rendered on a first-conversation turn or a turn inside
+//   the quiet after a warm close when NO intentions block renders. It carries
+//   the instruction FIRST_CONVERSATION_RESTRAINT carries inside that block,
+//   on the turns that block no longer exists.
+//
+//   NOT PROMPT TEXT but shipped beside it: which questions a first
 //   conversation may raise, and when (lib/agent/intentions/definitions.ts).
 //   That moves what a scenario can raise, so a harness diff across this
 //   version is a BASELINE RESET, not a regression.

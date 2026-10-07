@@ -62,6 +62,7 @@ import {
   renderableIntentions,
   type OpenIntention,
 } from '@/lib/agent/intentions/derive'
+import { hasAnsweredGuestBefore } from '@/lib/agent/retrieval-context'
 import {
   INTENTION_DEFINITION_BY_KEY,
   INTENTION_KEYS,
@@ -434,6 +435,8 @@ async function main(): Promise<void> {
         recordedOrderTimes: orderOnRecord ? [orderAt] : [],
         rows: { prompted, eligible: [] },
         inboundTimes: [receivedAt],
+        // The in-memory thread, read the way production reads the stored one.
+        venueHasAnsweredBefore: hasAnsweredGuestBefore(history),
         conversationWindowMs: 48 * 60 * 60 * 1000,
         inboundHistoryFrom: new Date(startedAt.getTime() - 14 * MS_PER_DAY),
         // TAC-567: true, because every conversation this harness generates IS a

@@ -826,9 +826,24 @@ export async function generateMessage(
           '[ai] generateMessage: dropped an ask, the reply is correcting a reported visit',
         )
       }
+      // TAC-575: a question the model emits on a turn that showed it no
+      // intentions block is dropped rather than folded into the reply. The
+      // field means nothing without the block, exactly as
+      // reportedVisitCorrection does above, and since TAC-575 the block is
+      // absent on purpose on the turns that must carry no question (a guest's
+      // first reply, the replies after a warm close). Nothing was rendered, so
+      // nothing is recorded and nothing closes.
+      const droppedForNoBlock =
+        (input.runtime.openIntentions?.length ?? 0) === 0 &&
+        rawObject.intentionQuestion.trim() !== ''
+      if (droppedForNoBlock) {
+        console.warn(
+          '[ai] generateMessage: dropped an intention question, no intentions block was rendered this turn',
+        )
+      }
       const composed = composeReplyWithIntention(
         rawObject.body,
-        correcting ? '' : rawObject.intentionQuestion,
+        correcting || droppedForNoBlock ? '' : rawObject.intentionQuestion,
       )
       if (composed.duplicateStripped) {
         console.warn(
