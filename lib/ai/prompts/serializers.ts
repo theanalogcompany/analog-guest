@@ -681,7 +681,34 @@ function formatScanArrival(
     scanArrival.hasRecordedVisit
       ? 'There is a recorded visit on file, so you can speak to them as someone who has been in before.'
       : 'There is no recorded visit on file. Don\'t say "welcome back" and don\'t mention a past visit.',
+    ...formatPriorGreetings(scanArrival.priorGreetings ?? []),
   ].join('\n')
+}
+
+/**
+ * TAC-575: the greeting's own last few greetings, as lines not to repeat.
+ *
+ * THIS IS THE ONE PLACE A QUOTED LINE OF OURS IS SHOWN ON PURPOSE. Everywhere
+ * else a quoted example is avoided because it gets copied. Here the lines are
+ * the thing to avoid, the instruction says so in the sentence that introduces
+ * them and again after them, and without them the greeting has nothing to
+ * differ from: it is generated without the earlier conversation (see
+ * PRIOR_GREETING_LIMIT, lib/agent/scan-arrival.ts).
+ *
+ * Each greeting is flattened to one line, so a line break inside a stored
+ * body cannot end the list early or start a new block.
+ */
+function formatPriorGreetings(priorGreetings: readonly string[]): string[] {
+  const lines = priorGreetings
+    .map((g) => g.replace(/\s+/g, ' ').trim())
+    .filter((g) => g !== '')
+  if (lines.length === 0) return []
+  return [
+    '',
+    'You have greeted this guest before. Your last greetings to them, newest first:',
+    ...lines.map((g) => `- ${g}`),
+    'Do not repeat any of these, and do not open the same way. Greet them differently this time.',
+  ]
 }
 
 /**

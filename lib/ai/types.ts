@@ -284,6 +284,12 @@ export type RuntimeContext = {
      * Picks the third greeting instruction (guest-arrived.ts).
      */
     afterComplaint?: boolean
+    /**
+     * TAC-575: this guest's last greetings, newest first. Rendered in
+     * `## Guest just arrived` as lines not to repeat. Absent or empty renders
+     * nothing.
+     */
+    priorGreetings?: string[]
   } | null
   /**
    * TAC-575: this reply is the first of a counter visit by a guest whose last

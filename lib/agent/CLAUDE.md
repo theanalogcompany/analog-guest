@@ -387,7 +387,8 @@ the kind; the serializer renders `## Sign off` or `## Closing this conversation`
   waits while a card is pending. Rules and reasons: `visit-checkin.ts`, last section.
   **Every scan greeting is generated without the earlier thread** (`messagesFromThisVisit`):
   with it, a thread ending on a complaint got that complaint answered again. The
-  measurements and what a greeting gives up: `guest-arrived.ts`.
+  measurements and what a greeting gives up: `guest-arrived.ts`. It is handed its own last
+  three greetings instead, as lines not to repeat (`PRIOR_GREETING_LIMIT`, `scan-arrival.ts`).
 - Three things stop either kind: a check-back still owed, staff in the thread, a complaint
   (`warmCloseBlocker`, before any marker is claimed).
 - **"The same visit" is two hours, not the day.** The check-in row is keyed on the

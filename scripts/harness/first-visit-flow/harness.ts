@@ -39,6 +39,7 @@ import {
   resolveSameVisitOrderAt,
   type VisitCheckin,
 } from '@/lib/agent/visit-checkin'
+import { latestGreetings } from '@/lib/agent/scan-arrival'
 import { isQuietAfterWarmClose } from '@/lib/agent/warm-close'
 import { categoryInstructionsFor } from '@/lib/ai/prompts/categories'
 import { runtimeToProse } from '@/lib/ai/prompts/serializers'
@@ -1352,6 +1353,65 @@ check(
   'CONTROL: a thread that is all from this visit is kept whole',
   messagesFromThisVisit(thread.slice(2), NOW).length,
   1,
+)
+
+// ---------------------------------------------------------------------------
+// 9. A greeting's own earlier greetings.
+// ---------------------------------------------------------------------------
+
+const greetingRows = [
+  { id: 'g5', generationId: 'gen-5', body: 'fifth', createdAt: at(-1 * DAY) },
+  {
+    id: 'g4b',
+    generationId: 'gen-4',
+    body: 'second bubble',
+    createdAt: at(-2 * DAY + 2),
+  },
+  {
+    id: 'g4a',
+    generationId: 'gen-4',
+    body: 'fourth,',
+    createdAt: at(-2 * DAY),
+  },
+  { id: 'g3', generationId: null, body: 'third', createdAt: at(-3 * DAY) },
+  { id: 'g2', generationId: 'gen-2', body: '   ', createdAt: at(-4 * DAY) },
+  { id: 'g1', generationId: 'gen-1', body: 'first', createdAt: at(-5 * DAY) },
+]
+check(
+  'prior greetings: the newest three, bubbles joined in order, blanks skipped',
+  latestGreetings(greetingRows),
+  ['fifth', 'fourth, second bubble', 'third'],
+)
+check('prior greetings: none on file', latestGreetings([]), [])
+const withPriors = prose(
+  {
+    scanArrival: {
+      hadPriorConversation: true,
+      hasRecordedVisit: true,
+      priorGreetings: ['hey, good to see you! what did you get?'],
+    },
+  },
+  'guest_arrived',
+)
+check(
+  'greeting with priors: shown as lines not to repeat',
+  withPriors.includes('- hey, good to see you! what did you get?') &&
+    withPriors.includes('Do not repeat any of these'),
+  true,
+)
+check(
+  'CONTROL greeting with no priors: no such lines',
+  prose(
+    {
+      scanArrival: {
+        hadPriorConversation: true,
+        hasRecordedVisit: true,
+        priorGreetings: [],
+      },
+    },
+    'guest_arrived',
+  ).includes('Do not repeat any of these'),
+  false,
 )
 
 console.log(

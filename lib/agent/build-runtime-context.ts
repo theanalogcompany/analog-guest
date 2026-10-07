@@ -45,7 +45,7 @@ import { loadComplaintCheckins, loadVisitCheckin } from './visit-checkin-store'
 // "first conversation". warm-close.ts is pure and builds no client at import.
 import { hasAnsweredGuestBefore, reachedGuest } from './retrieval-context'
 import { isFirstConversation, isQuietAfterWarmClose } from './warm-close'
-import { loadScanCarryForward } from './scan-arrival-store'
+import { loadPriorGreetings, loadScanCarryForward } from './scan-arrival-store'
 import {
   resolveConversationChannel,
   venueMessagingNumberRequired,
@@ -1095,6 +1095,18 @@ export async function buildRuntimeContext(input: {
     const scannedOnAnEarlierDay =
       scanDayKeys !== null &&
       [...scanDayKeys].some((dayKey) => dayKey !== todayKey)
+    // TAC-575: the greeting's own last few greetings, so a regular does not
+    // get the same sentence every visit. An unreadable read is "none".
+    const priorGreetings = await loadPriorGreetings(
+      supabase,
+      input.venueId,
+      input.guestId,
+    )
+    if (!priorGreetings.ok) {
+      console.warn(
+        `[agent] buildRuntimeContext: prior greetings unreadable for guest ${input.guestId}: ${priorGreetings.error}. This greeting may repeat an earlier one.`,
+      )
+    }
     scanArrival = {
       hadPriorConversation:
         input.followupTrigger.instagramScanArrival?.hadPriorConversation ===
@@ -1105,6 +1117,7 @@ export async function buildRuntimeContext(input: {
         scannedOnAnEarlierDay,
       afterComplaint:
         input.followupTrigger.instagramScanArrival?.afterComplaint === true,
+      priorGreetings: priorGreetings.ok ? priorGreetings.data : [],
     }
   }
 
