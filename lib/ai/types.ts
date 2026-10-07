@@ -770,8 +770,10 @@ export type GenerateMessageResult = {
   /**
    * Whether a getting-to-know-you question was dropped because the reply it
    * would have followed carries a link or a commitment (ruled 2026-10-07: never
-   * in a reply that sends a link or makes a recommendation). Same countability
-   * contract as the flag above. `false` at the synthetic construction sites.
+   * in a reply that sends a link or makes a recommendation). Carried like the
+   * flag above, and like it read by no production code yet: the firing rate
+   * today is the warn line generateMessage logs, plus the measurement replay.
+   * `false` at the synthetic construction sites.
    */
   intentionQuestionDroppedForTaskDraft: boolean
   /**

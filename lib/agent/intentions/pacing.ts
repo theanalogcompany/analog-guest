@@ -19,8 +19,9 @@ import type { PromptedIntentionRow } from './load'
 //   1. ONE OPEN QUESTION AT A TIME. While the last one asked in this
 //      conversation is unanswered, none is raised. An ignored question ends the
 //      asking for that conversation.
-//   2. ONLY ON A RELAXED TURN. Never in a reply that answers a question, sends
-//      a link or makes a recommendation.
+//   2. ONLY ON A RELAXED TURN. Never in a reply to a guest who is asking for
+//      something, and never in one that sends a link or makes a
+//      recommendation. (A guest ANSWERING something of ours is a relaxed turn.)
 //   3. A CEILING PER CONVERSATION. Two, or three for a guest who is engaged.
 //
 // Rules 1 and 3 are decided in deriveOpenIntentions from recorded state. Rule 2
@@ -162,18 +163,30 @@ function median(values: readonly number[]): number | null {
  *     rides on the reply to an answer; the next relaxed turn may carry one.
  *   - their_rhythm and why_theyre_here store no answer (`isSatisfied` is
  *     `() => false`). Once either is asked, it reads unanswered for the rest of
- *     the conversation and nothing follows it. The closed direction, and they
- *     are the last two in line.
+ *     the conversation and nothing follows it. The closed direction. Their
+ *     reply counts (8 and 11) put them late, but nothing makes them last: with
+ *     an earlier line rendered beside one, the model may take the later one.
+ *   - An answer the model does not write down reads as no answer. "yep" to
+ *     "do you live nearby?" names no place, so home_base may stay empty and
+ *     the question reads as ignored. `lastAskedAnswered` is logged every turn;
+ *     measure it before trusting the ceiling.
  *
  * KNOWN LIMIT. A prompted row is written after the send, by a classifier call.
  * A guest who replies inside that gap is derived against no row, so rule 1
  * does not see the question yet. Prompted-once closure has the same gap.
  *
+ * A QUESTION HELD FOR AN OPERATOR IS NOT SEEN EITHER. A queued draft has no
+ * prompted row until it is dispatched, so a second turn drafted while the
+ * first card is pending derives as if nothing had been asked.
+ *
  * ENGAGED, approved 2026-10-07: every question asked so far has its answer on
  * file, AND the guest has either asked us something or writes at length
  * (ENGAGED_MEDIAN_WORDS), judged on their messages since our first question in
  * this conversation. Being engaged lifts the ceiling from two to three and
- * lifts nothing else: rule 1 is checked first.
+ * lifts nothing else: rule 1 is checked first. "Asked us something" is
+ * looksLikeQuestion, which also fires on an opener word with no question
+ * behind it ("will do", "how nice"), and one such message counts for the rest
+ * of the conversation.
  */
 export function derivePacing(input: {
   prompted: readonly PromptedIntentionRow[]

@@ -383,8 +383,11 @@ and reasons: `intentions/pacing.ts`.
 | two per conversation, three if engaged | `deriveOpenIntentions` | prompted rows, the guest's messages |
 
 - **A hold writes and closes nothing**, like the brake. `ctx.intentionDerivation.pacing`
-  carries the reason and the engaged verdict and is logged every turn; the draft drop reports
-  on `intentionQuestionDroppedForTaskDraft`.
+  carries the reason and the engaged verdict and is logged every turn. The draft drop sets
+  `intentionQuestionDroppedForTaskDraft` and logs a warn line; nothing in production counts
+  the flag yet.
+- **A question in a card still waiting on an operator is invisible to these rules.** It has
+  no prompted row until it is dispatched.
 - **The turn that carries an answer never asks.** The fact is written inside that turn,
   after derivation.
 - **`their_rhythm` and `why_theyre_here` store no answer**, so once either is asked nothing
