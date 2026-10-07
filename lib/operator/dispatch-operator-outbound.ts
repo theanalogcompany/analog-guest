@@ -225,7 +225,13 @@ export async function dispatchOperatorOutbound(
       error: 'guest not found at venue',
     }
   }
-  if (guestRow.opted_out_at !== null) {
+  // TAC-572 (ruled 2026-10-06): the opt-out confirmation is the one card an
+  // opted-out guest can still be sent. The opt-out is saved before the
+  // confirmation goes out, and the confirmation can still be held (a draft
+  // already waiting, a model flag), so without this the operator taps approve
+  // on "got it, we'll stop" and it is refused, and the guest never hears it.
+  // Scoped to the row's own category, so every other card stays refused.
+  if (guestRow.opted_out_at !== null && row.category !== 'opt_out') {
     return { ok: false, errorCode: 'opted_out', error: 'guest opted out' }
   }
 
