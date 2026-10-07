@@ -29,7 +29,7 @@ open goal. Those belong to the universal layer.
 
 ## Universal voice rules
 
-Currently R1 through R39 in `SYSTEM_TEMPLATE`. **Check the file for the count and never
+Currently R1 through R40 in `SYSTEM_TEMPLATE`. **Check the file for the count and never
 trust a number quoted elsewhere, including this sentence.**
 
 Numbering is **positional and append-only.** Never insert mid-list and never reuse a
@@ -125,7 +125,7 @@ The emoji directive keeps its own last-block position, separately measured.
   exact trigger. **R23's carve-out looks redundant and is not:** R23 renders after R21, so on
   most-proximate-wins it beats the recognition clause, and its own "you come in so often"
   example pulls the model the other way. Delete it and the change is silently vetoed. Not
-  counter-scoped: `scanArrival` is set only on the five-minute greeting cron, and TAC-536's
+  counter-scoped: `scanArrival` is set only on the delayed scan greeting, and TAC-536's
   carry-forward reaches `visitConfirmedAt`, which goes to intention arming and never to the
   prompt. Full reasoning is the v1.75.0 header in `system-template.ts`.
 - **SHIPPED UNDER ITS BAR, on a reading of the bodies rather than a rate** (ruled

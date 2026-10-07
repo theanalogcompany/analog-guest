@@ -44,9 +44,8 @@
 //     in the thread and in the agent's history. ACCEPTED, not fixed.
 //   - A STOP received while the gate was shut was never classified. DONE
 //     2026-09-20: every Instagram inbound row read, none is an opt-out. Opt-out
-//     is still not recorded on any channel (TAC-475), so an Instagram guest who
-//     says STOP from here on is handled only by the classifier inside the agent
-//     run this flip turns on, and PR B still records a follow-up task for them.
+//     is recorded since TAC-572 (lib/guests/opt-out.ts): the agent run this
+//     flip turns on classifies the STOP and writes guests.opted_out_at.
 //   - The icebreaker titles (TAC-492). A QR guest's first message is the title
 //     of the icebreaker they tapped, which lives in Meta's settings and nowhere
 //     in this repo. RULED 2026-09-19: keep every title a greeting. A question-
@@ -114,10 +113,11 @@ export const INSTAGRAM_AGENT_REPLIES_ENABLED: boolean = true
  *
  *   run               hand this message to the agent; it records its own outcome
  *   schedule_arrival  TAC-536: a scan with no message. Nothing is generated
- *                     now; a pending row is written and the cron decides five
- *                     minutes later. The LEDGER ROW IS WRITTEN THEN, not here,
- *                     because the turn is still open — a guest who writes
- *                     within those five minutes is answered by that message's
+ *                     now; a pending row is written and it is decided about
+ *                     twenty seconds later, by the webhook's own fast path or
+ *                     the cron behind it. The LEDGER ROW IS WRITTEN THEN, not
+ *                     here, because the turn is still open — a guest who
+ *                     writes within that delay is answered by that message's
  *                     own turn, and a greeting for this one never happens.
  *   record            a turn the agent will never see — the route writes the row
  *   not_a_turn        not an inbound turn at all, and recording it would inflate

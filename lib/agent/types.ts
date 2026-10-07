@@ -22,8 +22,10 @@ import type {
 } from '@/lib/schemas'
 import type { ApprovalPolicy } from '@/lib/schemas/approval-policy'
 import type { MessageChannel } from '@/lib/schemas/message-channel'
+import type { ReOptIn } from '@/lib/guests/opt-out'
 import type { AlertContext } from './alerts'
 import type { Visit } from './extract-recent-visits'
+import type { RetractableReportedVisit } from './retract-reported-visit'
 import type { NewlyEligibleIntention, OpenIntention } from './intentions/derive'
 
 export type { AlertContext }
@@ -390,6 +392,16 @@ export interface RuntimeContext {
    * must not reach.
    */
   firstConversation: boolean
+  /**
+   * TAC-572: this turn opted the guest back in, and which way. Null on every
+   * other turn, and null as built: handleInbound sets it after classification,
+   * once decideOptOutTurn (lib/guests/opt-out.ts) has cleared the opt-out.
+   *
+   * One reader: buildAiRuntime threads it to the serializer, which renders the
+   * line telling the model not to frame the reply as a return. Without it the
+   * history's own "stop messaging me" invites exactly that.
+   */
+  reOptIn: ReOptIn | null
   recognition: RecognitionSnapshot
   // Mechanics this guest is currently eligible for. Filtered at load time in
   // build-runtime-context.ts by guest's recognition state and redemption
@@ -401,6 +413,13 @@ export interface RuntimeContext {
   // when no qualifying transactions on file. TAC-234 (replaces THE-229's
   // single-visit projection).
   recentVisits: Visit[]
+  // TAC-573: the visits this guest told us about in THIS conversation that
+  // they could still take back: guest-reported, inside conversationWindowMs,
+  // not on a day they scanned. Empty on every followup run and on almost every
+  // inbound. Non-empty is what renders the `## Visit they told you about`
+  // block, and it is the only set retractReportedVisits will touch. See
+  // retract-reported-visit.ts.
+  retractableReportedVisits: RetractableReportedVisit[]
   // TAC-297: open + pending_ack commitments for this guest at this venue.
   // Loaded by build-runtime-context.ts via findActiveCommitmentsForGuest and
   // projected through toActiveCommitment. Surfaced as the ## Active commitments
@@ -541,4 +560,20 @@ export type AgentResult =
   // their own processors, and never construct an AgentResult for a halted
   // venue at all.
   | { status: 'venue_halted'; venueStatus: string }
+  // TAC-572: the guest is opted out and this message does not opt them back
+  // in, so the agent did not reply. An SMS guest who sent anything but START,
+  // or an Instagram guest whose message needed no answer ("thanks" after the
+  // confirmation). Ruled 2026-10-06: silence, not a reply.
+  //
+  // A SEPARATE MEMBER for the reason 'venue_halted' is one: 'silenced' means a
+  // card was already waiting, and reusing it would make its docstring false.
+  //
+  // Recorded as outcome 'not_run' with reason 'guest_opted_out', the value
+  // migration 064 added for the scan greeting. Classification DID run here
+  // (the Instagram rule needs the category, and a crisis message must still
+  // reach the crisis reply), so 'not_run' means no reply was attempted, as it
+  // does for a suppressed scan greeting.
+  //
+  // Only handleInbound produces it.
+  | { status: 'guest_opted_out' }
   | { status: 'failed'; stage: AlertContext['stage']; error: string }

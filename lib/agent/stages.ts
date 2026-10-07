@@ -2902,6 +2902,11 @@ export function buildAiRuntime(
     // opt_out skip) and on non-emptiness. recognition state is surfaced as
     // a `Guest relationship: <state>` line near the inbound framing.
     recentVisits: ctx.recentVisits,
+    // TAC-573: only the item names cross into the AI module. The ids stay on
+    // the agent side, where retractReportedVisits reads them off ctx.
+    reportedVisits: ctx.retractableReportedVisits.map((v) => ({
+      items: v.items,
+    })),
     recognition: { state: ctx.recognition.state },
     // TAC-296: thread parsed guest context (post-filterActiveLifeContext +
     // observations-truncated) through to the AI module. The serializer
@@ -2922,6 +2927,8 @@ export function buildAiRuntime(
     // the prompt and the derivation cannot disagree about which turn is a first
     // conversation.
     firstConversation: ctx.firstConversation,
+    // TAC-572: null on every turn but the one that opted the guest back in.
+    reOptIn: ctx.reOptIn ?? undefined,
     // TAC-389: only handle-operator-decline.ts sets this, on the trigger it
     // hands to buildRuntimeContext. Every other path (inbound, cron follow-up,
     // ordinary Command Center manual follow-up) leaves it false, so the

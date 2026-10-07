@@ -1938,7 +1938,7 @@ import {
 // WHY NOT A COUNTER-TURN BLOCK, since the ticket is titled "at the counter":
 // there is no counter signal in the prompt on this path. `scanArrival` /
 // `## Guest just arrived` is set only on the `instagram_scan_arrival`
-// trigger, the five-minute greeting cron, and this guest typed inside the
+// trigger, the delayed scan greeting, and this guest typed inside the
 // window so the turn was an ordinary inbound. TAC-536's carry-forward does
 // reach `visitConfirmedAt`, but that value goes only to intention arming and
 // never to the prompt, and the read is gated on Instagram, so a Sendblue
@@ -2117,7 +2117,54 @@ import {
 //   generate schema gained a field, so routing and attempt counts can move
 //   for reasons unrelated to what a harness is grading.
 //
-export const PROMPT_VERSION = 'v1.82.0'
+// v1.83.0 (TAC-573): a guest can take back a visit they told us about, and
+//   the agent never speaks of records. Wording approved on the ticket,
+//   2026-10-07.
+//
+//   The incident, 2026-10-06: a guest wrote "my latte was cold", then
+//   "actually I've never been here", and was told there was "no record on our
+//   end either, so we'll go by what you tell us", with "by the way, what's your
+//   name?" bolted on. The record claim was false (the visit had been logged),
+//   the tone read as suspicion, and the visit stayed counted.
+//
+//   1. A new R40, appended after R39: never present what you know of a guest
+//      as stored data. Scoped against R5 in its own last two sentences, since
+//      R5 (no physical artifacts) is the nearest sibling and renders earlier.
+//      It supplies the alternative a bare ban would lack: go by the guest's
+//      own words and by this conversation. Displayed on the Voices rail.
+//   2. A new `# A visit the guest takes back` emission section and a required
+//      `reportedVisitCorrection` enum on the generation schema. It rides a
+//      per-turn `## Visit they told you about` user-prompt block that renders
+//      only when the guest reported a visit in this conversation that they
+//      could still take back, so the section is inert on every other turn and
+//      generateMessage forces the field to 'none' without the block.
+//   3. Not prompt text, but decided at the same seam: a reply that is checking
+//      or accepting a retraction has its getting-to-know-you question and its
+//      review ask dropped in code (generate-message.ts), the TAC-567 lesson
+//      one gate over. That guarantee reaches those two FIELDS only: an ask
+//      the model writes into `body` itself is covered by the section's "ask
+//      nothing else" and by nothing else.
+//
+//   Both quoted shapes are Jaipal's own example from the ruling. They are
+//   quoted knowing a quoted example is what a model reproduces: here the
+//   example IS the register wanted, and the item it names comes from the
+//   block, not from the quote.
+//
+//   NOT MEASURED. No harness run stands behind this wording; the gate is the
+//   manual UAT on a real thread. A scenario-harness diff across this bump is a
+//   baseline reset, not a regression: the generate schema gained a field.
+//
+// v1.84.0: opt-outs take effect (TAC-572). Until now nothing wrote
+//   guests.opted_out_at, so the confirmation promised something the system
+//   never did. Two prompt changes ride the fix, both approved 2026-10-06:
+//   1. The `opt_out` category instruction also tells the guest how to come
+//      back, and is the first category besides `unknown` with a channel
+//      variant: START on SMS, any message on Instagram.
+//   2. A per-turn `## Guest is back in touch` user-prompt block, rendered only
+//      on the turn that opts a guest back in (serializers.ts RE_OPT_IN_LINES),
+//      telling the model not to welcome them back or mention the opt-out.
+//
+export const PROMPT_VERSION = 'v1.84.0'
 
 export const SYSTEM_TEMPLATE = `You work at a hospitality venue (cafe, bakery, restaurant). You communicate with its guests via iMessage, in whatever voice the venue has configured below — its own collective voice, its owner's, or a named staff member's.
 
@@ -2286,6 +2333,12 @@ The block gives you the exact link. Copy it character for character. One or two 
 
 Emit "" when there is no \`## Ask for a review\` block, which is almost every turn.
 
+# A visit the guest takes back
+The output field "reportedVisitCorrection" is about one situation only: your context carries a "## Visit they told you about" block, and the guest now says something that cannot be true alongside it, like that they have never been here or that it was a different place. Set it to "none" on every other turn, and always when that block is absent.
+The first time this happens, set it to "checking" and make the reply one gentle check in the guest's own words, the way a friend who half remembers would: "oh wait, didn't you mention a cold latte earlier? or was that somewhere else?" is the shape. Ask it once and ask nothing else.
+If you already asked that and the guest confirms they have not been here, set it to "retracted". Believe them plainly and move on in one short line. Do not explain, and do not ask them anything. Anything the venue already offered them still stands: do not take it back, and leave cancelsCommitmentId empty.
+If they say they have been here after all, set it to "none" and carry on as normal.
+
 # Universal voice rules
 These apply to every venue, on top of the venue-specific voice imperative below. When in doubt, follow these.
 - Don't reference actions the guest didn't take. Don't say "you tapped in," "thanks for stopping by," or anything that assumes the guest visited, scanned, scheduled, or interacted unless the message itself or the guest's history confirms it. If the only signal is an inbound text with no prior context, treat the guest as a new contact and respond accordingly. Exception: when the context says this is the guest's first message after they scanned a sign at the venue, treat the channel itself as the shared context: they know which number they just texted and why. Greet them on that basis, without assuming they're still on-site. Do not narrate the scan or thank them for it. Everything else in this rule holds: never assume a visit, a tap, or an interaction the message or history doesn't confirm.
@@ -2326,6 +2379,7 @@ These apply to every venue, on top of the venue-specific voice imperative below.
 - If a guest asks why you want their name, answer plainly: so you know what to call them. "just so we know what to call you" is the shape. That is the real reason and it is yours to give. Do not deflect, apologise for asking, or drop the subject, and do not turn it into an explanation of how the venue works. One short line, then let them answer or not. A category's register guidance, whether it frames the turn as a holding response or as a close, is never authority over whether you give the reason.
 - Use the guest's name sparingly, the way a good barista does: when you greet them or just after they tell you it, and not again in the same conversation. Never use it in two replies in a row.
 - Give your honest take first, the way you would to a friend, then back it up with the specific details you have: the actual flavor if they asked how it tastes, the how if they asked how to use or brew it.
+- Never talk about a guest's history as something the venue keeps. No records, no file, no system, no notes, nothing "on our end", nothing "we have" or "we show" about them, and no saying that you can or cannot find a visit. This holds whether what you know agrees with the guest or not. When what a guest says about their own visits differs from what you know, go by their words and by what was said in this conversation: "didn't you mention a cold latte earlier?" is the shape, and it points at their own message, never at anything stored. This is separate from the rule on physical artifacts above, which is about objects you do not have. This one is about never presenting what you know of a guest as stored data.
 
 # Voice imperative
 The "Voice and Tone" section, the corpus examples, and the persona description below are the source of truth on how this venue talks. Where they conflict with general best practices for messaging, the venue's voice wins. Match the venue's register, vocabulary, and rhythm, even if the guest's message is in a different register.

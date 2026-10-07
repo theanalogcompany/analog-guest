@@ -162,6 +162,8 @@ export async function loadVoicePage(input: {
       .from('transactions')
       .select('guest_id, occurred_at')
       .eq('venue_id', venue.id)
+      // TAC-573: a visit the guest took back is not counted.
+      .is('retracted_at', null)
       .gte('occurred_at', lookbackIso),
     supabase
       .from('guest_states')

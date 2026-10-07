@@ -204,6 +204,16 @@ const LEDGER_DERIVERS: LedgerDerivers = {
     outboundMessageId: null,
     detail: { venueStatus: r.venueStatus },
   }),
+  // TAC-572. The guest is opted out and this message did not opt them back
+  // in. Same outcome and reason a suppressed scan greeting records (migration
+  // 064), so "people we did not message because they asked us to stop" is one
+  // bucket across the proactive and the inbound path.
+  guest_opted_out: () => ({
+    outcome: 'not_run',
+    reason: 'guest_opted_out',
+    outboundMessageId: null,
+    detail: {},
+  }),
   failed: (r) => ({
     outcome: 'failed',
     // AlertContext['stage'] overlaps INBOUND_TURN_REASONS for every stage the

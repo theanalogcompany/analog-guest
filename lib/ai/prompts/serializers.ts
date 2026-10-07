@@ -9,6 +9,7 @@ import {
   type VenueInfo,
   type VenueServices,
 } from '@/lib/schemas'
+import type { ReOptIn } from '@/lib/guests/opt-out'
 import type { MessageChannel } from '@/lib/schemas/message-channel'
 import type { EmojiDirective } from '../emoji-cadence'
 import {
@@ -1058,6 +1059,26 @@ function formatVisitHistory(
     .join('\n')
 }
 
+// TAC-573: the visit this guest told us about earlier in THIS conversation,
+// which is the only thing they can contradict and take back. Rendered only
+// when lib/agent/retract-reported-visit.ts found one, so the
+// `reportedVisitCorrection` instructions in the system prompt are inert on
+// every other turn. It says "told you", never anything about what is stored:
+// the block is the model's source for the gentle check, and R40 forbids
+// pointing a guest at records.
+function formatReportedVisits(
+  visits: readonly { items: string[] }[],
+): string | null {
+  if (visits.length === 0) return null
+  const items = [...new Set(visits.flatMap((v) => v.items))]
+  return [
+    '## Visit they told you about',
+    items.length > 0
+      ? `Earlier in this conversation the guest told you they had: ${items.join(', ')}.`
+      : 'Earlier in this conversation the guest told you about a visit here.',
+  ].join('\n')
+}
+
 // Category gate for the Visit History block. Welcome is the first-contact
 // NFC-tap reply (no prior visits to reference by definition); opt_out is a
 // stop-messaging acknowledgment where prior orders aren't relevant. All
@@ -1793,6 +1814,26 @@ function formatOpenIntentions(
 }
 
 /**
+ * TAC-572: the turn that opts a guest back in after an opt-out. Both texts were
+ * approved verbatim on 2026-10-06; changing either is a copy change.
+ *
+ * Why it exists: the history still holds the guest's "stop messaging me" and
+ * our confirmation, and with nothing said the model reads that and opens with
+ * a welcome back (the Oct 6 phone test). The `satisfies` makes a third way of
+ * opting back in fail `tsc` here rather than render no line.
+ */
+const RE_OPT_IN_LINES = {
+  instagram:
+    'This guest previously asked not to be messaged and has now written again. Reply to what they wrote as you would to any guest. Do not welcome them back, do not mention that they had asked you to stop, and do not comment on their return.',
+  sms_start:
+    'The guest has just texted START to hear from you again. Reply in one short line. Do not mention that they had opted out or asked you to stop.',
+} as const satisfies Record<ReOptIn, string>
+
+function formatReOptIn(reOptIn: ReOptIn): string {
+  return ['## Guest is back in touch', '', RE_OPT_IN_LINES[reOptIn]].join('\n')
+}
+
+/**
  * The once-ever review-ask block (v1.82.0). Rendered only when the runtime
  * carries `reviewAsk`, which lib/agent/review-ask.ts sets on an eligible
  * praise turn and nothing else sets, so this block cannot appear on a
@@ -1995,6 +2036,13 @@ export function runtimeToProse(
     const block = formatVisitHistory(runtime.recentVisits, now)
     if (block) blocks.push(block)
   }
+  // TAC-573: sits directly under ## Visit history, which lists the same visit
+  // among the others. No category gate: a guest can contradict themselves
+  // under any category, and the block is absent on almost every turn anyway.
+  if (runtime.reportedVisits && runtime.reportedVisits.length > 0) {
+    const block = formatReportedVisits(runtime.reportedVisits)
+    if (block) blocks.push(block)
+  }
   // TAC-296: ## Guest context sits between visit history and recent
   // conversation. Reading order continued: ... what they've recently bought →
   // what we know about them as a person → what was recently said. Block is
@@ -2082,6 +2130,13 @@ export function runtimeToProse(
   // TAC-519's measured one — asks raise from last position, not from third.
   if (runtime.reviewAsk) {
     blocks.push(formatReviewAsk(runtime.reviewAsk))
+  }
+
+  // TAC-572: after both asks and before the emoji directive, which keeps its
+  // own measured last position. Late on purpose (later beats earlier): the
+  // thing it overrides is the history, which the model has just read.
+  if (runtime.reOptIn) {
+    blocks.push(formatReOptIn(runtime.reOptIn))
   }
 
   // TAC-362: last block in, so it is the most-proximate instruction before

@@ -281,7 +281,8 @@ export type SendFailureCardResult =
  * Write the reply that didn't go out as a card (rule 4). Never throws.
  *
  * Mirrors the crash card (persistGenerationFailureCard in handle-inbound.ts):
- *   - a guest who opted out gets no card;
+ *   - a guest who opted out gets no card, unless this reply is the opt-out
+ *     confirmation (TAC-572);
  *   - the slot rule is `never_regen`. The gate had already said send, so its
  *     own slot held nothing it cared about, or a knowledge-gap card it lets an
  *     auto-send go out beside (TAC-308). Overwriting that card would destroy
@@ -311,7 +312,11 @@ export async function writeInstagramSendFailureCard(input: {
       .select('opted_out_at')
       .eq('id', ctx.guest.id)
       .maybeSingle()
-    if (guestRow?.opted_out_at) return { ok: false, skipped: 'opted_out' }
+    // TAC-572: except the opt-out confirmation itself. The opt-out is saved
+    // before the confirmation sends, so without this a confirmation Meta
+    // refused would vanish with no card, on the one turn the guest is owed it.
+    if (guestRow?.opted_out_at && ctx.classification?.category !== 'opt_out')
+      return { ok: false, skipped: 'opted_out' }
 
     const generation: GenerateMessageResult = input.carrier
       ? input.generation
