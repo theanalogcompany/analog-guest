@@ -67,10 +67,11 @@ export type RecordAskedResult =
   | { ok: false; error: string }
 
 /**
- * Record that the question reached the guest.
+ * Open this visit's check-in: the question reached the guest, or their order
+ * message already answered it (`answer` set, see orderTurnVerdict).
  *
- * A plain INSERT with no ON CONFLICT, so a second ask in one visit surfaces as
- * 23505 instead of quietly overwriting when the first was asked.
+ * A plain INSERT with no ON CONFLICT, so a second one in a visit surfaces as
+ * 23505 instead of quietly overwriting the first.
  */
 export async function recordVisitCheckinAsked(
   supabase: AdminSupabaseClient,
@@ -81,6 +82,8 @@ export async function recordVisitCheckinAsked(
     orderMessageId: string | null
     orderedAt: Date
     askedAt: Date
+    /** Only when the order message itself said how it is. */
+    answer?: VisitCheckinAnswer
   },
 ): Promise<RecordAskedResult> {
   try {
@@ -91,6 +94,9 @@ export async function recordVisitCheckinAsked(
       order_message_id: args.orderMessageId,
       ordered_at: args.orderedAt.toISOString(),
       asked_at: args.askedAt.toISOString(),
+      ...(args.answer === undefined
+        ? {}
+        : { answer: args.answer, answered_at: args.askedAt.toISOString() }),
     })
     if (!error) return { ok: true, data: 'recorded' }
     if (error.code === UNIQUE_VIOLATION)

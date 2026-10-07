@@ -9,6 +9,8 @@
 //
 //   A guest scans at the counter and is asked what they got.
 //   They name it. The reply receives the order and asks how it is so far.
+//   (If their own message already says how it is, that is recorded and the
+//   question is not asked.)
 //   What they say back is read as good, bad or not yet, and a row in
 //   `visit_checkins` (migration 073) carries that for the rest of the visit:
 //   the sign-off, the check-back and the next-visit follow-up all read it.
@@ -57,6 +59,13 @@ export const CHECKIN_ANSWER_WINDOW_MS = 2 * 60 * 60 * 1000
  * turn can tell? Null when the turn is not that moment.
  *
  * ALL OF:
+ *   the guest is answering us. Our last message to reach them asked something,
+ *     which on a counter visit is "what did you get?" from the greeting or the
+ *     opener. This is the same trigger R21's compliment exception names ("the
+ *     guest is answering your own question about what they just got"), and it
+ *     is what separates an order from a menu word. A live scan alone does not:
+ *     the scan carries forward for up to half an hour, and "do you still have
+ *     the iced sofi?" inside it names a menu item and reports nothing;
  *   a counter visit is live for this turn. On Instagram that is a scan on this
  *     message or one carried forward (`scanAt`); on a text thread it is a
  *     guest the counter sign created inside COUNTER_ARRIVAL_WINDOW_MS;
@@ -80,9 +89,12 @@ export function resolveSameVisitOrderAt(input: {
   guestCreatedAt: Date
   inboundAt: Date
   mentionsMenuItem: boolean
+  /** Our last message to reach the guest asked them something. */
+  answeringOurQuestion: boolean
   alreadyAskedThisVisit: boolean
 }): Date | null {
   if (!input.mentionsMenuItem) return null
+  if (!input.answeringOurQuestion) return null
   if (input.alreadyAskedThisVisit) return null
   if (input.scanAt !== null) return input.inboundAt
   const sinceCreated =
@@ -93,6 +105,60 @@ export function resolveSameVisitOrderAt(input: {
     sinceCreated >= 0 &&
     sinceCreated <= COUNTER_ARRIVAL_WINDOW_MS
   return atTheCounter ? input.inboundAt : null
+}
+
+/** What to do with a message that named the order, once it is classified. */
+export type OrderTurnVerdict =
+  /** Ask how it is. */
+  | 'ask'
+  /** They already said it is good. Record that; asking would be asking twice. */
+  | 'good'
+  /** They are already complaining about it. Record that; the complaint path runs. */
+  | 'bad'
+  /** Not an order report after all. Ask nothing, record nothing. */
+  | 'skip'
+
+/**
+ * The categories an order report classifies as. Measured, not assumed:
+ * lib/ai/prompts/CLAUDE.md records "just got a X" as casual_chatter and
+ * "got a X" as acknowledgment, four of four each.
+ *
+ * AN ALLOW-LIST, against this repo's usual deny-list posture, and the
+ * direction is chosen. Arming is decided before classification from a menu-name
+ * prefilter that was built as a cheapness gate and over-matches on purpose
+ * (any one word of a menu item's name). The classifier is the first thing on
+ * the turn that has actually read the message, so anything it calls a question,
+ * a request or a recommendation ask is not an order report, and asking "how is
+ * it so far?" about a drink the guest does not have is the worse mistake. A
+ * category missing from this list costs one unasked question.
+ */
+const ORDER_REPORT_CATEGORIES: ReadonlySet<string> = new Set([
+  'casual_chatter',
+  'acknowledgment',
+])
+
+/**
+ * The turn that armed the question has now been classified: should it ask?
+ *
+ * Decided here because the arming ran first and could not know. Three things
+ * the classification can say that the prefilter could not:
+ *
+ *   it is a complaint            the order is already going badly. `bad`.
+ *   it already praises the item  "iced sofi, so good" answers the question
+ *                                before it is asked. `good`, and no ask.
+ *   it is not an order report    a question that happens to name a menu item.
+ *                                `skip`.
+ *
+ * Complaint first, for classifyCheckinAnswer's reason: a burst that praises
+ * and complains classifies as a complaint.
+ */
+export function orderTurnVerdict(input: {
+  category: string
+  praisedExperience: boolean
+}): OrderTurnVerdict {
+  if (input.category === 'comp_complaint') return 'bad'
+  if (!ORDER_REPORT_CATEGORIES.has(input.category)) return 'skip'
+  return input.praisedExperience ? 'good' : 'ask'
 }
 
 /**

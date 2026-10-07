@@ -28,8 +28,19 @@ user prompt says on a given turn.
 
 It does **not** show what the model then writes. Whether the reply actually compliments the
 order, asks the required question, or varies its wording is not measured anywhere; the gate
-for those is the device UAT. It also does not exercise `handle-inbound.ts`, so the two
-`visit_checkins` writes (asked, answered) are covered by reading, not by this.
+for those is the device UAT.
+
+It also does not exercise `build-runtime-context.ts` or `handle-inbound.ts`, which need a
+database. So these are covered by reading, not by this harness:
+
+- the `visit_checkins` writes (asked, answered, answered on the order turn);
+- the two guards against asking twice in one visit (`promptedThisVisit`, and the filter that
+  closes the intention once a check-in exists). The first check marked `EXPECTED` shows why
+  they matter: the derivation alone re-arms on a second order event;
+- "our last message asked something", which is computed from stored history.
+
+Two checks are marked `EXPECTED`. They record what the derivation does, not what anyone
+ruled, so that a change to either is noticed.
 
 ## Checks confirmed to fail when their rule is removed
 
@@ -43,5 +54,7 @@ Each was mutated in the source, the harness run, and the source restored (2026-1
 | `bad` final in `nextCheckinAnswer` | bad is final |
 | the already-asked guard in `resolveSameVisitOrderAt` | already asked on this visit |
 | `checkinHold` in `renderableIntentions` | nothing else renders while waiting |
+| the answering-our-question guard in `resolveSameVisitOrderAt` | names a menu item but is not answering |
+| the category allow-list in `orderTurnVerdict` | a question that names a menu item; a recommendation ask |
 
 A check not in that table has not been shown able to fail.

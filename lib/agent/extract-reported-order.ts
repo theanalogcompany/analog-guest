@@ -213,8 +213,8 @@ function bodyContainsWord(normalizedBody: string, word: string): boolean {
  * raw substring containment: "cortados" (plural) still contains "cortado"
  * via the allowed plural-suffix tail, but "sana" no longer contains "san".
  *
- * ASYMMETRY — read before tuning this function further. Its two callers want
- * opposite things from a wrong answer:
+ * ASYMMETRY — read before tuning this function further. Its three callers do
+ * not want the same thing from a wrong answer:
  *   - extractReportedOrder (this file, TAC-323) tolerates a false positive:
  *     it costs one wasted Haiku call that correctly returns zero items. It
  *     is hurt by a false negative: that silently kills order extraction for
@@ -225,6 +225,13 @@ function bodyContainsWord(normalizedBody: string, word: string): boolean {
  *     exact turn it exists to cover, with nothing to signal that it
  *     happened. A false negative there just means the block renders on a
  *     turn where it maybe didn't strictly need to — redundant, not harmful.
+ *   - resolveSameVisitOrderAt (lib/agent/visit-checkin.ts, TAC-575) sides
+ *     with the suppression caller, and more sharply. A false positive there
+ *     ARMS A REQUIRED QUESTION ("how is it so far?") about a drink the guest
+ *     may not have. It does not rest on this function alone for that reason:
+ *     it also requires that the guest is answering a question of ours, and
+ *     the turn's classification can still veto it (orderTurnVerdict). A false
+ *     negative costs one unasked question.
  * Any future change to this function should move in the direction of fewer
  * false positives, even at the cost of occasionally more false negatives —
  * that trade helps the suppression caller and only mildly costs the

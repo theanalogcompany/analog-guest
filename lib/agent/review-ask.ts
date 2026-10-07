@@ -53,13 +53,15 @@ const REVIEW_ASK_DENIED_CATEGORIES = new Set([
  * Should THIS turn raise the review ask? {url, label} from the venue's
  * curated `venue_info.links` entry when every condition holds, null otherwise.
  *
- * All seven conditions, in cheap-first order:
+ * All eight conditions, in cheap-first order:
  *   1. the classifier read genuine praise (praisedExperience)
  *   2. not a crisis turn (belt — the crisis short-circuit already returned)
  *   3. category not on the deny-list above
  *   4. the venue owes this guest no answer (same rule intentions follow)
  *   5. not the guest's first conversation (its choreography is already ruled:
  *      TAC-567/568's two questions and the warm close)
+ *   5a. not inside a visit check-in (TAC-575: that guest is asked at the
+ *      sign-off)
  *   6. never asked before (guests.review_asked_at is null)
  *   7. the venue curated a review link (kind: 'review' in venue_info.links)
  */
@@ -73,6 +75,12 @@ export function deriveReviewAsk(
   if (REVIEW_ASK_DENIED_CATEGORIES.has(classification.category)) return null
   if (ctx.pendingQuestion !== null) return null
   if (ctx.firstConversation !== false) return null
+  // TAC-575: a guest inside a visit check-in is asked at the sign-off, not on
+  // the turn they say it is good. "It's great" is praise, and praise is
+  // condition 1 above, so without this the answer to our own question would
+  // raise the ask mid-visit, hold the reply for approval, and take the turn
+  // from the name ask.
+  if (ctx.reviewAskSavedForSignOff) return null
   if (ctx.guest.reviewAskedAt !== null) return null
   const link = findReviewLink(parseVenueLinks(ctx.venue.venueInfo.links))
   if (link === null) return null

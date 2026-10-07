@@ -485,6 +485,15 @@ function armingFor(
         input.conversationWindowMs,
         now,
       )
+    // TAC-575. This turn, or not at all. eventAt and eligibleAt are the same
+    // instant, as for visit_confirmed: there is no window to wait out.
+    case 'same_visit_order':
+      return input.sameVisitOrderAt === null
+        ? null
+        : {
+            eligibleAt: input.sameVisitOrderAt,
+            eventAt: input.sameVisitOrderAt,
+          }
     // TAC-558. The EARLIEST recorded order, and NO conversation-window hold -
     // the contrast with `recorded_order` directly above is documented on the
     // arming kind itself. Reuses recordedOrderTimes rather than adding an input:
@@ -495,15 +504,6 @@ function armingFor(
     // eventAt and eligibleAt are the same instant, as for visit_confirmed: there
     // is no window to wait out, so the moment the order is on record is both the
     // event and the moment it became askable.
-    // TAC-575. This turn, or not at all. eventAt and eligibleAt are the same
-    // instant, as for visit_confirmed: there is no window to wait out.
-    case 'same_visit_order':
-      return input.sameVisitOrderAt === null
-        ? null
-        : {
-            eligibleAt: input.sameVisitOrderAt,
-            eventAt: input.sameVisitOrderAt,
-          }
     case 'first_recorded_order': {
       const earliest = earliestFinite(input.recordedOrderTimes)
       return earliest === null

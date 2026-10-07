@@ -459,6 +459,11 @@ export interface RuntimeContext {
   // message read as. While true no intention renders (renderableIntentions)
   // and the prompt is told to ask nothing (buildAiRuntime).
   visitCheckinHold: boolean
+  // TAC-575: true when this turn belongs to a visit check-in, so praise on it
+  // must not raise the review ask (ruled 2026-10-06: for a guest who answers
+  // "how is it?", the review ask is saved for the sign-off). False as built;
+  // handleInbound sets it before deriveReviewAsk runs.
+  reviewAskSavedForSignOff: boolean
   // TAC-380: the rest of this turn's derivation. Empty/false on followup runs.
   intentionDerivation: IntentionDerivation
   // TAC-308: the question this guest is still owed an answer to, when a

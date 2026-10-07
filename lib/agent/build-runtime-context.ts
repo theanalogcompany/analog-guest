@@ -746,6 +746,34 @@ export async function buildRuntimeContext(input: {
         )
       }
     }
+    // THE SECOND RECORD OF "WE ASKED", and both are read. The check-in row is
+    // written from what was sent; the intention's prompted row is written by
+    // the post-send classifier, also on the operator-approved path, which
+    // writes no check-in. Either one alone can be missing (a classifier miss,
+    // a failed insert, a held reply), and a guard that reads one of them asks
+    // twice on the day the other was the only one written.
+    const promptedThisVisit =
+      visitLocalDate !== null &&
+      (intentionRows?.prompted ?? []).some(
+        (r) =>
+          r.intentionKey === 'hows_it_so_far' &&
+          venueLocalDate(r.promptedAt, venue.timezone) === visitLocalDate,
+      )
+    // Our last message to reach the guest asked them something. See
+    // resolveSameVisitOrderAt for why a live scan is not enough by itself.
+    const lastReached = recentMessages
+      .filter((m) => reachedGuest(m))
+      .reduce<(typeof recentMessages)[number] | null>(
+        (latest, m) =>
+          latest === null || m.createdAt.getTime() > latest.createdAt.getTime()
+            ? m
+            : latest,
+        null,
+      )
+    const answeringOurQuestion =
+      lastReached !== null &&
+      lastReached.direction === 'outbound' &&
+      lastReached.body.includes('?')
     const sameVisitOrderAt = resolveSameVisitOrderAt({
       scanAt,
       guestCreatedVia: guest.createdVia,
@@ -755,7 +783,9 @@ export async function buildRuntimeContext(input: {
         input.currentMessage.body,
         venue.venueInfo.menu.items,
       ),
-      alreadyAskedThisVisit: checkinUnreadable || visitCheckin !== null,
+      answeringOurQuestion,
+      alreadyAskedThisVisit:
+        checkinUnreadable || visitCheckin !== null || promptedThisVisit,
     })
 
     // The positive half of TAC-518's open question. Without it, a referral that
@@ -924,6 +954,22 @@ export async function buildRuntimeContext(input: {
       }
     }
 
+    // TAC-575: once this visit has a check-in, "how is it so far?" is done for
+    // the visit, whatever the intention's own row says. Withholding the event
+    // above stops a re-arm; it does not close a row that is still open because
+    // the post-send classifier missed the question or has not landed yet, and
+    // that row would otherwise render ALONE and REQUIRED on the turn the guest
+    // says "it's great".
+    if (visitCheckin !== null || promptedThisVisit) {
+      intentions = {
+        ...intentions,
+        open: intentions.open.filter((o) => o.key !== 'hows_it_so_far'),
+        newlyEligible: intentions.newlyEligible.filter(
+          (n) => n.key !== 'hows_it_so_far',
+        ),
+      }
+    }
+
     // TAC-573: the visits this guest could take back on this turn. See
     // retract-reported-visit.ts for the three conditions. The scan read is
     // paid only when a row passes the two conditions that need no query, which
@@ -1006,6 +1052,7 @@ export async function buildRuntimeContext(input: {
     visitCheckin,
     visitLocalDate,
     visitCheckinHold: false,
+    reviewAskSavedForSignOff: false,
     // TAC-560: true only on the pause-triggered warm close. Read off the
     // trigger rather than derived, because whether this turn is a close is the
     // caller's decision (the processor claimed it), not something re-inferable

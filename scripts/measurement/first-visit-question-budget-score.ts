@@ -30,7 +30,7 @@
  *     regular, then local, rhythm and why they are here, "only while they
  *     keep engaging".
  *
- * WHAT THIS BAR NO LONGER CATCHES: with six of the eight allowed, "off-target"
+ * WHAT THIS BAR NO LONGER CATCHES: with seven of the nine allowed, "off-target"
  * now means only a question about a past order or suggestion. The interview
  * TAC-567 was written against is held off by reply counts and one question per
  * turn, and bar 2 below is the one that measures the second of those.

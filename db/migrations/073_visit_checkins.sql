@@ -19,9 +19,12 @@
 -- Every later step needs "did we ask, when, and what did they say", so that is
 -- what a row here is.
 --
--- A ROW IS WRITTEN WHEN THE QUESTION REACHES THE GUEST, never before. So
--- `asked_at` is NOT NULL, and "a row exists" means "this guest was asked on
--- this visit". A visit where the order was named but the question was held,
+-- A ROW IS WRITTEN WHEN THE QUESTION REACHES THE GUEST, or when the message
+-- that named the order already said how it is ("iced sofi, so good"), in which
+-- case the answer is recorded and no question is asked. So "a row exists"
+-- means "this visit has a check-in", and `asked_at` is NOT NULL: it is when
+-- the question reached them, or, in that second case, when their own message
+-- arrived. A visit where the order was named but the question was held,
 -- dropped or never generated has no row and nothing here acts on it.
 --
 -- ============================================================================
@@ -34,6 +37,11 @@
 -- check: two orders named in one sitting ("the SoFi", then "and a croissant")
 -- must not ask how it is twice, and a racing coalesced turn must not either.
 -- The losing insert takes 23505 and reads as "already asked".
+--
+-- KNOWN LIMIT: THE DAY ROLLS OVER AT VENUE-LOCAL MIDNIGHT. A guest asked at
+-- 23:55 who answers at 00:02 is read against a new day, finds no row, and the
+-- answer is not recorded. Irrelevant for a cafe and live for a late venue;
+-- loading by "asked within the answer window" is the fix when one arrives.
 --
 -- ============================================================================
 -- THE COLUMNS, AND WHICH PART OF TAC-575 READS EACH
@@ -76,11 +84,21 @@
 -- LOCKS AND ORDERING
 -- ============================================================================
 --
--- A new table, so nothing is rewritten. The foreign key to `messages` takes a
--- brief lock on it while the constraint is created; `lock_timeout` makes a
--- busy table fail the migration cleanly rather than queue behind an inbound
--- webhook. This is not a migration AGAINST `messages`: no column, constraint
--- or index on that table changes.
+-- A new table, so nothing is rewritten. Each foreign key takes a brief lock on
+-- the table it references while the constraint is created. They are taken UP
+-- FRONT AND `messages` FIRST, the rule in db/migrations/CLAUDE.md and what 066
+-- does: an inbound webhook holds `messages` and then needs `guests`, so taking
+-- them in the other order can deadlock with it. `lock_timeout` makes a busy
+-- table fail the migration cleanly rather than queue. APPLY OUTSIDE THE PILOT
+-- VENUE'S OPENING HOURS regardless.
+--
+-- IS THIS A MIGRATION AGAINST `messages`? The author's reading is no, and it
+-- is a reading for the operator to confirm before applying, not a ruling. No
+-- column, index or constraint OWNED by `messages` changes. But the foreign key
+-- does touch it: it locks the table as above, installs referential triggers on
+-- it, and makes every DELETE from `messages` look up
+-- `visit_checkins.order_message_id` (indexed below for exactly that). 064 and
+-- 066 reference `messages` the same way.
 --
 -- ORDERING: additive, but the deployed code reads this table on every inbound
 -- turn's context build and inserts into it when the question is sent. APPLY IN
@@ -96,6 +114,8 @@
 begin;
 
 set local lock_timeout = '5s';
+
+lock table messages, guests, venues in share row exclusive mode;
 
 create table visit_checkins (
   id uuid primary key default gen_random_uuid(),
@@ -127,6 +147,11 @@ create index idx_visit_checkins_checkback_pending
   on visit_checkins (ordered_at)
   where checkback_claimed_at is null
     and (answer is null or answer = 'not_yet');
+
+-- For the ON DELETE SET NULL lookup a `messages` delete now performs.
+create index idx_visit_checkins_order_message
+  on visit_checkins (order_message_id)
+  where order_message_id is not null;
 
 commit;
 

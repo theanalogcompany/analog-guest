@@ -23,6 +23,7 @@ import {
   classifyCheckinAnswer,
   isAwaitingCheckinAnswer,
   nextCheckinAnswer,
+  orderTurnVerdict,
   resolveSameVisitOrderAt,
   type VisitCheckin,
 } from '@/lib/agent/visit-checkin'
@@ -96,7 +97,7 @@ function row(
     intentionKey: key,
     eligibleAt,
     promptedAt,
-    promptSource: 'classifier',
+    promptSource: 'classified',
     messageId: 'm-1',
   } as PromptedIntentionRow
 }
@@ -235,7 +236,7 @@ check(
   [],
 )
 check(
-  'asked once, it is closed for the rest of the visit',
+  'asked once and no new order event: it does not render again',
   openKeys({
     repliedMessageCount: 3,
     facts: oneOrder,
@@ -303,6 +304,7 @@ const named = {
   guestCreatedAt: at(-90 * DAY),
   inboundAt: NOW,
   mentionsMenuItem: true,
+  answeringOurQuestion: true,
   alreadyAskedThisVisit: false,
 }
 check(
@@ -313,6 +315,11 @@ check(
 check(
   'no menu item in the message',
   resolveSameVisitOrderAt({ ...named, mentionsMenuItem: false }),
+  null,
+)
+check(
+  'names a menu item but is not answering a question of ours',
+  resolveSameVisitOrderAt({ ...named, answeringOurQuestion: false }),
   null,
 )
 check(
@@ -402,6 +409,74 @@ check(
   0,
 )
 
+check(
+  'order turn, an order report: ask',
+  orderTurnVerdict({ category: 'casual_chatter', praisedExperience: false }),
+  'ask',
+)
+check(
+  'order turn, "got the sofi" classified as a sign-off: ask',
+  orderTurnVerdict({ category: 'acknowledgment', praisedExperience: false }),
+  'ask',
+)
+check(
+  'order turn that already praises it: recorded good, not asked',
+  orderTurnVerdict({ category: 'casual_chatter', praisedExperience: true }),
+  'good',
+)
+check(
+  'order turn that is a complaint: recorded bad',
+  orderTurnVerdict({ category: 'comp_complaint', praisedExperience: false }),
+  'bad',
+)
+check(
+  'a question that names a menu item: nothing',
+  orderTurnVerdict({ category: 'new_question', praisedExperience: false }),
+  'skip',
+)
+check(
+  'a recommendation ask that praises the place: nothing',
+  orderTurnVerdict({
+    category: 'recommendation_request',
+    praisedExperience: true,
+  }),
+  'skip',
+)
+
+// DOCUMENTED, NOT ENDORSED. Two behaviours of the derivation that the caller,
+// not the derivation, is responsible for. They are here so a change to either
+// is noticed.
+check(
+  'EXPECTED: a second order event in one visit re-arms in the derivation (the caller withholds the event)',
+  openKeys({
+    repliedMessageCount: 3,
+    facts: oneOrder,
+    sameVisitOrderAt: NOW,
+    rows: {
+      prompted: [row('hows_it_so_far', at(-300), at(-290))],
+      eligible: [],
+    },
+    inboundTimes: [at(-200), NOW],
+  }),
+  ['hows_it_so_far'],
+)
+check(
+  'EXPECTED: a guest who ignored the question last visit is not asked on the next one',
+  openKeys({
+    now: at(3 * DAY),
+    sameVisitOrderAt: at(3 * DAY),
+    isFirstConversation: false,
+    repliedMessageCount: 9,
+    facts: oneOrder,
+    rows: {
+      prompted: [row('hows_it_so_far', at(-300), at(-290))],
+      eligible: [],
+    },
+    inboundTimes: [at(-400), at(3 * DAY)],
+  }).includes('hows_it_so_far'),
+  false,
+)
+
 // ---------------------------------------------------------------------------
 // 5. After a warm close.
 // ---------------------------------------------------------------------------
@@ -452,6 +527,26 @@ const requiredTurn = prose({
   firstConversation: true,
   askNothing: true,
 })
+const ordinaryTurn = prose({
+  openIntentions: [INTENTION_DEFINITION_BY_KEY.understand_order.promptLine],
+  firstTouchAfterQrScan: true,
+  firstConversation: true,
+})
+check(
+  'CONTROL ordinary turn: has the opener',
+  ordinaryTurn.includes('Ask what they just got'),
+  true,
+)
+check(
+  'CONTROL ordinary turn: has the "not a checklist" paragraph',
+  ordinaryTurn.includes('not a checklist'),
+  true,
+)
+check(
+  'CONTROL ordinary turn: not marked required',
+  ordinaryTurn.includes('This one is not optional.'),
+  false,
+)
 check(
   'required turn: says it is not optional',
   requiredTurn.includes('This one is not optional.'),
