@@ -20,3 +20,27 @@ export function dedupeVisitsByLocalDate(
     .sort()
     .map((d) => new Date(d))
 }
+
+/**
+ * The visit days that count toward recognition: today's own day counts only
+ * when the guest has an EARLIER visit day in the list.
+ *
+ * Ruled 2026-10-07 after the counter phone test: the visit that is happening
+ * must never make a guest "returning". Without this, one visit dated today
+ * scored recency 100 x 0.25 = 25, which is the `returning` threshold on its
+ * own, so a guest's enrolment scan made them `returning` on their first
+ * message and they were welcomed back. With an earlier day on file today
+ * counts as before, so a regular who is in today loses nothing.
+ *
+ * `visitDates` is dedupeVisitsByLocalDate's output (midnight UTC of the local
+ * day), so the ISO date of each entry IS its local day key. Pure.
+ */
+export function visitDaysThatCount(
+  visitDates: Date[],
+  todayLocalDate: string,
+): Date[] {
+  const hasEarlierDay = visitDates.some(
+    (d) => d.toISOString().slice(0, 10) < todayLocalDate,
+  )
+  return hasEarlierDay ? visitDates : []
+}

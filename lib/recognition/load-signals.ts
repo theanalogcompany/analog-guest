@@ -1,3 +1,4 @@
+import { formatInTimeZone } from 'date-fns-tz'
 import { createAdminClient } from '@/lib/db/admin'
 import { logger } from '@/lib/observability/logger'
 import { extractMenuExploration } from './extract-menu-exploration'
@@ -6,7 +7,7 @@ import {
   scanVisitInstants,
 } from './load-scan-visits'
 import type { RawSignals, RecognitionResult } from './types'
-import { dedupeVisitsByLocalDate } from './visit-dedupe'
+import { dedupeVisitsByLocalDate, visitDaysThatCount } from './visit-dedupe'
 
 export const VISIT_LOOKBACK_DAYS = 90
 const MS_PER_DAY = 24 * 60 * 60 * 1000
@@ -28,6 +29,10 @@ const MS_PER_DAY = 24 * 60 * 60 * 1000
  * an order on one day are one visit. Nothing is written: no `transactions`
  * row and no `last_visit_at`, whose three writers (lib/guests/CLAUDE.md) stay
  * three. Spend is untouched; visit count, recency and consistency move.
+ *
+ * TODAY ALONE IS NOT A VISIT ON FILE (ruled 2026-10-07). A guest whose only
+ * visit day in the window is today counts zero visits here, whether that day
+ * came from a scan or an order: see visitDaysThatCount.
  *
  * THE SCAN READS FAIL OPEN TO ORDERS ALONE, unlike the five above. An
  * unreadable scan history undercounts a guest for one turn, which is what
@@ -184,7 +189,14 @@ export async function loadSignals({
       })) {
     occurredAtList.push(iso)
   }
-  const visitDateList = dedupeVisitsByLocalDate(occurredAtList, timezone)
+  // Today's own day counts only when an earlier visit day exists, so the
+  // visit that is happening never lifts a first-timer out of `new`
+  // (visitDaysThatCount). Applied here, the one place visits are read for
+  // recognition, so the count, recency and consistency all agree.
+  const visitDateList = visitDaysThatCount(
+    dedupeVisitsByLocalDate(occurredAtList, timezone),
+    formatInTimeZone(new Date(), timezone, 'yyyy-MM-dd'),
+  )
 
   const visitsLast90Days = visitDateList.length
   const lastVisit = visitDateList[visitDateList.length - 1]
