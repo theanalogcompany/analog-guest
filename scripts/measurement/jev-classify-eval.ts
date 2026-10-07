@@ -20,6 +20,14 @@
  * false positives, latency) is REPORTED for the flip decision, not gated
  * here: category disagreements need human eyes on which arm was right.
  *
+ * followUpWorthy (TAC-386) IS REPORTED PER ARM, with Jev's p(yes) beside its
+ * verdict, because the Jev arm answered `false` to it unconditionally from
+ * 2026-09-29 until the question was added and nothing printed that. Two
+ * figures sit under the count so it is not read as "check-ins sent": how many
+ * true units pass the scheduler's own gates, and how many guests wrote again
+ * before a check-in could have gone out (which skips it at dispatch). The
+ * hand-read of the true units is done from the ids, off this log.
+ *
  * WHAT IT CANNOT TELL YOU:
  *   - Both arms run WITHOUT persona/venueInfo/guestState (reconstructing
  *     those per historical message re-derives recognition state this script
@@ -202,6 +210,14 @@ interface ArmVerdict {
   confidence: number | null
   crisis: boolean | null
   corrects: boolean | null
+  followUpWorthy: boolean | null
+  /**
+   * Jev's p(yes) for follow_up_worthy, read back out of its reasoning string.
+   * Null on the Haiku arm, on a failed call, and on any Jev wording that does
+   * not ask the question - which is how a run on such wording shows up as
+   * "not asked" rather than as a clean zero.
+   */
+  followUpP: number | null
   errorCode: string | null
   ms: number
   /**
@@ -211,6 +227,13 @@ interface ArmVerdict {
    * the message body, so it is never logged - the repo is public.
    */
   reasoning: string | null
+}
+
+const FOLLOW_UP_P = /follow_up_worthy p\(yes\)=(\d+(?:\.\d+)?)/
+
+function parseFollowUpP(reasoning: string): number | null {
+  const match = FOLLOW_UP_P.exec(reasoning)
+  return match ? Number(match[1]) : null
 }
 
 async function timeArm(
@@ -226,6 +249,8 @@ async function timeArm(
       confidence: null,
       crisis: null,
       corrects: null,
+      followUpWorthy: null,
+      followUpP: null,
       errorCode: result.errorCode ?? 'unknown',
       ms,
       reasoning: null,
@@ -237,6 +262,8 @@ async function timeArm(
     confidence: result.data.classifierConfidence,
     crisis: result.data.crisisSafety,
     corrects: result.data.correctsPendingReply,
+    followUpWorthy: result.data.followUpWorthy,
+    followUpP: parseFollowUpP(result.data.reasoning),
     errorCode: null,
     ms,
     reasoning: result.data.reasoning,
@@ -251,7 +278,7 @@ async function runBothArms(input: {
   const haiku = await timeArm(() => classifyMessage(input, { enabled: false }))
   const jev = await timeArm(() => classifyMessageJevArm(input))
   // See ArmVerdict.reasoning: haiku prose never reaches the log.
-  return { haiku: { ...haiku, reasoning: null }, jev }
+  return { haiku: { ...haiku, reasoning: null, followUpP: null }, jev }
 }
 
 async function mapPool<T, R>(
@@ -288,6 +315,13 @@ interface InboundUnit {
   channel: string | null
   body: string
   recentMessages: RecentMessage[]
+  /**
+   * Milliseconds until this guest's next inbound, or null when there is none.
+   * The inquiry follow-up is skipped at dispatch when the guest has written
+   * again since the question, so this is what separates "flagged" from "would
+   * have been sent".
+   */
+  msToNextInbound: number | null
 }
 
 async function loadProductionUnits(args: Args): Promise<InboundUnit[]> {
@@ -349,6 +383,9 @@ async function loadProductionUnits(args: Args): Promise<InboundUnit[]> {
           status: r.status,
           review_state: r.review_state,
         }))
+      const nextInbound = rows
+        .slice(i + 1)
+        .find((r) => r.direction === 'inbound')
       units.push({
         messageId: row.id,
         venueId: row.venue_id,
@@ -356,12 +393,112 @@ async function loadProductionUnits(args: Args): Promise<InboundUnit[]> {
         channel: row.channel,
         body: row.body,
         recentMessages: groupIntoResponses(prior, MAX_HISTORY_MESSAGES),
+        msToNextInbound: nextInbound
+          ? Date.parse(nextInbound.created_at) - Date.parse(row.created_at)
+          : null,
       })
     }
   }
 
   units.sort((a, b) => a.messageId.localeCompare(b.messageId))
   return args.limit !== null ? units.slice(0, args.limit) : units
+}
+
+/**
+ * Categories `lib/agent/schedule-inquiry-followup.ts` never arms behind.
+ * Restated rather than imported, as `follow-up-worthy.ts` does: a report that
+ * imported the set would agree with the scheduler by construction.
+ */
+const NEVER_ARMS = new Set([
+  'comp_complaint',
+  'manual',
+  'opt_out',
+  'acknowledgment',
+])
+
+/** Matches `INQUIRY_FOLLOWUP_DELAY_HOURS`: no check-in goes out sooner. */
+const EARLIEST_CHECK_IN_MS = 3 * 60 * 60 * 1000
+/** Meta's reply window: no check-in goes out later. */
+const LATEST_CHECK_IN_MS = 24 * 60 * 60 * 1000
+
+interface ScoredUnit {
+  unit: InboundUnit
+  haiku: ArmVerdict
+  jev: ArmVerdict
+}
+
+function reportFollowUpWorthy(scored: readonly ScoredUnit[]): void {
+  const share = (n: number) =>
+    `${n}/${scored.length} (${((n / scored.length) * 100).toFixed(1)}%)`
+  const jevTrue = scored.filter((r) => r.jev.followUpWorthy === true)
+  const haikuTrue = scored.filter((r) => r.haiku.followUpWorthy === true)
+  const asked = scored.filter((r) => r.jev.followUpP !== null)
+
+  console.log(`\nfollowUpWorthy  jev: ${share(jevTrue.length)}`)
+  console.log(`                haiku: ${share(haikuTrue.length)}`)
+  if (asked.length === 0) {
+    console.log(
+      '  jev returned no follow_up_worthy p(yes) on any unit: this wording does not ask the question, so the jev figure above is not a measurement.',
+    )
+    return
+  }
+
+  const both = jevTrue.filter((r) => r.haiku.followUpWorthy === true).length
+  const jevOnly = jevTrue.length - both
+  const haikuOnly = haikuTrue.length - both
+  console.log(
+    `  both true ${both}   jev only ${jevOnly}   haiku only ${haikuOnly}   both false ${scored.length - both - jevOnly - haikuOnly}`,
+  )
+
+  // Deciles of p(yes), which is what the threshold stands or moves on.
+  const buckets = new Array<number>(10).fill(0)
+  for (const r of asked) {
+    buckets[Math.min(9, Math.floor((r.jev.followUpP ?? 0) * 10))]! += 1
+  }
+  console.log('  jev p(yes) distribution:')
+  buckets.forEach((count, i) => {
+    console.log(
+      `    ${(i / 10).toFixed(1)}-${((i + 1) / 10).toFixed(1)}  ${String(count).padStart(4)}`,
+    )
+  })
+
+  // What a true verdict has to survive before a guest hears anything.
+  const armable = jevTrue.filter(
+    (r) =>
+      r.unit.channel === 'instagram' &&
+      r.jev.crisis !== true &&
+      !NEVER_ARMS.has(r.jev.category ?? ''),
+  )
+  const wroteWithin = (r: ScoredUnit, ms: number) =>
+    r.unit.msToNextInbound !== null && r.unit.msToNextInbound <= ms
+  const sureSkips = armable.filter((r) => wroteWithin(r, EARLIEST_CHECK_IN_MS))
+  const possibleSkips = armable.filter((r) =>
+    wroteWithin(r, LATEST_CHECK_IN_MS),
+  )
+  console.log(
+    `  of jev true: ${armable.length} pass the scheduler's gates (instagram, category not refused, not crisis)`,
+  )
+  console.log(
+    `    guest wrote again within 3h (skipped at dispatch for certain): ${sureSkips.length}`,
+  )
+  console.log(
+    `    guest wrote again within 24h (skipped if before the due time): ${possibleSkips.length}`,
+  )
+  console.log(
+    `    so between ${armable.length - possibleSkips.length} and ${armable.length - sureSkips.length} would still be pending at their due time, before the one-pending, weekly-cap and hours rules.`,
+  )
+  for (const r of jevTrue) {
+    console.log(
+      `  FOLLOW-UP ${r.unit.messageId}: p=${r.jev.followUpP?.toFixed(2)} category=${r.jev.category} channel=${r.unit.channel} haiku=${r.haiku.followUpWorthy}`,
+    )
+  }
+  for (const r of haikuTrue) {
+    if (r.jev.followUpWorthy !== true) {
+      console.log(
+        `  HAIKU-ONLY ${r.unit.messageId}: jev p=${r.jev.followUpP?.toFixed(2)} category=${r.jev.category}`,
+      )
+    }
+  }
 }
 
 async function main(): Promise<void> {
@@ -410,6 +547,7 @@ async function main(): Promise<void> {
         messageId: unit.messageId,
         venueId: unit.venueId,
         channel: unit.channel,
+        msToNextInbound: unit.msToNextInbound,
         haiku: verdicts.haiku,
         jev: verdicts.jev,
         agree:
@@ -478,6 +616,8 @@ async function main(): Promise<void> {
     console.log(
       `correctsPendingReply disagreements: ${correctsDisagree.length}`,
     )
+
+    reportFollowUpWorthy(scored)
 
     const haikuMs = scored.map((r) => r.haiku.ms)
     const jevMs = scored.map((r) => r.jev.ms)

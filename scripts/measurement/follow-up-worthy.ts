@@ -1,6 +1,14 @@
 // TAC-386 arm A: does `followUpWorthy` draw the line the rulings drew?
 //
-//   npm run measure-follow-up-worthy -- <venue-slug>
+//   npm run measure-follow-up-worthy -- <venue-slug> [--arm jev|haiku] [--fixtures-only]
+//
+// THE ARM IS NAMED, NEVER INHERITED. This called the gated `classifyMessage`,
+// and from 2026-09-29 that meant the Jev arm, which answered `followUpWorthy:
+// false` to everything: every false-positive arm below read a clean zero for a
+// week for a reason that had nothing to do with the wording. So the run says
+// which classifier it is measuring, the Jev arm runs WITHOUT its Haiku
+// fallback (a Jev failure throws here; it must not score as Haiku's answer),
+// and the default is `jev` because that is the arm answering production.
 //
 // WHAT MAKES THIS EVIDENCE rather than a demonstration: every case carries a
 // hand-assigned `expected` written BEFORE the run, and the four false-positive
@@ -22,8 +30,10 @@
 
 import {
   classifyMessage,
+  classifyMessageJevArm,
   MAX_CLASSIFIER_INPUT_CHARS,
 } from '@/lib/ai/classify-message'
+import { CLASSIFY_JEV_PROMPT_VERSION } from '@/lib/ai/classify-message-jev'
 import { PROMPT_VERSION } from '@/lib/ai/prompts/system-template'
 import { createAdminClient } from '@/lib/db/admin'
 import { createRunLog } from './run-log'
@@ -162,6 +172,52 @@ const POSITIVE_CONTROL: LabelledFixture[] = [
   },
 ]
 
+/**
+ * The five phrases TAC-386's acceptance names (rulings of 2026-10-06), with the
+ * verdict it names for each. Scored on their own so the acceptance line can be
+ * read straight off the run.
+ */
+const ACCEPTANCE: (LabelledFixture & { expected: boolean })[] = [
+  { id: 'acc-park', body: 'where can I park?', expected: true },
+  {
+    id: 'acc-pour-over',
+    body: 'how do I brew pour over at home?',
+    expected: true,
+  },
+  { id: 'acc-close', body: 'what time do you close?', expected: false },
+  {
+    id: 'acc-complaint',
+    body: 'my latte was cold and the muffin was stale',
+    expected: false,
+  },
+  { id: 'acc-omw', body: 'omw', expected: false },
+]
+
+type ClassifierArm = 'jev' | 'haiku'
+
+interface Args {
+  venueSlug: string | null
+  arm: ClassifierArm
+  fixturesOnly: boolean
+}
+
+function parseArgs(argv: readonly string[]): Args {
+  const args: Args = { venueSlug: null, arm: 'jev', fixturesOnly: false }
+  for (let i = 0; i < argv.length; i += 1) {
+    const flag = argv[i]!
+    if (flag === '--arm') {
+      const arm = argv[++i]
+      if (arm !== 'jev' && arm !== 'haiku') {
+        throw new Error(`--arm must be jev or haiku, got ${String(arm)}`)
+      }
+      args.arm = arm
+    } else if (flag === '--fixtures-only') args.fixturesOnly = true
+    else if (flag.startsWith('--')) throw new Error(`unknown flag: ${flag}`)
+    else args.venueSlug = flag
+  }
+  return args
+}
+
 interface RealInbound {
   id: string
   body: string
@@ -224,9 +280,17 @@ const BELTED = new Set([
   'acknowledgment',
 ])
 
-async function classifyOne(body: string): Promise<Classified> {
-  const r = await classifyMessage({ inboundBody: body })
-  if (!r.ok) throw new Error(`classifier failed on "${body}": ${r.error}`)
+async function classifyOne(
+  arm: ClassifierArm,
+  body: string,
+): Promise<Classified> {
+  const r =
+    arm === 'jev'
+      ? await classifyMessageJevArm({ inboundBody: body })
+      : await classifyMessage({ inboundBody: body }, { enabled: false })
+  if (!r.ok) {
+    throw new Error(`${arm} classifier failed on "${body}": ${r.error}`)
+  }
   const usage = r.data.usage as { outputTokens?: number } | undefined
   return {
     worthy: r.data.followUpWorthy,
@@ -237,6 +301,7 @@ async function classifyOne(body: string): Promise<Classified> {
 }
 
 async function runFalsePositiveArm(
+  classifierArm: ClassifierArm,
   name: string,
   fixtures: readonly LabelledFixture[],
   log: ReturnType<typeof createRunLog>,
@@ -249,7 +314,7 @@ async function runFalsePositiveArm(
     reasoning: string
   }[] = []
   for (const fixture of fixtures) {
-    const out = await classifyOne(fixture.body)
+    const out = await classifyOne(classifierArm, fixture.body)
     if (out.outputTokens !== null) tokens.push(out.outputTokens)
     // Checkpoint per unit: the expensive half is the model calls, and losing
     // them to a late throw in the cheap half is the specific failure.
@@ -298,16 +363,20 @@ function reportArm(score: ArmScore): void {
 }
 
 async function main(): Promise<void> {
-  const venueSlug = process.argv[2]
-  if (!venueSlug) {
-    console.error('usage: npm run measure-follow-up-worthy -- <venue-slug>')
+  const { venueSlug, arm, fixturesOnly } = parseArgs(process.argv.slice(2))
+  if (!venueSlug && !fixturesOnly) {
+    console.error(
+      'usage: npm run measure-follow-up-worthy -- <venue-slug> [--arm jev|haiku] [--fixtures-only]',
+    )
     process.exit(1)
   }
 
   const log = createRunLog({
     name: 'tac386-follow-up-worthy',
     meta: {
-      arm: `followUpWorthy:${venueSlug}`,
+      arm: `followUpWorthy:${arm}:${venueSlug ?? 'fixtures-only'}`,
+      classifierArm: arm,
+      jevPromptVersion: CLASSIFY_JEV_PROMPT_VERSION,
       // The convention asks for the code state as well as the arm. The
       // classifier prompt does not embed this string, so a bump alone does not
       // change what this measures; it is recorded so a run can be placed.
@@ -316,8 +385,9 @@ async function main(): Promise<void> {
       outputTokenCap: OUTPUT_TOKEN_CAP,
       classifierInputCap: MAX_CLASSIFIER_INPUT_CHARS,
       bars: {
-        falsePositiveArms: 'zero true in each of A1..A4',
-        positiveControl: 'must fire, or the run proves nothing',
+        falsePositiveArms: 'zero true in each of A1..A5',
+        positiveControl: 'every case fires',
+        acceptance: 'every phrase gets the verdict the ticket names',
       },
     },
   })
@@ -334,13 +404,13 @@ async function main(): Promise<void> {
     ['A4 operator-arranged', A4_OPERATOR_ARRANGED],
     ['A5 explicit arrivals', A5_ARRIVALS],
   ] as const) {
-    arms.push(await runFalsePositiveArm(name, fixtures, log, tokens))
+    arms.push(await runFalsePositiveArm(arm, name, fixtures, log, tokens))
   }
 
   // The positive control.
   const controlCases: ScoredCase[] = []
   for (const fixture of POSITIVE_CONTROL) {
-    const out = await classifyOne(fixture.body)
+    const out = await classifyOne(arm, fixture.body)
     if (out.outputTokens !== null) tokens.push(out.outputTokens)
     log.appendUnit({
       arm: 'positive control',
@@ -363,11 +433,37 @@ async function main(): Promise<void> {
   }
   const control = scoreArm('positive control', controlCases)
 
+  const acceptanceCases: ScoredCase[] = []
+  for (const fixture of ACCEPTANCE) {
+    const out = await classifyOne(arm, fixture.body)
+    if (out.outputTokens !== null) tokens.push(out.outputTokens)
+    log.appendUnit({
+      arm: 'acceptance',
+      id: fixture.id,
+      body: fixture.body,
+      expected: fixture.expected,
+      actual: out.worthy,
+      category: out.category,
+      belted: BELTED.has(out.category),
+      reasoning: out.reasoning,
+      outputTokens: out.outputTokens,
+    })
+    acceptanceCases.push({
+      id: fixture.id,
+      body: fixture.body,
+      expected: fixture.expected,
+      actual: out.worthy,
+      reasoning: out.reasoning,
+    })
+  }
+  const acceptance = scoreArm('acceptance phrases', acceptanceCases)
+
   // The real inbounds. UNLABELLED HERE ON PURPOSE: this repo's real traffic is
   // a handful of messages, and hard-coding labels for them in a committed file
   // would make this arm a fixture set that drifts from the table. The run prints
   // each body with the verdict for reading, and the PR records the hand-read.
-  const real = await loadRealInbounds(venueSlug)
+  const real =
+    venueSlug && !fixturesOnly ? await loadRealInbounds(venueSlug) : []
   const realResults: {
     id: string
     body: string
@@ -376,7 +472,7 @@ async function main(): Promise<void> {
     reasoning: string
   }[] = []
   for (const inbound of real) {
-    const out = await classifyOne(inbound.body)
+    const out = await classifyOne(arm, inbound.body)
     if (out.outputTokens !== null) tokens.push(out.outputTokens)
     log.appendUnit({
       arm: 'real inbounds',
@@ -398,7 +494,9 @@ async function main(): Promise<void> {
   }
 
   // ---- Report ----
-  console.log(`\n=== TAC-386 arm A: followUpWorthy at ${venueSlug} ===`)
+  console.log(
+    `\n=== TAC-386 arm A: followUpWorthy via ${arm} at ${venueSlug ?? '(fixtures only)'} ===`,
+  )
 
   let allArmsPassed = true
   for (const arm of arms) {
@@ -416,12 +514,28 @@ async function main(): Promise<void> {
   reportArm(control)
   // A classifier stuck on false passes every arm above. This is the control
   // that makes those passes mean something.
-  const controlFired = control.truePositives > 0
+  // Every case, not "at all" (bar posted on TAC-386, 2026-10-06). One firing
+  // out of eight would pass the looser bar on a threshold set far too high.
+  const controlFired = control.falseNegatives === 0
   console.log(
-    `  CONTROL (must fire at all): ${controlFired ? 'PASS' : 'FAIL — the field is inert, so every arm above proves nothing'}`,
+    `  CONTROL (every case fires): ${
+      controlFired
+        ? 'PASS'
+        : control.truePositives === 0
+          ? 'FAIL — the field is inert, so every arm above proves nothing'
+          : `FAIL — ${control.truePositives} of ${control.total} fired`
+    }`,
   )
 
-  console.log(`\n--- real inbounds at ${venueSlug} (${realResults.length}) ---`)
+  reportArm(acceptance)
+  const acceptanceMet = acceptance.disagreements.length === 0
+  console.log(
+    `  ACCEPTANCE (each phrase as the ticket names it): ${acceptanceMet ? 'PASS' : 'FAIL'}`,
+  )
+
+  console.log(
+    `\n--- real inbounds at ${venueSlug ?? '(skipped)'} (${realResults.length}) ---`,
+  )
   for (const r of realResults) {
     const belt = BELTED.has(r.category) ? ' [BELTED]' : ''
     console.log(
@@ -433,20 +547,25 @@ async function main(): Promise<void> {
     `  ${realResults.filter((r) => r.worthy).length} of ${realResults.length} classified follow-up-worthy. HAND-READ these against the rulings.`,
   )
 
-  const headroom = scoreHeadroom(OUTPUT_TOKEN_CAP, tokens)
-  console.log(`\n--- output-token headroom (cap ${headroom.cap}) ---`)
-  console.log(
-    `  max ${headroom.max}, mean ${headroom.mean.toFixed(1)}, worst utilisation ${(headroom.worstUtilisation * 100).toFixed(1)}%`,
-  )
-  console.log(
-    `  any call at or over the cap: ${headroom.anyAtCap ? 'YES — truncation risk, raise the cap in this PR' : 'no'}`,
-  )
+  // Jev is not generative: it returns no usage and has no output cap to hit.
+  if (tokens.length === 0) {
+    console.log('\n--- output-token headroom: not applicable on this arm ---')
+  } else {
+    const headroom = scoreHeadroom(OUTPUT_TOKEN_CAP, tokens)
+    console.log(`\n--- output-token headroom (cap ${headroom.cap}) ---`)
+    console.log(
+      `  max ${headroom.max}, mean ${headroom.mean.toFixed(1)}, worst utilisation ${(headroom.worstUtilisation * 100).toFixed(1)}%`,
+    )
+    console.log(
+      `  any call at or over the cap: ${headroom.anyAtCap ? 'YES — truncation risk, raise the cap in this PR' : 'no'}`,
+    )
+  }
 
   console.log(
-    `\nOVERALL: ${allArmsPassed && controlFired ? 'every bar met' : 'A BAR BREACHED — report and stop'}`,
+    `\nOVERALL: ${allArmsPassed && controlFired && acceptanceMet ? 'every bar met' : 'A BAR BREACHED — report and stop'}`,
   )
   console.log(`run log: ${log.path}`)
-  if (!allArmsPassed || !controlFired) process.exitCode = 1
+  if (!allArmsPassed || !controlFired || !acceptanceMet) process.exitCode = 1
 }
 
 void main()
