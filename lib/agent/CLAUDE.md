@@ -261,7 +261,9 @@ carried on `RuntimeContext.firstConversation`.
 
 **The warm close is triggered by a lull, never by a stored name.** In conversation it needs
 the guest's sign-off AND the model's goodbye (`closesFirstConversation`); otherwise the pause
-timer sends it, for any first Instagram conversation, scanned or not.
+timer sends it, for any first Instagram conversation, scanned or not. **Neither path closes a
+conversation staff answered by hand or one that contains a complaint** (`warmCloseBlocker`,
+one check called by both, before the marker is claimed).
 
 **After a warm close, no question until the guest is two messages past it AND one reply of
 ours has reached them in between** (`isQuietAfterWarmClose`, `warm-close.ts`); two messages

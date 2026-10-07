@@ -59,6 +59,7 @@ import {
 import {
   claimWarmClose,
   loadLastInboundCategory,
+  loadWarmCloseBlocker,
   loadWarmCloseCandidates,
   loadWarmCloseGuestFacts,
   loadWarmCloseVenues,
@@ -85,6 +86,10 @@ export type WarmCloseSkipReason =
   | 'closed_in_conversation'
   /** Past their first conversation. */
   | 'not_first_conversation'
+  /** TAC-575: staff answered this guest by hand. No automated close at all. */
+  | 'staff_replied'
+  /** TAC-575: the conversation contains a complaint. No automated close at all. */
+  | 'complaint_in_conversation'
   | 'opted_out'
   | 'venue_paused'
   | 'quiet_hours'
@@ -333,6 +338,24 @@ async function considerCandidate(
   ) {
     return 'not_first_conversation'
   }
+
+  // TAC-575 (ruled 2026-10-06): a person in the thread, or a complaint in it,
+  // means no automated close at all. With the permanent checks, before the
+  // claim. An unreadable thread is not "nothing blocks": skip this tick.
+  const blocker = await loadWarmCloseBlocker(
+    supabase,
+    candidate.venueId,
+    candidate.guestId,
+    facts.data.firstContactedAt,
+  )
+  if (!blocker.ok) {
+    console.warn('[warm-close] thread unreadable; skipping', {
+      guestId: candidate.guestId,
+      error: blocker.error,
+    })
+    return 'guest_unreadable'
+  }
+  if (blocker.data !== null) return blocker.data
 
   // The belt behind the model's own self-report. See loadLastInboundCategory.
   if (

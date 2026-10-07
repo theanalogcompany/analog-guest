@@ -314,6 +314,74 @@ export function closesFirstConversation(input: {
   return input.guestSignedOff && input.agentSaidGoodbye
 }
 
+/** Why a first conversation gets no automated warm close at all. */
+export type WarmCloseBlocker =
+  /** Staff answered this guest in their own words. */
+  | 'staff_replied'
+  /** The conversation contains a complaint. */
+  | 'complaint_in_conversation'
+
+/** The columns of one message row that warmCloseBlocker reads. */
+export interface WarmCloseBlockerRow {
+  direction: string
+  status: string
+  generatedBy: string | null
+  reviewState: string | null
+  category: string | null
+}
+
+/** The message category a complaint turn's reply is stored under. */
+const COMPLAINT_CATEGORY = 'comp_complaint'
+
+/**
+ * Should this first conversation get NO automated warm close, from either path?
+ *
+ * TAC-575, ruled 2026-10-06 on PR 324's review. Two cases, and each skips the
+ * close entirely rather than delaying it:
+ *
+ *   STAFF REPLIED BY HAND. A reply typed in the Instagram app arrives as an
+ *   echo row with no `generated_by` (handle-events.ts; reply-check.ts reads the
+ *   same marker), and a draft an operator rewrote before sending carries
+ *   `review_state = 'edited'`. Either way a person is in the thread, and a
+ *   fixed "the line is open" landing ten minutes under their message answers
+ *   for them. Widening the pause timer to guests who never scanned made this
+ *   the common case, since a cold DM is what staff most often answer by hand.
+ *
+ *   A COMPLAINT. The category is stamped on our REPLY's row, never on the
+ *   guest's inbound (nothing writes `category` on an inbound), and it is there
+ *   whether the reply was sent, is still held for approval, or was skipped.
+ *   Any of those means the guest raised a problem, and a cheerful close on top
+ *   of an unresolved one reads as though nobody read it.
+ *
+ * AN ECHO OF OUR OWN SEND IS NOT STAFF. It also lands with no `generated_by`
+ * until insertOrReconcileEcho fills it in, a moment later. Both callers run
+ * well after that: the timer at least ten minutes on, the goodbye path on a
+ * later turn. If one ever caught the gap the cost is a missed close, which is
+ * the direction this whole mechanism is biased toward.
+ *
+ * Only delivered rows count as a staff reply; a complaint counts in any state.
+ */
+export function warmCloseBlocker(
+  rows: readonly WarmCloseBlockerRow[],
+  deliveredStatuses: ReadonlySet<string>,
+): WarmCloseBlocker | null {
+  let staffReplied = false
+  for (const row of rows) {
+    if (row.direction !== 'outbound') continue
+    if (row.category === COMPLAINT_CATEGORY) return 'complaint_in_conversation'
+    // A tapback is the one outbound row our own code writes with no
+    // `generated_by` (lib/messaging/expressions.ts). It is not a person.
+    if (row.category === 'reaction') continue
+    if (
+      deliveredStatuses.has(row.status) &&
+      (row.generatedBy === null || row.reviewState === 'edited')
+    ) {
+      staffReplied = true
+    }
+  }
+  return staffReplied ? 'staff_replied' : null
+}
+
 /**
  * The inbound category that means the guest signed off.
  *

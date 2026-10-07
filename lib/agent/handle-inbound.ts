@@ -67,7 +67,11 @@ import {
   recordIntentionEligibility,
   recordIntentionPrompts,
 } from './intentions/record'
-import { markWarmCloseSent, releaseWarmCloseClaim } from './warm-close-store'
+import {
+  loadWarmCloseBlocker,
+  markWarmCloseSent,
+  releaseWarmCloseClaim,
+} from './warm-close-store'
 import { closesFirstConversation, SIGN_OFF_CATEGORY } from './warm-close'
 import { recordInboundTurnOutcome } from './record-inbound-turn-outcome'
 import { isVenueProcessingHalted } from '@/lib/venues/status'
@@ -523,9 +527,34 @@ async function claimWarmCloseForTurn(
   ctx: RuntimeContext,
   agentRunId: string,
 ): Promise<ClaimedWarmClose | null> {
+  // TAC-575 (ruled 2026-10-06): no automated close where staff answered by hand
+  // or the conversation contains a complaint. The pause timer runs the same
+  // check through the same function. BEFORE the marker write, because the
+  // marker is what spends the guest's one close. An unreadable thread fails
+  // closed, like everything else here.
+  const supabase = createAdminClient()
+  const blocker = await loadWarmCloseBlocker(
+    supabase,
+    ctx.venue.id,
+    ctx.guest.id,
+    ctx.guest.firstContactedAt ?? ctx.guest.createdAt,
+  ).catch((e: unknown) => ({
+    ok: false as const,
+    error: e instanceof Error ? e.message : String(e),
+  }))
+  if (!blocker.ok || blocker.data !== null) {
+    console.log('[agent] warm close not sent on this turn', {
+      agentRunId,
+      guestId: ctx.guest.id,
+      reason: blocker.ok ? blocker.data : 'thread_unreadable',
+      ...(blocker.ok ? {} : { error: blocker.error }),
+    })
+    return null
+  }
+
   const claimedAt = new Date()
   const marked = await markWarmCloseSent(
-    createAdminClient(),
+    supabase,
     ctx.guest.id,
     claimedAt,
   ).catch((e: unknown) => ({
