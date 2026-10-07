@@ -399,7 +399,7 @@ function parseYmd(
 // instant's own UTC calendar day when the timezone is unreadable — a
 // same-day comparison that's occasionally off by a timezone offset is a far
 // smaller error than crashing or silently skipping the comparison.
-function venueLocalDayKey(timezone: string, instant: Date): string {
+export function venueLocalDayKey(timezone: string, instant: Date): string {
   const local = venueLocalDate(timezone, instant)
   if (!local) return instant.toISOString().slice(0, 10)
   return `${pad(local.year, 4)}-${pad(local.month, 2)}-${pad(local.day, 2)}`
@@ -486,8 +486,21 @@ function reportsTodaysScanVisit(
  * precision rather than losing the report — the same "unreadable clock
  * never asserts a confident thing, but never throws the report away either"
  * posture resolvePresentPrecision already carries.
+ *
+ * TAC-573: the noon anchor is for a PAST day only. The extractor answers
+ * 'specific_past_day' with today's date for "this morning", "earlier today"
+ * and any report with no timing cue at all, and noon is then a claim nobody
+ * made: "my latte was cold" at 2:39pm was stored at 12:00, and a report sent
+ * before noon was stored in the future. So a report resolving to the
+ * venue-local TODAY takes the message's own timestamp, still `approximate`
+ * (the guest did not say it was happening now). The `>` clamp is the same rule
+ * stated as the invariant: no visit is ever stamped later than the message
+ * that reported it, which also covers a date the model resolved to tomorrow.
+ * The scan-day branch above it is unchanged and still decides `pinned`.
+ *
+ * Exported for scripts/harness/reported-visits only.
  */
-function resolveOccurredAt(
+export function resolveOccurredAt(
   reportTiming: 'present' | 'specific_past_day',
   occurredOnDate: string,
   ctx: RuntimeContext,
@@ -518,6 +531,13 @@ function resolveOccurredAt(
       occurredAt: reportedAt,
       precision: resolvePresentPrecision(ctx, reportedAt),
     }
+  }
+  if (
+    instant.getTime() > reportedAt.getTime() ||
+    venueLocalDayKey(ctx.venue.timezone, instant) ===
+      venueLocalDayKey(ctx.venue.timezone, reportedAt)
+  ) {
+    return { occurredAt: reportedAt, precision: 'approximate' }
   }
   return { occurredAt: instant, precision: 'approximate' }
 }
@@ -813,6 +833,11 @@ export async function extractReportedOrder(
       .eq('venue_id', ctx.venue.id)
       .eq('guest_id', ctx.guest.id)
       .eq('source', 'guest_reported_ongoing')
+      // TAC-573: never merge new items into a row the guest took back. The
+      // enrollment gate above deliberately does NOT filter: a retracted
+      // 'guest_reported' row still holds the one-per-guest index slot, so a
+      // later genuine report has to land here as ongoing.
+      .is('retracted_at', null)
       .order('occurred_at', { ascending: false })
       .limit(ONGOING_MERGE_LOOKBACK_LIMIT)
     if (recentOngoingError) {

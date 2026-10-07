@@ -28,7 +28,7 @@ interface TransactionsListProps {
 }
 
 export function TransactionsList({
-  transactions,
+  transactions: allTransactions,
   windowDays,
   venueTimezone,
   now: nowProp,
@@ -41,7 +41,12 @@ export function TransactionsList({
   // removal state to keep in sync).
   const router = useRouter()
 
-  if (transactions.length === 0) {
+  // TAC-573: a visit the guest took back is shown, but apart from the visits
+  // and outside the count and the totals, which match the guest card above.
+  const retracted = allTransactions.filter((t) => t.retractedAt !== null)
+  const transactions = allTransactions.filter((t) => t.retractedAt === null)
+
+  if (allTransactions.length === 0) {
     return (
       <Card className="rounded-md border-stone-light/60 bg-parchment shadow-none p-3 flex flex-col gap-2">
         <header>
@@ -95,6 +100,22 @@ export function TransactionsList({
           />
         ))}
       </div>
+      {retracted.length > 0 ? (
+        <div className="flex flex-col gap-1 border-t border-stone-light/60 pt-3">
+          <Eyebrow>{`Taken back by the guest · ${retracted.length} · not counted`}</Eyebrow>
+          <div className="flex flex-col opacity-60">
+            {retracted.map((tx) => (
+              <TransactionRow
+                key={tx.id}
+                tx={tx}
+                venueTimezone={venueTimezone}
+                now={now}
+                onDeleted={() => router.refresh()}
+              />
+            ))}
+          </div>
+        </div>
+      ) : null}
     </Card>
   )
 }
