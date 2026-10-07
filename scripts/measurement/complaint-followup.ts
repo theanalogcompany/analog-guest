@@ -47,10 +47,13 @@
 //   MEASURE_ARMS=greeting          one arm only (or sign_off).
 //   MEASURE_GREETING=returning     the greeting arm with the ORDINARY
 //                                  returning-guest instruction on the same
-//                                  histories. The control for "is answering
-//                                  the old complaint something this PR's
-//                                  wording causes, or what any greeting does
-//                                  when the thread ends on a complaint".
+//                                  histories. First run as the control for
+//                                  "is answering the old complaint something
+//                                  the new wording causes, or what any
+//                                  greeting does when the thread ends on a
+//                                  complaint" (it was the second), and since
+//                                  the follow-up PR the check that the
+//                                  ordinary greeting no longer does it.
 //   MEASURE_OPEN_COMP=1            every unit's guest holds an OPEN COMP for
 //                                  the item they complained about, which is
 //                                  what the complaint path leaves behind when
@@ -335,9 +338,10 @@ async function main(): Promise<void> {
       arm: 'greeting' as const,
       faultWords: c.faultWords,
       // What production loads for this guest: the earlier visit, when it is
-      // within fourteen days. THE MODEL DOES NOT SEE IT on the treatment arm:
-      // buildAiRuntime drops everything before this visit for the follow-up
-      // greeting, which is the thing under test. The control arm does see it.
+      // within fourteen days. THE MODEL DOES NOT SEE IT, on either greeting:
+      // buildAiRuntime drops everything before this visit for every scan
+      // greeting, which is the thing under test. `historySeenByModel` in the
+      // run log is what generation was actually handed.
       history: c.daysAgo <= 14 ? earlierVisit(i) : [],
     })),
     ...COMPLAINTS.slice(0, PER_ARM).map((c, i) => {

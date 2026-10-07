@@ -85,13 +85,27 @@ export const GUEST_ARRIVED_INSTRUCTIONS_NEW = `The guest just scanned the sign a
  * moment ago. The two greetings that passed every run were the two with no
  * history loaded. So the wording went back to the draft and the history went.
  *
- * THE ORDINARY RETURNING GREETING HAS THE SAME WEAKNESS and nothing here fixes
- * it: run on the same threads as a control, it answered the complaint in six
- * of ten. That is main's behaviour for a guest whose thread ends on a
- * complaint and who is not owed a follow-up (already followed up, or the
- * complaint was never recorded on a check-in). Its wording is a ruling's,
- * verbatim, and keeping its history is the reason it can avoid repeating
- * itself; changing either is a decision of its own.
+ * THE ORDINARY RETURNING GREETING HAD THE SAME WEAKNESS AND NOW HAS THE SAME
+ * FIX (ruled 2026-10-06). On those threads, with its history, it answered the
+ * old complaint in five of ten; that is what any returning guest got whose
+ * thread ended on a complaint and who was not owed a follow-up. Its wording
+ * is a ruling's, verbatim, and is unchanged. Only the thread is withheld.
+ *
+ * WHAT A GREETING GIVES UP BY NOT SEEING THE THREAD, so nobody restores it
+ * without knowing the trade:
+ *
+ *   - It cannot see its own earlier greetings, so nothing stops a regular
+ *     getting the same line every morning. "Never reuse a line already sent"
+ *     has nothing to compare against here.
+ *   - It cannot pick up anything the guest said that was never stored as a
+ *     fact: a joke, a plan mentioned in passing, what they were unsure about
+ *     last time.
+ *   - It cannot match the register the thread had settled into.
+ *
+ * What it KEEPS, because none of it travels in the thread: the guest's name
+ * and stored notes, their visit history, open commitments, and the two facts
+ * in `## Guest just arrived`. Anything the guest wrote in the half hour before
+ * scanning is this visit and stays.
  */
 export const GUEST_ARRIVED_INSTRUCTIONS_AFTER_COMPLAINT = `The guest just scanned the code at the counter, so they are in the shop right now. The last time they were in, they told you something was wrong with what they got. Greet them the way you would someone walking up, say you are glad they came back, and ask what they got today. Do not apologise again, do not repeat what went wrong, and do not offer anything. One or two short lines. You have talked before, so don't introduce yourself.`
 

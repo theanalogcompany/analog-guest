@@ -574,10 +574,10 @@ export function visitStartFor(followedUpAt: Date): Date {
 /**
  * The part of a thread that belongs to the visit starting now.
  *
- * Used for ONE generation: the scan greeting that follows up a complaint
- * (lib/agent/stages.ts, buildAiRuntime). That greeting is written without the
- * earlier conversation, because with it the model answers the old complaint
- * again; guest-arrived.ts has the measurement. What the guest wrote in the
+ * Used for ONE KIND of generation: a scan greeting (lib/agent/stages.ts,
+ * buildAiRuntime). A greeting is written without the earlier conversation,
+ * because with it the model answers an old complaint again; guest-arrived.ts
+ * has the measurements. What the guest wrote in the
  * minutes before scanning stays: it is this visit.
  *
  * Generic over the message type so it reads nothing but the time.
