@@ -81,9 +81,12 @@ export function buildCrisisSafetyResult(): GenerateMessageResult {
     reviewAsk: '',
     // TAC-560: a fixed crisis reply is never the warm close.
     closedTheConversation: false,
+    // TAC-573: no generation behind this, so nothing is being corrected.
+    reportedVisitCorrection: 'none',
     intentionQuestionDuplicateStripped: false,
     // TAC-567: this path composes no question, so the gate never fired.
     intentionQuestionDroppedForBodyQuestion: false,
+    askDroppedForVisitCorrection: false,
     // This path composes no review ask, so that gate never fired either.
     reviewAskDroppedForBodyQuestion: false,
     attempts: 1,
@@ -102,6 +105,8 @@ export function buildCrisisSafetyResult(): GenerateMessageResult {
         reviewAsk: '',
         // TAC-560: a fixed crisis reply is never the warm close.
         closedTheConversation: false,
+        // TAC-573: no generation behind this, so nothing is being corrected.
+        reportedVisitCorrection: 'none',
       },
     ],
     systemPrompt: '',

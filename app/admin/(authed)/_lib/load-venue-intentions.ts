@@ -211,6 +211,9 @@ async function _loadVenueOpenIntentions(
       .from('transactions')
       .select('guest_id')
       .eq('venue_id', venueId)
+      // TAC-573: mirrors build-runtime-context, which does not count a visit
+      // the guest took back.
+      .is('retracted_at', null)
       .in('guest_id', guestIds),
   ])
 

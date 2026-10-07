@@ -2100,6 +2100,7 @@ export type Database = {
           occurred_at: string
           occurred_at_precision: string | null
           raw_data: Json | null
+          retracted_at: string | null
           source: string
           updated_at: string
           venue_id: string
@@ -2118,6 +2119,7 @@ export type Database = {
           occurred_at: string
           occurred_at_precision?: string | null
           raw_data?: Json | null
+          retracted_at?: string | null
           source: string
           updated_at?: string
           venue_id: string
@@ -2136,6 +2138,7 @@ export type Database = {
           occurred_at?: string
           occurred_at_precision?: string | null
           raw_data?: Json | null
+          retracted_at?: string | null
           source?: string
           updated_at?: string
           venue_id?: string

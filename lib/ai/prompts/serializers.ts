@@ -1059,6 +1059,26 @@ function formatVisitHistory(
     .join('\n')
 }
 
+// TAC-573: the visit this guest told us about earlier in THIS conversation,
+// which is the only thing they can contradict and take back. Rendered only
+// when lib/agent/retract-reported-visit.ts found one, so the
+// `reportedVisitCorrection` instructions in the system prompt are inert on
+// every other turn. It says "told you", never anything about what is stored:
+// the block is the model's source for the gentle check, and R40 forbids
+// pointing a guest at records.
+function formatReportedVisits(
+  visits: readonly { items: string[] }[],
+): string | null {
+  if (visits.length === 0) return null
+  const items = [...new Set(visits.flatMap((v) => v.items))]
+  return [
+    '## Visit they told you about',
+    items.length > 0
+      ? `Earlier in this conversation the guest told you they had: ${items.join(', ')}.`
+      : 'Earlier in this conversation the guest told you about a visit here.',
+  ].join('\n')
+}
+
 // Category gate for the Visit History block. Welcome is the first-contact
 // NFC-tap reply (no prior visits to reference by definition); opt_out is a
 // stop-messaging acknowledgment where prior orders aren't relevant. All
@@ -2013,6 +2033,13 @@ export function runtimeToProse(
     shouldRenderVisitHistory(category)
   ) {
     const block = formatVisitHistory(runtime.recentVisits, now)
+    if (block) blocks.push(block)
+  }
+  // TAC-573: sits directly under ## Visit history, which lists the same visit
+  // among the others. No category gate: a guest can contradict themselves
+  // under any category, and the block is absent on almost every turn anyway.
+  if (runtime.reportedVisits && runtime.reportedVisits.length > 0) {
+    const block = formatReportedVisits(runtime.reportedVisits)
     if (block) blocks.push(block)
   }
   // TAC-296: ## Guest context sits between visit history and recent

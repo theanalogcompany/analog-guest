@@ -326,6 +326,12 @@ export type RuntimeContext = {
   // TAC-234 (replaces THE-229's single-transaction lastVisit). Empty array
   // means "no qualifying visits"; undefined means "not loaded on this path."
   recentVisits?: Visit[]
+  // TAC-573: visits this guest told us about in this conversation and could
+  // still take back. Non-empty renders the `## Visit they told you about`
+  // block, which is the only thing that makes `reportedVisitCorrection`
+  // meaningful: generateMessage forces the field to 'none' without it.
+  // Undefined or empty on every followup and on almost every inbound.
+  reportedVisits?: { items: string[] }[]
   // Guest's recognition band, surfaced as a `Guest relationship: <state>`
   // line near the inbound framing (TAC-234). Mirrors what TAC-240 added on
   // the classifier side — same single source of truth.
@@ -525,6 +531,20 @@ export type GenerateMessageArrivalCapture = ArrivalCaptureEmission
  */
 export type ComplaintIntent = 'clarifying' | 'resolving' | 'none'
 
+/**
+ * TAC-573: what this reply is doing about a visit the guest told us about and
+ * is now contradicting.
+ *
+ *   'checking'  the reply is the one gentle check, in the guest's own words
+ *   'retracted' the guest confirmed they have not been; the reply believes them
+ *   'none'      every other turn
+ *
+ * Only meaningful when the runtime carried `reportedVisits`. See
+ * lib/agent/retract-reported-visit.ts for what code does with 'retracted' and
+ * what it refuses to take on the model's word.
+ */
+export type ReportedVisitCorrection = 'none' | 'checking' | 'retracted'
+
 export type GenerateMessageAttempt = {
   body: string
   // TAC-212: model self-flag from the structured output. Surfaced per-attempt
@@ -561,6 +581,8 @@ export type GenerateMessageAttempt = {
    * second close.
    */
   closedTheConversation: boolean
+  // TAC-573: see ReportedVisitCorrection.
+  reportedVisitCorrection: ReportedVisitCorrection
   // TAC-297: per-attempt commitment emission. Final attempt's value becomes
   // GenerateMessageResult.commitment.
   commitment: GenerateMessageCommitment
@@ -651,6 +673,8 @@ export type GenerateMessageResult = {
    * second close.
    */
   closedTheConversation: boolean
+  // TAC-573: see ReportedVisitCorrection.
+  reportedVisitCorrection: ReportedVisitCorrection
   // TAC-554: whether the duplicate guard stripped a repeat of the question off
   // the end of the answer. Reported rather than silent because that guard edits
   // guest-facing text; a guard whose firing rate nobody can produce is how
@@ -667,6 +691,14 @@ export type GenerateMessageResult = {
    * card) say `false` because they never compose a question at all.
    */
   intentionQuestionDroppedForBodyQuestion: boolean
+  /**
+   * TAC-573: whether a getting-to-know-you question or a review ask was dropped
+   * because this reply is a gentle check or accepts a retraction. Ruled
+   * 2026-10-06: no name ask or other intention rides on that reply. Reported
+   * for the reason the flag above is: the gate removes text the model meant to
+   * send, so its firing rate has to be countable.
+   */
+  askDroppedForVisitCorrection: boolean
   // The review invitation this reply carries, and the exact TAIL of `body` —
   // composeReplyWithReviewAsk joined them, the TAC-554 identity-by-construction
   // verbatim. '' on every turn the runtime offered no ask (which is almost all)

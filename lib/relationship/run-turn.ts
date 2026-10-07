@@ -336,7 +336,9 @@ export async function runTurn(input: RunTurnInput): Promise<TurnTrace> {
           .from('transactions')
           .select('id', { count: 'exact', head: true })
           .eq('venue_id', input.venueId)
-          .eq('guest_id', input.guestId),
+          .eq('guest_id', input.guestId)
+          // TAC-573: a visit the guest took back is not counted.
+          .is('retracted_at', null),
         supabase
           .from('messages')
           .select('id', { count: 'exact', head: true })

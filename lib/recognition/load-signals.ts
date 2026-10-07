@@ -52,6 +52,9 @@ export async function loadSignals({
       .select('amount_cents, occurred_at, raw_data')
       .eq('venue_id', venueId)
       .eq('guest_id', guestId)
+      // TAC-573: a visit the guest took back is not a visit. See
+      // lib/agent/retract-reported-visit.ts.
+      .is('retracted_at', null)
       .gte('occurred_at', lookbackIso),
     // TAC-313: counts RESPONSES, not rows. A split reply is dispatched as up
     // to three `messages` rows sharing a `generation_id`, and this count is the

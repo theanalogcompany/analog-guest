@@ -48,6 +48,12 @@ import {
   resolveInboundHistoryFrom,
 } from './intentions/derive'
 import { loadIntentionRows } from './intentions/load'
+import {
+  loadScanDayKeys,
+  retractedInConversation,
+  type RetractableReportedVisit,
+  selectRetractableVisits,
+} from './retract-reported-visit'
 import { findPendingQuestion } from './pending-question'
 import { MAX_BUBBLES_PER_RESPONSE } from './split-message'
 import type {
@@ -207,7 +213,11 @@ export async function buildRuntimeContext(input: {
     // applies the per-row freshness + line-item parseability filters.
     supabase
       .from('transactions')
-      .select('occurred_at, raw_data')
+      // TAC-573: retracted rows are read here and split off in code just
+      // below (`liveVisitRows`), rather than filtered in SQL, because this
+      // turn needs both halves: the visits still standing, and whether the
+      // guest took one back earlier in this conversation. One read, not two.
+      .select('id, source, occurred_at, created_at, raw_data, retracted_at')
       .eq('venue_id', input.venueId)
       .eq('guest_id', input.guestId)
       .gte('occurred_at', visitHistoryCutoffIso)
@@ -277,6 +287,12 @@ export async function buildRuntimeContext(input: {
       `buildRuntimeContext: visit history load failed: ${visitHistoryResult.error.message}`,
     )
   }
+
+  // TAC-573: a visit the guest took back is not a visit. Everything below
+  // that counts, dates or renders visits reads `liveVisitRows`; only the
+  // retraction logic reads `visitRows`.
+  const visitRows = visitHistoryResult.data ?? []
+  const liveVisitRows = visitRows.filter((row) => row.retracted_at === null)
 
   const guestRow = guestResult.data
 
@@ -541,7 +557,7 @@ export async function buildRuntimeContext(input: {
   // means "no qualifying visits to surface" and the serializer omits the
   // ## Visit history block entirely.
   const recentVisits = extractRecentVisits(
-    visitHistoryResult.data,
+    liveVisitRows,
     computedAt,
     MAX_VISIT_HISTORY_DAYS,
   )
@@ -570,11 +586,14 @@ export async function buildRuntimeContext(input: {
     newlyEligible: [],
     brakeEngaged: false,
   }
+  // TAC-573: inbound runs only, like the intentions above. A followup has no
+  // guest message that could be taking anything back.
+  let retractableReportedVisits: RetractableReportedVisit[] = []
   if (input.currentMessage) {
     // "Have we heard what they ordered" reuses the visit-history query rather
     // than issuing another: the RAW row count, before extractRecentVisits's
     // parse-projection, since we heard it even if raw_data is unparseable.
-    const recordedVisitCount = visitHistoryResult.data?.length ?? 0
+    const recordedVisitCount = liveVisitRows.length
     const hasQualifyingTransaction = recordedVisitCount > 0
 
     // TAC-436 ruling 3: arms understand_order off the EARLIEST confirmed visit,
@@ -810,6 +829,58 @@ export async function buildRuntimeContext(input: {
         venue.venueInfo.menu.items,
       ),
     }
+
+    // TAC-573, ruled 2026-10-07: once a guest has taken a visit back,
+    // understand_order does not reopen in that conversation. The retracted row
+    // no longer satisfies it, so it derives open again, and asking what they
+    // ordered of someone who just said they have never been in is the wrong
+    // question. Dropped from newlyEligible too, so no eligibility row starts
+    // its window on a turn it may not be asked. Nothing is written, so a later
+    // conversation derives it afresh.
+    //
+    // Measured from the message, not from computedAt, for the reason
+    // retrieval-context.ts gives: a replay pins history in the past.
+    if (
+      retractedInConversation(
+        visitRows,
+        input.currentMessage.receivedAt,
+        conversationWindowMs,
+      )
+    ) {
+      intentions = {
+        ...intentions,
+        open: intentions.open.filter((o) => o.key !== 'understand_order'),
+        newlyEligible: intentions.newlyEligible.filter(
+          (n) => n.key !== 'understand_order',
+        ),
+      }
+    }
+
+    // TAC-573: the visits this guest could take back on this turn. See
+    // retract-reported-visit.ts for the three conditions. The scan read is
+    // paid only when a row passes the two conditions that need no query, which
+    // is a guest who reported an order in this conversation.
+    const selection = {
+      now: input.currentMessage.receivedAt,
+      conversationWindowMs,
+      timezone: venue.timezone,
+    }
+    const reportedThisConversation = selectRetractableVisits(visitRows, {
+      ...selection,
+      scanDayKeys: new Set(),
+    })
+    if (reportedThisConversation.length > 0) {
+      retractableReportedVisits = selectRetractableVisits(visitRows, {
+        ...selection,
+        scanDayKeys: await loadScanDayKeys(supabase, {
+          venueId: input.venueId,
+          guestId: input.guestId,
+          timezone: venue.timezone,
+          createdVia: guest.createdVia,
+          createdAt: guest.createdAt,
+        }),
+      })
+    }
   }
 
   // TAC-536: the two facts a scan greeting may state. Computed only on that
@@ -839,8 +910,7 @@ export async function buildRuntimeContext(input: {
         input.followupTrigger.instagramScanArrival?.hadPriorConversation ===
         true,
       hasRecordedVisit:
-        (visitHistoryResult.data?.length ?? 0) > 0 ||
-        (arrival.ok && arrival.data !== null),
+        liveVisitRows.length > 0 || (arrival.ok && arrival.data !== null),
     }
   }
 
@@ -858,6 +928,7 @@ export async function buildRuntimeContext(input: {
     recognition,
     mechanics,
     recentVisits,
+    retractableReportedVisits,
     activeCommitments,
     // TAC-380: empty on every followup run and while the brake is engaged.
     // The serializer omits the block entirely when empty.

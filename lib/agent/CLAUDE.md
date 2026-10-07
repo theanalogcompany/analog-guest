@@ -305,6 +305,12 @@ conditional regression nothing notices.
 
 Prompt wording cannot reach any of this: see `docs/decisions/0007-intention-question-is-its-own-bubble.md`.
 
+## A reported visit can be taken back (TAC-573)
+
+`retract-reported-visit.ts` owns it; its header has the rulings. The model reports
+`reportedVisitCorrection`, code decides which rows may go, and every visit reader filters
+`retracted_at is null`. **A new reader of `transactions` must filter it too.**
+
 ## Proactive sends (TAC-386)
 
 Three paths reach a guest with no inbound behind them: the scan greeting (TAC-536; started by
