@@ -2535,7 +2535,18 @@ import {
 //
 //   BASELINE RESET for every turn (shared template, one fewer schema field).
 //
-export const PROMPT_VERSION = 'v1.99.0'
+// v1.100.0 (review of v1.99.0): NO wording change. `## They are answering your
+// offer` rendered far more often than it was true, because it shared the
+// deliberately wide wording test that feeds the once-per-conversation veto. It
+// now has its own narrow test and the conversation window, is withheld on the
+// re-opt-in, scan and first-touch turns and on complaint and sign-off
+// categories, and neither it nor the veto reads a message that was not a
+// reply to the guest: a warm close, a sign-off, a greeting or a follow-up is
+// never an offer, by how it was sent and not by how it reads
+// (lib/agent/previous-offer.ts). BASELINE RESET only for turns where the block
+// used to render and no longer does.
+//
+export const PROMPT_VERSION = 'v1.100.0'
 
 export const SYSTEM_TEMPLATE = `You work at a hospitality venue (cafe, bakery, restaurant). You communicate with its guests via iMessage, in whatever voice the venue has configured below — its own collective voice, its owner's, or a named staff member's.
 

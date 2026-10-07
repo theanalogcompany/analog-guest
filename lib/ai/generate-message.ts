@@ -963,10 +963,16 @@ export async function generateMessage(
       }
       const object = {
         ...rawObject,
+        // When the line is withheld and the model had also written it into
+        // the reply, the copy in the reply goes too: with one offer per
+        // conversation the veto fires on most replies, and a duplicate left in
+        // `body` would send the very line code decided against.
         body:
           offerDecision.append && beforeOffer.trim() !== ''
             ? appendFurtherHelpOffer(beforeOffer, offerLine)
-            : withAsk.body,
+            : beforeOffer.trim() !== ''
+              ? beforeOffer
+              : withAsk.body,
         intentionQuestion: composed.intentionQuestion,
         reviewAsk: withAsk.reviewAsk,
         furtherHelpOffer:

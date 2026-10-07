@@ -167,6 +167,11 @@ check(
   withoutOfferBubble(['second half of the answer', 'and a third'], ''),
   ['second half of the answer', 'and a third'],
 )
+check(
+  'control: an offer that already went out leaves the unsent messages alone',
+  withoutOfferBubble(['second half of the answer', 'and a third'], OFFER),
+  ['second half of the answer', 'and a third'],
+)
 
 // ONE OFFER PER CONVERSATION (ruled 2026-10-07).
 const NOW = new Date('2026-10-07T20:00:00Z')
@@ -252,25 +257,107 @@ check(
   ]),
   { append: true, reason: 'link' },
 )
-// What turns on the `## They are answering your offer` block.
+// What turns on the `## They are answering your offer` block. Narrower than
+// the veto on purpose: a false hit here tells the model something untrue.
+const answering = (thread: RecentMessage[], asOf = NOW): boolean =>
+  previousReplyOffered(thread, asOf, WINDOW_MS)
+const afterOurs = (body: string, category?: string): RecentMessage[] => [
+  msg('inbound', 'hey', 3),
+  { ...msg('outbound', body, 2), category },
+]
 check(
   'answering: our last message ended with an offer',
-  previousReplyOffered(beansThread),
+  answering(beansThread),
   true,
 )
 check(
   'control: our last message was a plain answer',
-  previousReplyOffered(noOfferThread),
+  answering(noOfferThread),
   false,
 )
 check(
   'control: an offer two messages back is not what they are answering',
-  previousReplyOffered([
+  answering([
     ...beansThread,
     msg('inbound', 'usually black', 1.5),
     msg('outbound', 'the light roast then', 1),
   ]),
   false,
+)
+check(
+  'control: an offer from before the conversation window is not being answered',
+  answering(beansThread, new Date(NOW.getTime() + WINDOW_MS + HOUR_MS)),
+  false,
+)
+// ORDINARY REPLIES THAT ARE NOT OFFERS. Each of these turned the block on
+// under the first version, which shared the veto's wide wording list.
+for (const body of [
+  'if you want something cold, the tonic is the one',
+  "let us know when you're on your way",
+  'give us a heads up if you want it tonight',
+  'happy to hear it',
+  'glad to have you',
+  'any other day works too',
+  "if you need parking, there's a lot on Pine",
+  "you won't hear from us again. if you want to come back, text START anytime",
+]) {
+  check(
+    `not an offer: ${JSON.stringify(body)}`,
+    answering(afterOurs(body)),
+    false,
+  )
+}
+
+// BY HOW IT WAS SENT, NOT BY HOW IT READS (ruled 2026-10-07). A close or a
+// sign-off worded exactly like an offer is not one, for the veto or the block.
+const closeWording =
+  'hope to see you soon. happy to answer anything else about the menu, events or what to try'
+const closedThread = (category: string): RecentMessage[] => [
+  ...noOfferThread,
+  { ...msg('outbound', closeWording, 1), category },
+]
+check(
+  'control: the same words in a reply DO count',
+  decide(closedThread('new_question')),
+  { append: false, reason: 'offered_this_conversation' },
+)
+for (const category of [
+  'acknowledgment',
+  'follow_up',
+  'guest_arrived',
+  'manual',
+  'a_close_category_that_does_not_exist_yet',
+]) {
+  check(
+    `sent as ${category}: not an offer for the once-per-conversation rule`,
+    decide(closedThread(category)),
+    { append: true, reason: 'link' },
+  )
+  check(
+    `sent as ${category}: the guest is not answering an offer`,
+    answering(closedThread(category)),
+    false,
+  )
+}
+check(
+  'a close sent after an offer ends "answering", but the offer still counts once',
+  [
+    answering([
+      ...beansThread,
+      {
+        ...msg('outbound', 'hope to see you soon', 1),
+        category: 'acknowledgment',
+      },
+    ]),
+    decide([
+      ...beansThread,
+      {
+        ...msg('outbound', 'hope to see you soon', 1),
+        category: 'acknowledgment',
+      },
+    ]).reason,
+  ],
+  [false, 'offered_this_conversation'],
 )
 
 if (failures > 0) {
