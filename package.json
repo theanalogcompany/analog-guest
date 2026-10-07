@@ -32,7 +32,7 @@
     "measure-turn-one-move": "tsx --env-file=.env.local scripts/measurement/turn-one-move.ts",
     "measure-template-regression": "tsx --env-file=.env.local scripts/measurement/template-regression.ts",
     "measure-prose-promise": "tsx --env-file=.env.local scripts/measurement/prose-promise-catch-rate.ts",
-    "measure-warm-close": "tsx --env-file=.env.local scripts/measurement/warm-close.ts",
+    "measure-warm-close": "tsx --env-file=.env.local scripts/measurement/warm-close-variety.ts",
     "measure-prose-promise-elliptical": "tsx --env-file=.env.local scripts/measurement/prose-promise-elliptical.ts",
     "measure-first-visit-question": "tsx --env-file=.env.local scripts/measurement/first-visit-question.ts",
     "measure-first-visit-budget": "tsx --env-file=.env.local scripts/measurement/first-visit-question-budget.ts",
