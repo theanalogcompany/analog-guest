@@ -8,6 +8,11 @@
 // put a rate on something one body did. The extras are printed and logged and
 // never enter the three bars, which stay fifteen bodies of fifteen inputs.
 //
+// `--dump-prompt <path>` writes the composed prompt for the first case and
+// exits without generating. Diff two dumps to check that a merge or a version
+// bump left this turn's prompt alone, which is what lets a run made before it
+// still stand.
+//
 // `--arm` only labels the run log (control, treatment). `--rescore` generates
 // nothing: it re-reads the bodies of an earlier run through today's detectors,
 // which is how a detector change is checked against a run that was hand-read.
@@ -32,7 +37,7 @@
 // nothing about whether the voice is templated.
 
 import { randomUUID } from 'node:crypto'
-import { readFileSync } from 'node:fs'
+import { readFileSync, writeFileSync } from 'node:fs'
 import { generateObject } from 'ai'
 
 import { buildRuntimeContext } from '@/lib/agent/build-runtime-context'
@@ -191,6 +196,7 @@ interface Args {
   rescorePath: string | null
   /** 1-based case number and how many extra generations of it. */
   extra: { caseNumber: number; times: number } | null
+  dumpPromptPath: string | null
 }
 
 function parseArgs(argv: readonly string[]): Args {
@@ -199,11 +205,13 @@ function parseArgs(argv: readonly string[]): Args {
     arm: 'shipped',
     rescorePath: null,
     extra: null,
+    dumpPromptPath: null,
   }
   for (let i = 0; i < argv.length; i += 1) {
     const flag = argv[i]!
     if (flag === '--arm') args.arm = argv[++i] ?? args.arm
     else if (flag === '--rescore') args.rescorePath = argv[++i] ?? null
+    else if (flag === '--dump-prompt') args.dumpPromptPath = argv[++i] ?? null
     else if (flag === '--extra') {
       const match = /^(\d+)x(\d+)$/.exec(argv[++i] ?? '')
       const caseNumber = Number(match?.[1])
@@ -407,6 +415,15 @@ async function main(): Promise<void> {
     console.error('refusing to run:')
     for (const p of problems) console.error(`  - ${p}`)
     process.exit(1)
+  }
+
+  if (args.dumpPromptPath !== null) {
+    writeFileSync(
+      args.dumpPromptPath,
+      `${first.composed.systemPrompt}\n\n=== USER PROMPT ===\n\n${first.composed.userPrompt}\n`,
+    )
+    console.log(`wrote the composed prompt to ${args.dumpPromptPath}`)
+    return
   }
 
   const log = createRunLog({
