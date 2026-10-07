@@ -47,7 +47,7 @@ export const REGRESSION_TELL_DESCRIPTIONS = {
   'what-can-i-do':
     'RETIRED TELL (owner-ruled 2026-10-05: okay to ask). Was: service-desk register ("what can I do for you?") where a host welcome belongs (v2.2.0 lesson). Kept so stored breaches from older runs still render',
   'two-questions':
-    'question stacking - two real questions in one bubble, or three-plus across the reply. Rhetorical tags ("right?") are not questions, and one body question plus the own-bubble getting-to-know-you question is the decision-0007 shape and fine (owner-ruled 2026-10-05; v2.8.0 lesson)',
+    'question stacking - two SUBSTANTIVE questions in one bubble, or three-plus across the reply. A social check-in is not a substantive question (owner-ruled 2026-10-06 on "Alex, nice to meet you. how was this morning? what did you get?" - technically two, meaningfully one). Substantive-vs-phatic is a Jev judgment, not a pattern match: clause extraction stays deterministic, the classification is semantic (lib/eval/question-substance.ts). Rhetorical tags ("right?") are not questions, and one body question plus the own-bubble getting-to-know-you question is the decision-0007 shape and fine (owner-ruled 2026-10-05; v2.8.0 lesson)',
   'either-or':
     'hedged either/or question ("anything catch your eye, or want a nudge in a direction?") - an AI tell, a question asking permission for its own alternative. The normalizer strips the ", or ...?" tail at the generation seam, so a hit here means the strip missed (owner-ruled 2026-10-05)',
 } satisfies Record<RegressionTell, string>
@@ -203,6 +203,18 @@ export const BUILTIN_REGRESSION_SCENARIOS: RegressionScenario[] = [
     expectFirstName: null,
     noTurnOneNameAsk: false,
     expectReplyContains: 'outside food',
+    forbidPolicyKeys: [],
+    enabled: true,
+  },
+  {
+    key: 'recommendation-turn-one',
+    lesson:
+      'The OPEN taste-ask on turn one, answered. Measured 2026-10-06 on v2.10.0-draft: "what is a good first order?" returned a bare welcome 11/11 while retrieval had already handed the model the answer ("the cafe recommends SoFi with a pastry"), and the n=6 gate was GREEN throughout - all five knowledge-* scenarios are CLOSED factual questions (wifi, milk, address, outside food, pastry list), which the agent answers correctly even while broken, so nothing in the set pointed at an open recommendation. That is the template v2.11.0 defect and the reason the guest\'s own agenda became a move. The bar is a menu token because the failure names no menu item at all: broken scored 0/6, correct 5-6/6. The target set is the other half of the assertion - a fix that bought answering by killing move pursuit would pass a reply-only bar, and bare-hey alone would not catch it on an inbound that asks something.',
+    script: ['what is a good first order?'],
+    target: ['find_their_thing', 'understand_order', 'what_they_came_for'],
+    expectFirstName: null,
+    noTurnOneNameAsk: true,
+    expectReplyContains: 'SoFi',
     forbidPolicyKeys: [],
     enabled: true,
   },
