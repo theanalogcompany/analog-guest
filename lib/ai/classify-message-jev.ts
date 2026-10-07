@@ -4,7 +4,7 @@
  * `classify-message.ts`.
  *
  * WHY. Classification is the measured 2.5s p50 / 3.6s p90 of the inbound hot
- * path, and it is a pure decision task: a 13-way category pick and three
+ * path, and it is a pure decision task: a 13-way category pick and four
  * booleans. Jev answers typed questions with calibrated probabilities in one
  * parallel pass (~150-250ms measured from this codebase's network), and its
  * confidence is trained calibration rather than a model's self-report - which
@@ -50,6 +50,16 @@ import { checkTypesafeEnv } from './typesafe-env'
 
 export const JEV_CLASSIFICATION_ENABLED = true
 
+// jev-v1.4.0 (TAC-386): a `follow_up_worthy` noul. This arm had returned
+// `followUpWorthy: false` unconditionally since it went live on 2026-09-29, 40
+// minutes after the inquiry follow-up shipped, so `inquiry_followups` never
+// held a row: the scheduler's first gate reads this field. The question set is
+// built here and sent with every request, so asking it is a change to this
+// file and nothing else (ruled 2026-10-06: no Haiku sidecar).
+//
+// Adding a question must not move the other four answers. Check that on the
+// replay (jev-classify-eval.ts) by comparing category per message id against a
+// run on the previous wording, not by reading the agreement rate.
 // jev-v1.3.0 (TAC-574): `mechanic_request` says ordering from the menu is NOT
 // one, and `new_question` says ordering and availability questions belong to
 // it. "can i get a flat white" and "can i order ahead" had both been classed
@@ -76,7 +86,7 @@ export const JEV_CLASSIFICATION_ENABLED = true
 // the prefer-true-on-ambiguity asymmetry. v1.0.0 scored an ambiguous "I want
 // to end it soon" at p(yes)=0.06 - it read "end it" as ending the
 // conversation - and the fixture eval's zero-false-negative ceiling caught it.
-export const CLASSIFY_JEV_PROMPT_VERSION = 'jev-v1.3.0'
+export const CLASSIFY_JEV_PROMPT_VERSION = 'jev-v1.4.0'
 
 export const TYPESAFE_SYSTEMONE_URL = 'https://api.typesafe.ai/v1/systemone'
 export const JEV_MODEL = 'jev-latest'
@@ -111,6 +121,17 @@ export const JEV_CORRECTS_PENDING_THRESHOLD = 0.75
  * on that evidence, not on argument.
  */
 export const JEV_PRAISE_THRESHOLD = 0.75
+
+/**
+ * P(yes) at or above this sets followUpWorthy. High on purpose, the same
+ * posture as correctsPending and praise: a wrongly-true value sends a guest an
+ * unprompted message they did not need, a wrongly-false one costs one missed
+ * check-in. Provisional (ruled 2026-10-06) until real volume says otherwise;
+ * move it on the replay's p(yes) distribution
+ * (`scripts/measurement/jev-classify-eval.ts`) and the fixture bars
+ * (`scripts/measurement/follow-up-worthy.ts`), not on argument.
+ */
+export const JEV_FOLLOW_UP_WORTHY_THRESHOLD = 0.75
 
 /** The classifier's 13 inbound categories. Must match the Haiku enum exactly. */
 export const CLASSIFIER_CATEGORIES = [
@@ -203,6 +224,30 @@ const PRAISE_CRITERIA = {
     'Bare thanks or sign-offs ("thanks", "thanks so much", "ok great", "got it"); politeness attached to a question or request; anticipation about something that has not happened yet ("cannot wait to try it"); compliments about this conversation or about texting with the venue rather than about the venue itself; any message that also reports a problem, disappointment, or complaint, even when it contains praise too; and any genuinely unclear case - a wrongly-true answer spends a moment that only comes once.',
 } as const
 
+const FOLLOW_UP_WORTHY_INSTRUCTIONS =
+  "Would the venue's answer to `inbound_message` help the guest do something afterwards, so that checking later whether it worked out would be natural? " +
+  'Judge `inbound_message` itself; `recent_conversation` is only context.'
+
+/**
+ * A parallel copy of the Haiku prompt's followUpWorthy paragraphs
+ * (`classify-message.ts`), reshaped into true/false criteria. The line it
+ * draws is ruled (2026-09-30): what the answer helps the guest DO, which is
+ * why this is its own question and never derived from category.
+ *
+ * TWO OF THE EXCLUSIONS HAVE NOTHING BEHIND THEM BUT THIS TEXT. Complaints,
+ * operator-held messages and crisis are also refused structurally by
+ * `lib/agent/schedule-inquiry-followup.ts`. Bookings and "on my way" are not:
+ * no category means either, and the 2026-09-30 ruling kept `event_question`
+ * and `mechanic_request` off the scheduler's deny-list. So the FALSE criteria
+ * are the only gate on those two, and the A4 and A5 arms of
+ * `scripts/measurement/follow-up-worthy.ts` are what holds them at zero.
+ */
+const FOLLOW_UP_WORTHY_CRITERIA = {
+  true: 'The answer is something the guest then goes and does: where to park or how to find the place; which beans or bag to buy; how to brew something at home; whether they can bring a dog; what to order or try; whether there are public events coming up. A question can be factual and still qualify when the guest acts on the answer: asking how to get there qualifies, asking when you close does not.',
+  false:
+    'There is nothing to have worked out: a pure fact with no action behind it ("what time do you close", "are you open Monday", "do you have wifi"); small talk, thanks or a passing comment; a complaint or a report that something was wrong; anything involving someone\'s safety or an emergency; anything an operator arranges rather than the venue simply answering (catering, a private event or renting the space, taking a booking or reservation, wholesale, press, hiring or partnership enquiries); a guest saying they are arriving or on their way ("omw", "walking over", "heading in now", "can you get my order ready"); and any genuinely unclear case. A wrongly-false answer costs one missed check-in; a wrongly-true one sends a guest a message they did not need.',
+} as const
+
 const CORRECTS_PENDING_INSTRUCTIONS =
   'In `recent_conversation`, a venue line may be marked NOT SENT - a reply the venue drafted but has not approved; that marker also appears on replies the venue decided not to send, so judge only against one that is waiting for approval, and only the most recent such line. ' +
   'Does `inbound_message` clearly correct, amend, or change the question that NOT SENT reply is answering ("actually make that oat milk", "wait, I meant tomorrow")? ' +
@@ -238,6 +283,7 @@ const SystemOneResponseSchema = z.object({
     crisis: NoulAnswerSchema,
     corrects_pending: NoulAnswerSchema,
     praise: NoulAnswerSchema,
+    follow_up_worthy: NoulAnswerSchema,
   }),
 })
 
@@ -260,6 +306,7 @@ function serializeReasoning(
   crisis: number,
   correctsPending: number,
   praise: number,
+  followUpWorthy: number,
 ): string {
   const runnerUp = Object.entries(probabilities)
     .filter(([category]) => category !== choice)
@@ -271,12 +318,12 @@ function serializeReasoning(
   return (
     `${model}: category=${choice}(${(chosen ?? 0).toFixed(2)})${runnerUpText}; ` +
     `crisis p(yes)=${crisis.toFixed(2)}; corrects_pending p(yes)=${correctsPending.toFixed(2)}; ` +
-    `praise p(yes)=${praise.toFixed(2)}`
+    `praise p(yes)=${praise.toFixed(2)}; follow_up_worthy p(yes)=${followUpWorthy.toFixed(2)}`
   )
 }
 
 /**
- * One request, three parallel judgments. Every failure path returns
+ * One request, five parallel judgments. Every failure path returns
  * `{ok: false}` with a distinct `errorCode` so the fallback event can say
  * which way it failed; none of them throws.
  */
@@ -329,6 +376,11 @@ export async function classifyMessageViaJev(
             instructions: PRAISE_INSTRUCTIONS,
             criteria: PRAISE_CRITERIA,
           },
+          follow_up_worthy: {
+            type: 'noul',
+            instructions: FOLLOW_UP_WORTHY_INSTRUCTIONS,
+            criteria: FOLLOW_UP_WORTHY_CRITERIA,
+          },
         },
       }),
     })
@@ -380,6 +432,7 @@ export async function classifyMessageViaJev(
     crisis,
     corrects_pending: correctsPending,
     praise,
+    follow_up_worthy: followUpWorthy,
   } = parsed.data.answers
   if (!isClassifierCategory(category.choice)) {
     // The API cannot choose an option we did not offer, so this is a contract
@@ -403,22 +456,14 @@ export async function classifyMessageViaJev(
         crisis.noul,
         correctsPending.noul,
         praise.noul,
+        followUpWorthy.noul,
       ),
       promptVersion: CLASSIFY_JEV_PROMPT_VERSION,
       crisisSafety: crisis.noul >= JEV_CRISIS_THRESHOLD,
       correctsPendingReply:
         correctsPending.noul >= JEV_CORRECTS_PENDING_THRESHOLD,
       praisedExperience: praise.noul >= JEV_PRAISE_THRESHOLD,
-      // TAC-386 KNOWN GAP: the question set this file sends has no
-      // followUpWorthy question, so a Jev-classified turn never arms an
-      // inquiry follow-up. False is the cheap direction by TAC-386's own
-      // posture (a missed follow-up, never a broken turn). Adding the question
-      // to the request body above is the v-next work item (the questions live
-      // in this file; jev-1.13.0 is the vendor's model, not a unit we train);
-      // do NOT derive it from category here - the
-      // 2026-09-30 ruling drew the line on what the answer helps the guest DO,
-      // which a category cannot express.
-      followUpWorthy: false,
+      followUpWorthy: followUpWorthy.noul >= JEV_FOLLOW_UP_WORTHY_THRESHOLD,
     },
   }
 }
