@@ -2470,7 +2470,32 @@ import {
 //   where pacing or a check-in holds the questions. No rule in this template
 //   changed.
 //
-export const PROMPT_VERSION = 'v1.96.0'
+// v1.97.0 (phone test, 2026-10-07, second of two): two user-prompt blocks, each
+// rendered on a fact derived in code from the guest's own thread. NO change to
+// this template. Both measured on constructed threads against a control with
+// the block removed (scripts/measurement/phone-test-fixes.ts; bodies in the
+// PR).
+//
+//   `## You know this guest` (serializers.ts, KNOWN_GUEST_LINES): a guest who
+//   has written to us before is not greeted as a first-time contact. Two
+//   variants, both approved verbatim: back after a pause in a recent
+//   conversation, and older history, including an imported thread (TAC-515)
+//   older than anything in the prompt. lib/agent/known-guest.ts decides which,
+//   from messages and not from the recognition band.
+//
+//   `## You have already apologised` (serializers.ts, ALREADY_APOLOGISED): a
+//   UNIVERSAL RULE SAYING THIS WAS WRITTEN, MEASURED AND NOT SHIPPED. From the
+//   rule list it took apology openers from 13 of 16 to 7 of 16 and moved the
+//   rest to "that's on us"; the venue's own persona says "say we're sorry"
+//   and renders later. The same instruction as a late block went 0 of 16.
+//   lib/agent/already-apologised.ts decides when it renders.
+//
+//   BASELINE RESET for a returning guest's first message after a pause, and
+//   for every reply after an apology in the same conversation. A guest with
+//   no earlier message and no apology in the thread gets a prompt
+//   byte-identical to v1.96.0.
+//
+export const PROMPT_VERSION = 'v1.97.0'
 
 export const SYSTEM_TEMPLATE = `You work at a hospitality venue (cafe, bakery, restaurant). You communicate with its guests via iMessage, in whatever voice the venue has configured below — its own collective voice, its owner's, or a named staff member's.
 

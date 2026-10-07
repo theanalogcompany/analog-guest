@@ -496,6 +496,15 @@ export type RuntimeContext = {
   // the model not to frame the reply as a return. Absent on every other turn,
   // which renders nothing.
   reOptIn?: ReOptIn
+  // The guest has written to the venue before this turn. 'earlier': they are
+  // back after a pause in a recent conversation the model can see. 'known':
+  // their history is older, possibly older than anything in the prompt. The
+  // serializer renders one `## You know this guest` block per value. Absent
+  // for a new guest and on any turn with its own facts about the return.
+  knownGuest?: 'earlier' | 'known'
+  // True when a message of ours that reached this guest in the current
+  // conversation already said sorry. Renders `## You have already apologised`.
+  alreadyApologised?: boolean
   // TAC-389: true only on an operator-initiated decline turn. Computed in
   // buildAiRuntime from ctx.followupTrigger.isOperatorDecline; the serializer
   // reads it to render the decline-specific `## Active commitments` intro,

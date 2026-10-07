@@ -596,6 +596,8 @@ async function generateTurn(
   }
   const ctx = {
     ...baseCtx,
+    // The real base guest's, like the thread: a constructed guest has none.
+    wroteBeforeHistoryWindow: false,
     recentVisits: unit.visits,
     recentMessages: [...history],
   } as typeof baseCtx

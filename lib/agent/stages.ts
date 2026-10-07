@@ -60,9 +60,11 @@ import {
 import { parseVenueLinks } from '@/lib/schemas/venue-info'
 import { loadVoicePack, retrieveKnowledgeContext } from '@/lib/rag'
 import { fireRedAlert } from './alerts'
+import { alreadyApologised } from './already-apologised'
 import { matchComp } from './comp-backstop'
 import { isFloorCategory, matchForwardCommitment } from './complaint-floor'
 import { canAutoSendComplaintTurn } from './complaint-routing'
+import { deriveKnownGuest } from './known-guest'
 import { resolveComplaintThreadCategory } from './complaint-thread'
 import { REPORTED_ORDER_WINDOW_DAYS } from './extract-reported-order'
 import { INTENTION_DEFINITION_BY_KEY } from './intentions/definitions'
@@ -3079,6 +3081,37 @@ export function buildAiRuntime(
         ctx.visitCheckinHold),
     // TAC-572: null on every turn but the one that opted the guest back in.
     reOptIn: ctx.reOptIn ?? undefined,
+    // Both derived HERE, from the thread this context actually carries, so a
+    // caller that swaps in another history (every measurement harness does)
+    // gets blocks that match it. Measured from when the guest's message
+    // arrived, not from now: a replayed turn is judged as of its own moment.
+    //
+    // Inbound turns only, and `knownGuest` never beside a block that already
+    // says how to treat the guest's return: the re-opt-in line says the
+    // opposite (do not comment on it), and a scan greeting or first touch
+    // carries its own facts.
+    knownGuest:
+      ctx.currentMessage !== null &&
+      ctx.followupTrigger === null &&
+      ctx.reOptIn === null &&
+      ctx.scanArrival === null &&
+      !firstTouchAfterQrScan
+        ? (deriveKnownGuest({
+            recentMessages: ctx.recentMessages,
+            receivedAt: ctx.currentMessage.receivedAt,
+            pauseMs: ctx.venue.warmClosePauseMinutes * 60 * 1000,
+            wroteBeforeHistoryWindow: ctx.wroteBeforeHistoryWindow,
+          }) ?? undefined)
+        : undefined,
+    alreadyApologised:
+      (ctx.currentMessage !== null &&
+        ctx.followupTrigger === null &&
+        alreadyApologised(
+          ctx.recentMessages,
+          ctx.currentMessage.receivedAt,
+          ctx.conversationWindowMs,
+        )) ||
+      undefined,
     // TAC-389: only handle-operator-decline.ts sets this, on the trigger it
     // hands to buildRuntimeContext. Every other path (inbound, cron follow-up,
     // ordinary Command Center manual follow-up) leaves it false, so the

@@ -108,6 +108,8 @@ export interface VenueContext {
    * read that could disagree with it.
    */
   warmCloseText: string
+  /** `followup_rules.warm_close_pause_minutes`: this venue's definition of a pause. */
+  warmClosePauseMinutes: number
 }
 
 export interface GuestContext {
@@ -488,6 +490,14 @@ export interface RuntimeContext {
    * history's own "stop messaging me" invites exactly that.
    */
   reOptIn: ReOptIn | null
+  /**
+   * Did this guest write to us before the loaded history begins? The one fact
+   * behind `## You know this guest` that the history itself cannot answer
+   * (known-guest.ts). False on a proactive turn. buildAiRuntime derives the
+   * block from this and `recentMessages`, so a caller that swaps in another
+   * thread gets a block that matches it.
+   */
+  wroteBeforeHistoryWindow: boolean
   recognition: RecognitionSnapshot
   // Mechanics this guest is currently eligible for. Filtered at load time in
   // build-runtime-context.ts by guest's recognition state and redemption

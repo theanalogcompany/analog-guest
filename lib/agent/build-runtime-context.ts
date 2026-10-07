@@ -176,6 +176,22 @@ export async function buildRuntimeContext(input: {
     messagesQuery = messagesQuery.lt('created_at', input.historyEndIso)
   }
 
+  let olderInboundQuery = supabase
+    .from('messages')
+    .select('id')
+    .eq('venue_id', input.venueId)
+    .eq('guest_id', input.guestId)
+    .eq('direction', 'inbound')
+    .neq('body', '')
+    .lt('created_at', historyCutoffIso)
+    .limit(1)
+  if (input.currentMessage) {
+    olderInboundQuery = olderInboundQuery.neq('id', input.currentMessage.id)
+  }
+  if (input.historyEndIso) {
+    olderInboundQuery = olderInboundQuery.lt('created_at', input.historyEndIso)
+  }
+
   const visitHistoryCutoffIso = new Date(
     Date.now() - MAX_VISIT_HISTORY_DAYS * MS_PER_DAY,
   ).toISOString()
@@ -191,6 +207,7 @@ export async function buildRuntimeContext(input: {
     activeCommitmentsResult,
     pendingQuestionResult,
     intentionRows,
+    olderInboundResult,
   ] = await Promise.all([
     supabase
       .from('venues')
@@ -261,6 +278,13 @@ export async function buildRuntimeContext(input: {
     input.currentMessage
       ? loadIntentionRows(input.venueId, input.guestId)
       : Promise.resolve(null),
+    // Did this guest write to us before the history window begins? The one
+    // fact the loaded history cannot answer, and the one an imported thread
+    // (TAC-515) older than the window depends on. Inbound runs only. The
+    // message being answered is excluded by id, and a pinned history
+    // (historyEndIso, the Voices regen path) bounds this the same way it
+    // bounds the history, so a replayed old message cannot match itself.
+    input.currentMessage ? olderInboundQuery : Promise.resolve(null),
   ])
 
   if (venueResult.error || !venueResult.data) {
@@ -450,6 +474,7 @@ export async function buildRuntimeContext(input: {
     // reads below. '' when this venue has none configured, which means neither
     // the goodbye path nor the pause timer sends one.
     warmCloseText: followupRules.warm_close_text,
+    warmClosePauseMinutes: followupRules.warm_close_pause_minutes,
   }
 
   // TAC-296: parse guests.context JSONB at the boundary. fail-OPEN on
@@ -519,6 +544,17 @@ export async function buildRuntimeContext(input: {
   // retrieval layer reads the same number rather than re-deriving it.
   const conversationWindowMs =
     followupRules.recent_conversation_hours * 60 * 60 * 1000
+
+  // A lookup that comes back as an error renders no block, which is what
+  // every guest got before this existed. (A thrown read fails the whole batch,
+  // as it does for every query beside it.)
+  if (olderInboundResult?.error) {
+    console.warn('[agent] older-inbound lookup failed', {
+      guestId: input.guestId,
+      error: olderInboundResult.error.message,
+    })
+  }
+  const wroteBeforeHistoryWindow = (olderInboundResult?.data?.length ?? 0) > 0
 
   // Is this message the answer to a complaint's clarifying question? Read off
   // the history rows already loaded above (`category` rides that select for
@@ -1164,6 +1200,7 @@ export async function buildRuntimeContext(input: {
     firstConversation,
     // TAC-572: null as built. handleInbound sets it after classification.
     reOptIn: null,
+    wroteBeforeHistoryWindow,
     recognition,
     mechanics,
     recentVisits,

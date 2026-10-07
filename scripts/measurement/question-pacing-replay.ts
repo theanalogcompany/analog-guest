@@ -252,6 +252,8 @@ async function main(): Promise<void> {
 
   const ctx: RuntimeContext = {
     ...baseCtx,
+    // The real base guest's, like the thread: a constructed guest has none.
+    wroteBeforeHistoryWindow: false,
     // Every guest-specific field, not only the ones this turn is about: a real
     // guest's open comp once reached every unit of another harness.
     guest: {

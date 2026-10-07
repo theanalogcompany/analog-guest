@@ -521,6 +521,11 @@ a warm-close anchor, excluded inside `loadWarmCloseCandidates`. Reasons in those
 
 ## Other rules that bite
 
+- Two facts about the guest are derived from their own messages rather than left to the
+  prompt, each in a pure module whose header is the authority: `known-guest.ts` (has this
+  guest written to us before, and how long ago) and `already-apologised.ts` (have we already
+  said sorry in this conversation). `buildAiRuntime` derives both from the thread the
+  context carries. Neither reads `recognition.state`, which scores visits.
 - `dispatch-reply.ts` is the one place a reply picks its transport. Nothing routes on a
   null channel.
 

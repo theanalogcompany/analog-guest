@@ -2153,6 +2153,66 @@ function formatReOptIn(reOptIn: ReOptIn): string {
 }
 
 /**
+ * Phone test 2026-10-07: a guest who has written to us before is not greeted
+ * as a first-time contact. Both texts approved verbatim 2026-10-07.
+ *
+ * Why a block: the history is chat turns with no times on them, so the model
+ * cannot tell a guest back after an hour from one mid-conversation, and a
+ * guest whose messages are older than the history window has nothing in the
+ * prompt at all (lib/agent/known-guest.ts decides which, and why it reads
+ * messages rather than the recognition band).
+ *
+ * `known` ENDS ON TWO BARS, and they are the scan greeting's, for its reason:
+ * having messaged is not having visited, and a conversation the model cannot
+ * see is not one it may refer to. An imported thread older than the window
+ * (TAC-515) is exactly that case.
+ *
+ * NO QUOTED GREETING in either. The ruling's own example lines are the ones
+ * every returning guest would then receive.
+ *
+ * Never beside `## Guest is back in touch`, which says the opposite (do not
+ * comment on the return) and stays: buildAiRuntime withholds this on that
+ * turn. The `satisfies` makes a third kind fail `tsc` rather than render
+ * nothing.
+ */
+const KNOWN_GUEST_LINES = {
+  earlier:
+    'This guest was talking with you earlier, and that conversation is in the messages before this one. They are back. Do not greet them as someone new and do not introduce the venue again. If their message is only a hello, greet them as someone picking the conversation back up and ask if there is anything else you can help with, in one short line. If it asks or says something, answer it directly with no greeting.',
+  known:
+    'This guest has messaged with the venue before today. They are not new. Do not greet them as a first-time contact and do not introduce the venue. If their message is only a hello, greet them warmly as someone you already know and invite them to say what they need, in one short line. Having messaged before is not the same as having visited: say nothing about a past visit unless ## Visit history shows one, and do not refer to an earlier conversation you cannot see in the messages before this one.',
+} as const satisfies Record<NonNullable<RuntimeContext['knownGuest']>, string>
+
+function formatKnownGuest(
+  knownGuest: NonNullable<RuntimeContext['knownGuest']>,
+): string {
+  return ['## You know this guest', '', KNOWN_GUEST_LINES[knownGuest]].join(
+    '\n',
+  )
+}
+
+/**
+ * Phone test 2026-10-07: consecutive replies in a complaint thread each opened
+ * with an apology. Rendered when a message of ours that reached this guest in
+ * the current conversation already said sorry (lib/agent/already-apologised.ts,
+ * which also records why this is a block and not a universal rule).
+ *
+ * "AND DO NOT SAY AGAIN WHOSE FAULT IT WAS": with only the apology barred, the
+ * opener became "that's on us", which is the same sentence in other words.
+ *
+ * IT DOES NOT SAY WHAT THE EARLIER SORRY WAS FOR, because the detector cannot
+ * know. The first wording said "for this", and a guest whose first complaint
+ * came three hours after our "sorry, no matcha here" got an apology 4 times in
+ * 10 where the control gave 10. With the condition left to the model ("if ...
+ * the same thing") that cell is 10 of 10 again and the repeat cell still 0 of
+ * 8. This wording approved verbatim 2026-10-07.
+ */
+const ALREADY_APOLOGISED = [
+  '## You have already apologised',
+  '',
+  'Earlier in this conversation you already said sorry to this guest. If what they are writing about now is the same thing, do not apologise again, and do not say again whose fault it was: start with what is new, the answer, the next step, or what you are doing about it. If it is a different problem, it gets its own apology, once.',
+].join('\n')
+
+/**
  * The once-ever review-ask block (v1.82.0). Rendered only when the runtime
  * carries `reviewAsk`, which lib/agent/review-ask.ts sets on an eligible
  * praise turn and nothing else sets, so this block cannot appear on a
@@ -2324,6 +2384,11 @@ export function runtimeToProse(
   if (runtime.lastVisitWentWrong) {
     blocks.push(formatLastVisitWentWrong())
   }
+  // In the same place: a fact about who is writing. Early on purpose, so the
+  // intentions block keeps the last-content position it was measured in.
+  if (runtime.knownGuest && category !== 'opt_out') {
+    blocks.push(formatKnownGuest(runtime.knownGuest))
+  }
   // TAC-560 rendered a warm-close block in this slot, beside `## Guest just
   // arrived`, and TAC-568 removed it when the close became a fixed string.
   // TAC-575 generates the close again, but its blocks render further down, in
@@ -2494,6 +2559,13 @@ export function runtimeToProse(
   // thing it overrides is the history, which the model has just read.
   if (runtime.reOptIn) {
     blocks.push(formatReOptIn(runtime.reOptIn))
+  }
+
+  // Late for the same reason: what it overrides is the persona's own "say
+  // we're sorry" and the history's apologies, all of which render earlier.
+  // From the rule list the same instruction lost to them.
+  if (runtime.alreadyApologised === true && category !== 'opt_out') {
+    blocks.push(ALREADY_APOLOGISED)
   }
 
   // TAC-362: last block in, so it is the most-proximate instruction before
