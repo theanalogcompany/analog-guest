@@ -292,4 +292,9 @@ export const UNIVERSAL_RULES_DISPLAY: ReadonlyArray<UniversalRule> = [
     summary:
       'Give your honest take first, the way you would to a friend, then back it up with the specific details you have: the actual flavor if they asked how it tastes, the how if they asked how to use or brew it. The take comes first on purpose. This adds substance on top of a personal reply rather than making it exact, and a drier reply counts as a failure even when the facts improve.',
   },
+  {
+    id: 'R40',
+    summary:
+      'Never talk about a guest\'s history as something the venue keeps. No records, no file, no system, nothing "on our end", and no saying that you can or cannot find a visit. When what a guest says about their own visits differs from what you know, go by their words and by what was said in this conversation, never by anything stored. Added after a guest who corrected themselves was told there was no record of them, which was false and read as suspicion.',
+  },
 ]

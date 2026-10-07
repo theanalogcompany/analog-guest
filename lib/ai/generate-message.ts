@@ -320,6 +320,22 @@ export const GeneratedMessageSchema = z.object({
   // Anthropic counts only optionals against the 24-property cap and a
   // required string costs zero.
   reviewAsk: z.string(),
+  // TAC-573: what this reply is doing about a visit the guest told us about
+  // and is now contradicting. 'none' on every turn the runtime carries no
+  // `## Visit they told you about` block, which is almost every turn.
+  //
+  // A REQUIRED ENUM, the complaintIntent reasoning verbatim: explicit presence
+  // is what Anthropic's validator handles most reliably, and a required field
+  // costs zero against the 24-optional cap.
+  //
+  // DECLARED LAST on purpose: structured output is generated in declaration
+  // order, so the model has written the reply before it labels it, and the
+  // label describes what it actually said.
+  //
+  // NOT TRUSTED ALONE. generateMessage forces it to 'none' when the block did
+  // not render, and lib/agent/retract-reported-visit.ts only ever retracts rows
+  // code selected. See that file for the one thing left to the prompt.
+  reportedVisitCorrection: z.enum(['none', 'checking', 'retracted']),
 })
 
 /**
@@ -628,6 +644,9 @@ export async function generateMessage(
       intentionQuestion: string
       reviewAsk: string
       closedTheConversation: boolean
+      reportedVisitCorrection: z.infer<
+        typeof GeneratedMessageSchema
+      >['reportedVisitCorrection']
     } | null = null
     const attemptHistory: GenerateMessageAttempt[] = []
     // THE-225, made STICKY by the TAC-509 follow-up (ruled 2026-09-21).
@@ -686,6 +705,9 @@ export async function generateMessage(
     // Whether the one-ask-per-turn gate dropped the review ask on the shipped
     // attempt. Same per-attempt assignment discipline as the two flags above.
     let reviewAskDropped = false
+    // TAC-573: whether the visit-correction gate dropped an ask on the shipped
+    // attempt.
+    let askDroppedForCorrection = false
     // Order-preserving and deduped, so a link flagged on attempt 1 is still
     // named on attempt 3 alongside anything new attempt 2 invented.
     const unverifiedUrlsSeen: string[] = []
@@ -777,9 +799,36 @@ export async function generateMessage(
       // condition, the attempt history, the shipped body, and every backstop
       // downstream — sees ONE body carrying the question, exactly as it did
       // before this field existed.
+      // TAC-573. Two things, both decided here because this is the seam that
+      // already owns what rides on the reply.
+      //
+      // The field means nothing without the block: a model that reports a
+      // correction on a turn that showed it no reported visit is normalized to
+      // 'none', so nothing downstream ever acts on it.
+      //
+      // And ruled 2026-10-06: a gentle check, or a reply accepting that the
+      // guest has not been in, carries no name ask and no other intention. Like
+      // TAC-567 one gate over, the prompt cannot be relied on for that, so the
+      // question and the review ask are dropped before they are composed. As
+      // there, nothing is written and nothing closes: the intention comes back
+      // open on a later turn.
+      const reportedVisitCorrection =
+        (input.runtime.reportedVisits?.length ?? 0) > 0
+          ? rawObject.reportedVisitCorrection
+          : 'none'
+      const correcting = reportedVisitCorrection !== 'none'
+      const droppedForCorrection =
+        correcting &&
+        (rawObject.intentionQuestion.trim() !== '' ||
+          rawObject.reviewAsk.trim() !== '')
+      if (droppedForCorrection) {
+        console.warn(
+          '[ai] generateMessage: dropped an ask, the reply is correcting a reported visit',
+        )
+      }
       const composed = composeReplyWithIntention(
         rawObject.body,
-        rawObject.intentionQuestion,
+        correcting ? '' : rawObject.intentionQuestion,
       )
       if (composed.duplicateStripped) {
         console.warn(
@@ -801,7 +850,7 @@ export async function generateMessage(
       // link in it.
       const withAsk = composeReplyWithReviewAsk(
         composed.body,
-        rawObject.reviewAsk,
+        correcting ? '' : rawObject.reviewAsk,
         input.runtime.reviewAsk != null,
       )
       if (withAsk.duplicateStripped) {
@@ -819,8 +868,10 @@ export async function generateMessage(
         body: withAsk.body,
         intentionQuestion: composed.intentionQuestion,
         reviewAsk: withAsk.reviewAsk,
+        reportedVisitCorrection,
       }
       lastResult = object
+      askDroppedForCorrection = droppedForCorrection
       duplicateStripped = composed.duplicateStripped
       droppedForBodyQuestion = composed.droppedForBodyQuestion
       reviewAskDropped = withAsk.droppedForBodyQuestion
@@ -837,6 +888,7 @@ export async function generateMessage(
         intentionQuestion: object.intentionQuestion,
         reviewAsk: object.reviewAsk,
         closedTheConversation: object.closedTheConversation,
+        reportedVisitCorrection: object.reportedVisitCorrection,
         userPromptOverride:
           userPromptForAttempt !== userPrompt
             ? userPromptForAttempt
@@ -909,6 +961,10 @@ export async function generateMessage(
         // writes guests.warm_close_sent_at post-dispatch when it is true, so the
         // pause timer never sends a second close.
         closedTheConversation: lastResult.closedTheConversation,
+        // TAC-573: already normalized to 'none' when the block did not render.
+        // handle-inbound.ts retracts on 'retracted', whatever the gate decides.
+        reportedVisitCorrection: lastResult.reportedVisitCorrection,
+        askDroppedForVisitCorrection: askDroppedForCorrection,
         // TAC-554: the exact tail of `body`. Dispatch splits there so the
         // question goes out as its own last message. '' means this turn asked
         // nothing, and dispatch then behaves exactly as it did before.

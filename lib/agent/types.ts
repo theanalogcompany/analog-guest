@@ -24,6 +24,7 @@ import type { ApprovalPolicy } from '@/lib/schemas/approval-policy'
 import type { MessageChannel } from '@/lib/schemas/message-channel'
 import type { AlertContext } from './alerts'
 import type { Visit } from './extract-recent-visits'
+import type { RetractableReportedVisit } from './retract-reported-visit'
 import type { NewlyEligibleIntention, OpenIntention } from './intentions/derive'
 
 export type { AlertContext }
@@ -403,6 +404,13 @@ export interface RuntimeContext {
   // when no qualifying transactions on file. TAC-234 (replaces THE-229's
   // single-visit projection).
   recentVisits: Visit[]
+  // TAC-573: the visits this guest told us about in THIS conversation that
+  // they could still take back: guest-reported, inside conversationWindowMs,
+  // not on a day they scanned. Empty on every followup run and on almost every
+  // inbound. Non-empty is what renders the `## Visit they told you about`
+  // block, and it is the only set retractReportedVisits will touch. See
+  // retract-reported-visit.ts.
+  retractableReportedVisits: RetractableReportedVisit[]
   // TAC-297: open + pending_ack commitments for this guest at this venue.
   // Loaded by build-runtime-context.ts via findActiveCommitmentsForGuest and
   // projected through toActiveCommitment. Surfaced as the ## Active commitments
