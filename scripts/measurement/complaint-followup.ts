@@ -51,6 +51,14 @@
 //                                  the old complaint something this PR's
 //                                  wording causes, or what any greeting does
 //                                  when the thread ends on a complaint".
+//   MEASURE_OPEN_COMP=1            every unit's guest holds an OPEN COMP for
+//                                  the item they complained about, which is
+//                                  what the complaint path leaves behind when
+//                                  an operator approves one. Production
+//                                  renders it under `## Active commitments` on
+//                                  the greeting, beside "do not offer
+//                                  anything". Without this mode the offer bar
+//                                  has almost nothing to fail on.
 
 import { randomUUID } from 'node:crypto'
 
@@ -319,15 +327,17 @@ async function main(): Promise<void> {
 
   const armsEnv = process.env.MEASURE_ARMS
   const controlGreeting = process.env.MEASURE_GREETING === 'returning'
-  const informational = armsEnv !== undefined || controlGreeting
+  const openComp = process.env.MEASURE_OPEN_COMP === '1'
+  const informational = armsEnv !== undefined || controlGreeting || openComp
   const allUnits: Unit[] = [
     ...COMPLAINTS.slice(0, PER_ARM).map((c, i) => ({
       id: `greeting-${String(i + 1).padStart(2, '0')}`,
       arm: 'greeting' as const,
       faultWords: c.faultWords,
-      // The greeting is the first thing said today, so history ends with the
-      // earlier visit. Complaints older than fourteen days are outside what
-      // production loads, and are left out here for the same reason.
+      // What production loads for this guest: the earlier visit, when it is
+      // within fourteen days. THE MODEL DOES NOT SEE IT on the treatment arm:
+      // buildAiRuntime drops everything before this visit for the follow-up
+      // greeting, which is the thing under test. The control arm does see it.
       history: c.daysAgo <= 14 ? earlierVisit(i) : [],
     })),
     ...COMPLAINTS.slice(0, PER_ARM).map((c, i) => {
@@ -373,6 +383,7 @@ async function main(): Promise<void> {
   const log = createRunLog({
     name: 'tac575-complaint-followup',
     meta: {
+      openComp,
       arm: controlGreeting
         ? 'informational-control-returning-greeting'
         : informational
@@ -421,6 +432,26 @@ async function main(): Promise<void> {
     relevanceScore: ch.similarity,
   }))
 
+  // The comp an approved complaint leaves open, in the stored shape.
+  const openCompFor = (
+    unitId: string,
+  ): RuntimeContext['activeCommitments'][number] => {
+    const i = Number(unitId.slice(-2)) - 1
+    const item = menuNames[i % menuNames.length]
+    return {
+      id: randomUUID(),
+      type: 'comp',
+      description: `${item} replacement`,
+      code: 'TEST',
+      status: 'open',
+      expected_arrival: null,
+      arrival_signal: null,
+      created_at: new Date(
+        startedAt.getTime() - COMPLAINTS[i].daysAgo * MS_PER_DAY,
+      ).toISOString(),
+    } as RuntimeContext['activeCommitments'][number]
+  }
+
   const failed: { id: string; error: string }[] = []
   const counts = {
     greetings: {
@@ -465,7 +496,7 @@ async function main(): Promise<void> {
       // Tonic, and closes and greetings offered constructed guests "the
       // Blossom Tonic we owe you". Found by the control arm of
       // complaint-followup.ts. Every run before this line was contaminated.
-      activeCommitments: [],
+      activeCommitments: openComp ? [openCompFor(unit.id)] : [],
       retractableReportedVisits: [],
       mechanics: [],
       conversationChannel: 'instagram',
@@ -497,6 +528,7 @@ async function main(): Promise<void> {
       },
     }
 
+    const runtime = buildAiRuntime(ctx)
     const gen = await generateMessage({
       category,
       persona: ctx.venue.brandPersona,
@@ -504,7 +536,7 @@ async function main(): Promise<void> {
       ragChunks,
       // What handleFollowup sets on both turns: an empty list.
       knowledgeChunks: [],
-      runtime: buildAiRuntime(ctx),
+      runtime,
       channel: 'instagram',
     })
 
@@ -560,7 +592,9 @@ async function main(): Promise<void> {
       reviewAsk: gen.data.reviewAsk,
       flags,
       attempts: gen.data.attempts,
-      historyMessages: unit.history.length,
+      // Loaded, and what generation was handed after buildAiRuntime's filter.
+      historyLoaded: unit.history.length,
+      historySeenByModel: runtime.recentMessages?.length ?? 0,
     })
     console.log(`  ${unit.id}  ${JSON.stringify(body)}`)
   }

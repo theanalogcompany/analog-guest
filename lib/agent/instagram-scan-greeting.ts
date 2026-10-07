@@ -446,6 +446,9 @@ export async function processScanArrival(
   let claimed = false
   let recordedGreeting = false
   let followup: { mention: boolean; claimedAt: Date } | null = null
+  // True once the greeting is known to be sent or held for an operator. From
+  // then on the follow-up it carried stands, whatever throws afterwards.
+  let greetingOut = false
   try {
     if (!isScanGreetingDue(row.scannedAt, now)) {
       return { kind: 'not_yet' }
@@ -550,6 +553,7 @@ export async function processScanArrival(
       })
       followup = null
     }
+    greetingOut = !RELEASES_CLAIM[outcome.status]
 
     await resolveScanArrival(
       supabase,
@@ -587,10 +591,13 @@ export async function processScanArrival(
     // bookkeeping throw does not change that. Otherwise `errored` is written
     // as whoever this call is. Unclaimed, it can lose to the other runner,
     // and then the row and its ledger entry are that runner's.
-    // TAC-575: a throw before the greeting was recorded means the follow-up
-    // it carried did not go out either. After that point the greeting is on
-    // its way and the claim stands.
-    if (followup !== null && !recordedGreeting) {
+    // TAC-575: give the follow-up back unless the greeting is KNOWN to have
+    // gone out or been queued. Keyed on the agent's own outcome, not on the
+    // bookkeeping after it: a throw while recording a sent greeting must not
+    // release a follow-up the guest has already read. The case this cannot
+    // see is handleFollowup itself throwing after its send; that releases,
+    // and the guest may be followed up once more.
+    if (followup !== null && !greetingOut) {
       await releaseComplaintFollowupClaim(supabase, {
         venueId: row.venueId,
         guestId: row.guestId,

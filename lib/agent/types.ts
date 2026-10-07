@@ -287,8 +287,8 @@ export interface FollowupTrigger {
     /** The venue's review link, on every sign-off but `plain`. */
     reviewAsk?: { url: string; label: string }
     /**
-     * When the processor claimed the once-ever review marker for a `happy`
-     * sign-off, so the claim can be given back, scoped to this timestamp, if
+     * When the processor claimed the once-ever review marker for a `happy` or
+     * `after_complaint` sign-off, so the claim can be given back, scoped to this timestamp, if
      * the invitation does not reach the guest.
      */
     reviewClaimedAt?: Date
@@ -521,9 +521,13 @@ export interface RuntimeContext {
   // raise the review ask, which is saved for the sign-off (deriveReviewAsk).
   // False as built; handleInbound sets it before deriveReviewAsk runs.
   insideVisitCheckin: boolean
-  // TAC-575: set when this INBOUND turn is the first of a counter visit by a
-  // guest owed a follow-up on an earlier complaint, and that complaint is
-  // recent enough to bring up. The reply then carries `## Their last visit`.
+  // TAC-575: set on an INBOUND turn with a counter scan live, for a guest
+  // still owed a follow-up on an earlier complaint. Usually their first
+  // message of the visit, but not enforced as that: if the follow-up waited
+  // on a pending card it lands on whichever counter turn comes after. With
+  // `mention: true` the reply carries `## Their last visit`; with `false`
+  // (the complaint is over thirty days old) it says nothing and the follow-up
+  // is claimed all the same.
   // Built by build-runtime-context; handleInbound clears it when the turn
   // turns out to be a complaint itself, and claims the follow-up once the
   // reply is on its way. Null on every other turn and on every followup run:

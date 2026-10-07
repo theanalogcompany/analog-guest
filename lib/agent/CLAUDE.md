@@ -355,7 +355,7 @@ any first Instagram conversation, scanned or not.
 | `happy` | a guest whose visit check-in reads `good`, never asked, venue has a review link; first conversation OR NOT | the review invitation, in the `reviewAsk` field | the review ask, `review_asked_at` |
 | `after_complaint` | a guest whose earlier complaint has been followed up, on a visit where they wrote and did not complain again; NO happiness condition | the same invitation, with a premise true of them | the same marker |
 
-`deriveSignOffReviewAsk` (`review-ask.ts`) is the one rule for `happy`. `ctx.signOff` carries
+`deriveSignOffReviewAsk` (`review-ask.ts`) is the one rule for both link kinds. `ctx.signOff` carries
 the kind; the serializer renders `## Sign off` or `## Closing this conversation`.
 
 - **ONLY THE PAUSE TIMER SIGNS OFF. No inbound turn does** (ruled 2026-10-06). The one
@@ -372,7 +372,7 @@ the kind; the serializer renders `## Sign off` or `## Closing this conversation`
 - **Its approval is `approval_policy.signOffReviewAsk`**, default hold, read on `happy` AND
   `after_complaint` (ruled: a card held only for past complainers invites skipping them). The praise-triggered ask keeps `reviewAsk`. Turning one on must
   not turn the other on.
-- **The timer CLAIMS `review_asked_at` before sending a happy sign-off** (two ticks would
+- **The timer CLAIMS `review_asked_at` before sending either link sign-off** (two ticks would
   otherwise both find the guest unasked) and gives it back only if the send fails
   (`releaseReviewAskClaim`). A held card keeps the claim, so a skipped one uses up the ask.
 - **A happy sign-off that goes out WITHOUT its link still spends the ask.** Giving the marker

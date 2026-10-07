@@ -534,12 +534,20 @@ export function lastComplaintFollowupAt(
  */
 export function owesAfterComplaintReviewAsk(input: {
   followedUpAt: Date | null
+  /**
+   * A LATER complaint of theirs is still waiting for its own follow-up (it
+   * was held back by a pending card, say). The link waits with it: inviting a
+   * review off the first complaint's follow-up while the second has had none
+   * is the invitation arriving before the fix.
+   */
+  anotherStillOwed: boolean
   todaysCheckin: VisitCheckin | null
   lastInboundAt: Date | null
   now: Date
 }): boolean {
   const { followedUpAt, todaysCheckin, lastInboundAt, now } = input
   if (followedUpAt === null) return false
+  if (input.anotherStillOwed) return false
   if (todaysCheckin?.answer === 'bad') return false
   if (todaysCheckin !== null && isCheckinFresh(todaysCheckin, now)) return true
   const sinceFollowup = now.getTime() - followedUpAt.getTime()

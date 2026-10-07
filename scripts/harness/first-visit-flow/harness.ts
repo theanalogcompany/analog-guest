@@ -1152,6 +1152,7 @@ const followedUp = at(-20 * MIN)
 check(
   'link owed: followed up twenty minutes ago, wrote five minutes ago',
   owesAfterComplaintReviewAsk({
+    anotherStillOwed: false,
     followedUpAt: followedUp,
     todaysCheckin: null,
     lastInboundAt: at(-5 * MIN),
@@ -1162,6 +1163,7 @@ check(
 check(
   'link owed with NO happiness condition: today reads "not yet"',
   owesAfterComplaintReviewAsk({
+    anotherStillOwed: false,
     followedUpAt: followedUp,
     todaysCheckin: checkin({ answer: 'not_yet', answeredAt: at(-9 * MIN) }),
     lastInboundAt: at(-9 * MIN),
@@ -1172,7 +1174,19 @@ check(
 check(
   'no link: the complaint was never followed up',
   owesAfterComplaintReviewAsk({
+    anotherStillOwed: false,
     followedUpAt: null,
+    todaysCheckin: checkin({ answer: 'not_yet', answeredAt: at(-9 * MIN) }),
+    lastInboundAt: at(-9 * MIN),
+    now: NOW,
+  }),
+  false,
+)
+check(
+  'no link: a later complaint of theirs has not been followed up yet',
+  owesAfterComplaintReviewAsk({
+    anotherStillOwed: true,
+    followedUpAt: followedUp,
     todaysCheckin: checkin({ answer: 'not_yet', answeredAt: at(-9 * MIN) }),
     lastInboundAt: at(-9 * MIN),
     now: NOW,
@@ -1182,6 +1196,7 @@ check(
 check(
   'no link: they complained again today',
   owesAfterComplaintReviewAsk({
+    anotherStillOwed: false,
     followedUpAt: followedUp,
     todaysCheckin: checkin({ answer: 'bad', answeredAt: at(-9 * MIN) }),
     lastInboundAt: at(-9 * MIN),
@@ -1192,6 +1207,7 @@ check(
 check(
   'no link: greeted and never wrote (their last message is from yesterday)',
   owesAfterComplaintReviewAsk({
+    anotherStillOwed: false,
     followedUpAt: followedUp,
     todaysCheckin: null,
     lastInboundAt: at(-DAY),
@@ -1202,6 +1218,7 @@ check(
 check(
   'no link: greeted and has never written at all',
   owesAfterComplaintReviewAsk({
+    anotherStillOwed: false,
     followedUpAt: followedUp,
     todaysCheckin: null,
     lastInboundAt: null,
@@ -1212,6 +1229,7 @@ check(
 check(
   'no link: followed up three days ago, and this is a message from home',
   owesAfterComplaintReviewAsk({
+    anotherStillOwed: false,
     followedUpAt: at(-3 * DAY),
     todaysCheckin: null,
     lastInboundAt: at(-5 * MIN),
@@ -1222,6 +1240,7 @@ check(
 check(
   'link still owed on a LATER visit: followed up three days ago, order named today',
   owesAfterComplaintReviewAsk({
+    anotherStillOwed: false,
     followedUpAt: at(-3 * DAY),
     todaysCheckin: checkin({}),
     lastInboundAt: at(-11 * MIN),

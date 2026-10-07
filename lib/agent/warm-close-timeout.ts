@@ -74,6 +74,7 @@ import {
   isCheckinFresh,
   lastComplaintFollowupAt,
   lastProactiveWasThisVisit,
+  owedComplaintFollowup,
   owesAfterComplaintReviewAsk,
   owesCheckback,
   visitStartFor,
@@ -444,6 +445,11 @@ async function considerCandidate(
       }
       afterComplaint = owesAfterComplaintReviewAsk({
         followedUpAt,
+        // An unreadable clock cannot say which complaints are from before
+        // today, so it reads as one still owed and the link waits.
+        anotherStillOwed:
+          closeLocalDate === null ||
+          owedComplaintFollowup(complaints.data, closeLocalDate, now) !== null,
         todaysCheckin: checkin,
         lastInboundAt: lastInbound.data,
         now,
@@ -492,6 +498,14 @@ async function considerCandidate(
   // inside a first conversation: read from first contact it would find the
   // very complaint the follow-up answered and refuse the invitation the ruling
   // sends them. A NEW complaint this visit is still inside the stretch.
+  //
+  // THIS ALSO NARROWS THE STAFF-REPLIED STOP, and that is the same decision,
+  // not a side effect to tidy away: the apology for the complaint is held for
+  // an operator, and an operator who edits it counts as staff in the thread.
+  // Read from first contact, nearly every followed-up guest inside their
+  // first forty-eight hours would be refused on the reply that fixed things.
+  // Staff writing by hand THIS visit still stops it. Flagged on the PR as a
+  // call for Jaipal.
   const visitStart =
     checkin !== null
       ? new Date(checkin.orderedAt.getTime() - COUNTER_ARRIVAL_WINDOW_MS)

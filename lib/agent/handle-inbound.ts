@@ -2939,7 +2939,15 @@ async function runInboundTurn(
         // TAC-575: a held reply keeps the follow-up's claim, as a held
         // check-back keeps its own. If an operator skips the card the
         // follow-up is spent unsaid, the accepted cost of every held card.
-        recordComplaintFollowedUp(ctx, agentRunId, 'queued')
+        //
+        // NOT WHEN THE CARD IS BLANK. A blank-body card (a question the venue
+        // could not answer) discards the draft, so the follow-up it carried
+        // was never written and no operator can send it. Claiming here would
+        // spend it for certain, and would make the review link owed for a
+        // follow-up nobody said. Left owed for the next counter turn.
+        if (!approval.blankBody) {
+          recordComplaintFollowedUp(ctx, agentRunId, 'queued')
+        }
         trace.update({
           output: {
             status: 'queued',
@@ -3525,8 +3533,11 @@ async function runInboundTurn(
  * its way, so the follow-up is spent. Claimed AFTER the reply is sent or
  * queued, the order the in-conversation check-back uses and for its reason:
  * the claim-before-send order protects against a send that might not happen,
- * and here it has. Nothing races it in practice: the scan greeting stands down
- * for a guest who wrote inside its window, and a burst of messages is one turn.
+ * and here it has. Little races it: the scan greeting stands down for a guest
+ * who wrote inside its window, and a burst of messages is one turn. What is
+ * left is a message landing in the moment between the greeting's "has the
+ * guest written" read and its claim. Both then follow up, this claim reads
+ * `lost`, and that is logged as a warning so the rate can be counted.
  *
  * Also called when the complaint was too old to bring up (`mention: false`).
  * The reply said nothing about it, and the claim is still what makes the review
@@ -3557,12 +3568,18 @@ function recordComplaintFollowedUp(
         })
         return
       }
+      if (claim.status === 'lost') {
+        console.warn(
+          '[agent] complaint follow-up was already claimed; this reply may have followed up a second time',
+          { agentRunId, guestId, via, mentioned: owed.mention },
+        )
+        return
+      }
       console.log('[agent] complaint followed up in conversation', {
         agentRunId,
         guestId,
         via,
         mentioned: owed.mention,
-        outcome: claim.status,
       })
     }),
   )

@@ -57,6 +57,13 @@ async function main(): Promise<void> {
     .eq('venue_id', venue.id)
     .order('created_at', { ascending: true })
   if (guestsError || !guests) throw new Error('guests unreadable')
+  // One unpaginated read. At the API's row cap the list would be cut short
+  // while still printing a guest count, so refuse rather than report a part.
+  if (guests.length >= 1000) {
+    throw new Error(
+      `${guests.length} guests: at the row cap, so this list may be truncated. Paginate before trusting it.`,
+    )
+  }
 
   const log = createRunLog({
     name: 'tac575-scan-visits-before-after',
