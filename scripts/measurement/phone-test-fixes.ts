@@ -538,6 +538,8 @@ function toHistory(lines: readonly Line[], endsAt: Date): RecentMessage[] {
     body,
     createdAt: new Date(endsAt.getTime() - (lines.length - i) * 120_000),
     delivery: 'delivered',
+    // Every line of ours in these threads is a reply to the guest.
+    category: dir === 'out' ? 'reply' : null,
   })) as RecentMessage[]
 }
 

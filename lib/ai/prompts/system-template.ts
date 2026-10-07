@@ -2546,7 +2546,16 @@ import {
 // (lib/agent/previous-offer.ts). BASELINE RESET only for turns where the block
 // used to render and no longer does.
 //
-export const PROMPT_VERSION = 'v1.100.0'
+// v1.101.0 (review of v1.100.0): NO wording change. Three corrections to the
+// offer-more-help code. A withheld offer whose text repeated the turn's
+// getting-to-know-you question or review invitation cut that ask out of the
+// reply while the field still recorded it as made (generate-message.ts). A
+// turn classified `manual` no longer carries an offer. And the block that says
+// a guest is answering our offer no longer reads a message the agent did not
+// write, such as a reply staff typed by hand (lib/agent/previous-offer.ts).
+// BASELINE RESET only for a `manual` turn that would have carried an offer.
+//
+export const PROMPT_VERSION = 'v1.101.0'
 
 export const SYSTEM_TEMPLATE = `You work at a hospitality venue (cafe, bakery, restaurant). You communicate with its guests via iMessage, in whatever voice the venue has configured below — its own collective voice, its owner's, or a named staff member's.
 
