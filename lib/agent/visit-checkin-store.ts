@@ -17,7 +17,35 @@ export type StoreResult<T> =
 const UNIQUE_VIOLATION = '23505'
 
 const CHECKIN_COLUMNS =
-  'id, venue_local_date, ordered_at, asked_at, answer, answered_at'
+  'id, venue_local_date, ordered_at, asked_at, answer, answered_at, checkback_claimed_at, checkback_sent_at'
+
+interface CheckinRow {
+  id: string
+  venue_local_date: string
+  ordered_at: string
+  asked_at: string
+  answer: string | null
+  answered_at: string | null
+  checkback_claimed_at: string | null
+  checkback_sent_at: string | null
+}
+
+function toVisitCheckin(row: CheckinRow): VisitCheckin {
+  return {
+    id: row.id,
+    venueLocalDate: row.venue_local_date,
+    orderedAt: new Date(row.ordered_at),
+    askedAt: new Date(row.asked_at),
+    answer: isAnswer(row.answer) ? row.answer : null,
+    answeredAt: row.answered_at ? new Date(row.answered_at) : null,
+    checkbackClaimedAt: row.checkback_claimed_at
+      ? new Date(row.checkback_claimed_at)
+      : null,
+    checkbackSentAt: row.checkback_sent_at
+      ? new Date(row.checkback_sent_at)
+      : null,
+  }
+}
 
 function isAnswer(value: string | null): value is VisitCheckinAnswer {
   return value === 'good' || value === 'bad' || value === 'not_yet'
@@ -46,17 +74,7 @@ export async function loadVisitCheckin(
     .maybeSingle()
   if (error) return { ok: false, error: error.message }
   if (!data) return { ok: true, data: null }
-  return {
-    ok: true,
-    data: {
-      id: data.id,
-      venueLocalDate: data.venue_local_date,
-      orderedAt: new Date(data.ordered_at),
-      askedAt: new Date(data.asked_at),
-      answer: isAnswer(data.answer) ? data.answer : null,
-      answeredAt: data.answered_at ? new Date(data.answered_at) : null,
-    },
-  }
+  return { ok: true, data: toVisitCheckin(data) }
 }
 
 export type RecordAskedResult =
@@ -153,5 +171,154 @@ export async function recordVisitCheckinAnswer(
     }
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// The check-back (TAC-575, the timed half)
+// ---------------------------------------------------------------------------
+
+/** How many rows one tick looks at. */
+export const CHECKBACK_SCAN_LIMIT = 50
+
+/** A check-in the timer has to consider, with who it belongs to. */
+export interface DueVisitCheckback {
+  venueId: string
+  guestId: string
+  checkin: VisitCheckin
+}
+
+/**
+ * Check-ins still owed a check-back whose order is old enough for it and not
+ * too old to bother, oldest first.
+ *
+ * The predicate is the partial index's own (migration 073's
+ * idx_visit_checkins_checkback_pending), so this stays an index scan. The two
+ * time bounds are the timer's delay and its max age; everything else the
+ * processor re-checks per row on `now`, because nothing here is settled early.
+ */
+export async function loadDueVisitCheckbacks(
+  supabase: AdminSupabaseClient,
+  orderedNoLaterThan: Date,
+  orderedNoEarlierThan: Date,
+  limit: number = CHECKBACK_SCAN_LIMIT,
+): Promise<StoreResult<DueVisitCheckback[]>> {
+  const { data, error } = await supabase
+    .from('visit_checkins')
+    .select(`venue_id, guest_id, ${CHECKIN_COLUMNS}`)
+    .is('checkback_claimed_at', null)
+    .or('answer.is.null,answer.eq.not_yet')
+    .lte('ordered_at', orderedNoLaterThan.toISOString())
+    .gte('ordered_at', orderedNoEarlierThan.toISOString())
+    .order('ordered_at', { ascending: true })
+    .limit(limit)
+  if (error) return { ok: false, error: error.message }
+  return {
+    ok: true,
+    data: (data ?? []).map((row) => ({
+      venueId: row.venue_id,
+      guestId: row.guest_id,
+      checkin: toVisitCheckin(row),
+    })),
+  }
+}
+
+export type CheckbackClaimResult =
+  /** This caller owns the visit's one check-back. */
+  | { status: 'claimed' }
+  /** Someone else took it, or the guest answered in the meantime. */
+  | { status: 'lost' }
+  | { status: 'failed'; error: string }
+
+/**
+ * Take this visit's one check-back.
+ *
+ * A compare-and-set on BOTH things that make it owed: nobody has claimed it,
+ * and the guest still has not said good or bad. The second half is what stops
+ * a check-back going out a moment after "it's great" landed on another turn.
+ * `sent` also stamps checkback_sent_at, for the reply that has already carried
+ * the question by the time it claims.
+ */
+export async function claimVisitCheckback(
+  supabase: AdminSupabaseClient,
+  args: {
+    id: string
+    venueId: string
+    guestId: string
+    now: Date
+    /** True when the question has already reached the guest. */
+    sent: boolean
+  },
+): Promise<CheckbackClaimResult> {
+  try {
+    const at = args.now.toISOString()
+    const { data, error } = await supabase
+      .from('visit_checkins')
+      .update(
+        args.sent
+          ? { checkback_claimed_at: at, checkback_sent_at: at }
+          : { checkback_claimed_at: at },
+      )
+      .eq('id', args.id)
+      .eq('venue_id', args.venueId)
+      .eq('guest_id', args.guestId)
+      .is('checkback_claimed_at', null)
+      .or('answer.is.null,answer.eq.not_yet')
+      .select('id')
+    if (error) return { status: 'failed', error: error.message }
+    return (data ?? []).length === 1
+      ? { status: 'claimed' }
+      : { status: 'lost' }
+  } catch (e) {
+    return {
+      status: 'failed',
+      error: e instanceof Error ? e.message : String(e),
+    }
+  }
+}
+
+/**
+ * Give back a claim whose check-back never reached the guest, scoped to the
+ * exact timestamp this caller wrote so it cannot release someone else's.
+ */
+export async function releaseVisitCheckbackClaim(
+  supabase: AdminSupabaseClient,
+  args: { id: string; venueId: string; guestId: string; claimedAt: Date },
+): Promise<void> {
+  const { error } = await supabase
+    .from('visit_checkins')
+    .update({ checkback_claimed_at: null })
+    .eq('id', args.id)
+    .eq('venue_id', args.venueId)
+    .eq('guest_id', args.guestId)
+    .eq('checkback_claimed_at', args.claimedAt.toISOString())
+    .is('checkback_sent_at', null)
+  if (error) {
+    console.error('[visit-checkback] claim release failed', {
+      id: args.id,
+      error: error.message,
+    })
+  }
+}
+
+/** Record that the claimed check-back reached the guest. */
+export async function markVisitCheckbackSent(
+  supabase: AdminSupabaseClient,
+  args: { id: string; venueId: string; guestId: string; now: Date },
+): Promise<void> {
+  const { error } = await supabase
+    .from('visit_checkins')
+    .update({ checkback_sent_at: args.now.toISOString() })
+    .eq('id', args.id)
+    .eq('venue_id', args.venueId)
+    .eq('guest_id', args.guestId)
+    .is('checkback_sent_at', null)
+  if (error) {
+    // Logged, not thrown: the message is out. A missing stamp means the warm
+    // close may still follow an unanswered check-back, which is visible here.
+    console.error('[visit-checkback] sent stamp failed', {
+      id: args.id,
+      error: error.message,
+    })
   }
 }
