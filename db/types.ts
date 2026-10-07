@@ -1878,11 +1878,13 @@ export type Database = {
       }
       pos_tap_events: {
         Row: {
+          channel: string | null
           created_at: string
           device_id: string | null
           id: string
           location_external_id: string | null
           phone_number: string | null
+          provider_payment_id: string | null
           received_at: string
           reconciled_transaction_id: string | null
           status: string
@@ -1891,11 +1893,13 @@ export type Database = {
           venue_id: string
         }
         Insert: {
+          channel?: string | null
           created_at?: string
           device_id?: string | null
           id?: string
           location_external_id?: string | null
           phone_number?: string | null
+          provider_payment_id?: string | null
           received_at?: string
           reconciled_transaction_id?: string | null
           status?: string
@@ -1904,11 +1908,13 @@ export type Database = {
           venue_id: string
         }
         Update: {
+          channel?: string | null
           created_at?: string
           device_id?: string | null
           id?: string
           location_external_id?: string | null
           phone_number?: string | null
+          provider_payment_id?: string | null
           received_at?: string
           reconciled_transaction_id?: string | null
           status?: string
@@ -2312,6 +2318,7 @@ export type Database = {
           hold_all_outbound: boolean
           id: string
           instagram_account_id: string | null
+          instagram_username: string | null
           is_test: boolean
           messaging_phone_number: string | null
           name: string
@@ -2325,6 +2332,7 @@ export type Database = {
           hold_all_outbound?: boolean
           id?: string
           instagram_account_id?: string | null
+          instagram_username?: string | null
           is_test?: boolean
           messaging_phone_number?: string | null
           name: string
@@ -2338,6 +2346,7 @@ export type Database = {
           hold_all_outbound?: boolean
           id?: string
           instagram_account_id?: string | null
+          instagram_username?: string | null
           is_test?: boolean
           messaging_phone_number?: string | null
           name?: string
@@ -2411,6 +2420,73 @@ export type Database = {
           },
           {
             foreignKeyName: "visit_checkins_venue_id_fkey"
+            columns: ["venue_id"]
+            isOneToOne: false
+            referencedRelation: "venues"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      visit_messages: {
+        Row: {
+          angle: string | null
+          claimed_at: string
+          guest_id: string
+          id: string
+          kind: string
+          message_id: string | null
+          outcome: string
+          sent_at: string | null
+          skip_reason: string | null
+          slot: string | null
+          venue_id: string
+          venue_local_date: string
+        }
+        Insert: {
+          angle?: string | null
+          claimed_at?: string
+          guest_id: string
+          id?: string
+          kind: string
+          message_id?: string | null
+          outcome?: string
+          sent_at?: string | null
+          skip_reason?: string | null
+          slot?: string | null
+          venue_id: string
+          venue_local_date: string
+        }
+        Update: {
+          angle?: string | null
+          claimed_at?: string
+          guest_id?: string
+          id?: string
+          kind?: string
+          message_id?: string | null
+          outcome?: string
+          sent_at?: string | null
+          skip_reason?: string | null
+          slot?: string | null
+          venue_id?: string
+          venue_local_date?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "visit_messages_guest_id_fkey"
+            columns: ["guest_id"]
+            isOneToOne: false
+            referencedRelation: "guests"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "visit_messages_message_id_fkey"
+            columns: ["message_id"]
+            isOneToOne: false
+            referencedRelation: "messages"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "visit_messages_venue_id_fkey"
             columns: ["venue_id"]
             isOneToOne: false
             referencedRelation: "venues"

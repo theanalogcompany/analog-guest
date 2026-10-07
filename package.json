@@ -22,6 +22,7 @@
     "ingest-response-review": "tsx --env-file=.env.local scripts/ingest-response-review.ts",
     "seed-venue": "tsx --env-file=.env.local scripts/seed-venue.ts",
     "square-e2e": "tsx --env-file=.env.local scripts/square-e2e.ts",
+    "pos-scan-code": "tsx --env-file=.env.local scripts/pos-scan-code.ts",
     "instagram-smoke": "tsx --env-file=.env.local scripts/instagram-send-smoke.ts",
     "insert-instagram-credential": "tsx --env-file=.env.local scripts/insert-instagram-credential.ts",
     "backfill-instagram-contacts": "tsx --env-file=.env.local scripts/backfill-instagram-contacts.ts",
