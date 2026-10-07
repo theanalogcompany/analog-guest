@@ -899,6 +899,45 @@ export type Database = {
           },
         ]
       }
+      instagram_backfill_messages: {
+        Row: {
+          created_at: string
+          guest_id: string
+          message_id: string
+          run_id: string
+          venue_id: string
+        }
+        Insert: {
+          created_at?: string
+          guest_id: string
+          message_id: string
+          run_id: string
+          venue_id: string
+        }
+        Update: {
+          created_at?: string
+          guest_id?: string
+          message_id?: string
+          run_id?: string
+          venue_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "instagram_backfill_messages_guest_id_fkey"
+            columns: ["guest_id"]
+            isOneToOne: false
+            referencedRelation: "guests"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "instagram_backfill_messages_venue_id_fkey"
+            columns: ["venue_id"]
+            isOneToOne: false
+            referencedRelation: "venues"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       instagram_credentials: {
         Row: {
           access_token_enc: string

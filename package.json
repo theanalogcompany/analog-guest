@@ -23,6 +23,7 @@
     "square-e2e": "tsx --env-file=.env.local scripts/square-e2e.ts",
     "instagram-smoke": "tsx --env-file=.env.local scripts/instagram-send-smoke.ts",
     "insert-instagram-credential": "tsx --env-file=.env.local scripts/insert-instagram-credential.ts",
+    "backfill-instagram-contacts": "tsx --env-file=.env.local scripts/backfill-instagram-contacts.ts",
     "load-venue-knowledge": "tsx --env-file=.env.local scripts/load-venue-knowledge.ts",
     "ingest-venue-site": "tsx --env-file=.env.local scripts/ingest-venue-site.ts",
     "prepare": "husky",
