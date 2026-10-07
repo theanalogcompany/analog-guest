@@ -2348,11 +2348,18 @@ import {
 //      names `## Sign off` as a block that may give a link, so it needs no
 //      edit.
 //
+//   4. The greeting in (1) is generated WITHOUT the earlier conversation
+//      (stages.ts, buildAiRuntime; messagesFromThisVisit). Not wording, but it
+//      changes what that one generation is sent, so it is recorded here.
+//
 //   The three wordings were NOT approved before the build (ruled 2026-10-06:
 //   ruled on in PR review, with the bodies). MEASURED ONCE, bar fixed on the
-//   ticket before any generation: scripts/measurement/complaint-followup.ts;
-//   see the PR body for the result and the bodies. Every other turn's prompt
-//   is byte-identical to v1.90.0, so no baseline resets.
+//   ticket before any generation (scripts/measurement/complaint-followup.ts),
+//   and THE GREETINGS FAILED IT: eight of ten answered the old complaint
+//   instead of greeting. The sign-offs passed. (4) is the fix; a later run
+//   with it met every number, but that run is informational, not a second
+//   verdict. See the PR body for all the bodies. Every other turn's prompt is
+//   byte-identical to v1.90.0, so no baseline resets.
 //
 export const PROMPT_VERSION = 'v1.91.0'
 

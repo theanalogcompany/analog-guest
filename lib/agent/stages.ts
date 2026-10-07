@@ -100,6 +100,7 @@ import type {
   RuntimeContext,
   Visit,
 } from './types'
+import { messagesFromThisVisit } from './visit-checkin'
 import type { MessageCategory } from '@/lib/ai'
 
 // STRONG_MATCH_SIMILARITY / MIN_STRONG_MATCHES / CORPUS_RETRIEVE_LIMIT lived
@@ -2971,7 +2972,17 @@ export function buildAiRuntime(
         ? { state: 'unknown' }
         : resolveVenueOpenState(ctx.venue, now),
     },
-    recentMessages: ctx.recentMessages,
+    // TAC-575: the greeting that follows up a complaint is written WITHOUT the
+    // earlier conversation. With it the model answered the old complaint
+    // again instead of greeting (guest-arrived.ts has the measurement). Every
+    // other turn gets the thread unchanged.
+    recentMessages:
+      ctx.scanArrival?.afterComplaint === true && ctx.followupTrigger !== null
+        ? messagesFromThisVisit(
+            ctx.recentMessages,
+            ctx.followupTrigger.triggeredAt,
+          )
+        : ctx.recentMessages,
     mechanics: ctx.mechanics,
     // TAC-234: thread the recent transactions through to the AI module's
     // RuntimeContext. The serializer gates rendering by category (welcome /

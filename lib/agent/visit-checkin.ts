@@ -562,3 +562,22 @@ export function owesAfterComplaintReviewAsk(input: {
 export function visitStartFor(followedUpAt: Date): Date {
   return new Date(followedUpAt.getTime() - COUNTER_ARRIVAL_WINDOW_MS)
 }
+
+/**
+ * The part of a thread that belongs to the visit starting now.
+ *
+ * Used for ONE generation: the scan greeting that follows up a complaint
+ * (lib/agent/stages.ts, buildAiRuntime). That greeting is written without the
+ * earlier conversation, because with it the model answers the old complaint
+ * again; guest-arrived.ts has the measurement. What the guest wrote in the
+ * minutes before scanning stays: it is this visit.
+ *
+ * Generic over the message type so it reads nothing but the time.
+ */
+export function messagesFromThisVisit<T extends { createdAt: Date }>(
+  messages: readonly T[],
+  visitBeganAt: Date,
+): T[] {
+  const since = visitStartFor(visitBeganAt).getTime()
+  return messages.filter((m) => m.createdAt.getTime() >= since)
+}

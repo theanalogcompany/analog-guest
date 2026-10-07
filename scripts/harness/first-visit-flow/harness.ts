@@ -29,6 +29,7 @@ import {
   isCheckinFresh,
   lastComplaintFollowupAt,
   lastProactiveWasThisVisit,
+  messagesFromThisVisit,
   nextCheckinAnswer,
   orderTurnVerdict,
   owedComplaintFollowup,
@@ -1316,6 +1317,22 @@ check(
   'CONTROL returning greeting: says nothing about a last visit',
   greetReturning.includes('something was wrong'),
   false,
+)
+
+const thread = [
+  { createdAt: at(-2 * DAY), body: 'it came out cold' },
+  { createdAt: at(-2 * DAY + 300), body: 'so sorry about that' },
+  { createdAt: at(-10 * MIN), body: 'are you open?' },
+]
+check(
+  'the follow-up greeting sees nothing of the earlier visit',
+  messagesFromThisVisit(thread, NOW).map((m) => m.body),
+  ['are you open?'],
+)
+check(
+  'CONTROL: a thread that is all from this visit is kept whole',
+  messagesFromThisVisit(thread.slice(2), NOW).length,
+  1,
 )
 
 console.log(

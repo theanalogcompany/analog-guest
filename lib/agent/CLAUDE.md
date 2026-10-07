@@ -385,6 +385,8 @@ the kind; the serializer renders `## Sign off` or `## Closing this conversation`
   message at the counter. One column, `visit_checkins.followup_claimed_at` on the `bad`
   row: claimed means followed up, and that is what the `after_complaint` link waits on. It
   waits while a card is pending. Rules and reasons: `visit-checkin.ts`, last section.
+  **That greeting is generated without the earlier thread** (`messagesFromThisVisit`): with
+  it, eight of ten answered the old complaint again. Measurement: `guest-arrived.ts`.
 - Three things stop either kind: a check-back still owed, staff in the thread, a complaint
   (`warmCloseBlocker`, before any marker is claimed).
 - **"The same visit" is two hours, not the day.** The check-in row is keyed on the

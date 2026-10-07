@@ -39,6 +39,18 @@
 // context build is the one step that could persist anything.
 //
 //   npx tsx --env-file=.env.local scripts/measurement/complaint-followup.ts
+//
+// TWO INFORMATIONAL MODES, added after the pre-registered run (its greetings
+// FAILED: eight of ten answered the old complaint instead of greeting). Either
+// one prints no PASS or FAIL and says so in its log:
+//
+//   MEASURE_ARMS=greeting          one arm only (or sign_off).
+//   MEASURE_GREETING=returning     the greeting arm with the ORDINARY
+//                                  returning-guest instruction on the same
+//                                  histories. The control for "is answering
+//                                  the old complaint something this PR's
+//                                  wording causes, or what any greeting does
+//                                  when the thread ends on a complaint".
 
 import { randomUUID } from 'node:crypto'
 
@@ -55,6 +67,7 @@ import type { RuntimeContext } from '@/lib/agent/types'
 import { createAdminClient } from '@/lib/db/admin'
 import { startAgentTrace } from '@/lib/observability/langfuse'
 import { findReviewLink, parseVenueLinks } from '@/lib/schemas'
+import { toParsedGuestContext } from '@/lib/schemas/guest-context'
 import { createRunLog } from './run-log'
 
 const PER_ARM = 10
@@ -304,7 +317,10 @@ async function main(): Promise<void> {
     ]
   }
 
-  const units: Unit[] = [
+  const armsEnv = process.env.MEASURE_ARMS
+  const controlGreeting = process.env.MEASURE_GREETING === 'returning'
+  const informational = armsEnv !== undefined || controlGreeting
+  const allUnits: Unit[] = [
     ...COMPLAINTS.slice(0, PER_ARM).map((c, i) => ({
       id: `greeting-${String(i + 1).padStart(2, '0')}`,
       arm: 'greeting' as const,
@@ -340,10 +356,28 @@ async function main(): Promise<void> {
     }),
   ]
 
+  const units = allUnits.filter(
+    (u) =>
+      armsEnv === undefined ||
+      armsEnv
+        .split(',')
+        .map((a) => a.trim())
+        .includes(u.arm),
+  )
+  if (units.length === 0) {
+    throw new Error(
+      `MEASURE_ARMS="${armsEnv}" names no arm (greeting, sign_off)`,
+    )
+  }
+
   const log = createRunLog({
     name: 'tac575-complaint-followup',
     meta: {
-      arm: 'treatment-only',
+      arm: controlGreeting
+        ? 'informational-control-returning-greeting'
+        : informational
+          ? `informational-${armsEnv}`
+          : 'treatment-only',
       promptVersion: PROMPT_VERSION,
       venue: venueSlug,
       venueName: venue.name,
@@ -418,12 +452,22 @@ async function main(): Promise<void> {
       guest: {
         ...base.guest,
         firstName: null,
+        context: toParsedGuestContext({}, startedAt),
         createdAt: new Date(startedAt.getTime() - 40 * MS_PER_DAY),
         firstContactedAt: new Date(startedAt.getTime() - 40 * MS_PER_DAY),
         reviewAskedAt: null,
       },
       recentMessages: unit.history,
       recentVisits: [],
+      // NOTHING OF THE REAL GUEST'S. The base context is built for a real
+      // guest, and until 2026-10-06 their open commitments and stored notes
+      // rode into every unit: that guest holds an open comp for a Blossom
+      // Tonic, and closes and greetings offered constructed guests "the
+      // Blossom Tonic we owe you". Found by the control arm of
+      // complaint-followup.ts. Every run before this line was contaminated.
+      activeCommitments: [],
+      retractableReportedVisits: [],
+      mechanics: [],
       conversationChannel: 'instagram',
       firstConversation: false,
       openIntentions: [],
@@ -434,7 +478,7 @@ async function main(): Promise<void> {
         ? {
             hadPriorConversation: true,
             hasRecordedVisit: true,
-            afterComplaint: true,
+            afterComplaint: !controlGreeting,
           }
         : null,
       signOff: isGreeting ? null : 'after_complaint',
@@ -557,6 +601,22 @@ async function main(): Promise<void> {
     console.log('\n[tac575] RUN VOID: guest_states changed during the run.')
     log.appendUnit({ summary: true, void: true, statesBefore, statesAfter })
     process.exit(2)
+  }
+
+  if (informational) {
+    log.appendUnit({
+      summary: true,
+      void: false,
+      informational: true,
+      controlGreeting,
+      counts,
+      statesBefore,
+      statesAfter,
+    })
+    console.log(
+      '\n[tac575] INFORMATIONAL RUN: no verdict against the pre-registered bar.',
+    )
+    process.exit(0)
   }
 
   const greetingsPass =

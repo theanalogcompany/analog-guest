@@ -2029,8 +2029,15 @@ function formatLastVisitWentWrong(): string {
  * "A SOFT HOPE TO SEE THEM AGAIN IS FINE..." was added on a ruling
  * (2026-10-06) after the first generated closes: four of ten said "hope to see
  * you soon", which is allowed, and one invited a guest in for a drink they had
- * never mentioned, which is not. The venue's guide names topics ("what to get
- * next time"), and that is where an invented item comes from.
+ * never mentioned, which is not.
+ *
+ * CORRECTION (TAC-575 PR 5). This comment used to say the invented item came
+ * from the venue's guide naming topics ("what to get next time"). That was a
+ * guess and it was wrong: the measurement harness built every constructed
+ * guest on a real one who holds an open comp for exactly that drink, and the
+ * comp rode into the prompt. The sentence stays, because it is a rule Jaipal
+ * gave about what a close may say, not a fix for that run. Nothing has shown
+ * the guide produces an invented item.
  *
  * An empty guide renders the block without that sentence. The callers do not
  * send a plain close for a venue with no text (the setting's empty default

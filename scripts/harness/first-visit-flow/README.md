@@ -81,5 +81,6 @@ Each was mutated in the source, the harness run, and the source restored (2026-1
 | the after-complaint half of `deriveSignOffReviewAsk` | after a complaint: the link, with no "good" on file |
 | the after-complaint branch in the serializer's sign-off slot (pointed at the happy block) | after-complaint sign-off: its own premise; never says they are enjoying it |
 | the after-complaint pick in `guestArrivedInstructionsFor` | greeting after a complaint: glad they came back, no second apology |
+| the visit bound in `messagesFromThisVisit` (made always true) | the follow-up greeting sees nothing of the earlier visit |
 
 A check not in that table has not been shown able to fail.
