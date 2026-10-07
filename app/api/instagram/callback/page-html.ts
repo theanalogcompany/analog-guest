@@ -1,13 +1,19 @@
-// TAC-516: the two pages the Instagram callback can render.
+// TAC-516: the three pages the Instagram callback can render.
 //
 // Split from the route so there is exactly one place that builds HTML — a second
 // one is how a token eventually reaches a page.
 //
-// NOTHING INTERPOLATED HERE IS ATTACKER-CONTROLLED OR SECRET. The failure
-// page takes a fixed reason from a closed union, never Meta's error message,
-// never the state, never a token, never an account id. That is why there is
-// no escaping: there is nothing to escape, and keeping it that way is the
-// invariant rather than the escaping being the defence.
+// ONE VALUE HERE IS ATTACKER-CONTROLLED, AND IT IS ESCAPED: the `code` on the
+// code page. Anyone can open this URL with `?code=<anything>`, so it goes
+// through `escapeHtml`, it is capped at INSTAGRAM_CALLBACK_CODE_MAX_LENGTH,
+// and it is written into the markup in exactly one place — the textarea. The
+// script reads it back from the element, so it is never interpolated into
+// JavaScript.
+//
+// Everything else is fixed or allowlisted, and stays unescaped on purpose. The
+// failure page takes a fixed reason from a closed union, never Meta's error
+// message, never the state, never a token, never an account id. The success
+// page renders the handle only when it matches Instagram's own character set.
 
 /** Why a connect attempt did not finish. Fixed copy, closed set. */
 export type InstagramCallbackFailure =
@@ -66,7 +72,24 @@ const FAILURE_COPY: Record<
   },
 }
 
-function page(title: string, heading: string, body: string): string {
+/** The longest `code` the code page will show. Longer is not a code. */
+export const INSTAGRAM_CALLBACK_CODE_MAX_LENGTH = 1024
+
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+}
+
+function page(
+  title: string,
+  heading: string,
+  body: string,
+  extra: { head: string; main: string } = { head: '', main: '' },
+): string {
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -87,10 +110,82 @@ function page(title: string, heading: string, body: string): string {
     body { background: #1c1917; color: #fafaf9; }
     p { color: #d6d3d1; }
   }
-</style>
+</style>${extra.head}
 </head>
-<body><main><h1>${heading}</h1><p>${body}</p></main></body>
+<body><main><h1>${heading}</h1><p>${body}</p>${extra.main}</main></body>
 </html>`
+}
+
+// 16px on the textarea is deliberate: iOS Safari zooms the page when a field
+// with a smaller font takes focus, and this page is opened on a phone.
+const CODE_PAGE_HEAD = `
+<meta name="referrer" content="no-referrer">
+<style>
+  body { box-sizing: border-box; }
+  main { width: 100%; }
+  textarea {
+    display: block; box-sizing: border-box; width: 100%; margin: 1.25rem 0 0; padding: 0.75rem;
+    font: 16px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; word-break: break-all;
+    color: inherit; background: #ffffff; border: 1px solid #d6d3d1; border-radius: 10px; resize: none;
+  }
+  button {
+    display: block; width: 100%; min-height: 48px; margin: 0.75rem 0 0; padding: 0 1rem;
+    font: inherit; font-weight: 600; color: #fafaf9; background: #1c1917;
+    border: 0; border-radius: 10px;
+  }
+  @media (prefers-color-scheme: dark) {
+    textarea { background: #292524; border-color: #44403c; }
+    button { color: #1c1917; background: #fafaf9; }
+  }
+</style>`
+
+// "Copied" is shown only when the clipboard write resolved. Every other
+// outcome — no clipboard API, a refused permission, an insecure context —
+// selects the text and says so, so the label never claims a copy that did not
+// happen.
+const CODE_PAGE_SCRIPT = `<script>
+(function () {
+  var box = document.getElementById('code');
+  var button = document.getElementById('copy');
+  function selectAll() {
+    box.focus();
+    box.select();
+    box.setSelectionRange(0, box.value.length);
+  }
+  function selected() {
+    selectAll();
+    button.textContent = 'Selected, now copy';
+  }
+  box.addEventListener('click', selectAll);
+  button.addEventListener('click', function () {
+    try {
+      navigator.clipboard.writeText(box.value).then(function () {
+        button.textContent = 'Copied';
+      }, selected);
+    } catch (e) {
+      selected();
+    }
+  });
+})();
+</script>`
+
+/**
+ * The page for a `code` that arrived with no `state`: a manual authorize
+ * link, where a person carries the code to us by hand. Shows the code and
+ * nothing else. Returns null for a code over the cap, so the cap cannot be
+ * skipped by a caller.
+ */
+export function instagramCallbackCodePage(code: string): string | null {
+  if (code.length > INSTAGRAM_CALLBACK_CODE_MAX_LENGTH) return null
+  return page(
+    'Almost done',
+    'Almost done',
+    'Tap Copy, then text the code to Jaipal.',
+    {
+      head: CODE_PAGE_HEAD,
+      main: `<textarea id="code" readonly rows="4" aria-label="Your code" spellcheck="false" autocapitalize="off" autocomplete="off">${escapeHtml(code)}</textarea><button id="copy" type="button">Copy</button>${CODE_PAGE_SCRIPT}`,
+    },
+  )
 }
 
 export function instagramCallbackSuccessPage(username: string | null): string {
