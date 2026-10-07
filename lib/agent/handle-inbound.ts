@@ -54,8 +54,8 @@ import {
   loadPendingRowsBySlot,
 } from './pending-slots'
 import {
-  bodyMentionsMenuItem,
   extractReportedOrder,
+  recordedOrderForThisVisit,
 } from './extract-reported-order'
 import { retractReportedVisits } from './retract-reported-visit'
 import {
@@ -81,6 +81,7 @@ import {
   classifyCheckinAnswer,
   isAwaitingCheckinAnswer,
   nextCheckinAnswer,
+  ORDER_READ_WAIT_MS,
   orderTurnVerdict,
 } from './visit-checkin'
 import {
@@ -1795,18 +1796,49 @@ async function runInboundTurn(
     // message that turns out not to be an order must leave NO row: an
     // eligibility row would keep the required question open for two hours and
     // put it on the guest's next "ok cool".
+    let armedOrderExtraction: ReturnType<typeof extractReportedOrder> | null =
+      null
     if (
       ctx.intentionDerivation.newlyEligible.some(
         (e) => e.key === 'hows_it_so_far',
       )
     ) {
+      // The one turn that WAITS for the order extractor (ruled 2026-10-07):
+      // whether it recorded an order is what decides the question. A
+      // complaint is `bad` whatever it finds, and an opt-out never reached
+      // the extractor before this, so neither waits. The promise is kept for
+      // the fire-and-forget site below, which must not run it a second time.
+      let orderRecorded = false
+      if (
+        ctx.classification.category !== 'comp_complaint' &&
+        ctx.classification.category !== 'opt_out'
+      ) {
+        const readStartedAt = Date.now()
+        armedOrderExtraction = extractReportedOrder(ctx)
+        const outcome = await Promise.race([
+          armedOrderExtraction,
+          new Promise<null>((resolve) =>
+            setTimeout(() => resolve(null), ORDER_READ_WAIT_MS),
+          ),
+        ])
+        orderRecorded =
+          outcome !== null &&
+          recordedOrderForThisVisit(
+            outcome,
+            ctx.currentMessage.receivedAt,
+            ctx.venue.timezone,
+          )
+        console.log('[agent] order turn waited on the extractor', {
+          agentRunId,
+          waitedMs: Date.now() - readStartedAt,
+          outcome: outcome === null ? 'timed_out' : outcome.kind,
+          orderRecorded,
+        })
+      }
       const verdict = orderTurnVerdict({
         category: ctx.classification.category,
         praisedExperience: ctx.classification.praisedExperience === true,
-        mentionsMenuItem: bodyMentionsMenuItem(
-          ctx.currentMessage.body,
-          ctx.venue.venueInfo.menu.items,
-        ),
+        orderRecorded,
       })
       if (verdict !== 'ask') {
         ctx.openIntentions = ctx.openIntentions.filter(
@@ -2010,8 +2042,12 @@ async function runInboundTurn(
     // available to generateStage below, so the reply can't reference it.
     // Never throws; the module logs its own outcome. Placed post-classify,
     // pre-generate per the ticket's own sequencing.
+    //
+    // TAC-575: a turn that armed "how is it so far?" has already started it
+    // and waited (above). That run is reused here, never repeated: a second
+    // run would read the first one's row as an order already on file.
     waitUntil(
-      extractReportedOrder(ctx)
+      (armedOrderExtraction ?? extractReportedOrder(ctx))
         .then((outcome) => {
           if (outcome.kind === 'recorded') {
             console.log('[agent] inbound self-reported order recorded', {

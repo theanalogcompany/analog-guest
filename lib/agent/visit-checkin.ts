@@ -78,10 +78,10 @@ export const CHECKIN_ANSWER_WINDOW_MS = 2 * 60 * 60 * 1000
  *   a counter visit is live for this turn. On Instagram that is a scan on this
  *     message or one carried forward (`scanAt`); on a text thread it is a
  *     guest the counter sign created inside COUNTER_ARRIVAL_WINDOW_MS;
- *   this message names something on the menu. The order extractor runs after
- *     the reply is sent, so no transaction exists yet on the turn that names
- *     the order; the menu-name prefilter is the same signal
- *     applyCurrentTurnSuppression already reads for the same reason;
+ *   this message names something on the menu. Arming is decided while the
+ *     context is built, before the order extractor has run, so the menu-name
+ *     prefilter stands in for it here and over-matches on purpose; the armed
+ *     turn then waits for the extractor itself (orderTurnVerdict);
  *   we have not already asked on this visit.
  *
  * `alreadyAskedThisVisit` MUST BE TRUE WHEN THE CHECK-IN COULD NOT BE READ.
@@ -128,50 +128,40 @@ export type OrderTurnVerdict =
   | 'skip'
 
 /**
- * The categories an order report classifies as. Measured, not assumed:
- * lib/ai/prompts/CLAUDE.md records "just got a X" as casual_chatter and
- * "got a X" as acknowledgment, four of four each.
+ * How long an armed turn waits for the order extractor before giving up on
+ * asking this turn.
  *
- * AN ALLOW-LIST, against this repo's usual deny-list posture, and the
- * direction is chosen. Arming is decided before classification from a menu-name
- * prefilter that was built as a cheapness gate and over-matches on purpose
- * (any one word of a menu item's name). The classifier is the first thing on
- * the turn that has actually read the message, so anything it calls a question,
- * a request or a recommendation ask is not an order report, and asking "how is
- * it so far?" about a drink the guest does not have is the worse mistake. A
- * category missing from this list costs one unasked question.
+ * NOT IN THE RULING, and stated as a choice. The ruling makes the armed turn
+ * wait for the extractor; it does not say for how long, and the reply is what
+ * is waiting. Six seconds is several times the read's measured p95 (the PR
+ * body has the figures), so it only ever cuts off a call that has hung. On a
+ * timeout nothing is asked and the extractor carries on in the background, so
+ * the order is still recorded: one unasked question, never a held reply.
  */
-const ORDER_REPORT_CATEGORIES: ReadonlySet<string> = new Set([
-  'casual_chatter',
-  'acknowledgment',
-])
+export const ORDER_READ_WAIT_MS = 6000
 
 /**
- * `reply` is an order report ONLY WHEN THE MESSAGE NAMES A MENU ITEM (ruled
- * 2026-10-07). The 2026-10-07 phone test: we asked "what did you get just
- * now?", the guest answered "pink panther", the classifier called it `reply`
- * (0.57) and the question was never asked. A bare item name in answer to our
- * own question is the plainest order report there is, and the two categories
- * above were measured on "got a X" phrasings, not on it.
+ * The turn that armed the question has now been read: should it ask?
  *
- * It is conditional because `reply` is also what "not yet", "yes" and "haha"
- * classify as. The menu match is the one arming already uses
- * (bodyMentionsMenuItem), asked again here so this function does not rest on
- * every caller having armed first.
- */
-const ORDER_REPORT_WHEN_NAMING_AN_ITEM = 'reply'
-
-/**
- * The turn that armed the question has now been classified: should it ask?
+ * WHAT DECIDES IT IS THE ORDER EXTRACTOR, NOT THE CLASSIFIER (ruled
+ * 2026-10-07). `orderRecorded` is "the extractor recorded an order for the
+ * visit this message arrived on" (recordedOrderForThisVisit,
+ * extract-reported-order.ts), and the armed turn waits for it.
  *
- * Decided here because the arming ran first and could not know. Three things
- * the classification can say that the prefilter could not:
+ * It used to be the classifier's category, against an allow-list of
+ * `casual_chatter` and `acknowledgment`. The 2026-10-07 phone test: we asked
+ * "what did you get just now?", the guest answered "pink panther", the
+ * classifier said `reply`, and nothing was asked. Adding `reply` was measured
+ * and still missed: Jev read 3 of 22 bare item names as `new_question`, and
+ * which three moved between runs. A category cannot tell an order from a
+ * question about the menu; the extractor is built to.
  *
- *   it is a complaint            the order is already going badly. `bad`.
+ * The classifier still says two things the extractor does not:
+ *
+ *   it is a complaint            the order is already going badly. `bad`,
+ *                                whatever the extractor made of it.
  *   it already praises the item  "iced sofi, so good" answers the question
  *                                before it is asked. `good`, and no ask.
- *   it is not an order report    a question that happens to name a menu item.
- *                                `skip`.
  *
  * Complaint first, for classifyCheckinAnswer's reason: a burst that praises
  * and complains classifies as a complaint.
@@ -179,15 +169,11 @@ const ORDER_REPORT_WHEN_NAMING_AN_ITEM = 'reply'
 export function orderTurnVerdict(input: {
   category: string
   praisedExperience: boolean
-  /** bodyMentionsMenuItem for this message against the venue's menu. */
-  mentionsMenuItem: boolean
+  /** recordedOrderForThisVisit for this turn. False when the wait timed out. */
+  orderRecorded: boolean
 }): OrderTurnVerdict {
   if (input.category === 'comp_complaint') return 'bad'
-  const isOrderReport =
-    ORDER_REPORT_CATEGORIES.has(input.category) ||
-    (input.category === ORDER_REPORT_WHEN_NAMING_AN_ITEM &&
-      input.mentionsMenuItem)
-  if (!isOrderReport) return 'skip'
+  if (!input.orderRecorded) return 'skip'
   return input.praisedExperience ? 'good' : 'ask'
 }
 

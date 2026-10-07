@@ -463,20 +463,20 @@ check(
 )
 
 check(
-  'order turn, an order report: ask',
+  'order turn, the extractor recorded an order: ask',
   orderTurnVerdict({
-    category: 'casual_chatter',
+    category: 'reply',
     praisedExperience: false,
-    mentionsMenuItem: true,
+    orderRecorded: true,
   }),
   'ask',
 )
 check(
-  'order turn, "got the sofi" classified as a sign-off: ask',
+  'order turn the classifier calls a question, but an order was recorded: ask',
   orderTurnVerdict({
-    category: 'acknowledgment',
+    category: 'new_question',
     praisedExperience: false,
-    mentionsMenuItem: true,
+    orderRecorded: true,
   }),
   'ask',
 )
@@ -485,52 +485,34 @@ check(
   orderTurnVerdict({
     category: 'casual_chatter',
     praisedExperience: true,
-    mentionsMenuItem: true,
+    orderRecorded: true,
   }),
   'good',
 )
 check(
-  'order turn that is a complaint: recorded bad',
+  'order turn that is a complaint: recorded bad, whatever the extractor found',
   orderTurnVerdict({
     category: 'comp_complaint',
     praisedExperience: false,
-    mentionsMenuItem: true,
+    orderRecorded: false,
   }),
   'bad',
 )
 check(
-  'a question that names a menu item: nothing',
+  'no order recorded (a question, "not yet", a timed-out wait): nothing',
   orderTurnVerdict({
-    category: 'new_question',
+    category: 'casual_chatter',
     praisedExperience: false,
-    mentionsMenuItem: true,
+    orderRecorded: false,
   }),
   'skip',
 )
 check(
-  'a recommendation ask that praises the place: nothing',
+  'praise with no order recorded: nothing',
   orderTurnVerdict({
     category: 'recommendation_request',
     praisedExperience: true,
-    mentionsMenuItem: true,
-  }),
-  'skip',
-)
-check(
-  'a bare item name in answer to our question, classified reply: ask',
-  orderTurnVerdict({
-    category: 'reply',
-    praisedExperience: false,
-    mentionsMenuItem: true,
-  }),
-  'ask',
-)
-check(
-  'a reply that names nothing on the menu ("not yet", "haha"): nothing',
-  orderTurnVerdict({
-    category: 'reply',
-    praisedExperience: false,
-    mentionsMenuItem: false,
+    orderRecorded: false,
   }),
   'skip',
 )
