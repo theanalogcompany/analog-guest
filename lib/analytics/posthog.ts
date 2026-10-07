@@ -2922,3 +2922,100 @@ export async function captureWarmCloseSkipped(
 ): Promise<void> {
   await capturePostHogEvent('warm_close_skipped', props.guestId, { ...props })
 }
+
+// ---------------------------------------------------------------------------
+// POS scan code funnel
+// ---------------------------------------------------------------------------
+//
+// The chain is: a Square payment becomes visible to us -> a code is issued ->
+// the code reaches a guest (printed, eventually; by hand for now) -> they scan
+// -> Meta delivers it as `referral.ref` -> the payment is bound to them -> the
+// card fingerprint is mapped so every later visit auto-matches with no scan.
+//
+// WHY EVERY STAGE GETS ITS OWN EVENT. `pos_webhook_events` sat at zero rows
+// from the Square integration shipping until this work, and
+// `square_webhook_latency` was instrumented that whole time and never fired
+// once. Nobody noticed, because an instrument that has never produced a data
+// point is indistinguishable from a healthy quiet system. A funnel with a
+// count at each stage is the only shape where "it stopped at stage 3" is
+// visible at all.
+//
+// The funnel is monotonic by construction (issued >= scanned >= bound), which
+// is what lets a nightly recount straight from `pos_tap_events` DISAGREE with
+// these counters. A number nothing can contradict is not evidence.
+//
+// NO `pos_scan_code_printed` EVENT. There is no printer and no firmware ack,
+// so nothing server-side can observe that paper came out. An event emitted on
+// "we handed the code to a device" would read as "the guest can see it" and
+// could not fail -- an empty paper roll would leave every counter healthy. The
+// event arrives with the ack, not before it.
+//
+// Analytics never changes control flow: every function here is awaited only
+// inside a `waitUntil` or a swallowed branch at its call site.
+
+export interface ScanCodeIssuedProps {
+  venueId: string
+  providerPaymentId: string
+  locationExternalId: string | null
+  /** False when a code already existed for this payment and was reused. */
+  created: boolean
+}
+
+export async function captureScanCodeIssued(
+  props: ScanCodeIssuedProps,
+): Promise<void> {
+  // Keyed on the venue, not a guest: at issue time nobody has scanned yet and
+  // there is no guest to attribute it to.
+  await capturePostHogEvent('pos_scan_code_issued', props.venueId, {
+    ...props,
+  })
+}
+
+export interface ScanCodeBoundProps {
+  venueId: string
+  guestId: string
+  transactionId: string
+  /** ms from the code being issued to the scan that bound it. */
+  codeAgeMs: number | null
+  /**
+   * What became of the card mapping: 'linked', 'no_fingerprint' or
+   * 'link_failed'. Three states rather than a boolean, because a guest who
+   * will not auto-match next visit needs to be distinguishable from one who
+   * will, and the two reasons they might not have different fixes.
+   */
+  fingerprint: string
+}
+
+export async function captureScanCodeBound(
+  props: ScanCodeBoundProps,
+): Promise<void> {
+  await capturePostHogEvent('pos_scan_code_bound', props.guestId, { ...props })
+}
+
+/**
+ * Why a scanned code did not bind.
+ *
+ * Kept distinct rather than folded into one failure count, per
+ * .claude/rules/errors-as-values.md: each has a different fix, and
+ * `payment_not_ingested` in particular is not a defect at all -- it is the
+ * guest having scanned before Square's webhook landed, which is the expected
+ * race and the one a retry path would answer.
+ */
+export type ScanCodeUnmatchedReason =
+  'code_not_found' | 'payment_not_ingested' | 'claim_lost' | 'db_error'
+
+export interface ScanCodeUnmatchedProps {
+  venueId: string
+  guestId: string
+  reason: ScanCodeUnmatchedReason
+  /** Present only on `db_error`; an error message, never guest content. */
+  error?: string
+}
+
+export async function captureScanCodeUnmatched(
+  props: ScanCodeUnmatchedProps,
+): Promise<void> {
+  await capturePostHogEvent('pos_scan_code_unmatched', props.guestId, {
+    ...props,
+  })
+}

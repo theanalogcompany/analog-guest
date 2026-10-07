@@ -60,14 +60,19 @@ import { createAdminClient } from '@/lib/db/admin'
 import {
   captureInstagramCardResolvedExternally,
   captureInstagramScanUnattributed,
+  captureScanCodeBound,
+  captureScanCodeUnmatched,
 } from '@/lib/analytics/posthog'
 import { resolveAgentHandoff } from '@/lib/messaging/instagram/agent-gate'
 import { markInboundSeen } from '@/lib/messaging/instagram/mark-seen'
 import {
   logInstagramOutcome,
   processInstagramDelivery,
+  scanCodeBindTargetFor,
   scanUnattributedReason,
 } from '@/lib/messaging/instagram/handle-events'
+import { reconcileScanCodeFromReferral } from '@/lib/pos/reconcile-tap'
+import { looksLikeScanCode } from '@/lib/pos/scan-code'
 import {
   profileRefreshTargetFor,
   refreshInstagramProfile,
@@ -347,6 +352,69 @@ export async function POST(request: Request): Promise<Response> {
             reason: unattributed,
             referralSource: outcome.referralSource,
             guestCreated: outcome.guestCreated,
+          }),
+        )
+      }
+      // A scan that carried a POS scan code: bind the Square payment it was
+      // issued against to the guest who scanned, and map their card so every
+      // later visit auto-matches with no scan at all.
+      //
+      // Fires on BOTH referral paths, which is the whole point — a guest who
+      // scans and says nothing arrives as a standalone referral, and one who
+      // scans and types arrives as a message carrying the same referral.
+      //
+      // waitUntil, never awaited, and FAILS OPEN: four DB round trips must not
+      // sit inside Meta's delivery deadline, and an unattributed purchase is
+      // recoverable where a lost message is not. It races the scan greeting's
+      // twenty-second delay and wins by orders of magnitude, but nothing here
+      // guarantees that ordering — see reconcileScanCodeFromReferral's header
+      // for what has to change the day a greeting must name what they bought.
+      const scanCodeTarget = scanCodeBindTargetFor(outcome, looksLikeScanCode)
+      if (scanCodeTarget !== null) {
+        waitUntil(
+          reconcileScanCodeFromReferral({
+            venueId: scanCodeTarget.venueId,
+            guestId: scanCodeTarget.guestId,
+            code: scanCodeTarget.code,
+            supabase,
+          }).then((result) => {
+            if (!result.ok) {
+              // A silent degrade needs an event, per
+              // .claude/rules/errors-as-values.md: without this the whole
+              // mechanism could stop binding and leave only a console line.
+              console.error('instagram: scan code bind failed', {
+                event: 'pos_scan_code_bind_failed',
+                venueId: scanCodeTarget.venueId,
+                guestId: scanCodeTarget.guestId,
+                messageId: scanCodeTarget.messageId,
+                errorCode: result.errorCode,
+                error: result.error,
+              })
+              return captureScanCodeUnmatched({
+                venueId: scanCodeTarget.venueId,
+                guestId: scanCodeTarget.guestId,
+                reason: 'db_error',
+                error: result.error,
+              })
+            }
+            if (result.data.status === 'bound') {
+              return captureScanCodeBound({
+                venueId: scanCodeTarget.venueId,
+                guestId: scanCodeTarget.guestId,
+                transactionId: result.data.transactionId,
+                codeAgeMs: result.data.codeAgeMs,
+                fingerprint: result.data.fingerprint,
+              })
+            }
+            // Every non-bound outcome keeps its own reason rather than being
+            // folded into one miss count. `payment_not_ingested` especially:
+            // it is the guest scanning before Square's webhook landed, which
+            // is a race to answer with a retry, not a defect to fix.
+            return captureScanCodeUnmatched({
+              venueId: scanCodeTarget.venueId,
+              guestId: scanCodeTarget.guestId,
+              reason: result.data.status,
+            })
           }),
         )
       }

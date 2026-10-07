@@ -154,6 +154,18 @@ export type InstagramEventOutcome =
        * A vocabulary constant, never guest content.
        */
       referralSource: string | null
+      /**
+       * Meta's `referral.ref` -- the payload the ig.me link carried -- or null
+       * when none arrived. Stored on the row since migration 048 and, until
+       * the POS scan code, read by nothing.
+       *
+       * Safe to carry here on the same grounds as `referralSource`: a `ref` is
+       * a value WE put in a link, never anything a guest typed. The venue's
+       * counter QR carries hand-set strings like `LEMILS-COUNTER`; a scan code
+       * carries `sc_<random>`. Neither is guest content, so neither is subject
+       * to this directory's no-guest-content-in-logs rule.
+       */
+      referralRef: string | null
       /** False when the item had no millisecond timestamp and provider_sent_at was saved NULL. */
       hasProviderSentAt: boolean
       /**
@@ -445,6 +457,7 @@ async function insertMessage(
     hasReferral: event.kind !== 'echo' && event.referral !== null,
     referralSource:
       event.kind === 'echo' ? null : (event.referral?.source ?? null),
+    referralRef: event.kind === 'echo' ? null : (event.referral?.ref ?? null),
     hasProviderSentAt: event.providerSentAt !== null,
     titlelessPostback:
       event.kind === 'postback' && (event.title ?? '').trim() === '',
@@ -568,6 +581,7 @@ async function insertReferralMessage(
     guestCreated: guest.created,
     hasReferral: true,
     referralSource: event.referral.source,
+    referralRef: event.referral.ref,
     hasProviderSentAt: event.providerSentAt !== null,
     titlelessPostback: false,
     guestCreatedVia: guest.createdVia,
@@ -736,6 +750,50 @@ export function scanUnattributedReason(
   return isScanReferral(outcome.referralSource)
     ? null
     : 'unrecognized_referral_source'
+}
+
+/** A guest's scan that carried a POS scan code, and who to bind it to. */
+export interface ScanCodeBindTarget {
+  venueId: string
+  guestId: string
+  messageId: string
+  /** The `referral.ref` value, already known to carry our code prefix. */
+  code: string
+}
+
+/**
+ * Pick out a referral carrying a POS scan code.
+ *
+ * A pure selector over this module's own outcome union, deliberately holding
+ * no knowledge of what a code means -- `looksLikeScanCode` owns that, and the
+ * route does the binding. Same shape and same reason as
+ * `profileRefreshTargetFor` and `externalResolutionTargetFor`: the route reads
+ * one outcome and asks each feature whether this is its business, so no
+ * feature re-derives another's gate.
+ *
+ * Both referral paths reach here, which is the point. A guest who scans and
+ * says nothing produces a standalone `referral` event; a guest who scans and
+ * types produces a `message` carrying the same referral. The code must bind
+ * either way, and nothing else in this file treats those two as one case.
+ *
+ * Echoes are excluded by `guestId` being the venue's own side of the thread on
+ * one -- but they are already excluded because an echo carries no referral.
+ */
+export function scanCodeBindTargetFor(
+  outcome: InstagramEventOutcome,
+  // A type PREDICATE, not a boolean: it narrows `referralRef` to a string, so
+  // the target below needs no cast and this module still imports nothing from
+  // lib/pos. `looksLikeScanCode` satisfies it.
+  isScanCode: (ref: string | null) => ref is string,
+): ScanCodeBindTarget | null {
+  if (outcome.status !== 'persisted' || outcome.kind === 'echo') return null
+  if (!isScanCode(outcome.referralRef)) return null
+  return {
+    venueId: outcome.venueId,
+    guestId: outcome.guestId,
+    messageId: outcome.messageId,
+    code: outcome.referralRef,
+  }
 }
 
 export function logInstagramOutcome(outcome: InstagramEventOutcome): void {
