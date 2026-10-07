@@ -24,12 +24,11 @@
  * the review invitation (decision 0007), which were each paid for twice before
  * they were separated in code.
  *
- * WHAT CODE CAN SEE AND WHAT IT TAKES ON TRUST. A link is in the text. A
- * recommendation is the turn's category or an emitted recommendation
- * commitment. Instructions leave no mark in prose (task-draft.ts says the same
- * of its own gap), so that one is the model's `gaveInstructions`, a
- * self-report, backed by a length proxy (EXPLAINED_WORDS) because the
- * self-report alone never fired. The vetoes are all code's.
+ * WHAT CODE CAN SEE. A link is in the text. A recommendation is the turn's
+ * category or an emitted recommendation commitment. Instructions leave no mark
+ * in prose (task-draft.ts says the same of its own gap), so that one is a
+ * proxy: the model chose to write the line, and the reply is long enough to
+ * have explained something (EXPLAINED_WORDS). The vetoes are all code's.
  *
  * Its own file, like task-draft.ts, so a harness can drive it without the
  * generation module.
@@ -45,8 +44,6 @@ export interface FurtherHelpOfferInput {
   /** The model's offer line. '' when it wrote none. */
   offer: string
   category: MessageCategory
-  /** The model's self-report that `body` walks the guest through how to do something. */
-  gaveInstructions: boolean
   commitment: CommitmentEmission
   /** False on every proactive turn: an offer answers something the guest asked. */
   repliesToGuest: boolean
@@ -65,7 +62,6 @@ export interface FurtherHelpOfferInput {
 export type FurtherHelpOfferReason =
   | 'link'
   | 'recommendation'
-  | 'instructions'
   | 'long_reply'
   | 'no_offer_written'
   | 'offer_is_a_question'
@@ -102,18 +98,15 @@ function proseOf(body: string): string {
  * How long a reply has to be before an offer the model wrote is read as
  * following an explanation rather than a fact.
  *
- * A PROXY, AND STATED AS ONE. `gaveInstructions` came back false on every
- * one of 100 generations, including a five-sentence answer on how to
- * brew each bean, so on its own that condition never fired. What did separate
- * the two kinds of answer was the model's own choice to write the line: it
- * wrote one after every brewing answer and after none of forty single facts.
- * So an offer the model wrote, on a reply this long, counts. Single facts in
- * those runs were mostly under a dozen words; the long one, about parking,
- * never carried an offer line.
- *
- * THE FLAG IS STILL IN THE SCHEMA AND HAS NEVER FIRED. Removing it changes
- * the prompt, and the budget for this change ran out before that could be
- * measured. It is recorded here so nobody reasons from it as a working switch.
+ * A PROXY, AND STATED AS ONE. v1.98.0 also asked the model for a
+ * `gaveInstructions` flag. It came back false on every one of 110
+ * generations, including a five-sentence answer on how to brew each bean, so
+ * v1.99.0 removed it rather than keep a field that reads like a switch and
+ * changes nothing. What did separate the two kinds of answer was the model's
+ * own choice to write the line: it wrote one after every brewing answer and
+ * after none of forty single facts. So an offer the model wrote, on a reply
+ * this long, counts. Single facts in those runs were mostly under a dozen
+ * words; the long one, about parking, never carried an offer line.
  */
 const EXPLAINED_WORDS = 25
 
@@ -160,7 +153,6 @@ export function decideFurtherHelpOffer(input: FurtherHelpOfferInput): {
   ) {
     return { append: true, reason: 'recommendation' }
   }
-  if (input.gaveInstructions) return { append: true, reason: 'instructions' }
   if (wordCount(input.body) >= EXPLAINED_WORDS) {
     return { append: true, reason: 'long_reply' }
   }
