@@ -38,6 +38,7 @@ import { UNKNOWN_INSTRUCTIONS } from './unknown'
 // chosen in categoryInstructionsFor. See that function.
 import { INQUIRY_FOLLOWUP_INSTRUCTIONS } from './inquiry-followup'
 import { VISIT_CHECKBACK_INSTRUCTIONS } from './visit-checkback'
+import { WARM_CLOSE_INSTRUCTIONS } from './warm-close'
 import { WELCOME_INSTRUCTIONS } from './welcome'
 
 export function getCategoryInstructions(category: MessageCategory): string {
@@ -174,7 +175,12 @@ export function categoryInstructionsFor(
   // `category: 'follow_up'` and is about a drink the guest has NOW. See
   // visit-checkback.ts.
   visitCheckback = false,
+  // TAC-575: and for the pause timer's sign-off, which stores
+  // `category: 'acknowledgment'` although the guest signed off on nothing. See
+  // warm-close.ts.
+  timedClose = false,
 ): string {
+  if (timedClose) return WARM_CLOSE_INSTRUCTIONS
   if (visitCheckback) return VISIT_CHECKBACK_INSTRUCTIONS
   if (inquiryFollowup) return INQUIRY_FOLLOWUP_INSTRUCTIONS
   if (category === 'guest_arrived')

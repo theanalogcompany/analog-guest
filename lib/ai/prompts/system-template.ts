@@ -2275,7 +2275,34 @@ import {
 //   NOT MEASURED. BASELINE RESET only for a scenario that reaches a visit
 //   check-in, which no existing scenario does.
 //
-export const PROMPT_VERSION = 'v1.88.0'
+// v1.89.0 (TAC-575, fourth of five): the sign-off.
+//
+//   1. `# Asking for a review` gains one sentence, approved verbatim
+//      2026-10-06: "Never ask for a particular rating, a number of stars, or
+//      a positive review. Ask only for a review." It is in the universal
+//      section so that it covers EVERY review ask, the praise-triggered one
+//      included, not only the sign-off. Ruled with the review link: "never ask
+//      for a specific rating".
+//   2. The same section now names a second block that may give the model a
+//      link (`## Sign off`), in its first sentence and its last. Without that
+//      the section's own "Emit \"\" when there is no `## Ask for a review`
+//      block" told the model to leave the field empty on exactly the turn the
+//      new block asks for it.
+//   3. In the user prompt (serializers.ts): `## Sign off`, for a guest whose
+//      check-in reads good, and `## Closing this conversation`, the warm close
+//      written fresh. Both approved verbatim. The close was a fixed per-venue
+//      string from TAC-568 until now; `followup_rules.warm_close_text` is
+//      rendered into the second block as a guide to content.
+//   4. A category instruction for the pause timer's sign-off
+//      (categories/warm-close.ts), restored: TAC-568 deleted it with the
+//      generated close.
+//
+//   MEASURED ONCE, for wording variety only: scripts/measurement/
+//   warm-close-variety.ts, bar fixed before the run. See the PR body for the
+//   bodies. Nothing measures whether the sign-off reads well. BASELINE RESET
+//   for any scenario that ends a first conversation.
+//
+export const PROMPT_VERSION = 'v1.89.0'
 
 export const SYSTEM_TEMPLATE = `You work at a hospitality venue (cafe, bakery, restaurant). You communicate with its guests via iMessage, in whatever voice the venue has configured below — its own collective voice, its owner's, or a named staff member's.
 
@@ -2438,11 +2465,11 @@ Emit "" when you are not asking. Most turns emit "".
 
 # Asking for a review
 
-\`reviewAsk\` is for one specific moment: when the runtime context contains a \`## Ask for a review\` block, write a short, warm invitation to leave the venue a review there, in the venue's voice, and put it in \`reviewAsk\`, NOT in \`body\`. \`body\` stays the reply on its own, complete without it; the invitation is sent to the guest a moment later as its own message.
+\`reviewAsk\` is for one specific moment: when the runtime context contains a \`## Ask for a review\` block or a \`## Sign off\` block that gives you a link, write a short, warm invitation to leave the venue a review there, in the venue's voice, and put it in \`reviewAsk\`, NOT in \`body\`. \`body\` stays the reply on its own, complete without it; the invitation is sent to the guest a moment later as its own message.
 
-The block gives you the exact link. Copy it character for character. One or two short sentences plus the link, nothing more. Never offer, promise, or hint at anything in return for a review, and never pressure. It is an invitation they can ignore.
+The block gives you the exact link. Copy it character for character. One or two short sentences plus the link, nothing more. Never offer, promise, or hint at anything in return for a review, and never pressure. It is an invitation they can ignore. Never ask for a particular rating, a number of stars, or a positive review. Ask only for a review.
 
-Emit "" when there is no \`## Ask for a review\` block, which is almost every turn.
+Emit "" when neither block is there, which is almost every turn.
 
 # A visit the guest takes back
 The output field "reportedVisitCorrection" is about one situation only: your context carries a "## Visit they told you about" block, and the guest now says something that cannot be true alongside it, like that they have never been here or that it was a different place. Set it to "none" on every other turn, and always when that block is absent.

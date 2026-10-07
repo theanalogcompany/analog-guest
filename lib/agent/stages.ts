@@ -3023,6 +3023,13 @@ export function buildAiRuntime(
     // optional RuntimeContext fields around it read.
     inquiryFollowup: ctx.inquiryFollowup ?? undefined,
     visitCheckback: ctx.visitCheckback || undefined,
+    // TAC-575: the sign-off. The kind is decided upstream (the pause timer, or
+    // handleInbound on a goodbye turn); this only carries it. The venue's close
+    // text rides along on a plain close as a guide to its content.
+    signOff: ctx.signOff ?? undefined,
+    warmCloseGuidance:
+      ctx.signOff === 'plain' ? ctx.venue.warmCloseText : undefined,
+    timedClose: ctx.followupTrigger?.reason === 'warm_close' || undefined,
     // The once-ever review ask. Set only by handle-inbound's eligibility
     // predicate (lib/agent/review-ask.ts); null → undefined so the serializer
     // omits the `## Ask for a review` block and composeReplyWithReviewAsk
