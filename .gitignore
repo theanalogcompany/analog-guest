@@ -76,3 +76,7 @@ supabase/.temp/
 # ticket rather than committing the file.
 measurement-runs/
 *.jsonl
+# Run logs kept per ticket after a worktree is removed. Ignored whole, not just
+# the *.jsonl: the hand-read files beside them hold real guest message bodies,
+# and this repo is public.
+scripts/measurement/runs/
