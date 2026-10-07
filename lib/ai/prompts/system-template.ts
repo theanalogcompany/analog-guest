@@ -2495,7 +2495,25 @@ import {
 //   no earlier message and no apology in the thread gets a prompt
 //   byte-identical to v1.96.0.
 //
-export const PROMPT_VERSION = 'v1.97.0'
+// v1.98.0 (phone test, 2026-10-07, third of three): offering more help, and
+// one sentence in a user-prompt block.
+//
+//   A NEW SECTION, `# Offering more help`, AND TWO OUTPUT FIELDS. The reply
+//   ends with a light offer when it sent a link, made a recommendation or gave
+//   instructions, and never after a single fact. The model writes the line in
+//   `furtherHelpOffer`; code decides from the finished reply whether it is
+//   sent (lib/ai/further-help-offer.ts, which records the three rounds that
+//   left that decision to the prompt and missed). `gaveInstructions` is the
+//   one condition the text itself does not show. Wording shown in the PR.
+//
+//   `## You know this guest`, the back-after-a-pause variant, no longer lets
+//   the greeting imply a visit: "welcome back" was in about half of them, to
+//   guests with no visit on record (serializers.ts, KNOWN_GUEST_LINES).
+//
+//   BASELINE RESET for every turn: the section is in the shared template and
+//   the schema has two more fields.
+//
+export const PROMPT_VERSION = 'v1.98.0'
 
 export const SYSTEM_TEMPLATE = `You work at a hospitality venue (cafe, bakery, restaurant). You communicate with its guests via iMessage, in whatever voice the venue has configured below — its own collective voice, its owner's, or a named staff member's.
 
@@ -2663,6 +2681,13 @@ Emit "" when you are not asking. Most turns emit "".
 The block gives you the exact link. Copy it character for character. One or two short sentences plus the link, nothing more. Never offer, promise, or hint at anything in return for a review, and never pressure. It is an invitation they can ignore. Never ask for a particular rating, a number of stars, or a positive review. Ask only for a review.
 
 Emit "" when neither block is there, which is almost every turn.
+
+# Offering more help
+\`furtherHelpOffer\` is one short, light line saying you are happy to answer anything else about what you just helped with. Write it when your reply did one of three things: sent the guest a link, made a recommendation or helped them choose between things, or walked them through how to do something. On a recommendation, or when you helped them choose, always write it. It goes in \`furtherHelpOffer\` and NOT in \`body\`, and \`body\` stays complete without it. It is a statement and not a question, it says nothing about how good anything is, and it is worded differently from any offer you have already made this guest.
+
+Emit "" on every other reply: when the answer is a single fact, like an hour, a price, an address or a yes or no, on a complaint, on a sign-off, and whenever the reply asks the guest something.
+
+Set \`gaveInstructions\` to true only when \`body\` walks the guest through how to do something, like brewing at home, ordering online, booking a place at an event, or arranging catering or wholesale. Saying where something is, when you are open, or whether you have something is not instructions. False on every other reply.
 
 # A visit the guest takes back
 The output field "reportedVisitCorrection" is about one situation only: your context carries a "## Visit they told you about" block, and the guest now says something that cannot be true alongside it, like that they have never been here or that it was a different place. Set it to "none" on every other turn, and always when that block is absent.

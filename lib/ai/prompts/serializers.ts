@@ -2167,6 +2167,10 @@ function formatReOptIn(reOptIn: ReOptIn): string {
  * see is not one it may refer to. An imported thread older than the window
  * (TAC-515) is exactly that case.
  *
+ * `earlier` SAYS THE RETURN IS TO THE CHAT, NOT THE VENUE (v1.98.0). Without it
+ * about half the greetings were "welcome back", to guests with no visit on
+ * record, which is the phrase the scan greeting bars for that reason.
+ *
  * NO QUOTED GREETING in either. The ruling's own example lines are the ones
  * every returning guest would then receive.
  *
@@ -2177,7 +2181,7 @@ function formatReOptIn(reOptIn: ReOptIn): string {
  */
 const KNOWN_GUEST_LINES = {
   earlier:
-    'This guest was talking with you earlier, and that conversation is in the messages before this one. They are back. Do not greet them as someone new and do not introduce the venue again. If their message is only a hello, greet them as someone picking the conversation back up and ask if there is anything else you can help with, in one short line. If it asks or says something, answer it directly with no greeting.',
+    'This guest was talking with you earlier, and that conversation is in the messages before this one. They are back in the chat. Do not greet them as someone new and do not introduce the venue again. If their message is only a hello, greet them as someone picking the conversation back up and ask if there is anything else you can help with, in one short line. That is about the chat and not about a visit: unless ## Visit history shows one, do not welcome them back, and say nothing that implies they have been in. If it asks or says something, answer it directly with no greeting.',
   known:
     'This guest has messaged with the venue before today. They are not new. Do not greet them as a first-time contact and do not introduce the venue. If their message is only a hello, greet them warmly as someone you already know and invite them to say what they need, in one short line. Having messaged before is not the same as having visited: say nothing about a past visit unless ## Visit history shows one, and do not refer to an earlier conversation you cannot see in the messages before this one.',
 } as const satisfies Record<NonNullable<RuntimeContext['knownGuest']>, string>

@@ -2,6 +2,7 @@ import type { EligibleMechanic, GuestState } from '@/lib/recognition'
 import type { ReOptIn } from '@/lib/guests/opt-out'
 import type { MessageChannel } from '@/lib/schemas/message-channel'
 import type { EmojiDirective } from './emoji-cadence'
+import type { FurtherHelpOfferReason } from './further-help-offer'
 import type {
   ActiveCommitment,
   ArrivalCaptureEmission,
@@ -811,6 +812,15 @@ export type GenerateMessageResult = {
    * Nothing is stamped on a dropped ask, so the guest stays eligible.
    */
   reviewAskDroppedForBodyQuestion: boolean
+  /**
+   * The offer-more-help line as it was sent, '' when the reply carries none.
+   * The exact tail of `body`: dispatch peels it off as its own last message. Written by the model in its own field and appended by
+   * code only when the finished reply sent a link, made a recommendation or
+   * gave instructions (lib/ai/further-help-offer.ts).
+   */
+  furtherHelpOffer: string
+  /** Which fact sent the offer, or which veto stopped one the model wrote. */
+  furtherHelpOfferReason: FurtherHelpOfferReason
   attempts: number
   // Per-attempt body + flags, in attempt order. Surfaced for trace
   // observability (THE-216) so each `generate.attempt_N` span can carry the

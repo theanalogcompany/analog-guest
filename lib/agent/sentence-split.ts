@@ -220,10 +220,14 @@ export function resolveOutboundTail(
   reviewAsk: string,
   intentionQuestion: string,
   renderedCount: number,
+  furtherHelpOffer: string,
 ): string {
-  return reviewAsk !== ''
-    ? reviewAsk
-    : intentionTailFor(intentionQuestion, renderedCount)
+  if (reviewAsk !== '') return reviewAsk
+  const question = intentionTailFor(intentionQuestion, renderedCount)
+  // The offer-more-help line is last in line and never competes: the decision
+  // that appends it (lib/ai/further-help-offer.ts) withholds it from any
+  // reply that carries either of the other two.
+  return question !== '' ? question : furtherHelpOffer
 }
 
 /**

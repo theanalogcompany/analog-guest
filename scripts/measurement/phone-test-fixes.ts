@@ -1,5 +1,4 @@
-// Phone test fixes (2026-10-07): the generation check for the five items, and
-// the leave-one-out runs behind them.
+// Phone test fixes (2026-10-07): the generation check for the five items.
 //
 // GENERATE-ONLY. Nothing is sent and nothing is written, with the exception
 // every harness on this path reports on itself: buildRuntimeContext calls
@@ -20,14 +19,13 @@
 // shipped arm.
 //
 //   shipped   the prompt as composed, untouched
-//   control   the same prompt with this change's two blocks taken out
-//   cand-,    wording that is NOT shipped (item 1a, offering further help)
-//   diag-,
-//   try-
+//   control   the same prompt with the latest change's wording taken out
 //
-// The arms that found the causes of the first three items (v1.95.0, #344) are
-// in that pull request's history, with the bodies in its description. They
-// edited text that change has since replaced.
+// This file has measured three changes (v1.95.0 #344, v1.97.0 #346, v1.98.0),
+// and the control is always the latest one's. The earlier arms, including the
+// leave-one-out runs and the three rounds that tried to get an offer line out
+// of prompt wording alone, are in those pull requests' histories with their
+// bodies; they edited text that has since been replaced.
 //
 // THE SYSTEM PROMPT IS SPLIT WHERE PRODUCTION SPLITS IT: the stable half with
 // a cache breakpoint, then the per-message half. (Production's breakpoint has
@@ -60,12 +58,22 @@ import type {
 import { getGenerationModel } from '@/lib/ai/client'
 import { composePrompt } from '@/lib/ai/compose-prompt'
 import {
+  appendFurtherHelpOffer,
+  decideFurtherHelpOffer,
+} from '@/lib/ai/further-help-offer'
+import {
   composeReplyWithIntention,
   GeneratedMessageSchema,
   MAX_OUTPUT_TOKENS,
+  replaceDashes,
+  stripTrailingDuplicate,
 } from '@/lib/ai/generate-message'
 import { PROMPT_VERSION } from '@/lib/ai/prompts/system-template'
 import { buildRuntimeContext } from '@/lib/agent/build-runtime-context'
+import {
+  resolveDispatchBubbles,
+  resolveOutboundTail,
+} from '@/lib/agent/sentence-split'
 import {
   buildAiRuntime,
   classifyStage,
@@ -83,42 +91,12 @@ import { createRunLog } from './run-log'
 // Arms
 // ---------------------------------------------------------------------------
 
-/** What a transform may read about the unit it is applied to. */
-interface UnitFacts {
-  category: MessageCategory
-  /** The knowledge retrieved for this unit, as the writer sees it. */
-  knowledge: string
-}
-
 interface Transform {
   label: string
   target: 'system' | 'user'
-  apply: (prompt: string, facts: UnitFacts) => string
+  apply: (prompt: string) => string
   /** A transform that may legitimately find nothing on some units. */
   optional?: boolean
-  /**
-   * A transform whose whole point is to act on some turns and not others, so a
-   * cell it never touches is a result (no offer block on single facts), not a
-   * silent copy of the shipped arm.
-   */
-  conditional?: boolean
-}
-
-/** Remove the one line that starts with `prefix`. */
-function dropLine(
-  target: Transform['target'],
-  label: string,
-  prefix: string,
-): Transform {
-  return {
-    label,
-    target,
-    apply: (p) =>
-      p
-        .split('\n')
-        .filter((line) => !line.startsWith(prefix))
-        .join('\n'),
-  }
 }
 
 function swap(
@@ -131,152 +109,33 @@ function swap(
   return { label, target, apply: (p) => p.replace(from, to), optional }
 }
 
-/** Where the user prompt's blocks end and its closing lines begin. */
-const TAIL_ANCHORS = ['\n\nThe guest just sent:', '\n\nGenerate '] as const
-
-/**
- * Remove a `## Heading` block from the user prompt.
- *
- * The block ends at the next heading OR at the closing lines, whichever comes
- * first. The first version cut to the next heading only, and a block that
- * happened to be last took "The guest just sent" with it: on a complaint turn
- * the apology block is last (no emoji directive follows), so the control arm
- * generated those replies without the guest's message.
- */
-function dropBlock(label: string, heading: string): Transform {
-  return {
-    label,
-    target: 'user',
-    optional: true,
-    apply: (p) => {
-      const start = p.indexOf(heading)
-      if (start === -1) return p
-      const ends = ['\n\n## ', ...TAIL_ANCHORS]
-        .map((a) => p.indexOf(a, start + heading.length))
-        .filter((at) => at !== -1)
-      if (ends.length === 0) return p.slice(0, start).trimEnd()
-      const end = Math.min(...ends)
-      // Blocks are joined by a blank line: drop this one and one separator.
-      return start === 0
-        ? p.slice(end).replace(/^\n\n/, '')
-        : p.slice(0, start).replace(/\n\n$/, '') + p.slice(end)
-    },
-  }
-}
-
-/** Add a block at the end of the user prompt's blocks, before the closing lines. */
-function insertUserBlock(label: string, block: string): Transform {
-  return {
-    label,
-    target: 'user',
-    apply: (p) => {
-      const anchor = TAIL_ANCHORS.find((a) => p.includes(a))
-      if (anchor === undefined) return p
-      const at = p.lastIndexOf(anchor)
-      return `${p.slice(0, at)}\n\n${block}${p.slice(at)}`
-    },
-  }
-}
-
-const MIRROR_RULE = '- Match the register and length of what the guest sent.'
-
-const RULES_END = '\n\n# Voice imperative'
-
-// Item 1a, NOT shipped. The rule as approved on 2026-10-07; it produced no
-// offers from the rule list and 3 of 10 as a late block.
-const RULE_OFFER =
-  '- Whether a reply ends by offering more help is decided by what the answer did, not by its topic. When your answer sent the guest a link, made a recommendation or helped them choose between things, or walked them through how to do something, end with one short, light line saying you are happy to answer anything else about it. When your answer was a single fact, like an hour, a price, an address or a yes or no, give the fact and stop, with no offer after it. The offer is a statement and not a question, it is about the thing you just helped with, and it is worded differently each time: look at what you have already sent this guest and do not reuse an offer you have made. This is not the closing sentence the rule on recommendations above forbids, which is about praising the thing; this line says nothing about how good anything is. It is not telling the guest to get in touch either, which the rule above on that forbids: it leaves the door open in this thread and asks for nothing. Leave it off a complaint turn, a sign-off, any reply that already asks the guest something, and any turn where you are putting a question in intentionQuestion.'
-
-const APPEND_OFFER_RULE = swap(
-  'system',
-  'offer rule',
-  RULES_END,
-  `\n${RULE_OFFER}${RULES_END}`,
-)
-
-const DROP_PERSONA_LENGTH: Transform = {
-  label: 'persona length section',
+// What v1.98.0 changed, so the control arm can take it back out: the offer
+// section of the system prompt, and one sentence of the back-after-a-pause
+// block. Restated here rather than imported, so a typo in the prompt cannot
+// make the control agree with it.
+const DROP_OFFER_SECTION: Transform = {
+  label: 'offer section',
   target: 'system',
-  apply: (p) => p.replace(/## Length\n[^\n]*\n/, ''),
-}
-const DROP_LENGTH_RULE = dropLine(
-  'system',
-  'length authority rule',
-  '- The ## Length section below is the only authority',
-)
-
-/**
- * Item 1a, the code-computed round (ruled 2026-10-07): the conditions the
- * rule left to the model are decided from the turn's inputs, and the block
- * renders only when one holds, stating it as a fact.
- *
- * Only what is knowable BEFORE the reply exists can be computed here: the
- * category, and whether the knowledge the writer was handed carries a link.
- * "Your reply contains a link" is a fact about the reply and would need a
- * second pass.
- */
-const OFFER_CATEGORIES: ReadonlySet<MessageCategory> = new Set([
-  'recommendation_request',
-  'event_question',
-])
-const HAS_LINK = /https?:\/\/|\b[a-z0-9-]+\.(com|co|org|net)\//i
-
-function offerFact(facts: UnitFacts): string | null {
-  if (facts.category === 'recommendation_request') {
-    return 'In this reply you are recommending something or helping the guest choose.'
-  }
-  if (OFFER_CATEGORIES.has(facts.category)) {
-    return 'In this reply you are telling the guest about something they can come to or sign up for.'
-  }
-  if (HAS_LINK.test(facts.knowledge)) {
-    return 'What you were given to answer this includes a link. If your reply sends the guest that link or walks them through how to do something, this block applies; if it only states a fact, ignore it.'
-  }
-  return null
-}
-
-const OFFER_FACT_BLOCK: Transform = {
-  label: 'offer fact block',
-  target: 'user',
-  // Renders on some units only, by design: that is the thing under test.
-  optional: true,
-  conditional: true,
-  apply: (p, facts) => {
-    const fact = offerFact(facts)
-    if (fact === null) return p
-    return insertUserBlock(
-      'offer fact block',
-      `## Offer more help\n\n${fact} End the reply with one short, light line saying you are happy to answer anything else about it. Make it a statement, not a question, and say it your own way.`,
-    ).apply(p, facts)
+  // Required: the section is in every prompt, so a heading that no longer
+  // matches must fail the unit rather than leave the section in the control.
+  apply: (p) => {
+    const start = p.indexOf('# Offering more help\n')
+    const end = p.indexOf('# A visit the guest takes back\n')
+    return start === -1 || end === -1 ? p : p.slice(0, start) + p.slice(end)
   },
 }
 
-/** What this change ships: two user-prompt blocks. The control takes them out. */
-const SHIPPED_BLOCKS = [
-  dropBlock('known-guest block', '## You know this guest'),
-  dropBlock('apology block', '## You have already apologised'),
-]
+const EARLIER_AFTER =
+  'They are back in the chat. Do not greet them as someone new and do not introduce the venue again. If their message is only a hello, greet them as someone picking the conversation back up and ask if there is anything else you can help with, in one short line. That is about the chat and not about a visit: unless ## Visit history shows one, do not welcome them back, and say nothing that implies they have been in.'
+const EARLIER_BEFORE =
+  'They are back. Do not greet them as someone new and do not introduce the venue again. If their message is only a hello, greet them as someone picking the conversation back up and ask if there is anything else you can help with, in one short line.'
 
 const ARMS: Record<string, readonly Transform[]> = {
   shipped: [],
-  control: SHIPPED_BLOCKS,
-  // Item 1a, not shipped.
-  'cand-1a': [APPEND_OFFER_RULE],
-  'cand-1a+length-both': [
-    APPEND_OFFER_RULE,
-    DROP_PERSONA_LENGTH,
-    DROP_LENGTH_RULE,
+  control: [
+    DROP_OFFER_SECTION,
+    swap('user', 'earlier wording', EARLIER_AFTER, EARLIER_BEFORE, true),
   ],
-  'cand-1a+mirror-rule': [
-    APPEND_OFFER_RULE,
-    dropLine('system', 'mirror rule', MIRROR_RULE),
-  ],
-  'diag-1a-block': [
-    insertUserBlock(
-      'offer block',
-      `## Offering more help\n\n${RULE_OFFER.slice(2)}`,
-    ),
-  ],
-  'try-1a-facts': [OFFER_FACT_BLOCK],
 }
 
 // ---------------------------------------------------------------------------
@@ -435,6 +294,27 @@ const CELLS: readonly Cell[] = [
       u('card', 'do you take card?'),
       u('open-tomorrow', 'what time do you open tomorrow?'),
     ],
+  },
+  {
+    id: '1-thanks',
+    what: 'a thanks after a link was sent: a sign-off, so no offer (constructed)',
+    kind: 'inbound',
+    established: true,
+    units: [
+      'thanks!',
+      'perfect, thank you',
+      'great thanks',
+      'ty',
+      'ok cool',
+    ].map((inbound, i) => ({
+      id: `thanks-${i + 1}`,
+      inbound,
+      history: [
+        ['in', 'can you send me the menu?'],
+        ['out', 'here you go: https://lemils.com/pages/cafe-menu'],
+      ] as const,
+      gapMinutes: 1,
+    })),
   },
   {
     id: '1-greeting',
@@ -885,20 +765,6 @@ async function main(): Promise<void> {
           categories.set(unit.id, category)
         }
 
-        // MEASURE_DRY=1 prints what the code can know about each unit before
-        // any reply exists. It writes no reply, but it has still classified
-        // the unit and retrieved its knowledge, which is one small model call
-        // and one embedding per unit.
-        if (process.env.MEASURE_DRY === '1') {
-          const chunks = knowledge.get(unit.id) ?? []
-          console.log(
-            `  ${unit.id} [${category}] tags=${JSON.stringify([...new Set(chunks.flatMap((c) => c.primaryTags ?? []))])} link=${HAS_LINK.test(chunks.map((c) => c.text).join('\n'))}`,
-          )
-          touched += 1
-          done += 1
-          continue
-        }
-
         const composed = composePrompt({
           category,
           persona: ctx.venue.brandPersona,
@@ -911,12 +777,6 @@ async function main(): Promise<void> {
         // Transforms run on the two halves of the system prompt separately,
         // so the stable half keeps its own cache breakpoint, as production's
         // does. No transform here spans the boundary between them.
-        const facts: UnitFacts = {
-          category,
-          knowledge: (knowledge.get(unit.id) ?? [])
-            .map((c) => c.text)
-            .join('\n'),
-        }
         let prefix = composed.cacheableSystemPrefix
         let suffix = composed.volatileSystemSuffix
         let user = composed.userPrompt
@@ -924,13 +784,13 @@ async function main(): Promise<void> {
         for (const t of arm) {
           let changed = false
           if (t.target === 'system') {
-            const nextPrefix = t.apply(prefix, facts)
-            const nextSuffix = t.apply(suffix, facts)
+            const nextPrefix = t.apply(prefix)
+            const nextSuffix = t.apply(suffix)
             changed = nextPrefix !== prefix || nextSuffix !== suffix
             prefix = nextPrefix
             suffix = nextSuffix
           } else {
-            const next = t.apply(user, facts)
+            const next = t.apply(user)
             changed = next !== user
             user = next
           }
@@ -971,12 +831,48 @@ async function main(): Promise<void> {
           '## You know this guest',
           '## You have already apologised',
         ].filter((h) => user.includes(h))
-        const reply = composeReplyWithIntention(
-          object.body,
-          object.intentionQuestion,
-        ).body
+        // What generateMessage does with the fields, step for step. No unit
+        // here renders an intentions block, so production drops any question
+        // the model emits; and none carries a review ask.
+        const correcting =
+          (unit.reportedItems?.length ?? 0) > 0 &&
+          object.reportedVisitCorrection !== 'none'
+        const composedReply = composeReplyWithIntention(object.body, '')
+        const offerLine = replaceDashes(object.furtherHelpOffer).trim()
+        const beforeOffer =
+          offerLine === ''
+            ? composedReply.body
+            : stripTrailingDuplicate(composedReply.body, offerLine)
+        const offer = decideFurtherHelpOffer({
+          body: beforeOffer,
+          offer: offerLine,
+          category,
+          gaveInstructions: object.gaveInstructions,
+          commitment: object.commitment,
+          repliesToGuest: unit.inbound !== undefined,
+          signsOff: object.closedTheConversation || cell.kind === 'close',
+          onComplaintTurn: object.complaintIntent !== 'none',
+          carriesAnAsk: false,
+          knowledgeGap: object.knowledgeGap,
+          correctingVisit: correcting,
+        })
+        const sendsOffer = offer.append && beforeOffer.trim() !== ''
+        const reply = sendsOffer
+          ? appendFurtherHelpOffer(beforeOffer, offerLine)
+          : composedReply.body
+        // What the guest would actually receive: the messages dispatch makes
+        // of it, with the offer peeled off as its own. The first version of
+        // this check printed the reply before dispatch and so never saw that
+        // a line break does not survive it.
+        const bubbles = resolveDispatchBubbles(
+          reply,
+          Math.random,
+          resolveOutboundTail('', '', 0, sendsOffer ? offerLine : ''),
+        )
         const flags = {
           ...detect(reply),
+          offerSent: sendsOffer,
+          offerWritten: offerLine.trim() !== '',
           knownBlock: blocks.includes('## You know this guest'),
           apologyBlock: blocks.includes('## You have already apologised'),
         }
@@ -994,6 +890,10 @@ async function main(): Promise<void> {
           blocks,
           inbound: unit.inbound ?? null,
           body: reply,
+          bubbles,
+          offerLine,
+          offerReason: offer.reason,
+          gaveInstructions: object.gaveInstructions,
           knowledgeGap: object.knowledgeGap,
           reportedVisitCorrection: object.reportedVisitCorrection,
           flags,
@@ -1003,7 +903,7 @@ async function main(): Promise<void> {
           .map(([k]) => k)
           .join(',')
         console.log(
-          `  ${unit.id} [${category}${object.knowledgeGap ? ', GAP' : ''}] ${JSON.stringify(reply)}  {${marks}}`,
+          `  ${unit.id} [${category}${object.knowledgeGap ? ', GAP' : ''}] ${bubbles.map((b) => JSON.stringify(b)).join(' + ')}  {${offer.reason === 'no_offer_written' ? '' : `offer:${offer.reason} `}${marks}}`,
         )
       } catch (e) {
         failed += 1
@@ -1021,7 +921,7 @@ async function main(): Promise<void> {
 
     // A control or candidate arm that changed no prompt in the whole cell is a
     // silent copy of the shipped arm, not a result.
-    if (arm.length > 0 && touched === 0 && !arm.some((t) => t.conditional)) {
+    if (arm.length > 0 && touched === 0) {
       console.log(`  ${cell.id}: no transform changed any prompt (CELL VOID)`)
       failed += 1
     }

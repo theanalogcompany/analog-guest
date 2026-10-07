@@ -34,7 +34,7 @@ decision rather than silent drift. A **required** boolean or string is free.
 `correctsPendingReply`, `followUpWorthy`, `praisedExperience`. None is `.optional()`, which
 is what makes the compiler name every site synthesizing a `Classification`.
 
-`PROMPT_VERSION` (`prompts/system-template.ts`, currently v1.97.0) covers the
+`PROMPT_VERSION` (`prompts/system-template.ts`, currently v1.98.0) covers the
 classify/generate contract. Every other module here carries its own, and they are
 deliberately not linked:
 
@@ -129,6 +129,11 @@ than check outcomes:
   strip is the only place model text is REMOVED; it only ever removes a trailing duplicate,
   and it reports itself on `intentionQuestionDuplicateStripped` because a guard editing
   guest-facing text has to be countable.
+
+`furtherHelpOffer` is a third field of the same kind: the model writes an offer-more-help
+line apart from the reply, and `decideFurtherHelpOffer` (`further-help-offer.ts`) appends it
+only when the finished reply sent a link, made a recommendation or explained something. The
+reason rides on `furtherHelpOfferReason`. Its sibling `gaveInstructions` has never fired.
 
 `intentionQuestion` is a bare REQUIRED string, which costs zero against Anthropic's
 24-optional cap. `body` remains the complete reply, so every backstop still reads the

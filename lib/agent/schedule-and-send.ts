@@ -476,6 +476,7 @@ export async function scheduleAndSend(
       generation.reviewAsk,
       generation.intentionQuestion,
       options.renderedIntentions?.length ?? 0,
+      generation.furtherHelpOffer,
     ),
   )
   if (bubbles.length === 0) {
