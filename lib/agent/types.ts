@@ -581,6 +581,10 @@ export type AgentResult =
   // reach the crisis reply), so 'not_run' means no reply was attempted, as it
   // does for a suppressed scan greeting.
   //
+  // TAC-574 added one producer where classification did NOT run: an opted-out
+  // text guest who sends only a photo or other attachment. There is no text
+  // to classify, so the turn stops before the context build.
+  //
   // Only handleInbound produces it.
   | { status: 'guest_opted_out' }
   | { status: 'failed'; stage: AlertContext['stage']; error: string }

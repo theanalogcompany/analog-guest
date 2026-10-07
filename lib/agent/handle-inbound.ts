@@ -473,6 +473,19 @@ async function persistGenerationFailureCard(
  *     the card is still written and a red alert says the guest is still opted
  *     out, the same direction TAC-572 takes for a text reply.
  *
+ * THREE GAPS IN THE INSTAGRAM RULE, open on the TAC-574 PR for a ruling. This
+ * path has no category and no attachment type, so it cannot make the
+ * distinctions TAC-572's text rules make:
+ *   1. An acknowledgment GIF. TAC-572 keeps "thanks" after the confirmation
+ *      from undoing an opt-out. A thumbs-up GIF sent after the confirmation
+ *      lands here and DOES undo it.
+ *   2. A story mention or a shared post. parse-events.ts stores a link for
+ *      every attachment kind, so a guest who tags the venue in a story, without
+ *      writing to it, is opted back in and carded.
+ *   3. No "back in touch" guard. TAC-572 sets `turn.reOptIn` so the reply does
+ *      not welcome the guest back. Nothing durable is set here, so the first
+ *      TEXT after this card runs as an ordinary turn and can.
+ *
  * Never throws. A card that cannot be written is a `failed` turn, which the
  * turn retries once.
  */
@@ -1432,6 +1445,22 @@ async function runInboundTurn(
           venueId: inbound.venueId,
           guestId: inbound.guestId,
         })
+        if (!optedOut.ok) {
+          // Counted, as TAC-572's own read is: a degrade nobody can count is
+          // one nobody will notice. The card that follows cannot reach the
+          // guest by itself; the operator dispatch refuses an opted-out send.
+          console.warn('[agent] opt-out read failed on a media-only turn', {
+            agentRunId,
+            guestId: inbound.guestId,
+            error: optedOut.error,
+          })
+          await capturePostHogEvent('opt_out_read_failed', agentRunId, {
+            agentRunId,
+            venueId: inbound.venueId,
+            guestId: inbound.guestId,
+            error: optedOut.error,
+          })
+        }
         if (optedOut.ok && optedOut.data) {
           console.log('[agent] media-only inbound not carded: opted out', {
             agentRunId,
