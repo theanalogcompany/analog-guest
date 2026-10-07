@@ -19,7 +19,6 @@ import {
 import { INTENTION_DEFINITION_BY_KEY } from '@/lib/agent/intentions/definitions'
 import type { PromptedIntentionRow } from '@/lib/agent/intentions/load'
 import { hasAnsweredGuestBefore } from '@/lib/agent/retrieval-context'
-import { deriveSignOffReviewAsk } from '@/lib/agent/review-ask'
 import {
   classifyCheckinAnswer,
   isAwaitingCheckinAnswer,
@@ -27,13 +26,11 @@ import {
   hasBeenQuietLongEnough,
   isCheckbackTooLate,
   isCheckinFresh,
-  lastComplaintFollowupAt,
   lastProactiveWasThisVisit,
   messagesFromThisVisit,
   nextCheckinAnswer,
   orderTurnVerdict,
   owedComplaintFollowup,
-  owesAfterComplaintReviewAsk,
   owesCheckback,
   resolveCheckbackDueAt,
   resolveSameVisitOrderAt,
@@ -877,78 +874,6 @@ check(
 // ---------------------------------------------------------------------------
 
 const REVIEW_URL = 'https://reviews.example.test/write?id=abc'
-const links = [{ label: 'Leave a review', url: REVIEW_URL, kind: 'review' }]
-check(
-  'happy: check-in good, never asked, venue has a link',
-  deriveSignOffReviewAsk({
-    afterComplaint: false,
-    checkinAnswer: 'good',
-    reviewAskedAt: null,
-    links,
-  }),
-  { url: REVIEW_URL, label: 'Leave a review' },
-)
-check(
-  'not happy: they never said it was good',
-  deriveSignOffReviewAsk({
-    afterComplaint: false,
-    checkinAnswer: 'not_yet',
-    reviewAskedAt: null,
-    links,
-  }),
-  null,
-)
-check(
-  'not happy: they complained',
-  deriveSignOffReviewAsk({
-    afterComplaint: false,
-    checkinAnswer: 'bad',
-    reviewAskedAt: null,
-    links,
-  }),
-  null,
-)
-check(
-  'not happy: no check-in at all',
-  deriveSignOffReviewAsk({
-    afterComplaint: false,
-    checkinAnswer: null,
-    reviewAskedAt: null,
-    links,
-  }),
-  null,
-)
-check(
-  'not happy: already asked once',
-  deriveSignOffReviewAsk({
-    afterComplaint: false,
-    checkinAnswer: 'good',
-    reviewAskedAt: at(-DAY),
-    links,
-  }),
-  null,
-)
-check(
-  'not happy: the venue has no review link',
-  deriveSignOffReviewAsk({
-    afterComplaint: false,
-    checkinAnswer: 'good',
-    reviewAskedAt: null,
-    links: [],
-  }),
-  null,
-)
-check(
-  'not happy: a link that is not marked as the review link',
-  deriveSignOffReviewAsk({
-    afterComplaint: false,
-    checkinAnswer: 'good',
-    reviewAskedAt: null,
-    links: [{ label: 'Menu', url: REVIEW_URL }],
-  }),
-  null,
-)
-
 check(
   'same visit: answered "so good" twenty minutes ago',
   isCheckinFresh(
@@ -982,29 +907,99 @@ check(
   true,
 )
 
-const happyTurn = prose(
-  { signOff: 'happy', reviewAsk: { url: REVIEW_URL, label: 'Leave a review' } },
-  'acknowledgment',
-)
-check('happy turn: the sign-off block', happyTurn.includes('## Sign off'), true)
+// TAC-578: the sign-off carries no link, the plain close is one short line,
+// and the review invitation rides the first-visit thank-you. Blocks are
+// compared with whitespace folded, because their sentences wrap.
+const flat = (text: string): string => text.replace(/\s+/g, ' ')
+const visitTurn = flat(prose({ signOff: 'visit' }, 'acknowledgment'))
+check('visit turn: the sign-off block', visitTurn.includes('## Sign off'), true)
 check(
-  'happy turn: the link, character for character',
-  happyTurn.includes(`exactly as written: ${REVIEW_URL}`),
-  true,
+  'visit turn: about the visit, and no thanks for coming in',
+  [
+    visitTurn.includes('is about this visit'),
+    visitTurn.includes('Do not thank them for coming in'),
+  ],
+  [true, true],
 )
 check(
-  'happy turn: never a rating',
-  happyTurn.includes('Never ask for a particular rating or number of stars.'),
-  true,
+  'visit turn: no link and no review ask, even with a link in the runtime',
+  (() => {
+    const p = flat(
+      prose(
+        {
+          signOff: 'visit',
+          reviewAsk: { url: REVIEW_URL, label: 'Leave a review' },
+        },
+        'acknowledgment',
+      ),
+    )
+    return [
+      p.includes(REVIEW_URL),
+      p.includes('## Ask for a review'),
+      p.includes('do not ask for a review, do not include a link'),
+    ]
+  })(),
+  [false, false, true],
 )
 check(
-  'happy turn: not the praise block as well',
-  happyTurn.includes('## Ask for a review'),
+  'visit turn: not the plain close as well',
+  visitTurn.includes('## Closing this conversation'),
   false,
 )
+// Rule 3 as re-ruled: the reply to "it's good" is the sign-off.
+const answerTurn = flat(prose({ signOff: 'answer' }))
 check(
-  'happy turn: not the plain close as well',
-  happyTurn.includes('## Closing this conversation'),
+  'answer sign-off: answers what they said, and asks nothing',
+  [
+    answerTurn.includes('## Sign off'),
+    answerTurn.includes('This guest has just told you how their order is.'),
+    answerTurn.includes(
+      'Do not add facts about the item, how it is made, or what is in it, unless they are already in the conversation above.',
+    ),
+    answerTurn.includes('do not include a link'),
+    answerTurn.includes('Ask nothing.'),
+    // The timer's premise must not appear on a reply.
+    answerTurn.includes('reached a natural pause'),
+  ],
+  [true, true, true, true, true, false],
+)
+const answerWithName = flat(
+  prose({
+    signOff: 'answer',
+    openIntentions: [INTENTION_DEFINITION_BY_KEY.learn_name.promptLine],
+  }),
+)
+check(
+  'answer sign-off, first visit, name still open: the line asks nothing and the question has its own field',
+  [
+    answerWithName.includes('goes in `intentionQuestion`'),
+    answerWithName.includes('do not ask for a review'),
+    answerWithName.includes(REVIEW_URL),
+  ],
+  [true, true, false],
+)
+const answerWithAsk = flat(
+  prose({
+    signOff: 'answer',
+    reviewAsk: { url: REVIEW_URL, label: 'Leave a review' },
+  }),
+)
+check(
+  "answer sign-off, later visit, never asked: the invitation on the thank-you's rules",
+  [
+    answerWithAsk.includes(`exactly as written: ${REVIEW_URL}`),
+    answerWithAsk.includes(
+      'Never ask for a particular rating or number of stars.',
+    ),
+    answerWithAsk.includes('do not ask for a review'),
+    // One block carries it: not the praise block as well.
+    answerWithAsk.includes('## Ask for a review'),
+  ],
+  [true, true, false, false],
+)
+check(
+  'CONTROL answer sign-off with no link in the runtime: no invitation',
+  answerTurn.includes('In `reviewAsk`'),
   false,
 )
 const praiseTurn = prose({
@@ -1018,38 +1013,45 @@ check(
   ],
   [true, false],
 )
-check(
-  'happy with no link handed over renders no sign-off block',
-  prose({ signOff: 'happy' }, 'acknowledgment').includes('## Sign off'),
-  false,
-)
-const plainTurn = prose(
-  {
-    signOff: 'plain',
-    warmCloseGuidance: 'coffee and beans, what to get next time',
-  },
-  'acknowledgment',
-)
+const plainTurn = flat(prose({ signOff: 'plain' }, 'acknowledgment'))
 check(
   'plain turn: the close block',
   plainTurn.includes('## Closing this conversation'),
   true,
 )
 check(
-  'plain turn: the venue text, as a guide',
-  plainTurn.includes(
-    'not as words to reuse: coffee and beans, what to get next time',
-  ),
-  true,
+  'plain turn: a warm line about the conversation, then one open-door clause, no examples',
+  [
+    plainTurn.includes('Close it in two short sentences at most.'),
+    plainTurn.includes('one warm line that belongs to this conversation'),
+    plainTurn.includes(
+      'Then one short clause telling them they can message here anytime.',
+    ),
+    plainTurn.includes(
+      'Do not list or give examples of what they can message about.',
+    ),
+    plainTurn.includes('do not name any item they did not mention themselves'),
+    // v1.95.0's examples sentence, which the phone test read as a script.
+    plainTurn.includes('two or three examples'),
+    plainTurn.includes('what this venue'),
+  ],
+  [true, true, true, true, true, false, false],
+)
+const closeAfterOffer = flat(
+  prose({ signOff: 'plain', closeAfterOffer: true }, 'acknowledgment'),
 )
 check(
-  'plain turn: a soft hope to see them is allowed, an invitation for something specific is not',
+  'plain turn after an offer already went out: the warm line alone, no open door',
   [
-    plainTurn.includes('A soft hope to see them again is fine.'),
-    plainTurn.includes('Do not invite them in'),
-    plainTurn.includes('do not name any item they did not mention'),
+    closeAfterOffer.includes('## Closing this conversation'),
+    closeAfterOffer.includes('one warm line that belongs to this conversation'),
+    closeAfterOffer.includes(
+      'no open door, no offer of help, and nothing about messaging you.',
+    ),
+    closeAfterOffer.includes('they can message here anytime'),
+    closeAfterOffer.includes('two short sentences'),
   ],
-  [true, true, true],
+  [true, true, true, false, false],
 )
 check(
   'plain turn: no link block',
@@ -1059,16 +1061,154 @@ check(
   ],
   [false, false],
 )
+
+const thanks = {
+  kind: 'first_visit_thanks' as const,
+  when: 'yesterday',
+  afterResolvedComplaint: false,
+  order: '',
+  priorCheckins: [],
+}
+const thanksTurn = flat(
+  prose(
+    {
+      postVisit: thanks,
+      reviewAsk: { url: REVIEW_URL, label: 'Leave a review' },
+    },
+    'follow_up',
+  ),
+)
 check(
-  'plain turn with no venue text: the block, without the guide sentence',
+  'thank-you: its block, with the day stated',
+  [
+    thanksTurn.includes('## Thanking them for their first visit'),
+    thanksTurn.includes('came in for the first time yesterday.'),
+    thanksTurn.includes('Start with one specific thing from it'),
+    thanksTurn.includes('Do not open with the thanks'),
+    thanksTurn.includes('do not write as though they have been in before'),
+    // The first wording, which twelve of twenty bodies opened on.
+    thanksTurn.includes('Thank them for coming in, and mention'),
+  ],
+  [true, true, true, true, true, false],
+)
+check(
+  'thank-you: the link, character for character, and never a rating',
+  [
+    thanksTurn.includes(`exactly as written: ${REVIEW_URL}`),
+    thanksTurn.includes(
+      'Never ask for a particular rating or number of stars.',
+    ),
+    thanksTurn.includes('## Ask for a review'),
+  ],
+  [true, true, false],
+)
+check(
+  'thank-you with no link handed over: the thanks, and no invitation',
   (() => {
-    const p = prose({ signOff: 'plain' }, 'acknowledgment')
+    const p = flat(prose({ postVisit: thanks }, 'follow_up'))
     return [
-      p.includes('## Closing this conversation'),
-      p.includes('as a guide to its content'),
+      p.includes('## Thanking them for their first visit'),
+      p.includes('In `reviewAsk`'),
     ]
   })(),
   [true, false],
+)
+const resolvedTurn = flat(
+  prose(
+    {
+      postVisit: {
+        ...thanks,
+        when: 'earlier today',
+        afterResolvedComplaint: true,
+      },
+      reviewAsk: { url: REVIEW_URL, label: 'Leave a review' },
+    },
+    'follow_up',
+  ),
+)
+check(
+  'thank-you after a resolved complaint: the SAME invitation, and nothing of what went wrong',
+  [
+    resolvedTurn.includes(
+      'Do not mention or hint at what went wrong, do not apologise',
+    ),
+    resolvedTurn.includes(`exactly as written: ${REVIEW_URL}`),
+    resolvedTurn.includes('came in for the first time earlier today.'),
+  ],
+  [true, true, true],
+)
+check(
+  'CONTROL thank-you with no complaint: no word about one',
+  thanksTurn.includes('went wrong'),
+  false,
+)
+const checkinTurn = flat(
+  prose(
+    {
+      postVisit: {
+        kind: 'visit_checkin',
+        when: 'yesterday',
+        afterResolvedComplaint: false,
+        order: 'oat flat white',
+        priorCheckins: ['first earlier\nline', 'second earlier line'],
+      },
+      reviewAsk: { url: REVIEW_URL, label: 'Leave a review' },
+    },
+    'follow_up',
+  ),
+)
+check(
+  'check-in: a compliment, never a thanks for visiting',
+  [
+    checkinTurn.includes('## A word about their visit'),
+    checkinTurn.includes('Write one short, warm compliment on what they got'),
+    checkinTurn.includes('Do not thank them for visiting or for coming in.'),
+  ],
+  [true, true, true],
+)
+check(
+  'check-in: the order and the earlier messages, each on one line',
+  [
+    checkinTurn.includes('What they got this time: oat flat white'),
+    checkinTurn.includes('- first earlier line - second earlier line'),
+  ],
+  [true, true],
+)
+check(
+  'check-in: never the review invitation, and no list of angles',
+  [
+    checkinTurn.includes(REVIEW_URL),
+    checkinTurn.includes('the_usual'),
+    checkinTurn.includes('a_departure'),
+  ],
+  [false, false, false],
+)
+check(
+  'the category instruction is swapped for each',
+  [
+    categoryInstructionsFor(
+      'follow_up',
+      'instagram',
+      null,
+      false,
+      false,
+      false,
+      { kind: 'first_visit_thanks', when: 'yesterday' },
+    ).startsWith('The guest visited for the first time'),
+    categoryInstructionsFor(
+      'follow_up',
+      'instagram',
+      null,
+      false,
+      false,
+      false,
+      { kind: 'visit_checkin', when: 'earlier today' },
+    ).includes('came in again earlier today. This message is not a thank-you'),
+    categoryInstructionsFor('follow_up', 'instagram').startsWith(
+      'The guest visited for the first time',
+    ),
+  ],
+  [true, true, false],
 )
 check(
   'CONTROL ordinary turn: neither block',
@@ -1161,177 +1301,6 @@ check(
   'the newest complaint decides: one at 40 days, one at 2',
   owedComplaintFollowup([complaint(40), complaint(2)], TODAY, NOW),
   { mention: true },
-)
-check(
-  'last followed up: the later of two',
-  lastComplaintFollowupAt([
-    complaint(9, at(-5 * DAY)),
-    complaint(3, at(-HOUR)),
-    complaint(1),
-  ]),
-  at(-HOUR),
-)
-check('last followed up: never', lastComplaintFollowupAt([complaint(1)]), null)
-
-const followedUp = at(-20 * MIN)
-check(
-  'link owed: followed up twenty minutes ago, wrote five minutes ago',
-  owesAfterComplaintReviewAsk({
-    anotherStillOwed: false,
-    followedUpAt: followedUp,
-    todaysCheckin: null,
-    lastInboundAt: at(-5 * MIN),
-    now: NOW,
-  }),
-  true,
-)
-check(
-  'link owed with NO happiness condition: today reads "not yet"',
-  owesAfterComplaintReviewAsk({
-    anotherStillOwed: false,
-    followedUpAt: followedUp,
-    todaysCheckin: checkin({ answer: 'not_yet', answeredAt: at(-9 * MIN) }),
-    lastInboundAt: at(-9 * MIN),
-    now: NOW,
-  }),
-  true,
-)
-check(
-  'no link: the complaint was never followed up',
-  owesAfterComplaintReviewAsk({
-    anotherStillOwed: false,
-    followedUpAt: null,
-    todaysCheckin: checkin({ answer: 'not_yet', answeredAt: at(-9 * MIN) }),
-    lastInboundAt: at(-9 * MIN),
-    now: NOW,
-  }),
-  false,
-)
-check(
-  'no link: a later complaint of theirs has not been followed up yet',
-  owesAfterComplaintReviewAsk({
-    anotherStillOwed: true,
-    followedUpAt: followedUp,
-    todaysCheckin: checkin({ answer: 'not_yet', answeredAt: at(-9 * MIN) }),
-    lastInboundAt: at(-9 * MIN),
-    now: NOW,
-  }),
-  false,
-)
-check(
-  'no link: they complained again today',
-  owesAfterComplaintReviewAsk({
-    anotherStillOwed: false,
-    followedUpAt: followedUp,
-    todaysCheckin: checkin({ answer: 'bad', answeredAt: at(-9 * MIN) }),
-    lastInboundAt: at(-9 * MIN),
-    now: NOW,
-  }),
-  false,
-)
-check(
-  'no link: greeted and never wrote (their last message is from yesterday)',
-  owesAfterComplaintReviewAsk({
-    anotherStillOwed: false,
-    followedUpAt: followedUp,
-    todaysCheckin: null,
-    lastInboundAt: at(-DAY),
-    now: NOW,
-  }),
-  false,
-)
-check(
-  'no link: greeted and has never written at all',
-  owesAfterComplaintReviewAsk({
-    anotherStillOwed: false,
-    followedUpAt: followedUp,
-    todaysCheckin: null,
-    lastInboundAt: null,
-    now: NOW,
-  }),
-  false,
-)
-check(
-  'no link: followed up three days ago, and this is a message from home',
-  owesAfterComplaintReviewAsk({
-    anotherStillOwed: false,
-    followedUpAt: at(-3 * DAY),
-    todaysCheckin: null,
-    lastInboundAt: at(-5 * MIN),
-    now: NOW,
-  }),
-  false,
-)
-check(
-  'link still owed on a LATER visit: followed up three days ago, order named today',
-  owesAfterComplaintReviewAsk({
-    anotherStillOwed: false,
-    followedUpAt: at(-3 * DAY),
-    todaysCheckin: checkin({}),
-    lastInboundAt: at(-11 * MIN),
-    now: NOW,
-  }),
-  true,
-)
-check(
-  'after a complaint: the link, with no "good" on file',
-  deriveSignOffReviewAsk({
-    checkinAnswer: 'not_yet',
-    afterComplaint: true,
-    reviewAskedAt: null,
-    links,
-  }),
-  { url: REVIEW_URL, label: 'Leave a review' },
-)
-check(
-  'after a complaint: still once ever',
-  deriveSignOffReviewAsk({
-    checkinAnswer: null,
-    afterComplaint: true,
-    reviewAskedAt: at(-DAY),
-    links,
-  }),
-  null,
-)
-
-const afterComplaintTurn = prose(
-  {
-    signOff: 'after_complaint',
-    reviewAsk: { url: REVIEW_URL, label: 'Leave a review' },
-  },
-  'acknowledgment',
-)
-check(
-  'after-complaint sign-off: its own premise',
-  afterComplaintTurn.includes('went wrong and has come back'),
-  true,
-)
-check(
-  'after-complaint sign-off: never says they are enjoying it',
-  afterComplaintTurn.includes('enjoying'),
-  false,
-)
-check(
-  'after-complaint sign-off: the link, character for character',
-  afterComplaintTurn.includes(`exactly as written: ${REVIEW_URL}`),
-  true,
-)
-check(
-  'after-complaint sign-off: never a rating',
-  afterComplaintTurn.includes(
-    'Never ask for a particular rating or number of stars',
-  ),
-  true,
-)
-check(
-  'after-complaint sign-off: not the praise block',
-  afterComplaintTurn.includes('## Ask for a review'),
-  false,
-)
-check(
-  'CONTROL happy sign-off: says they are enjoying it',
-  happyTurn.includes('enjoying'),
-  true,
 )
 check(
   'first message at the counter after a complaint: the block',

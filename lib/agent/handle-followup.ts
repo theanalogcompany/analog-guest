@@ -162,6 +162,8 @@ function answeredMessageIdOf(trigger: FollowupTrigger): string | null {
     trigger.inquiryFollowup?.answerMessageId ??
     // TAC-575 names our own last outbound, as the warm close does.
     trigger.visitCheckback?.answersMessageId ??
+    // TAC-578 names our own last outbound too.
+    trigger.postVisit?.answersMessageId ??
     scanMessageIdOf(trigger)
   )
 }
@@ -206,6 +208,11 @@ function replyCheckFor(
   // there is no guest message for this to talk over. Staff answering by hand
   // during the visit stops the check-back outright, in the processor.
   if (trigger.reason === 'visit_checkback') return 'exempt'
+  // TAC-578 is exempt for the same reason again: the processor sends only when
+  // our message is the newest in the thread and it has sat for at least half
+  // an hour (POST_VISIT_QUIET_FLOOR_MS), and a guest writing in the meantime
+  // makes theirs the newest, which stops it.
+  if (trigger.reason === 'post_visit') return 'exempt'
   const id = scanMessageIdOf(trigger)
   return id === null ? 'exempt' : { inboundMessageId: id }
 }
@@ -278,6 +285,12 @@ function triggerToCategory(
     // applyApprovalPolicyStage.
     case 'visit_checkback':
       return 'follow_up'
+    // TAC-578. `follow_up` for the reason above: no new messages.category
+    // value. Separable by `visit_messages.message_id`. Its instructions are
+    // swapped via the postVisit runtime field (post-visit.ts) and its approval
+    // reads `approval_policy.postVisitMessage`.
+    case 'post_visit':
+      return 'follow_up'
   }
 }
 
@@ -324,6 +337,19 @@ export async function handleFollowup(input: {
    * every existing caller is unchanged.
    */
   agentRunId?: string
+  /**
+   * TAC-578: the caller's own check on the draft, run once it is written and
+   * before anything is queued or sent. `{ send: false }` ends the run as
+   * `refused` with that reason: nothing is persisted and no card is made.
+   *
+   * It exists for the later-visit check-in, whose rule is that a draft which
+   * is not fresh is not sent at all (lib/agent/post-visit-timeout.ts). That is
+   * not an approval trigger: a card would ask an operator to approve a line
+   * the ruling says should not exist. A throw is treated as `send: false`.
+   */
+  beforeSend?: (draft: {
+    body: string
+  }) => Promise<{ send: true } | { send: false; reason: string }>
 }): Promise<AgentResult> {
   const agentRunId = input.agentRunId ?? randomUUID()
   const start = Date.now()
@@ -449,11 +475,16 @@ export async function handleFollowup(input: {
     // ten to thirty minutes after the guest's own order message, so the window
     // cannot have closed. The send still re-derives it.
     const isVisitCheckback = input.trigger.reason === 'visit_checkback'
+    // TAC-578 carves out the FIFTH. The processor picks a slot that is inside
+    // the window by construction (resolvePostVisitSlot reads Meta's close
+    // before choosing morning or evening), and the send still re-derives it.
+    const isPostVisit = input.trigger.reason === 'post_visit'
     const routesThroughDispatchReply =
       isInstagramScanArrival ||
       isWarmClose ||
       isInquiryFollowup ||
-      isVisitCheckback
+      isVisitCheckback ||
+      isPostVisit
     if (isWarmClose && ctx.conversationChannel !== 'instagram') {
       const reason = 'warm_close_is_instagram_only'
       console.warn(
@@ -495,6 +526,18 @@ export async function handleFollowup(input: {
           channel: ctx.conversationChannel,
         },
       )
+      trace.update({ output: { status: 'refused', reason } })
+      return { status: 'refused', reason }
+    }
+    // Instagram only, like the three above. The slot is chosen against Meta's
+    // window, which a text conversation does not have.
+    if (isPostVisit && ctx.conversationChannel !== 'instagram') {
+      const reason = 'post_visit_is_instagram_only'
+      console.warn('[agent] post-visit message refused: not Instagram', {
+        agentRunId,
+        guestId: ctx.guest.id,
+        channel: ctx.conversationChannel,
+      })
       trace.update({ output: { status: 'refused', reason } })
       return { status: 'refused', reason }
     }
@@ -634,8 +677,7 @@ export async function handleFollowup(input: {
     // improvised: the empty default means "this venue has not been given a
     // close". The processor checks it too and never claims the guest's close,
     // so reaching here empty means the config changed between the scan and
-    // the run. A happy sign-off does not need the text; it needs the link,
-    // which the processor resolved and handed over.
+    // the run. A visit sign-off does not need the text.
     if (ctx.signOff === 'plain' && ctx.venue.warmCloseText.trim() === '') {
       const reason = 'no_warm_close_text'
       console.warn('[agent] warm close refused: venue has no warm_close_text', {
@@ -684,6 +726,32 @@ export async function handleFollowup(input: {
       agentRunId,
       attempts: gen.result.attempts,
     })
+
+    // TAC-578: the caller's say on the draft, before a card or a send exists.
+    if (input.beforeSend) {
+      let verdict: { send: true } | { send: false; reason: string }
+      try {
+        verdict = await input.beforeSend({ body: gen.result.body })
+      } catch (e) {
+        console.error('[agent] followup beforeSend threw; not sending', {
+          agentRunId,
+          error: e instanceof Error ? e.message : String(e),
+        })
+        verdict = { send: false, reason: 'before_send_threw' }
+      }
+      if (!verdict.send) {
+        console.log("[agent] followup not sent on the caller's check", {
+          agentRunId,
+          guestId: ctx.guest.id,
+          triggerReason: input.trigger.reason,
+          reason: verdict.reason,
+        })
+        trace.update({
+          output: { status: 'refused', reason: verdict.reason },
+        })
+        return { status: 'refused', reason: verdict.reason }
+      }
+    }
 
     // TAC-296: capture what the agent UNDERSTOOD into guests.context. On
     // the followup path there's no inbound, so contextUpdate is expected to
@@ -1230,15 +1298,20 @@ export async function handleFollowup(input: {
             // two-sentence close on a fair coin about half the time.
             // NEVER_SPLIT_RNG removes the coin rather than tuning it, using
             // the rng parameter TAC-319 built for exactly this kind of caller.
-            // A happy sign-off (TAC-575) is two messages all the same: that
-            // one, then the review invitation as the reply's tail.
+            // (TAC-575's happy sign-off was two messages all the same, that
+            // one and the review invitation as the reply's tail. No sign-off
+            // carries an invitation since TAC-578; the thank-you below does.)
             //
             // A scan greeting keeps the ordinary coin: nothing in TAC-536 asks
             // for one bubble.
             //
             // TAC-575: the check-back is one short line by its own instruction,
             // and takes the same option for the same reason.
-            ...(isWarmClose || isVisitCheckback
+            //
+            // TAC-578: the thank-you and the check-in are one message each
+            // too. A thank-you with the invitation is two, like the happy
+            // sign-off before it: the invitation is the reply's tail.
+            ...(isWarmClose || isVisitCheckback || isPostVisit
               ? { rng: NEVER_SPLIT_RNG }
               : {}),
             // The scan row. NOT OPTIONAL: a reply naming no inbound is read by
@@ -1297,23 +1370,22 @@ export async function handleFollowup(input: {
         outboundMessageId,
         providerMessageId,
       })
-      // TAC-575: a happy sign-off went out. Did the invitation go with it?
+      // TAC-578: a first-visit thank-you went out. Did the invitation go
+      // with it?
       //
-      // The pause timer claimed the once-ever review marker BEFORE this ran,
-      // on the expectation that the reply would carry the link. It can fail
-      // to: the model may leave `reviewAsk` empty, or composeReplyWithReviewAsk
-      // drops it when the sign-off itself asks a question.
+      // The processor claimed the once-ever review marker BEFORE this ran, on
+      // the expectation that the message would carry the link. It can fail to:
+      // the model may leave `reviewAsk` empty, or composeReplyWithReviewAsk
+      // drops it when the thank-you itself asks a question.
       //
-      // THE CLAIM IS KEPT EITHER WAY. An earlier version gave the marker back
-      // here, and that turned one missing link into a loop: the sign-off just
-      // sent becomes our newest message, the guest is unasked again, nothing
-      // else on the happy path says "already signed off", and ten minutes
-      // later they get "so glad you're enjoying it" a second time, then a
-      // third. A sign-off that went out without its link costs this guest
-      // their one invitation, the same accepted cost as a held card an
-      // operator skips. It is logged so the rate can be counted.
+      // THE CLAIM IS KEPT EITHER WAY, as TAC-575 kept the sign-off's. The
+      // thank-you is once ever by its own index, so giving the marker back
+      // here could not loop the way the sign-off's did, but it would leave a
+      // guest who has had their thank-you open to a second, separate ask on
+      // their next praise. One touch about reviews per guest is the rule. It
+      // is logged so the rate can be counted.
       if (
-        (ctx.signOff === 'happy' || ctx.signOff === 'after_complaint') &&
+        ctx.postVisit?.kind === 'first_visit_thanks' &&
         ctx.reviewAsk !== null
       ) {
         const carried = bodyContainsReviewLink(
@@ -1321,19 +1393,18 @@ export async function handleFollowup(input: {
           ctx.reviewAsk.url,
         )
         if (carried) {
-          console.log('[agent] sign-off review ask sent', {
+          console.log('[agent] first-visit review ask sent', {
             agentRunId,
             guestId: ctx.guest.id,
             linkLabel: ctx.reviewAsk.label,
           })
         } else {
           console.warn(
-            '[agent] sign-off went out without the review link; the ask is spent',
+            '[agent] first-visit thank-you went out without the review link; the ask is spent',
             {
               agentRunId,
               guestId: ctx.guest.id,
               outboundMessageId,
-              signOff: ctx.signOff,
             },
           )
         }

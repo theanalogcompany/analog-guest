@@ -30,6 +30,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import type { Database } from '@/db/types'
 import { isInquiryFollowupMessage } from '@/lib/followups/inquiry-followup-store'
 import { DELIVERED_OUTBOUND_STATUSES } from './group-responses'
+import { isPostVisitMessage } from './visit-messages-store'
 import { warmCloseBlocker, type WarmCloseBlocker } from './warm-close'
 
 type AdminSupabaseClient = SupabaseClient<Database>
@@ -205,6 +206,18 @@ export async function loadWarmCloseCandidates(
     }
   }
 
+  // TAC-578: A THANK-YOU OR A CHECK-IN IS NOT AN ANCHOR EITHER, for the same
+  // reason and by the same placement. Each goes out hours after the visit with
+  // no conversation around it, and as "our last word" it would draw the
+  // "always here" close ten minutes behind it.
+  const postVisit = await isPostVisitMessage(supabase, outboundIds)
+  if (!postVisit.ok) {
+    return {
+      ok: false,
+      error: `loadWarmCloseCandidates (post-visit provenance): ${postVisit.error}`,
+    }
+  }
+
   const seen = new Set<string>()
   const candidates: WarmCloseCandidate[] = []
   for (const row of data ?? []) {
@@ -215,6 +228,7 @@ export async function loadWarmCloseCandidates(
     // rather than letting an older delivered row stand in as our last word.
     seen.add(guestId)
     if (row.direction !== 'outbound') continue
+    if (postVisit.data.has(row.id)) continue
     if (proactive.data.has(row.id)) {
       console.log(
         '[warm-close] newest outbound is a follow-up; not an anchor',

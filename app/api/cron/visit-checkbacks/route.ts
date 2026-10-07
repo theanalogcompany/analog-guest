@@ -13,6 +13,11 @@
 // does not stop a check-back worked into a reply to a guest who is still
 // chatting; that one is the agent answering a message.
 //
+// TAC-578: IT NOW ALSO CARRIES the first-visit thank-you and the later-visit
+// check-in (lib/agent/post-visit-timeout.ts), ruled onto an existing cron
+// rather than a new one. So pausing this entry stops those too. To stop only
+// those, set `followup_rules.post_visit_message_enabled` to false.
+//
 // EVERY MINUTE MATTERS HERE more than for the warm close. The check-back is
 // due ten minutes after the order and worthless after thirty, so a schedule
 // coarser than a minute spends a real share of that window.
@@ -28,6 +33,7 @@
 // Auth follows the same dev-skip pattern as the other crons: in dev
 // `curl localhost:3000/api/cron/visit-checkbacks` works without the header.
 
+import { processDuePostVisitMessages } from '@/lib/agent/post-visit-timeout'
 import { processDueVisitCheckbacks } from '@/lib/agent/visit-checkin-timeout'
 
 function isAuthorized(request: Request): boolean {
@@ -43,6 +49,14 @@ export async function GET(request: Request): Promise<Response> {
   }
 
   const summary = await processDueVisitCheckbacks(new Date())
-  console.log('[cron visit-checkbacks] tick complete', summary)
-  return Response.json({ ok: true, ...summary })
+  // TAC-578: the messages that follow a visit ride this tick, after the
+  // check-back so the one that is worthless in thirty minutes is never kept
+  // waiting. It never throws, and on most ticks reads one venues row and
+  // stops: outside the morning and evening slots nothing can be due.
+  const postVisit = await processDuePostVisitMessages(new Date())
+  console.log('[cron visit-checkbacks] tick complete', {
+    ...summary,
+    postVisit,
+  })
+  return Response.json({ ok: true, ...summary, postVisit })
 }

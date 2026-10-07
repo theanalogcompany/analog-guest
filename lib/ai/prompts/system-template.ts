@@ -2494,7 +2494,6 @@ import {
 //   for every reply after an apology in the same conversation. A guest with
 //   no earlier message and no apology in the thread gets a prompt
 //   byte-identical to v1.96.0.
-//
 // v1.98.0 (phone test, 2026-10-07, third of three): offering more help, and
 // one sentence in a user-prompt block.
 //
@@ -2546,7 +2545,42 @@ import {
 // (lib/agent/previous-offer.ts). BASELINE RESET only for turns where the block
 // used to render and no longer does.
 //
-export const PROMPT_VERSION = 'v1.100.0'
+// v1.101.0 (TAC-578, 2026-10-07): NO RULE IN THIS TEMPLATE CHANGED. Five
+//   user-prompt blocks and two category instructions did, all in
+//   prompts/serializers.ts and prompts/categories/, all approved verbatim:
+//
+//     `## Sign off` (reply)  new. The reply to a guest who has just said
+//                    their order is good IS the visit's sign-off: one light
+//                    line, no added facts about the item. On a first visit
+//                    it leaves room for the name ask; past the first visit
+//                    it may carry the once-ever review invitation.
+//     `## Sign off` (timed)  one block where there were two, and no review
+//                    link in it. Now only for a guest who was asked how it
+//                    is, never said, chatted and went quiet.
+//     `## Closing this conversation`  a warm line about the conversation
+//                    and one short open-door clause, two sentences at most,
+//                    or the warm line alone when an offer of more help has
+//                    already gone out in the conversation. v1.95.0's examples
+//                    from the venue's text are gone, and that text no longer
+//                    reaches the prompt.
+//     `## Thanking them for their first visit`  new. The once-ever message
+//                    after a first visit, with the review invitation.
+//     `## A word about their visit`  new. A compliment on a later visit's
+//                    order, shown the earlier ones it must differ from.
+//
+//   The last two swap the `follow_up` category instructions for their own
+//   (categories/post-visit.ts), as the check-back and the inquiry follow-up do.
+//
+//   BASELINE RESET for every pause-timer sign-off and for the reply to a
+//   check-in answer that reads good, and a new baseline for the two messages
+//   that did not exist. One change is behaviour and not wording: a guest past
+//   their first visit who praises their order inside a check-in can now get
+//   the review invitation on that turn (lib/agent/review-ask.ts).
+//
+//   The freshness judge for the check-in carries its own version
+//   (VERIFY_VISIT_CHECKIN_PROMPT_VERSION) and is not this constant's.
+//
+export const PROMPT_VERSION = 'v1.101.0'
 
 export const SYSTEM_TEMPLATE = `You work at a hospitality venue (cafe, bakery, restaurant). You communicate with its guests via iMessage, in whatever voice the venue has configured below — its own collective voice, its owner's, or a named staff member's.
 

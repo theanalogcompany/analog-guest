@@ -355,18 +355,14 @@ async function main(): Promise<void> {
     followupTrigger: {
       reason: 'warm_close',
       triggeredAt: startedAt,
-      warmClose: {
-        answersMessageId: randomUUID(),
-        signOff: 'after_complaint',
-        reviewAsk: { url: reviewLink.url, label: reviewLink.label },
-      },
+      warmClose: { answersMessageId: randomUUID(), signOff: 'visit' },
     },
   })
   if (greetingBase.scanArrival?.afterComplaint !== true) {
     throw new Error('the greeting context did not carry afterComplaint')
   }
-  if (signOffBase.signOff !== 'after_complaint') {
-    throw new Error('the sign-off context did not carry after_complaint')
+  if (signOffBase.signOff !== 'visit') {
+    throw new Error('the sign-off context did not carry its kind')
   }
 
   const menuNames = greetingBase.venue.venueInfo.menu.items
@@ -468,6 +464,25 @@ async function main(): Promise<void> {
       ],
     })),
   ]
+  // TAC-578 RETIRED WHAT THE SIGN-OFF ARM MEASURED. It scored the review
+  // invitation on the sign-off of a guest whose complaint had been followed
+  // up. Ruled 2026-10-07, no sign-off carries an invitation: it rides the
+  // first-visit thank-you (scripts/measurement/post-visit-messages.ts measures
+  // that). The arm's units and scoring are left for the greeting arm's
+  // history fixtures, which they share, but it refuses to run rather than
+  // print a FAIL for a link that is no longer supposed to be there.
+  if (
+    !priorsMode &&
+    (armsEnv === undefined ||
+      armsEnv
+        .split(',')
+        .map((a) => a.trim())
+        .includes('sign_off'))
+  ) {
+    throw new Error(
+      'the sign_off arm is retired (TAC-578): run with MEASURE_ARMS=greeting',
+    )
+  }
   const units = priorsMode
     ? priorsUnits
     : allUnits.filter(
@@ -623,10 +638,8 @@ async function main(): Promise<void> {
             priorGreetings: [...(unit.priors ?? [])],
           }
         : null,
-      signOff: isGreeting ? null : 'after_complaint',
-      reviewAsk: isGreeting
-        ? null
-        : { url: reviewLink.url, label: reviewLink.label },
+      signOff: isGreeting ? null : 'visit',
+      reviewAsk: null,
       // What handleFollowup synthesises for each trigger.
       classification: {
         category,

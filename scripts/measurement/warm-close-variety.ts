@@ -56,6 +56,15 @@
 // many happy closes carried the link, because a sign-off without it is a
 // finding in its own right, but that is not part of the bar.
 //
+// TAC-578 CHANGED WHAT THIS GENERATES, and the text above describes the
+// 2026-10-06 run, not the code. The `happy` kind is now `visit`: the in-shop
+// sign-off, a light line about the visit with NO review invitation, and the
+// plain close is one short "message anytime" line with no venue text behind
+// it. The variable still named `happyWithLink` now counts visit sign-offs that
+// carried the review link, and the right number is ZERO. The 2026-10-06
+// verdict is not a verdict on either of these blocks; a run of this file is a
+// new measurement.
+//
 // A FAILED UNIT IS NOT A RESULT (scripts/CLAUDE.md, convention 5). Any
 // generation error voids the run, whatever the counts read.
 
@@ -226,8 +235,8 @@ async function main(): Promise<void> {
     ...HAPPY_ANSWERS.slice(0, PER_KIND).map((answer, i) => {
       const item = menuNames[i % menuNames.length]
       return {
-        id: `happy-${String(i + 1).padStart(2, '0')}`,
-        kind: 'happy' as const,
+        id: `visit-${String(i + 1).padStart(2, '0')}`,
+        kind: 'visit' as const,
         history: [
           turn('outbound', 'hey, welcome in! what did you get?', at(16)),
           turn('inbound', `the ${item.toLowerCase()}`, at(15)),
@@ -243,19 +252,19 @@ async function main(): Promise<void> {
     }),
   ]
 
-  // MEASURE_KINDS=plain (or happy) runs one kind only. That is an
+  // MEASURE_KINDS=plain (or visit) runs one kind only. That is an
   // INFORMATIONAL re-run, never the pre-registered verdict, which is over the
   // pooled 20: the run says so in its log and prints no PASS or FAIL.
   const kindsEnv = process.env.MEASURE_KINDS
   const kinds: readonly SignOffKind[] =
     kindsEnv === undefined
-      ? ['plain', 'happy']
+      ? ['plain', 'visit']
       : kindsEnv
           .split(',')
           .map((k) => k.trim())
-          .filter((k): k is SignOffKind => k === 'plain' || k === 'happy')
+          .filter((k): k is SignOffKind => k === 'plain' || k === 'visit')
   if (kinds.length === 0) {
-    throw new Error(`MEASURE_KINDS="${kindsEnv}" names no kind (plain, happy)`)
+    throw new Error(`MEASURE_KINDS="${kindsEnv}" names no kind (plain, visit)`)
   }
   const partial = kinds.length < 2
   const units = allUnits.filter((u) => kinds.includes(u.kind))
@@ -338,10 +347,8 @@ async function main(): Promise<void> {
       corpus,
       knowledgeCorpus: [],
       signOff: unit.kind,
-      reviewAsk:
-        unit.kind === 'happy'
-          ? { url: reviewLink.url, label: reviewLink.label }
-          : null,
+      // Neither sign-off carries a link since TAC-578.
+      reviewAsk: null,
       // What handleFollowup synthesises for a warm_close trigger.
       classification: {
         category: 'acknowledgment',
@@ -396,7 +403,7 @@ async function main(): Promise<void> {
       namedUnmentioned.push({ id: unit.id, items: unmentionedItems })
     }
     const linkCarried =
-      unit.kind === 'happy' && bodyContainsReviewLink(body, reviewLink.url)
+      unit.kind === 'visit' && bodyContainsReviewLink(body, reviewLink.url)
     if (linkCarried) happyWithLink += 1
     closes.push({ id: unit.id, kind: unit.kind, body })
     log.appendUnit({
@@ -405,7 +412,7 @@ async function main(): Promise<void> {
       failed: false,
       body,
       reviewAsk: gen.data.reviewAsk,
-      linkCarried: unit.kind === 'happy' ? linkCarried : null,
+      linkCarried: unit.kind === 'visit' ? linkCarried : null,
       unmentionedItems,
       attempts: gen.data.attempts,
       lastGuestLine: unit.history
@@ -453,10 +460,10 @@ async function main(): Promise<void> {
   )
   printVerdict(
     'happy only (information)',
-    scoreVariety(closes.filter((c) => c.kind === 'happy')),
+    scoreVariety(closes.filter((c) => c.kind === 'visit')),
   )
 
-  const happyTotal = closes.filter((c) => c.kind === 'happy').length
+  const happyTotal = closes.filter((c) => c.kind === 'visit').length
   console.log(
     `\n[tac575] happy closes carrying the review link: ${happyWithLink}/${happyTotal} (not part of the bar)`,
   )

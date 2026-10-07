@@ -87,6 +87,8 @@ import {
   nextCheckinAnswer,
   ORDER_READ_WAIT_MS,
   orderTurnVerdict,
+  replySignsOffVisit,
+  signOffReplyQuestions,
 } from './visit-checkin'
 import {
   claimComplaintFollowup,
@@ -798,6 +800,57 @@ function startTyping(turn: InboundTurnState, ctx: RuntimeContext): void {
   )
   turn.typingInFlight = sending
   waitUntil(sending)
+}
+
+/**
+ * TAC-578: make this reply the visit's sign-off.
+ *
+ * Sets the kind the serializer renders `## Sign off` for, and narrows the
+ * questions that may ride on it to what the ruling allows: on a first visit
+ * the name ask if it is open, otherwise nothing (signOffReplyQuestions).
+ *
+ * `newlyEligible` is narrowed with it, as the two order-turn filters above
+ * do. At the order-turn call the eligibility write is still to come, and a
+ * question that did not render must not have its window opened; at the
+ * answer-turn call that write has already run and the filter changes nothing.
+ *
+ * "First visit" is the visit count, the reading deriveReviewAsk's condition 5a
+ * takes: zero means no earlier visit day on file.
+ *
+ * The review invitation is not decided here. deriveReviewAsk runs after this
+ * and raises it for a guest past their first visit who has never been asked.
+ *
+ * IT WRITES NO ROW, and four attempts to make it write one are why. The pause
+ * timer does not ask whether this reply went: once the check-in reads `good`
+ * it sends no timed sign-off at all (timedSignOffFor), which is the ruling
+ * read literally ("the timed sign-off only remains for a visit where the
+ * check-in went unanswered"). A `sign_off` row as evidence was tried, at
+ * decision time, at send time and tied to a card, and each version had a path
+ * that either left a row for a sign-off that never went or lost one and sent
+ * a second (four code reviews). With no row there is no second sign-off to
+ * send. The cost is stated at timedSignOffFor.
+ */
+function signOffInThisReply(ctx: RuntimeContext): void {
+  ctx.signOff = 'answer'
+  const firstVisit = ctx.recognition.signals.visitFrequency === 0
+  ctx.openIntentions = signOffReplyQuestions(ctx.openIntentions, firstVisit)
+  ctx.intentionDerivation = {
+    ...ctx.intentionDerivation,
+    newlyEligible: signOffReplyQuestions(
+      ctx.intentionDerivation.newlyEligible,
+      firstVisit,
+    ),
+  }
+}
+
+/** Our newest message in the loaded history that reached the guest. */
+function lastDeliveredOutboundAt(ctx: RuntimeContext): Date | null {
+  let latest: Date | null = null
+  for (const m of ctx.recentMessages) {
+    if (m.direction !== 'outbound' || m.delivery !== 'delivered') continue
+    if (latest === null || m.createdAt > latest) latest = m.createdAt
+  }
+  return latest
 }
 
 /**
@@ -2152,9 +2205,24 @@ async function runInboundTurn(
       // They said how it is in the same breath as what it is. That IS the
       // visit's check-in, so it is recorded without a question having been
       // asked: the sign-off and the next-visit follow-up read this row either
-      // way. It also makes this a check-in turn, so "iced sofi, so good" does
-      // not raise the review ask here; that is the sign-off's.
+      // way. It also makes this a check-in turn, so on a FIRST visit "iced
+      // sofi, so good" does not raise the review ask here; that guest is
+      // invited by the first-visit thank-you (deriveReviewAsk, condition 5a).
       if (verdict === 'good' || verdict === 'bad') ctx.insideVisitCheckin = true
+      // They have told us it is good, unasked. The reply is the sign-off, as
+      // it is when they answer the question (TAC-578, rule 3).
+      if (
+        verdict === 'good' &&
+        replySignsOffVisit({
+          category: ctx.classification.category,
+          answerThisTurn: 'good',
+          rowAnswer: null,
+          rowAnsweredAt: null,
+          lastDeliveredOutboundAt: null,
+        })
+      ) {
+        signOffInThisReply(ctx)
+      }
       if (
         (verdict === 'good' || verdict === 'bad') &&
         ctx.visitLocalDate !== null
@@ -2267,8 +2335,9 @@ async function runInboundTurn(
       // renderableIntentions runs, like ctx.reviewAsk below.
       const answerNow = answer ?? checkin.answer
       ctx.visitCheckinHold = answerNow !== 'good'
-      // Praise on this turn is the answer to our own question, so the review
-      // ask it would raise is saved for the sign-off (deriveReviewAsk).
+      // Praise on this turn is the answer to our own question, so on a first
+      // visit the review ask it would raise is left to the first-visit
+      // thank-you (deriveReviewAsk, condition 5a).
       ctx.insideVisitCheckin = true
       // THREE TURNS THE CHECK-BACK MUST NOT RIDE, even when the clock says it
       // is due. Removed from the eligibility write too, as for the order turn
@@ -2285,6 +2354,25 @@ async function runInboundTurn(
       //   they are signing off             a goodbye is not a turn to put a
       //                                    question on. If they go quiet the
       //                                    timer still checks back.
+      // TAC-578, rule 3 as re-ruled 2026-10-07: the reply to "it's good" IS
+      // the visit's sign-off, and no timed one follows it. `answer` is what
+      // this message CHANGED the row to, so it is true once: on "so good"
+      // straight away, or on "ok tried it, so good" after a "not yet". A
+      // second "really, so good" after our sign-off has reached them changes
+      // nothing and is an ordinary turn. replySignsOffVisit also covers the
+      // burst that re-runs this turn after the answer was written, and keeps
+      // the block off a question or an opt-out that happens to carry praise.
+      if (
+        replySignsOffVisit({
+          category: ctx.classification.category,
+          answerThisTurn: answer,
+          rowAnswer: checkin.answer,
+          rowAnsweredAt: checkin.answeredAt,
+          lastDeliveredOutboundAt: lastDeliveredOutboundAt(ctx),
+        })
+      ) {
+        signOffInThisReply(ctx)
+      }
       const firstAnswerThisTurn = checkin.answer === null && answer !== null
       if (
         answerNow === 'good' ||
@@ -3575,7 +3663,7 @@ async function runInboundTurn(
       //
       // AUTO-SEND ONLY. A reply held for approval writes no row even if an
       // operator sends it, so that visit gets no check-back, no hold on other
-      // questions and no review ask at the sign-off. It is still not asked
+      // questions and no sign-off. It is still not asked
       // twice: the operator path records the intention's prompt, and arming
       // reads that too (build-runtime-context, promptedThisVisit). A known
       // limit, stated on the PR.

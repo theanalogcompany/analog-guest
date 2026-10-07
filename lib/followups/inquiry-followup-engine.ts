@@ -81,6 +81,11 @@ import {
   type InquiryFollowupVenue,
 } from './inquiry-followup-store'
 import { isTooSoonAfterProactive } from './proactive-spacing'
+import { isInsideOneMessageGap } from '@/lib/agent/visit-messages'
+import {
+  firstVisitThanksStillOwed,
+  loadLastSpacedSendAt,
+} from '@/lib/agent/visit-messages-store'
 
 type AdminSupabaseClient = ReturnType<typeof createAdminClient>
 
@@ -118,6 +123,10 @@ export type InquirySkipReason =
   | 'venue_closed_now'
   | 'card_pending'
   | 'too_soon_after_proactive'
+  /** TAC-578: a thank-you, a check-in or a close reached them within three hours. */
+  | 'inside_one_message_gap'
+  /** TAC-578: their first-visit thank-you is still to come, and goes first. */
+  | 'yields_to_first_visit_thanks'
   /** Another tick claimed it first. */
   | 'claim_lost'
   | 'generation_did_not_send'
@@ -490,6 +499,46 @@ async function considerRow(
   if (isTooSoonAfterProactive(facts.data.lastProactiveSendAt, now)) {
     return 'too_soon_after_proactive'
   }
+
+  // TAC-578, the one-message rule (ruled 2026-10-07): a follow-up, a
+  // thank-you or check-in, and a close never land within three hours of each
+  // other, and the first-visit thank-you outranks this. Both are DELAYS: the
+  // row stays pending and goes out later inside its own window, or expires
+  // with it. An unreadable record has not shown the way is clear.
+  const lastSpaced = await loadLastSpacedSendAt(supabase, {
+    venueId: row.venueId,
+    guestId: row.guestId,
+  })
+  if (!lastSpaced.ok) {
+    console.warn('[inquiry-followup] recent sends unreadable; skipping', {
+      guestId: row.guestId,
+      error: lastSpaced.error,
+    })
+    return 'guest_unreadable'
+  }
+  if (isInsideOneMessageGap(lastSpaced.data, now)) {
+    return 'inside_one_message_gap'
+  }
+  // Parsed here rather than carried on the gate: these three keys belong to
+  // another mechanism and this is their one reader in this file.
+  const visitRules = parseFollowupRules(gate.venue.followupRules)
+  const thanksOwed = await firstVisitThanksStillOwed(supabase, {
+    venueId: row.venueId,
+    guestId: row.guestId,
+    now,
+    enabled: visitRules.post_visit_message_enabled,
+    timezone: gate.venue.timezone,
+    earliestLocal: visitRules.visit_message_earliest_local,
+    latestLocal: visitRules.visit_message_latest_local,
+  })
+  if (!thanksOwed.ok) {
+    console.warn('[inquiry-followup] visit record unreadable; skipping', {
+      guestId: row.guestId,
+      error: thanksOwed.error,
+    })
+    return 'guest_unreadable'
+  }
+  if (thanksOwed.data) return 'yields_to_first_visit_thanks'
 
   // An operator holding a card for this guest is mid-decision; a follow-up
   // landing under them would answer for them. loadPendingRowsBySlot is the ONE

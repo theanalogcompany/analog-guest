@@ -34,7 +34,7 @@ decision rather than silent drift. A **required** boolean or string is free.
 `correctsPendingReply`, `followUpWorthy`, `praisedExperience`. None is `.optional()`, which
 is what makes the compiler name every site synthesizing a `Classification`.
 
-`PROMPT_VERSION` (`prompts/system-template.ts`, currently v1.100.0) covers the
+`PROMPT_VERSION` (`prompts/system-template.ts`, currently v1.101.0) covers the
 classify/generate contract. Every other module here carries its own, and they are
 deliberately not linked:
 
@@ -59,6 +59,10 @@ its own prompt version, narrow inputs, `AIResult`.
 | `verify-mechanic-offer.ts` | does it offer an approval-gated mechanic |
 | `verify-cancellation-claim.ts` | does it claim a cancellation with no carrier |
 | `verify-closed-venue-arrival.ts` | does it confirm a same-moment arrival while shut |
+
+`verify-visit-checkin.ts` (TAC-578) has the same shape and is **not a fifth**: it decides
+whether a later-visit check-in is sent at all, adds no approval trigger, and its caller sends
+nothing on any failure.
 
 Three properties they share, each load-bearing:
 

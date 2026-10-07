@@ -57,13 +57,45 @@ export interface IntentionDerivation {
 export type AgentRunId = string
 
 /**
- * TAC-575: the three sign-offs. `happy` is for a guest who said their order is
- * good and carries the review invitation. `after_complaint` carries it too,
- * for a guest whose earlier complaint has been followed up and who has not
- * said today's order is good (one who has gets `happy`). `plain` is the warm
- * close, with no link.
+ * The sign-offs (TAC-578, ruled 2026-10-07, rule 3 re-ruled the same day).
+ *
+ *   answer  NOT the timer's: the REPLY to a guest who has just said their
+ *           order is good. That reply is the visit's sign-off, and no timed
+ *           one follows it. Set by handleInbound.
+ *   visit   the timer's light line for a guest who was asked how it is, never
+ *           said, chatted about something else and went quiet.
+ *   plain   the timer's once-ever "always here" close.
+ *
+ * `visit` and `plain` carry no link. `answer` carries the once-ever review
+ * invitation only for a guest past their first visit who has never been asked
+ * (the praise ask, lib/agent/review-ask.ts); a first-visit guest gets it from
+ * the thank-you (lib/agent/post-visit-timeout.ts).
+ *
+ * TAC-575 had three (`happy` and `after_complaint` both carried the link).
  */
-export type SignOffKind = 'happy' | 'after_complaint' | 'plain'
+export type SignOffKind = 'visit' | 'plain' | 'answer'
+
+/**
+ * TAC-578: what a `post_visit` trigger carries. Decided entirely by the
+ * processor (lib/agent/post-visit-timeout.ts), which is the one place that has
+ * read the visit, the slot, the complaint's standing and the once-ever
+ * markers together; everything downstream only carries it.
+ */
+export interface PostVisitTrigger {
+  kind: 'first_visit_thanks' | 'visit_checkin'
+  /** "earlier today" or "yesterday", from the slot. A fact, not a guess. */
+  when: string
+  /** OUR last outbound row, written to reply_to_message_id (TAC-560's reason). */
+  answersMessageId: string
+  /** first_visit_thanks only: staff put a complaint right on this visit. */
+  afterResolvedComplaint: boolean
+  /** first_visit_thanks only: the venue's review link, when the ask is carried. */
+  reviewAsk?: { url: string; label: string }
+  /** visit_checkin only: what they got this time, as the block renders it. */
+  order: string
+  /** visit_checkin only: the earlier check-ins that reached them, newest first. */
+  priorCheckins: string[]
+}
 
 export interface VenueContext {
   id: string
@@ -225,6 +257,10 @@ export interface FollowupTrigger {
     // an Instagram conversation, and the fourth that routes its send through
     // dispatchReply rather than scheduleAndSend.
     | 'visit_checkback'
+    // TAC-578: a visit is over and the venue is writing once about it: the
+    // first-visit thank-you or a later-visit check-in. The FIFTH reason
+    // allowed on an Instagram conversation and routed through dispatchReply.
+    | 'post_visit'
   // TAC-123: engine-aggregated secondary reasons for this run. The primary
   // already lives on `reason` above; this array carries the OTHER reasons that
   // also applied on this guest's tick, already mapped to the AI-side
@@ -287,20 +323,10 @@ export interface FollowupTrigger {
   warmClose?: {
     answersMessageId: string
     /**
-     * TAC-575: which sign-off this is. `happy` carries the review invitation
-     * for a guest whose check-in reads good; `plain` is the warm close with no
-     * link. Decided by the processor, which is the one place that has read
-     * the check-in, the marker and the venue's links together.
+     * Which sign-off this is. Decided by the processor, the one place that has
+     * read the check-in and the markers together.
      */
     signOff: SignOffKind
-    /** The venue's review link, on every sign-off but `plain`. */
-    reviewAsk?: { url: string; label: string }
-    /**
-     * When the processor claimed the once-ever review marker for a `happy` or
-     * `after_complaint` sign-off, so the claim can be given back, scoped to this timestamp, if
-     * the invitation does not reach the guest.
-     */
-    reviewClaimedAt?: Date
   }
   /**
    * TAC-386: set only when `reason === 'inquiry_followup'`. Typed channel rather
@@ -334,6 +360,8 @@ export interface FollowupTrigger {
   visitCheckback?: {
     answersMessageId: string
   }
+  /** TAC-578: set only when `reason === 'post_visit'`. */
+  postVisit?: PostVisitTrigger
   triggeredAt: Date
   metadata?: Record<string, unknown>
 }
@@ -586,13 +614,16 @@ export interface RuntimeContext {
   // reply is on its way. Null on every other turn and on every followup run:
   // a scan greeting carries the same fact on `scanArrival.afterComplaint`.
   complaintFollowup: { mention: boolean } | null
-  // TAC-575: which sign-off this turn is, or null on every turn that is not
-  // one. Set by build-runtime-context from the pause timer's trigger and by
-  // nothing else: no inbound turn is a sign-off (ruled 2026-10-06, because a
-  // goodbye and an "ok cool" classify the same). The serializer renders the matching
-  // block, and the approval gate routes the review invitation on any sign-off
-  // by `approval_policy.signOffReviewAsk` instead of `reviewAsk`.
+  // Which sign-off this turn is, or null on every turn that is not one. Set by
+  // build-runtime-context from the pause timer's trigger (`visit`, `plain`),
+  // and by handleInbound on ONE kind of inbound turn (`answer`): the guest has
+  // just said their order is good. That is not a guess at a goodbye, which
+  // the 2026-10-06 ruling against inbound sign-offs was about ("bye" and "ok
+  // cool" classify the same); it is the check-in row changing to `good`.
   signOff: SignOffKind | null
+  // TAC-578: the first-visit thank-you or later-visit check-in this turn is,
+  // or null on every other turn. Carried straight off the trigger.
+  postVisit: PostVisitTrigger | null
   // TAC-380: the rest of this turn's derivation. Empty/false on followup runs.
   intentionDerivation: IntentionDerivation
   // TAC-308: the question this guest is still owed an answer to, when a
