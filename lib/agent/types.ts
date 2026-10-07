@@ -29,6 +29,7 @@ import type { Visit } from './extract-recent-visits'
 import type { RetractableReportedVisit } from './retract-reported-visit'
 import type { NewlyEligibleIntention, OpenIntention } from './intentions/derive'
 import type { PacingVerdict } from './intentions/pacing'
+import type { KnownGuest } from './known-guest'
 import type { VisitCheckin } from './visit-checkin'
 
 export type { AlertContext }
@@ -488,6 +489,15 @@ export interface RuntimeContext {
    * history's own "stop messaging me" invites exactly that.
    */
   reOptIn: ReOptIn | null
+  /**
+   * Which `## You know this guest` block this turn may carry, decided from the
+   * guest's own earlier messages (known-guest.ts). Null on a proactive turn
+   * and for a guest who has not written before. buildAiRuntime still withholds
+   * it on turns that carry their own facts about the guest's return.
+   */
+  knownGuest: KnownGuest | null
+  /** Have we already said sorry in this conversation? See already-apologised.ts. */
+  alreadyApologised: boolean
   recognition: RecognitionSnapshot
   // Mechanics this guest is currently eligible for. Filtered at load time in
   // build-runtime-context.ts by guest's recognition state and redemption

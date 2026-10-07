@@ -1,5 +1,5 @@
-// Phone test fixes (2026-10-07): the ablation and the generation check for
-// items 1, 3, 4 and 5.
+// Phone test fixes (2026-10-07): the generation check for the five items, and
+// the leave-one-out runs behind them.
 //
 // GENERATE-ONLY. Nothing is sent and nothing is written, with the exception
 // every harness on this path reports on itself: buildRuntimeContext calls
@@ -14,29 +14,33 @@
 //
 // ARMS ARE PROMPT TRANSFORMS. An arm is a list of edits applied to the
 // composed system or user prompt. An edit to text every prompt carries must
-// change the prompt or the unit fails; an edit to text only some prompts carry
-// (a category instruction, a block) may find nothing, but an arm in which NO
-// edit changed a unit's prompt fails that unit, so a control can never pass as
-// a silent copy of the shipped arm. That one mechanism serves both jobs:
+// change the prompt or the unit fails. An edit to a block only some turns
+// carry may find nothing on a unit, but a cell in which the arm changed no
+// prompt at all is void, so a control can never pass as a silent copy of the
+// shipped arm.
 //
-//   ablation   remove one unit (a rule, a block, a sentence) from the shipped
-//              prompt and see whether the defect goes away
-//   control    put the shipped prompt back to what it was before this change,
-//              so the check has something to disagree with
+//   shipped   the prompt as composed, untouched
+//   control   the same prompt with this change's two blocks taken out
+//   cand-,    wording that is NOT shipped (item 1a, offering further help)
+//   diag-,
+//   try-
 //
-// `shipped` is the prompt as composed, untouched. `control` is that prompt
-// with this change's wording taken back out (the earlier text restored), and is
-// what the shipped arm is read against. The `abl-` arms are the leave-one-out
-// runs that found the causes; several name text this change has since
-// replaced and will now refuse to run, which is the guard working. The `cand-`
-// and `diag-` arms are wording that is NOT shipped (items 1a and 3).
+// The arms that found the causes of the first three items (v1.95.0, #344) are
+// in that pull request's history, with the bodies in its description. They
+// edited text that change has since replaced.
+//
+// THE SYSTEM PROMPT IS SENT THE WAY PRODUCTION SENDS IT: the stable half with
+// a cache breakpoint, then the per-message half. The run prints how many input
+// tokens were read from cache. An arm that edits the stable half pays one
+// write and then reads; a run of ~750 uncached generations is what this
+// replaced.
 //
 // WHAT IT DOES NOT TAKE FROM PRODUCTION. It calls generateObject itself, so
 // the dash/self-talk/link regen loop is bypassed. It classifies each unit once
 // per run and reuses the category across that run's reps. An arm is its own
 // run, so two arms can land a unit in different categories; the category is
-// logged on every unit so that can be seen. Bodies are hand-read; the detectors only narrow
-// the reading and are deliberately wide.
+// logged on every unit so that can be seen. Bodies are hand-read; the
+// detectors only narrow the reading and are deliberately wide.
 //
 // A FAILED UNIT IS NOT A RESULT (scripts/CLAUDE.md, convention 5). Any
 // generation error voids its cell.
@@ -59,7 +63,9 @@ import {
   MAX_OUTPUT_TOKENS,
 } from '@/lib/ai/generate-message'
 import { PROMPT_VERSION } from '@/lib/ai/prompts/system-template'
+import { alreadyApologised } from '@/lib/agent/already-apologised'
 import { buildRuntimeContext } from '@/lib/agent/build-runtime-context'
+import { deriveKnownGuest } from '@/lib/agent/known-guest'
 import {
   buildAiRuntime,
   classifyStage,
@@ -67,6 +73,7 @@ import {
   retrieveKnowledgeWithContextStage,
 } from '@/lib/agent/stages'
 import type { RuntimeContext } from '@/lib/agent/types'
+import { WARM_CLOSE_PAUSE_MINUTES_DEFAULT } from '@/lib/agent/warm-close'
 import { createAdminClient } from '@/lib/db/admin'
 import { startAgentTrace } from '@/lib/observability/langfuse'
 import { toParsedGuestContext } from '@/lib/schemas/guest-context'
@@ -76,12 +83,25 @@ import { createRunLog } from './run-log'
 // Arms
 // ---------------------------------------------------------------------------
 
+/** What a transform may read about the unit it is applied to. */
+interface UnitFacts {
+  category: MessageCategory
+  /** The knowledge retrieved for this unit, as the writer sees it. */
+  knowledge: string
+}
+
 interface Transform {
   label: string
   target: 'system' | 'user'
-  apply: (prompt: string) => string
+  apply: (prompt: string, facts: UnitFacts) => string
   /** A transform that may legitimately find nothing on some units. */
   optional?: boolean
+  /**
+   * A transform whose whole point is to act on some turns and not others, so a
+   * cell it never touches is a result (no offer block on single facts), not a
+   * silent copy of the shipped arm.
+   */
+  conditional?: boolean
 }
 
 /** Remove the one line that starts with `prefix`. */
@@ -143,160 +163,22 @@ function insertUserBlock(label: string, block: string): Transform {
   }
 }
 
-const GREETING_RULE = '- Do not name a specific product (a drink, a bean'
 const MIRROR_RULE = '- Match the register and length of what the guest sent.'
-const REPEAT_RULE = '- A greeting, a question about the guest, a check-in'
-
-// ---------------------------------------------------------------------------
-// The wording under test. Restated here rather than imported from the prompt:
-// importing would make the control arm agree with whatever the prompt says,
-// including a typo. `before` is the text this change replaced, `after` is
-// this change's.
-// ---------------------------------------------------------------------------
 
 const RULES_END = '\n\n# Voice imperative'
 
+// Item 1a, NOT shipped. The rule as approved on 2026-10-07; it produced no
+// offers from the rule list and 3 of 10 as a late block.
 const RULE_OFFER =
   '- Whether a reply ends by offering more help is decided by what the answer did, not by its topic. When your answer sent the guest a link, made a recommendation or helped them choose between things, or walked them through how to do something, end with one short, light line saying you are happy to answer anything else about it. When your answer was a single fact, like an hour, a price, an address or a yes or no, give the fact and stop, with no offer after it. The offer is a statement and not a question, it is about the thing you just helped with, and it is worded differently each time: look at what you have already sent this guest and do not reuse an offer you have made. This is not the closing sentence the rule on recommendations above forbids, which is about praising the thing; this line says nothing about how good anything is. It is not telling the guest to get in touch either, which the rule above on that forbids: it leaves the door open in this thread and asks for nothing. Leave it off a complaint turn, a sign-off, any reply that already asks the guest something, and any turn where you are putting a question in intentionQuestion.'
 
-const RULE_APOLOGY =
-  '- Apologise for a thing once. If your last reply to this guest already opened with an apology, do not open this one with another, in the same words or in different ones. The apology has been made. Start with what is new instead: the answer, the next step, or what you are doing about it. A new problem the guest raises is a new thing and gets its own apology, once. This is separate from the rule above on repeating a line, which is about wording; this one is about not apologising again at all.'
+const APPEND_OFFER_RULE = swap(
+  'system',
+  'offer rule',
+  RULES_END,
+  `\n${RULE_OFFER}${RULES_END}`,
+)
 
-const RULE_SELF_CORRECTION =
-  "- When a guest corrects something they themselves told you, like saying it was a different place or that they mixed something up, the slip is theirs and it is a small one. Take the correction lightly and move on in one short line. Do not apologise, do not call it your mistake or the venue's, and do not make anything of it. This is separate from the rule above on a guest questioning something you said: that one is about your own earlier message, and there you do own an error. Here nothing you said was wrong. A guest who only says they have never been here, without saying they got something wrong, has not corrected themselves yet: # A visit the guest takes back covers that turn, and its one gentle check comes first."
-
-interface WordingEdit {
-  label: string
-  target: Transform['target']
-  before: string
-  after: string
-  /** True when the text is not in every unit's prompt (a category, a block). */
-  optional?: boolean
-}
-
-const appendRule = (label: string, rule: string): WordingEdit => ({
-  label,
-  target: 'system',
-  before: RULES_END,
-  after: `\n${rule}${RULES_END}`,
-})
-
-const CLOSE_BEFORE_HEAD =
-  'The conversation has reached a natural pause. Close it warmly and leave\nthe door open: they can message here anytime.'
-const CLOSE_BEFORE_GUIDE =
-  " This is what this venue's close usually covers, as a guide to its content and not as words to reuse: "
-const CLOSE_BEFORE_TAIL =
-  'Say it in your own words, different from anything you have already sent\nthis guest. A soft hope to see them again is fine. Do not invite them in\nfor anything specific, and do not name any item they did not mention\nthemselves. Ask nothing.'
-
-// The approved first part plus one sentence: asked for a line about what was
-// talked about, two of the first ten closes answered the question again or
-// placed the guest inside the venue.
-const CLOSE_AFTER_HEAD =
-  'The conversation has reached a natural pause. Close it in two short\nparts. First, one line that belongs to this conversation: something warm\nabout what you and this guest actually talked about, or a soft hope to\nsee them again. It does not repeat an answer you already gave, and it\ndoes not assume they are at the venue or have been in. Then a light open\ndoor: they can message here anytime with other questions, with two or\nthree examples of what they might ask about.'
-
-const CLOSE_AFTER_GUIDE =
-  " Take those examples from what this venue's close usually covers, leaning on the menu, events and recommendations where it has them, choosing different ones each time and never reusing its words: "
-const CLOSE_AFTER_TAIL =
-  'Say all of it in your own words, different from anything you have\nalready sent this guest. Do not include a link and do not ask for a\nreview. Do not invite them in for anything specific, and do not name any\nitem they did not mention themselves. Ask nothing.'
-
-const EDITS = {
-  '1a': [appendRule('offer rule', RULE_OFFER)],
-  '1b': [
-    {
-      label: 'greeting invitation',
-      target: 'system',
-      before: ' Reply in kind and stop.',
-      after:
-        ' When that message is a greeting, greet them back warmly and ask how you can help or what they are looking for, in one short line, and stop there. They are messaging you, not standing at the counter, so do not ask what you can get them or what they would like: that is taking an order. Say it your own way rather than reaching for a stock phrase. When it is anything else with no content of its own, reply in kind and stop.',
-    },
-    // The half the ablation found: the first-conversation block outranks the
-    // rule above, so the rule alone moved 4 of 10 and this took it to 10.
-    {
-      label: 'no-questions exception',
-      target: 'user',
-      before:
-        'exception is a question another block in this prompt tells you to ask.',
-      after:
-        'exception is a question another block in this prompt tells you to ask.\nInviting a guest who has only said hello to say what they need is not a\nquestion of your own, and is welcome.',
-      optional: true,
-    },
-    {
-      label: 'first-conversation exception',
-      target: 'user',
-      before: 'line above fits.',
-      after:
-        'line above fits.\nInviting a guest who has only said hello to say what they need is not a\nquestion of your own, and is welcome.',
-      optional: true,
-    },
-  ],
-  '3-rule': [appendRule('apology rule', RULE_APOLOGY)],
-  '3-category': [
-    {
-      label: 'category: already said sorry',
-      target: 'system',
-      before: 'say sorry for it, once, and mean it.',
-      after:
-        'say sorry for it, once, and mean it. If you have already said sorry for this in an earlier message, do not say it again.',
-      optional: true,
-    },
-  ],
-  '4': [
-    appendRule('self-correction rule', RULE_SELF_CORRECTION),
-    {
-      label: 'take-back section',
-      target: 'system',
-      before:
-        'The first time this happens, set it to "checking" and make the reply one gentle check in the guest\'s own words, the way a friend who half remembers would: "oh wait, didn\'t you mention a cold latte earlier? or was that somewhere else?" is the shape. Ask it once and ask nothing else.\nIf you already asked that and the guest confirms they have not been here, set it to "retracted". Believe them plainly and move on in one short line. Do not explain, and do not ask them anything. Anything the venue already offered them still stands: do not take it back, and leave cancelsCommitmentId empty.',
-      after:
-        'If the guest says outright that they got it wrong, like that it was a different place or the wrong cafe, there is nothing to check: set it to "retracted" straight away.\nIf they only say something that does not fit, like that they have never been here, without saying they got anything wrong, then the first time this happens set it to "checking" and make the reply one gentle check in the guest\'s own words, the way a friend who half remembers would: "oh wait, didn\'t you mention a cold latte earlier? or was that somewhere else?" is the shape. Ask it once and ask nothing else.\nIf you already asked that and the guest confirms they have not been here, set it to "retracted".\nWhenever you set "retracted", believe them plainly and move on in one short line, with no apology: nothing you said was wrong. Do not explain, and do not ask them anything. Anything the venue already offered them still stands: do not take it back, and leave cancelsCommitmentId empty.',
-    },
-  ],
-  '5': [
-    {
-      label: 'close head',
-      target: 'user',
-      before: CLOSE_BEFORE_HEAD,
-      after: CLOSE_AFTER_HEAD,
-      optional: true,
-    },
-    {
-      label: 'close guide',
-      target: 'user',
-      before: CLOSE_BEFORE_GUIDE,
-      after: CLOSE_AFTER_GUIDE,
-      optional: true,
-    },
-    {
-      label: 'close tail',
-      target: 'user',
-      before: CLOSE_BEFORE_TAIL,
-      after: CLOSE_AFTER_TAIL,
-      optional: true,
-    },
-  ],
-} as const satisfies Record<string, readonly WordingEdit[]>
-
-/** Apply the new wording to a prompt that does not have it yet. */
-const forward = (edits: readonly WordingEdit[]): Transform[] =>
-  edits.map((e) => swap(e.target, e.label, e.before, e.after, e.optional))
-
-/** Take the new wording back out of a prompt that ships it. */
-const reverse = (edits: readonly WordingEdit[]): Transform[] =>
-  [...edits]
-    .reverse()
-    .map((e) => swap(e.target, e.label, e.after, e.before, e.optional))
-
-// The venue's own persona text. Not ours to edit in this change, but it has to
-// be ruled in or out as a cause.
-const DROP_PERSONA_COMPLAINT_LINE: Transform = {
-  label: 'persona complaint line',
-  target: 'system',
-  apply: (p) =>
-    p
-      .split('\n')
-      .filter((line) => !line.includes('we own it plainly'))
-      .join('\n'),
-}
 const DROP_PERSONA_LENGTH: Transform = {
   label: 'persona length section',
   target: 'system',
@@ -308,83 +190,78 @@ const DROP_LENGTH_RULE = dropLine(
   '- The ## Length section below is the only authority',
 )
 
-/** What v1.95.0 ships. Items 1a and 3 are not in it. */
-const SHIPPED = [...EDITS['1b'], ...EDITS['4'], ...EDITS['5']]
+/**
+ * Item 1a, the code-computed round (ruled 2026-10-07): the conditions the
+ * rule left to the model are decided from the turn's inputs, and the block
+ * renders only when one holds, stating it as a fact.
+ *
+ * Only what is knowable BEFORE the reply exists can be computed here: the
+ * category, and whether the knowledge the writer was handed carries a link.
+ * "Your reply contains a link" is a fact about the reply and would need a
+ * second pass.
+ */
+const OFFER_CATEGORIES: ReadonlySet<MessageCategory> = new Set([
+  'recommendation_request',
+  'event_question',
+])
+const HAS_LINK = /https?:\/\/|\b[a-z0-9-]+\.(com|co|org|net)\//i
+
+function offerFact(facts: UnitFacts): string | null {
+  if (facts.category === 'recommendation_request') {
+    return 'In this reply you are recommending something or helping the guest choose.'
+  }
+  if (OFFER_CATEGORIES.has(facts.category)) {
+    return 'In this reply you are telling the guest about something they can come to or sign up for.'
+  }
+  if (HAS_LINK.test(facts.knowledge)) {
+    return 'What you were given to answer this includes a link. If your reply sends the guest that link or walks them through how to do something, this block applies; if it only states a fact, ignore it.'
+  }
+  return null
+}
+
+const OFFER_FACT_BLOCK: Transform = {
+  label: 'offer fact block',
+  target: 'user',
+  // Renders on some units only, by design: that is the thing under test.
+  optional: true,
+  conditional: true,
+  apply: (p, facts) => {
+    const fact = offerFact(facts)
+    if (fact === null) return p
+    return insertUserBlock(
+      'offer fact block',
+      `## Offer more help\n\n${fact} End the reply with one short, light line saying you are happy to answer anything else about it. Make it a statement, not a question, and say it your own way.`,
+    ).apply(p, facts)
+  },
+}
+
+/** What this change ships: two user-prompt blocks. The control takes them out. */
+const SHIPPED_BLOCKS = [
+  dropBlock('known-guest block', '## You know this guest'),
+  dropBlock('apology block', '## You have already apologised'),
+]
 
 const ARMS: Record<string, readonly Transform[]> = {
   shipped: [],
-  control: reverse(SHIPPED),
-  // Candidate wording applied to a prompt that does not ship it yet.
-  'cand-1a': forward(EDITS['1a']),
-  'cand-3-rule': forward(EDITS['3-rule']),
-  'cand-3': forward([...EDITS['3-rule'], ...EDITS['3-category']]),
-  // The candidate with one more unit removed: what is still holding it back?
-  'cand-1a+length-section': [...forward(EDITS['1a']), DROP_PERSONA_LENGTH],
-  'cand-1a+length-rule': [...forward(EDITS['1a']), DROP_LENGTH_RULE],
+  control: SHIPPED_BLOCKS,
+  // Item 1a, not shipped.
+  'cand-1a': [APPEND_OFFER_RULE],
   'cand-1a+length-both': [
-    ...forward(EDITS['1a']),
+    APPEND_OFFER_RULE,
     DROP_PERSONA_LENGTH,
     DROP_LENGTH_RULE,
   ],
   'cand-1a+mirror-rule': [
-    ...forward(EDITS['1a']),
+    APPEND_OFFER_RULE,
     dropLine('system', 'mirror rule', MIRROR_RULE),
   ],
-  'cand-1a+closer-rule': [
-    ...forward(EDITS['1a']),
-    dropLine(
-      'system',
-      'closer rule',
-      '- When delivering a recommendation, a description, or a fact',
-    ),
-  ],
-  'cand-1a+no-cta': [
-    ...forward(EDITS['1a']),
-    swap('system', 'no calls-to-action', ', no calls-to-action.', '.'),
-  ],
-  // DIAGNOSTICS, not candidates: the same instruction moved from the rule list
-  // to a block at the end of the user prompt, to separate "the wording does
-  // not work" from "the wording is too far from the generate line".
   'diag-1a-block': [
     insertUserBlock(
       'offer block',
       `## Offering more help\n\n${RULE_OFFER.slice(2)}`,
     ),
   ],
-  'diag-3-block': [
-    insertUserBlock(
-      'apology block',
-      '## You have already apologised\n\nYou have already said sorry to this guest for this, earlier in this conversation. Do not apologise again, and do not say again whose fault it was. Start with what is new: the answer, the next step, or what you are doing about it. If they raise a different problem, that one gets its own apology, once.',
-    ),
-  ],
-  'cand-3+persona-own-it': [
-    ...forward([...EDITS['3-rule'], ...EDITS['3-category']]),
-    DROP_PERSONA_COMPLAINT_LINE,
-  ],
-  // Item 1b: what stops a "hi" getting an invitation?
-  'abl-greeting-rule': [dropLine('system', 'greeting rule', GREETING_RULE)],
-  'abl-reply-in-kind': [
-    swap('system', 'reply in kind', ' Reply in kind and stop.', ''),
-  ],
-  'abl-no-questions-block': [
-    dropBlock('no-questions block', '## No questions this turn'),
-  ],
-  'abl-mirror-rule': [dropLine('system', 'mirror rule', MIRROR_RULE)],
-  'abl-no-cta': [
-    swap('system', 'no calls-to-action', ', no calls-to-action.', '.'),
-  ],
-  // Item 3: what makes each reply open with an apology?
-  'abl-category-sorry': [
-    swap(
-      'system',
-      'category sorry',
-      'Once you understand it, say sorry for it, once, and mean it. Then find',
-      'Once you understand it, find',
-      true,
-    ),
-  ],
-  'abl-persona-own-it': [DROP_PERSONA_COMPLAINT_LINE],
-  'abl-repeat-rule': [dropLine('system', 'repeat rule', REPEAT_RULE)],
+  'try-1a-facts': [OFFER_FACT_BLOCK],
 }
 
 // ---------------------------------------------------------------------------
@@ -400,6 +277,12 @@ interface Unit {
   /** The guest's message this turn. Absent on the pause-timer close. */
   inbound?: string
   reportedItems?: readonly string[]
+  /** Minutes between the end of `history` and this turn. Default: none. */
+  gapMinutes?: number
+  /** The guest wrote before the history window (an imported thread, say). */
+  wroteBeforeHistoryWindow?: boolean
+  /** This is the turn that opted the guest back in. */
+  reOptIn?: 'instagram'
 }
 
 interface Cell {
@@ -552,6 +435,52 @@ const CELLS: readonly Cell[] = [
     ],
   },
   {
+    id: '2-earlier',
+    what: 'a hello half an hour after an answered question (constructed)',
+    kind: 'inbound',
+    established: true,
+    units: ['hey', 'hi', 'hello again', 'hey there', 'hii'].map(
+      (inbound, i) => ({
+        id: `back-${i + 1}`,
+        inbound,
+        history: CLOSE_EXCHANGES[i] as readonly Line[],
+        gapMinutes: 30,
+      }),
+    ),
+  },
+  {
+    id: '2-known',
+    what: 'a hello from a guest whose only messages predate the history window (constructed)',
+    kind: 'inbound',
+    established: true,
+    units: ['hey', 'hi', 'hello', 'hi there', 'heyy'].map((inbound, i) => ({
+      id: `old-${i + 1}`,
+      inbound,
+      history: [],
+      wroteBeforeHistoryWindow: true,
+    })),
+  },
+  {
+    id: '2-reoptin',
+    what: 'the turn that opts a guest back in: the block must be absent (constructed)',
+    kind: 'inbound',
+    established: true,
+    units: ['hey', 'hi', 'are you open today?', 'hello', 'hey again'].map(
+      (inbound, i) => ({
+        id: `optin-${i + 1}`,
+        inbound,
+        history: [
+          ['in', 'do you have oat milk?'],
+          ['out', 'yep, oat and almond'],
+          ['in', 'please stop messaging me'],
+          ['out', "done, you won't hear from us again"],
+        ] as const,
+        gapMinutes: 120,
+        reOptIn: 'instagram' as const,
+      }),
+    ),
+  },
+  {
     id: '3-apology',
     what: 'the next reply in a complaint thread that has already apologised (constructed)',
     kind: 'inbound',
@@ -680,7 +609,10 @@ function unitContext(
   // The close fires after the venue's pause; an inbound turn follows the
   // thread directly.
   const historyEnd =
-    cell.kind === 'close' ? new Date(now.getTime() - 10 * 60_000) : now
+    cell.kind === 'close'
+      ? new Date(now.getTime() - 10 * 60_000)
+      : new Date(now.getTime() - (unit.gapMinutes ?? 0) * 60_000)
+  const recentMessages = toHistory(unit.history, historyEnd)
   const firstContact = cell.established
     ? new Date(now.getTime() - 3 * 24 * 60 * 60_000)
     : new Date(now.getTime() - 20 * 60_000)
@@ -705,7 +637,24 @@ function unitContext(
             channel: 'instagram',
             referralSource: null,
           },
-    recentMessages: toHistory(unit.history, historyEnd),
+    recentMessages,
+    // Derived by the production functions from the constructed thread, so the
+    // cell measures the derivation and the block together. The pause is the
+    // venue default; the conversation window is the base context's own.
+    knownGuest:
+      unit.inbound === undefined
+        ? null
+        : deriveKnownGuest({
+            recentMessages,
+            receivedAt: now,
+            pauseMs: WARM_CLOSE_PAUSE_MINUTES_DEFAULT * 60_000,
+            wroteBeforeHistoryWindow: unit.wroteBeforeHistoryWindow === true,
+          }),
+    alreadyApologised: alreadyApologised(
+      recentMessages,
+      now,
+      base.conversationWindowMs,
+    ),
     // NOTHING OF THE REAL GUEST'S (the TAC-575 contamination: a leaked open
     // comp reached a ruling).
     recentVisits: [],
@@ -726,7 +675,7 @@ function unitContext(
     visitCheckinHold: false,
     insideVisitCheckin: false,
     complaintFollowup: null,
-    reOptIn: null,
+    reOptIn: unit.reOptIn ?? null,
     inboundMedia: null,
     visitLocalDate: null,
     // The base guest may be inside the quiet that follows a warm close, which
@@ -867,6 +816,9 @@ async function main(): Promise<void> {
   }))
 
   const voidCells: string[] = []
+  // Prompt-cache accounting across the run. Without it a breakpoint that
+  // never reads looks exactly like one that does.
+  const cache = { read: 0, write: 0, uncached: 0, calls: 0 }
 
   for (const cell of cells) {
     console.log(`\n== ${cell.id}: ${cell.what}`)
@@ -876,6 +828,7 @@ async function main(): Promise<void> {
     const tallies: Record<string, number> = {}
     let done = 0
     let failed = 0
+    let touched = 0
 
     for (let rep = 0; rep < reps; rep += 1) {
       const unit = cell.units[rep % cell.units.length] as Unit
@@ -910,6 +863,18 @@ async function main(): Promise<void> {
           categories.set(unit.id, category)
         }
 
+        // MEASURE_DRY=1 prints what the code can know about each unit before
+        // any reply exists, and generates nothing.
+        if (process.env.MEASURE_DRY === '1') {
+          const chunks = knowledge.get(unit.id) ?? []
+          console.log(
+            `  ${unit.id} [${category}] tags=${JSON.stringify([...new Set(chunks.flatMap((c) => c.primaryTags ?? []))])} link=${HAS_LINK.test(chunks.map((c) => c.text).join('\n'))}`,
+          )
+          touched += 1
+          done += 1
+          continue
+        }
+
         const composed = composePrompt({
           category,
           persona: ctx.venue.brandPersona,
@@ -919,30 +884,65 @@ async function main(): Promise<void> {
           runtime: buildAiRuntime(ctx),
           channel: 'instagram',
         })
-        let system = composed.systemPrompt
+        // Transforms run on the two halves of the system prompt separately,
+        // so the stable half keeps its own cache breakpoint, as production's
+        // does. No transform here spans the boundary between them.
+        const facts: UnitFacts = {
+          category,
+          knowledge: (knowledge.get(unit.id) ?? [])
+            .map((c) => c.text)
+            .join('\n'),
+        }
+        let prefix = composed.cacheableSystemPrefix
+        let suffix = composed.volatileSystemSuffix
         let user = composed.userPrompt
         const applied: string[] = []
         for (const t of arm) {
-          const before = t.target === 'system' ? system : user
-          const after = t.apply(before)
-          if (after === before && !t.optional) {
+          let changed = false
+          if (t.target === 'system') {
+            const nextPrefix = t.apply(prefix, facts)
+            const nextSuffix = t.apply(suffix, facts)
+            changed = nextPrefix !== prefix || nextSuffix !== suffix
+            prefix = nextPrefix
+            suffix = nextSuffix
+          } else {
+            const next = t.apply(user, facts)
+            changed = next !== user
+            user = next
+          }
+          if (!changed && !t.optional) {
             throw new Error(`transform "${t.label}" did not change the prompt`)
           }
-          if (after !== before) applied.push(t.label)
-          if (t.target === 'system') system = after
-          else user = after
+          if (changed) applied.push(t.label)
         }
-        if (arm.length > 0 && applied.length === 0) {
-          throw new Error('no transform in this arm changed the prompt')
-        }
+        // An arm of optional edits may leave some units untouched (the fact
+        // block renders on some turns only). A cell where it touched none is
+        // caught below.
+        if (applied.length > 0) touched += 1
 
-        const { object } = await generateObject({
+        const { object, usage, providerMetadata } = await generateObject({
           model: getGenerationModel(),
-          system,
-          messages: [...composed.historyTurns, { role: 'user', content: user }],
+          messages: [
+            {
+              role: 'system',
+              content: prefix,
+              providerOptions: {
+                anthropic: { cacheControl: { type: 'ephemeral' } },
+              },
+            },
+            { role: 'system', content: suffix },
+            ...composed.historyTurns,
+            { role: 'user', content: user },
+          ],
           schema: GeneratedMessageSchema,
           maxOutputTokens: MAX_OUTPUT_TOKENS,
         })
+        cache.read += usage?.cachedInputTokens ?? 0
+        cache.write +=
+          (providerMetadata?.anthropic?.cacheCreationInputTokens as
+            number | null | undefined) ?? 0
+        cache.uncached += usage?.inputTokenDetails?.noCacheTokens ?? 0
+        cache.calls += 1
         const reply = composeReplyWithIntention(
           object.body,
           object.intentionQuestion,
@@ -986,6 +986,12 @@ async function main(): Promise<void> {
       }
     }
 
+    // A control or candidate arm that changed no prompt in the whole cell is a
+    // silent copy of the shipped arm, not a result.
+    if (arm.length > 0 && touched === 0 && !arm.some((t) => t.conditional)) {
+      console.log(`  ${cell.id}: no transform changed any prompt (CELL VOID)`)
+      failed += 1
+    }
     if (failed > 0) voidCells.push(cell.id)
     console.log(
       `  -- ${cell.id}: ${done}/${reps} generated${failed > 0 ? `, ${failed} FAILED (CELL VOID)` : ''}; ${Object.entries(
@@ -1006,6 +1012,12 @@ async function main(): Promise<void> {
   console.log(
     '[phone-test] counts above are detector hits, not verdicts. Read the bodies.',
   )
+  const inputTokens = cache.read + cache.write + cache.uncached
+  const hitRate = inputTokens === 0 ? 0 : cache.read / inputTokens
+  console.log(
+    `[phone-test] prompt cache: ${cache.calls} calls, ${inputTokens} input tokens: ${cache.read} read, ${cache.write} written, ${cache.uncached} uncached. hit rate ${(hitRate * 100).toFixed(0)}% of input tokens`,
+  )
+  log.appendUnit({ summary: true, cache: { ...cache, inputTokens, hitRate } })
   if (voidCells.length > 0) {
     console.log(`[phone-test] VOID cells: ${voidCells.join(', ')}`)
     process.exit(2)

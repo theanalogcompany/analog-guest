@@ -3079,6 +3079,23 @@ export function buildAiRuntime(
         ctx.visitCheckinHold),
     // TAC-572: null on every turn but the one that opted the guest back in.
     reOptIn: ctx.reOptIn ?? undefined,
+    // Inbound turns only, and never beside a block that already says how to
+    // treat the guest's return: the re-opt-in line says the opposite (do not
+    // comment on it), and a scan greeting or first touch carries its own facts.
+    knownGuest:
+      ctx.currentMessage !== null &&
+      ctx.followupTrigger === null &&
+      ctx.reOptIn === null &&
+      ctx.scanArrival === null &&
+      !firstTouchAfterQrScan
+        ? (ctx.knownGuest ?? undefined)
+        : undefined,
+    // Inbound turns only: a follow-up after a complaint has its own wording.
+    alreadyApologised:
+      (ctx.currentMessage !== null &&
+        ctx.followupTrigger === null &&
+        ctx.alreadyApologised) ||
+      undefined,
     // TAC-389: only handle-operator-decline.ts sets this, on the trigger it
     // hands to buildRuntimeContext. Every other path (inbound, cron follow-up,
     // ordinary Command Center manual follow-up) leaves it false, so the
