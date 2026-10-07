@@ -405,7 +405,7 @@ alike. Rules and reasons: `visit-messages.ts` (pure) and the two processors.
 
 | message | when | once per | claim |
 | --- | --- | --- | --- |
-| `plain` close | quiet after a conversation that is not a visit and armed no inquiry follow-up | guest, ever, across conversations | `guests.warm_close_sent_at` |
+| `plain` close | quiet after the guest signalled they were done, in a conversation that is not a visit, armed no inquiry follow-up and carried no offer of more help | guest, ever, across conversations | `guests.warm_close_sent_at` |
 | `answer` sign-off | NOT timed: the REPLY to a guest who has just said their order is good (`replySignsOffVisit`, `signOffInThisReply`) | visit | none: once the check-in reads `good` the timer sends no sign-off at all |
 | `visit` sign-off | timed: asked how it is, never said good or bad, wrote since, went quiet (`timedSignOffFor`) | visit | `visit_messages` row, kind `sign_off` |
 | first-visit thank-you | the next morning, or that evening, after a guest's first visit; carries the review invitation | guest, ever | `visit_messages` row + `review_asked_at` |
@@ -421,9 +421,12 @@ The first two are `warm-close-timeout.ts` (`ctx.signOff`); the last two are
   visit the once-ever review invitation (`deriveReviewAsk`). Never both. A guest who was
   asked and wrote nothing since gets nothing.
 
-- **A question that armed an inquiry follow-up gets no close** (`followup_is_next_touch`),
-  and neither does a guest who scanned in the last day (`visit_conversation`). Neither
-  spends the once-ever marker.
+- **The plain close follows a done-signal, never an answer the guest went quiet after**
+  (`guest_not_done`): our last message must have answered a turn classified
+  `acknowledgment`. It is also never sent once an offer of more help has gone out in the
+  conversation (`offer_already_made`, the offer feature's own detector), after a question
+  that armed an inquiry follow-up (`followup_is_next_touch`), or to a guest who scanned in
+  the last 36 hours (`visit_conversation`). None of these spends the once-ever marker.
 - **The slot is recomputed every tick, never stored** (`resolvePostVisitSlot`): morning if
   Meta's window is still open then, else that evening, else skip. It fails toward NOT
   sending on any unreadable input, the opposite of `isQuietHour`.
