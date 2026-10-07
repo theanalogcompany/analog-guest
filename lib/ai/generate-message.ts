@@ -334,14 +334,11 @@ export const GeneratedMessageSchema = z.object({
   // required string costs zero.
   reviewAsk: z.string(),
   // The offer-more-help line, written apart from the reply so code can decide
-  // from the finished reply whether it is sent (further-help-offer.ts), and
-  // the model's own report that the reply gave how-to instructions, the one
-  // of that rule's three conditions that leaves no mark in the text. Both
-  // REQUIRED, so neither costs a slot against the 24-optional cap. '' and
-  // false on almost every turn. After `body` on purpose: the model has
-  // written the reply before it describes it.
+  // from the finished reply whether it is sent (further-help-offer.ts).
+  // REQUIRED, so it costs no slot against the 24-optional cap. '' on most
+  // turns. After `body` on purpose: the model has written the reply before it
+  // writes the line that follows it.
   furtherHelpOffer: z.string(),
-  gaveInstructions: z.boolean(),
   // TAC-573: what this reply is doing about a visit the guest told us about
   // and is now contradicting. 'none' on every turn the runtime carries no
   // `## Visit they told you about` block, which is almost every turn.
@@ -941,7 +938,6 @@ export async function generateMessage(
         body: beforeOffer,
         offer: offerLine,
         category: input.category,
-        gaveInstructions: rawObject.gaveInstructions,
         commitment: rawObject.commitment,
         repliesToGuest: input.runtime.inboundMessage != null,
         signsOff:
@@ -953,6 +949,7 @@ export async function generateMessage(
           composed.intentionQuestion !== '' || withAsk.reviewAsk !== '',
         knowledgeGap: rawObject.knowledgeGap,
         correctingVisit: correcting,
+        offeredThisConversation: input.runtime.offeredThisConversation === true,
       })
       // Logged like the drops above: a line the model wrote and code withheld
       // is guest-facing text removed, and has to be countable.

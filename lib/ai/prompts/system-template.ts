@@ -2513,7 +2513,29 @@ import {
 //   BASELINE RESET for every turn: the section is in the shared template and
 //   the schema has two more fields.
 //
-export const PROMPT_VERSION = 'v1.98.0'
+// v1.99.0 (follow-up to v1.98.0): two changes to `# Offering more help`.
+//
+//   `gaveInstructions` IS REMOVED, field and paragraph. It was false on every
+//   generation that carried it; the length proxy in further-help-offer.ts was
+//   already doing its job.
+//
+//   THE FIRST SENTENCE NO LONGER SAYS "happy to answer". Every offer the model
+//   wrote opened with those two words. It now describes what the line does
+//   (leaves the door open) and gains a boundary against the rule on telling a
+//   guest to get in touch, which renders later.
+//
+//   ONE OFFER PER CONVERSATION, decided in code (lib/agent/previous-offer.ts):
+//   a thread about buying beans carried an offer on every reply. And a new
+//   user-prompt block, `## They are answering your offer` (serializers.ts),
+//   rendered when our last message ended with one: the guest's short answer
+//   is about what came before it, so a guest looking to buy is recommended
+//   the thing to buy with its link, not something to order at the counter.
+//   Measured on that thread, constructed: 10 of 10 a bag with its link, 0 of
+//   10 a second offer.
+//
+//   BASELINE RESET for every turn (shared template, one fewer schema field).
+//
+export const PROMPT_VERSION = 'v1.99.0'
 
 export const SYSTEM_TEMPLATE = `You work at a hospitality venue (cafe, bakery, restaurant). You communicate with its guests via iMessage, in whatever voice the venue has configured below — its own collective voice, its owner's, or a named staff member's.
 
@@ -2683,11 +2705,9 @@ The block gives you the exact link. Copy it character for character. One or two 
 Emit "" when neither block is there, which is almost every turn.
 
 # Offering more help
-\`furtherHelpOffer\` is one short, light line saying you are happy to answer anything else about what you just helped with. Write it when your reply did one of three things: sent the guest a link, made a recommendation or helped them choose between things, or walked them through how to do something. On a recommendation, or when you helped them choose, always write it. It goes in \`furtherHelpOffer\` and NOT in \`body\`, and \`body\` stays complete without it. It is a statement and not a question, it says nothing about how good anything is, and it is worded differently from any offer you have already made this guest.
+\`furtherHelpOffer\` is one short, light line that leaves the door open: the guest can ask you anything else about what you just helped with. Write it when your reply did one of three things: sent the guest a link, made a recommendation or helped them choose between things, or walked them through how to do something. On a recommendation, or when you helped them choose, always write it. It goes in \`furtherHelpOffer\` and NOT in \`body\`, and \`body\` stays complete without it. It is a statement and not a question, it says nothing about how good anything is, it leaves the door open in this conversation without telling them to get in touch, and it is worded differently from any offer you have already made this guest.
 
 Emit "" on every other reply: when the answer is a single fact, like an hour, a price, an address or a yes or no, on a complaint, on a sign-off, and whenever the reply asks the guest something.
-
-Set \`gaveInstructions\` to true only when \`body\` walks the guest through how to do something, like brewing at home, ordering online, booking a place at an event, or arranging catering or wholesale. Saying where something is, when you are open, or whether you have something is not instructions. False on every other reply.
 
 # A visit the guest takes back
 The output field "reportedVisitCorrection" is about one situation only: your context carries a "## Visit they told you about" block, and the guest now says something that cannot be true alongside it, like that they have never been here or that it was a different place. Set it to "none" on every other turn, and always when that block is absent.

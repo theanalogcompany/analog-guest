@@ -89,6 +89,7 @@ import {
   materializeInlineCommitment,
   persistOrRegenQueuedDraft,
 } from './schedule-and-send'
+import { withoutOfferBubble } from './held-draft-body'
 import {
   resolveDispatchBubbles,
   resolveOutboundTail,
@@ -550,7 +551,9 @@ export async function dispatchInstagramReply(
         generation:
           scope === 'whole_reply'
             ? generation
-            : { ...generation, body: undeliveredBody },
+            : // The offer line is already out of `undeliveredBody` (below),
+              // so the card must not be asked to find it there again.
+              { ...generation, body: undeliveredBody, furtherHelpOffer: '' },
         carrier: scope === 'whole_reply',
         renderedIntentions: options.renderedIntentions,
       })
@@ -743,9 +746,15 @@ export async function dispatchInstagramReply(
     await deps.applyCancellation(ctx, generation, persistedIds[0]!)
   }
 
-  const remainder = bubbles.slice(sentCount)
+  // What did not go out, less the offer-more-help line: a card is one message
+  // an operator approves verbatim, and it never carries that line
+  // (held-draft-body.ts). When the offer was ALL that did not go out there is
+  // nothing to card, and `report` writes none for an empty body; the failure
+  // is still captured.
+  const unsent = bubbles.slice(sentCount)
+  const remainder = withoutOfferBubble(unsent, generation.furtherHelpOffer)
   let undelivered: { reason: string; cardId: string | null } | null = null
-  if (remainder.length > 0) {
+  if (unsent.length > 0) {
     const why = stopped ?? failure('unknown')
     const card = await report(
       why,

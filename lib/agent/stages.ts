@@ -65,6 +65,7 @@ import { matchComp } from './comp-backstop'
 import { isFloorCategory, matchForwardCommitment } from './complaint-floor'
 import { canAutoSendComplaintTurn } from './complaint-routing'
 import { deriveKnownGuest } from './known-guest'
+import { offeredThisConversation, previousReplyOffered } from './previous-offer'
 import { resolveComplaintThreadCategory } from './complaint-thread'
 import { REPORTED_ORDER_WINDOW_DAYS } from './extract-reported-order'
 import { INTENTION_DEFINITION_BY_KEY } from './intentions/definitions'
@@ -3107,6 +3108,20 @@ export function buildAiRuntime(
       (ctx.currentMessage !== null &&
         ctx.followupTrigger === null &&
         alreadyApologised(
+          ctx.recentMessages,
+          ctx.currentMessage.receivedAt,
+          ctx.conversationWindowMs,
+        )) ||
+      undefined,
+    answeringOurOffer:
+      (ctx.currentMessage !== null &&
+        ctx.followupTrigger === null &&
+        previousReplyOffered(ctx.recentMessages)) ||
+      undefined,
+    offeredThisConversation:
+      (ctx.currentMessage !== null &&
+        ctx.followupTrigger === null &&
+        offeredThisConversation(
           ctx.recentMessages,
           ctx.currentMessage.receivedAt,
           ctx.conversationWindowMs,

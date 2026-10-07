@@ -70,6 +70,7 @@ import {
 } from '@/lib/ai/generate-message'
 import { PROMPT_VERSION } from '@/lib/ai/prompts/system-template'
 import { buildRuntimeContext } from '@/lib/agent/build-runtime-context'
+import { offeredThisConversation } from '@/lib/agent/previous-offer'
 import {
   resolveDispatchBubbles,
   resolveOutboundTail,
@@ -312,6 +313,30 @@ const CELLS: readonly Cell[] = [
       history: [
         ['in', 'can you send me the menu?'],
         ['out', 'here you go: https://lemils.com/pages/cafe-menu'],
+      ] as const,
+      gapMinutes: 1,
+    })),
+  },
+  {
+    id: '1-buy-followup',
+    what: 'the guest takes up our offer after asking for help buying beans (the 2026-10-07 phone thread, constructed)',
+    kind: 'inbound',
+    established: true,
+    units: [
+      'usually black',
+      'black mostly',
+      'i drink it black',
+      'pour over, black',
+      'black, no milk',
+    ].map((inbound, i) => ({
+      id: `black-${i + 1}`,
+      inbound,
+      history: [
+        ['in', 'can you help me buy beans'],
+        [
+          'out',
+          "you can browse everything at https://lemils.com/collections/all happy to point you toward a specific bean if you tell me what you're brewing or how you take your coffee",
+        ],
       ] as const,
       gapMinutes: 1,
     })),
@@ -830,6 +855,7 @@ async function main(): Promise<void> {
         const blocks = [
           '## You know this guest',
           '## You have already apologised',
+          '## They are answering your offer',
         ].filter((h) => user.includes(h))
         // What generateMessage does with the fields, step for step. No unit
         // here renders an intentions block, so production drops any question
@@ -847,7 +873,6 @@ async function main(): Promise<void> {
           body: beforeOffer,
           offer: offerLine,
           category,
-          gaveInstructions: object.gaveInstructions,
           commitment: object.commitment,
           repliesToGuest: unit.inbound !== undefined,
           signsOff: object.closedTheConversation || cell.kind === 'close',
@@ -855,6 +880,11 @@ async function main(): Promise<void> {
           carriesAnAsk: false,
           knowledgeGap: object.knowledgeGap,
           correctingVisit: correcting,
+          offeredThisConversation: offeredThisConversation(
+            ctx.recentMessages,
+            now,
+            ctx.conversationWindowMs,
+          ),
         })
         const sendsOffer = offer.append && beforeOffer.trim() !== ''
         const reply = sendsOffer
@@ -893,7 +923,6 @@ async function main(): Promise<void> {
           bubbles,
           offerLine,
           offerReason: offer.reason,
-          gaveInstructions: object.gaveInstructions,
           knowledgeGap: object.knowledgeGap,
           reportedVisitCorrection: object.reportedVisitCorrection,
           flags,
