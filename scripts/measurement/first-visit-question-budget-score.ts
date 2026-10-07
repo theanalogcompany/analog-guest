@@ -38,6 +38,7 @@
 export const ALLOWED_KEYS = [
   'understand_order',
   'hows_it_so_far',
+  'check_back_on_order',
   'learn_name',
   'are_they_new_here',
   'are_they_local',

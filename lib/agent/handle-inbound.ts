@@ -87,6 +87,7 @@ import {
   orderTurnVerdict,
 } from './visit-checkin'
 import {
+  claimVisitCheckback,
   recordVisitCheckinAnswer,
   recordVisitCheckinAsked,
 } from './visit-checkin-store'
@@ -2042,7 +2043,23 @@ async function runInboundTurn(
       // the row will say AFTER this message, so "it's great" lifts the hold on
       // the turn it arrives and the name ask can follow it. Set before
       // renderableIntentions runs, like ctx.reviewAsk below.
-      ctx.visitCheckinHold = (answer ?? checkin.answer) !== 'good'
+      const answerNow = answer ?? checkin.answer
+      ctx.visitCheckinHold = answerNow !== 'good'
+      // They have just said how it is, so the check-back this turn may have
+      // armed is answered before it is asked. Removed from the eligibility
+      // write too, as for the order turn above: a row would keep a required
+      // question open on their next message.
+      if (answerNow === 'good' || answerNow === 'bad') {
+        ctx.openIntentions = ctx.openIntentions.filter(
+          (o) => o.key !== 'check_back_on_order',
+        )
+        ctx.intentionDerivation = {
+          ...ctx.intentionDerivation,
+          newlyEligible: ctx.intentionDerivation.newlyEligible.filter(
+            (e) => e.key !== 'check_back_on_order',
+          ),
+        }
+      }
       if (answer !== null) {
         const checkinGuestId = ctx.guest.id
         waitUntil(
@@ -3319,6 +3336,54 @@ async function runInboundTurn(
       ) {
         waitUntil(recordAskedHowItIs('sent_field'))
       }
+      // TAC-575: this reply worked the check-back in, so the visit's one
+      // check-back is spent. Claimed and stamped sent in one write, AFTER the
+      // send, because here the question has already gone: the timer's
+      // claim-before-send order protects against a send that might not
+      // happen, and this one did. The timer cannot race it. It needs our
+      // message to be the newest and to have sat for CHECKBACK_QUIET_FLOOR_MS,
+      // and this write lands seconds after the reply.
+      //
+      // The same two signals as the question above, for the same reason.
+      const checkedBack = renderedIntentions.find(
+        (o) => o.key === 'check_back_on_order',
+      )
+      const checkbackRowId = ctx.visitCheckin?.id ?? null
+      const recordCheckedBack = async (
+        via: 'sent_field' | 'classifier',
+      ): Promise<void> => {
+        if (checkedBack === undefined || checkbackRowId === null) return
+        const claim = await claimVisitCheckback(createAdminClient(), {
+          id: checkbackRowId,
+          venueId: checkinVenueId,
+          guestId: checkinGuestId,
+          now: new Date(),
+          sent: true,
+        })
+        if (claim.status === 'failed') {
+          // The timer may now send a second check-back. Visible, not silent.
+          console.error('[agent] visit check-back claim failed', {
+            agentRunId,
+            guestId: checkinGuestId,
+            via,
+            error: claim.error,
+          })
+          return
+        }
+        console.log('[agent] visit check-back asked in conversation', {
+          agentRunId,
+          guestId: checkinGuestId,
+          via,
+          outcome: claim.status,
+        })
+      }
+      if (
+        checkedBack !== undefined &&
+        sentQuestion !== '' &&
+        dispatched.deliveredBody.includes(sentQuestion)
+      ) {
+        waitUntil(recordCheckedBack('sent_field'))
+      }
       // TAC-324 / TAC-380: close the intentions this send raised. Fire-and-
       // forget, mirroring extractReportedOrder's waitUntil posture: it never
       // blocks the reply. Uses the SENT body.
@@ -3352,6 +3417,9 @@ async function runInboundTurn(
                 // TAC-575: the second signal. See recordAskedHowItIs.
                 if (outcome.raisedKeys.includes('hows_it_so_far')) {
                   await recordAskedHowItIs('classifier')
+                }
+                if (outcome.raisedKeys.includes('check_back_on_order')) {
+                  await recordCheckedBack('classifier')
                 }
                 console.log('[agent] inbound intention prompts recorded', {
                   agentRunId,

@@ -70,6 +70,8 @@ export function formatArmsOn(armsOn: IntentionArmsOn): string {
       return "The guest's newest recorded order, from an earlier conversation. A newer one re-arms it"
     case 'same_visit_order':
       return 'The guest has just named what they got, on a visit that is happening now. A later visit re-arms it'
+    case 'checkback_due':
+      return 'The guest was asked how their order is, has not said, and is still chatting five minutes after the order. A later visit re-arms it'
     case 'first_recorded_order':
       return "The guest's earliest recorded order, as soon as one exists. No wait for the conversation to end, and a later order never re-arms it"
   }

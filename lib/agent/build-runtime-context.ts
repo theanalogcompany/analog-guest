@@ -31,7 +31,11 @@ import { parseIntentionRules } from '@/lib/schemas/intention-rules'
 import { isScanReferral } from '@/lib/schemas/referral-source'
 import { bodyMentionsMenuItem } from './extract-reported-order'
 import { scanCarryForwardAt } from './scan-arrival'
-import { resolveSameVisitOrderAt, type VisitCheckin } from './visit-checkin'
+import {
+  resolveCheckbackDueAt,
+  resolveSameVisitOrderAt,
+  type VisitCheckin,
+} from './visit-checkin'
 import { loadVisitCheckin } from './visit-checkin-store'
 // TAC-567: TAC-560's predicate, reused rather than a second definition of
 // "first conversation". warm-close.ts is pure and builds no client at import.
@@ -788,6 +792,14 @@ export async function buildRuntimeContext(input: {
         checkinUnreadable || visitCheckin !== null || promptedThisVisit,
     })
 
+    // TAC-575: is this reply the one that works the check-back in? Null unless
+    // the visit is still owed it and five minutes have passed since the order.
+    // An unreadable check-in is null here, which is "do not ask".
+    const checkbackDueAt = resolveCheckbackDueAt(
+      visitCheckin,
+      input.currentMessage.receivedAt,
+    )
+
     // The positive half of TAC-518's open question. Without it, a referral that
     // DID arrive for a returning guest leaves no trace until the model happens
     // to raise understand_order's line, and this repo has already had a stretch
@@ -884,6 +896,7 @@ export async function buildRuntimeContext(input: {
       openRecommendationsUnreadable: !activeCommitmentsResult.ok,
       recordedOrderTimes,
       sameVisitOrderAt,
+      checkbackDueAt,
       rows: intentionRows,
       inboundTimes,
       inboundHistoryFrom,
@@ -966,6 +979,21 @@ export async function buildRuntimeContext(input: {
         open: intentions.open.filter((o) => o.key !== 'hows_it_so_far'),
         newlyEligible: intentions.newlyEligible.filter(
           (n) => n.key !== 'hows_it_so_far',
+        ),
+      }
+    }
+
+    // TAC-575: the same rule for the check-back. Its intention row can outlive
+    // the reason for it: the timer may have sent the check-back since the turn
+    // that armed it, or the guest may have said how it is. `checkbackDueAt` is
+    // recomputed from the check-in on every turn, so null here means "not owed
+    // now", whatever the row says.
+    if (checkbackDueAt === null) {
+      intentions = {
+        ...intentions,
+        open: intentions.open.filter((o) => o.key !== 'check_back_on_order'),
+        newlyEligible: intentions.newlyEligible.filter(
+          (n) => n.key !== 'check_back_on_order',
         ),
       }
     }

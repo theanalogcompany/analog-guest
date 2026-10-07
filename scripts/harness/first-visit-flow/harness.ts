@@ -22,8 +22,15 @@ import { hasAnsweredGuestBefore } from '@/lib/agent/retrieval-context'
 import {
   classifyCheckinAnswer,
   isAwaitingCheckinAnswer,
+  checkbackWentUnanswered,
+  hasBeenQuietLongEnough,
+  isCheckbackDue,
+  isCheckbackTooLate,
+  lastProactiveWasThisVisit,
   nextCheckinAnswer,
   orderTurnVerdict,
+  owesCheckback,
+  resolveCheckbackDueAt,
   resolveSameVisitOrderAt,
   type VisitCheckin,
 } from '@/lib/agent/visit-checkin'
@@ -77,6 +84,7 @@ function openKeys(over: Partial<DeriveOpenIntentionsInput>): string[] {
     openRecommendationsUnreadable: false,
     recordedOrderTimes: [],
     sameVisitOrderAt: null,
+    checkbackDueAt: null,
     rows: { prompted: [], eligible: [] },
     inboundTimes: [NOW],
     conversationWindowMs: 48 * HOUR * 1000,
@@ -182,6 +190,7 @@ const orderTurn = deriveOpenIntentions({
   openRecommendationsUnreadable: false,
   recordedOrderTimes: [],
   sameVisitOrderAt: NOW,
+  checkbackDueAt: null,
   rows: { prompted: [], eligible: [] },
   inboundTimes: [NOW],
   conversationWindowMs: 48 * HOUR * 1000,
@@ -213,11 +222,11 @@ check(
   'always',
 )
 check(
-  'every other intention is left to judgement',
+  'the two order questions are required and every other intention is left to judgement',
   Object.values(INTENTION_DEFINITION_BY_KEY)
     .filter((d) => d.raise === 'always')
     .map((d) => d.key),
-  ['hows_it_so_far'],
+  ['hows_it_so_far', 'check_back_on_order'],
 )
 check(
   'no order named: the order question, not this one',
@@ -262,6 +271,7 @@ check(
     openRecommendationsUnreadable: false,
     recordedOrderTimes: [],
     sameVisitOrderAt: null,
+    checkbackDueAt: null,
     rows: {
       prompted: [],
       eligible: [{ intentionKey: 'hows_it_so_far', eligibleAt: at(-120) }],
@@ -402,11 +412,47 @@ check(
   isAwaitingCheckinAnswer({ askedAt: at(-3 * HOUR) } as VisitCheckin, NOW),
   false,
 )
+const optionalOpen = [
+  {
+    key: 'learn_name' as const,
+    promptLine: INTENTION_DEFINITION_BY_KEY.learn_name.promptLine,
+    eligibleAt: NOW,
+  },
+  {
+    key: 'are_they_local' as const,
+    promptLine: INTENTION_DEFINITION_BY_KEY.are_they_local.promptLine,
+    eligibleAt: NOW,
+  },
+]
 check(
-  'while the check-in is waiting on a good answer, nothing else renders',
-  renderableIntentions(orderTurn.open, 'casual_chatter', false, false, true)
+  'CONTROL without the hold, the optional questions render',
+  renderableIntentions(optionalOpen, 'casual_chatter', false, false, false)
+    .length,
+  2,
+)
+check(
+  'while the check-in is waiting on a good answer, no optional question renders',
+  renderableIntentions(optionalOpen, 'casual_chatter', false, false, true)
     .length,
   0,
+)
+check(
+  'the check-back itself survives the hold',
+  renderableIntentions(
+    [
+      {
+        key: 'check_back_on_order' as const,
+        promptLine: INTENTION_DEFINITION_BY_KEY.check_back_on_order.promptLine,
+        eligibleAt: NOW,
+      },
+      ...optionalOpen,
+    ],
+    'casual_chatter',
+    false,
+    false,
+    true,
+  ).map((o) => o.key),
+  ['check_back_on_order'],
 )
 
 check(
@@ -474,6 +520,184 @@ check(
     },
     inboundTimes: [at(-400), at(3 * DAY)],
   }).includes('hows_it_so_far'),
+  false,
+)
+
+// ---------------------------------------------------------------------------
+// 4b. The check-back.
+// ---------------------------------------------------------------------------
+
+const MIN = 60
+const checkin = (over: Partial<VisitCheckin>): VisitCheckin => ({
+  id: 'c-1',
+  venueLocalDate: '2026-10-06',
+  orderedAt: at(-11 * MIN),
+  askedAt: at(-11 * MIN + 5),
+  answer: null,
+  answeredAt: null,
+  checkbackClaimedAt: null,
+  checkbackSentAt: null,
+  ...over,
+})
+check('owed: asked and no answer', owesCheckback(checkin({})), true)
+check(
+  'owed: they had not tried it',
+  owesCheckback(checkin({ answer: 'not_yet' })),
+  true,
+)
+check(
+  'not owed: they said it is good',
+  owesCheckback(checkin({ answer: 'good' })),
+  false,
+)
+check(
+  'not owed: they complained',
+  owesCheckback(checkin({ answer: 'bad' })),
+  false,
+)
+check(
+  'not owed: already claimed',
+  owesCheckback(checkin({ checkbackClaimedAt: at(-60) })),
+  false,
+)
+check(
+  'timed: not due nine minutes after the order',
+  isCheckbackDue(at(-9 * MIN), NOW),
+  false,
+)
+check(
+  'timed: due ten minutes after the order',
+  isCheckbackDue(at(-10 * MIN), NOW),
+  true,
+)
+check(
+  'timed: thirty minutes after the order is still in time',
+  isCheckbackTooLate(at(-30 * MIN), NOW),
+  false,
+)
+check(
+  'timed: thirty-one minutes after is too late',
+  isCheckbackTooLate(at(-31 * MIN), NOW),
+  true,
+)
+check(
+  'timed: our reply a minute ago is too fresh to follow',
+  hasBeenQuietLongEnough(at(-60), NOW),
+  false,
+)
+check(
+  'timed: our reply two minutes ago is not',
+  hasBeenQuietLongEnough(at(-2 * MIN), NOW),
+  true,
+)
+check(
+  'in conversation: four minutes after the order, not yet',
+  resolveCheckbackDueAt(
+    checkin({ orderedAt: at(-4 * MIN), askedAt: at(-4 * MIN) }),
+    NOW,
+  ),
+  null,
+)
+check(
+  'in conversation: six minutes after the order, anchored at order plus five',
+  resolveCheckbackDueAt(
+    checkin({ orderedAt: at(-6 * MIN), askedAt: at(-6 * MIN) }),
+    NOW,
+  ),
+  at(-1 * MIN),
+)
+check(
+  'in conversation: not once they have said it is good',
+  resolveCheckbackDueAt(
+    checkin({ orderedAt: at(-6 * MIN), askedAt: at(-6 * MIN), answer: 'good' }),
+    NOW,
+  ),
+  null,
+)
+check(
+  'in conversation: not once the timer has claimed it',
+  resolveCheckbackDueAt(
+    checkin({
+      orderedAt: at(-6 * MIN),
+      askedAt: at(-6 * MIN),
+      checkbackClaimedAt: at(-30),
+    }),
+    NOW,
+  ),
+  null,
+)
+check(
+  'in conversation: not the next morning',
+  resolveCheckbackDueAt(
+    checkin({ orderedAt: at(-20 * HOUR), askedAt: at(-20 * HOUR) }),
+    NOW,
+  ),
+  null,
+)
+check(
+  'in conversation: no check-in (or unreadable)',
+  resolveCheckbackDueAt(null, NOW),
+  null,
+)
+check(
+  'in conversation: the due check-back renders alone, ahead of the name',
+  openKeys({
+    repliedMessageCount: 5,
+    facts: oneOrder,
+    recordedOrderTimes: [at(-600)],
+    checkbackDueAt: at(-1 * MIN),
+  }),
+  ['check_back_on_order'],
+)
+check(
+  'in conversation: the anchor does not re-arm on the next turn',
+  openKeys({
+    repliedMessageCount: 6,
+    facts: oneOrder,
+    recordedOrderTimes: [at(-600)],
+    checkbackDueAt: at(-1 * MIN),
+    rows: {
+      prompted: [row('check_back_on_order', at(-1 * MIN), at(-30))],
+      eligible: [],
+    },
+    inboundTimes: [at(-20), NOW],
+  }).includes('check_back_on_order'),
+  false,
+)
+check(
+  'spacing: the greeting eight minutes before the order is this visit',
+  lastProactiveWasThisVisit(at(-19 * MIN), at(-11 * MIN)),
+  true,
+)
+check(
+  'spacing: a follow-up fifty minutes before the order is not',
+  lastProactiveWasThisVisit(at(-61 * MIN), at(-11 * MIN)),
+  false,
+)
+check(
+  'spacing: no earlier unprompted message',
+  lastProactiveWasThisVisit(null, at(-11 * MIN)),
+  false,
+)
+check(
+  'unanswered: sent, and nothing from the guest since',
+  checkbackWentUnanswered(
+    checkin({ checkbackSentAt: at(-5 * MIN) }),
+    at(-8 * MIN),
+  ),
+  true,
+)
+check(
+  'unanswered: sent, and they replied',
+  checkbackWentUnanswered(
+    checkin({ checkbackSentAt: at(-5 * MIN) }),
+    at(-2 * MIN),
+  ),
+  false,
+)
+check(
+  'unanswered: never sent',
+  checkbackWentUnanswered(checkin({}), null),
   false,
 )
 
