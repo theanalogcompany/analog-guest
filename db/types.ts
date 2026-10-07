@@ -2258,6 +2258,76 @@ export type Database = {
         }
         Relationships: []
       }
+      visit_checkins: {
+        Row: {
+          answer: string | null
+          answered_at: string | null
+          asked_at: string
+          checkback_claimed_at: string | null
+          checkback_sent_at: string | null
+          created_at: string
+          followup_claimed_at: string | null
+          guest_id: string
+          id: string
+          order_message_id: string | null
+          ordered_at: string
+          venue_id: string
+          venue_local_date: string
+        }
+        Insert: {
+          answer?: string | null
+          answered_at?: string | null
+          asked_at: string
+          checkback_claimed_at?: string | null
+          checkback_sent_at?: string | null
+          created_at?: string
+          followup_claimed_at?: string | null
+          guest_id: string
+          id?: string
+          order_message_id?: string | null
+          ordered_at: string
+          venue_id: string
+          venue_local_date: string
+        }
+        Update: {
+          answer?: string | null
+          answered_at?: string | null
+          asked_at?: string
+          checkback_claimed_at?: string | null
+          checkback_sent_at?: string | null
+          created_at?: string
+          followup_claimed_at?: string | null
+          guest_id?: string
+          id?: string
+          order_message_id?: string | null
+          ordered_at?: string
+          venue_id?: string
+          venue_local_date?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "visit_checkins_guest_id_fkey"
+            columns: ["guest_id"]
+            isOneToOne: false
+            referencedRelation: "guests"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "visit_checkins_order_message_id_fkey"
+            columns: ["order_message_id"]
+            isOneToOne: false
+            referencedRelation: "messages"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "visit_checkins_venue_id_fkey"
+            columns: ["venue_id"]
+            isOneToOne: false
+            referencedRelation: "venues"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       voice_corpus: {
         Row: {
           added_by_operator_id: string | null

@@ -73,6 +73,18 @@ export function deriveReviewAsk(
   if (REVIEW_ASK_DENIED_CATEGORIES.has(classification.category)) return null
   if (ctx.pendingQuestion !== null) return null
   if (ctx.firstConversation !== false) return null
+  // TAC-575, INTERIM UNTIL PR 4 OF THAT TICKET (ruled 2026-10-06). A guest who
+  // answers "how is it so far?" with praise is, by the ruling, asked for a
+  // review at the SIGN-OFF, not here. The sign-off does not exist until PR 4,
+  // so until then this predicate is left exactly as it was and that praise
+  // raises the ask on this turn, as any praise does.
+  //
+  // PR 4 removes this fallback by adding ONE condition at this line:
+  //   if (isInsideVisitCheckin(ctx)) return null
+  // where "inside" is a check-in row for the visit still within
+  // CHECKIN_ANSWER_WINDOW_MS (lib/agent/visit-checkin.ts), or this turn's
+  // orderTurnVerdict being 'good'. Nothing else here needs to change, and
+  // nothing in this PR depends on the ask being raised.
   if (ctx.guest.reviewAskedAt !== null) return null
   const link = findReviewLink(parseVenueLinks(ctx.venue.venueInfo.links))
   if (link === null) return null

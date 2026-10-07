@@ -217,9 +217,53 @@ so a halted venue never accumulates recognition state or takes a claim.
 
 ## Intentions
 
-`intentions/`. Eight keys in `definitions.ts`, priority-ordered, arming on
-`visit_confirmed` / `first_recorded_order` / `open_recommendation` / `recorded_order` /
-`first_contact`.
+`intentions/`. Nine keys in `definitions.ts`, priority-ordered, arming on
+`visit_confirmed` / `same_visit_order` / `first_recorded_order` / `open_recommendation` /
+`recorded_order` / `first_contact`.
+
+### One intention is required, and it renders alone (TAC-575)
+
+`raise: 'always'` on a definition removes the model's licence to skip it. Only
+`hows_it_so_far` carries it: "how is it so far?" comes right after a guest names their order
+(ruled 2026-10-06), and the check-back, the sign-off and the complaint follow-up all hang off
+the answer, so a one-in-three raise rate would make them a matter of luck.
+
+- It arms on `same_visit_order`: the guest is ANSWERING A QUESTION OF OURS, a counter visit
+  is live, and the message names a menu item (`resolveSameVisitOrderAt`, `visit-checkin.ts`).
+  The menu-name prefilter, not a transaction - the order extractor runs after the reply is
+  sent. The prefilter over-matches by design, so once the turn is classified
+  `orderTurnVerdict` decides again: only `casual_chatter` / `acknowledgment` ask; a complaint
+  or a message that already praises the item is recorded as the answer with no question; a
+  question that merely names a menu item arms nothing and leaves no row.
+- While it is open it is the ONLY open intention (`requiredAlone` in `derive.ts`), and the
+  serializer swaps the "not a checklist" paragraph for `MUST_ASK_PARAGRAPH`.
+- It still goes out through `intentionQuestion` and closes through the post-send classifier.
+  A reply that already asks something still drops it in code, and it comes back next turn
+  until its two hours run out.
+
+**The answer lives on `visit_checkins` (migration 073), not on the intention.** A row is
+written when the question REACHES the guest (auto-send only; from the sent field or from the
+post-send classifier, whichever sees it), one per guest per venue-local day.
+
+**"We asked this visit" has two records and both are read**: that row, and the intention's
+prompted row. Either can be the only one written (a classifier miss, a failed insert, an
+operator-approved send), so arming reads both and a check-in closes the intention outright
+(`promptedThisVisit` and the filter after it in `build-runtime-context.ts`). The guest's next replies are read as good / bad / not yet from the classifier's existing
+`comp_complaint` category and `praisedExperience` flag (`classifyCheckinAnswer`); "not yet" is
+the default, not a detection. Bad is final, good is not.
+
+**Until they say it is good, nothing else is asked, for at most two hours from the question**
+(`ctx.visitCheckinHold`, set by `handleInbound` after classification and read by
+`renderableIntentions`; `CHECKIN_ANSWER_WINDOW_MS` bounds it, and a `bad` answer holds for the
+whole of it). **Interim until TAC-575's PR 4:** praise inside a check-in still raises the
+review ask on that turn, as any praise does; the ruled behaviour (saved for the sign-off)
+lands with the sign-off, as one condition at the marked line in `deriveReviewAsk`. It is decided
+post-classification on purpose: the message saying "it's great" has to lift the hold on the
+turn it arrives.
+
+`resolveSameVisitOrderAt` is handed `alreadyAskedThisVisit: true` when the check-in could not
+be read. The intention re-arms on a newer event, so reading a failure as "not asked" is how
+one visit gets the question twice.
 
 `first_recorded_order` and `recorded_order` are one word apart and opposite:
 `recorded_order` takes the NEWEST order and HOLDS it until the order has left the
@@ -240,12 +284,12 @@ never saw.
 ### A first conversation gets to know the guest in a fixed order (TAC-575)
 
 Ruled 2026-10-06, replacing TAC-567/568's "two questions, then the close". On a guest's
-FIRST conversation six of the eight may be raised, in `priority` order: `understand_order`,
-`learn_name`, `are_they_new_here`, then `are_they_local`, `their_rhythm`, `why_theyre_here`.
+FIRST conversation seven of the nine may be raised, in `priority` order: `understand_order`,
+`hows_it_so_far`, `learn_name`, `are_they_new_here`, then `are_they_local`, `their_rhythm`, `why_theyre_here`.
 The two about a PAST order or suggestion stay suppressed.
 
-**No getting-to-know-you question rides on a guest's first reply** (the order question is
-the one exception: it has no gate and the opener asks it). A `replies_only` gate is shut until
+**No getting-to-know-you question rides on a guest's first reply** (the two order questions,
+`understand_order` and `hows_it_so_far`, are the exceptions: neither has a gate). A `replies_only` gate is shut until
 `venueHasAnsweredBefore`, read from OUR side of the thread (`hasAnsweredGuestBefore`,
 `retrieval-context.ts`) because an inbound count cannot say "first reply": three quick
 messages reach a count of three with nothing yet said back. A venue's

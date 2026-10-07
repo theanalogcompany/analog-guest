@@ -80,6 +80,16 @@ import {
   markWarmCloseSent,
   releaseWarmCloseClaim,
 } from './warm-close-store'
+import {
+  classifyCheckinAnswer,
+  isAwaitingCheckinAnswer,
+  nextCheckinAnswer,
+  orderTurnVerdict,
+} from './visit-checkin'
+import {
+  recordVisitCheckinAnswer,
+  recordVisitCheckinAsked,
+} from './visit-checkin-store'
 import { closesFirstConversation, SIGN_OFF_CATEGORY } from './warm-close'
 import { recordInboundTurnOutcome } from './record-inbound-turn-outcome'
 import { isVenueProcessingHalted } from '@/lib/venues/status'
@@ -1892,6 +1902,73 @@ async function runInboundTurn(
     // corrects that. Fire-and-forget: nothing below waits on it.
     if (mayAutoSendAfterClassification(ctx)) startTyping(turn, ctx)
 
+    // TAC-575: this message armed "how is it so far?" before anyone had read
+    // it. Now it is classified, decide whether it really is an order report
+    // (orderTurnVerdict says why this cannot be decided at arming).
+    //
+    // BEFORE the eligibility write below, and that placement is the point. A
+    // message that turns out not to be an order must leave NO row: an
+    // eligibility row would keep the required question open for two hours and
+    // put it on the guest's next "ok cool".
+    if (
+      ctx.intentionDerivation.newlyEligible.some(
+        (e) => e.key === 'hows_it_so_far',
+      )
+    ) {
+      const verdict = orderTurnVerdict({
+        category: ctx.classification.category,
+        praisedExperience: ctx.classification.praisedExperience === true,
+      })
+      if (verdict !== 'ask') {
+        ctx.openIntentions = ctx.openIntentions.filter(
+          (o) => o.key !== 'hows_it_so_far',
+        )
+        ctx.intentionDerivation = {
+          ...ctx.intentionDerivation,
+          newlyEligible: ctx.intentionDerivation.newlyEligible.filter(
+            (e) => e.key !== 'hows_it_so_far',
+          ),
+        }
+      }
+      // They said how it is in the same breath as what it is. That IS the
+      // visit's check-in, so it is recorded without a question having been
+      // asked: the sign-off and the next-visit follow-up read this row either
+      // way.
+      if (
+        (verdict === 'good' || verdict === 'bad') &&
+        ctx.visitLocalDate !== null
+      ) {
+        const checkinGuestId = ctx.guest.id
+        waitUntil(
+          recordVisitCheckinAsked(createAdminClient(), {
+            venueId: ctx.venue.id,
+            guestId: checkinGuestId,
+            venueLocalDate: ctx.visitLocalDate,
+            orderMessageId: ctx.currentMessage.id,
+            orderedAt: ctx.currentMessage.receivedAt,
+            askedAt: ctx.currentMessage.receivedAt,
+            answer: verdict,
+          }).then((recorded) => {
+            if (!recorded.ok) {
+              console.error('[agent] visit check-in write failed', {
+                agentRunId,
+                guestId: checkinGuestId,
+                error: recorded.error,
+              })
+              return
+            }
+            console.log('[agent] visit check-in answered on the order turn', {
+              agentRunId,
+              guestId: checkinGuestId,
+              answer: verdict,
+              outcome: recorded.data,
+            })
+          }),
+        )
+      }
+      console.log('[agent] order turn read', { agentRunId, verdict })
+    }
+
     // TAC-380: persist intentions seen eligible for the first time this turn,
     // and move re-armed ones to their newer event's anchor.
     // Fire-and-forget like every intentions write; it can't affect the reply. A
@@ -1938,6 +2015,66 @@ async function runInboundTurn(
             )
           }),
       )
+    }
+
+    // TAC-575: if this guest was asked how their order is on this visit, read
+    // this message as their answer. Post-classify because both signals are the
+    // classifier's (visit-checkin.ts says why no new model call is needed), and
+    // before generation because it never blocks one: fire and forget, like the
+    // extractor below.
+    //
+    // The row was loaded at context build, so the turn that SENDS the question
+    // never reaches here with one, and the guest's order message is never read
+    // as its own answer.
+    if (
+      ctx.visitCheckin !== null &&
+      isAwaitingCheckinAnswer(ctx.visitCheckin, ctx.currentMessage.receivedAt)
+    ) {
+      const checkin = ctx.visitCheckin
+      const answer = nextCheckinAnswer(
+        checkin.answer,
+        classifyCheckinAnswer({
+          category: ctx.classification.category,
+          praisedExperience: ctx.classification.praisedExperience === true,
+        }),
+      )
+      // Until they say it is good, the venue asks nothing else. Read from what
+      // the row will say AFTER this message, so "it's great" lifts the hold on
+      // the turn it arrives and the name ask can follow it. Set before
+      // renderableIntentions runs, like ctx.reviewAsk below.
+      ctx.visitCheckinHold = (answer ?? checkin.answer) !== 'good'
+      if (answer !== null) {
+        const checkinGuestId = ctx.guest.id
+        waitUntil(
+          recordVisitCheckinAnswer(createAdminClient(), {
+            id: checkin.id,
+            venueId: ctx.venue.id,
+            guestId: checkinGuestId,
+            expected: checkin.answer,
+            answer,
+            answeredAt: ctx.currentMessage.receivedAt,
+          }).then((written) => {
+            if (!written.ok) {
+              // Logged, not swallowed: an unrecorded answer means this guest
+              // gets a check-back they did not need, or no review ask.
+              console.error('[agent] visit check-in answer write failed', {
+                agentRunId,
+                guestId: checkinGuestId,
+                answer,
+                error: written.error,
+              })
+              return
+            }
+            console.log('[agent] visit check-in answer', {
+              agentRunId,
+              guestId: checkinGuestId,
+              answer,
+              previous: checkin.answer,
+              outcome: written.data,
+            })
+          }),
+        )
+      }
     }
 
     // TAC-323: fire the self-reported-order extractor. Non-blocking by
@@ -2626,6 +2763,7 @@ async function runInboundTurn(
       ctx.classification.category,
       ctx.pendingQuestion !== null,
       ctx.reviewAsk !== null,
+      ctx.visitCheckinHold,
     )
 
     if (approval.action === 'queue') {
@@ -3097,6 +3235,90 @@ async function runInboundTurn(
             }),
         )
       }
+      // TAC-575: the "how is it so far?" question reached the guest, so this
+      // visit now has a check-in. Everything later in the visit reads this row.
+      //
+      // TWO SIGNALS, EITHER ONE WRITES THE ROW, because each misses a case the
+      // other catches:
+      //
+      //   the sent field   the question rode in `intentionQuestion` as the exact
+      //                    tail of the reply (decision 0007) and the delivered
+      //                    body contains it. Deterministic, and written at once.
+      //   the classifier   the post-send classifier below says this reply
+      //                    raised hows_it_so_far. That is the only thing that
+      //                    sees a question the model wrote into `body`, which
+      //                    TAC-554 measured it doing routinely; the field is
+      //                    then empty, or dropped for the body's own `?`.
+      //
+      // A classifier false positive writes a row for a question never asked,
+      // which costs one check-back. A missing row costs the visit its
+      // check-back, its sign-off ask and the hold on other questions, so the
+      // wider net is the cheaper mistake.
+      //
+      // `eligibleAt` is when the guest named their order: the intention's
+      // anchor is that message's arrival, which is also what "ten minutes after
+      // the order" is measured from. It is this turn's message unless the
+      // question could not go out on the order turn and is going out late.
+      //
+      // AUTO-SEND ONLY. A reply held for approval writes no row even if an
+      // operator sends it, so that visit gets no check-back, no hold on other
+      // questions and no review ask at the sign-off. It is still not asked
+      // twice: the operator path records the intention's prompt, and arming
+      // reads that too (build-runtime-context, promptedThisVisit). A known
+      // limit, stated on the PR.
+      const askedHowItIs = renderedIntentions.find(
+        (o) => o.key === 'hows_it_so_far',
+      )
+      const sentQuestion = gen.result.intentionQuestion.trim()
+      const checkinVenueId = ctx.venue.id
+      const checkinGuestId = ctx.guest.id
+      const checkinLocalDate = ctx.visitLocalDate
+      const orderMessage = {
+        id: ctx.currentMessage.id,
+        receivedAt: ctx.currentMessage.receivedAt,
+      }
+      // One writer for both signals below. Idempotent by the table's unique
+      // index, so being called by both costs a 23505 and nothing else.
+      const recordAskedHowItIs = async (
+        via: 'sent_field' | 'classifier',
+      ): Promise<void> => {
+        if (askedHowItIs === undefined || checkinLocalDate === null) return
+        const orderedAt = askedHowItIs.eligibleAt
+        const recorded = await recordVisitCheckinAsked(createAdminClient(), {
+          venueId: checkinVenueId,
+          guestId: checkinGuestId,
+          venueLocalDate: checkinLocalDate,
+          orderMessageId:
+            orderedAt.getTime() === orderMessage.receivedAt.getTime()
+              ? orderMessage.id
+              : null,
+          orderedAt,
+          askedAt: new Date(),
+        })
+        if (!recorded.ok) {
+          console.error('[agent] visit check-in write failed', {
+            agentRunId,
+            guestId: checkinGuestId,
+            via,
+            error: recorded.error,
+          })
+          return
+        }
+        console.log('[agent] visit check-in asked', {
+          agentRunId,
+          guestId: checkinGuestId,
+          venueLocalDate: checkinLocalDate,
+          via,
+          outcome: recorded.data,
+        })
+      }
+      if (
+        askedHowItIs !== undefined &&
+        sentQuestion !== '' &&
+        dispatched.deliveredBody.includes(sentQuestion)
+      ) {
+        waitUntil(recordAskedHowItIs('sent_field'))
+      }
       // TAC-324 / TAC-380: close the intentions this send raised. Fire-and-
       // forget, mirroring extractReportedOrder's waitUntil posture: it never
       // blocks the reply. Uses the SENT body.
@@ -3127,6 +3349,10 @@ async function runInboundTurn(
           })
             .then(async (outcome) => {
               if (outcome.kind === 'recorded') {
+                // TAC-575: the second signal. See recordAskedHowItIs.
+                if (outcome.raisedKeys.includes('hows_it_so_far')) {
+                  await recordAskedHowItIs('classifier')
+                }
                 console.log('[agent] inbound intention prompts recorded', {
                   agentRunId,
                   raisedKeys: outcome.raisedKeys,

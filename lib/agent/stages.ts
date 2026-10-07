@@ -60,6 +60,7 @@ import { matchComp } from './comp-backstop'
 import { isFloorCategory, matchForwardCommitment } from './complaint-floor'
 import { canAutoSendComplaintTurn } from './complaint-routing'
 import { REPORTED_ORDER_WINDOW_DAYS } from './extract-reported-order'
+import { INTENTION_DEFINITION_BY_KEY } from './intentions/definitions'
 import { renderableIntentions } from './intentions/derive'
 import { getPrimaryTagPreference } from './knowledge-tag-mapping'
 import {
@@ -2759,8 +2760,31 @@ function renderedIntentionLines(ctx: RuntimeContext): string[] | undefined {
     ctx.classification?.category ?? null,
     ctx.pendingQuestion !== null,
     ctx.reviewAsk !== null,
+    ctx.visitCheckinHold,
   )
   return rendered.length > 0 ? rendered.map((o) => o.promptLine) : undefined
+}
+
+/**
+ * TAC-575: is the one intention this turn renders a REQUIRED one?
+ *
+ * The same renderableIntentions call as the lines above, for the same reason:
+ * the paragraph that says "ask it" must only appear when the line it is about
+ * actually rendered. deriveOpenIntentions already narrowed the open set to the
+ * required intention alone, so this is a read of the first entry.
+ */
+function rendersRequiredIntention(ctx: RuntimeContext): boolean {
+  const rendered = renderableIntentions(
+    ctx.openIntentions,
+    ctx.classification?.category ?? null,
+    ctx.pendingQuestion !== null,
+    ctx.reviewAsk !== null,
+    ctx.visitCheckinHold,
+  )
+  return (
+    rendered.length > 0 &&
+    INTENTION_DEFINITION_BY_KEY[rendered[0].key].raise === 'always'
+  )
 }
 
 export function buildAiRuntime(
@@ -2938,6 +2962,7 @@ export function buildAiRuntime(
     // TAC-324 / TAC-380: the intentions this turn RENDERS, as prompt lines in
     // priority order. Not simply ctx.openIntentions; see renderedIntentionLines.
     openIntentions: renderedIntentionLines(ctx),
+    mustAskIntention: rendersRequiredIntention(ctx),
     firstTouchAfterQrScan,
     // TAC-567: carried, never recomputed. build-runtime-context resolved it
     // against the same conversationWindowMs the intention derivation used, so
@@ -2949,7 +2974,9 @@ export function buildAiRuntime(
     askNothing:
       ctx.currentMessage !== null &&
       ctx.followupTrigger === null &&
-      (ctx.firstConversation || ctx.intentionDerivation.quietAfterWarmClose),
+      (ctx.firstConversation ||
+        ctx.intentionDerivation.quietAfterWarmClose ||
+        ctx.visitCheckinHold),
     // TAC-572: null on every turn but the one that opted the guest back in.
     reOptIn: ctx.reOptIn ?? undefined,
     // TAC-389: only handle-operator-decline.ts sets this, on the trigger it

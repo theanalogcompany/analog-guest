@@ -427,6 +427,12 @@ export type RuntimeContext = {
   // on a followup or proactive turn, where the instruction may itself be to
   // ask something (the scan greeting asks what they got).
   askNothing?: boolean
+  // TAC-575: true when the one line in `openIntentions` is a REQUIRED
+  // question (the definition's `raise: 'always'`), today only "how is it so
+  // far?" right after a guest names their order. The serializer swaps the
+  // intentions block's "usually you won't ask" paragraph for one that says to
+  // ask it. Absent reads as false, which renders the ordinary paragraph.
+  mustAskIntention?: boolean
   // TAC-572: set only on the inbound turn that opted the guest back in after
   // an opt-out, and says which way ('instagram': they wrote again; 'sms_start':
   // they texted START). The serializer renders one fixed line per value telling

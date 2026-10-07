@@ -429,6 +429,10 @@ async function main(): Promise<void> {
         }),
         // The scan confirms the visit, which is what arms understand_order.
         visitConfirmedAt: startedAt,
+        // TAC-575's "how is it so far?" is NOT modelled here: null never arms
+        // it, so this harness still measures the questions it was built for.
+        // In production the order turn now carries that question instead.
+        sameVisitOrderAt: null,
         openRecommendationTimes: [],
         openRecommendationTouchedTimes: [],
         openRecommendationsUnreadable: false,
@@ -568,6 +572,7 @@ async function main(): Promise<void> {
           ctx.classification?.category ?? null,
           ctx.pendingQuestion !== null,
           ctx.reviewAsk !== null,
+          ctx.visitCheckinHold,
         )
         turnRow.renderedKeys = rendered.map((r) => r.key)
         record.renderedKeys = turnRow.renderedKeys
