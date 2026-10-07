@@ -2154,7 +2154,17 @@ import {
 //   manual UAT on a real thread. A scenario-harness diff across this bump is a
 //   baseline reset, not a regression: the generate schema gained a field.
 //
-export const PROMPT_VERSION = 'v1.83.0'
+// v1.84.0: opt-outs take effect (TAC-572). Until now nothing wrote
+//   guests.opted_out_at, so the confirmation promised something the system
+//   never did. Two prompt changes ride the fix, both approved 2026-10-06:
+//   1. The `opt_out` category instruction also tells the guest how to come
+//      back, and is the first category besides `unknown` with a channel
+//      variant: START on SMS, any message on Instagram.
+//   2. A per-turn `## Guest is back in touch` user-prompt block, rendered only
+//      on the turn that opts a guest back in (serializers.ts RE_OPT_IN_LINES),
+//      telling the model not to welcome them back or mention the opt-out.
+//
+export const PROMPT_VERSION = 'v1.84.0'
 
 export const SYSTEM_TEMPLATE = `You work at a hospitality venue (cafe, bakery, restaurant). You communicate with its guests via iMessage, in whatever voice the venue has configured below — its own collective voice, its owner's, or a named staff member's.
 

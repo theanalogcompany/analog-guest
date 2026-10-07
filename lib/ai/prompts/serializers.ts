@@ -9,6 +9,7 @@ import {
   type VenueInfo,
   type VenueServices,
 } from '@/lib/schemas'
+import type { ReOptIn } from '@/lib/guests/opt-out'
 import type { MessageChannel } from '@/lib/schemas/message-channel'
 import type { EmojiDirective } from '../emoji-cadence'
 import {
@@ -1824,6 +1825,26 @@ function formatOpenIntentions(
  * closing "no other question" line is the prompt half of the one-ask-per-turn
  * rule; composeReplyWithReviewAsk is the structural half.
  */
+/**
+ * TAC-572: the turn that opts a guest back in after an opt-out. Both texts were
+ * approved verbatim on 2026-10-06; changing either is a copy change.
+ *
+ * Why it exists: the history still holds the guest's "stop messaging me" and
+ * our confirmation, and with nothing said the model reads that and opens with
+ * a welcome back (the Oct 6 phone test). The `satisfies` makes a third way of
+ * opting back in fail `tsc` here rather than render no line.
+ */
+const RE_OPT_IN_LINES = {
+  instagram:
+    'This guest previously asked not to be messaged and has now written again. Reply to what they wrote as you would to any guest. Do not welcome them back, do not mention that they had asked you to stop, and do not comment on their return.',
+  sms_start:
+    'The guest has just texted START to hear from you again. Reply in one short line. Do not mention that they had opted out or asked you to stop.',
+} as const satisfies Record<ReOptIn, string>
+
+function formatReOptIn(reOptIn: ReOptIn): string {
+  return ['## Guest is back in touch', '', RE_OPT_IN_LINES[reOptIn]].join('\n')
+}
+
 function formatReviewAsk(reviewAsk: { url: string; label: string }): string {
   return [
     '## Ask for a review',
@@ -2109,6 +2130,13 @@ export function runtimeToProse(
   // TAC-519's measured one — asks raise from last position, not from third.
   if (runtime.reviewAsk) {
     blocks.push(formatReviewAsk(runtime.reviewAsk))
+  }
+
+  // TAC-572: after both asks and before the emoji directive, which keeps its
+  // own measured last position. Late on purpose (later beats earlier): the
+  // thing it overrides is the history, which the model has just read.
+  if (runtime.reOptIn) {
+    blocks.push(formatReOptIn(runtime.reOptIn))
   }
 
   // TAC-362: last block in, so it is the most-proximate instruction before

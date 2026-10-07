@@ -104,6 +104,14 @@ const CATEGORY_CHANNEL_SUBSTITUTIONS = {
         to: 'a real busy person messaging back',
       },
     ],
+    // TAC-572, approved 2026-10-06: the way back differs by channel. START is
+    // the SMS keyword; on Instagram any new message opts the guest back in.
+    opt_out: [
+      {
+        from: 'they can text START anytime if they want to hear from you again',
+        to: 'they can message you anytime if they want to hear from you again',
+      },
+    ],
   },
 } as const satisfies Record<
   MessageChannel,
