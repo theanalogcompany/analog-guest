@@ -12,6 +12,13 @@
 // from a closed union, which is what makes that guarantee structural rather
 // than a habit.
 //
+// ONE BRANCH SHOWS THE `code`, and it is the one with no `state`. A manual
+// authorize link carries no state, so there is no venue or operator to tie
+// the callback to and nothing here may act on it: that branch returns before
+// the environment is read, before a database client exists and before any
+// exchange. It renders the code for a person to carry to us by hand, and it
+// never logs it. A `state` is still the only thing that connects a venue.
+//
 // WHY THE ORDER OF WRITES IS WHAT IT IS. There is no transaction across
 // PostgREST, so the credential and `venues.instagram_account_id` cannot move
 // together. The conflict check runs FIRST and writes nothing on a refusal
@@ -50,6 +57,7 @@ import {
 
 import {
   INSTAGRAM_CALLBACK_FAILURE_STATUS,
+  instagramCallbackCodePage,
   instagramCallbackFailurePage,
   instagramCallbackSuccessPage,
   type InstagramCallbackFailure,
@@ -84,7 +92,14 @@ export async function GET(request: Request): Promise<Response> {
 
   // Meta sends `error=access_denied` when the operator declines. That is not
   // a fault, and it renders the same plain page as a missing parameter.
-  if (!code || !state) return fail('missing_parameters')
+  if (!code) return fail('missing_parameters')
+
+  // No state: the manual authorize link. Show the code and stop. See the
+  // header — nothing below this branch runs for it.
+  if (!state) {
+    const codePage = instagramCallbackCodePage(code)
+    return codePage === null ? fail('missing_parameters') : html(codePage, 200)
+  }
 
   const appId = process.env.INSTAGRAM_APP_ID
   const appSecret = process.env.INSTAGRAM_APP_SECRET
