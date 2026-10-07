@@ -2446,7 +2446,31 @@ import {
 //   plain close. Every other turn is unchanged in the user prompt and gains
 //   one rule in this one.
 //
-export const PROMPT_VERSION = 'v1.95.0'
+// v1.96.0 (question pacing, 2026-10-07): one sentence on the end of
+// `## No questions this turn` (serializers.ts, NO_QUESTION_RESTRAINT), wording
+// approved verbatim: "Asking nothing is not the same as saying little: the
+// reply is still a warm sentence or two in your usual voice, never a bare link
+// or a one-word answer."
+//
+//   WHY. The same change stops a getting-to-know-you question riding on a turn
+//   that is asking for something (lib/agent/intentions/pacing.ts), so on a first
+//   conversation that turn now renders this block where the intentions block
+//   used to be. "Answer what they wrote and leave it there" then read as "say as
+//   little as possible": a constructed menu request came back as the bare link
+//   7 times in 10 without the sentence, and 0 in 10 with it, twice (once on
+//   v1.95.0's branch before it merged, once here; rules-on arm of
+//   scripts/measurement/question-pacing-replay.ts, bodies in the PR).
+//
+//   One thread, one venue, ten replies a run. The replies it produces are
+//   "here you go: <link>", which is a clause rather than a sentence or two;
+//   ruled fine, and the follow-on offer line is a later change.
+//
+//   BASELINE RESET for every turn that renders the block: a guest's first
+//   reply, the quiet after a warm close, and now any first-conversation turn
+//   where pacing or a check-in holds the questions. No rule in this template
+//   changed.
+//
+export const PROMPT_VERSION = 'v1.96.0'
 
 export const SYSTEM_TEMPLATE = `You work at a hospitality venue (cafe, bakery, restaurant). You communicate with its guests via iMessage, in whatever voice the venue has configured below — its own collective voice, its owner's, or a named staff member's.
 
