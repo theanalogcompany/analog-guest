@@ -231,34 +231,38 @@ Two predicates must move together: `shouldRenderOpenIntentions` (render side) an
 classifier is offered intentions the prompt never showed, which closes goals the guest
 never saw.
 
-### A first conversation asks two things, then the close (TAC-567/TAC-568)
+### A first conversation gets to know the guest in a fixed order (TAC-575)
 
-On a guest's FIRST conversation only `understand_order` and `learn_name` may be raised, plus
-`are_they_new_here` **once `guests.warm_close_sent_at` is set**. The other five are suppressed
-outright. Ruled 2026-09-30 after a fresh scan asked four questions across three messages.
+Ruled 2026-10-06, replacing TAC-567/568's "two questions, then the close". On a guest's
+FIRST conversation six of the eight may be raised, in `priority` order: `understand_order`,
+`learn_name`, `are_they_new_here`, then `are_they_local`, `their_rhythm`, `why_theyre_here`.
+The two about a PAST order or suggestion stay suppressed.
 
-**Learning the name is the first conversation's closing moment** - `closesFirstConversation`
-(`warm-close.ts`) sends the warm close on the turn that stores it.
+**Nothing is asked in a guest's first reply.** Every `replies_only` gate now carries a
+`firstMessageMinReplies` of at least 3, and that field is not venue-overridable, so it is the
+floor under `intention_rules.min_replies`. What keeps six from reading as an interview is the
+reply counts (3, 3, 5, 8, 11), one question per turn, and the brake - not this policy.
 
-`onFirstConversation` on the definition is the one declaration - `'allowed' | 'suppressed' |
-'after_warm_close'` - so a new intention must answer it or fail `tsc`; nothing in `derive.ts`
-branches on a key, and its `switch` is over the closed union.
+`onFirstConversation` on the definition is the one declaration - `'allowed' | 'suppressed'` -
+so a new intention must answer it or fail `tsc`; nothing in `derive.ts` branches on a key, and
+its `switch` is over the closed union. "First conversation" is TAC-560's `isFirstConversation`
+(`warm-close.ts`), resolved once in `build-runtime-context` against the same
+`conversationWindowMs` the brake reads, anchored on `first_contacted_at ?? created_at`, and
+carried on `RuntimeContext.firstConversation`.
 
-**Why `are_they_new_here` is deferred rather than suppressed**, since the morning ruling
-removed it outright and the amendment put it back: it closes on `hasRepeatVisitsOnRecord`, so
-by the second visit the record already satisfies it. "Never on a first conversation" and
-"never at all" are the same sentence for this one intention. The turn that SENDS the close
-still sees `warmCloseSent: false`, because intentions are derived before the reply is
-generated - so it is the guest's next message that can raise it. "First conversation" is
-TAC-560's `isFirstConversation` (`warm-close.ts`), resolved once in `build-runtime-context`
-against the same `conversationWindowMs` the brake reads, anchored on
-`first_contacted_at ?? created_at`, and carried on `RuntimeContext.firstConversation`.
+**The warm close is triggered by a lull, never by a stored name.** In conversation it needs
+the guest's sign-off AND the model's goodbye (`closesFirstConversation`); otherwise the pause
+timer sends it, for any first Instagram conversation, scanned or not.
 
-**`deriveOpenIntentions` applies it TWICE and neither is redundant.** The arming loop skips a
-suppressed intention, so no `eligible_at` row is written and its window does not start ticking
-on a question nobody may ask. The open-set filter is the actual guarantee: first-contact
-eligibility is STICKY, so a row already on file is never re-gated and only the filter can stop
-it rendering.
+**After a warm close, no question until the guest is two messages past it**
+(`isQuietAfterWarmClose`, `warm-close.ts`). It has the brake's shape: nothing renders, nothing
+is recorded, so every intention comes back open. Not limited to a first conversation.
+
+**`deriveOpenIntentions` applies the first-conversation policy TWICE and neither is
+redundant.** The arming loop skips a suppressed intention, so no `eligible_at` row is written
+and its window does not start ticking on a question nobody may ask. The open-set filter is the
+actual guarantee: first-contact eligibility is STICKY, so a row already on file is never
+re-gated and only the filter can stop it rendering.
 
 The prompt half is a restraint paragraph the serializer renders into the intentions block when
 `firstConversation` is true. It rides that block, so it does not render on a first-conversation
@@ -309,7 +313,7 @@ Prompt wording cannot reach any of this: see `docs/decisions/0007-intention-ques
 
 Three paths reach a guest with no inbound behind them: the scan greeting (TAC-536; started by
 the Instagram webhook's fast path, cron as backstop, so only pausing the venue stops it), the warm
-close (TAC-560), the inquiry follow-up (TAC-386, `lib/followups/`). **No two within 60
+close (TAC-560; any first Instagram conversation since TAC-575), the inquiry follow-up (TAC-386, `lib/followups/`). **No two within 60
 minutes**, via `proactive-spacing.ts` and `guests.last_proactive_send_at`. A follow-up is NOT
 a warm-close anchor, excluded inside `loadWarmCloseCandidates`. Reasons in those headers.
 

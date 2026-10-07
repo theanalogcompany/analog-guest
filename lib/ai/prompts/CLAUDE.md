@@ -29,7 +29,7 @@ open goal. Those belong to the universal layer.
 
 ## Universal voice rules
 
-Currently R1 through R40 in `SYSTEM_TEMPLATE`. **Check the file for the count and never
+Currently R1 through R41 in `SYSTEM_TEMPLATE`. **Check the file for the count and never
 trust a number quoted elsewhere, including this sentence.**
 
 Numbering is **positional and append-only.** Never insert mid-list and never reuse a
