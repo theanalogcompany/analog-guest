@@ -155,6 +155,32 @@ const DEFAULT_GRAPH_INPUT = {
       closedWhen: [],
     },
     {
+      // The GUEST's own agenda, owner-approved 2026-10-06. Every other move
+      // is the house learning something about the guest, each closed by a
+      // profile field - so the moves header's "your one question is for
+      // these" had nothing in "these" standing for what the guest actually
+      // asked. Measured on v2.10.0-draft: "what is a good first order?"
+      // returned a bare welcome 11/11 while retrieval had already handed the
+      // model the answer, and leave-one-out over all 22 prompt units put the
+      // cause in that header - the last instruction before the guest's
+      // message. This move removes the conflict instead of rewording it:
+      // 3/3 on the defect, service-desk register 0/3 on a bare "hey"
+      // (matching control, where earlier wordings scored 3/3).
+      //
+      // The second sentence is load-bearing and owner-ruled: without it the
+      // move becomes an aim to EXTRACT intent and pulls "what can I help you
+      // with?" onto an opener that asked nothing. Self-disabling, the same
+      // shape understand_order uses ("if they have not been in, there is
+      // nothing to ask about").
+      //
+      // closedWhen is empty and always will be - no profile field can close
+      // what the guest wants from you this turn.
+      key: 'what_they_came_for',
+      homeState: 'first_contact',
+      goal: 'What they asked you for, when they have asked for something. Nothing to draw out of them - if their message carries no request, there is nothing here.',
+      closedWhen: [],
+    },
+    {
       key: 'first_or_returning',
       homeState: 'first_visit',
       goal: "Learn whether this was their first time in or they've been coming a while - it changes how you talk to them.",
