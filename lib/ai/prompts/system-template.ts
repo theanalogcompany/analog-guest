@@ -2524,6 +2524,15 @@ import {
 //   (leaves the door open) and gains a boundary against the rule on telling a
 //   guest to get in touch, which renders later.
 //
+//   ONE OFFER PER CONVERSATION, decided in code (lib/agent/previous-offer.ts):
+//   a thread about buying beans carried an offer on every reply. And a new
+//   user-prompt block, `## They are answering your offer` (serializers.ts),
+//   rendered when our last message ended with one: the guest's short answer
+//   is about what came before it, so a guest looking to buy is recommended
+//   the thing to buy with its link, not something to order at the counter.
+//   Measured on that thread, constructed: 10 of 10 a bag with its link, 0 of
+//   10 a second offer.
+//
 //   BASELINE RESET for every turn (shared template, one fewer schema field).
 //
 export const PROMPT_VERSION = 'v1.99.0'

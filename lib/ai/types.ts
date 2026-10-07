@@ -506,6 +506,13 @@ export type RuntimeContext = {
   // True when a message of ours that reached this guest in the current
   // conversation already said sorry. Renders `## You have already apologised`.
   alreadyApologised?: boolean
+  // True when the last message of ours that reached this guest ended with an
+  // offer of more help (lib/agent/previous-offer.ts). The serializer renders
+  // `## They are answering your offer`.
+  answeringOurOffer?: boolean
+  // True when any message of ours in the current conversation ended with one.
+  // The offer decision sends at most one per conversation.
+  offeredThisConversation?: boolean
   // TAC-389: true only on an operator-initiated decline turn. Computed in
   // buildAiRuntime from ctx.followupTrigger.isOperatorDecline; the serializer
   // reads it to render the decline-specific `## Active commitments` intro,

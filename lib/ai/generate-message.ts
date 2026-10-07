@@ -949,6 +949,7 @@ export async function generateMessage(
           composed.intentionQuestion !== '' || withAsk.reviewAsk !== '',
         knowledgeGap: rawObject.knowledgeGap,
         correctingVisit: correcting,
+        offeredThisConversation: input.runtime.offeredThisConversation === true,
       })
       // Logged like the drops above: a line the model wrote and code withheld
       // is guest-facing text removed, and has to be countable.

@@ -57,6 +57,8 @@ export interface FurtherHelpOfferInput {
   knowledgeGap: boolean
   /** The reply is checking or taking back a visit the guest reported. */
   correctingVisit: boolean
+  /** A message of ours in this conversation already ended with an offer. */
+  offeredThisConversation: boolean
 }
 
 export type FurtherHelpOfferReason =
@@ -66,6 +68,7 @@ export type FurtherHelpOfferReason =
   | 'no_offer_written'
   | 'offer_is_a_question'
   | 'correcting_visit'
+  | 'offered_this_conversation'
   | 'nothing_to_offer_about'
   | 'not_a_reply'
   | 'sign_off'
@@ -133,6 +136,9 @@ export function decideFurtherHelpOffer(input: FurtherHelpOfferInput): {
   if (!input.repliesToGuest) return no('not_a_reply')
   if (input.knowledgeGap) return no('knowledge_gap')
   if (input.correctingVisit) return no('correcting_visit')
+  // One per conversation (ruled 2026-10-07): an offer on the end of every
+  // answer in a thread read as a script.
+  if (input.offeredThisConversation) return no('offered_this_conversation')
   if (input.onComplaintTurn || input.category === 'comp_complaint') {
     return no('complaint')
   }

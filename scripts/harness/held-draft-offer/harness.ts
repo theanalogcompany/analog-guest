@@ -12,12 +12,20 @@
 
 import { readFileSync } from 'node:fs'
 
-import { heldDraftBody } from '@/lib/agent/held-draft-body'
+import { heldDraftBody, withoutOfferBubble } from '@/lib/agent/held-draft-body'
+import {
+  offeredThisConversation,
+  previousReplyOffered,
+} from '@/lib/agent/previous-offer'
 import {
   resolveDispatchBubbles,
   resolveOutboundTail,
 } from '@/lib/agent/sentence-split'
-import { appendFurtherHelpOffer } from '@/lib/ai/further-help-offer'
+import {
+  appendFurtherHelpOffer,
+  decideFurtherHelpOffer,
+} from '@/lib/ai/further-help-offer'
+import type { RecentMessage } from '@/lib/ai/types'
 
 let failures = 0
 function check(name: string, actual: unknown, expected: unknown): void {
@@ -132,6 +140,136 @@ check(
 check(
   'wiring: nothing in schedule-and-send stores the whole reply as one message',
   source.includes('collapseToSingleMessage('),
+  false,
+)
+
+// A suffix that lands inside a word is not a tail.
+check(
+  'held: an offer that only matches the end of a word is not cut',
+  heldDraftBody({ body: 'see the menu', furtherHelpOffer: 'nu' }),
+  'see the menu',
+)
+
+// THE INSTAGRAM PARTIAL SEND. Some messages went out and the rest become a
+// card. By then the offer is its own message, full stop stripped.
+check(
+  'partial send: the offer is dropped from what is carded',
+  withoutOfferBubble(['second half of the answer', OFFER], `${OFFER}.`),
+  ['second half of the answer'],
+)
+check(
+  'partial send: when only the offer failed, nothing is left to card',
+  withoutOfferBubble([OFFER], OFFER),
+  [],
+)
+check(
+  'control: a reply with no offer keeps every unsent message',
+  withoutOfferBubble(['second half of the answer', 'and a third'], ''),
+  ['second half of the answer', 'and a third'],
+)
+
+// ONE OFFER PER CONVERSATION (ruled 2026-10-07).
+const NOW = new Date('2026-10-07T20:00:00Z')
+const HOUR_MS = 60 * 60 * 1000
+const WINDOW_MS = 48 * HOUR_MS
+const msg = (
+  direction: 'inbound' | 'outbound',
+  body: string,
+  minutesAgo: number,
+  delivery: RecentMessage['delivery'] = 'delivered',
+): RecentMessage => ({
+  direction,
+  body,
+  createdAt: new Date(NOW.getTime() - minutesAgo * 60_000),
+  delivery,
+})
+// The 2026-10-07 phone thread, constructed.
+const beansThread = [
+  msg('inbound', 'can you help me buy beans', 3),
+  msg(
+    'outbound',
+    "you can browse everything at https://example.com/collections/all happy to point you toward a specific bean if you tell me what you're brewing",
+    2,
+  ),
+]
+const noOfferThread = [
+  msg('inbound', 'what time do you close', 3),
+  msg('outbound', '3pm today', 2),
+]
+const base = {
+  body: 'for black coffee the light roast is the one: https://example.com/products/light',
+  offer: 'glad to help you pick a grind too',
+  category: 'recommendation_request' as const,
+  commitment: {},
+  repliesToGuest: true,
+  signsOff: false,
+  onComplaintTurn: false,
+  carriesAnAsk: false,
+  knowledgeGap: false,
+  correctingVisit: false,
+}
+const decide = (thread: RecentMessage[], asOf = NOW) =>
+  decideFurtherHelpOffer({
+    ...base,
+    offeredThisConversation: offeredThisConversation(thread, asOf, WINDOW_MS),
+  })
+check(
+  'control: the first answer in a conversation gets its offer',
+  decide(noOfferThread),
+  {
+    append: true,
+    reason: 'link',
+  },
+)
+check('once: the reply after an offer carries none', decide(beansThread), {
+  append: false,
+  reason: 'offered_this_conversation',
+})
+check(
+  'once: nor does a later reply, with other messages in between',
+  decide([
+    ...beansThread,
+    msg('inbound', 'usually black', 1.5),
+    msg(
+      'outbound',
+      'the light roast then: https://example.com/products/light',
+      1,
+    ),
+    msg('inbound', 'and for espresso?', 0.5),
+  ]),
+  { append: false, reason: 'offered_this_conversation' },
+)
+check(
+  'control: an offer from before the conversation window does not count',
+  decide(beansThread, new Date(NOW.getTime() + WINDOW_MS + HOUR_MS)),
+  { append: true, reason: 'link' },
+)
+check(
+  'control: an offer in a draft the guest never received does not count',
+  decide([
+    msg('inbound', 'can you help me buy beans', 3),
+    msg('outbound', beansThread[1]?.body ?? '', 2, 'awaiting_review'),
+  ]),
+  { append: true, reason: 'link' },
+)
+// What turns on the `## They are answering your offer` block.
+check(
+  'answering: our last message ended with an offer',
+  previousReplyOffered(beansThread),
+  true,
+)
+check(
+  'control: our last message was a plain answer',
+  previousReplyOffered(noOfferThread),
+  false,
+)
+check(
+  'control: an offer two messages back is not what they are answering',
+  previousReplyOffered([
+    ...beansThread,
+    msg('inbound', 'usually black', 1.5),
+    msg('outbound', 'the light roast then', 1),
+  ]),
   false,
 )
 
