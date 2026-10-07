@@ -1,0 +1,24 @@
+{
+  "source": "CONSTRUCTED from Jaipal's description of the 2026-10-07 phone test. The real rows were deleted when the guest was reset, so no line here is captured traffic.",
+  "note": "The guest's four earlier messages and our three earlier replies are fixed text. Only the reply to the last message is generated. Our third reply ends on the name question, which the guest then ignores; that is the state the run is about.",
+  "nameQuestion": "by the way, what's your name?",
+  "history": [
+    { "direction": "inbound", "body": "hi" },
+    { "direction": "outbound", "body": "hey, good to hear from you 🙂" },
+    { "direction": "inbound", "body": "do you have oat milk?" },
+    { "direction": "outbound", "body": "we do, oat milk works in anything on the menu" },
+    { "direction": "inbound", "body": "can i get a flat white" },
+    {
+      "direction": "outbound",
+      "body": "yes, just order at the counter when you're in and we'll make it. by the way, what's your name?",
+      "asks": "learn_name"
+    },
+    { "direction": "inbound", "body": "ok thanks" },
+    { "direction": "outbound", "body": "anytime" }
+  ],
+  "measuredInbound": "can i see the menu",
+  "expected": {
+    "main": "the menu link, plus \"do you live or work nearby?\" (are_they_local)",
+    "rules_on": "the menu link, and no getting-to-know-you question"
+  }
+}

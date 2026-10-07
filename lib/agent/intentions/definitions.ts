@@ -379,6 +379,23 @@ export interface IntentionDefinition {
    */
   raise: 'when_it_fits' | 'always'
   /**
+   * What sets the moment for this question: the visit, or the conversation.
+   *
+   * Ruled 2026-10-07, after a phone test asked whether the guest lives nearby
+   * in the same reply as the menu link, with the name question still
+   * unanswered. A `'conversation'` intention is a getting-to-know-you question
+   * and is held to the pacing rules in pacing.ts: one open question at a time,
+   * only on a relaxed turn, and a ceiling per conversation. A `'visit'`
+   * intention is tied to an order or a suggestion and none of those rules
+   * touch it.
+   *
+   * DECLARED PER INTENTION, like `onFirstConversation` and for its reason:
+   * `first_contact` arms four of the five paced ones and `first_recorded_order`
+   * the fifth, so there is no structural property to read this off, and
+   * nothing in derive.ts or pacing.ts branches on a key.
+   */
+  pacing: 'conversation' | 'visit'
+  /**
    * Rendered verbatim as one line in the "## What you're hoping to get to"
    * block. Phrased as a state Sana is in ("you don't know...") rather than an
    * instruction ("ask...") — the difference is the whole mechanism.
@@ -455,6 +472,7 @@ const DEFINITIONS = {
     // all, and the opener asks it outright.
     onFirstConversation: 'allowed',
     raise: 'when_it_fits',
+    pacing: 'visit',
     promptLine: "You haven't heard what this guest ordered yet.",
     // Deliberately says nothing about how the drink or food WAS: that belongs
     // to did_they_like_it. Left in, a "how was your drink?" send would close
@@ -481,6 +499,7 @@ const DEFINITIONS = {
     onFirstConversation: 'allowed',
     // The one required question. See `raise`.
     raise: 'always',
+    pacing: 'visit',
     // A STATE, like every line here, and it names the item nowhere: the guest's
     // own message is in the thread, and a line that quoted an example drink
     // would be the thing a model reproduces.
@@ -512,6 +531,7 @@ const DEFINITIONS = {
     // judgement it would be worked in about one time in three, and the guest
     // who keeps chatting is the one the timer never reaches.
     raise: 'always',
+    pacing: 'visit',
     // A STATE, and it says why this is a second ask rather than a first: the
     // model can see its own earlier "how is it?" in the thread, and R41 tells
     // it not to reuse a line, so it has to know this is a deliberate return to
@@ -568,6 +588,7 @@ const DEFINITIONS = {
     // The history above is why it was never simply 'suppressed'.
     onFirstConversation: 'allowed',
     raise: 'when_it_fits',
+    pacing: 'conversation',
     // Ruled verbatim by Jaipal, 2026-09-29. THIS IS THE ORIGINAL WORDING, ruled
     // back after a second one was tried and measured worse. Read the history
     // before rewording it, because the obvious fix has been tried.
@@ -629,6 +650,7 @@ const DEFINITIONS = {
     // not something to follow up inside it.
     onFirstConversation: 'suppressed',
     raise: 'when_it_fits',
+    pacing: 'visit',
     promptLine:
       "You suggested something to this guest and haven't heard whether they tried it.",
     classifierDescription:
@@ -651,6 +673,7 @@ const DEFINITIONS = {
     // inventing it in the body on turn 2.
     onFirstConversation: 'suppressed',
     raise: 'when_it_fits',
+    pacing: 'visit',
     promptLine:
       'You know what this guest ordered, but not whether they liked it.',
     classifierDescription:
@@ -683,6 +706,7 @@ const DEFINITIONS = {
     // the turn that stored a name, and TAC-575 moved the close to a lull.
     onFirstConversation: 'allowed',
     raise: 'when_it_fits',
+    pacing: 'conversation',
     // TAC-541 ruling 3. THE SHAPE IS PART OF THE LINE, and the generic
     // restraint paragraph is what made that necessary: "one short question on
     // the end is fine" is true of every intention here, and on a name it
@@ -721,6 +745,7 @@ const DEFINITIONS = {
     // onFirstConversation.
     onFirstConversation: 'allowed',
     raise: 'when_it_fits',
+    pacing: 'conversation',
     promptLine: "You don't know whether this guest lives or works nearby.",
     classifierDescription:
       "asks whether the guest lives or works nearby, or where they're coming from",
@@ -741,6 +766,7 @@ const DEFINITIONS = {
     // onFirstConversation.
     onFirstConversation: 'allowed',
     raise: 'when_it_fits',
+    pacing: 'conversation',
     // TIME OF DAY, never frequency (TAC-380 ruling 2). R23 bans stating or
     // implying how often a guest visits, and the real trip is the turn AFTER
     // the question — "since you're in most mornings" — when the model uses the
@@ -766,6 +792,7 @@ const DEFINITIONS = {
     // onFirstConversation.
     onFirstConversation: 'allowed',
     raise: 'when_it_fits',
+    pacing: 'conversation',
     promptLine: "You don't know what brings this guest in.",
     classifierDescription:
       'asks what brings the guest in, or what they come in for',

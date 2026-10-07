@@ -420,6 +420,10 @@ async function main(): Promise<void> {
         recordedOrderTimes: orderOnRecord ? [orderAt] : [],
         rows: { prompted, eligible: [] },
         inboundTimes: [receivedAt],
+        // The pacing rules read message text only to judge whether a guest is
+        // engaged, which this fixture does not exercise. Rule 1 (one open
+        // question) does apply here, off `prompted` and the facts above.
+        inboundMessages: [{ at: receivedAt, body: null }],
         // The in-memory thread, read the way production reads the stored one.
         venueHasAnsweredBefore: hasAnsweredGuestBefore(history),
         conversationWindowMs: CONVERSATION_WINDOW_MS,

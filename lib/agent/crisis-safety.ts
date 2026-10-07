@@ -86,6 +86,7 @@ export function buildCrisisSafetyResult(): GenerateMessageResult {
     intentionQuestionDuplicateStripped: false,
     // TAC-567: this path composes no question, so the gate never fired.
     intentionQuestionDroppedForBodyQuestion: false,
+    intentionQuestionDroppedForTaskDraft: false,
     askDroppedForVisitCorrection: false,
     // This path composes no review ask, so that gate never fired either.
     reviewAskDroppedForBodyQuestion: false,

@@ -14,6 +14,7 @@ import { composePrompt } from './compose-prompt'
 import { containsEmoji } from './emoji-cadence'
 import { PROMPT_VERSION } from './prompts/system-template'
 import { matchSelfTalk } from './self-talk-detector'
+import { isTaskDraft } from './task-draft'
 import { findUnverifiedUrls, URL_TOKEN_SPLITTER } from './url-detector'
 import type {
   AIResult,
@@ -714,6 +715,8 @@ export async function generateMessage(
     // TAC-573: whether the visit-correction gate dropped an ask on the shipped
     // attempt.
     let askDroppedForCorrection = false
+    // Whether the task-draft gate dropped the question on the shipped attempt.
+    let droppedForTaskDraft = false
     // Order-preserving and deduped, so a link flagged on attempt 1 is still
     // named on attempt 3 alongside anything new attempt 2 invented.
     const unverifiedUrlsSeen: string[] = []
@@ -847,9 +850,32 @@ export async function generateMessage(
           '[ai] generateMessage: dropped an intention question, no intentions block was rendered this turn',
         )
       }
+      // Ruled 2026-10-07: a getting-to-know-you question never rides on a
+      // reply that sends a link or makes a recommendation. The category gate
+      // (renderableIntentions) keeps the block off a turn that is asking for
+      // something; this is the draft's own half, for a reply that turned into
+      // a task anyway. A link in the answer or an emitted commitment (a
+      // recommendation, a hold, a comp) is the signal, read off the generation
+      // with no further model call (isTaskDraft).
+      //
+      // Only when every rendered line is a getting-to-know-you one: the field
+      // does not say which line the model took, and a question about the
+      // visit's order is not this rule's to drop. Nothing is written and
+      // nothing closes, the same cost as the two drops above.
+      const taskDraft =
+        input.runtime.conversationPacedIntentionsOnly === true &&
+        rawObject.intentionQuestion.trim() !== '' &&
+        isTaskDraft(rawObject.body, rawObject.commitment)
+      if (taskDraft) {
+        console.warn(
+          '[ai] generateMessage: dropped a getting-to-know-you question, the reply carries a link or a commitment',
+        )
+      }
       const composed = composeReplyWithIntention(
         rawObject.body,
-        correcting || droppedForNoBlock ? '' : rawObject.intentionQuestion,
+        correcting || droppedForNoBlock || taskDraft
+          ? ''
+          : rawObject.intentionQuestion,
       )
       if (composed.duplicateStripped) {
         console.warn(
@@ -893,6 +919,7 @@ export async function generateMessage(
       }
       lastResult = object
       askDroppedForCorrection = droppedForCorrection
+      droppedForTaskDraft = taskDraft
       duplicateStripped = composed.duplicateStripped
       droppedForBodyQuestion = composed.droppedForBodyQuestion
       reviewAskDropped = withAsk.droppedForBodyQuestion
@@ -996,6 +1023,7 @@ export async function generateMessage(
         // Carried for the same reason as the line above: it edits guest-facing
         // text, so its firing rate has to be countable rather than inferred.
         intentionQuestionDroppedForBodyQuestion: droppedForBodyQuestion,
+        intentionQuestionDroppedForTaskDraft: droppedForTaskDraft,
         // The exact tail of `body` when non-empty, the intentionQuestion
         // identity one field over. Dispatch peels it off as its own last
         // bubble; '' means this turn carries no review ask.

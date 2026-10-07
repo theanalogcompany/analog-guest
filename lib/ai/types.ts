@@ -484,6 +484,12 @@ export type RuntimeContext = {
   // intentions block's "usually you won't ask" paragraph for one that says to
   // ask it. Absent reads as false, which renders the ordinary paragraph.
   mustAskIntention?: boolean
+  // True when every line in `openIntentions` is a getting-to-know-you question
+  // (the definition's `pacing: 'conversation'`). generateMessage then drops the
+  // question from a reply that carries a link or a commitment: ruled
+  // 2026-10-07, such a question never rides on a reply that is doing a job.
+  // Absent reads as false, which drops nothing.
+  conversationPacedIntentionsOnly?: boolean
   // TAC-572: set only on the inbound turn that opted the guest back in after
   // an opt-out, and says which way ('instagram': they wrote again; 'sms_start':
   // they texted START). The serializer renders one fixed line per value telling
@@ -761,6 +767,13 @@ export type GenerateMessageResult = {
    * card) say `false` because they never compose a question at all.
    */
   intentionQuestionDroppedForBodyQuestion: boolean
+  /**
+   * Whether a getting-to-know-you question was dropped because the reply it
+   * would have followed carries a link or a commitment (ruled 2026-10-07: never
+   * in a reply that sends a link or makes a recommendation). Same countability
+   * contract as the flag above. `false` at the synthetic construction sites.
+   */
+  intentionQuestionDroppedForTaskDraft: boolean
   /**
    * TAC-573: whether a getting-to-know-you question or a review ask was dropped
    * because this reply is a gentle check or accepts a retraction. Ruled
