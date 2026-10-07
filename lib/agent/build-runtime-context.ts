@@ -160,7 +160,7 @@ export async function buildRuntimeContext(input: {
   let messagesQuery = supabase
     .from('messages')
     .select(
-      'id, direction, body, created_at, generation_id, status, review_state, category',
+      'id, direction, body, created_at, generation_id, status, review_state, category, review_reason',
     )
     .eq('venue_id', input.venueId)
     .eq('guest_id', input.guestId)

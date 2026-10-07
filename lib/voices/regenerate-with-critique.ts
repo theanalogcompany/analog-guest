@@ -44,6 +44,7 @@ import {
   type VoiceCorpusChunk as AiVoiceCorpusChunk,
 } from '@/lib/ai'
 import { buildRuntimeContext } from '@/lib/agent/build-runtime-context'
+import { resolveComplaintThreadCategory } from '@/lib/agent/complaint-thread'
 import {
   buildAiRuntime,
   retrieveKnowledgeWithContextStage,
@@ -325,6 +326,16 @@ export async function regenerateWithCritique(
   // handle-inbound.ts's identical short circuit) — regenerating it here
   // would run exactly the generateMessage call that mechanism exists to
   // bypass, on a message this repo has decided must never be persona-styled.
+  // The live turn's category, not only the classifier's pick: the answer to a
+  // complaint's clarifying question ran as comp_complaint (complaint-thread.ts),
+  // so its regen must too or it is rewritten under the wrong instructions. The
+  // pure half of classifyStage's carry, without the stage's event.
+  const { category } = resolveComplaintThreadCategory({
+    classifierCategory: classification.data.category,
+    crisisSafety: classification.data.crisisSafety,
+    openComplaintClarification: ctx.openComplaintClarification,
+  })
+
   if (classification.data.crisisSafety) {
     return {
       ok: false,
@@ -371,7 +382,7 @@ export async function regenerateWithCritique(
   // emits no PostHog or Langfuse event, only a console.warn on degrade.
   const knowledgeRows = await retrieveKnowledgeWithContextStage(
     ctx,
-    classification.data.category,
+    category,
     load.data.inbound.body,
   )
   const knowledgeChunks: AiKnowledgeCorpusChunk[] = knowledgeRows.map((c) => ({
@@ -402,7 +413,7 @@ export async function regenerateWithCritique(
   // and returns the best attempt. No SEND_FIDELITY_FLOOR check — operator
   // decides what's good enough by reading the result.
   const gen = await generateMessage({
-    category: classification.data.category,
+    category,
     persona: ctx.venue.brandPersona,
     venueInfo: ctx.venue.venueInfo,
     ragChunks,

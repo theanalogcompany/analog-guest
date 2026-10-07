@@ -40,6 +40,13 @@
 //   - The gate reads the base guest's live pending cards. One would add
 //     previous_pending_held to a queued unit; triggers are logged per unit so
 //     that is visible, and no bar reads that trigger.
+//   - WHETHER build-runtime-context DERIVES THE FLAG FROM REAL ROWS. Every
+//     unit sets it from the real predicate over rows this file builds, shaped
+//     like the history query's. The query itself is not exercised: that needs
+//     seeded message rows, and this writes nothing. `tsc` covers the select
+//     losing a column the predicate reads; the order, the current-message
+//     exclusion and the stored values are covered by the manual phone check
+//     in the PR, not here.
 //   - The four post-generation checks do not run, as on a live inbound turn
 //     where they are post-send. A sent unit here went out on the deterministic
 //     gate alone, which is the production posture being measured.
@@ -87,6 +94,7 @@ interface Row {
   direction: 'inbound' | 'outbound'
   status: string
   review_state: string | null
+  review_reason: string | null
   category: string | null
   created_at: string
 }
@@ -100,6 +108,7 @@ const GUEST_COMPLAINT: Row = {
   direction: 'inbound',
   status: 'received',
   review_state: null,
+  review_reason: null,
   category: null,
   created_at: ago(120),
 }
@@ -107,6 +116,7 @@ const QUESTION: Row = {
   direction: 'outbound',
   status: 'sent',
   review_state: 'auto_sent',
+  review_reason: null,
   category: 'comp_complaint',
   created_at: ago(100),
 }
@@ -116,6 +126,8 @@ const draft = (review_state: string, status: string): Row => ({
   direction: 'outbound',
   status,
   review_state,
+  // A queued draft carries its primary trigger here.
+  review_reason: 'category_requires_approval',
   category: 'comp_complaint',
   created_at: ago(60),
 })
@@ -140,7 +152,7 @@ const OPEN_CELLS: Array<{ name: string; rows: Row[]; expect: boolean }> = [
   },
   {
     name: 'one turn: make-it-right draft waiting for staff',
-    rows: [draft('pending', 'pending'), GUEST_ANSWER, QUESTION],
+    rows: [draft('pending', 'pending_review'), GUEST_ANSWER, QUESTION],
     expect: false,
   },
   {
@@ -155,7 +167,7 @@ const OPEN_CELLS: Array<{ name: string; rows: Row[]; expect: boolean }> = [
   },
   {
     name: 'one turn: staff skipped it',
-    rows: [draft('skipped', 'pending'), GUEST_ANSWER, QUESTION],
+    rows: [draft('skipped', 'pending_review'), GUEST_ANSWER, QUESTION],
     expect: false,
   },
   {
@@ -183,6 +195,36 @@ const OPEN_CELLS: Array<{ name: string; rows: Row[]; expect: boolean }> = [
     expect: false,
   },
   { name: 'no outbound at all', rows: [GUEST_COMPLAINT], expect: false },
+  {
+    // The question's row is written after the send returns, so a guest who
+    // answers while it is going out is OLDER than the question.
+    name: 'the guest answered while the question was still being sent',
+    rows: [{ ...QUESTION, created_at: ago(-2) }, GUEST_COMPLAINT],
+    expect: true,
+  },
+  {
+    name: 'a demo guest bypass on a complaint turn is not a question',
+    rows: [{ ...QUESTION, review_reason: 'demo_bypass' }, GUEST_COMPLAINT],
+    expect: false,
+  },
+  {
+    name: 'the fixed crisis reply on a complaint turn is not a question',
+    rows: [
+      { ...QUESTION, review_reason: 'crisis_safety_reply' },
+      GUEST_COMPLAINT,
+    ],
+    expect: false,
+  },
+  {
+    name: 'a second auto-sent clarifying question keeps it open',
+    rows: [
+      { ...QUESTION, created_at: ago(60) },
+      GUEST_ANSWER,
+      QUESTION,
+      GUEST_COMPLAINT,
+    ],
+    expect: true,
+  },
 ]
 
 type Category = Parameters<
@@ -422,6 +464,7 @@ const rowFor = (
   direction,
   status: direction === 'inbound' ? 'received' : 'sent',
   review_state: reviewState,
+  review_reason: null,
   category,
   created_at: new Date(Date.now() - secondsAgo * 1000).toISOString(),
 })
@@ -503,6 +546,7 @@ async function main() {
   let turnOneSent = 0
   let controlHeldByCategory = 0
   let sentWithPromise = 0
+  let heldForAnotherReason = 0
 
   for (let rep = 0; rep < args.reps; rep += 1) {
     // Turn 1: the complaint, on an empty thread.
@@ -572,6 +616,20 @@ async function main() {
       else if (unit.action === 'queue') tally[cell.id].queued += 1
       else tally[cell.id].other += 1
       if (isIncident && promise.matched) sentWithPromise += 1
+      // On the treatment arm a queued incident unit must be held BY THE CARRY,
+      // not by some other trigger that happened to fire: the thread read open,
+      // the turn ran as a complaint, and the category trigger is on the card.
+      if (
+        isIncident &&
+        thread !== null &&
+        unit.action === 'queue' &&
+        !(
+          unit.threadOpen === true &&
+          unit.category === 'comp_complaint' &&
+          unit.triggers.includes(CATEGORY_TRIGGER)
+        )
+      )
+        heldForAnotherReason += 1
       if (!isIncident && unit.triggers.includes(CATEGORY_TRIGGER))
         controlHeldByCategory += 1
 
@@ -611,13 +669,20 @@ async function main() {
   // The verdict. A cell with no valid unit has not been measured, so it fails
   // rather than passing on an empty count.
   const failures: string[] = []
+  const minValid = Math.min(3, args.reps)
   for (const id of ['answer', 'topic-change'] as const) {
     const t = tally[id]
     const valid = t.sent + t.queued + t.other
-    if (valid === 0) failures.push(`${id}: no valid unit, not measured`)
-    else if (t.sent > 0)
-      failures.push(`${id}: ${t.sent}/${valid} sent, bar is 0`)
+    if (valid < minValid)
+      failures.push(`${id}: ${valid} valid unit(s), need ${minValid}`)
+    if (t.sent > 0) failures.push(`${id}: ${t.sent}/${valid} sent, bar is 0`)
+    if (t.other > 0)
+      failures.push(`${id}: ${t.other} unit(s) neither sent nor queued`)
   }
+  if (heldForAnotherReason > 0)
+    failures.push(
+      `${heldForAnotherReason} incident unit(s) queued without the carry holding them`,
+    )
   const control = tally.control
   if (control.sent + control.queued + control.other === 0)
     failures.push('control: no valid unit, not measured')
