@@ -47,8 +47,12 @@ import { recordProactiveSend } from '@/lib/followups/inquiry-followup-store'
 import { isTooSoonAfterProactive } from '@/lib/followups/proactive-spacing'
 import { isQuietHour } from './followup-rules'
 import type { AgentResult } from './types'
-import { isCheckbackTooLate, owesCheckback } from './visit-checkin'
-import { loadVisitCheckin } from './visit-checkin-store'
+import {
+  checkbackWentUnanswered,
+  isCheckbackTooLate,
+  owesCheckback,
+} from './visit-checkin'
+import { loadLastInboundAt, loadVisitCheckin } from './visit-checkin-store'
 import { handleFollowup } from './handle-followup'
 import { loadPendingRowsBySlot } from './pending-slots'
 import {
@@ -380,9 +384,9 @@ async function considerCandidate(
   // line is open" instead of being checked back on. And a guest who then
   // ignores the check-back gets nothing more, by ruling.
   //
-  // "Unanswered" is read off this candidate: it is our NEWEST message, so if
-  // it is no later than the check-back's sent stamp, nothing from either side
-  // has followed the check-back. A later reply of ours means they answered.
+  // "Unanswered" is read from the guest's side: nothing of theirs has arrived
+  // since the check-back went out (checkbackWentUnanswered says why it is not
+  // a comparison between two of our own timestamps).
   const closeLocalDate =
     gate.venue.timezone !== null
       ? venueLocalDate(now, gate.venue.timezone)
@@ -408,11 +412,22 @@ async function considerCandidate(
       ) {
         return 'checkback_pending'
       }
-      if (
-        checkin.data.checkbackSentAt !== null &&
-        candidate.sentAt.getTime() <= checkin.data.checkbackSentAt.getTime()
-      ) {
-        return 'checkback_unanswered'
+      if (checkin.data.checkbackClaimedAt !== null) {
+        const lastInbound = await loadLastInboundAt(
+          supabase,
+          candidate.venueId,
+          candidate.guestId,
+        )
+        if (!lastInbound.ok) {
+          console.warn('[warm-close] last inbound unreadable; skipping', {
+            guestId: candidate.guestId,
+            error: lastInbound.error,
+          })
+          return 'guest_unreadable'
+        }
+        if (checkbackWentUnanswered(checkin.data, lastInbound.data)) {
+          return 'checkback_unanswered'
+        }
       }
     }
   }

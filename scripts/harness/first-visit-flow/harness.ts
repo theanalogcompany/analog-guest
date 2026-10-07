@@ -24,7 +24,6 @@ import {
   isAwaitingCheckinAnswer,
   checkbackWentUnanswered,
   hasBeenQuietLongEnough,
-  isCheckbackDue,
   isCheckbackTooLate,
   lastProactiveWasThisVisit,
   nextCheckinAnswer,
@@ -561,16 +560,6 @@ check(
   false,
 )
 check(
-  'timed: not due nine minutes after the order',
-  isCheckbackDue(at(-9 * MIN), NOW),
-  false,
-)
-check(
-  'timed: due ten minutes after the order',
-  isCheckbackDue(at(-10 * MIN), NOW),
-  true,
-)
-check(
   'timed: thirty minutes after the order is still in time',
   isCheckbackTooLate(at(-30 * MIN), NOW),
   false,
@@ -602,6 +591,32 @@ check(
   'in conversation: six minutes after the order, anchored at order plus five',
   resolveCheckbackDueAt(
     checkin({ orderedAt: at(-6 * MIN), askedAt: at(-6 * MIN) }),
+    NOW,
+  ),
+  at(-1 * MIN),
+)
+check(
+  'in conversation: "not yet" two minutes ago restarts the wait',
+  resolveCheckbackDueAt(
+    checkin({
+      orderedAt: at(-8 * MIN),
+      askedAt: at(-8 * MIN),
+      answer: 'not_yet',
+      answeredAt: at(-2 * MIN),
+    }),
+    NOW,
+  ),
+  null,
+)
+check(
+  'in conversation: "not yet" six minutes ago, anchored at that answer plus five',
+  resolveCheckbackDueAt(
+    checkin({
+      orderedAt: at(-12 * MIN),
+      askedAt: at(-12 * MIN),
+      answer: 'not_yet',
+      answeredAt: at(-6 * MIN),
+    }),
     NOW,
   ),
   at(-1 * MIN),
@@ -696,9 +711,25 @@ check(
   false,
 )
 check(
-  'unanswered: never sent',
+  'unanswered: never claimed or sent',
   checkbackWentUnanswered(checkin({}), null),
   false,
+)
+check(
+  'unanswered: held for an operator (claimed, no sent stamp), nothing from the guest since',
+  checkbackWentUnanswered(
+    checkin({ checkbackClaimedAt: at(-5 * MIN) }),
+    at(-8 * MIN),
+  ),
+  true,
+)
+check(
+  'unanswered: read against the GUEST, so our own later message time cannot make it false',
+  checkbackWentUnanswered(
+    checkin({ checkbackSentAt: at(-5 * MIN) }),
+    at(-5 * MIN - 30),
+  ),
+  true,
 )
 
 // ---------------------------------------------------------------------------

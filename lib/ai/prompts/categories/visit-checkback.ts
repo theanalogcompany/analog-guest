@@ -23,4 +23,11 @@
 // needs to know that asking again here is the point, in different words.
 //
 // No em dash: R3 bans them in output and the prompt should not model one.
-export const VISIT_CHECKBACK_INSTRUCTIONS = `The guest told you what they got a little while ago, and they have not said how it is: they had not tried it yet, or they went quiet. You are checking back on it once. Send one short line asking how it is treating them, naming what they got, in different words from anything you have already sent them. It is not a message about a past visit. Ask nothing else and add nothing else.`
+//
+// ABOUT, NOT SHAPE. An earlier draft said "send one short line" and "add
+// nothing else". lib/ai/prompts/CLAUDE.md reserves length and structure for
+// the universal layer (a category instruction governs what the turn is ABOUT),
+// and the one-message guarantee is made in code anyway (NEVER_SPLIT_RNG at the
+// send). That draft also said "how it is treating them", which is the ruling's
+// own example with the pronoun changed.
+export const VISIT_CHECKBACK_INSTRUCTIONS = `The guest told you what they got a little while ago, and they have not said how it is: they had not tried it yet, or they went quiet. You are checking back on that once, and that is all this message is about: ask how it is now, naming what they got, in different words from anything you have already sent them. It is not a message about a past visit.`

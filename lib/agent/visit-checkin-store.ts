@@ -372,3 +372,55 @@ export async function loadNewestThreadMessage(
     },
   }
 }
+
+/**
+ * When the guest last did anything in this thread, or null if never.
+ *
+ * Any inbound row counts, a counter re-scan included: it is the guest acting.
+ */
+export async function loadLastInboundAt(
+  supabase: AdminSupabaseClient,
+  venueId: string,
+  guestId: string,
+): Promise<StoreResult<Date | null>> {
+  const { data, error } = await supabase
+    .from('messages')
+    .select('created_at')
+    .eq('venue_id', venueId)
+    .eq('guest_id', guestId)
+    .eq('direction', 'inbound')
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+  if (error) return { ok: false, error: error.message }
+  return { ok: true, data: data ? new Date(data.created_at) : null }
+}
+
+/**
+ * Has a reply already carried this visit's check-back, as far as the
+ * intention record knows?
+ *
+ * The reply-borne check-back claims the row itself, but only on an auto-send.
+ * A reply that was held and then approved by an operator records the
+ * intention's prompt (dispatchOperatorOutbound does that for every approved
+ * card) and never claims. Without this read the timer would find the row
+ * unclaimed, the approved reply as our newest message, and check back a second
+ * time two minutes later.
+ */
+export async function wasCheckbackAskedInConversation(
+  supabase: AdminSupabaseClient,
+  venueId: string,
+  guestId: string,
+  since: Date,
+): Promise<StoreResult<boolean>> {
+  const { data, error } = await supabase
+    .from('guest_intention_prompts')
+    .select('intention_key')
+    .eq('venue_id', venueId)
+    .eq('guest_id', guestId)
+    .eq('intention_key', 'check_back_on_order')
+    .gte('prompted_at', since.toISOString())
+    .limit(1)
+  if (error) return { ok: false, error: error.message }
+  return { ok: true, data: (data ?? []).length > 0 }
+}

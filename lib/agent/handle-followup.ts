@@ -260,8 +260,8 @@ function replyCheckFor(
   if (trigger.reason === 'inquiry_followup') return 'exempt'
   // TAC-575 is exempt for the warm close's reason: the processor only sends
   // when OUR message is the newest in the thread and has sat unanswered, so
-  // there is no guest message for this to talk over, and staff answering by
-  // hand makes theirs the newest and restarts the quiet floor.
+  // there is no guest message for this to talk over. Staff answering by hand
+  // during the visit stops the check-back outright, in the processor.
   if (trigger.reason === 'visit_checkback') return 'exempt'
   const id = scanMessageIdOf(trigger)
   return id === null ? 'exempt' : { inboundMessageId: id }

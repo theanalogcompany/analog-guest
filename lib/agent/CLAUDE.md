@@ -271,18 +271,28 @@ compare-and-set that makes it exactly one:
 | the guest | path | when |
 | --- | --- | --- |
 | went quiet | `visit-checkin-timeout.ts`, every-minute cron at `/api/cron/visit-checkbacks` | 10 to 30 min after the ORDER, and our last message has sat 2 min |
-| is still chatting | the `check_back_on_order` intention on their next turn | from 5 min after the order |
+| is still chatting | the `check_back_on_order` intention on a later turn | from 5 min after the order, or after their "not yet" if that is later |
 
 The timer needs OUR message to be the newest in the thread, so the two cannot both fire. It
 claims BEFORE sending and releases if nothing reached the guest (`RELEASES_CLAIM`, shared with
 the warm close); the reply claims AFTER sending, because by then the question has gone.
 
+- **Never on the turn that answers the question, and never on a goodbye.** "Haven't tried it
+  yet" must not get "and how is it?" in the same breath; `handleInbound` drops the intention
+  on the turn the row first gets an answer and on a sign-off turn, post-classification.
+- **No check-back where staff replied by hand or the visit holds a complaint**
+  (`loadWarmCloseBlocker`, the warm close's own check, applied here by the same reasoning
+  and not yet ruled for this message specifically).
+- **An operator-approved reply that carried the check-back does not claim the row**, so the
+  timer also reads the intention's prompt (`wasCheckbackAskedInConversation`) and settles it.
 - **Its approval does not follow its category.** It is stored as `follow_up`, and reads
   `approval_policy.visitCheckback` instead (default HOLD; a venue opts in with `"auto_send"`).
 - **The one-hour spacing rule does not apply against this visit's own greeting**
   (`lastProactiveWasThisVisit`); it does against everything else.
-- **The warm close waits for it and yields to it**: `checkback_pending` while one is owed,
-  `checkback_unanswered` once it went out and got no reply ("send nothing more").
+- **The warm close waits for it and yields to it**, on both its paths: `checkback_pending`
+  while one is owed, `checkback_unanswered` once it went out and got no reply ("send nothing
+  more"). Unanswered is read from the GUEST's side, nothing of theirs since it went out; a
+  comparison between two of our own timestamps was the first version and could never be true.
 - Instagram only. 10 and 5 minutes are ruled; the 2-minute quiet floor and the 30-minute
   bound are choices, stated at the constants.
 

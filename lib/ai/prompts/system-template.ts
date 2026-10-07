@@ -2263,7 +2263,10 @@ import {
 //   2. A second REQUIRED intention, `check_back_on_order`
 //      (lib/agent/intentions/definitions.ts), for a guest who is still
 //      chatting five minutes after the order. It renders under the same
-//      MUST_ASK_PARAGRAPH as hows_it_so_far.
+//      MUST_ASK_PARAGRAPH as hows_it_so_far, which is REWORDED for that: it
+//      said "the thing they just told you they got" and "receives what they
+//      said", true only of the order turn. It now says "what they got" and
+//      "answers what they wrote".
 //
 //   Both ask the model to return to something it has already asked once, and
 //   R41 says never to reuse a line, so both say outright that this is a

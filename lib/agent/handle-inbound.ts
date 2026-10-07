@@ -83,8 +83,10 @@ import {
 import {
   classifyCheckinAnswer,
   isAwaitingCheckinAnswer,
+  isCheckbackTooLate,
   nextCheckinAnswer,
   orderTurnVerdict,
+  owesCheckback,
 } from './visit-checkin'
 import {
   claimVisitCheckback,
@@ -644,6 +646,24 @@ async function claimWarmCloseForTurn(
   ctx: RuntimeContext,
   agentRunId: string,
 ): Promise<ClaimedWarmClose | null> {
+  // TAC-575: the check-back comes before the close. A guest who says "thanks!"
+  // while their visit is still owed one is not closed on this turn; the timer
+  // checks back if they stay quiet, and the pause timer closes after that. The
+  // pause timer applies the same order (`checkback_pending`).
+  if (
+    ctx.visitCheckin !== null &&
+    ctx.visitCheckinHold &&
+    owesCheckback(ctx.visitCheckin) &&
+    !isCheckbackTooLate(ctx.visitCheckin.orderedAt, new Date())
+  ) {
+    console.log('[agent] warm close not sent on this turn', {
+      agentRunId,
+      guestId: ctx.guest.id,
+      reason: 'checkback_pending',
+    })
+    return null
+  }
+
   // TAC-575 (ruled 2026-10-06): no automated close where staff answered by hand
   // or the conversation contains a complaint. The pause timer runs the same
   // check through the same function. BEFORE the marker write, because the
@@ -2045,11 +2065,28 @@ async function runInboundTurn(
       // renderableIntentions runs, like ctx.reviewAsk below.
       const answerNow = answer ?? checkin.answer
       ctx.visitCheckinHold = answerNow !== 'good'
-      // They have just said how it is, so the check-back this turn may have
-      // armed is answered before it is asked. Removed from the eligibility
-      // write too, as for the order turn above: a row would keep a required
-      // question open on their next message.
-      if (answerNow === 'good' || answerNow === 'bad') {
+      // THREE TURNS THE CHECK-BACK MUST NOT RIDE, even when the clock says it
+      // is due. Removed from the eligibility write too, as for the order turn
+      // above: a row would keep a required question open on their next message.
+      //
+      //   they have just said how it is    good or bad answers it before it
+      //                                    is asked.
+      //   this message IS their answer     the row had no answer and now has
+      //                                    one. "haven't tried it yet" must
+      //                                    not get "and how is it?" back in
+      //                                    the same breath. Their answer also
+      //                                    restarts the wait
+      //                                    (resolveCheckbackDueAt).
+      //   they are signing off             a goodbye is not a turn to put a
+      //                                    question on. If they go quiet the
+      //                                    timer still checks back.
+      const firstAnswerThisTurn = checkin.answer === null && answer !== null
+      if (
+        answerNow === 'good' ||
+        answerNow === 'bad' ||
+        firstAnswerThisTurn ||
+        ctx.classification.category === SIGN_OFF_CATEGORY
+      ) {
         ctx.openIntentions = ctx.openIntentions.filter(
           (o) => o.key !== 'check_back_on_order',
         )

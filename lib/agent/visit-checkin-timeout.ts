@@ -52,6 +52,7 @@ import { loadPendingRowsBySlot } from './pending-slots'
 import {
   CHECKBACK_DELAY_MS,
   CHECKBACK_MAX_AGE_MS,
+  COUNTER_ARRIVAL_WINDOW_MS,
   hasBeenQuietLongEnough,
   lastProactiveWasThisVisit,
 } from './visit-checkin'
@@ -61,9 +62,14 @@ import {
   loadNewestThreadMessage,
   markVisitCheckbackSent,
   releaseVisitCheckbackClaim,
+  wasCheckbackAskedInConversation,
   type DueVisitCheckback,
 } from './visit-checkin-store'
-import { loadWarmCloseVenues, type WarmCloseVenue } from './warm-close-store'
+import {
+  loadWarmCloseBlocker,
+  loadWarmCloseVenues,
+  type WarmCloseVenue,
+} from './warm-close-store'
 import { RELEASES_CLAIM } from './warm-close-timeout'
 
 type AdminSupabaseClient = ReturnType<typeof createAdminClient>
@@ -91,8 +97,16 @@ export type VisitCheckbackSkipReason =
   | 'card_pending'
   /** An unprompted message from OUTSIDE this visit went out within the hour. */
   | 'too_soon_after_proactive'
-  /** Someone else claimed it, the guest answered, or the send did not happen. */
+  /** Staff answered this guest by hand during the visit. No check-back at all. */
+  | 'staff_replied'
+  /** The visit contains a complaint the check-in row did not record. */
+  | 'complaint_in_conversation'
+  /** A reply already carried the check-back (an operator-approved one). */
+  | 'asked_in_conversation'
+  /** Someone else claimed it, or the guest answered in the meantime. */
   | 'claim_lost'
+  /** Claimed, but nothing reached the guest. The claim was given back. */
+  | 'send_failed'
 
 export interface ProcessVisitCheckbacksResult {
   /** Due rows considered. */
@@ -230,7 +244,7 @@ async function considerRow(
 
   // The thread, newest message first. This is what "the guest has gone quiet"
   // means, and it is also what keeps this off a guest whose reply is carrying
-  // the check-back already, and off a thread staff are typing into.
+  // the check-back already.
   const newest = await loadNewestThreadMessage(
     supabase,
     row.venueId,
@@ -258,6 +272,54 @@ async function considerRow(
     (pending.obligation !== null || pending.conversation.length > 0)
   ) {
     return 'card_pending'
+  }
+
+  // A person in the thread, or a complaint in it, means no automated message.
+  // Ruled 2026-10-06 for the warm close; applied here by the same reasoning and
+  // through the same check, because "how's it treating you?" two minutes under
+  // a reply staff typed, or on top of a complaint the check-in row missed
+  // (its answer write is fire-and-forget), is the message that ruling exists
+  // to stop. Scoped to this visit: from the earliest a scan for this order
+  // could have been.
+  const blocker = await loadWarmCloseBlocker(
+    supabase,
+    row.venueId,
+    row.guestId,
+    new Date(row.checkin.orderedAt.getTime() - COUNTER_ARRIVAL_WINDOW_MS),
+  )
+  if (!blocker.ok) {
+    console.warn('[visit-checkback] thread unreadable; skipping', {
+      guestId: row.guestId,
+      error: blocker.error,
+    })
+    return 'guest_unreadable'
+  }
+  if (blocker.data !== null) return blocker.data
+
+  // A reply an operator approved may already have carried the check-back
+  // without claiming it. Settle the row so no later tick looks again.
+  const asked = await wasCheckbackAskedInConversation(
+    supabase,
+    row.venueId,
+    row.guestId,
+    row.checkin.orderedAt,
+  )
+  if (!asked.ok) {
+    console.warn('[visit-checkback] intention prompts unreadable; skipping', {
+      guestId: row.guestId,
+      error: asked.error,
+    })
+    return 'guest_unreadable'
+  }
+  if (asked.data) {
+    await claimVisitCheckback(supabase, {
+      id: row.checkin.id,
+      venueId: row.venueId,
+      guestId: row.guestId,
+      now,
+      sent: true,
+    })
+    return 'asked_in_conversation'
   }
 
   // The hour rule, except against this visit's own greeting. A DELAY, not a
@@ -315,20 +377,25 @@ async function considerRow(
       guestId: row.guestId,
       status: result.status,
     })
-    return 'claim_lost'
+    return 'send_failed'
   }
 
   // Only on a confirmed send: the sent stamp is what tells the warm close an
   // unanswered check-back ended the visit, and the spacing marker is what lets
   // the other unprompted mechanisms see this one.
+  //
+  // A FRESH CLOCK, not the tick's `now`. `now` was read before generation and
+  // the send, so it is EARLIER than the message it would be describing. The
+  // claim keeps `now` because the release matches on it.
   if (result.status === 'sent') {
+    const sentAt = new Date()
     await markVisitCheckbackSent(supabase, {
       id: row.checkin.id,
       venueId: row.venueId,
       guestId: row.guestId,
-      now,
+      now: sentAt,
     })
-    await recordProactiveSend(supabase, row.guestId, now)
+    await recordProactiveSend(supabase, row.guestId, sentAt)
   }
 
   console.log('[visit-checkback] checked back', {
