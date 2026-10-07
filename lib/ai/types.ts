@@ -125,6 +125,11 @@ export type RecentMessage = {
   // Required, not optional: a missing value defaulting to delivered is the
   // defect this field exists to remove, so every construction site decides.
   delivery: MessageDelivery
+  // `messages.category` of the row: for a message of ours, the category of the
+  // turn that sent it, which says how it came to be sent (a reply, a sign-off,
+  // a follow-up). Read by lib/agent/previous-offer.ts. Optional because only
+  // build-runtime-context has it; a thread built by hand leaves it out.
+  category?: string | null
 }
 
 // One transaction projected for the agent prompt (TAC-234). Replaces the

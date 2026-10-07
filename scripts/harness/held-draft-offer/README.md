@@ -35,8 +35,10 @@ the once-per-conversation checks sit beside controls where the offer is still se
 answer, an offer older than the conversation window, an offer in a draft the guest never
 received).
 
-The offer in an earlier message is recognised by its wording, because nothing stored marks a
-sent message as an offer. The checks use the wording of the 2026-10-07 phone thread; they do
+Which earlier messages can count is decided by how they were sent: only a reply to the guest,
+by the row's category. A close, a sign-off, a greeting or a follow-up never counts, including
+one sent under a category that does not exist yet. Inside those replies the offer is
+recognised by its wording, because nothing stored marks a sent message as an offer. The checks use the wording of the 2026-10-07 phone thread; they do
 not show that every offer the model can write is recognised.
 
 The last two checks read `lib/agent/schedule-and-send.ts` as text and assert that both
@@ -55,3 +57,5 @@ Each of these was applied and the harness re-run before this was committed:
 | `heldDraftBody` returns the whole collapsed reply | five: the three answer checks (link, emoji, full stop), the run-on check and the whitespace check |
 | one storage site put back to the whole reply | both wiring checks |
 | the once-per-conversation veto removed from `decideFurtherHelpOffer` | both "once: ..." checks |
+| `couldCarryOffer` made to accept every category | the five "sent as ..." pairs |
+| `previousReplyOffered` put back on the wide wording list | all eight "not an offer" checks |

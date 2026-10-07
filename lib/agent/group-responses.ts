@@ -38,6 +38,8 @@ export interface HistoryRow {
   // TAC-394: what deriveDelivery reads.
   status: string
   review_state: string | null
+  // Carried through to RecentMessage for lib/agent/previous-offer.ts.
+  category?: string | null
 }
 
 /**
@@ -175,6 +177,8 @@ export function groupIntoResponses(
         delivery: deliveries.includes('delivered')
           ? 'delivered'
           : deliveries[0]!,
+        // Every bubble of one response was sent under one category.
+        category: first.category ?? null,
       }
     })
     .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime())

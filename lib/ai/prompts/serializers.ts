@@ -2210,6 +2210,12 @@ function formatKnownGuest(
  * the same thing") that cell is 10 of 10 again and the repeat cell still 0 of
  * 8. This wording approved verbatim 2026-10-07.
  */
+const ALREADY_APOLOGISED = [
+  '## You have already apologised',
+  '',
+  'Earlier in this conversation you already said sorry to this guest. If what they are writing about now is the same thing, do not apologise again, and do not say again whose fault it was: start with what is new, the answer, the next step, or what you are doing about it. If it is a different problem, it gets its own apology, once.',
+].join('\n')
+
 /**
  * Phone test 2026-10-07: a guest asked for help buying beans, got the shop link
  * and an offer to point them to a specific bean, answered "usually black", and
@@ -2218,7 +2224,7 @@ function formatKnownGuest(
  *
  * Rendered when our last message ended with an offer (lib/agent/
  * previous-offer.ts), which is the one moment a short reply is known to be
- * about the thing before it. WORDING PENDING APPROVAL.
+ * about the thing before it. Wording accepted 2026-10-07, after it shipped.
  *
  * No venue and no product in it: "something to take home or order online"
  * against "something to order at the counter" is the distinction, and each
@@ -2228,12 +2234,6 @@ const ANSWERING_OUR_OFFER = [
   '## They are answering your offer',
   '',
   'Your last message ended by offering more help with what you had just sent them, and this message takes you up on it. Stay on what they were trying to do in the messages before this one, and answer for that. If they were looking to buy something to take home or order online, recommend the one to buy and include its link when the venue knowledge has one. Do not answer with something to order at the counter instead.',
-].join('\n')
-
-const ALREADY_APOLOGISED = [
-  '## You have already apologised',
-  '',
-  'Earlier in this conversation you already said sorry to this guest. If what they are writing about now is the same thing, do not apologise again, and do not say again whose fault it was: start with what is new, the answer, the next step, or what you are doing about it. If it is a different problem, it gets its own apology, once.',
 ].join('\n')
 
 /**
@@ -2594,7 +2594,14 @@ export function runtimeToProse(
 
   // Late, like the two above it: what it steers is how the model reads the
   // guest's short answer, and the category instruction would otherwise decide.
-  if (runtime.answeringOurOffer === true && category !== 'opt_out') {
+  // Not on a complaint or a sign-off: neither is a guest taking up an offer,
+  // and on a complaint its last sentence would sit after everything else.
+  if (
+    runtime.answeringOurOffer === true &&
+    category !== 'opt_out' &&
+    category !== 'comp_complaint' &&
+    category !== 'acknowledgment'
+  ) {
     blocks.push(ANSWERING_OUR_OFFER)
   }
 

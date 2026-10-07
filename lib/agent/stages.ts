@@ -3113,10 +3113,20 @@ export function buildAiRuntime(
           ctx.conversationWindowMs,
         )) ||
       undefined,
+    // Withheld on the turns knownGuest is, for the same reason: each carries
+    // its own account of why the guest is writing, and this block would
+    // contradict it (the re-opt-in line most directly).
     answeringOurOffer:
       (ctx.currentMessage !== null &&
         ctx.followupTrigger === null &&
-        previousReplyOffered(ctx.recentMessages)) ||
+        ctx.reOptIn === null &&
+        ctx.scanArrival === null &&
+        !firstTouchAfterQrScan &&
+        previousReplyOffered(
+          ctx.recentMessages,
+          ctx.currentMessage.receivedAt,
+          ctx.conversationWindowMs,
+        )) ||
       undefined,
     offeredThisConversation:
       (ctx.currentMessage !== null &&
