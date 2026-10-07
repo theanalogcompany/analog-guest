@@ -2276,9 +2276,12 @@ import {
 //   check-in, which no existing scenario does.
 //
 // v1.89.0 (TAC-386): the inquiry follow-up may ask how it went, and may not
-//   presume the visit. In the user prompt, not this template: one sentence of
+//   presume the visit. In the user prompt, not this template: one line of
 //   `## Following up on what they asked` (formatInquiryFollowup in
-//   serializers.ts) is replaced, approved verbatim 2026-10-06.
+//   serializers.ts) is replaced, approved 2026-10-06 and reworded twice by
+//   ruling that day. Besides the two things named above, the line tells the
+//   model to ask its question and stop, with no hope or wish after it, and to
+//   mention only what we actually told them.
 //
 //   Ruling 11 of 2026-09-17 barred asking or asserting whether the guest came
 //   in. It was loosened on 2026-10-06 to a line between a question and a

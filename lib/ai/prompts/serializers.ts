@@ -732,7 +732,7 @@ function formatScanArrival(
  * thing we helped with turned out, or whether they got to it ("did you find a
  * spot okay" is the ruling's own example, and it is deliberately not quoted in
  * the prompt). We may not ask whether they came in, and we may not write as
- * though we know they did. Three things in the sentence, each from a measured
+ * though we know they did. Five things in the line, each from a measured
  * body:
  *
  *   "NAME WHAT WE ACTUALLY SUGGESTED RATHER THAN ONLY THE TOPIC". Every bar-1

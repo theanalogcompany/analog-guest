@@ -107,6 +107,18 @@ const STOPWORDS = new Set([
   'would',
   'you',
   'your',
+  // Added after the fixtures were redrawn from real answers (review,
+  // 2026-10-06). Those answers contain ordinary verbs, and "did that work out?"
+  // counted as naming our suggestion because one answer said "the most work to
+  // make". None of these says what we suggested.
+  'come',
+  'easier',
+  'else',
+  'like',
+  'make',
+  'try',
+  'want',
+  'work',
 ])
 
 function fold(body: string): string {
@@ -133,6 +145,9 @@ export function contentWords(text: string): Set<string> {
     const word = raw.replace(/'s$/, '')
     if (/\d/.test(word)) {
       out.add(word)
+      // And the bare number, so "300ml" matches a body that wrote "300 ml".
+      const digits = /^\d+/.exec(word)?.[0]
+      if (digits !== undefined) out.add(digits)
       continue
     }
     if (word.length < 3) continue
@@ -218,6 +233,11 @@ export function findsReference(
  */
 const VISIT_ASKS: RegExp[] = [
   /\bdid you (come|stop|swing|pop|drop) (in|by|over|through)\b/,
+  // The same ask behind a filler: "did you end up stopping by", "did you guys
+  // make it in", "ever make it in?". Dropping the old bare /did you end up/
+  // freed the outcome question and, until review caught it, this with it.
+  /\b(did (you|y'all)|ever)( guys| all| ever| end up)* (com|stopp|swing|popp|dropp|mak)(e|ing)( it)? (in|by|over|through)\b/,
+  /\bdid (you|y'all)( guys| all)? ever make it\b/,
   /\bdid you (make|get) (it )?(in|over|down|by)\b/,
   /\bhave you (come|been|made it|stopped) (in|by|over|here)\b/,
   /\bwere you able to (come|make it|stop)\b/,
@@ -246,7 +266,11 @@ const VISIT_ASKS: RegExp[] = [
  * pipeline can contradict.
  */
 const VISIT_PRESUMED: RegExp[] = [
-  /\bhope (you|y'all|your [a-z' ]{1,24}?|they|she|he) (all |both )?(had|enjoyed|liked|loved)\b/,
+  // `hoping` as well as `hope`, and a subject behind an article: "hope the pup
+  // had a good time" is one determiner from the body this list exists for,
+  // and the first version of this line could not see it (review, 2026-10-06).
+  /\b(hope|hoping) (you|y'all|(your|the) [a-z' ]{1,24}?|they|she|he|everyone|everybody) (all |both )?(had|enjoyed|liked|loved)\b/,
+  /\b(so )?(glad|happy) [a-z' ]{0,30}?\b(hit the spot|enjoyed|liked|loved)\b/,
   /\b(glad|happy|great|good|nice) (that )?(you|your [a-z' ]{1,24}?) (came|made it|stopped|enjoyed|liked|loved|had)\b/,
   /\b(good|great|nice|lovely) (to see|seeing|having) (you|y'all)\b/,
   /\bsaw you\b/,
@@ -264,7 +288,10 @@ const VISIT_PRESUMED: RegExp[] = [
   // Both ruled barred 2026-10-06, from the control run. "hoping it was the
   // cocoa hit you were after" says they had it; "hope the corner table worked
   // out for your dog" seats the dog. "worked out for you" stays allowed.
-  /\b(hope|hoping) (it|that|they) (was|were)\b/,
+  // KNOWN FALSE POSITIVE, left in: "hope that was helpful" is a hope about our
+  // help and is flagged here. The copy now bars every hope, so a body with one
+  // is worth a hand-read whichever kind it is.
+  /\b(hope|hoping) (it|that|they|the [a-z' ]{1,24}?) (was|were)\b/,
   // A HOPE only. "did the corner table work out for your pup?" is a question
   // about the thing, which the ruling allows, and the second treatment run
   // showed the unanchored pattern flagging it.
@@ -344,6 +371,15 @@ const VISIT_CASES: {
     via: 'presumed',
   },
   { body: 'did you make it in?', clean: false, via: 'asks' },
+  { body: 'did you end up stopping by?', clean: false, via: 'asks' },
+  { body: 'did you guys make it in', clean: false, via: 'asks' },
+  { body: 'hoping you enjoyed the cortado', clean: false, via: 'presumed' },
+  { body: 'hope the pup had a good time', clean: false, via: 'presumed' },
+  {
+    body: 'hope the SoFi was everything you wanted',
+    clean: false,
+    via: 'presumed',
+  },
   { body: 'hey, did you find us okay?', clean: false, via: 'asks' },
   {
     body: 'hoping it was the cocoa hit you were after',
@@ -414,9 +450,9 @@ export function checkDetectors(): string[] {
   }
   // And must still refuse a body that names only the topic.
   const topicOnly = findsReference(
-    'hope the beans info was helpful!',
-    'which bag should I buy if I like something chocolatey',
-    'The Colombia is the one, it leans cocoa and brown sugar.',
+    'hey, did that work out?',
+    'whats underrated here',
+    'The Blossom Tonic. It is the most work to make and somehow the least ordered. It is floral, with a thick foam on top.',
   )
   if (topicOnly.namesSuggestion) {
     problems.push(
@@ -482,8 +518,10 @@ export function findsRepetition(
  * Ruled 2026-10-06 to carry the same weight as presuming the visit, after a
  * body named "the lot on Bush and Polk" where our answer said a garage on Clay.
  * A NARROW INSTRUMENT, and it says so: it sees an invented proper noun and
- * nothing else. An invented "lot", price or opening time is lower-case and
- * invisible here, so an empty list is not a clean bill. The hand-read is.
+ * nothing else. Invisible to it, all found in review: a lower-case invention
+ * (a "lot", a price, an opening time); a name that OPENS a sentence, because
+ * each sentence's first word is skipped; and an all-caps name such as BART. So
+ * an empty list is not a clean bill. The hand-read is.
  */
 export function findsUnsaidNames(
   body: string,
@@ -493,14 +531,19 @@ export function findsUnsaidNames(
   const said = new Set(
     fold(`${question} ${answer}`)
       .split(/[^a-z0-9']+/)
-      .filter(Boolean),
+      .filter(Boolean)
+      // The body's words lose their possessive below, so ours must too, or
+      // "Le Mil's" in both reads as a name we never said.
+      .map((w) => w.replace(/'s$/, '')),
   )
   const unsaid = new Set<string>()
   // Skip each sentence's first word, which is capitalised for another reason.
   for (const sentence of body.split(/[.!?\n]+/)) {
     const words = sentence.trim().split(/\s+/).slice(1)
     for (const raw of words) {
-      const word = raw.replace(/[^A-Za-z']/g, '')
+      // Straighten the apostrophe before stripping, or a curly one is dropped
+      // and "Mil’s" becomes "Mils".
+      const word = raw.replace(/[‘’]/g, "'").replace(/[^A-Za-z']/g, '')
       if (!/^[A-Z][a-z]+/.test(word)) continue
       if (!said.has(fold(word).replace(/'s$/, ''))) unsaid.add(word)
     }

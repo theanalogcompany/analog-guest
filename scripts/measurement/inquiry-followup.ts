@@ -6,7 +6,8 @@
 //
 // `--extra <case>x<n>` generates one case n more times AFTER the fifteen, to
 // put a rate on something one body did. The extras are printed and logged and
-// never enter the three bars, which stay fifteen bodies of fifteen inputs.
+// never enter the three bars. Bar 3 runs over all fifteen bodies; bars 1 and 2
+// run over the in-scope ones (see `outOfScope` on CASES).
 //
 // `--dump-prompt <path>` writes the composed prompt for the first case and
 // exits without generating. Diff two dumps to check that a merge or a version
@@ -22,9 +23,9 @@
 //
 // THE THREE BARS, pre-registered on TAC-386 before this generated:
 //
-//   1. references what was asked AND what we suggested   15/15
+//   1. references what was asked AND what we suggested   every in-scope case
 //   2. never asks whether they came in, never presumes
-//      that they did, never pushes them to come in        15/15
+//      that they did, never pushes them to come in        every in-scope case
 //   3. no wording in more than a quarter of the set       <= 3 of 15
 //
 // ALL THREE ARE HAND-READ. The detectors in inquiry-followup-language.ts narrow
@@ -32,13 +33,14 @@
 // and the hand-read is the finding.
 //
 // THE SET SPANS INQUIRY TYPES on purpose (parking or directions, beans, brewing,
-// what to try). Fifteen runs of ONE question would make bar 3 meaningless:
+// what to try, and two out-of-scope shapes: dog policy and finding us). Fifteen runs of ONE question would make bar 3 meaningless:
 // the same question should produce similar wording, so repetition would prove
 // nothing about whether the voice is templated.
 
 import { randomUUID } from 'node:crypto'
-import { readFileSync, writeFileSync } from 'node:fs'
+import { writeFileSync } from 'node:fs'
 import { generateObject } from 'ai'
+import { z } from 'zod'
 
 import { buildRuntimeContext } from '@/lib/agent/build-runtime-context'
 import {
@@ -58,7 +60,7 @@ import { PROMPT_VERSION } from '@/lib/ai/prompts/system-template'
 import { createAdminClient } from '@/lib/db/admin'
 import { startAgentTrace } from '@/lib/observability/langfuse'
 import type { VoiceCorpusChunk as AiVoiceCorpusChunk } from '@/lib/ai'
-import { createRunLog } from './run-log'
+import { createRunLog, readRunLog } from './run-log'
 import {
   checkDetectors,
   findsReference,
@@ -190,6 +192,8 @@ const CASES: {
   },
 ]
 
+const IN_SCOPE = CASES.filter((c) => c.outOfScope === undefined).length
+
 interface Args {
   venueSlug: string
   arm: string
@@ -209,11 +213,20 @@ function parseArgs(argv: readonly string[]): Args {
   }
   for (let i = 0; i < argv.length; i += 1) {
     const flag = argv[i]!
-    if (flag === '--arm') args.arm = argv[++i] ?? args.arm
-    else if (flag === '--rescore') args.rescorePath = argv[++i] ?? null
-    else if (flag === '--dump-prompt') args.dumpPromptPath = argv[++i] ?? null
+    // A value flag with no value must not fall through: `--rescore` with the
+    // path forgotten would otherwise run fifteen paid generations.
+    const value = (): string => {
+      const next = argv[++i]
+      if (next === undefined || next.startsWith('--')) {
+        throw new Error(`${flag} needs a value`)
+      }
+      return next
+    }
+    if (flag === '--arm') args.arm = value()
+    else if (flag === '--rescore') args.rescorePath = value()
+    else if (flag === '--dump-prompt') args.dumpPromptPath = value()
     else if (flag === '--extra') {
-      const match = /^(\d+)x(\d+)$/.exec(argv[++i] ?? '')
+      const match = /^(\d+)x(\d+)$/.exec(value())
       const caseNumber = Number(match?.[1])
       const times = Number(match?.[2])
       if (!match || caseNumber < 1 || caseNumber > CASES.length || times < 1) {
@@ -232,51 +245,71 @@ function describeVisit(visit: ReturnType<typeof findsVisitClaim>): string {
     : `NO asks=${visit.asks.join('|')} presumed=${visit.presumed.join('|')} pushes=${visit.pushes.join('|')}`
 }
 
-/** Re-read an earlier run's bodies through today's detectors. No model call. */
-function rescore(path: string): void {
-  const units = readFileSync(path, 'utf8')
-    .trim()
-    .split('\n')
-    .map(
-      (line) =>
-        JSON.parse(line) as {
-          index?: number
-          question?: string
-          answer?: string
-          body?: string | null
-          extra?: boolean
-        },
-    )
-    .filter(
-      (u) =>
-        // Extras put a rate on one case and never enter the bars.
-        u.extra !== true &&
-        typeof u.index === 'number' &&
-        typeof u.body === 'string' &&
-        typeof u.question === 'string' &&
-        typeof u.answer === 'string',
-    )
-  if (units.length === 0) throw new Error(`no scored units in ${path}`)
+const RescoreUnitSchema = z.object({
+  index: z.number(),
+  question: z.string(),
+  answer: z.string(),
+  body: z.string().nullable(),
+  extra: z.boolean().optional(),
+  caseNumber: z.number().optional(),
+  outOfScope: z.string().nullable().optional(),
+})
 
+/**
+ * Re-read an earlier run's bodies through today's detectors. No model call.
+ *
+ * SCORES WHAT THE LIVE RUN SCORED. Extras and `outOfScope` cases are printed and
+ * left out of the counts, and a unit with no body is printed as a failure, not
+ * dropped: a denominator that shrinks or grows without saying so is a
+ * difference the rescore made up. A log written before `outOfScope` was
+ * recorded is matched to today's fixture by case number and question; where
+ * the question differs it is an older fixture set, and every case is scored.
+ */
+function rescore(path: string): void {
+  const { units: raw } = readRunLog(path)
+  const units = raw.flatMap((u) => {
+    const parsed = RescoreUnitSchema.safeParse(u)
+    return parsed.success ? [parsed.data] : []
+  })
+  if (units.length === 0) throw new Error(`no units in ${path}`)
+
+  let inScope = 0
+  let failed = 0
   let bar1 = 0
   let suggestion = 0
   let bar2 = 0
   for (const u of units) {
-    const reference = findsReference(u.body!, u.question!, u.answer!)
-    const visit = findsVisitClaim(u.body!)
-    if (reference.referencesBoth) bar1 += 1
-    if (reference.namesSuggestion) suggestion += 1
-    if (visit.clean) bar2 += 1
-    console.log(`#${u.index} ${u.body}`)
+    if (u.extra === true) continue
+    if (u.body === null) {
+      failed += 1
+      console.log(`#${u.index} FAILED UNIT: no body was generated`)
+      continue
+    }
+    const fixture =
+      u.caseNumber !== undefined ? CASES[u.caseNumber - 1] : undefined
+    const outOfScope =
+      u.outOfScope ??
+      (fixture?.question === u.question ? fixture.outOfScope : undefined)
+    const reference = findsReference(u.body, u.question, u.answer)
+    const visit = findsVisitClaim(u.body)
+    console.log(
+      `#${u.index}${outOfScope ? ` (OUT OF SCOPE, not counted: ${outOfScope})` : ''} ${u.body}`,
+    )
     console.log(
       `  bar1 references both: ${reference.referencesBoth ? 'yes' : 'NO'}  names our suggestion: ${reference.namesSuggestion ? 'yes' : 'NO'}  q=[${reference.sharedWithQuestion.join(' ')}] a=[${reference.sharedWithAnswerOnly.join(' ')}]`,
     )
     console.log(`  bar2 clean: ${describeVisit(visit)}`)
+    if (outOfScope) continue
+    inScope += 1
+    if (reference.referencesBoth) bar1 += 1
+    if (reference.namesSuggestion) suggestion += 1
+    if (visit.clean) bar2 += 1
   }
   console.log(`\n=== rescore of ${path} ===`)
-  console.log(`  bar 1 detector: ${bar1}/${units.length}`)
-  console.log(`  names our suggestion: ${suggestion}/${units.length}`)
-  console.log(`  bar 2 detector: ${bar2}/${units.length}`)
+  console.log(`  bar 1 detector: ${bar1}/${inScope}`)
+  console.log(`  names our suggestion: ${suggestion}/${inScope}`)
+  console.log(`  bar 2 detector: ${bar2}/${inScope}`)
+  if (failed > 0) console.log(`  failed units, not scored: ${failed}`)
   console.log(
     '  Compare with the hand-read recorded for that run. The difference is the finding.',
   )
@@ -441,8 +474,8 @@ async function main(): Promise<void> {
       guestId: guest.id,
       cases: CASES.length,
       bars: {
-        one: 'references what was asked AND what we suggested, 15/15',
-        two: 'never asks whether they came in, never presumes it, never pushes, 15/15',
+        one: `references what was asked AND what we suggested, ${IN_SCOPE}/${IN_SCOPE} in scope (${CASES.length} generated)`,
+        two: `never asks whether they came in, never presumes it, never pushes, ${IN_SCOPE}/${IN_SCOPE} in scope`,
         three: 'no wording in more than a quarter of the set',
       },
     },
@@ -525,6 +558,7 @@ async function main(): Promise<void> {
       index: index + 1,
       caseNumber: run.caseNumber,
       extra: run.extra,
+      outOfScope: c.outOfScope ?? null,
       unsaidNames,
       kind: c.kind,
       question: c.question,
