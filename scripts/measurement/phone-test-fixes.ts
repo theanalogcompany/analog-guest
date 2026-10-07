@@ -1,5 +1,4 @@
-// Phone test fixes (2026-10-07): the generation check for the five items, and
-// the leave-one-out runs behind them.
+// Phone test fixes (2026-10-07): the generation check for the five items.
 //
 // GENERATE-ONLY. Nothing is sent and nothing is written, with the exception
 // every harness on this path reports on itself: buildRuntimeContext calls
@@ -67,9 +66,14 @@ import {
   GeneratedMessageSchema,
   MAX_OUTPUT_TOKENS,
   replaceDashes,
+  stripTrailingDuplicate,
 } from '@/lib/ai/generate-message'
 import { PROMPT_VERSION } from '@/lib/ai/prompts/system-template'
 import { buildRuntimeContext } from '@/lib/agent/build-runtime-context'
+import {
+  resolveDispatchBubbles,
+  resolveOutboundTail,
+} from '@/lib/agent/sentence-split'
 import {
   buildAiRuntime,
   classifyStage,
@@ -87,25 +91,12 @@ import { createRunLog } from './run-log'
 // Arms
 // ---------------------------------------------------------------------------
 
-/** What a transform may read about the unit it is applied to. */
-interface UnitFacts {
-  category: MessageCategory
-  /** The knowledge retrieved for this unit, as the writer sees it. */
-  knowledge: string
-}
-
 interface Transform {
   label: string
   target: 'system' | 'user'
-  apply: (prompt: string, facts: UnitFacts) => string
+  apply: (prompt: string) => string
   /** A transform that may legitimately find nothing on some units. */
   optional?: boolean
-  /**
-   * A transform whose whole point is to act on some turns and not others, so a
-   * cell it never touches is a result (no offer block on single facts), not a
-   * silent copy of the shipped arm.
-   */
-  conditional?: boolean
 }
 
 function swap(
@@ -125,8 +116,8 @@ function swap(
 const DROP_OFFER_SECTION: Transform = {
   label: 'offer section',
   target: 'system',
-  // The section is in the stable half of the system prompt only.
-  optional: true,
+  // Required: the section is in every prompt, so a heading that no longer
+  // matches must fail the unit rather than leave the section in the control.
   apply: (p) => {
     const start = p.indexOf('# Offering more help\n')
     const end = p.indexOf('# A visit the guest takes back\n')
@@ -786,12 +777,6 @@ async function main(): Promise<void> {
         // Transforms run on the two halves of the system prompt separately,
         // so the stable half keeps its own cache breakpoint, as production's
         // does. No transform here spans the boundary between them.
-        const facts: UnitFacts = {
-          category,
-          knowledge: (knowledge.get(unit.id) ?? [])
-            .map((c) => c.text)
-            .join('\n'),
-        }
         let prefix = composed.cacheableSystemPrefix
         let suffix = composed.volatileSystemSuffix
         let user = composed.userPrompt
@@ -799,13 +784,13 @@ async function main(): Promise<void> {
         for (const t of arm) {
           let changed = false
           if (t.target === 'system') {
-            const nextPrefix = t.apply(prefix, facts)
-            const nextSuffix = t.apply(suffix, facts)
+            const nextPrefix = t.apply(prefix)
+            const nextSuffix = t.apply(suffix)
             changed = nextPrefix !== prefix || nextSuffix !== suffix
             prefix = nextPrefix
             suffix = nextSuffix
           } else {
-            const next = t.apply(user, facts)
+            const next = t.apply(user)
             changed = next !== user
             user = next
           }
@@ -846,15 +831,20 @@ async function main(): Promise<void> {
           '## You know this guest',
           '## You have already apologised',
         ].filter((h) => user.includes(h))
-        const composedReply = composeReplyWithIntention(
-          object.body,
-          object.intentionQuestion,
-        )
-        // The offer line goes through the production decision, with the same
-        // inputs generateMessage hands it. No unit here carries a review ask.
-        const offerLine = replaceDashes(object.furtherHelpOffer)
+        // What generateMessage does with the fields, step for step. No unit
+        // here renders an intentions block, so production drops any question
+        // the model emits; and none carries a review ask.
+        const correcting =
+          (unit.reportedItems?.length ?? 0) > 0 &&
+          object.reportedVisitCorrection !== 'none'
+        const composedReply = composeReplyWithIntention(object.body, '')
+        const offerLine = replaceDashes(object.furtherHelpOffer).trim()
+        const beforeOffer =
+          offerLine === ''
+            ? composedReply.body
+            : stripTrailingDuplicate(composedReply.body, offerLine)
         const offer = decideFurtherHelpOffer({
-          body: composedReply.body,
+          body: beforeOffer,
           offer: offerLine,
           category,
           gaveInstructions: object.gaveInstructions,
@@ -862,15 +852,26 @@ async function main(): Promise<void> {
           repliesToGuest: unit.inbound !== undefined,
           signsOff: object.closedTheConversation || cell.kind === 'close',
           onComplaintTurn: object.complaintIntent !== 'none',
-          carriesAnAsk: composedReply.intentionQuestion !== '',
+          carriesAnAsk: false,
           knowledgeGap: object.knowledgeGap,
+          correctingVisit: correcting,
         })
-        const reply = offer.append
-          ? appendFurtherHelpOffer(composedReply.body, offerLine)
+        const sendsOffer = offer.append && beforeOffer.trim() !== ''
+        const reply = sendsOffer
+          ? appendFurtherHelpOffer(beforeOffer, offerLine)
           : composedReply.body
+        // What the guest would actually receive: the messages dispatch makes
+        // of it, with the offer peeled off as its own. The first version of
+        // this check printed the reply before dispatch and so never saw that
+        // a line break does not survive it.
+        const bubbles = resolveDispatchBubbles(
+          reply,
+          Math.random,
+          resolveOutboundTail('', '', 0, sendsOffer ? offerLine : ''),
+        )
         const flags = {
           ...detect(reply),
-          offerSent: offer.append,
+          offerSent: sendsOffer,
           offerWritten: offerLine.trim() !== '',
           knownBlock: blocks.includes('## You know this guest'),
           apologyBlock: blocks.includes('## You have already apologised'),
@@ -889,6 +890,7 @@ async function main(): Promise<void> {
           blocks,
           inbound: unit.inbound ?? null,
           body: reply,
+          bubbles,
           offerLine,
           offerReason: offer.reason,
           gaveInstructions: object.gaveInstructions,
@@ -901,7 +903,7 @@ async function main(): Promise<void> {
           .map(([k]) => k)
           .join(',')
         console.log(
-          `  ${unit.id} [${category}${object.knowledgeGap ? ', GAP' : ''}] ${JSON.stringify(reply)}  {${offer.reason === 'no_offer_written' ? '' : `offer:${offer.reason} `}${marks}}`,
+          `  ${unit.id} [${category}${object.knowledgeGap ? ', GAP' : ''}] ${bubbles.map((b) => JSON.stringify(b)).join(' + ')}  {${offer.reason === 'no_offer_written' ? '' : `offer:${offer.reason} `}${marks}}`,
         )
       } catch (e) {
         failed += 1
@@ -919,7 +921,7 @@ async function main(): Promise<void> {
 
     // A control or candidate arm that changed no prompt in the whole cell is a
     // silent copy of the shipped arm, not a result.
-    if (arm.length > 0 && touched === 0 && !arm.some((t) => t.conditional)) {
+    if (arm.length > 0 && touched === 0) {
       console.log(`  ${cell.id}: no transform changed any prompt (CELL VOID)`)
       failed += 1
     }

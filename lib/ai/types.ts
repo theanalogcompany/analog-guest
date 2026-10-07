@@ -813,8 +813,8 @@ export type GenerateMessageResult = {
    */
   reviewAskDroppedForBodyQuestion: boolean
   /**
-   * The offer-more-help line as it was sent, on the end of `body`; '' when the
-   * reply carries none. Written by the model in its own field and appended by
+   * The offer-more-help line as it was sent, '' when the reply carries none.
+   * The exact tail of `body`: dispatch peels it off as its own last message. Written by the model in its own field and appended by
    * code only when the finished reply sent a link, made a recommendation or
    * gave instructions (lib/ai/further-help-offer.ts).
    */

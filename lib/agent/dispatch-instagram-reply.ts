@@ -526,6 +526,7 @@ export async function dispatchInstagramReply(
     generation.reviewAsk,
     generation.intentionQuestion,
     options.renderedIntentions?.length ?? 0,
+    generation.furtherHelpOffer,
   )
   const split = resolveDispatchBubbles(
     generation.body,

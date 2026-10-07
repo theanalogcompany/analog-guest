@@ -449,8 +449,9 @@ the kind; the serializer renders `## Sign off` or `## Closing this conversation`
 - **A close may hope to see them again, softly. It may not invite them in for something
   specific, or name an item they did not mention** (ruled 2026-10-06, after the first
   generated closes did both). In the plain block and the timed-close instruction.
-- **The model's `closedTheConversation` report is read by nothing.** It was the goodbye
-  path's second signal; that path is gone. Still emitted, pending removal.
+- **The model's `closedTheConversation` report has one reader**: the offer-more-help
+  decision withholds its line on a reply the model reports as a sign-off
+  (`lib/ai/further-help-offer.ts`). The goodbye path that used to read it is gone.
 - **Repetition across guests is not solved.** A prompt cannot see what another guest was
   sent. `npm run measure-warm-close` measures it against a bar fixed in advance.
 

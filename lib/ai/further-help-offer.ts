@@ -58,13 +58,18 @@ export interface FurtherHelpOfferInput {
   carriesAnAsk: boolean
   /** The body goes to an operator, not the guest. */
   knowledgeGap: boolean
+  /** The reply is checking or taking back a visit the guest reported. */
+  correctingVisit: boolean
 }
 
 export type FurtherHelpOfferReason =
   | 'link'
   | 'recommendation'
   | 'instructions'
+  | 'long_reply'
   | 'no_offer_written'
+  | 'offer_is_a_question'
+  | 'correcting_visit'
   | 'nothing_to_offer_about'
   | 'not_a_reply'
   | 'sign_off'
@@ -76,11 +81,21 @@ export type FurtherHelpOfferReason =
  * A bare domain counts here. extractUrls wants a scheme or a path, which is
  * right for checking a link against the venue's allowlist and wrong for this:
  * "head to example.com" sends the guest somewhere just as much.
+ *
+ * Lower case only and never straight after `@`, a letter or a dot, so an email
+ * address, a handle, and a sentence that runs into the next one without a
+ * space ("it's great.Coffee is next") are not links.
  */
-const BARE_DOMAIN = /\b[a-z0-9-]+\.(?:com|co|org|net|io|shop|coffee|cafe)\b/i
+const BARE_DOMAIN =
+  /(?<![@\w.-])[a-z0-9-]{2,}\.(?:com|co|org|net|io|shop|coffee|cafe)\b/
 
 function sendsLink(body: string): boolean {
   return extractUrls(body).length > 0 || BARE_DOMAIN.test(body)
+}
+
+/** The reply with its links taken out, so a `?` in a query string is not a question. */
+function proseOf(body: string): string {
+  return extractUrls(body).reduce((text, url) => text.replace(url, ' '), body)
 }
 
 /**
@@ -107,7 +122,6 @@ function wordCount(body: string): number {
 }
 
 const NEVER_ON: ReadonlySet<MessageCategory> = new Set([
-  'comp_complaint',
   'acknowledgment',
   'opt_out',
 ])
@@ -121,14 +135,23 @@ export function decideFurtherHelpOffer(input: FurtherHelpOfferInput): {
   reason: FurtherHelpOfferReason
 } {
   const no = (reason: FurtherHelpOfferReason) => ({ append: false, reason })
-  if (input.offer.trim() === '') return no('no_offer_written')
+  // A line with nothing sayable in it (a lone dash survives replaceDashes).
+  if (!/[\p{L}\p{N}]/u.test(input.offer)) return no('no_offer_written')
   if (!input.repliesToGuest) return no('not_a_reply')
   if (input.knowledgeGap) return no('knowledge_gap')
+  if (input.correctingVisit) return no('correcting_visit')
   if (input.onComplaintTurn || input.category === 'comp_complaint') {
     return no('complaint')
   }
   if (input.signsOff || NEVER_ON.has(input.category)) return no('sign_off')
-  if (input.carriesAnAsk || input.body.includes('?')) return no('already_asks')
+  if (input.carriesAnAsk || proseOf(input.body).includes('?')) {
+    return no('already_asks')
+  }
+  // "A statement and not a question" is only prompt wording until this line.
+  // A `?` on the end of our last message changes what three readers of it do:
+  // the warm-close floor, whether the guest's next message is read as an
+  // answer to us, and the check-back.
+  if (input.offer.includes('?')) return no('offer_is_a_question')
 
   if (sendsLink(input.body)) return { append: true, reason: 'link' }
   if (
@@ -137,21 +160,27 @@ export function decideFurtherHelpOffer(input: FurtherHelpOfferInput): {
   ) {
     return { append: true, reason: 'recommendation' }
   }
-  if (input.gaveInstructions || wordCount(input.body) >= EXPLAINED_WORDS) {
-    return { append: true, reason: 'instructions' }
+  if (input.gaveInstructions) return { append: true, reason: 'instructions' }
+  if (wordCount(input.body) >= EXPLAINED_WORDS) {
+    return { append: true, reason: 'long_reply' }
   }
   return no('nothing_to_offer_about')
 }
 
 /**
- * The reply with the offer on the end.
+ * The reply with the offer on the end, joined the way the two asks are: one
+ * space, so the line is the exact tail of `body` and dispatch can peel it off
+ * as its own last message (resolveOutboundTail).
  *
- * One more sentence when the reply ends a sentence; its own line when it does
- * not. Replies here often end on a link or an emoji with no full stop, and the
- * first bodies read "...pages/cafe-menu happy to answer anything else".
+ * ITS OWN MESSAGE IS WHAT MAKES IT READABLE. A reply that sends a link usually
+ * ends on the link or an emoji, with no full stop, and a line break does not
+ * survive dispatch: every path collapses whitespace. The first version joined
+ * with a newline and would have delivered "...pages/cafe-menu happy to answer
+ * anything else" as one run-on bubble.
+ *
+ * A draft held for an operator is still one message, as it is for the two
+ * asks, so there the line is folded in.
  */
 export function appendFurtherHelpOffer(body: string, offer: string): string {
-  const reply = body.trimEnd()
-  const joiner = /[.!?]$/.test(reply) ? ' ' : '\n'
-  return `${reply}${joiner}${offer.trim()}`
+  return `${body.trimEnd()} ${offer.trim()}`
 }

@@ -278,12 +278,13 @@ export const GeneratedMessageSchema = z.object({
   // structural marks that turn: it is an ordinary reply to "thanks!", stored
   // under whatever the classifier picked. So the model reports it.
   //
-  // NOTHING READS IT SINCE TAC-575. handle-inbound.ts used to write
-  // guests.warm_close_sent_at from this report; the goodbye path now decides
-  // before generation, and then (ruled 2026-10-06) stopped signing off on a
-  // reply at all: only the pause timer does. The field is still emitted and is
-  // dead; removing it changes the generation schema and the prompt section
-  // that asks for it, so it is left for a change of its own.
+  // ONE READER SINCE v1.98.0: the offer-more-help decision treats a reply the
+  // model reports as a sign-off as one that takes no offer line (below, and
+  // further-help-offer.ts). Between TAC-575 and then nothing read it:
+  // handle-inbound.ts used to write guests.warm_close_sent_at from this
+  // report; the goodbye path now decides before generation, and then (ruled
+  // 2026-10-06) stopped signing off on a reply at all. Removing the field now
+  // changes that veto as well as the schema and the prompt section.
   //
   // SELF-REPORT IS NOT TRUSTED ALONE, on this repo's own record (TAC-350: 8 of 8
   // fabrications self-reported clean). The timer carries an independent belt: a
@@ -930,10 +931,15 @@ export async function generateMessage(
       // the two asks above are already in or out, so "this reply asks
       // something" is a fact about the text, and an offer never lands behind a
       // tail dispatch is about to peel off as its own message.
-      const offerLine = replaceDashes(rawObject.furtherHelpOffer)
+      const offerLine = replaceDashes(rawObject.furtherHelpOffer).trim()
+      // The model put the line in the reply as well as in the field. One copy.
+      const beforeOffer =
+        offerLine === ''
+          ? withAsk.body
+          : stripTrailingDuplicate(withAsk.body, offerLine)
       const offerDecision = decideFurtherHelpOffer({
-        body: withAsk.body,
-        offer: correcting ? '' : offerLine,
+        body: beforeOffer,
+        offer: offerLine,
         category: input.category,
         gaveInstructions: rawObject.gaveInstructions,
         commitment: rawObject.commitment,
@@ -946,15 +952,28 @@ export async function generateMessage(
         carriesAnAsk:
           composed.intentionQuestion !== '' || withAsk.reviewAsk !== '',
         knowledgeGap: rawObject.knowledgeGap,
+        correctingVisit: correcting,
       })
+      // Logged like the drops above: a line the model wrote and code withheld
+      // is guest-facing text removed, and has to be countable.
+      if (
+        !offerDecision.append &&
+        offerDecision.reason !== 'no_offer_written'
+      ) {
+        console.warn(
+          `[ai] generateMessage: withheld the offer-more-help line (${offerDecision.reason})`,
+        )
+      }
       const object = {
         ...rawObject,
-        body: offerDecision.append
-          ? appendFurtherHelpOffer(withAsk.body, offerLine)
-          : withAsk.body,
+        body:
+          offerDecision.append && beforeOffer.trim() !== ''
+            ? appendFurtherHelpOffer(beforeOffer, offerLine)
+            : withAsk.body,
         intentionQuestion: composed.intentionQuestion,
         reviewAsk: withAsk.reviewAsk,
-        furtherHelpOffer: offerDecision.append ? offerLine.trim() : '',
+        furtherHelpOffer:
+          offerDecision.append && beforeOffer.trim() !== '' ? offerLine : '',
         reportedVisitCorrection,
       }
       offerReason = offerDecision.reason
@@ -1073,8 +1092,8 @@ export async function generateMessage(
         // Countable for the same reason the two intention flags are; nothing
         // is stamped on a drop, so the guest stays eligible.
         reviewAskDroppedForBodyQuestion: reviewAskDropped,
-        // The offer line as sent, '' when none was. It is the end of `body`,
-        // not a separate message. The reason says which fact sent it or which
+        // The offer line as sent, '' when none was. The exact tail of `body`,
+        // like the two asks; dispatch sends it as its own last message. The reason says which fact sent it or which
         // veto stopped one the model wrote, so the rule's firing is countable.
         furtherHelpOffer: lastResult.furtherHelpOffer,
         furtherHelpOfferReason: offerReason,
