@@ -95,6 +95,10 @@ const COMPLAINT_REASON = 'something went wrong'
 
 const BODY_COMPLAINT = 'Complaint waiting for review'
 const BODY_NO_QUESTION = 'Draft ready to review'
+// TAC-574, approved verbatim 2026-10-06. The media-only card has no draft and
+// no guest words to quote, so the shared fallback above would be false on it.
+// Scoped to that one card by review reason; every other card is unchanged.
+const BODY_MEDIA_ONLY = 'Sent an attachment. Reply by hand.'
 
 // Used only for a reason this map does not know. The map is total over every
 // value that can reach a push, so this is reachable only if primaryTrigger
@@ -363,11 +367,14 @@ export async function sendDraftFlaggedPush(
     input.primaryTrigger,
     input.guestCategory,
   )
-  const body = buildPushBody(
-    input.guestQuestion,
-    input.guestCategory,
-    input.guestIsCrisis,
-  )
+  const body =
+    input.primaryTrigger === MEDIA_ONLY_REVIEW_REASON
+      ? BODY_MEDIA_ONLY
+      : buildPushBody(
+          input.guestQuestion,
+          input.guestCategory,
+          input.guestIsCrisis,
+        )
 
   for (const recipient of recipients) {
     const badge = await countPendingForOperator(recipient.id)

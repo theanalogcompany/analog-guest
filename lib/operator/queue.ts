@@ -377,15 +377,13 @@ const REVIEW_REASON_LABELS: Record<
   // would be in the Instagram thread.
   instagram_send_failed:
     "This reply didn't send on Instagram. Check the thread before sending it again.",
-  // TAC-574, copy approved verbatim 2026-10-06. It does not say where to look,
-  // because the app cannot show the media on either channel.
-  //
-  // KNOWN GAP against this file's own rule that a label is true on every case
-  // it fires for: the card is written for ANY attachment with no text, so a
-  // video, or over text a voice memo or a PDF, is also labelled "a photo or
-  // GIF". Raised on the TAC-574 PR; the wording is the owner's to change.
+  // TAC-574, copy approved verbatim 2026-10-06 (second wording). "An
+  // attachment", not "a photo or GIF": the card is written for ANY attachment
+  // with no text, so a video, or over text a voice memo or a PDF, lands here
+  // too, and the first wording was false for those. It does not say where to
+  // look, because the app cannot show the media on either channel.
   media_only_inbound:
-    'Sent a photo or GIF with no text. Write your reply by hand.',
+    'Sent an attachment with no text. Write your reply by hand.',
 
   // --- You're mid-thread with this guest ------------------------------------
   // Ranked 9th, so it only ever wins when nothing else fired: the draft itself
