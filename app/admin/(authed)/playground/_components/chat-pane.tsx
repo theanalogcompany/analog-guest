@@ -34,6 +34,9 @@ function RewindButton({
   )
 }
 
+/** Default save name: the opening guest message, trimmed to something readable. */
+const NAME_FROM_FIRST_MESSAGE_CHARS = 60
+
 export function ChatPane({
   turns,
   selectedTurnId,
@@ -45,6 +48,9 @@ export function ChatPane({
   onSend,
   onSelectTurn,
   onRewind,
+  savableTurnCount,
+  saving,
+  onSaveConversation,
 }: {
   turns: PlaygroundTurn[]
   selectedTurnId: string | null
@@ -59,8 +65,14 @@ export function ChatPane({
   onSelectTurn: (id: string) => void
   /** Discards this turn and everything after; 'rerun' re-sends it as-is. */
   onRewind: (turnId: string, mode: 'rerun' | 'edit') => void
+  /** How many turns a save would actually carry; 0 hides the control. */
+  savableTurnCount: number
+  saving: boolean
+  onSaveConversation: (name: string) => void
 }) {
   const [draft, setDraft] = useState('')
+  const [savingOpen, setSavingOpen] = useState(false)
+  const [saveName, setSaveName] = useState('')
   const scrollRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -82,6 +94,19 @@ export function ChatPane({
     if (text.length === 0 || !canSend || busy) return
     setDraft('')
     onSend(text)
+  }
+
+  const openSave = () => {
+    const first = turns.find((t) => t.mode === 'sandbox')?.request.inbound[0]
+    setSaveName((first ?? '').slice(0, NAME_FROM_FIRST_MESSAGE_CHARS))
+    setSavingOpen(true)
+  }
+
+  const commitSave = () => {
+    const name = saveName.trim()
+    if (name.length === 0 || saving) return
+    onSaveConversation(name)
+    setSavingOpen(false)
   }
 
   return (
@@ -136,10 +161,61 @@ export function ChatPane({
       </div>
 
       {showComposer && turns.some((t) => t.mode === 'sandbox') && (
-        <p className="shrink-0 px-4 pb-1 text-[11px] italic text-ink-faint">
-          Hover a guest message to rerun or edit from that point - later turns
-          are discarded, and the session rewinds with them.
-        </p>
+        <div className="flex shrink-0 items-center justify-between gap-3 px-4 pb-1">
+          <p className="text-[11px] italic text-ink-faint">
+            Hover a guest message to rerun or edit from that point - later turns
+            are discarded, and the session rewinds with them.
+          </p>
+          {savableTurnCount > 0 && !savingOpen && (
+            <button
+              type="button"
+              onClick={openSave}
+              disabled={busy || saving}
+              className="shrink-0 cursor-pointer whitespace-nowrap text-[11px] text-ink-faint underline decoration-dotted underline-offset-2 hover:text-ink disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {saving
+                ? 'saving'
+                : `save conversation (${savableTurnCount} turn${savableTurnCount === 1 ? '' : 's'})`}
+            </button>
+          )}
+        </div>
+      )}
+
+      {showComposer && savingOpen && (
+        <div className="flex shrink-0 items-center gap-2 border-t border-stone-light/60 bg-parchment/40 px-4 py-2">
+          <input
+            type="text"
+            value={saveName}
+            autoFocus
+            maxLength={120}
+            onChange={(e) => setSaveName(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault()
+                commitSave()
+              }
+              if (e.key === 'Escape') setSavingOpen(false)
+            }}
+            placeholder="Name this conversation"
+            className="h-8 flex-1 rounded-[2px] border border-stone-light bg-paper px-2 text-xs text-ink outline-none focus:border-clay/60"
+          />
+          <Button
+            type="button"
+            size="sm"
+            onClick={commitSave}
+            disabled={saveName.trim().length === 0 || saving}
+          >
+            Save
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            variant="ghost"
+            onClick={() => setSavingOpen(false)}
+          >
+            Cancel
+          </Button>
+        </div>
       )}
 
       {showComposer && (

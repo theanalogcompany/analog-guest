@@ -1601,6 +1601,57 @@ export type Database = {
         }
         Relationships: []
       }
+      playground_conversations: {
+        Row: {
+          created_at: string
+          created_by_operator_id: string | null
+          id: string
+          name: string
+          next_session: Json | null
+          turn_count: number
+          turns: Json
+          updated_at: string
+          venue_id: string
+        }
+        Insert: {
+          created_at?: string
+          created_by_operator_id?: string | null
+          id?: string
+          name: string
+          next_session?: Json | null
+          turn_count: number
+          turns: Json
+          updated_at?: string
+          venue_id: string
+        }
+        Update: {
+          created_at?: string
+          created_by_operator_id?: string | null
+          id?: string
+          name?: string
+          next_session?: Json | null
+          turn_count?: number
+          turns?: Json
+          updated_at?: string
+          venue_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "playground_conversations_created_by_operator_id_fkey"
+            columns: ["created_by_operator_id"]
+            isOneToOne: false
+            referencedRelation: "operators"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "playground_conversations_venue_id_fkey"
+            columns: ["venue_id"]
+            isOneToOne: false
+            referencedRelation: "venues"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       pos_catalog_items: {
         Row: {
           category: string | null

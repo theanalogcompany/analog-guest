@@ -63,7 +63,32 @@ export function Inspector({
   }
 
   const response = turn.response
-  if (response === undefined) return <Placeholder text="No trace available." />
+  if (response === undefined) {
+    // Restored from a save: the reply was stored, the trace was not
+    // (migration 074's ruling). Say so plainly and point at the one action
+    // that produces a real trace. The alternative - rendering empty sections,
+    // or worse, filling them from the save - would present a prompt, a gate
+    // decision and judge scores that were never recorded for this turn.
+    if (turn.restored !== undefined) {
+      return (
+        <div className="p-4">
+          <p className="text-xs font-medium uppercase tracking-wider text-ink-soft">
+            Trace not saved
+          </p>
+          <p className="pt-2 text-xs leading-relaxed text-ink">
+            This turn was restored from a saved conversation. Saves keep the
+            reply, not the trace.
+          </p>
+          <p className="pt-2 text-xs italic text-ink-faint">
+            Hover this turn&apos;s guest message and choose &ldquo;rerun from
+            here&rdquo; to run it again and get the full trace. Everything after
+            it is discarded, and the session rewinds with it.
+          </p>
+        </div>
+      )
+    }
+    return <Placeholder text="No trace available." />
+  }
 
   return (
     <TraceInspector

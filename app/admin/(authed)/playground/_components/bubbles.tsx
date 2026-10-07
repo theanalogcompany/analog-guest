@@ -1,5 +1,6 @@
 'use client'
 
+import { replyBubblesOf } from '../_lib/history'
 import type { PlaygroundTurn } from '../_lib/types'
 
 // Bubble rendering for playground turns, shared by the sandbox chat and the
@@ -76,8 +77,12 @@ export function TurnReply({
     )
   }
 
+  // A restored turn has bubbles and no trace; a live turn has a trace. Both
+  // reach the same render below, so a saved conversation reads identically to
+  // one just run - except for the no-trace note, which must stay visible.
+  const restored = turn.response === undefined ? turn.restored : undefined
   const generation = turn.response?.trace.generation
-  if (!generation?.ok) {
+  if (restored === undefined && !generation?.ok) {
     return (
       <div className="flex justify-end">
         <button
@@ -95,10 +100,28 @@ export function TurnReply({
     )
   }
 
-  const verdict = turn.response?.trace.gate?.verdict
+  // The one definition of "this turn's reply bubbles", shared with the
+  // transcript builder - rendering text the next prompt does not carry is
+  // exactly the divergence that helper exists to prevent.
+  const bubbles = replyBubblesOf(turn)
+  const verdict = restored?.verdict ?? turn.response?.trace.gate?.verdict
+
+  // A saved turn whose run produced nothing is saved as producing nothing
+  // (schemas/playground.ts). Render that rather than an empty slot, so the
+  // conversation does not read as if the venue simply said nothing back.
+  if (bubbles.length === 0) {
+    return (
+      <div className="flex justify-end">
+        <span className="text-[11px] italic text-ink-faint">
+          no reply was generated on this turn
+        </span>
+      </div>
+    )
+  }
+
   return (
     <div className="flex flex-col items-end gap-0.5">
-      {generation.output.messages.map((text, i) => (
+      {bubbles.map((text, i) => (
         <button
           key={i}
           type="button"
@@ -117,6 +140,11 @@ export function TurnReply({
       {verdict && verdict !== 'send' && (
         <span className="pt-0.5 text-[11px] italic text-ink-soft">
           gate: {verdict}
+        </span>
+      )}
+      {restored !== undefined && (
+        <span className="pt-0.5 text-[11px] italic text-ink-faint">
+          restored - rerun to inspect
         </span>
       )}
       {turn.previousTrace && (

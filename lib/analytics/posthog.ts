@@ -1043,6 +1043,71 @@ export async function captureAgentLatencyHigh(
   await capturePostHogEvent('agent_latency_high', props.guestId, { ...props })
 }
 
+// Emitted once per `notify` policy hit on the v2 gate (lib/policy/gate.ts),
+// fired by lib/policy/notify.ts. A notify row never changes the verdict — it
+// is how a venue learns something happened WITHOUT the draft waiting on a
+// human, which is the whole point of `complaint_notifies_owner`.
+//
+// SLACK RELAY ONLY WHEN THE DRAFT ACTUALLY WENT OUT. When another row queued
+// the same turn, the operator card IS the notification and a second ping is
+// noise — but the PostHog event still fires on every hit, because a rate
+// nobody can count is how comp_regex_backstop became an illusion. Read the
+// two apart in analytics on `verdict`.
+//
+// Scoping note for whoever adds the second notify row: the relay here is
+// unconditional on policy key, which is right while the only notify row is
+// one the owner explicitly wants pinged about. A chattier row needs the
+// per-key scoping captureDemoBypassedApprovalGate uses, not a louder Slack.
+export interface PolicyNotificationProps {
+  agentRunId: string
+  venueId: string
+  guestId: string
+  /** The notify row that hit, e.g. 'complaint_notifies_owner'. */
+  policyKey: string
+  /** The row's operator-facing label. */
+  label: string
+  /** The turn's verdict, decided by the OTHER rows; a notify never moves it. */
+  verdict: 'send' | 'queue' | 'block'
+  /** Active situations this turn, post-exempt-strip. */
+  situations: string[]
+  /** P(yes) when the notify row was semantic; absent for structural/always. */
+  probability?: number
+  inboundBody: string | null
+  /** The bubbles as generated, joined for display. */
+  generatedBody: string
+}
+
+export async function capturePolicyNotification(
+  props: PolicyNotificationProps,
+): Promise<void> {
+  await capturePostHogEvent('policy_notification', props.guestId, { ...props })
+  if (props.verdict === 'send') {
+    await postToSlack(formatPolicyNotification(props))
+  }
+}
+
+function formatPolicyNotification(props: PolicyNotificationProps): string {
+  const lines = [
+    `*${props.label}* — sent without approval \`${props.policyKey}\``,
+    `venue: \`${props.venueId}\``,
+    `guest: \`${props.guestId}\``,
+    `run: \`${props.agentRunId}\``,
+    `situations: ${props.situations.map((s) => `\`${s}\``).join(', ') || '—'}`,
+  ]
+  if (props.probability !== undefined) {
+    lines.push(`p: \`${props.probability.toFixed(3)}\``)
+  }
+  if (props.inboundBody) {
+    lines.push(
+      `guest said: "${truncate(props.inboundBody, SLACK_FIELD_TRUNCATE_CHARS)}"`,
+    )
+  }
+  lines.push(
+    `we replied: "${truncate(props.generatedBody, SLACK_FIELD_TRUNCATE_CHARS)}"`,
+  )
+  return lines.join('\n')
+}
+
 // TAC-212: emitted from the inbound + followup orchestrators when the
 // approval-policy gate (applyApprovalPolicyStage in lib/agent/stages.ts)
 // routes the draft to the operator queue instead of dispatching. Slack

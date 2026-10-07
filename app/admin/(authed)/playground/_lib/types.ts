@@ -1,4 +1,5 @@
 import type { HistoryTurn } from '@/lib/ai/v2/compose'
+import type { PlaygroundConversationTurn } from '@/lib/schemas/playground'
 import type {
   PlaygroundSession,
   TurnOverrides,
@@ -82,4 +83,44 @@ export interface PlaygroundTurn {
   previousTrace?: TurnTrace
   /** Replay mode: the bubbles v1 actually sent after this inbound, null when none followed. */
   v1Reply?: string[] | null
+  /**
+   * Restored from a saved conversation (migration 074): the reply and gate
+   * verdict as they were, with NO trace behind them.
+   *
+   * Mutually exclusive with `response` by construction - a turn is either one
+   * this session ran (trace, inspectable) or one read back from a save
+   * (bubbles only). Every consumer must branch on which, and none may
+   * synthesize a trace from this: an inspector panel filled from a save would
+   * show a composed prompt and judge scores that were never recorded.
+   *
+   * Cleared the moment the turn is rerun, because then a real trace exists.
+   */
+  restored?: {
+    reply: string[]
+    verdict: 'send' | 'queue' | 'block' | null
+  }
+}
+
+/** One row of the saved-conversation picker. No `turns` - see the list route. */
+export interface SavedConversationSummary {
+  id: string
+  name: string
+  turnCount: number
+  createdAt: string
+  updatedAt: string
+}
+
+export interface SavedConversationListResponse {
+  conversations: SavedConversationSummary[]
+  /** True when saves exist beyond the listed window. */
+  hasMore: boolean
+}
+
+export interface SavedConversationDetail extends SavedConversationSummary {
+  turns: PlaygroundConversationTurn[]
+  /**
+   * The session a new message onto the end would run with. Null when the save
+   * carried none, which restores as a fresh session rather than as an error.
+   */
+  nextSession: PlaygroundSession | null
 }
