@@ -64,5 +64,7 @@ Each was mutated in the source, the harness run, and the source restored (2026-1
 | the time bound in `resolveCheckbackDueAt` | not the next morning |
 | the visit bound in `lastProactiveWasThisVisit` | a follow-up fifty minutes before the order |
 | a required intention surviving the hold in `renderableIntentions` | the check-back itself survives the hold |
+| the claim fallback in `checkbackWentUnanswered` | held for an operator, nothing from the guest since |
+| a "not yet" restarting the wait in `resolveCheckbackDueAt` | "not yet" two minutes ago restarts the wait |
 
 A check not in that table has not been shown able to fail.
