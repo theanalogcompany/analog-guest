@@ -7,7 +7,7 @@
 // `--extra <case>x<n>` generates one case n more times AFTER the fifteen, to
 // put a rate on something one body did. The extras are printed and logged and
 // never enter the three bars. Bar 3 runs over all fifteen bodies; bars 1 and 2
-// run over the in-scope ones (see `outOfScope` on CASES).
+// run over every case not marked `outOfScope`, which today is all fifteen.
 //
 // `--dump-prompt <path>` writes the composed prompt for the first case and
 // exits without generating. Diff two dumps to check that a merge or a version
@@ -33,7 +33,8 @@
 // and the hand-read is the finding.
 //
 // THE SET SPANS INQUIRY TYPES on purpose (parking or directions, beans, brewing,
-// what to try, and two out-of-scope shapes: dog policy and finding us). Fifteen runs of ONE question would make bar 3 meaningless:
+// what to try, dog policy and finding us). Fifteen runs of ONE question would
+// make bar 3 meaningless:
 // the same question should produce similar wording, so repetition would prove
 // nothing about whether the voice is templated.
 
@@ -88,11 +89,17 @@ const BLOCK_HEADER = '## Following up on what they asked'
  * THIS MAKES THE SET VENUE-SPECIFIC. Run it against another venue and the
  * answers are fiction again; the startup guard does not check that.
  *
- * `outOfScope` cases are still generated and printed, and are left out of bars
- * 1 and 2. Ruled 2026-10-06: a question whose only outcome is a visit (may I
- * bring a dog, which door is yours) has nothing to follow up on, so the fix is
- * the classifier not arming one, not better copy. They stay in the set so the
- * bodies are on record when that classifier change is made.
+ * ALL FIFTEEN ARE IN SCOPE, the dog-policy and finding-us questions included.
+ * Ruled 2026-10-06, reversing a ruling of the same day: those questions keep
+ * their follow-ups, and the question-against-statement line applies to them
+ * like any other. For a few hours they were marked `outOfScope` on the theory
+ * that the classifier should not arm one; there is no such classifier change.
+ * THE RUN THAT SHIPPED v1.89.0 WAS SCORED OVER THIRTEEN for that reason, so its
+ * figures on TAC-386 are not comparable with a run of this file as it stands.
+ *
+ * `outOfScope` stays as a field with no case using it: `--rescore` still reads
+ * it from a log that recorded it, and a case marked with it is generated,
+ * printed and left out of bars 1 and 2.
  */
 const CASES: {
   kind: string
@@ -122,7 +129,12 @@ const CASES: {
     kind: 'directions',
     question: 'are you the one on the corner or further down the block',
     answer: "We are right on Polk Street, the storefront says Le Mil's.",
-    outOfScope: 'finding us: the only outcome is a visit',
+    // EXPECT A BAR-2 FLAG HERE THAT THE HAND-READ OVERRULES. "did you find us
+    // okay on Polk?" is ruled acceptable for a finding-us question
+    // (2026-10-06): it is a question about the thing they asked. The detector
+    // flags the phrase wherever it appears, because behind any other question
+    // it is asking whether they came in, and it cannot tell which question it
+    // is reading.
   },
   {
     kind: 'beans',
@@ -164,7 +176,6 @@ const CASES: {
     kind: 'dogs',
     question: 'can I bring my dog',
     answer: 'Yes, dogs are welcome at the cafe.',
-    outOfScope: 'dog policy: the only outcome is a visit',
   },
   {
     kind: 'brewing',
@@ -261,9 +272,13 @@ const RescoreUnitSchema = z.object({
  * SCORES WHAT THE LIVE RUN SCORED. Extras and `outOfScope` cases are printed and
  * left out of the counts, and a unit with no body is printed as a failure, not
  * dropped: a denominator that shrinks or grows without saying so is a
- * difference the rescore made up. A log written before `outOfScope` was
- * recorded is matched to today's fixture by case number and question; where
- * the question differs it is an older fixture set, and every case is scored.
+ * difference the rescore made up.
+ *
+ * A LOG THAT DOES NOT RECORD SCOPE IS SCORED OVER EVERY CASE, AND SAYS SO. That
+ * includes the 2026-10-06 runs behind v1.89.0, which were scored live over
+ * thirteen with two cases left out and written before the field existed. The
+ * scope cannot be recovered from the fixtures any more, since no case carries
+ * it, so their rescore reads over fifteen and prints why.
  */
 function rescore(path: string): void {
   const { units: raw } = readRunLog(path)
@@ -285,11 +300,7 @@ function rescore(path: string): void {
       console.log(`#${u.index} FAILED UNIT: no body was generated`)
       continue
     }
-    const fixture =
-      u.caseNumber !== undefined ? CASES[u.caseNumber - 1] : undefined
-    const outOfScope =
-      u.outOfScope ??
-      (fixture?.question === u.question ? fixture.outOfScope : undefined)
+    const outOfScope = u.outOfScope ?? undefined
     const reference = findsReference(u.body, u.question, u.answer)
     const visit = findsVisitClaim(u.body)
     console.log(
@@ -310,6 +321,11 @@ function rescore(path: string): void {
   console.log(`  names our suggestion: ${suggestion}/${inScope}`)
   console.log(`  bar 2 detector: ${bar2}/${inScope}`)
   if (failed > 0) console.log(`  failed units, not scored: ${failed}`)
+  if (units.every((u) => u.outOfScope === undefined)) {
+    console.log(
+      '  this log does not record scope, so every case is counted. If its live run left cases out, the denominators differ for that reason alone.',
+    )
+  }
   console.log(
     '  Compare with the hand-read recorded for that run. The difference is the finding.',
   )
