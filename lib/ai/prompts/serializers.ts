@@ -2204,7 +2204,7 @@ function formatKnownGuest(
  * came three hours after our "sorry, no matcha here" got an apology 4 times in
  * 10 where the control gave 10. With the condition left to the model ("if ...
  * the same thing") that cell is 10 of 10 again and the repeat cell still 0 of
- * 8. Approved wording was the first; this one is pending approval.
+ * 8. This wording approved verbatim 2026-10-07.
  */
 const ALREADY_APOLOGISED = [
   '## You have already apologised',
