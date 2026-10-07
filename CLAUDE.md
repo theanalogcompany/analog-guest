@@ -337,6 +337,15 @@ call is not loud enough alone.
 - **Ask what would fail if a claim were untrue.** The expensive defects here are a claim
   nothing enforces - a comment, a printed PASS, a schema default - and the claim
   is what stops anyone looking. If no input could make it fail, it proves nothing.
+- **Fix the mechanism, never the symptom - and find the mechanism by ablation.** A fix is not
+  proposed until something was *removed* and the defect went away. For a prompt that means
+  leave-one-out over its units (frame paragraphs, brief sections, then clauses inside the
+  guilty unit), and the fix is measured on sibling inputs it was never tuned on plus the case
+  the guilty unit exists to protect. Copy that names the failing input passes its own test and
+  leaves every sibling broken: a line answering "a good first order" was 11/11 on that phrase
+  while the actual cause - the moves header telling the model its turn is for asking, in the
+  last position before the guest's message, with nothing anywhere saying to answer - still
+  swallowed every other answer-before-ask turn.
 - **Arrange for something to disagree.** Careful reading catches none of those. A control arm,
   a reconciliation against a total, an independent tool. A number nobody can
   contradict is not evidence.
