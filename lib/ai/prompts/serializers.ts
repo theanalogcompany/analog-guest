@@ -1827,6 +1827,12 @@ const NO_QUESTION_RESTRAINT = [
   'Answer what they wrote and leave it there. The reply asks them nothing:',
   'no question of your own, however natural one would be here. The one',
   'exception is a question another block in this prompt tells you to ask.',
+  // v1.95.0. Without this sentence a guest who writes only "hi" on a first
+  // conversation gets a welcome and nothing to answer: the greeting rule's
+  // invitation lost to this block 6 times in 10, and with the block removed
+  // it won 9 in 10.
+  'Inviting a guest who has only said hello to say what they need is not a',
+  'question of your own, and is welcome.',
 ].join('\n')
 
 /**
@@ -2052,7 +2058,7 @@ function formatLastVisitWentWrong(): string {
  * covers, because that is a per-venue product decision (which topics a guest
  * may message about), and the block says outright not to reuse its words.
  *
- * "A SOFT HOPE TO SEE THEM AGAIN IS FINE..." was added on a ruling
+ * "A SOFT HOPE TO SEE THEM AGAIN" and the two bars after it came from a ruling
  * (2026-10-06) after the first generated closes: four of ten said "hope to see
  * you soon", which is allowed, and one invited a guest in for a drink they had
  * never mentioned, which is not.
@@ -2065,7 +2071,24 @@ function formatLastVisitWentWrong(): string {
  * gave about what a close may say, not a fix for that run. Nothing has shown
  * the guide produces an invented item.
  *
- * An empty guide renders the block without that sentence. The callers do not
+ * TWO PARTS, IN ORDER (v1.95.0, wording approved 2026-10-07 and one sentence
+ * added on the first generated closes, below). The phone test's close was an
+ * open door with nothing of the conversation in it. Now a line that belongs to
+ * this conversation comes first, then the open door with a few examples, and
+ * the examples lean on the menu, events and recommendations where the venue's
+ * guide has them (Jaipal's steer), without its words.
+ *
+ * "IT DOES NOT REPEAT AN ANSWER..., AND IT DOES NOT ASSUME THEY ARE AT THE
+ * VENUE" is the added sentence. Asked for a line about what was talked about,
+ * two closes in the first ten answered the question a second time ("dogs are
+ * always welcome here") or placed the guest inside ("hope the WiFi treats you
+ * well in there"). The first is the rule on restating context; the second is
+ * the rule on assuming a visit, and this block renders after both.
+ *
+ * "DO NOT INCLUDE A LINK AND DO NOT ASK FOR A REVIEW" belongs to this close
+ * only. The happy and after-complaint sign-offs keep their invitation.
+ *
+ * An empty guide renders the block without the examples' source. The callers do not
  * send a plain close for a venue with no text (the setting's empty default
  * still means "this venue has not been given a close"), so this is the
  * defensive branch, not a path.
@@ -2081,16 +2104,21 @@ function formatPlainClose(guidance: string): string {
   return [
     '## Closing this conversation',
     '',
-    'The conversation has reached a natural pause. Close it warmly and leave',
-    'the door open: they can message here anytime.' +
+    'The conversation has reached a natural pause. Close it in two short',
+    'parts. First, one line that belongs to this conversation: something warm',
+    'about what you and this guest actually talked about, or a soft hope to',
+    'see them again. It does not repeat an answer you already gave, and it',
+    'does not assume they are at the venue or have been in. Then a light open',
+    'door: they can message here anytime with other questions, with two or',
+    'three examples of what they might ask about.' +
       (guide === ''
         ? ''
-        : ` This is what this venue's close usually covers, as a guide to its content and not as words to reuse: ${guide}`),
+        : ` Take those examples from what this venue's close usually covers, leaning on the menu, events and recommendations where it has them, choosing different ones each time and never reusing its words: ${guide}`),
     '',
-    'Say it in your own words, different from anything you have already sent',
-    'this guest. A soft hope to see them again is fine. Do not invite them in',
-    'for anything specific, and do not name any item they did not mention',
-    'themselves. Ask nothing.',
+    'Say all of it in your own words, different from anything you have',
+    'already sent this guest. Do not include a link and do not ask for a',
+    'review. Do not invite them in for anything specific, and do not name any',
+    'item they did not mention themselves. Ask nothing.',
   ].join('\n')
 }
 
