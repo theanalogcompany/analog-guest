@@ -396,6 +396,12 @@ export interface RuntimeContext {
     hasRecordedVisit: boolean
     /** TAC-575: carried from the trigger; see instagramScanArrival. */
     afterComplaint: boolean
+    /**
+     * TAC-575: the last greetings that reached this guest, newest first, at
+     * most PRIOR_GREETING_LIMIT. The greeting is told not to repeat them. It
+     * sees no other part of the earlier conversation.
+     */
+    priorGreetings: string[]
   } | null
   /**
    * TAC-386: the question and our answer, on an inquiry-follow-up turn only.

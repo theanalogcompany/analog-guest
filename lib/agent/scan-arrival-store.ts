@@ -44,6 +44,8 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 
 import type { Database } from '@/db/types'
 import { logger } from '@/lib/observability/logger'
+import { DELIVERED_OUTBOUND_STATUSES } from './group-responses'
+import { latestGreetings } from './scan-arrival'
 
 type AdminSupabaseClient = SupabaseClient<Database>
 
@@ -329,5 +331,54 @@ export async function loadScanCarryForward(
       greetedAt !== null && Number.isFinite(greetedAt.getTime())
         ? greetedAt
         : null,
+  }
+}
+
+// A greeting is at most a few bubbles, so this many rows always holds the
+// newest PRIOR_GREETING_LIMIT greetings.
+const PRIOR_GREETING_ROW_LIMIT = 12
+
+/**
+ * TAC-575: the last greetings that reached this guest, newest first, for the
+ * next greeting not to repeat. See PRIOR_GREETING_LIMIT in scan-arrival.ts.
+ *
+ * Read by `category = 'guest_arrived'`, which is what handleFollowup stores a
+ * scan greeting under and nothing else uses. Only rows that reached the guest:
+ * a greeting an operator skipped is not something the guest has heard.
+ *
+ * Returns the error rather than an empty list, so the caller chooses the
+ * direction. It chooses "no priors": a greeting that might repeat itself is
+ * what every greeting was before this, and is better than no greeting.
+ */
+export async function loadPriorGreetings(
+  supabase: AdminSupabaseClient,
+  venueId: string,
+  guestId: string,
+): Promise<StoreResult<string[]>> {
+  try {
+    const { data, error } = await supabase
+      .from('messages')
+      .select('id, generation_id, body, created_at')
+      .eq('venue_id', venueId)
+      .eq('guest_id', guestId)
+      .eq('direction', 'outbound')
+      .eq('category', 'guest_arrived')
+      .in('status', [...DELIVERED_OUTBOUND_STATUSES])
+      .order('created_at', { ascending: false })
+      .limit(PRIOR_GREETING_ROW_LIMIT)
+    if (error) return { ok: false, error: error.message }
+    return {
+      ok: true,
+      data: latestGreetings(
+        (data ?? []).map((row) => ({
+          id: row.id,
+          generationId: row.generation_id,
+          body: row.body,
+          createdAt: new Date(row.created_at),
+        })),
+      ),
+    }
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) }
   }
 }

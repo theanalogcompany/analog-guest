@@ -94,9 +94,10 @@ export const GUEST_ARRIVED_INSTRUCTIONS_NEW = `The guest just scanned the sign a
  * WHAT A GREETING GIVES UP BY NOT SEEING THE THREAD, so nobody restores it
  * without knowing the trade:
  *
- *   - It cannot see its own earlier greetings, so nothing stops a regular
- *     getting the same line every morning. "Never reuse a line already sent"
- *     has nothing to compare against here.
+ *   - It could not see its own earlier greetings, and ten in a row came out
+ *     as one sentence. FIXED SEPARATELY: the greeting is now handed its last
+ *     three greetings to this guest as lines not to repeat
+ *     (PRIOR_GREETING_LIMIT, lib/agent/scan-arrival.ts). Those lines only.
  *   - It cannot pick up anything the guest said that was never stored as a
  *     fact: a joke, a plan mentioned in passing, what they were unsure about
  *     last time.

@@ -54,6 +54,16 @@
 //                                  complaint" (it was the second), and since
 //                                  the follow-up PR the check that the
 //                                  ordinary greeting no longer does it.
+//   MEASURE_PRIORS=1               THE PRIOR-GREETINGS CHECK, which has a bar
+//                                  of its own (posted on the ticket
+//                                  2026-10-06) and prints a verdict: the
+//                                  ordinary returning greeting on the ten
+//                                  complaint threads, each guest with one
+//                                  prior greeting on file, plus five regulars
+//                                  with three each. Passes when the complaint
+//                                  bar is still met on the ten AND no greeting
+//                                  repeats one of its own priors word for
+//                                  word (normalizeForRepeat).
 //   MEASURE_OPEN_COMP=1            every unit's guest holds an OPEN COMP for
 //                                  the item they complained about, which is
 //                                  what the complaint path leaves behind when
@@ -215,6 +225,59 @@ interface Unit {
   arm: 'greeting' | 'sign_off'
   faultWords: readonly string[]
   history: RecentMessage[]
+  /** The greetings on file for this guest, newest first. Priors mode only. */
+  priors?: readonly string[]
+  /** A regular with a friendly thread, not a complaint. Priors mode only. */
+  regular?: boolean
+}
+
+/** The greeting each complaint thread's earlier visit opened with. */
+const FIRST_GREETING = 'hey, welcome in! what did you get?'
+
+/**
+ * Five regulars and the last three greetings each has had, newest first.
+ * Taken from what the greeting actually produced in the #334 runs, so they
+ * are the lines it is most likely to write again.
+ */
+const REGULARS: readonly (readonly string[])[] = [
+  [
+    'hey, good to see you again! what did you get? ☕',
+    'hey, good to see you back 👋 what did you get?',
+    'hey, good to see you! what did you get? ☕',
+  ],
+  [
+    'hey, you made it in! what did you end up getting?',
+    'hey, good to see you again. what did you end up getting?',
+    'hey, welcome back! what did you get today?',
+  ],
+  [
+    'morning! what did you get? ☕',
+    'hey, good to see you back 😊 what did you get?',
+    'hey, good to see you again 👋 what did you get?',
+  ],
+  [
+    'hey, good to see you in! what did you get? ☕',
+    'hey, good to see you back. what did you get?',
+    "hey, you're back. what did you get today?",
+  ],
+  [
+    'hey, good to see you! what did you get? ☕',
+    'hey, good to see you again! what did you get? ☕',
+    'hey, good to see you back 👋 what did you get?',
+  ],
+]
+
+/**
+ * "Word for word", made strict: lowercased, with emoji, punctuation and extra
+ * spaces removed, so a greeting that only swaps an emoji or a full stop still
+ * counts as a repeat.
+ */
+export function normalizeForRepeat(text: string): string {
+  return text
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}\s]/gu, '')
+    .replace(/\s+/g, ' ')
+    .trim()
 }
 
 function turn(
@@ -329,9 +392,13 @@ async function main(): Promise<void> {
   }
 
   const armsEnv = process.env.MEASURE_ARMS
-  const controlGreeting = process.env.MEASURE_GREETING === 'returning'
+  const priorsMode = process.env.MEASURE_PRIORS === '1'
+  // The priors check is about the ordinary returning greeting.
+  const controlGreeting =
+    priorsMode || process.env.MEASURE_GREETING === 'returning'
   const openComp = process.env.MEASURE_OPEN_COMP === '1'
-  const informational = armsEnv !== undefined || controlGreeting || openComp
+  const informational =
+    !priorsMode && (armsEnv !== undefined || controlGreeting || openComp)
   const allUnits: Unit[] = [
     ...COMPLAINTS.slice(0, PER_ARM).map((c, i) => ({
       id: `greeting-${String(i + 1).padStart(2, '0')}`,
@@ -370,14 +437,47 @@ async function main(): Promise<void> {
     }),
   ]
 
-  const units = allUnits.filter(
-    (u) =>
-      armsEnv === undefined ||
-      armsEnv
-        .split(',')
-        .map((a) => a.trim())
-        .includes(u.arm),
-  )
+  const priorsUnits: Unit[] = [
+    ...allUnits
+      .filter((u) => u.arm === 'greeting')
+      .map((u) => ({ ...u, priors: [FIRST_GREETING] })),
+    ...REGULARS.map((priors, i) => ({
+      id: `regular-${String(i + 1).padStart(2, '0')}`,
+      arm: 'greeting' as const,
+      faultWords: [],
+      regular: true,
+      priors,
+      // A friendly earlier visit. The model does not see it; it is here so
+      // the unit is the shape production loads.
+      history: [
+        turn(
+          'outbound',
+          priors[0],
+          new Date(startedAt.getTime() - 2 * MS_PER_DAY),
+        ),
+        turn(
+          'inbound',
+          'a flat white',
+          new Date(startedAt.getTime() - 2 * MS_PER_DAY + 60_000),
+        ),
+        turn(
+          'outbound',
+          'good choice',
+          new Date(startedAt.getTime() - 2 * MS_PER_DAY + 120_000),
+        ),
+      ],
+    })),
+  ]
+  const units = priorsMode
+    ? priorsUnits
+    : allUnits.filter(
+        (u) =>
+          armsEnv === undefined ||
+          armsEnv
+            .split(',')
+            .map((a) => a.trim())
+            .includes(u.arm),
+      )
   if (units.length === 0) {
     throw new Error(
       `MEASURE_ARMS="${armsEnv}" names no arm (greeting, sign_off)`,
@@ -388,11 +488,14 @@ async function main(): Promise<void> {
     name: 'tac575-complaint-followup',
     meta: {
       openComp,
-      arm: controlGreeting
-        ? 'informational-control-returning-greeting'
-        : informational
-          ? `informational-${armsEnv}`
-          : 'treatment-only',
+      priorsMode,
+      arm: priorsMode
+        ? 'prior-greetings'
+        : controlGreeting
+          ? 'informational-control-returning-greeting'
+          : informational
+            ? `informational-${armsEnv}`
+            : 'treatment-only',
       promptVersion: PROMPT_VERSION,
       venue: venueSlug,
       venueName: venue.name,
@@ -456,6 +559,9 @@ async function main(): Promise<void> {
     } as RuntimeContext['activeCommitments'][number]
   }
 
+  const repeats: { id: string; body: string }[] = []
+  const priorsBodies: { id: string; body: string }[] = []
+  const regulars = { total: 0, asks: 0 }
   const failed: { id: string; error: string }[] = []
   const counts = {
     greetings: {
@@ -514,6 +620,7 @@ async function main(): Promise<void> {
             hadPriorConversation: true,
             hasRecordedVisit: true,
             afterComplaint: !controlGreeting,
+            priorGreetings: [...(unit.priors ?? [])],
           }
         : null,
       signOff: isGreeting ? null : 'after_complaint',
@@ -571,7 +678,15 @@ async function main(): Promise<void> {
         : bodyContainsReviewLink(body, reviewLink.url),
       asksForRating: isGreeting ? null : asksForRating(body),
     }
-    if (isGreeting) {
+    const repeated = (unit.priors ?? []).filter(
+      (prior) => normalizeForRepeat(prior) === normalizeForRepeat(body),
+    )
+    if (repeated.length > 0) repeats.push({ id: unit.id, body })
+    priorsBodies.push({ id: unit.id, body })
+    if (unit.regular) {
+      regulars.total += 1
+      if (flags.asksWhatTheyGot) regulars.asks += 1
+    } else if (isGreeting) {
       const c = counts.greetings
       c.total += 1
       if (flags.apologises) c.apologise += 1
@@ -595,6 +710,8 @@ async function main(): Promise<void> {
       body,
       reviewAsk: gen.data.reviewAsk,
       flags,
+      priors: unit.priors ?? null,
+      repeatsAPrior: repeated.length > 0,
       attempts: gen.data.attempts,
       // Loaded, and what generation was handed after buildAiRuntime's filter.
       historyLoaded: unit.history.length,
@@ -628,7 +745,10 @@ async function main(): Promise<void> {
   )
 
   // Validity before verdict.
-  if (failed.length > 0 || g.total + s.total !== units.length) {
+  if (
+    failed.length > 0 ||
+    g.total + s.total + regulars.total !== units.length
+  ) {
     console.log(
       `\n[tac575] RUN VOID: ${failed.length} unit(s) failed (${failed.map((f) => f.id).join(', ')}). A failed unit is not a result; no verdict.`,
     )
@@ -639,6 +759,45 @@ async function main(): Promise<void> {
     console.log('\n[tac575] RUN VOID: guest_states changed during the run.')
     log.appendUnit({ summary: true, void: true, statesBefore, statesAfter })
     process.exit(2)
+  }
+
+  if (priorsMode) {
+    // Reported, not part of the bar: how alike the fifteen are to each other.
+    const groups = new Map<string, string[]>()
+    for (const b of priorsBodies) {
+      const key = normalizeForRepeat(b.body)
+      groups.set(key, [...(groups.get(key) ?? []), b.id])
+    }
+    const identical = [...groups.values()].filter((ids) => ids.length > 1)
+    const complaintBarMet =
+      g.apologise === 0 && g.offer === 0 && g.fault === 0 && g.asks === PER_ARM
+    const pass = complaintBarMet && repeats.length === 0
+    console.log(
+      `\n[tac575] greetings repeating one of their own priors: ${repeats.length} of ${priorsBodies.length} (bar 0)${repeats.map((r) => ` [${r.id}]`).join('')}`,
+    )
+    console.log(
+      `[tac575] regulars asking what they got: ${regulars.asks}/${regulars.total} (reported, not in the bar)`,
+    )
+    console.log(
+      `[tac575] groups identical to each other: ${identical.length}${identical.map((ids) => ` [${ids.join(', ')}]`).join('')} (reported, not in the bar)`,
+    )
+    log.appendUnit({
+      summary: true,
+      void: false,
+      priorsMode: true,
+      counts,
+      regulars,
+      repeats,
+      identical,
+      complaintBarMet,
+      pass,
+      statesBefore,
+      statesAfter,
+    })
+    console.log(
+      `\n[tac575] complaint bar: ${complaintBarMet ? 'MET' : 'NOT MET'}; repeats: ${repeats.length}; ${pass ? 'PASS' : 'FAIL'}`,
+    )
+    process.exit(pass ? 0 : 1)
   }
 
   if (informational) {
