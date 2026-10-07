@@ -100,6 +100,7 @@ import type {
   RuntimeContext,
   Visit,
 } from './types'
+import { messagesFromThisVisit } from './visit-checkin'
 import type { MessageCategory } from '@/lib/ai'
 
 // STRONG_MATCH_SIMILARITY / MIN_STRONG_MATCHES / CORPUS_RETRIEVE_LIMIT lived
@@ -2059,9 +2060,12 @@ export async function applyApprovalPolicyStage(
   //
   // TAC-575: the invitation on a happy guest's SIGN-OFF reads a setting of its
   // own (`signOffReviewAsk`), for the reason on that key: turning the sign-off
-  // on at a venue must not also turn the praise ask on.
+  // on at a venue must not also turn the praise ask on. The invitation after a
+  // followed-up complaint reads the SAME setting (ruled 2026-10-06, PR 5): a
+  // card held only for past complainers invites skipping exactly those, which
+  // is the review gating the ticket rules out.
   const reviewAskDisposition =
-    ctx.signOff === 'happy'
+    ctx.signOff === 'happy' || ctx.signOff === 'after_complaint'
       ? resolveSignOffReviewAskDisposition(ctx.venue.approvalPolicy)
       : resolveReviewAskDisposition(ctx.venue.approvalPolicy)
   if (
@@ -2968,7 +2972,19 @@ export function buildAiRuntime(
         ? { state: 'unknown' }
         : resolveVenueOpenState(ctx.venue, now),
     },
-    recentMessages: ctx.recentMessages,
+    // TAC-575: EVERY SCAN GREETING is written WITHOUT the earlier
+    // conversation. With it, a thread whose last exchange was a complaint got
+    // an answer to that complaint instead of a greeting: first found on the
+    // greeting that follows a complaint up, then on the ordinary returning one
+    // (ruled 2026-10-06; guest-arrived.ts has both measurements and what the
+    // greeting gives up). Every other turn gets the thread unchanged.
+    recentMessages:
+      ctx.scanArrival !== null && ctx.followupTrigger !== null
+        ? messagesFromThisVisit(
+            ctx.recentMessages,
+            ctx.followupTrigger.triggeredAt,
+          )
+        : ctx.recentMessages,
     mechanics: ctx.mechanics,
     // TAC-234: thread the recent transactions through to the AI module's
     // RuntimeContext. The serializer gates rendering by category (welcome /
@@ -3019,12 +3035,15 @@ export function buildAiRuntime(
     // TAC-536: mapped straight through, never re-derived. Null on every turn
     // but a scan greeting, and the serializer omits the block on null.
     scanArrival: ctx.scanArrival,
+    // TAC-575: the reply to a returning guest's first message at the counter,
+    // when their last visit ended in a complaint recent enough to bring up.
+    lastVisitWentWrong: ctx.complaintFollowup?.mention === true || undefined,
     // TAC-386: undefined rather than null on every other turn, matching how the
     // optional RuntimeContext fields around it read.
     inquiryFollowup: ctx.inquiryFollowup ?? undefined,
     visitCheckback: ctx.visitCheckback || undefined,
-    // TAC-575: the sign-off. The kind is decided upstream (the pause timer, or
-    // handleInbound on a goodbye turn); this only carries it. The venue's close
+    // TAC-575: the sign-off. The kind is decided upstream, by the pause timer
+    // and nothing else; this only carries it. The venue's close
     // text rides along on a plain close as a guide to its content.
     signOff: ctx.signOff ?? undefined,
     warmCloseGuidance:

@@ -9,6 +9,8 @@
     "build:worktree": "set -a && . \"$(dirname \"$(git rev-parse --path-format=absolute --git-common-dir)\")/.env.local\" && set +a && next build",
     "start": "next start",
     "lint": "eslint",
+    "measure-complaint-followup": "tsx --env-file=.env.local scripts/measurement/complaint-followup.ts",
+    "measure-scan-visits": "tsx --env-file=.env.local scripts/measurement/scan-visits-before-after.ts",
     "measure-inquiry-followup": "tsx --env-file=.env.local scripts/measurement/inquiry-followup.ts",
     "measure-follow-up-worthy": "tsx --env-file=.env.local scripts/measurement/follow-up-worthy.ts",
     "db:types": "npx supabase gen types typescript --project-id fudibprfkhvfdjesvbzl --schema public > db/types.ts",

@@ -1,5 +1,9 @@
 import { createAdminClient } from '@/lib/db/admin'
 import { logger } from '@/lib/observability/logger'
+import {
+  loadInstagramScanInstants,
+  scanVisitInstants,
+} from '@/lib/recognition/load-scan-visits'
 import { extractRecentVisits } from './extract-recent-visits'
 import { venueLocalDayKey } from './extract-reported-order'
 import type { RuntimeContext } from './types'
@@ -54,11 +58,6 @@ export const RETRACTABLE_SOURCES = [
   'guest_reported',
   'guest_reported_ongoing',
 ] as const
-
-// How many of a guest's scans to read when working out which days they
-// scanned. A candidate visit sits inside the 90-day visit window, and one
-// greeting per guest per day bounds the rows that matter well below this.
-const SCAN_DAY_LOOKUP_LIMIT = 200
 
 /** The columns of a `transactions` row this module reads. */
 export interface ReportedVisitRow {
@@ -170,49 +169,36 @@ export async function loadScanDayKeys(
     createdAt: Date
   },
 ): Promise<Set<string> | null> {
-  try {
-    const { data, error } = await supabase
-      .from('instagram_scan_arrivals')
-      .select('scanned_at')
-      .eq('venue_id', input.venueId)
-      .eq('guest_id', input.guestId)
-      .order('scanned_at', { ascending: false })
-      .limit(SCAN_DAY_LOOKUP_LIMIT)
-    if (error) {
-      logger.warn(
-        '[agent] scan days unreadable; no reported visit is retractable this turn',
-        {
-          venueId: input.venueId,
-          guestId: input.guestId,
-          error: error.message,
-        },
-      )
-      return null
-    }
-    const keys = new Set<string>()
-    if (input.createdVia === 'qr_scan') {
-      keys.add(venueLocalDayKey(input.timezone, input.createdAt))
-    }
-    for (const row of data ?? []) {
-      const scannedAt = new Date(row.scanned_at)
-      if (!Number.isFinite(scannedAt.getTime())) continue
-      keys.add(venueLocalDayKey(input.timezone, scannedAt))
-    }
-    return keys
-  } catch (e) {
-    // A thrown read fails the same way as a returned error. Without this the
-    // throw would surface in buildRuntimeContext and cost the guest their reply
-    // over a question that only decides whether a visit may be taken back.
+  // TAC-575: read through the reader recognition counts visits with, so "a day
+  // the guest scanned" is one definition (lib/recognition/load-scan-visits.ts).
+  // It never throws: a thrown read comes back as an error, which matters here
+  // because a throw would surface in buildRuntimeContext and cost the guest
+  // their reply over a question that only decides whether a visit may be taken
+  // back.
+  const scans = await loadInstagramScanInstants(supabase, {
+    venueId: input.venueId,
+    guestId: input.guestId,
+  })
+  if (!scans.ok) {
     logger.warn(
-      '[agent] scan days read threw; no reported visit is retractable this turn',
+      '[agent] scan days unreadable; no reported visit is retractable this turn',
       {
         venueId: input.venueId,
         guestId: input.guestId,
-        error: e instanceof Error ? e.message : String(e),
+        error: scans.error,
       },
     )
     return null
   }
+  const keys = new Set<string>()
+  for (const instant of scanVisitInstants({
+    createdVia: input.createdVia,
+    createdAt: input.createdAt,
+    instagramScans: scans.data,
+  })) {
+    keys.add(venueLocalDayKey(input.timezone, instant))
+  }
+  return keys
 }
 
 export type RetractReportedVisitsOutcome =

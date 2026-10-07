@@ -27,14 +27,19 @@ import {
   hasBeenQuietLongEnough,
   isCheckbackTooLate,
   isCheckinFresh,
+  lastComplaintFollowupAt,
   lastProactiveWasThisVisit,
+  messagesFromThisVisit,
   nextCheckinAnswer,
   orderTurnVerdict,
+  owedComplaintFollowup,
+  owesAfterComplaintReviewAsk,
   owesCheckback,
   resolveCheckbackDueAt,
   resolveSameVisitOrderAt,
   type VisitCheckin,
 } from '@/lib/agent/visit-checkin'
+import { latestGreetings } from '@/lib/agent/scan-arrival'
 import { isQuietAfterWarmClose } from '@/lib/agent/warm-close'
 import { categoryInstructionsFor } from '@/lib/ai/prompts/categories'
 import { runtimeToProse } from '@/lib/ai/prompts/serializers'
@@ -851,12 +856,18 @@ const REVIEW_URL = 'https://reviews.example.test/write?id=abc'
 const links = [{ label: 'Leave a review', url: REVIEW_URL, kind: 'review' }]
 check(
   'happy: check-in good, never asked, venue has a link',
-  deriveSignOffReviewAsk({ checkinAnswer: 'good', reviewAskedAt: null, links }),
+  deriveSignOffReviewAsk({
+    afterComplaint: false,
+    checkinAnswer: 'good',
+    reviewAskedAt: null,
+    links,
+  }),
   { url: REVIEW_URL, label: 'Leave a review' },
 )
 check(
   'not happy: they never said it was good',
   deriveSignOffReviewAsk({
+    afterComplaint: false,
     checkinAnswer: 'not_yet',
     reviewAskedAt: null,
     links,
@@ -865,17 +876,28 @@ check(
 )
 check(
   'not happy: they complained',
-  deriveSignOffReviewAsk({ checkinAnswer: 'bad', reviewAskedAt: null, links }),
+  deriveSignOffReviewAsk({
+    afterComplaint: false,
+    checkinAnswer: 'bad',
+    reviewAskedAt: null,
+    links,
+  }),
   null,
 )
 check(
   'not happy: no check-in at all',
-  deriveSignOffReviewAsk({ checkinAnswer: null, reviewAskedAt: null, links }),
+  deriveSignOffReviewAsk({
+    afterComplaint: false,
+    checkinAnswer: null,
+    reviewAskedAt: null,
+    links,
+  }),
   null,
 )
 check(
   'not happy: already asked once',
   deriveSignOffReviewAsk({
+    afterComplaint: false,
     checkinAnswer: 'good',
     reviewAskedAt: at(-DAY),
     links,
@@ -885,6 +907,7 @@ check(
 check(
   'not happy: the venue has no review link',
   deriveSignOffReviewAsk({
+    afterComplaint: false,
     checkinAnswer: 'good',
     reviewAskedAt: null,
     links: [],
@@ -894,6 +917,7 @@ check(
 check(
   'not happy: a link that is not marked as the review link',
   deriveSignOffReviewAsk({
+    afterComplaint: false,
     checkinAnswer: 'good',
     reviewAskedAt: null,
     links: [{ label: 'Menu', url: REVIEW_URL }],
@@ -1057,6 +1081,337 @@ check(
   'CONTROL goodbye turn: says the guest is wrapping up',
   goodbye.includes('wrapping up'),
   true,
+)
+
+// ---------------------------------------------------------------------------
+// 8. The follow-up on the next visit after a complaint (PR 5).
+// ---------------------------------------------------------------------------
+
+const TODAY = '2026-10-06'
+const complaint = (
+  daysAgo: number,
+  followupClaimedAt: Date | null = null,
+): {
+  venueLocalDate: string
+  orderedAt: Date
+  followupClaimedAt: Date | null
+} => {
+  const orderedAt = at(-daysAgo * DAY)
+  return {
+    venueLocalDate: orderedAt.toISOString().slice(0, 10),
+    orderedAt,
+    followupClaimedAt,
+  }
+}
+check(
+  'owed: a complaint two days ago, not followed up',
+  owedComplaintFollowup([complaint(2)], TODAY, NOW),
+  { mention: true },
+)
+check(
+  "not owed: today's own complaint",
+  owedComplaintFollowup(
+    [{ venueLocalDate: TODAY, orderedAt: at(-HOUR), followupClaimedAt: null }],
+    TODAY,
+    NOW,
+  ),
+  null,
+)
+check(
+  'not owed: already followed up',
+  owedComplaintFollowup([complaint(2, at(-DAY))], TODAY, NOW),
+  null,
+)
+check('not owed: no complaint', owedComplaintFollowup([], TODAY, NOW), null)
+check(
+  'owed but not mentioned: the complaint is 31 days old',
+  owedComplaintFollowup([complaint(31)], TODAY, NOW),
+  { mention: false },
+)
+check(
+  'mentioned: the complaint is 29 days old',
+  owedComplaintFollowup([complaint(29)], TODAY, NOW),
+  { mention: true },
+)
+check(
+  'the newest complaint decides: one at 40 days, one at 2',
+  owedComplaintFollowup([complaint(40), complaint(2)], TODAY, NOW),
+  { mention: true },
+)
+check(
+  'last followed up: the later of two',
+  lastComplaintFollowupAt([
+    complaint(9, at(-5 * DAY)),
+    complaint(3, at(-HOUR)),
+    complaint(1),
+  ]),
+  at(-HOUR),
+)
+check('last followed up: never', lastComplaintFollowupAt([complaint(1)]), null)
+
+const followedUp = at(-20 * MIN)
+check(
+  'link owed: followed up twenty minutes ago, wrote five minutes ago',
+  owesAfterComplaintReviewAsk({
+    anotherStillOwed: false,
+    followedUpAt: followedUp,
+    todaysCheckin: null,
+    lastInboundAt: at(-5 * MIN),
+    now: NOW,
+  }),
+  true,
+)
+check(
+  'link owed with NO happiness condition: today reads "not yet"',
+  owesAfterComplaintReviewAsk({
+    anotherStillOwed: false,
+    followedUpAt: followedUp,
+    todaysCheckin: checkin({ answer: 'not_yet', answeredAt: at(-9 * MIN) }),
+    lastInboundAt: at(-9 * MIN),
+    now: NOW,
+  }),
+  true,
+)
+check(
+  'no link: the complaint was never followed up',
+  owesAfterComplaintReviewAsk({
+    anotherStillOwed: false,
+    followedUpAt: null,
+    todaysCheckin: checkin({ answer: 'not_yet', answeredAt: at(-9 * MIN) }),
+    lastInboundAt: at(-9 * MIN),
+    now: NOW,
+  }),
+  false,
+)
+check(
+  'no link: a later complaint of theirs has not been followed up yet',
+  owesAfterComplaintReviewAsk({
+    anotherStillOwed: true,
+    followedUpAt: followedUp,
+    todaysCheckin: checkin({ answer: 'not_yet', answeredAt: at(-9 * MIN) }),
+    lastInboundAt: at(-9 * MIN),
+    now: NOW,
+  }),
+  false,
+)
+check(
+  'no link: they complained again today',
+  owesAfterComplaintReviewAsk({
+    anotherStillOwed: false,
+    followedUpAt: followedUp,
+    todaysCheckin: checkin({ answer: 'bad', answeredAt: at(-9 * MIN) }),
+    lastInboundAt: at(-9 * MIN),
+    now: NOW,
+  }),
+  false,
+)
+check(
+  'no link: greeted and never wrote (their last message is from yesterday)',
+  owesAfterComplaintReviewAsk({
+    anotherStillOwed: false,
+    followedUpAt: followedUp,
+    todaysCheckin: null,
+    lastInboundAt: at(-DAY),
+    now: NOW,
+  }),
+  false,
+)
+check(
+  'no link: greeted and has never written at all',
+  owesAfterComplaintReviewAsk({
+    anotherStillOwed: false,
+    followedUpAt: followedUp,
+    todaysCheckin: null,
+    lastInboundAt: null,
+    now: NOW,
+  }),
+  false,
+)
+check(
+  'no link: followed up three days ago, and this is a message from home',
+  owesAfterComplaintReviewAsk({
+    anotherStillOwed: false,
+    followedUpAt: at(-3 * DAY),
+    todaysCheckin: null,
+    lastInboundAt: at(-5 * MIN),
+    now: NOW,
+  }),
+  false,
+)
+check(
+  'link still owed on a LATER visit: followed up three days ago, order named today',
+  owesAfterComplaintReviewAsk({
+    anotherStillOwed: false,
+    followedUpAt: at(-3 * DAY),
+    todaysCheckin: checkin({}),
+    lastInboundAt: at(-11 * MIN),
+    now: NOW,
+  }),
+  true,
+)
+check(
+  'after a complaint: the link, with no "good" on file',
+  deriveSignOffReviewAsk({
+    checkinAnswer: 'not_yet',
+    afterComplaint: true,
+    reviewAskedAt: null,
+    links,
+  }),
+  { url: REVIEW_URL, label: 'Leave a review' },
+)
+check(
+  'after a complaint: still once ever',
+  deriveSignOffReviewAsk({
+    checkinAnswer: null,
+    afterComplaint: true,
+    reviewAskedAt: at(-DAY),
+    links,
+  }),
+  null,
+)
+
+const afterComplaintTurn = prose(
+  {
+    signOff: 'after_complaint',
+    reviewAsk: { url: REVIEW_URL, label: 'Leave a review' },
+  },
+  'acknowledgment',
+)
+check(
+  'after-complaint sign-off: its own premise',
+  afterComplaintTurn.includes('went wrong and has come back'),
+  true,
+)
+check(
+  'after-complaint sign-off: never says they are enjoying it',
+  afterComplaintTurn.includes('enjoying'),
+  false,
+)
+check(
+  'after-complaint sign-off: the link, character for character',
+  afterComplaintTurn.includes(`exactly as written: ${REVIEW_URL}`),
+  true,
+)
+check(
+  'after-complaint sign-off: never a rating',
+  afterComplaintTurn.includes(
+    'Never ask for a particular rating or number of stars',
+  ),
+  true,
+)
+check(
+  'after-complaint sign-off: not the praise block',
+  afterComplaintTurn.includes('## Ask for a review'),
+  false,
+)
+check(
+  'CONTROL happy sign-off: says they are enjoying it',
+  happyTurn.includes('enjoying'),
+  true,
+)
+check(
+  'first message at the counter after a complaint: the block',
+  prose({ lastVisitWentWrong: true }).includes('## Their last visit'),
+  true,
+)
+check(
+  'CONTROL any other turn: no such block',
+  prose({}).includes('## Their last visit'),
+  false,
+)
+const greetAfterComplaint = categoryInstructionsFor(
+  'guest_arrived',
+  'instagram',
+  { hadPriorConversation: true, afterComplaint: true },
+)
+const greetReturning = categoryInstructionsFor('guest_arrived', 'instagram', {
+  hadPriorConversation: true,
+})
+check(
+  'greeting after a complaint: glad they came back, no second apology',
+  greetAfterComplaint.includes('glad they came back') &&
+    greetAfterComplaint.includes('Do not apologise again'),
+  true,
+)
+check(
+  'CONTROL returning greeting: says nothing about a last visit',
+  greetReturning.includes('something was wrong'),
+  false,
+)
+
+const thread = [
+  { createdAt: at(-2 * DAY), body: 'it came out cold' },
+  { createdAt: at(-2 * DAY + 300), body: 'so sorry about that' },
+  { createdAt: at(-10 * MIN), body: 'are you open?' },
+]
+check(
+  'the follow-up greeting sees nothing of the earlier visit',
+  messagesFromThisVisit(thread, NOW).map((m) => m.body),
+  ['are you open?'],
+)
+check(
+  'CONTROL: a thread that is all from this visit is kept whole',
+  messagesFromThisVisit(thread.slice(2), NOW).length,
+  1,
+)
+
+// ---------------------------------------------------------------------------
+// 9. A greeting's own earlier greetings.
+// ---------------------------------------------------------------------------
+
+const greetingRows = [
+  { id: 'g5', generationId: 'gen-5', body: 'fifth', createdAt: at(-1 * DAY) },
+  {
+    id: 'g4b',
+    generationId: 'gen-4',
+    body: 'second bubble',
+    createdAt: at(-2 * DAY + 2),
+  },
+  {
+    id: 'g4a',
+    generationId: 'gen-4',
+    body: 'fourth,',
+    createdAt: at(-2 * DAY),
+  },
+  { id: 'g3', generationId: null, body: 'third', createdAt: at(-3 * DAY) },
+  { id: 'g2', generationId: 'gen-2', body: '   ', createdAt: at(-4 * DAY) },
+  { id: 'g1', generationId: 'gen-1', body: 'first', createdAt: at(-5 * DAY) },
+]
+check(
+  'prior greetings: the newest three, bubbles joined in order, blanks skipped',
+  latestGreetings(greetingRows),
+  ['fifth', 'fourth, second bubble', 'third'],
+)
+check('prior greetings: none on file', latestGreetings([]), [])
+const withPriors = prose(
+  {
+    scanArrival: {
+      hadPriorConversation: true,
+      hasRecordedVisit: true,
+      priorGreetings: ['hey, good to see you! what did you get?'],
+    },
+  },
+  'guest_arrived',
+)
+check(
+  'greeting with priors: shown as lines not to repeat',
+  withPriors.includes('- hey, good to see you! what did you get?') &&
+    withPriors.includes('Do not repeat any of these'),
+  true,
+)
+check(
+  'CONTROL greeting with no priors: no such lines',
+  prose(
+    {
+      scanArrival: {
+        hadPriorConversation: true,
+        hasRecordedVisit: true,
+        priorGreetings: [],
+      },
+    },
+    'guest_arrived',
+  ).includes('Do not repeat any of these'),
+  false,
 )
 
 console.log(

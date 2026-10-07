@@ -74,6 +74,7 @@ import type { RuntimeContext, SignOffKind } from '@/lib/agent/types'
 import { createAdminClient } from '@/lib/db/admin'
 import { startAgentTrace } from '@/lib/observability/langfuse'
 import { findReviewLink, parseVenueLinks } from '@/lib/schemas'
+import { toParsedGuestContext } from '@/lib/schemas/guest-context'
 import { createRunLog } from './run-log'
 import {
   MAX_OPENING_SHARE,
@@ -314,12 +315,22 @@ async function main(): Promise<void> {
       guest: {
         ...baseCtx.guest,
         firstName: null,
+        context: toParsedGuestContext({}, startedAt),
         createdAt: at(20),
         firstContactedAt: at(20),
         reviewAskedAt: null,
       },
       recentMessages: unit.history,
       recentVisits: [],
+      // NOTHING OF THE REAL GUEST'S. The base context is built for a real
+      // guest, and until 2026-10-06 their open commitments and stored notes
+      // rode into every unit: that guest holds an open comp for a Blossom
+      // Tonic, and closes and greetings offered constructed guests "the
+      // Blossom Tonic we owe you". Found by the control arm of
+      // complaint-followup.ts. Every run before this line was contaminated.
+      activeCommitments: [],
+      retractableReportedVisits: [],
+      mechanics: [],
       conversationChannel: 'instagram',
       firstConversation: true,
       openIntentions: [],

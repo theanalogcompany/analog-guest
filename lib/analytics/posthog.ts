@@ -2619,6 +2619,13 @@ export interface InstagramScanGreetingProps {
   hadPriorConversation: boolean | null
   /** The AgentResult status, on a scan that was actually greeted. */
   agentStatus?: string
+  /**
+   * TAC-575: this greeting took the follow-up on a complaint from an earlier
+   * visit. Absent on a suppressed scan.
+   */
+  followedUpComplaint?: boolean
+  /** TAC-575: and the complaint was recent enough for the greeting to refer to. */
+  mentionedComplaint?: boolean
 }
 
 /**
@@ -2644,6 +2651,13 @@ export async function captureInstagramScanGreeting(
       props.hadPriorConversation === true
         ? 'they have messaged this venue before, so the greeting does not introduce itself'
         : 'no messages with them on record, so the greeting says who they have reached',
+      ...(props.followedUpComplaint === true
+        ? [
+            props.mentionedComplaint === true
+              ? 'their last visit ended in a complaint, and this greeting follows it up'
+              : "their last visit ended in a complaint too long ago to bring up; the review link is owed at this visit's sign-off",
+          ]
+        : []),
       `agent outcome: \`${props.agentStatus ?? 'unknown'}\``,
       `venue: \`${props.venueId}\``,
       `guest: \`${props.guestId}\``,

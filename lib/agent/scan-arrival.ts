@@ -204,6 +204,72 @@ export function scanCarryForwardAt(input: ScanCarryForwardInput): Date | null {
   return lastScanAt
 }
 
+// ---------------------------------------------------------------------------
+// The greetings this guest has already had (TAC-575)
+// ---------------------------------------------------------------------------
+
+/**
+ * How many of its own earlier greetings a scan greeting is shown, as lines not
+ * to repeat. Three (ruled 2026-10-06).
+ *
+ * WHY THE GREETING NEEDS THEM HANDED TO IT. A scan greeting is generated
+ * without the guest's earlier conversation (messagesFromThisVisit: with the
+ * thread, a greeting answered an old complaint instead of greeting). That also
+ * took away the only place it could see what it said last time, and ten
+ * greetings in a row came out as one sentence. These are those lines back,
+ * and only greetings: nothing the guest said, and no other message of ours.
+ *
+ * A GREETING IS WHATEVER REACHED THE GUEST UNDER THAT CATEGORY, so two kinds
+ * of line come back that the model did not write as an ordinary greeting: one
+ * an operator edited before sending, and one that followed up a complaint
+ * ("glad you came back"). Both are shown as lines not to repeat. Whether a
+ * later greeting ever refers to one is not measured.
+ */
+export const PRIOR_GREETING_LIMIT = 3
+
+/** One stored outbound row of a greeting, as read for the list below. */
+export interface GreetingRow {
+  id: string
+  generationId: string | null
+  body: string
+  createdAt: Date
+}
+
+/**
+ * The newest greetings, newest first, each as the one message the guest read.
+ *
+ * A greeting can be dispatched as more than one bubble, stored as rows sharing
+ * a `generation_id`, so rows are grouped on it (a row without one is its own
+ * greeting, the identity groupIntoResponses uses) and a greeting's bubbles are
+ * joined in the order they were sent. Pure.
+ */
+export function latestGreetings(
+  rows: readonly GreetingRow[],
+  limit: number = PRIOR_GREETING_LIMIT,
+): string[] {
+  const byGreeting = new Map<string, GreetingRow[]>()
+  for (const row of rows) {
+    if (row.body.trim() === '') continue
+    const key = row.generationId ?? row.id
+    const bubbles = byGreeting.get(key)
+    if (bubbles) bubbles.push(row)
+    else byGreeting.set(key, [row])
+  }
+  const greetings = [...byGreeting.values()].map((bubbles) => {
+    const ordered = [...bubbles].sort(
+      (a, b) => a.createdAt.getTime() - b.createdAt.getTime(),
+    )
+    return {
+      sentAt: ordered[ordered.length - 1].createdAt.getTime(),
+      text: ordered.map((b) => b.body.trim()).join(' '),
+    }
+  })
+  return greetings
+    .sort((a, b) => b.sentAt - a.sentAt)
+    .slice(0, limit)
+    .map((g) => g.text)
+}
+
 /**
  * The venue-local calendar day a claim is keyed on.
  *

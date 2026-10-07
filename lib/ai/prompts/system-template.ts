@@ -2330,7 +2330,67 @@ import {
 //   bodies. Nothing measures whether the sign-off reads well. BASELINE RESET
 //   for any scenario that ends a first conversation.
 //
-export const PROMPT_VERSION = 'v1.90.0'
+// v1.91.0 (TAC-575, fifth of five): the follow-up on the next visit after a
+// complaint. Nothing in THIS file's prompt text changes; the three additions
+// are in the user prompt and one category instruction, and each reaches only
+// a guest with a `bad` visit check-in on file:
+//
+//   1. A third scan-greeting instruction (categories/guest-arrived.ts,
+//      GUEST_ARRIVED_INSTRUCTIONS_AFTER_COMPLAINT), for the greeting that is
+//      also the follow-up.
+//   2. `## Their last visit` (serializers.ts), the same follow-up on the reply
+//      to the guest's own first message at the counter, when they wrote
+//      before the greeting.
+//   3. A second `## Sign off` block (serializers.ts,
+//      formatAfterComplaintSignOff): the review invitation for a guest whose
+//      complaint has been followed up, with no happiness condition (ruled
+//      2026-10-06). The universal `# Asking for a review` section already
+//      names `## Sign off` as a block that may give a link, so it needs no
+//      edit.
+//
+//   4. The greeting in (1) is generated WITHOUT the earlier conversation
+//      (stages.ts, buildAiRuntime; messagesFromThisVisit). Not wording, but it
+//      changes what that one generation is sent, so it is recorded here.
+//
+//   The three wordings were NOT approved before the build (ruled 2026-10-06:
+//   ruled on in PR review, with the bodies). MEASURED ONCE, bar fixed on the
+//   ticket before any generation (scripts/measurement/complaint-followup.ts),
+//   and THE GREETINGS FAILED IT: eight of ten answered the old complaint
+//   instead of greeting. The sign-offs passed. (4) is the fix; a later run
+//   with it met every number, but that run is informational, not a second
+//   verdict. See the PR body for all the bodies. Every other turn's prompt is
+//   byte-identical to v1.90.0, so no baseline resets.
+//
+// v1.92.0 (TAC-575, follow-up to the fifth): every scan greeting is generated
+// WITHOUT the earlier conversation, not only the one that follows up a
+// complaint (stages.ts, buildAiRuntime). No prompt text changes anywhere; what
+// changes is the chat turns sent with a `guest_arrived` generation for a guest
+// who has talked with the venue before. Ruled 2026-10-06, after the ordinary
+// returning greeting answered an old complaint instead of greeting on threads
+// that ended in one. What the greeting gives up is listed in
+// categories/guest-arrived.ts.
+//
+//   MEASURED, bar fixed on the ticket before any generation
+//   (scripts/measurement/complaint-followup.ts, control mode): see the PR
+//   body for both arms and the bodies. BASELINE RESET for any scenario that is
+//   a scan greeting to a guest with earlier messages; every other turn is
+//   byte-identical to v1.91.0.
+//
+// v1.93.0 (TAC-575): a scan greeting is shown its own last three greetings to
+// this guest, as lines not to repeat (serializers.ts, formatPriorGreetings,
+// inside `## Guest just arrived`). Ruled 2026-10-06. v1.92.0 took the earlier
+// conversation away from the greeting, and with it the only place it could
+// see what it said last time: ten greetings in a row came out as one
+// sentence. Only its own greetings come back; the this-visit-only rule stands
+// for everything else. New wording, two sentences around the list, shown in
+// the PR body.
+//
+//   MEASURED, bar fixed on the ticket before any generation
+//   (scripts/measurement/complaint-followup.ts, MEASURE_PRIORS=1): see the PR
+//   body. A guest with no greeting on file gets a prompt byte-identical to
+//   v1.92.0. BASELINE RESET for a scan greeting to a guest who has had one.
+//
+export const PROMPT_VERSION = 'v1.93.0'
 
 export const SYSTEM_TEMPLATE = `You work at a hospitality venue (cafe, bakery, restaurant). You communicate with its guests via iMessage, in whatever voice the venue has configured below — its own collective voice, its owner's, or a named staff member's.
 

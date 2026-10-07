@@ -29,19 +29,23 @@ import { parseApprovalPolicy } from '@/lib/schemas/approval-policy'
 import { parseFollowupRules } from '@/lib/schemas/followup-rules'
 import { parseIntentionRules } from '@/lib/schemas/intention-rules'
 import { isScanReferral } from '@/lib/schemas/referral-source'
-import { bodyMentionsMenuItem } from './extract-reported-order'
+import {
+  bodyMentionsMenuItem,
+  venueLocalDayKey,
+} from './extract-reported-order'
 import { scanCarryForwardAt } from './scan-arrival'
 import {
   resolveCheckbackDueAt,
   resolveSameVisitOrderAt,
+  owedComplaintFollowup,
   type VisitCheckin,
 } from './visit-checkin'
-import { loadVisitCheckin } from './visit-checkin-store'
+import { loadComplaintCheckins, loadVisitCheckin } from './visit-checkin-store'
 // TAC-567: TAC-560's predicate, reused rather than a second definition of
 // "first conversation". warm-close.ts is pure and builds no client at import.
 import { hasAnsweredGuestBefore, reachedGuest } from './retrieval-context'
 import { isFirstConversation, isQuietAfterWarmClose } from './warm-close'
-import { loadScanCarryForward } from './scan-arrival-store'
+import { loadPriorGreetings, loadScanCarryForward } from './scan-arrival-store'
 import {
   resolveConversationChannel,
   venueMessagingNumberRequired,
@@ -603,6 +607,7 @@ export async function buildRuntimeContext(input: {
   // null on every other path.
   let visitCheckin: VisitCheckin | null = null
   let visitLocalDate: string | null = null
+  let complaintFollowup: RuntimeContext['complaintFollowup'] = null
   if (input.currentMessage) {
     // "Have we heard what they ordered" reuses the visit-history query rather
     // than issuing another: the RAW row count, before extractRecentVisits's
@@ -747,6 +752,32 @@ export async function buildRuntimeContext(input: {
         checkinUnreadable = true
         console.warn(
           `[agent] buildRuntimeContext: visit check-in load failed for guest ${input.guestId}: ${checkinResult.error}. "How is it so far?" is not armed this turn.`,
+        )
+      }
+    }
+    // TAC-575: is this the first message of a counter visit by a guest whose
+    // earlier complaint has not been followed up? Read only when a scan is
+    // live (`scanAt`), which is what "detected visit" means in the ruling, so
+    // a DM from home never brings a complaint up and no other turn pays for
+    // the read.
+    //
+    // FAILS TOWARD SAYING NOTHING. An unreadable table has not shown there is
+    // a complaint to follow up, and the follow-up stays owed for a later turn.
+    if (scanAt !== null && visitLocalDate !== null) {
+      const complaints = await loadComplaintCheckins(
+        supabase,
+        input.venueId,
+        input.guestId,
+      )
+      if (complaints.ok) {
+        complaintFollowup = owedComplaintFollowup(
+          complaints.data,
+          visitLocalDate,
+          input.currentMessage.receivedAt,
+        )
+      } else {
+        console.warn(
+          `[agent] buildRuntimeContext: complaint check-ins unreadable for guest ${input.guestId}: ${complaints.error}. No follow-up this turn.`,
         )
       }
     }
@@ -1047,12 +1078,46 @@ export async function buildRuntimeContext(input: {
       venueId: input.venueId,
       guestId: input.guestId,
     })
+    // TAC-575: a scan on an EARLIER day is a visit too (scans count as visits,
+    // ruled 2026-10-06), so a guest who scanned yesterday and never said what
+    // they got is no longer told apart from a stranger. Today's own scan is
+    // what this greeting answers and does not count: it would make the line
+    // true for every guest. An unreadable scan history reads as no earlier
+    // scan, the understating direction this fact already fails in.
+    const scanDayKeys = await loadScanDayKeys(supabase, {
+      venueId: input.venueId,
+      guestId: input.guestId,
+      timezone: venue.timezone,
+      createdVia: guest.createdVia,
+      createdAt: guest.createdAt,
+    })
+    const todayKey = venueLocalDayKey(venue.timezone, new Date())
+    const scannedOnAnEarlierDay =
+      scanDayKeys !== null &&
+      [...scanDayKeys].some((dayKey) => dayKey !== todayKey)
+    // TAC-575: the greeting's own last few greetings, so a regular does not
+    // get the same sentence every visit. An unreadable read is "none".
+    const priorGreetings = await loadPriorGreetings(
+      supabase,
+      input.venueId,
+      input.guestId,
+    )
+    if (!priorGreetings.ok) {
+      console.warn(
+        `[agent] buildRuntimeContext: prior greetings unreadable for guest ${input.guestId}: ${priorGreetings.error}. This greeting may repeat an earlier one.`,
+      )
+    }
     scanArrival = {
       hadPriorConversation:
         input.followupTrigger.instagramScanArrival?.hadPriorConversation ===
         true,
       hasRecordedVisit:
-        liveVisitRows.length > 0 || (arrival.ok && arrival.data !== null),
+        liveVisitRows.length > 0 ||
+        (arrival.ok && arrival.data !== null) ||
+        scannedOnAnEarlierDay,
+      afterComplaint:
+        input.followupTrigger.instagramScanArrival?.afterComplaint === true,
+      priorGreetings: priorGreetings.ok ? priorGreetings.data : [],
     }
   }
 
@@ -1112,6 +1177,7 @@ export async function buildRuntimeContext(input: {
     reviewAsk: input.followupTrigger?.warmClose?.reviewAsk ?? null,
     signOff: input.followupTrigger?.warmClose?.signOff ?? null,
     insideVisitCheckin: false,
+    complaintFollowup,
     // TAC-574: always null here, for the same reason. handle-inbound.ts sets
     // it once it knows what arrived beside the text.
     inboundMedia: null,

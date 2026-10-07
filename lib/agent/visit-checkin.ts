@@ -429,3 +429,163 @@ export function checkbackWentUnanswered(
     lastInboundAt === null || lastInboundAt.getTime() <= wentOutAt.getTime()
   )
 }
+
+// ---------------------------------------------------------------------------
+// The follow-up on the next visit after a complaint
+// ---------------------------------------------------------------------------
+//
+// Ruled 2026-10-06: a guest who said their order was bad goes down the
+// complaint path that day, and "on the guest's next detected visit, the agent
+// follows up, then offers the review link". A detected visit is a counter scan.
+//
+// THE ONE COLUMN THIS USES is `followup_claimed_at` on the `bad` row (migration
+// 073). Null means the follow-up is still owed. It is claimed when the visit
+// that follows it up begins, and from then on it is what says "this guest's
+// complaint has been followed up", which is the fact the review link waits on.
+
+/** A `bad` check-in, reduced to what the follow-up reads. */
+export interface ComplaintCheckin {
+  venueLocalDate: string
+  orderedAt: Date
+  followupClaimedAt: Date | null
+}
+
+/**
+ * How old a complaint can be and still be referred to when the guest comes
+ * back. Thirty days (ruled 2026-10-06). Past it the guest is greeted as any
+ * returning guest; the follow-up is still claimed and the link is still
+ * offered at that visit's sign-off, because the review ruling is about every
+ * guest who answered, not about recent ones.
+ */
+export const COMPLAINT_FOLLOWUP_MENTION_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000
+
+export interface OwedComplaintFollowup {
+  /** False when the complaint is too old to bring up. */
+  mention: boolean
+}
+
+/**
+ * Is this guest owed a follow-up on the visit happening now?
+ *
+ * Owed when a `bad` check-in from an EARLIER venue-local day has no follow-up
+ * claimed. Today's own `bad` row is never owed today: that is the complaint
+ * itself, still on the complaint path.
+ *
+ * `mention` is read off the NEWEST owed complaint. An older one behind it is
+ * claimed in the same statement (claimComplaintFollowup), so it cannot come
+ * back as a second follow-up on a later visit.
+ */
+export function owedComplaintFollowup(
+  complaints: readonly ComplaintCheckin[],
+  todayLocalDate: string,
+  now: Date,
+): OwedComplaintFollowup | null {
+  let newest: ComplaintCheckin | null = null
+  for (const complaint of complaints) {
+    if (complaint.followupClaimedAt !== null) continue
+    if (complaint.venueLocalDate >= todayLocalDate) continue
+    if (newest === null || complaint.orderedAt > newest.orderedAt) {
+      newest = complaint
+    }
+  }
+  if (newest === null) return null
+  return {
+    mention:
+      now.getTime() - newest.orderedAt.getTime() <=
+      COMPLAINT_FOLLOWUP_MENTION_MAX_AGE_MS,
+  }
+}
+
+/** When this guest's most recent complaint follow-up was claimed, if ever. */
+export function lastComplaintFollowupAt(
+  complaints: readonly ComplaintCheckin[],
+): Date | null {
+  let latest: Date | null = null
+  for (const complaint of complaints) {
+    const at = complaint.followupClaimedAt
+    if (at !== null && (latest === null || at > latest)) latest = at
+  }
+  return latest
+}
+
+/**
+ * Should this sign-off invite a guest whose complaint has been followed up to
+ * leave a review? Ruled 2026-10-06 (PR 5, question 1): they wrote at least
+ * once this visit and did not complain again. NO HAPPINESS CONDITION: making
+ * the unhappy guest's link wait on a "good" is the review gating the ticket
+ * rules out.
+ *
+ *   followed up              some complaint of theirs has a follow-up claimed.
+ *                            Not necessarily today: a guest whose return visit
+ *                            ended in an unanswered check-back got nothing
+ *                            more that day, and is still owed the link.
+ *   on a visit now           the follow-up was claimed within the answer
+ *                            window, or today's check-in is still fresh. A DM
+ *                            from home days later is not a visit.
+ *   wrote this visit         a fresh check-in is itself a message from them;
+ *                            otherwise their last message must be no older
+ *                            than the visit.
+ *   did not complain again   today's check-in is not `bad`. A complaint in the
+ *                            thread with no check-in is caught by the timer's
+ *                            own complaint stop, scoped to this visit.
+ *
+ * Whether they were ever asked before, and whether the venue has a link, are
+ * deriveSignOffReviewAsk's to decide (lib/agent/review-ask.ts).
+ */
+export function owesAfterComplaintReviewAsk(input: {
+  followedUpAt: Date | null
+  /**
+   * A LATER complaint of theirs is still waiting for its own follow-up (it
+   * was held back by a pending card, say). The link waits with it: inviting a
+   * review off the first complaint's follow-up while the second has had none
+   * is the invitation arriving before the fix.
+   */
+  anotherStillOwed: boolean
+  todaysCheckin: VisitCheckin | null
+  lastInboundAt: Date | null
+  now: Date
+}): boolean {
+  const { followedUpAt, todaysCheckin, lastInboundAt, now } = input
+  if (followedUpAt === null) return false
+  if (input.anotherStillOwed) return false
+  if (todaysCheckin?.answer === 'bad') return false
+  if (todaysCheckin !== null && isCheckinFresh(todaysCheckin, now)) return true
+  const sinceFollowup = now.getTime() - followedUpAt.getTime()
+  if (sinceFollowup < 0 || sinceFollowup > CHECKIN_ANSWER_WINDOW_MS) {
+    return false
+  }
+  return (
+    lastInboundAt !== null &&
+    lastInboundAt.getTime() >= visitStartFor(followedUpAt).getTime()
+  )
+}
+
+/**
+ * Where "this visit" starts for a follow-up claimed at `followedUpAt`. The
+ * claim is taken as the greeting goes out, or just after the reply to the
+ * guest's own first message, so a message of theirs shortly BEFORE the claim
+ * is part of the visit. The counter-arrival window is the existing number for
+ * "shortly before" (COUNTER_ARRIVAL_WINDOW_MS).
+ */
+export function visitStartFor(followedUpAt: Date): Date {
+  return new Date(followedUpAt.getTime() - COUNTER_ARRIVAL_WINDOW_MS)
+}
+
+/**
+ * The part of a thread that belongs to the visit starting now.
+ *
+ * Used for ONE KIND of generation: a scan greeting (lib/agent/stages.ts,
+ * buildAiRuntime). A greeting is written without the earlier conversation,
+ * because with it the model answers an old complaint again; guest-arrived.ts
+ * has the measurements. What the guest wrote in the
+ * minutes before scanning stays: it is this visit.
+ *
+ * Generic over the message type so it reads nothing but the time.
+ */
+export function messagesFromThisVisit<T extends { createdAt: Date }>(
+  messages: readonly T[],
+  visitBeganAt: Date,
+): T[] {
+  const since = visitStartFor(visitBeganAt).getTime()
+  return messages.filter((m) => m.createdAt.getTime() >= since)
+}

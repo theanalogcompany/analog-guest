@@ -98,6 +98,9 @@ legacy shape in place.
 
 ## last_visit_at has three writers and they must agree
 
+A counter scan is a visit too (TAC-575), but **at read time only**: `loadSignals` merges scan
+days in and writes nothing. It is not a fourth writer. `lib/recognition/load-scan-visits.ts`.
+
 Two Square paths and the self-reported-order path. **Any writer of `last_visit_at` must
 write `last_visit_precision` in the same statement**, or a guest who self-reports once
 (`approximate`) and then becomes a POS regular is permanently blocked from the post-visit

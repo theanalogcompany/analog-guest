@@ -13,7 +13,7 @@ import {
   type StateThresholds,
 } from './types'
 
-async function loadThresholds(
+export async function loadThresholds(
   venueId: string,
 ): Promise<RecognitionResult<StateThresholds>> {
   const supabase = createAdminClient()
