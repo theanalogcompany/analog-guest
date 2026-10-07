@@ -2361,7 +2361,22 @@ import {
 //   verdict. See the PR body for all the bodies. Every other turn's prompt is
 //   byte-identical to v1.90.0, so no baseline resets.
 //
-export const PROMPT_VERSION = 'v1.91.0'
+// v1.92.0 (TAC-575, follow-up to the fifth): every scan greeting is generated
+// WITHOUT the earlier conversation, not only the one that follows up a
+// complaint (stages.ts, buildAiRuntime). No prompt text changes anywhere; what
+// changes is the chat turns sent with a `guest_arrived` generation for a guest
+// who has talked with the venue before. Ruled 2026-10-06, after the ordinary
+// returning greeting answered an old complaint instead of greeting on threads
+// that ended in one. What the greeting gives up is listed in
+// categories/guest-arrived.ts.
+//
+//   MEASURED, bar fixed on the ticket before any generation
+//   (scripts/measurement/complaint-followup.ts, control mode): see the PR
+//   body for both arms and the bodies. BASELINE RESET for any scenario that is
+//   a scan greeting to a guest with earlier messages; every other turn is
+//   byte-identical to v1.91.0.
+//
+export const PROMPT_VERSION = 'v1.92.0'
 
 export const SYSTEM_TEMPLATE = `You work at a hospitality venue (cafe, bakery, restaurant). You communicate with its guests via iMessage, in whatever voice the venue has configured below — its own collective voice, its owner's, or a named staff member's.
 

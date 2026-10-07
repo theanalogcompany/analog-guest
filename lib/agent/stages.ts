@@ -2972,12 +2972,14 @@ export function buildAiRuntime(
         ? { state: 'unknown' }
         : resolveVenueOpenState(ctx.venue, now),
     },
-    // TAC-575: the greeting that follows up a complaint is written WITHOUT the
-    // earlier conversation. With it the model answered the old complaint
-    // again instead of greeting (guest-arrived.ts has the measurement). Every
-    // other turn gets the thread unchanged.
+    // TAC-575: EVERY SCAN GREETING is written WITHOUT the earlier
+    // conversation. With it, a thread whose last exchange was a complaint got
+    // an answer to that complaint instead of a greeting: first found on the
+    // greeting that follows a complaint up, then on the ordinary returning one
+    // (ruled 2026-10-06; guest-arrived.ts has both measurements and what the
+    // greeting gives up). Every other turn gets the thread unchanged.
     recentMessages:
-      ctx.scanArrival?.afterComplaint === true && ctx.followupTrigger !== null
+      ctx.scanArrival !== null && ctx.followupTrigger !== null
         ? messagesFromThisVisit(
             ctx.recentMessages,
             ctx.followupTrigger.triggeredAt,
