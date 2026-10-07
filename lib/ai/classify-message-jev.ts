@@ -50,12 +50,18 @@ import { checkTypesafeEnv } from './typesafe-env'
 
 export const JEV_CLASSIFICATION_ENABLED = true
 
+// jev-v1.3.0 (TAC-574): `mechanic_request` narrowed to what the venue has to
+// arrange or grant, and `new_question` widened to say ordering and
+// availability questions belong to it. "can i get a flat white" and "can i
+// order ahead" had both been classed mechanic_request, which always holds the
+// reply for approval. Ruled 2026-10-06; the Haiku prompt carries the same
+// wording under PROMPT_VERSION v1.83.0.
 // jev-v1.2.0: added the `praise` noul behind the once-ever Google review ask.
 // jev-v1.1.0: crisis question gained explicit true/false criteria carrying
 // the prefer-true-on-ambiguity asymmetry. v1.0.0 scored an ambiguous "I want
 // to end it soon" at p(yes)=0.06 - it read "end it" as ending the
 // conversation - and the fixture eval's zero-false-negative ceiling caught it.
-export const CLASSIFY_JEV_PROMPT_VERSION = 'jev-v1.2.0'
+export const CLASSIFY_JEV_PROMPT_VERSION = 'jev-v1.3.0'
 
 export const TYPESAFE_SYSTEMONE_URL = 'https://api.typesafe.ai/v1/systemone'
 export const JEV_MODEL = 'jev-latest'
@@ -118,14 +124,14 @@ export const JEV_CATEGORY_CRITERIA = {
   reply:
     'A conversational reply to something the venue sent, without a specific question, complaint, request, or other intent below.',
   new_question:
-    'The guest is asking the venue a factual question (hours, menu, location, etc.).',
+    'The guest is asking the venue a factual question (hours, menu, location, etc.), including whether they can order something, how ordering works, or whether an item or option is available (e.g., "can i get a flat white", "can i order ahead", "do you do pre-orders", "can i get oat milk in that").',
   opt_out: 'The guest is asking to stop receiving messages.',
   acknowledgment:
     'The guest is acknowledging, signing off, or otherwise closing a thread without a question or request (e.g., "thanks", "ok cool", "got it", "see you tomorrow").',
   comp_complaint:
     'The guest is reporting a quality issue or unsatisfactory experience with something they received from the venue (e.g., "muffin was stale", "had a bad experience today", "waited 20 minutes"). A complaint about service is comp_complaint even if phrased as a reply.',
   mechanic_request:
-    'The guest is asking about, invoking, or requesting a perk, hold, event slot, or other venue mechanic (e.g., "can you hold the couch", "is the tea on the house", "can i get on the open mic list").',
+    'The guest is asking about, invoking, or requesting something the venue has to arrange or grant for them: a hold, a perk, a comp or something on the house, an event slot, or another venue mechanic (e.g., "can you hold the couch", "is the tea on the house", "can i get on the open mic list"). Ordering from the menu, asking whether an item or option is available, or asking how ordering works is NOT mechanic_request, even when phrased "can i get"; that is new_question.',
   recommendation_request:
     'The guest is asking the venue for a recommendation on what to order, try, or pair (e.g., "what\'s good here", "what do you pair with the latte", "anything worth trying"). Opinion-shaped questions belong here, not in new_question, which is factual.',
   casual_chatter:
@@ -145,6 +151,7 @@ export const JEV_CATEGORY_CRITERIA = {
 const CATEGORY_INSTRUCTIONS =
   'Classify `inbound_message`, sent by a guest to a hospitality venue (cafe, bakery, restaurant), into exactly one category. ' +
   'When a message could fit multiple categories, prefer the more specific one. ' +
+  'A guest ordering from the menu or asking whether something is available is new_question, not mechanic_request. ' +
   'If the message looks like a response to an event invite or perk offer, choose reply (or event_question / perk_inquiry if the guest is asking ABOUT an event or perk). ' +
   'If a first contact looks like an opening pleasantry, choose casual_chatter or new_question depending on what the guest is saying.'
 
@@ -387,11 +394,13 @@ export async function classifyMessageViaJev(
       correctsPendingReply:
         correctsPending.noul >= JEV_CORRECTS_PENDING_THRESHOLD,
       praisedExperience: praise.noul >= JEV_PRAISE_THRESHOLD,
-      // TAC-386 KNOWN GAP: the Jev unit (v1.13.0) has no followUpWorthy
-      // question, so a Jev-classified turn never arms an inquiry follow-up.
-      // False is the cheap direction by TAC-386's own posture (a missed
-      // follow-up, never a broken turn). Adding the question to the Jev unit
-      // is the v-next work item; do NOT derive it from category here - the
+      // TAC-386 KNOWN GAP: the question set this file sends has no
+      // followUpWorthy question, so a Jev-classified turn never arms an
+      // inquiry follow-up. False is the cheap direction by TAC-386's own
+      // posture (a missed follow-up, never a broken turn). Adding the question
+      // to the request body above is the v-next work item (the questions live
+      // in this file; jev-1.13.0 is the vendor's model, not a unit we train);
+      // do NOT derive it from category here - the
       // 2026-09-30 ruling drew the line on what the answer helps the guest DO,
       // which a category cannot express.
       followUpWorthy: false,

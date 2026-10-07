@@ -2117,7 +2117,20 @@ import {
 //   generate schema gained a field, so routing and attempt counts can move
 //   for reasons unrelated to what a harness is grading.
 //
-export const PROMPT_VERSION = 'v1.82.0'
+// v1.83.0 (TAC-574): NO change to any rule, block or wording in this file.
+//   The bump is here for the v1.62.0 reason: the CLASSIFIER stamps this
+//   version on its output, and its prompt changed. `mechanic_request` is
+//   narrowed to what the venue has to arrange or grant (a hold, a perk, a
+//   comp, an event slot) and `new_question` now says ordering and
+//   availability questions belong to it, after "can i get a flat white" and
+//   "can i order ahead" were both held for approval as mechanic requests
+//   (ruled 2026-10-06). The Jev arm carries the same wording under its own
+//   CLASSIFY_JEV_PROMPT_VERSION (jev-v1.3.0).
+//
+//   BASELINE RESET for routing grades: a scenario whose inbound is an
+//   ordering question can move from queued to sent across this bump.
+//
+export const PROMPT_VERSION = 'v1.83.0'
 
 export const SYSTEM_TEMPLATE = `You work at a hospitality venue (cafe, bakery, restaurant). You communicate with its guests via iMessage, in whatever voice the venue has configured below — its own collective voice, its owner's, or a named staff member's.
 
