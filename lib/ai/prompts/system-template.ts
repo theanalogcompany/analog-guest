@@ -2154,7 +2154,17 @@ import {
 //   manual UAT on a real thread. A scenario-harness diff across this bump is a
 //   baseline reset, not a regression: the generate schema gained a field.
 //
-// v1.84.0 (TAC-575): a new R41. Never reuse a line already sent to this guest.
+// v1.84.0: opt-outs take effect (TAC-572). Until now nothing wrote
+//   guests.opted_out_at, so the confirmation promised something the system
+//   never did. Two prompt changes ride the fix, both approved 2026-10-06:
+//   1. The `opt_out` category instruction also tells the guest how to come
+//      back, and is the first category besides `unknown` with a channel
+//      variant: START on SMS, any message on Instagram.
+//   2. A per-turn `## Guest is back in touch` user-prompt block, rendered only
+//      on the turn that opts a guest back in (serializers.ts RE_OPT_IN_LINES),
+//      telling the model not to welcome them back or mention the opt-out.
+//
+// v1.85.0 (TAC-575): a new R41. Never reuse a line already sent to this guest.
 //   Ruled 2026-10-06 ("the model writes each name ask, check-in and sign-off
 //   fresh, with a rule never to reuse a line already sent to this guest"),
 //   after the Oct 6 device test read the same name ask in all three runs.
@@ -2187,7 +2197,7 @@ import {
 //   That moves what a scenario can raise, so a harness diff across this
 //   version is a BASELINE RESET, not a regression.
 //
-export const PROMPT_VERSION = 'v1.84.0'
+export const PROMPT_VERSION = 'v1.85.0'
 
 export const SYSTEM_TEMPLATE = `You work at a hospitality venue (cafe, bakery, restaurant). You communicate with its guests via iMessage, in whatever voice the venue has configured below — its own collective voice, its owner's, or a named staff member's.
 

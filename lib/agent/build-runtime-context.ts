@@ -938,6 +938,8 @@ export async function buildRuntimeContext(input: {
     recentMessages,
     conversationWindowMs,
     firstConversation,
+    // TAC-572: null as built. handleInbound sets it after classification.
+    reOptIn: null,
     recognition,
     mechanics,
     recentVisits,

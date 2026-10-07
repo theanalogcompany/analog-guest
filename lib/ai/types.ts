@@ -1,4 +1,5 @@
 import type { EligibleMechanic, GuestState } from '@/lib/recognition'
+import type { ReOptIn } from '@/lib/guests/opt-out'
 import type { MessageChannel } from '@/lib/schemas/message-channel'
 import type { EmojiDirective } from './emoji-cadence'
 import type {
@@ -412,6 +413,12 @@ export type RuntimeContext = {
   // on a followup or proactive turn, where the instruction may itself be to
   // ask something (the scan greeting asks what they got).
   askNothing?: boolean
+  // TAC-572: set only on the inbound turn that opted the guest back in after
+  // an opt-out, and says which way ('instagram': they wrote again; 'sms_start':
+  // they texted START). The serializer renders one fixed line per value telling
+  // the model not to frame the reply as a return. Absent on every other turn,
+  // which renders nothing.
+  reOptIn?: ReOptIn
   // TAC-389: true only on an operator-initiated decline turn. Computed in
   // buildAiRuntime from ctx.followupTrigger.isOperatorDecline; the serializer
   // reads it to render the decline-specific `## Active commitments` intro,

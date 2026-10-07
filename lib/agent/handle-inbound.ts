@@ -15,6 +15,12 @@ import {
 } from '@/lib/analytics/posthog'
 import { createAdminClient } from '@/lib/db/admin'
 import { isEmptyContextUpdate, updateGuestContext } from '@/lib/guests/context'
+import {
+  clearOptOut,
+  decideOptOutTurn,
+  readOptedOut,
+  recordOptOut,
+} from '@/lib/guests/opt-out'
 import { sendCommitmentArrivalPush } from '@/lib/notifications/send-commitment-push'
 import {
   sendDraftFlaggedPush,
@@ -222,6 +228,7 @@ async function findExistingReply(
  *
  * Policy, matching the gate's behavior rather than reinventing it:
  *   - `opted_out_at` → NO card. Nobody is going to reply to someone who left.
+ *     Except on the opt_out turn itself (TAC-572): its confirmation is owed.
  *   - `hold_all_outbound` → card ANYWAY. A queue card IS the hold outcome;
  *     suppressing it would restore the exact silence this fixes, and would do
  *     it specifically at the venues that asked for more oversight. That flag
@@ -245,7 +252,12 @@ async function persistGenerationFailureCard(
       .select('opted_out_at')
       .eq('id', ctx.guest.id)
       .maybeSingle()
-    if (guestRow?.opted_out_at) {
+    // TAC-572: an opt_out turn records the opt-out BEFORE it generates, so
+    // this read is true on the very turn whose confirmation just failed. That
+    // guest is still owed the confirmation, and the card is the only way an
+    // operator learns it did not go; dispatchOperatorOutbound lets an
+    // opt_out-category card through for the same reason.
+    if (guestRow?.opted_out_at && ctx.classification?.category !== 'opt_out') {
       console.warn(
         '[agent] generation-failure card skipped — guest opted out',
         {
@@ -657,6 +669,7 @@ const TYPING_OFF_AFTER = {
   superseded: true,
   coalesced: true,
   venue_halted: true,
+  guest_opted_out: true,
   failed: true,
 } as const satisfies Record<AgentResult['status'], boolean>
 
@@ -1448,6 +1461,116 @@ async function runInboundTurn(
         return { status: 'failed', stage, error: errMsg }
       }
     }
+
+    // TAC-572: the guest's opt-out, decided once per turn by decideOptOutTurn
+    // (lib/guests/opt-out.ts, which carries the rules and the rulings).
+    //
+    // BELOW THE CRISIS SHORT-CIRCUIT, so an opted-out guest in crisis still
+    // gets the crisis reply: that path already outranks every hold in this
+    // file, and silence is worst on exactly that turn. AFTER classification
+    // rather than before context build, because the Instagram rule reads the
+    // category ("thanks" after the confirmation must not opt them back in).
+    //
+    // THE READ FAILS OPEN. An unreadable row is treated as not opted out, so
+    // the guest who wrote to us is answered; an `opt_out` turn still records,
+    // because recording does not depend on the read. The proactive paths fail
+    // the other way (isOptedOut in instagram-scan-greeting.ts suppresses), and
+    // the asymmetry is deliberate: nobody asked for those messages.
+    const optOutIds = { venueId: ctx.venue.id, guestId: ctx.guest.id }
+    const optedOutRead = await readOptedOut(optOutIds)
+    if (!optedOutRead.ok) {
+      console.warn('[agent] opt-out read failed, treating as not opted out', {
+        agentRunId,
+        guestId: ctx.guest.id,
+        error: optedOutRead.error,
+      })
+      // An event as well as a line: this is the one path on which an
+      // opted-out SMS guest can be answered, and a degrade nobody can count
+      // is one nobody will notice.
+      await capturePostHogEvent('opt_out_read_failed', agentRunId, {
+        agentRunId,
+        venueId: ctx.venue.id,
+        guestId: ctx.guest.id,
+        error: optedOutRead.error,
+      })
+    }
+    const optOutDecision = decideOptOutTurn({
+      channel: ctx.conversationChannel,
+      optedOut: optedOutRead.ok ? optedOutRead.data : false,
+      category: ctx.classification.category,
+      body: inbound.message.body,
+      isRetry: turn.retryDepth > 0,
+    })
+    if (optOutDecision.action === 'silence') {
+      console.log('[agent] inbound not answered: guest is opted out', {
+        agentRunId,
+        guestId: ctx.guest.id,
+        channel: ctx.conversationChannel,
+        category: ctx.classification.category,
+      })
+      trace.update({
+        output: {
+          status: 'guest_opted_out',
+          category: ctx.classification.category,
+        },
+      })
+      retrieveSpan.end({ output: { discarded: 'guest_opted_out' } })
+      return { status: 'guest_opted_out' }
+    }
+    if (optOutDecision.action === 'record') {
+      // Awaited, so the opt-out is saved BEFORE the confirmation goes out and
+      // "we'll stop" is never said ahead of the fact. One retry, then a red
+      // alert, and the confirmation still sends: a guest who asked to stop and
+      // heard nothing is the compliance failure, and the alert is what makes
+      // the unrecorded opt-out somebody's problem rather than nobody's.
+      let recorded = await recordOptOut(optOutIds)
+      if (!recorded.ok) recorded = await recordOptOut(optOutIds)
+      if (recorded.ok) {
+        console.log('[agent] opt-out recorded', {
+          agentRunId,
+          guestId: ctx.guest.id,
+          newlyOptedOut: recorded.data.changed,
+        })
+      } else {
+        await fireRedAlert({
+          agentRunId,
+          venueId: ctx.venue.id,
+          guestId: ctx.guest.id,
+          kind: 'inbound',
+          stage: 'persist',
+          errorMessage: `opt-out NOT recorded, confirmation still sent: ${recorded.error}`,
+          extra: { step: 'opt_out_record' },
+        })
+      }
+    }
+    if (optOutDecision.action === 'clear') {
+      let cleared = await clearOptOut(optOutIds)
+      if (!cleared.ok) cleared = await clearOptOut(optOutIds)
+      if (cleared.ok) {
+        console.log('[agent] guest opted back in', {
+          agentRunId,
+          guestId: ctx.guest.id,
+          via: optOutDecision.reOptIn,
+        })
+      } else {
+        // The reply still goes: they wrote to us and this message is the one
+        // that earns an answer. But they are still opted out in the database,
+        // so every proactive path keeps skipping them until someone looks.
+        await fireRedAlert({
+          agentRunId,
+          venueId: ctx.venue.id,
+          guestId: ctx.guest.id,
+          kind: 'inbound',
+          stage: 'persist',
+          errorMessage: `re-opt-in NOT recorded, guest is still opted out: ${cleared.error}`,
+          extra: { step: 'opt_out_clear', via: optOutDecision.reOptIn },
+        })
+      }
+      turn.reOptIn = optOutDecision.reOptIn
+    }
+    // Read from the turn, not the decision: on an extension the opt-out is
+    // already cleared and the decision above is 'none'.
+    ctx.reOptIn = turn.reOptIn
 
     // TAC-540: show the guest typing dots, if this turn looks headed for an
     // auto-send.
@@ -2457,7 +2580,15 @@ async function runInboundTurn(
     // before retrieval. A crisis reply is fixed and unconditional, and
     // deferring it to a newer fragment is the worst failure this feature could
     // have.
-    if (mayExtend(turn)) {
+    //
+    // NOT ON AN OPT_OUT TURN (TAC-572). The opt-out is already recorded by
+    // here, so re-entering would re-decide against an opted-out guest on a
+    // different message: "thanks" would silence the turn and discard the
+    // confirmation, and anything else would opt the guest straight back in
+    // inside the turn that opted them out. The confirmation goes out as
+    // generated, and the newer message becomes its own turn at the handoff,
+    // where the opt-out rules apply to it as they would a minute later.
+    if (ctx.classification.category !== 'opt_out' && mayExtend(turn)) {
       const uncovered = await findUncoveredInbound(
         { venueId: ctx.venue.id, guestId: ctx.guest.id },
         turn,
@@ -2510,14 +2641,20 @@ async function runInboundTurn(
     // The pause timer cannot race this: its candidate scan only produces a guest
     // whose NEWEST message is our outbound, and an inbound turn in flight means
     // the guest's own message is newest. The CAS is the belt anyway.
-    const claimedWarmClose = closesFirstConversation({
-      guestSignedOff: ctx.classification.category === SIGN_OFF_CATEGORY,
-      agentSaidGoodbye: gen.result.closedTheConversation,
-      isFirstConversation: ctx.firstConversation,
-      warmCloseText: ctx.venue.warmCloseText,
-    })
-      ? await claimWarmCloseForTurn(ctx, agentRunId)
-      : null
+    //
+    // TAC-572: never on an opt_out turn. The confirmation is the last thing a
+    // guest who asked to stop should read, and a close that invites them back
+    // in riding behind it is a message they did not ask for.
+    const claimedWarmClose =
+      ctx.classification.category !== 'opt_out' &&
+      closesFirstConversation({
+        guestSignedOff: ctx.classification.category === SIGN_OFF_CATEGORY,
+        agentSaidGoodbye: gen.result.closedTheConversation,
+        isFirstConversation: ctx.firstConversation,
+        warmCloseText: ctx.venue.warmCloseText,
+      })
+        ? await claimWarmCloseForTurn(ctx, agentRunId)
+        : null
 
     const sendSpan = trace.span('send', { bodyLength: gen.result.body.length })
     try {

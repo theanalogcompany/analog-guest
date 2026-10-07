@@ -2933,6 +2933,8 @@ export function buildAiRuntime(
       ctx.currentMessage !== null &&
       ctx.followupTrigger === null &&
       (ctx.firstConversation || ctx.intentionDerivation.quietAfterWarmClose),
+    // TAC-572: null on every turn but the one that opted the guest back in.
+    reOptIn: ctx.reOptIn ?? undefined,
     // TAC-389: only handle-operator-decline.ts sets this, on the trigger it
     // hands to buildRuntimeContext. Every other path (inbound, cron follow-up,
     // ordinary Command Center manual follow-up) leaves it false, so the
