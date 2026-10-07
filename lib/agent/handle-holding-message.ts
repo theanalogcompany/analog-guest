@@ -644,6 +644,9 @@ function buildFallbackGeneration(): GenerateMessageResult {
     askDroppedForVisitCorrection: false,
     // This path composes no review ask, so that gate never fired either.
     reviewAskDroppedForBodyQuestion: false,
+    // This path composes no offer line.
+    furtherHelpOffer: '',
+    furtherHelpOfferReason: 'no_offer_written',
     attempts: 0,
     attemptHistory: [],
     systemPrompt: '',

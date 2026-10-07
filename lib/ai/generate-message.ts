@@ -12,6 +12,11 @@ import { logger } from '@/lib/observability/logger'
 import { getGenerationModel } from './client'
 import { composePrompt } from './compose-prompt'
 import { containsEmoji } from './emoji-cadence'
+import {
+  appendFurtherHelpOffer,
+  decideFurtherHelpOffer,
+  type FurtherHelpOfferReason,
+} from './further-help-offer'
 import { PROMPT_VERSION } from './prompts/system-template'
 import { matchSelfTalk } from './self-talk-detector'
 import { isTaskDraft } from './task-draft'
@@ -327,6 +332,15 @@ export const GeneratedMessageSchema = z.object({
   // Anthropic counts only optionals against the 24-property cap and a
   // required string costs zero.
   reviewAsk: z.string(),
+  // The offer-more-help line, written apart from the reply so code can decide
+  // from the finished reply whether it is sent (further-help-offer.ts), and
+  // the model's own report that the reply gave how-to instructions, the one
+  // of that rule's three conditions that leaves no mark in the text. Both
+  // REQUIRED, so neither costs a slot against the 24-optional cap. '' and
+  // false on almost every turn. After `body` on purpose: the model has
+  // written the reply before it describes it.
+  furtherHelpOffer: z.string(),
+  gaveInstructions: z.boolean(),
   // TAC-573: what this reply is doing about a visit the guest told us about
   // and is now contradicting. 'none' on every turn the runtime carries no
   // `## Visit they told you about` block, which is almost every turn.
@@ -650,6 +664,7 @@ export async function generateMessage(
       cancelsCommitmentId: string
       intentionQuestion: string
       reviewAsk: string
+      furtherHelpOffer: string
       closedTheConversation: boolean
       reportedVisitCorrection: z.infer<
         typeof GeneratedMessageSchema
@@ -712,6 +727,7 @@ export async function generateMessage(
     // Whether the one-ask-per-turn gate dropped the review ask on the shipped
     // attempt. Same per-attempt assignment discipline as the two flags above.
     let reviewAskDropped = false
+    let offerReason: FurtherHelpOfferReason = 'no_offer_written'
     // TAC-573: whether the visit-correction gate dropped an ask on the shipped
     // attempt.
     let askDroppedForCorrection = false
@@ -910,13 +926,38 @@ export async function generateMessage(
           '[ai] generateMessage: dropped the review ask, the reply already asked a question',
         )
       }
+      // The offer-more-help line, decided LAST and from the finished reply:
+      // the two asks above are already in or out, so "this reply asks
+      // something" is a fact about the text, and an offer never lands behind a
+      // tail dispatch is about to peel off as its own message.
+      const offerLine = replaceDashes(rawObject.furtherHelpOffer)
+      const offerDecision = decideFurtherHelpOffer({
+        body: withAsk.body,
+        offer: correcting ? '' : offerLine,
+        category: input.category,
+        gaveInstructions: rawObject.gaveInstructions,
+        commitment: rawObject.commitment,
+        repliesToGuest: input.runtime.inboundMessage != null,
+        signsOff:
+          rawObject.closedTheConversation ||
+          input.runtime.signOff != null ||
+          input.runtime.timedClose === true,
+        onComplaintTurn: rawObject.complaintIntent !== 'none',
+        carriesAnAsk:
+          composed.intentionQuestion !== '' || withAsk.reviewAsk !== '',
+        knowledgeGap: rawObject.knowledgeGap,
+      })
       const object = {
         ...rawObject,
-        body: withAsk.body,
+        body: offerDecision.append
+          ? appendFurtherHelpOffer(withAsk.body, offerLine)
+          : withAsk.body,
         intentionQuestion: composed.intentionQuestion,
         reviewAsk: withAsk.reviewAsk,
+        furtherHelpOffer: offerDecision.append ? offerLine.trim() : '',
         reportedVisitCorrection,
       }
+      offerReason = offerDecision.reason
       lastResult = object
       askDroppedForCorrection = droppedForCorrection
       droppedForTaskDraft = taskDraft
@@ -1032,6 +1073,11 @@ export async function generateMessage(
         // Countable for the same reason the two intention flags are; nothing
         // is stamped on a drop, so the guest stays eligible.
         reviewAskDroppedForBodyQuestion: reviewAskDropped,
+        // The offer line as sent, '' when none was. It is the end of `body`,
+        // not a separate message. The reason says which fact sent it or which
+        // veto stopped one the model wrote, so the rule's firing is countable.
+        furtherHelpOffer: lastResult.furtherHelpOffer,
+        furtherHelpOfferReason: offerReason,
         attempts,
         attemptHistory,
         systemPrompt,
