@@ -2902,6 +2902,11 @@ export function buildAiRuntime(
     // opt_out skip) and on non-emptiness. recognition state is surfaced as
     // a `Guest relationship: <state>` line near the inbound framing.
     recentVisits: ctx.recentVisits,
+    // TAC-573: only the item names cross into the AI module. The ids stay on
+    // the agent side, where retractReportedVisits reads them off ctx.
+    reportedVisits: ctx.retractableReportedVisits.map((v) => ({
+      items: v.items,
+    })),
     recognition: { state: ctx.recognition.state },
     // TAC-296: thread parsed guest context (post-filterActiveLifeContext +
     // observations-truncated) through to the AI module. The serializer

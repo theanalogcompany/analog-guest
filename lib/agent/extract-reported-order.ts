@@ -399,7 +399,7 @@ function parseYmd(
 // instant's own UTC calendar day when the timezone is unreadable — a
 // same-day comparison that's occasionally off by a timezone offset is a far
 // smaller error than crashing or silently skipping the comparison.
-function venueLocalDayKey(timezone: string, instant: Date): string {
+export function venueLocalDayKey(timezone: string, instant: Date): string {
   const local = venueLocalDate(timezone, instant)
   if (!local) return instant.toISOString().slice(0, 10)
   return `${pad(local.year, 4)}-${pad(local.month, 2)}-${pad(local.day, 2)}`

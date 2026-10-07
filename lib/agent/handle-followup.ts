@@ -91,8 +91,11 @@ function fixedWarmCloseGeneration(text: string): GenerateMessageResult {
     // The close is not itself a report that a conversation closed: this IS the
     // close, and the marker was already claimed by the processor.
     closedTheConversation: false,
+    // TAC-573: no generation behind this, so nothing is being corrected.
+    reportedVisitCorrection: 'none',
     intentionQuestionDuplicateStripped: false,
     intentionQuestionDroppedForBodyQuestion: false,
+    askDroppedForVisitCorrection: false,
     reviewAskDroppedForBodyQuestion: false,
     attempts: 0,
     attemptHistory: [],

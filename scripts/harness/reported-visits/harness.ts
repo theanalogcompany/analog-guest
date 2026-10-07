@@ -13,6 +13,11 @@
 import assert from 'node:assert/strict'
 
 import { resolveOccurredAt } from '@/lib/agent/extract-reported-order'
+import {
+  type ReportedVisitRow,
+  retractedInConversation,
+  selectRetractableVisits,
+} from '@/lib/agent/retract-reported-visit'
 import type { RuntimeContext } from '@/lib/agent/types'
 
 const LA = 'America/Los_Angeles'
@@ -179,6 +184,123 @@ check("a scan-day guest's report about yesterday keeps noon", () => {
     ),
     '2026-10-05T19:00:00.000Z',
     'approximate',
+  )
+})
+
+// ---------------------------------------------------------------------------
+// Which visits a guest may take back: selectRetractableVisits.
+//
+// The clock is the afternoon message; the conversation window is three hours.
+// Day keys are written out as the venue-local dates they are, not computed.
+// ---------------------------------------------------------------------------
+
+const THREE_HOURS_MS = 3 * 60 * 60 * 1000
+
+function row(overrides: Partial<ReportedVisitRow>): ReportedVisitRow {
+  return {
+    id: 't1',
+    source: 'guest_reported',
+    // Reported ten minutes before the afternoon message, stamped at that time.
+    occurred_at: '2026-10-06T21:29:00.000Z',
+    created_at: '2026-10-06T21:29:00.000Z',
+    raw_data: { line_items: [{ name: 'Latte', quantity: 1 }] },
+    retracted_at: null,
+    ...overrides,
+  }
+}
+
+function retractableIds(
+  rows: ReportedVisitRow[],
+  scanDayKeys: ReadonlySet<string> | null = new Set(),
+): string[] {
+  return selectRetractableVisits(rows, {
+    now: AFTERNOON,
+    conversationWindowMs: THREE_HOURS_MS,
+    timezone: LA,
+    scanDayKeys,
+  }).map((v) => v.transactionId)
+}
+
+check('a visit reported in this conversation can be taken back', () => {
+  assert.deepEqual(retractableIds([row({})]), ['t1'])
+})
+
+check('a later reported visit can be taken back too', () => {
+  assert.deepEqual(
+    retractableIds([row({ source: 'guest_reported_ongoing' })]),
+    ['t1'],
+  )
+})
+
+check('a POS visit can never be taken back', () => {
+  assert.deepEqual(retractableIds([row({ source: 'square' })]), [])
+  assert.deepEqual(retractableIds([row({ source: 'manual' })]), [])
+})
+
+check('a visit reported before this conversation cannot be taken back', () => {
+  // Reported four hours before the message: outside the three-hour window.
+  assert.deepEqual(
+    retractableIds([row({ created_at: '2026-10-06T17:39:00.000Z' })]),
+    [],
+  )
+})
+
+check('a visit on a day the guest scanned cannot be taken back', () => {
+  assert.deepEqual(retractableIds([row({})], new Set(['2026-10-06'])), [])
+})
+
+check('a scan on another day does not protect this one', () => {
+  assert.deepEqual(retractableIds([row({})], new Set(['2026-10-05'])), ['t1'])
+})
+
+check('a visit reported today about a scanned yesterday stays', () => {
+  // Reported in this conversation, but it happened on Oct 5 venue-local, and
+  // the guest scanned on Oct 5.
+  assert.deepEqual(
+    retractableIds(
+      [row({ occurred_at: '2026-10-05T19:00:00.000Z' })],
+      new Set(['2026-10-05']),
+    ),
+    [],
+  )
+})
+
+check('unreadable scans mean nothing can be taken back', () => {
+  assert.deepEqual(retractableIds([row({})], null), [])
+})
+
+check('a visit already taken back is not offered again', () => {
+  assert.deepEqual(
+    retractableIds([row({ retracted_at: '2026-10-06T21:35:00.000Z' })]),
+    [],
+  )
+})
+
+check('the item names the guest reported are carried', () => {
+  const [visit] = selectRetractableVisits([row({})], {
+    now: AFTERNOON,
+    conversationWindowMs: THREE_HOURS_MS,
+    timezone: LA,
+    scanDayKeys: new Set(),
+  })
+  assert.deepEqual(visit?.items, ['latte'])
+})
+
+check('a retraction holds for this conversation and not the next', () => {
+  const rows = [row({ retracted_at: '2026-10-06T21:35:00.000Z' })]
+  assert.equal(retractedInConversation(rows, AFTERNOON, THREE_HOURS_MS), true)
+  // The next day, well outside the window.
+  assert.equal(
+    retractedInConversation(
+      rows,
+      new Date('2026-10-07T21:39:00.000Z'),
+      THREE_HOURS_MS,
+    ),
+    false,
+  )
+  assert.equal(
+    retractedInConversation([row({})], AFTERNOON, THREE_HOURS_MS),
+    false,
   )
 })
 

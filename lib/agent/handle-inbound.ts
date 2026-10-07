@@ -49,6 +49,7 @@ import {
   loadPendingRowsBySlot,
 } from './pending-slots'
 import { extractReportedOrder } from './extract-reported-order'
+import { retractReportedVisits } from './retract-reported-visit'
 import {
   bodyContainsReviewLink,
   deriveReviewAsk,
@@ -447,9 +448,12 @@ function buildGenerationFailureGeneration(): GenerateMessageResult {
     reviewAsk: '',
     // TAC-560: the crash card is a blank draft for an operator, not a close.
     closedTheConversation: false,
+    // TAC-573: no generation behind this, so nothing is being corrected.
+    reportedVisitCorrection: 'none',
     intentionQuestionDuplicateStripped: false,
     // TAC-567: this path composes no question, so the gate never fired.
     intentionQuestionDroppedForBodyQuestion: false,
+    askDroppedForVisitCorrection: false,
     // This path composes no review ask, so that gate never fired either.
     reviewAskDroppedForBodyQuestion: false,
     attempts: 2,
@@ -1897,6 +1901,51 @@ async function runInboundTurn(
           errorCode: writeResult.errorCode,
         })
       }
+    }
+
+    // TAC-573: the guest confirmed they have not been in, so the visit they
+    // reported earlier in this conversation stops counting. BEFORE the
+    // approval gate and independent of it, for the reason the arrival capture
+    // just below is: what the guest told us is true whether our reply is sent,
+    // queued or dropped.
+    //
+    // The model's 'retracted' is necessary and never sufficient.
+    // generateMessage already forced the field to 'none' unless the
+    // `## Visit they told you about` block rendered, and retractReportedVisits
+    // touches only the rows build-runtime-context selected: guest-reported, from
+    // this conversation, not on a day the guest scanned. Non-blocking and it
+    // never throws, the extractReportedOrder posture: a failed write costs a
+    // visit that keeps counting, which is where things stood before.
+    if (gen.result.reportedVisitCorrection === 'retracted') {
+      const retractingGuestId = ctx.guest.id
+      waitUntil(
+        retractReportedVisits(ctx)
+          .then((outcome) => {
+            if (outcome.kind === 'retracted') {
+              console.log('[agent] inbound reported visit retracted', {
+                agentRunId,
+                guestId: retractingGuestId,
+                transactionIds: outcome.transactionIds,
+                lastVisitAt: outcome.lastVisitAt,
+              })
+            } else if (outcome.kind === 'failed') {
+              console.warn(
+                '[agent] inbound reported visit retraction failed (continuing)',
+                {
+                  agentRunId,
+                  guestId: retractingGuestId,
+                  error: outcome.error,
+                },
+              )
+            }
+          })
+          .catch((e) => {
+            console.error('[agent] retractReportedVisits threw unexpectedly', {
+              agentRunId,
+              error: e instanceof Error ? e.message : String(e),
+            })
+          }),
+      )
     }
 
     // TAC-297: dispatch arrival capture. Fires BEFORE the approval-policy
