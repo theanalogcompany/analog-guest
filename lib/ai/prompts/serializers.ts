@@ -747,6 +747,12 @@ function formatScanArrival(
  *   "curious how it landed" in three, "get a chance to" in three. A permission
  *   with a phrase in it is a quoted example by another name.
  *
+ *   "ASK THE QUESTION AND STOP. NO HOPE OR WISH ABOUT HOW IT WENT". Once the
+ *   question was permitted, the presumption moved to a second sentence behind
+ *   it: "how did the cortado land? hoping it hit the right note for you". The
+ *   question is fine and the trailing hope states that they had it. Ruled
+ *   barred 2026-10-06.
+ *
  *   "MENTION ONLY WHAT WE ACTUALLY TOLD THEM". One body named "the lot on Bush
  *   and Polk" for a venue with no lot, where we had said a garage on Clay.
  *   Ruled 2026-10-06: adding a fact to what we told them carries the same
@@ -768,7 +774,7 @@ function formatInquiryFollowup(
     `What they asked: "${inquiry.question}"`,
     `What we told them: "${inquiry.answer}"`,
     'What we told them is what we said. Treat it as settled: do not correct it, re-verify it, walk it back, or apologise for it.',
-    'Refer to the specific thing they asked about, and name what we actually suggested rather than only the topic, in our own words. A question about the thing itself is fine. Mention only what we actually told them. Do not add places, items or details we did not say. Do not ask whether they came in. We do not know whether they have been in, so do not write anything that takes it as given: nothing in this message may describe them, or anyone or anything with them, as having been here or as having had or enjoyed something, even conditionally. Do not ask them to come in.',
+    'Refer to the specific thing they asked about, and name what we actually suggested rather than only the topic, in our own words. A question about the thing itself is fine. Ask the question and stop. No hope or wish about how it went. Mention only what we actually told them. Do not add places, items or details we did not say. Do not ask whether they came in. We do not know whether they have been in, so do not write anything that takes it as given: nothing in this message may describe them, or anyone or anything with them, as having been here or as having had or enjoyed something, even conditionally. Do not ask them to come in.',
     'This message carries one subject and nothing else. Do not raise a birthday or any other occasion, do not open a new topic, and do not add a promise to stay in touch. It is the only message we send about it.',
   ].join('\n')
 }

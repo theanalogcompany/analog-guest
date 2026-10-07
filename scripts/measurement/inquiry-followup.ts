@@ -27,7 +27,7 @@
 // and the hand-read is the finding.
 //
 // THE SET SPANS INQUIRY TYPES on purpose (parking or directions, beans, brewing,
-// dogs, what to try). Fifteen runs of ONE question would make bar 3 meaningless:
+// what to try). Fifteen runs of ONE question would make bar 3 meaningless:
 // the same question should produce similar wording, so repetition would prove
 // nothing about whether the voice is templated.
 
@@ -66,100 +66,122 @@ import {
 const BLOCK_HEADER = '## Following up on what they asked'
 
 /**
- * The fifteen cases: five inquiry shapes, three each.
+ * The fifteen cases.
  *
- * Each pairs a guest question with a plausible answer of ours, because the
- * prompt renders BOTH and bar 1 is about referencing both. The answers are
- * written as this venue would answer, not as a template.
+ * REDRAWN 2026-10-06 FROM THE VENUE'S OWN KNOWLEDGE (ruled that day). The first
+ * set paired each question with an answer written to sound plausible, and the
+ * harness retrieves the venue's real knowledge alongside it. Where the two
+ * disagreed the model followed retrieval: a body named two beans the venue
+ * sells in place of the "Colombia" the fixture said we recommended, and another
+ * named a lot at a venue that has none. Those read as copy failures and were
+ * partly the fixture's. So every answer below is what Le Mil's knowledge
+ * actually says, and where it says nothing (how to find the door, what to do
+ * about a bitter cup) the answer is a plain one that contradicts none of it.
+ *
+ * THIS MAKES THE SET VENUE-SPECIFIC. Run it against another venue and the
+ * answers are fiction again; the startup guard does not check that.
+ *
+ * `outOfScope` cases are still generated and printed, and are left out of bars
+ * 1 and 2. Ruled 2026-10-06: a question whose only outcome is a visit (may I
+ * bring a dog, which door is yours) has nothing to follow up on, so the fix is
+ * the classifier not arming one, not better copy. They stay in the set so the
+ * bodies are on record when that classifier change is made.
  */
-const CASES: { kind: string; question: string; answer: string }[] = [
+const CASES: {
+  kind: string
+  question: string
+  answer: string
+  outOfScope?: string
+}[] = [
   {
     kind: 'parking',
     question: 'where do I park around there',
     answer:
-      'Street parking on Polk is usually fine before 9. The lot behind the building is permit only.',
+      'Street parking on Polk can be tough, so give yourself a few extra minutes. Muni is a short walk if you would rather skip the car.',
   },
   {
     kind: 'parking',
     question: 'is there parking there',
     answer:
-      'There is metered street parking right out front, and a garage a block up on Clay if that is full.',
+      'Just street parking on Polk, and it can be challenging. Polk is well connected by transit if that is easier.',
   },
   {
     kind: 'directions',
     question: 'whats the easiest way to get to you from the mission',
     answer:
-      'The 49 drops you two blocks away, or BART to Civic Center and a short walk up.',
+      'Transit is easiest. Polk Street is well connected and we are a short walk from the Muni stops.',
   },
   {
     kind: 'directions',
     question: 'are you the one on the corner or further down the block',
-    answer: 'Further down, past the flower shop, the green awning is us.',
+    answer: "We are right on Polk Street, the storefront says Le Mil's.",
+    outOfScope: 'finding us: the only outcome is a visit',
   },
   {
     kind: 'beans',
     question: 'which bag should I buy if I like something chocolatey',
     answer:
-      'The Colombia is the one, it leans cocoa and brown sugar. The Ethiopia is the bright one, so probably not that.',
+      'Chikka if you want it dark, it is dark chocolate and roasted malt and made for espresso. Budan is the lighter one, more toffee and hazelnut.',
   },
   {
     kind: 'beans',
     question: 'do you sell coffee beans too',
     answer:
-      'We do, whole bean or ground on the shelf by the register, and we roast the Colombia weekly.',
+      'We do. Budan, Malenad and Chikka come whole bean or ground, in 10 oz, 1 lb and 5 lb bags on lemils.com.',
   },
   {
     kind: 'beans',
     question: 'whats a good bag for a filter coffee drinker',
     answer:
-      'The washed Ethiopia is the one most filter drinkers go for. It is delicate, so a little coarser than you might expect.',
+      'Estate Secret. It is our chicory blend for South Indian filter coffee, 80% Arabica and 20% chicory, and it is what goes into the SoFi.',
   },
   {
     kind: 'brewing',
     question: 'how should I brew the beans I got from you',
     answer:
-      'A 1 to 16 ratio, water just off the boil, and give it a good stir after the bloom.',
+      'For pour over, 21 grams to about 300ml of water, medium-fine grind, water around 200F. Bloom for 30 seconds, then three pours of about 100ml.',
   },
   {
     kind: 'brewing',
     question: 'my pour over keeps coming out bitter, any ideas',
     answer:
-      'Usually the grind is too fine or the water is too hot. Go a notch coarser first and let the kettle sit a minute.',
+      'Check it against our recipe: 21 grams to about 300ml, a medium-fine grind, water around 200F, and finish in under three minutes.',
   },
   {
     kind: 'brewing',
     question: 'whats the ratio you use for the aeropress',
-    answer: 'We go 17 grams to 250, about two minutes, and a slow press.',
+    answer:
+      'We do not have a set Aeropress recipe. Our pour over ratio is 1:14, 21 grams to about 300ml, and we grind medium-fine for Aeropress.',
   },
   {
     kind: 'dogs',
     question: 'can I bring my dog',
-    answer:
-      'Of course, the patio is dog friendly and there is a water bowl by the door.',
+    answer: 'Yes, dogs are welcome at the cafe.',
+    outOfScope: 'dog policy: the only outcome is a visit',
   },
   {
-    kind: 'dogs',
-    question: 'is the patio ok for a big dog',
+    kind: 'brewing',
+    question: 'how do I make filter coffee at home',
     answer:
-      'Plenty of room on the patio, the corner table by the planter is the roomiest.',
+      'Two to three tablespoons of Estate Secret in the top of a South Indian filter, press it down lightly, pour a cup of boiling water over and let it drip 10 to 15 minutes. Then half decoction, half hot milk, and sweeten to taste.',
   },
   {
     kind: 'what-to-try',
     question: 'whats something I should try when I get there',
     answer:
-      'The Pink Panther if you want something interesting, or the cortado if you would rather taste the coffee.',
+      'The SoFi, our South Indian filter coffee. It outsells everything else six to one. The Pink Panther if you want something cold and different.',
   },
   {
     kind: 'what-to-try',
     question: 'what do you recommend, I like coffee but not too sweet',
     answer:
-      'The cortado then, or a straight filter. The Blossom Tonic is the sweet one so I would skip it.',
+      'Our drinks are not too sweet to begin with. Try the SoFi Classic, or a cortado if you would rather skip sweet altogether.',
   },
   {
     kind: 'what-to-try',
     question: 'whats underrated here',
     answer:
-      'The cardamom bun. It sells out by ten and nobody asks about it until it is gone.',
+      'The Blossom Tonic. It is the most work to make and somehow the least ordered. It is floral, with a thick foam on top.',
   },
 ]
 
@@ -426,6 +448,8 @@ async function main(): Promise<void> {
     ...extras.map((e) => ({ ...e, extra: true })),
   ]
   const extraBodies: string[] = []
+  /** Scored bodies only: `outOfScope` cases are generated and left out. */
+  const scored: { body: string; c: (typeof CASES)[number] }[] = []
   for (const [index, run] of runs.entries()) {
     const c = run.c
     const { composed } = index === 0 ? first : await composeFor(c)
@@ -497,12 +521,15 @@ async function main(): Promise<void> {
       voice,
     })
     if (body !== null) (run.extra ? extraBodies : bodies).push(body)
+    if (body !== null && !run.extra && c.outOfScope === undefined) {
+      scored.push({ body, c })
+    }
     if (!run.extra && rawBody !== null && rawBody !== body) rewrittenCount += 1
 
     console.log(
       run.extra
         ? `--- EXTRA of case ${run.caseNumber} (${c.kind}), not in the bars ---`
-        : `--- ${index + 1}/${CASES.length} (${c.kind}) ---`,
+        : `--- ${index + 1}/${CASES.length} (${c.kind})${c.outOfScope ? ` OUT OF SCOPE for bars 1 and 2, ${c.outOfScope}` : ''} ---`,
     )
     console.log(`  asked:  ${c.question}`)
     console.log(`  we said: ${c.answer}`)
@@ -533,29 +560,26 @@ async function main(): Promise<void> {
 
   // ---- Report ----
   const units = bodies.length
-  const bar1 = CASES.filter((c, i) =>
-    bodies[i] === undefined
-      ? false
-      : findsReference(bodies[i], c.question, c.answer).referencesBoth,
+  const inScope = scored.length
+  const bar1 = scored.filter(
+    ({ body, c }) => findsReference(body, c.question, c.answer).referencesBoth,
   ).length
-  const suggestion = CASES.filter((c, i) =>
-    bodies[i] === undefined
-      ? false
-      : findsReference(bodies[i], c.question, c.answer).namesSuggestion,
+  const suggestion = scored.filter(
+    ({ body, c }) => findsReference(body, c.question, c.answer).namesSuggestion,
   ).length
-  const bar2 = bodies.filter((b) => findsVisitClaim(b).clean).length
+  const bar2 = scored.filter(({ body }) => findsVisitClaim(body).clean).length
   const repetition = findsRepetition(bodies)
 
   console.log('=== TAC-386 arm B ===')
   console.log(`generated ${units} of ${CASES.length}`)
   console.log(
-    `  bar 1 references both halves: ${bar1}/${units} ${bar1 === units ? 'PASS' : 'FAIL'}`,
+    `  bar 1 references both halves: ${bar1}/${inScope} ${bar1 === inScope ? 'PASS' : 'FAIL'}`,
   )
   console.log(
-    `  names our suggestion (candidate only, see ReferenceVerdict): ${suggestion}/${units}`,
+    `  names our suggestion (candidate only, see ReferenceVerdict): ${suggestion}/${inScope}`,
   )
   console.log(
-    `  bar 2 never asks about, presumes or pushes the visit: ${bar2}/${units} ${bar2 === units ? 'PASS' : 'FAIL'}`,
+    `  bar 2 never asks about, presumes or pushes the visit: ${bar2}/${inScope} ${bar2 === inScope ? 'PASS' : 'FAIL'}`,
   )
   console.log(
     `  bar 3 worst shared phrase in ${repetition.worst} of ${units} (limit ${repetition.limit}): ${repetition.withinBar ? 'PASS' : 'FAIL'}`,
@@ -590,8 +614,8 @@ async function main(): Promise<void> {
 
   const allPassed =
     units === CASES.length &&
-    bar1 === units &&
-    bar2 === units &&
+    bar1 === inScope &&
+    bar2 === inScope &&
     repetition.withinBar &&
     voiceProblems.length === 0
   if (!allPassed) process.exitCode = 1
