@@ -50,12 +50,27 @@ import { checkTypesafeEnv } from './typesafe-env'
 
 export const JEV_CLASSIFICATION_ENABLED = true
 
-// jev-v1.3.0 (TAC-574): `mechanic_request` narrowed to what the venue has to
-// arrange or grant, and `new_question` widened to say ordering and
-// availability questions belong to it. "can i get a flat white" and "can i
-// order ahead" had both been classed mechanic_request, which always holds the
-// reply for approval. Ruled 2026-10-06; the Haiku prompt carries the same
-// wording under PROMPT_VERSION v1.83.0.
+// jev-v1.3.0 (TAC-574): `mechanic_request` says ordering from the menu is NOT
+// one, and `new_question` says ordering and availability questions belong to
+// it. "can i get a flat white" and "can i order ahead" had both been classed
+// mechanic_request, which always holds the reply for approval. Ruled
+// 2026-10-06; the Haiku prompt carries the same wording under PROMPT_VERSION
+// v1.83.0.
+//
+// THE WORDING IS NARROW ON PURPOSE, and two wider drafts are why. Both passed
+// the seven-phrase harness (scripts/measurement/classifier-mechanic.ts) and
+// both moved real traffic the wrong way on the 30-day replay
+// (jev-classify-eval.ts, 297 units, each compared with main's wording):
+//   - defining mechanic_request as "something the venue has to arrange or
+//     grant, ... a comp or something on the house" pulled "what's the wifi
+//     password", "do you have a bathroom code" and a cold-latte complaint
+//     asking for a free one INTO mechanic_request. Net 15 -> 20 on this arm.
+//   - leaving the factual examples off new_question while adding the ordering
+//     ones left the wifi and bathroom questions there, and moved "can you set
+//     aside a blossom tonic for me tomorrow" OUT, which is a hold.
+// Hence the wifi and set-aside examples below. Change either definition only
+// with the replay beside the phrase harness: the phrases are quoted in the
+// definitions, so they pass almost whatever else the wording does.
 // jev-v1.2.0: added the `praise` noul behind the once-ever Google review ask.
 // jev-v1.1.0: crisis question gained explicit true/false criteria carrying
 // the prefer-true-on-ambiguity asymmetry. v1.0.0 scored an ambiguous "I want
@@ -124,14 +139,14 @@ export const JEV_CATEGORY_CRITERIA = {
   reply:
     'A conversational reply to something the venue sent, without a specific question, complaint, request, or other intent below.',
   new_question:
-    'The guest is asking the venue a factual question (hours, menu, location, etc.), including whether they can order something, how ordering works, or whether an item or option is available (e.g., "can i get a flat white", "can i order ahead", "do you do pre-orders", "can i get oat milk in that").',
+    'The guest is asking the venue a factual question (hours, menu, location, wifi, etc.) or asking whether they can order something or whether it is available (e.g., "what time do you close", "what\'s the wifi password", "can i get a flat white", "can i order ahead", "do you do pre-orders", "can i get oat milk in that").',
   opt_out: 'The guest is asking to stop receiving messages.',
   acknowledgment:
     'The guest is acknowledging, signing off, or otherwise closing a thread without a question or request (e.g., "thanks", "ok cool", "got it", "see you tomorrow").',
   comp_complaint:
     'The guest is reporting a quality issue or unsatisfactory experience with something they received from the venue (e.g., "muffin was stale", "had a bad experience today", "waited 20 minutes"). A complaint about service is comp_complaint even if phrased as a reply.',
   mechanic_request:
-    'The guest is asking about, invoking, or requesting something the venue has to arrange or grant for them: a hold, a perk, a comp or something on the house, an event slot, or another venue mechanic (e.g., "can you hold the couch", "is the tea on the house", "can i get on the open mic list"). Ordering from the menu, asking whether an item or option is available, or asking how ordering works is NOT mechanic_request, even when phrased "can i get"; that is new_question.',
+    'The guest is asking about, invoking, or requesting a perk, hold, event slot, or other venue mechanic (e.g., "can you hold the couch", "can you set one aside for me tomorrow", "is the tea on the house", "can i get on the open mic list"). Ordering from the menu or asking whether an item or option is available is NOT mechanic_request, even when phrased "can i get"; that is new_question.',
   recommendation_request:
     'The guest is asking the venue for a recommendation on what to order, try, or pair (e.g., "what\'s good here", "what do you pair with the latte", "anything worth trying"). Opinion-shaped questions belong here, not in new_question, which is factual.',
   casual_chatter:

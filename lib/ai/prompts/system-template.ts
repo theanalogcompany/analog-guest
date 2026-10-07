@@ -2119,13 +2119,18 @@ import {
 //
 // v1.83.0 (TAC-574): NO change to any rule, block or wording in this file.
 //   The bump is here for the v1.62.0 reason: the CLASSIFIER stamps this
-//   version on its output, and its prompt changed. `mechanic_request` is
-//   narrowed to what the venue has to arrange or grant (a hold, a perk, a
-//   comp, an event slot) and `new_question` now says ordering and
-//   availability questions belong to it, after "can i get a flat white" and
-//   "can i order ahead" were both held for approval as mechanic requests
+//   version on its output, and its prompt changed. `mechanic_request` now
+//   says ordering from the menu is NOT one, and `new_question` says ordering
+//   and availability questions belong to it, after "can i get a flat white"
+//   and "can i order ahead" were both held for approval as mechanic requests
 //   (ruled 2026-10-06). The Jev arm carries the same wording under its own
-//   CLASSIFY_JEV_PROMPT_VERSION (jev-v1.3.0).
+//   CLASSIFY_JEV_PROMPT_VERSION (jev-v1.3.0), and classify-message-jev.ts
+//   records why the wording is this narrow.
+//
+//   Same ticket, in serializers.ts: one new user-prompt line under "The guest
+//   just sent", rendered only when the guest's text arrived with a photo, GIF
+//   or other attachment (`[guest also sent a photo] You cannot see it. ...`).
+//   Absent on every other turn. lib/agent/inbound-media.ts decides when.
 //
 //   BASELINE RESET for routing grades: a scenario whose inbound is an
 //   ordering question can move from queued to sent across this bump.
