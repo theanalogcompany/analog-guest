@@ -1933,9 +1933,7 @@ async function runInboundTurn(
       // They said how it is in the same breath as what it is. That IS the
       // visit's check-in, so it is recorded without a question having been
       // asked: the sign-off and the next-visit follow-up read this row either
-      // way. `good` also saves the review ask for the sign-off, since this
-      // message is praise and would otherwise raise it right here.
-      if (verdict === 'good') ctx.reviewAskSavedForSignOff = true
+      // way.
       if (
         (verdict === 'good' || verdict === 'bad') &&
         ctx.visitLocalDate !== null
@@ -2045,9 +2043,6 @@ async function runInboundTurn(
       // the turn it arrives and the name ask can follow it. Set before
       // renderableIntentions runs, like ctx.reviewAsk below.
       ctx.visitCheckinHold = (answer ?? checkin.answer) !== 'good'
-      // And praise here is the answer to our own question, not a moment for
-      // the review ask: that is saved for the sign-off (deriveReviewAsk).
-      ctx.reviewAskSavedForSignOff = true
       if (answer !== null) {
         const checkinGuestId = ctx.guest.id
         waitUntil(

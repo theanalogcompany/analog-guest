@@ -53,15 +53,13 @@ const REVIEW_ASK_DENIED_CATEGORIES = new Set([
  * Should THIS turn raise the review ask? {url, label} from the venue's
  * curated `venue_info.links` entry when every condition holds, null otherwise.
  *
- * All eight conditions, in cheap-first order:
+ * All seven conditions, in cheap-first order:
  *   1. the classifier read genuine praise (praisedExperience)
  *   2. not a crisis turn (belt — the crisis short-circuit already returned)
  *   3. category not on the deny-list above
  *   4. the venue owes this guest no answer (same rule intentions follow)
  *   5. not the guest's first conversation (its choreography is already ruled:
  *      TAC-567/568's two questions and the warm close)
- *   5a. not inside a visit check-in (TAC-575: that guest is asked at the
- *      sign-off)
  *   6. never asked before (guests.review_asked_at is null)
  *   7. the venue curated a review link (kind: 'review' in venue_info.links)
  */
@@ -75,12 +73,18 @@ export function deriveReviewAsk(
   if (REVIEW_ASK_DENIED_CATEGORIES.has(classification.category)) return null
   if (ctx.pendingQuestion !== null) return null
   if (ctx.firstConversation !== false) return null
-  // TAC-575: a guest inside a visit check-in is asked at the sign-off, not on
-  // the turn they say it is good. "It's great" is praise, and praise is
-  // condition 1 above, so without this the answer to our own question would
-  // raise the ask mid-visit, hold the reply for approval, and take the turn
-  // from the name ask.
-  if (ctx.reviewAskSavedForSignOff) return null
+  // TAC-575, INTERIM UNTIL PR 4 OF THAT TICKET (ruled 2026-10-06). A guest who
+  // answers "how is it so far?" with praise is, by the ruling, asked for a
+  // review at the SIGN-OFF, not here. The sign-off does not exist until PR 4,
+  // so until then this predicate is left exactly as it was and that praise
+  // raises the ask on this turn, as any praise does.
+  //
+  // PR 4 removes this fallback by adding ONE condition at this line:
+  //   if (isInsideVisitCheckin(ctx)) return null
+  // where "inside" is a check-in row for the visit still within
+  // CHECKIN_ANSWER_WINDOW_MS (lib/agent/visit-checkin.ts), or this turn's
+  // orderTurnVerdict being 'good'. Nothing else here needs to change, and
+  // nothing in this PR depends on the ask being raised.
   if (ctx.guest.reviewAskedAt !== null) return null
   const link = findReviewLink(parseVenueLinks(ctx.venue.venueInfo.links))
   if (link === null) return null

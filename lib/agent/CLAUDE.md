@@ -255,8 +255,9 @@ the default, not a detection. Bad is final, good is not.
 **Until they say it is good, nothing else is asked, for at most two hours from the question**
 (`ctx.visitCheckinHold`, set by `handleInbound` after classification and read by
 `renderableIntentions`; `CHECKIN_ANSWER_WINDOW_MS` bounds it, and a `bad` answer holds for the
-whole of it). Praise inside a check-in never raises the review ask
-(`ctx.reviewAskSavedForSignOff`): that is saved for the sign-off. It is decided
+whole of it). **Interim until TAC-575's PR 4:** praise inside a check-in still raises the
+review ask on that turn, as any praise does; the ruled behaviour (saved for the sign-off)
+lands with the sign-off, as one condition at the marked line in `deriveReviewAsk`. It is decided
 post-classification on purpose: the message saying "it's great" has to lift the hold on the
 turn it arrives.
 
