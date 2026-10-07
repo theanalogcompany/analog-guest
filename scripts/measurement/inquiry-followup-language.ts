@@ -223,6 +223,8 @@ const VISIT_ASKS: RegExp[] = [
   /\bwere you able to (come|make it|stop)\b/,
   /\bif you (made it|came|stopped|were|got) (in|by|here|over)\b/,
   /\bhow was (your|the) (visit|trip)\b/,
+  // Ruled barred 2026-10-06: finding the venue is the visit.
+  /\bdid you find (us|the (shop|cafe|place|spot we))\b/,
   // An ask in statement form, found in the 2026-10-06 treatment run: "hope you
   // got a chance to bring your pup by". It presumes nothing, and it is still
   // about the coming-in and not about how our help turned out.
@@ -258,12 +260,21 @@ const VISIT_PRESUMED: RegExp[] = [
   // Found in the 2026-10-06 control run, which the lines above read as clean:
   // "hoping the Pink Panther or the cortado hit the spot for you" states that
   // they had the drink. A hope about how something we recommended WAS.
-  /\b(hope|hoping) [a-z' ,]{0,48}?\b(hit the spot|went down|was (good|great|tasty|nice))\b/,
+  /\b(hope|hoping) [a-z' ,]{0,48}?\b(hit the [a-z ]{0,16}?(spot|note|notes|mark)|went down|was (good|great|tasty|nice))\b/,
+  // Both ruled barred 2026-10-06, from the control run. "hoping it was the
+  // cocoa hit you were after" says they had it; "hope the corner table worked
+  // out for your dog" seats the dog. "worked out for you" stays allowed.
+  /\b(hope|hoping) (it|that|they) (was|were)\b/,
+  // A HOPE only. "did the corner table work out for your pup?" is a question
+  // about the thing, which the ruling allows, and the second treatment run
+  // showed the unanchored pattern flagging it.
+  /\b(hope|hoping) [a-z' ,]{0,48}?\bwork(ed)? out for (your|the) (dog|pup|puppy|kid|kids|friend|friends|family|group)\b/,
 ]
 
 /** Phrasings that push the guest to come in, also barred by ruling 2. */
 const VISIT_PUSHES: RegExp[] = [
-  /\bcome (on )?(in|by|down|over)\b/,
+  // Not "come in handy", which the second treatment run produced.
+  /\bcome (on )?(in|by|down|over)\b(?! handy)/,
   /\bswing by\b/,
   /\bstop (in|by)\b/,
   /\bpop (in|by)\b/,
@@ -333,6 +344,25 @@ const VISIT_CASES: {
     via: 'presumed',
   },
   { body: 'did you make it in?', clean: false, via: 'asks' },
+  { body: 'hey, did you find us okay?', clean: false, via: 'asks' },
+  {
+    body: 'hoping it was the cocoa hit you were after',
+    clean: false,
+    via: 'presumed',
+  },
+  {
+    body: 'hope the corner table worked out for your dog',
+    clean: false,
+    via: 'presumed',
+  },
+  { body: 'hope the parking tip worked out for you', clean: true },
+  { body: 'did the corner table work out for your pup? 🐾', clean: true },
+  { body: 'did the water bowl come in handy?', clean: true },
+  {
+    body: 'hoping it hit the right note for you.',
+    clean: false,
+    via: 'presumed',
+  },
   {
     body: 'hope you got a chance to bring your pup by 🐾',
     clean: false,
@@ -443,6 +473,39 @@ export function findsRepetition(
 
   const worst = phrases[0]?.count ?? 0
   return { phrases, worst, withinBar: worst <= limit, limit }
+}
+
+/**
+ * Capitalised words in the body that neither the question nor our answer
+ * contains: a candidate list for "added a fact we did not say".
+ *
+ * Ruled 2026-10-06 to carry the same weight as presuming the visit, after a
+ * body named "the lot on Bush and Polk" where our answer said a garage on Clay.
+ * A NARROW INSTRUMENT, and it says so: it sees an invented proper noun and
+ * nothing else. An invented "lot", price or opening time is lower-case and
+ * invisible here, so an empty list is not a clean bill. The hand-read is.
+ */
+export function findsUnsaidNames(
+  body: string,
+  question: string,
+  answer: string,
+): string[] {
+  const said = new Set(
+    fold(`${question} ${answer}`)
+      .split(/[^a-z0-9']+/)
+      .filter(Boolean),
+  )
+  const unsaid = new Set<string>()
+  // Skip each sentence's first word, which is capitalised for another reason.
+  for (const sentence of body.split(/[.!?\n]+/)) {
+    const words = sentence.trim().split(/\s+/).slice(1)
+    for (const raw of words) {
+      const word = raw.replace(/[^A-Za-z']/g, '')
+      if (!/^[A-Z][a-z]+/.test(word)) continue
+      if (!said.has(fold(word).replace(/'s$/, ''))) unsaid.add(word)
+    }
+  }
+  return [...unsaid].sort()
 }
 
 /** Voice checks that are not bars but would each be a defect. */

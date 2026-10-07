@@ -2,6 +2,11 @@
 //
 //   npm run measure-inquiry-followup -- [venue-slug] [--arm <label>]
 //   npm run measure-inquiry-followup -- --rescore <run-log.jsonl>
+//   npm run measure-inquiry-followup -- --extra 2x5
+//
+// `--extra <case>x<n>` generates one case n more times AFTER the fifteen, to
+// put a rate on something one body did. The extras are printed and logged and
+// never enter the three bars, which stay fifteen bodies of fifteen inputs.
 //
 // `--arm` only labels the run log (control, treatment). `--rescore` generates
 // nothing: it re-reads the bodies of an earlier run through today's detectors,
@@ -53,6 +58,7 @@ import {
   checkDetectors,
   findsReference,
   findsRepetition,
+  findsUnsaidNames,
   findsVisitClaim,
   findsVoiceProblems,
 } from './inquiry-followup-language'
@@ -161,6 +167,8 @@ interface Args {
   venueSlug: string
   arm: string
   rescorePath: string | null
+  /** 1-based case number and how many extra generations of it. */
+  extra: { caseNumber: number; times: number } | null
 }
 
 function parseArgs(argv: readonly string[]): Args {
@@ -168,12 +176,21 @@ function parseArgs(argv: readonly string[]): Args {
     venueSlug: 'le-mils-coffee',
     arm: 'shipped',
     rescorePath: null,
+    extra: null,
   }
   for (let i = 0; i < argv.length; i += 1) {
     const flag = argv[i]!
     if (flag === '--arm') args.arm = argv[++i] ?? args.arm
     else if (flag === '--rescore') args.rescorePath = argv[++i] ?? null
-    else if (flag.startsWith('--')) throw new Error(`unknown flag: ${flag}`)
+    else if (flag === '--extra') {
+      const match = /^(\d+)x(\d+)$/.exec(argv[++i] ?? '')
+      const caseNumber = Number(match?.[1])
+      const times = Number(match?.[2])
+      if (!match || caseNumber < 1 || caseNumber > CASES.length || times < 1) {
+        throw new Error('--extra takes <case>x<n>, e.g. 2x5')
+      }
+      args.extra = { caseNumber, times }
+    } else if (flag.startsWith('--')) throw new Error(`unknown flag: ${flag}`)
     else args.venueSlug = flag
   }
   return args
@@ -197,10 +214,13 @@ function rescore(path: string): void {
           question?: string
           answer?: string
           body?: string | null
+          extra?: boolean
         },
     )
     .filter(
       (u) =>
+        // Extras put a rate on one case and never enter the bars.
+        u.extra !== true &&
         typeof u.index === 'number' &&
         typeof u.body === 'string' &&
         typeof u.question === 'string' &&
@@ -395,7 +415,19 @@ async function main(): Promise<void> {
 
   const bodies: string[] = []
   let rewrittenCount = 0
-  for (const [index, c] of CASES.entries()) {
+  const extras = args.extra
+    ? Array.from({ length: args.extra.times }, () => ({
+        c: CASES[args.extra!.caseNumber - 1]!,
+        caseNumber: args.extra!.caseNumber,
+      }))
+    : []
+  const runs = [
+    ...CASES.map((c, i) => ({ c, caseNumber: i + 1, extra: false })),
+    ...extras.map((e) => ({ ...e, extra: true })),
+  ]
+  const extraBodies: string[] = []
+  for (const [index, run] of runs.entries()) {
+    const c = run.c
     const { composed } = index === 0 ? first : await composeFor(c)
     const system = composed.systemPrompt
 
@@ -445,9 +477,14 @@ async function main(): Promise<void> {
       body === null ? null : findsReference(body, c.question, c.answer)
     const visit = body === null ? null : findsVisitClaim(body)
     const voice = body === null ? null : findsVoiceProblems(body)
+    const unsaidNames =
+      body === null ? [] : findsUnsaidNames(body, c.question, c.answer)
 
     log.appendUnit({
       index: index + 1,
+      caseNumber: run.caseNumber,
+      extra: run.extra,
+      unsaidNames,
       kind: c.kind,
       question: c.question,
       answer: c.answer,
@@ -459,10 +496,14 @@ async function main(): Promise<void> {
       visit,
       voice,
     })
-    if (body !== null) bodies.push(body)
-    if (rawBody !== null && rawBody !== body) rewrittenCount += 1
+    if (body !== null) (run.extra ? extraBodies : bodies).push(body)
+    if (!run.extra && rawBody !== null && rawBody !== body) rewrittenCount += 1
 
-    console.log(`--- ${index + 1}/${CASES.length} (${c.kind}) ---`)
+    console.log(
+      run.extra
+        ? `--- EXTRA of case ${run.caseNumber} (${c.kind}), not in the bars ---`
+        : `--- ${index + 1}/${CASES.length} (${c.kind}) ---`,
+    )
     console.log(`  asked:  ${c.question}`)
     console.log(`  we said: ${c.answer}`)
     console.log(`  BODY:   ${body ?? `(failed: ${error})`}`)
@@ -473,6 +514,11 @@ async function main(): Promise<void> {
     }
     if (visit) {
       console.log(`  bar2 clean: ${describeVisit(visit)}`)
+    }
+    if (unsaidNames.length > 0) {
+      console.log(
+        `  names in neither the question nor our answer: ${unsaidNames.join(', ')}`,
+      )
     }
     if (
       voice &&
@@ -519,6 +565,11 @@ async function main(): Promise<void> {
     for (const p of repetition.phrases.slice(0, 8)) {
       console.log(`    ${p.count}x  ${JSON.stringify(p.phrase)}`)
     }
+  }
+  if (extraBodies.length > 0) {
+    console.log(
+      `  extras generated (not in any bar above): ${extraBodies.length}. Hand-read each for a fact we did not say.`,
+    )
   }
   const dashRewrites = rewrittenCount
   console.log(
