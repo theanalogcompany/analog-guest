@@ -30,12 +30,25 @@
 // the mixed pool, and that is worth seeing even though it is not the bar.
 //
 // WHAT IT TAKES THE PRODUCTION PATH FOR, and what it does not. The prompt is
-// production's: the real venue, its persona, its voice pack, its close text and
+// close to production's, with the differences named below: the real venue, its persona, its voice pack, its close text and
 // review link, composed by buildAiRuntime and generateMessage with the trigger
 // the pause timer hands over. What is constructed is each guest's HISTORY, and
 // in it the venue's own earlier lines are written by hand, so they are the same
 // shape in every unit. That is a pressure TOWARD repetition (the model sees
 // near-identical threads), which is the conservative direction for this bar.
+//
+// KNOWN LIMITS OF THE 2026-10-06 RUN, found in review afterwards and stated
+// rather than re-run away (a re-run is informational, not a second verdict):
+//   - it passed no `knowledgeChunks`, where production passes an empty list,
+//     so the "no venue knowledge matched" block was absent. Fixed below.
+//   - it scores the composed body. Two happy closes with the same first
+//     message and different invitations do not count as duplicates, so bar 1
+//     UNDER-detects on the happy arm.
+//   - a template in exactly half of one kind is exactly a quarter of the pool
+//     and passes bar 2. Each kind alone is printed for that reason.
+//   - the base guest's recognition, context and commitments are inherited from
+//     a real guest; only the fields listed at the override are reset.
+//   - only first-conversation happy closes are generated, not a regular's.
 //
 // WHAT IT CANNOT SHOW. Whether a close reads well, whether a happy sign-off
 // asks for a rating, or whether one guest would get the same close twice (the
@@ -318,6 +331,10 @@ async function main(): Promise<void> {
       persona: ctx.venue.brandPersona,
       venueInfo: ctx.venue.venueInfo,
       ragChunks,
+      // What handleFollowup sets on a warm_close turn: an empty list, which
+      // renders the "no venue knowledge matched" block. The 2026-10-06 run
+      // omitted this and so composed a prompt without that block.
+      knowledgeChunks: [],
       runtime: buildAiRuntime(ctx),
       channel: 'instagram',
     })

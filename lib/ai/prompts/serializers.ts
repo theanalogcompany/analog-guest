@@ -1975,7 +1975,13 @@ function formatHappySignOff(reviewAsk: { url: string }): string {
  * defensive branch, not a path.
  */
 function formatPlainClose(guidance: string): string {
-  const guide = guidance.trim()
+  // One line, whatever the stored value holds. It is a hand-edited setting, and
+  // a line break or a leading `#` in it would end this block early or start a
+  // new one in the middle of the instruction.
+  const guide = guidance
+    .replace(/\s+/g, ' ')
+    .replace(/^#+\s*/, '')
+    .trim()
   return [
     '## Closing this conversation',
     '',
@@ -2176,20 +2182,11 @@ export function runtimeToProse(
   if (runtime.scanArrival) {
     blocks.push(formatScanArrival(runtime.scanArrival))
   }
-  // TAC-560: beside `## Guest just arrived` because both are facts about this
-  // moment, and above everything else in the user prompt for the same reason
-  // that one is: the turn's own situation comes before the history it draws on.
-  //
-  // The two are mutually exclusive in practice (a scan greeting is the FIRST
-  // thing said to a guest, a warm close the last), but nothing enforces that and
-  // nothing needs to: they make different claims and neither contradicts the
-  // other.
-  //
-  // The POSITION is a choice, not a measurement, exactly as TAC-536's is.
-  // TAC-568 removed the warm close's block from this slot. The close is no
-  // longer generated at all: it is a fixed per-venue string
-  // (`followup_rules.warm_close_text`) that the dispatch layer sends, so there
-  // is nothing here for a prompt to steer.
+  // TAC-560 rendered a warm-close block in this slot, beside `## Guest just
+  // arrived`, and TAC-568 removed it when the close became a fixed string.
+  // TAC-575 generates the close again, but its blocks render further down, in
+  // the review-ask slot (formatHappySignOff, formatPlainClose): a sign-off is
+  // an ask-shaped last word, and that slot is the measured last-content one.
   if (runtime.inquiryFollowup) {
     blocks.push(formatInquiryFollowup(runtime.inquiryFollowup))
   }

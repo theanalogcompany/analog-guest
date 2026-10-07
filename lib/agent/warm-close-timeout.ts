@@ -71,6 +71,7 @@ import {
   checkbackWentUnanswered,
   COUNTER_ARRIVAL_WINDOW_MS,
   isCheckbackTooLate,
+  isCheckinFresh,
   lastProactiveWasThisVisit,
   owesCheckback,
   type VisitCheckin,
@@ -394,8 +395,13 @@ async function considerCandidate(
   // sign-off (ruled 2026-10-06), in a first conversation or not: every guest
   // who answers "how is it?" is eventually offered it. Everyone else gets the
   // plain close, and only inside the rules that have always bounded it.
+  //
+  // Only a check-in from THIS visit counts (isCheckinFresh): the row is keyed
+  // on the day, and a guest who said "so good" this morning and asked about
+  // closing time this afternoon is not signing off the morning's drink.
   const reviewAsk = deriveSignOffReviewAsk({
-    checkinAnswer: checkin?.answer ?? null,
+    checkinAnswer:
+      checkin !== null && isCheckinFresh(checkin, now) ? checkin.answer : null,
     reviewAskedAt: facts.data.reviewAskedAt,
     links: gate.venue.links,
   })
@@ -475,7 +481,8 @@ async function considerCandidate(
     }
   }
 
-  // The belt behind the model's own self-report. See loadLastInboundCategory.
+  // An older belt: a last inbound stored as a sign-off means the goodbye path
+  // has had its turn. See loadLastInboundCategory for what it can and cannot see.
   if (
     (await loadLastInboundCategory(
       supabase,

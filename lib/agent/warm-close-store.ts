@@ -94,7 +94,7 @@ function linksOf(venueInfo: unknown): unknown {
   return typeof venueInfo === 'object' &&
     venueInfo !== null &&
     'links' in venueInfo
-    ? (venueInfo as { links?: unknown }).links
+    ? venueInfo.links
     : undefined
 }
 
@@ -300,15 +300,19 @@ export async function loadWarmCloseGuestFacts(
 /**
  * The guest's most recent inbound category, or null.
  *
- * The belt behind the model's own `closedTheConversation` self-report: a last
- * inbound that classified `acknowledgment` IS the sign-off turn Le Mil's rule 15
- * fires on, so the in-conversation close has already gone out and the timer
- * stands down. Independent of the self-report and venue-neutral, on an existing
- * column.
+ * Written for TAC-560 as the belt behind the model's `closedTheConversation`
+ * self-report: a last inbound that classified `acknowledgment` was the sign-off
+ * turn, so the in-conversation close had already gone out and the timer stood
+ * down. Since TAC-575 nothing consults that self-report, and the goodbye path
+ * decides before generation.
  *
- * Fails to null, which means "no signal" and lets the other checks decide. The
- * marker is the authoritative guard; this only catches the case where the
- * self-report missed.
+ * READ WHAT IT CAN SEE BEFORE RELYING ON IT. It reads `messages.category` on an
+ * INBOUND row, and the classification is stamped on our reply's row, not on
+ * the guest's message. Unless something writes a category onto inbound rows
+ * this returns null for every guest, and the marker is what actually stops a
+ * second close.
+ *
+ * Fails to null, which means "no signal" and lets the other checks decide.
  */
 export async function loadLastInboundCategory(
   supabase: AdminSupabaseClient,

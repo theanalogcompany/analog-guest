@@ -256,9 +256,8 @@ the default, not a detection. Bad is final, good is not.
 question**; a required one still renders, which is how the check-back gets through
 (`ctx.visitCheckinHold`, set by `handleInbound` after classification and read by
 `renderableIntentions`; `CHECKIN_ANSWER_WINDOW_MS` bounds it, and a `bad` answer holds for the
-whole of it). **Interim until TAC-575's PR 4:** praise inside a check-in still raises the
-review ask on that turn, as any praise does; the ruled behaviour (saved for the sign-off)
-lands with the sign-off, as one condition at the marked line in `deriveReviewAsk`. It is decided
+whole of it). Praise inside a check-in does not raise the review ask on that turn; it is
+saved for the sign-off (see the sign-offs below). The hold is decided
 post-classification on purpose: the message saying "it's great" has to lift the hold on the
 turn it arrives.
 
@@ -375,13 +374,22 @@ conversation`.
 - **Praise inside a visit check-in never raises the praise ask** (`ctx.insideVisitCheckin`,
   condition 5a of `deriveReviewAsk`): that guest is asked at the sign-off.
 - The same three things stop either kind on either path: a check-back still owed, staff in
-  the thread, a complaint.
-- **Repetition across guests is measured and NOT solved.** `npm run measure-warm-close` (20
-  closes, bar fixed in advance) FAILED on its one run, 2026-10-06: two happy guests got the
-  identical close. A prompt cannot see what another guest was sent. See that PR for the
-  bodies before reading the generated close as varied. **Neither path closes a
-conversation staff answered by hand or one that contains a complaint** (`warmCloseBlocker`,
-one check called by both, before the marker is claimed).
+  the thread, a complaint (`warmCloseBlocker`, one check called by both, before any marker
+  is claimed).
+- **"The same visit" is two hours, not the day.** The check-in row is keyed on the
+  venue-local day; only a fresh one makes a sign-off happy (`isCheckinFresh`,
+  `visit-checkin.ts`), so "so good" at nine does not turn a "thanks" at four into a review ask.
+- **A happy sign-off that goes out WITHOUT its link still spends the ask.** The marker is not
+  given back on a sent reply: giving it back made the timer send the sign-off again every ten
+  minutes. Logged, so the rate can be counted.
+- **`acknowledgment` is not "goodbye".** The goodbye path refuses three turns that classify
+  as it: the order turn ("got a cortado"), a turn carrying a required question, and a turn
+  where an answer is still owed. A mid-conversation "ok cool" is NOT refused and is read as a
+  sign-off; nothing structural tells it from a goodbye before the reply is written.
+- **A held sign-off takes the close marker at queue time**, since the draft in the queue is
+  the close and operator dispatch knows nothing about that marker.
+- **Repetition across guests is not solved.** A prompt cannot see what another guest was
+  sent. `npm run measure-warm-close` measures it against a bar fixed in advance.
 
 **After a warm close, no question until the guest is two messages past it AND one reply of
 ours has reached them in between** (`isQuietAfterWarmClose`, `warm-close.ts`); two messages

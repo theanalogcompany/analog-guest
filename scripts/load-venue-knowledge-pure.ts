@@ -529,15 +529,14 @@ export interface SplitSafetyFinding {
 export function checkSplitSafety(
   entries: ReadonlyArray<{ rowId: string; content: string }>,
   // TAC-554 widened resolveDispatchBubbles with a required third parameter, the
-  // getting-to-know-you question, and TAC-568 a fourth, the fixed warm close.
-  // This report has neither an intention turn nor a close in it, so callers pass
-  // '' for both below — stated rather than defaulted so a future caller here has
-  // to decide.
+  // getting-to-know-you question. (TAC-568 added a fourth, the fixed warm close,
+  // and TAC-575 removed it again.) This report has no intention turn in it, so
+  // callers pass '' below, stated rather than defaulted so a future caller here
+  // has to decide.
   split: (
     body: string,
     rng: () => number,
     intentionTail: string,
-    warmCloseBubble: string,
   ) => string[] = resolveDispatchBubbles,
 ): SplitSafetyFinding[] {
   const findings: SplitSafetyFinding[] = []
@@ -546,7 +545,7 @@ export function checkSplitSafety(
   for (const e of entries) {
     const tokens = e.content.match(domain) ?? []
     if (tokens.length === 0) continue
-    const bubbles = split(e.content, () => 0, '', '')
+    const bubbles = split(e.content, () => 0, '')
     for (const token of tokens) {
       // A domain is intact if some single bubble still contains it whole.
       if (!bubbles.some((b) => b.includes(token))) {

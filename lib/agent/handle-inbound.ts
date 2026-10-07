@@ -71,6 +71,7 @@ import {
   markReviewAsked,
 } from './review-ask'
 import { scheduleInquiryFollowup } from './schedule-inquiry-followup'
+import { INTENTION_DEFINITION_BY_KEY } from './intentions/definitions'
 import { renderableIntentions } from './intentions/derive'
 import {
   recordIntentionEligibility,
@@ -82,10 +83,12 @@ import {
   releaseWarmCloseClaim,
 } from './warm-close-store'
 import {
+  CHECKIN_ANSWER_WINDOW_MS,
   classifyCheckinAnswer,
   COUNTER_ARRIVAL_WINDOW_MS,
   isAwaitingCheckinAnswer,
   isCheckbackTooLate,
+  isCheckinFresh,
   nextCheckinAnswer,
   orderTurnVerdict,
   owesCheckback,
@@ -703,7 +706,7 @@ async function decideSignOffForTurn(
       ? new Date(
           ctx.visitCheckin.orderedAt.getTime() - COUNTER_ARRIVAL_WINDOW_MS,
         )
-      : ctx.guest.createdAt
+      : new Date(Date.now() - CHECKIN_ANSWER_WINDOW_MS)
   const blocker = await loadWarmCloseBlocker(
     createAdminClient(),
     ctx.venue.id,
@@ -1975,6 +1978,10 @@ async function runInboundTurn(
     // "it was great" gets the happy sign-off on the same turn.
     let checkinAnswerNow: VisitCheckinAnswer | null =
       ctx.visitCheckin?.answer ?? null
+    // TAC-575: this message is the guest NAMING THEIR ORDER (it armed "how is
+    // it so far?"). Read by the sign-off decision, which must never treat that
+    // message as a goodbye however it classified.
+    let orderTurn = false
 
     // TAC-575: this message armed "how is it so far?" before anyone had read
     // it. Now it is classified, decide whether it really is an order report
@@ -1989,6 +1996,7 @@ async function runInboundTurn(
         (e) => e.key === 'hows_it_so_far',
       )
     ) {
+      orderTurn = true
       const verdict = orderTurnVerdict({
         category: ctx.classification.category,
         praisedExperience: ctx.classification.praisedExperience === true,
@@ -2292,11 +2300,42 @@ async function runInboundTurn(
     // (the second writer of ctx.reviewAsk, through the same module); either
     // kind empties the intentions, since a closing turn asks nothing, and
     // nothing is recorded against them so they come back open.
-    if (ctx.classification.category === SIGN_OFF_CATEGORY) {
+    //
+    // `acknowledgment` IS NOT "GOODBYE", and three turns that classify as it
+    // are refused outright here, each because the turn has other business:
+    //
+    //   the order turn          "got a cortado" classifies `acknowledgment`
+    //                           (measured, lib/ai/prompts/CLAUDE.md), and it is
+    //                           the turn that asks how it is. A close there
+    //                           would replace the question and spend the
+    //                           guest's one close on their first message.
+    //   a required question     a due check-back is what this turn carries.
+    //   an answer still owed    the venue owes this guest an answer.
+    //
+    // That leaves "ok cool" and "thanks" in the middle of a conversation, which
+    // also classify as it and are NOT goodbyes. Nothing structural tells them
+    // apart from one before the reply is written. See the PR for the ruling
+    // this needs; until then they are read as sign-offs, as the name says.
+    //
+    // Only a check-in from this visit makes a sign-off happy (isCheckinFresh):
+    // the row is keyed on the day, and "so good" this morning is not what a
+    // "thanks" this afternoon is about.
+    const requiredQuestionOpen = ctx.openIntentions.some(
+      (o) => INTENTION_DEFINITION_BY_KEY[o.key].raise === 'always',
+    )
+    if (
+      ctx.classification.category === SIGN_OFF_CATEGORY &&
+      !orderTurn &&
+      !requiredQuestionOpen &&
+      ctx.pendingQuestion === null
+    ) {
       const signOff = await decideSignOffForTurn(
         ctx,
         agentRunId,
-        checkinAnswerNow,
+        ctx.visitCheckin !== null &&
+          isCheckinFresh(ctx.visitCheckin, ctx.currentMessage.receivedAt)
+          ? checkinAnswerNow
+          : null,
       )
       if (signOff !== null) {
         ctx.signOff = signOff.kind
@@ -2906,6 +2945,19 @@ async function runInboundTurn(
 
     if (approval.action === 'queue') {
       retractConfirmedVisit()
+      // TAC-575: a sign-off that is HELD still spends the guest's one close,
+      // and the marker is taken now. The draft in the queue IS the close, and
+      // an operator who approves it sends it without anything on that path
+      // knowing about the marker; left unset, the guest's next "ok thanks"
+      // would get a second close. Kept whether the card is approved or
+      // skipped, the rule the pause timer applies to a queued close.
+      if (
+        ctx.signOff !== null &&
+        ctx.firstConversation &&
+        ctx.guest.warmCloseSentAt === null
+      ) {
+        await claimWarmCloseForTurn(ctx, agentRunId)
+      }
       const queueSpan = trace.span('queue', {
         primaryTrigger: approval.primaryTrigger,
         triggerCount: approval.triggers.length,

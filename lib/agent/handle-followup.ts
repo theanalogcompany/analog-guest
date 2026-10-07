@@ -21,7 +21,7 @@ import type { CommitmentIdentity, SlotDropReason } from './pending-slots'
 import { dispatchReply } from './dispatch-reply'
 import { undeliveredAgentResult } from './handle-inbound'
 import { persistOrRegenQueuedDraft, scheduleAndSend } from './schedule-and-send'
-import { bodyContainsReviewLink, releaseReviewAskClaim } from './review-ask'
+import { bodyContainsReviewLink } from './review-ask'
 import { NEVER_SPLIT_RNG } from './warm-close'
 import {
   applyApprovalPolicyStage,
@@ -1225,12 +1225,13 @@ export async function handleFollowup(input: {
         ? await dispatchReply(ctx, gen.result, {
             skipHumanFeelDelay: true,
             reviewReason: demoBypassReviewReason,
-            // TAC-560: the warm close is ONE message, always. Rule 15 asks for
-            // one and so does this ticket's acceptance criteria, and
-            // resolveDispatchBubbles would otherwise split a two-sentence close
-            // on a fair coin about half the time. NEVER_SPLIT_RNG removes the
-            // coin rather than tuning it, using the rng parameter TAC-319 built
-            // for exactly this kind of caller.
+            // TAC-560: the warm close's own text is ONE message. Rule 15 asks
+            // for one, and resolveDispatchBubbles would otherwise split a
+            // two-sentence close on a fair coin about half the time.
+            // NEVER_SPLIT_RNG removes the coin rather than tuning it, using
+            // the rng parameter TAC-319 built for exactly this kind of caller.
+            // A happy sign-off (TAC-575) is two messages all the same: that
+            // one, then the review invitation as the reply's tail.
             //
             // A scan greeting keeps the ordinary coin: nothing in TAC-536 asks
             // for one bubble.
@@ -1301,19 +1302,17 @@ export async function handleFollowup(input: {
       // The pause timer claimed the once-ever review marker BEFORE this ran,
       // on the expectation that the reply would carry the link. It can fail
       // to: the model may leave `reviewAsk` empty, or composeReplyWithReviewAsk
-      // drops it when the sign-off itself asks a question. A sign-off without
-      // the link has not asked for a review, so the marker goes back and the
-      // guest can still be invited another time.
+      // drops it when the sign-off itself asks a question.
       //
-      // Judged on what was DELIVERED, the definition every other stamp uses
-      // (bodyContainsReviewLink). Only here, on a confirmed send: a held card
-      // keeps the claim, and a failed send is released by the processor.
-      const signOffAsk = input.trigger.warmClose
-      if (
-        ctx.signOff === 'happy' &&
-        ctx.reviewAsk !== null &&
-        signOffAsk?.reviewClaimedAt !== undefined
-      ) {
+      // THE CLAIM IS KEPT EITHER WAY. An earlier version gave the marker back
+      // here, and that turned one missing link into a loop: the sign-off just
+      // sent becomes our newest message, the guest is unasked again, nothing
+      // else on the happy path says "already signed off", and ten minutes
+      // later they get "so glad you're enjoying it" a second time, then a
+      // third. A sign-off that went out without its link costs this guest
+      // their one invitation, the same accepted cost as a held card an
+      // operator skips. It is logged so the rate can be counted.
+      if (ctx.signOff === 'happy' && ctx.reviewAsk !== null) {
         const carried = bodyContainsReviewLink(
           dispatched.deliveredBody,
           ctx.reviewAsk.url,
@@ -1326,14 +1325,9 @@ export async function handleFollowup(input: {
           })
         } else {
           console.warn(
-            '[agent] happy sign-off went out without the review link; marker released',
+            '[agent] happy sign-off went out without the review link; the ask is spent',
             { agentRunId, guestId: ctx.guest.id, outboundMessageId },
           )
-          await releaseReviewAskClaim({
-            venueId: ctx.venue.id,
-            guestId: ctx.guest.id,
-            claimedAt: signOffAsk.reviewClaimedAt,
-          })
         }
       }
       await capturePostHogEvent('followup_message_handled', ctx.guest.id, {

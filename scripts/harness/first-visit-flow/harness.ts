@@ -26,6 +26,7 @@ import {
   checkbackWentUnanswered,
   hasBeenQuietLongEnough,
   isCheckbackTooLate,
+  isCheckinFresh,
   lastProactiveWasThisVisit,
   nextCheckinAnswer,
   orderTurnVerdict,
@@ -901,6 +902,39 @@ check(
     links: [{ label: 'Menu', url: REVIEW_URL }],
   }),
   null,
+)
+
+check(
+  'same visit: answered "so good" twenty minutes ago',
+  isCheckinFresh(
+    checkin({
+      askedAt: at(-30 * MIN),
+      answer: 'good',
+      answeredAt: at(-20 * MIN),
+    }),
+    NOW,
+  ),
+  true,
+)
+check(
+  'not the same visit: answered "so good" seven hours ago',
+  isCheckinFresh(
+    checkin({
+      askedAt: at(-7 * HOUR - 600),
+      answer: 'good',
+      answeredAt: at(-7 * HOUR),
+    }),
+    NOW,
+  ),
+  false,
+)
+check(
+  'same visit: asked three hours ago but answered an hour ago',
+  isCheckinFresh(
+    checkin({ askedAt: at(-3 * HOUR), answer: 'good', answeredAt: at(-HOUR) }),
+    NOW,
+  ),
+  true,
 )
 
 const closing = {

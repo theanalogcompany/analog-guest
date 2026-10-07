@@ -627,9 +627,8 @@ export type GenerateMessageAttempt = {
   /**
    * TAC-560: did this reply close the guest's first conversation, in the way the
    * venue's own voice rules describe? Required, so it costs nothing against the
-   * optional-field budget. handle-inbound.ts writes guests.warm_close_sent_at
-   * post-dispatch when it is true, which is what stops the pause timer sending a
-   * second close.
+   * optional-field budget. Not read by anything since TAC-575, when the goodbye
+   * path began deciding before generation.
    */
   closedTheConversation: boolean
   // TAC-573: see ReportedVisitCorrection.
@@ -719,9 +718,8 @@ export type GenerateMessageResult = {
   /**
    * TAC-560: did this reply close the guest's first conversation, in the way the
    * venue's own voice rules describe? Required, so it costs nothing against the
-   * optional-field budget. handle-inbound.ts writes guests.warm_close_sent_at
-   * post-dispatch when it is true, which is what stops the pause timer sending a
-   * second close.
+   * optional-field budget. Not read by anything since TAC-575, when the goodbye
+   * path began deciding before generation.
    */
   closedTheConversation: boolean
   // TAC-573: see ReportedVisitCorrection.

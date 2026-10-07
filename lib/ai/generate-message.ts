@@ -270,8 +270,12 @@ export const GeneratedMessageSchema = z.object({
   // WHAT IT IS FOR. The close is once per guest EVER, from either path, and the
   // timer needs to know the in-conversation close already went out. Nothing
   // structural marks that turn: it is an ordinary reply to "thanks!", stored
-  // under whatever the classifier picked. So the model reports it, and
-  // handle-inbound.ts writes guests.warm_close_sent_at post-dispatch.
+  // under whatever the classifier picked. So the model reports it.
+  //
+  // NOTHING READS IT SINCE TAC-575. handle-inbound.ts used to write
+  // guests.warm_close_sent_at from this report; the goodbye path now decides
+  // before generation. The field is still emitted, and whether it goes back to
+  // being the goodbye path's second signal is an open question on that ticket.
   //
   // SELF-REPORT IS NOT TRUSTED ALONE, on this repo's own record (TAC-350: 8 of 8
   // fabrications self-reported clean). The timer carries an independent belt: a
@@ -971,10 +975,8 @@ export async function generateMessage(
         // SAID back (TAC-296 precedent).
         arrivalCapture: lastResult.arrivalCapture,
         cancelsCommitmentId: lastResult.cancelsCommitmentId,
-        // TAC-560: did this reply close the guest's first conversation? The
-        // in-conversation half of a once-per-guest-ever marker; handle-inbound.ts
-        // writes guests.warm_close_sent_at post-dispatch when it is true, so the
-        // pause timer never sends a second close.
+        // TAC-560: did this reply close the guest's first conversation? Not
+        // read by anything since TAC-575; see the schema field above.
         closedTheConversation: lastResult.closedTheConversation,
         // TAC-573: already normalized to 'none' when the block did not render.
         // handle-inbound.ts retracts on 'retracted', whatever the gate decides.
