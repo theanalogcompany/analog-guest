@@ -1904,10 +1904,16 @@ async function runInboundTurn(
     }
 
     // TAC-573: the guest confirmed they have not been in, so the visit they
-    // reported earlier in this conversation stops counting. BEFORE the
-    // approval gate and independent of it, for the reason the arrival capture
-    // just below is: what the guest told us is true whether our reply is sent,
-    // queued or dropped.
+    // reported earlier in this conversation stops counting. Independent of the
+    // approval gate, for the reason the arrival capture just below is: what the
+    // guest told us is true whether our reply is sent, queued or dropped.
+    //
+    // DEFINED here and CALLED at each of the four places this turn's generation
+    // becomes final: the silence, drop and queue branches, and the send path
+    // AFTER its extension check. Not called here, because the send path can
+    // still find a newer message from the guest and re-enter with it, and
+    // "wait, I did come in Tuesday" a few seconds behind "never been" must be
+    // answered by the re-entered turn before anything is retracted.
     //
     // The model's 'retracted' is necessary and never sufficient.
     // generateMessage already forced the field to 'none' unless the
@@ -1916,24 +1922,27 @@ async function runInboundTurn(
     // this conversation, not on a day the guest scanned. Non-blocking and it
     // never throws, the extractReportedOrder posture: a failed write costs a
     // visit that keeps counting, which is where things stood before.
-    if (gen.result.reportedVisitCorrection === 'retracted') {
-      const retractingGuestId = ctx.guest.id
+    const retractionCtx = ctx
+    const retractionConfirmed =
+      gen.result.reportedVisitCorrection === 'retracted'
+    const retractConfirmedVisit = (): void => {
+      if (!retractionConfirmed) return
       waitUntil(
-        retractReportedVisits(ctx)
+        retractReportedVisits(retractionCtx)
           .then((outcome) => {
             if (outcome.kind === 'retracted') {
               console.log('[agent] inbound reported visit retracted', {
                 agentRunId,
-                guestId: retractingGuestId,
+                guestId: retractionCtx.guest.id,
                 transactionIds: outcome.transactionIds,
-                lastVisitAt: outcome.lastVisitAt,
+                lastVisit: outcome.lastVisit,
               })
             } else if (outcome.kind === 'failed') {
               console.warn(
                 '[agent] inbound reported visit retraction failed (continuing)',
                 {
                   agentRunId,
-                  guestId: retractingGuestId,
+                  guestId: retractionCtx.guest.id,
                   error: outcome.error,
                 },
               )
@@ -2128,6 +2137,7 @@ async function runInboundTurn(
     // this is the expected outcome on a very common turn shape, not an
     // incident. The trace still records it, so a single run is explainable.
     if (approval.action === 'silence') {
+      retractConfirmedVisit()
       console.log(
         '[agent] inbound draft silenced: nothing to answer, a card is already waiting',
         {
@@ -2144,6 +2154,7 @@ async function runInboundTurn(
     }
 
     if (approval.action === 'drop') {
+      retractConfirmedVisit()
       console.warn(
         '[agent] inbound draft dropped: a pending card holds its slot',
         {
@@ -2225,6 +2236,7 @@ async function runInboundTurn(
     )
 
     if (approval.action === 'queue') {
+      retractConfirmedVisit()
       const queueSpan = trace.span('queue', {
         primaryTrigger: approval.primaryTrigger,
         triggerCount: approval.triggers.length,
@@ -2506,6 +2518,9 @@ async function runInboundTurn(
         )
       }
     }
+
+    // TAC-573: past the extension check, so this generation is the turn's last.
+    retractConfirmedVisit()
 
     // Send + persist. TAC-284: demo guests skip the read receipt and typing
     // indicators (TAC-421 removed the pre-send sleep this also used to skip)

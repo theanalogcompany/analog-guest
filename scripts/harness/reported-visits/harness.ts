@@ -286,6 +286,22 @@ check('the item names the guest reported are carried', () => {
   assert.deepEqual(visit?.items, ['latte'])
 })
 
+check(
+  'a retraction stamped after this message was received still holds',
+  () => {
+    // The guest's next message arrived while the retracting turn was still
+    // generating, so the stamp is two minutes LATER than the message.
+    assert.equal(
+      retractedInConversation(
+        [row({ retracted_at: '2026-10-06T21:41:00.000Z' })],
+        AFTERNOON,
+        THREE_HOURS_MS,
+      ),
+      true,
+    )
+  },
+)
+
 check('a retraction holds for this conversation and not the next', () => {
   const rows = [row({ retracted_at: '2026-10-06T21:35:00.000Z' })]
   assert.equal(retractedInConversation(rows, AFTERNOON, THREE_HOURS_MS), true)

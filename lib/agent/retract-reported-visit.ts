@@ -132,17 +132,24 @@ export function selectRetractableVisits(
  * that conversation. With the visit no longer counted the intention derives
  * open again, and "what did you get?" is the wrong thing to ask someone who
  * just said they have never been in. It is free to come back in a later one.
+ *
+ * NO LOWER BOUND, unlike a row's created_at. `retracted_at` is wall-clock at
+ * the write, which lands after the retracting turn generated, while `now` is
+ * the receipt time of the message being answered. A message the guest sent
+ * while that turn was still generating was received BEFORE the stamp, and it
+ * is the very next thing we answer, so a retraction "in the future" of this
+ * message still belongs to this conversation.
  */
 export function retractedInConversation(
   rows: readonly Pick<ReportedVisitRow, 'retracted_at'>[],
   now: Date,
   conversationWindowMs: number,
 ): boolean {
-  return rows.some(
-    (row) =>
-      row.retracted_at !== null &&
-      withinWindow(row.retracted_at, now, conversationWindowMs),
-  )
+  return rows.some((row) => {
+    if (row.retracted_at === null) return false
+    const elapsed = now.getTime() - new Date(row.retracted_at).getTime()
+    return Number.isFinite(elapsed) && elapsed <= conversationWindowMs
+  })
 }
 
 /**
@@ -163,30 +170,49 @@ export async function loadScanDayKeys(
     createdAt: Date
   },
 ): Promise<Set<string> | null> {
-  const { data, error } = await supabase
-    .from('instagram_scan_arrivals')
-    .select('scanned_at')
-    .eq('venue_id', input.venueId)
-    .eq('guest_id', input.guestId)
-    .order('scanned_at', { ascending: false })
-    .limit(SCAN_DAY_LOOKUP_LIMIT)
-  if (error) {
+  try {
+    const { data, error } = await supabase
+      .from('instagram_scan_arrivals')
+      .select('scanned_at')
+      .eq('venue_id', input.venueId)
+      .eq('guest_id', input.guestId)
+      .order('scanned_at', { ascending: false })
+      .limit(SCAN_DAY_LOOKUP_LIMIT)
+    if (error) {
+      logger.warn(
+        '[agent] scan days unreadable; no reported visit is retractable this turn',
+        {
+          venueId: input.venueId,
+          guestId: input.guestId,
+          error: error.message,
+        },
+      )
+      return null
+    }
+    const keys = new Set<string>()
+    if (input.createdVia === 'qr_scan') {
+      keys.add(venueLocalDayKey(input.timezone, input.createdAt))
+    }
+    for (const row of data ?? []) {
+      const scannedAt = new Date(row.scanned_at)
+      if (!Number.isFinite(scannedAt.getTime())) continue
+      keys.add(venueLocalDayKey(input.timezone, scannedAt))
+    }
+    return keys
+  } catch (e) {
+    // A thrown read fails the same way as a returned error. Without this the
+    // throw would surface in buildRuntimeContext and cost the guest their reply
+    // over a question that only decides whether a visit may be taken back.
     logger.warn(
-      '[agent] scan days unreadable; no reported visit is retractable this turn',
-      { venueId: input.venueId, guestId: input.guestId, error: error.message },
+      '[agent] scan days read threw; no reported visit is retractable this turn',
+      {
+        venueId: input.venueId,
+        guestId: input.guestId,
+        error: e instanceof Error ? e.message : String(e),
+      },
     )
     return null
   }
-  const keys = new Set<string>()
-  if (input.createdVia === 'qr_scan') {
-    keys.add(venueLocalDayKey(input.timezone, input.createdAt))
-  }
-  for (const row of data ?? []) {
-    const scannedAt = new Date(row.scanned_at)
-    if (!Number.isFinite(scannedAt.getTime())) continue
-    keys.add(venueLocalDayKey(input.timezone, scannedAt))
-  }
-  return keys
 }
 
 export type RetractReportedVisitsOutcome =
@@ -194,8 +220,14 @@ export type RetractReportedVisitsOutcome =
   | {
       kind: 'retracted'
       transactionIds: string[]
-      /** What guests.last_visit_at was recomputed to; null when no visit is left. */
-      lastVisitAt: string | null
+      /**
+       * What became of `guests.last_visit_at`:
+       *   'walked_back'  it pointed at a retracted visit and was rewritten
+       *   'left'         it pointed elsewhere, or a later writer got there first
+       *   'unreadable'   a read or the write failed; the cache may still point
+       *                  at the retracted visit until the next report moves it
+       */
+      lastVisit: 'walked_back' | 'left' | 'unreadable'
     }
   | { kind: 'failed'; error: string }
 
@@ -208,12 +240,26 @@ export type RetractReportedVisitsOutcome =
  * the same turn retracts nothing and reports `nothing_to_retract`.
  *
  * `last_visit_at` is the one cache every other writer only moves FORWARD, so
- * this is the only place it can move back. It is recomputed from the newest
- * visit still standing, and written only when the cache sits at or after the
- * earliest retracted visit AND ahead of that newest standing one. A cache that
- * already points at a later, real visit is left exactly as it is, precision
- * included. A failed recompute is logged and swallowed: the transaction rows
- * are the record and are already correct.
+ * this is the only place it can move back. It moves only when BOTH hold:
+ *
+ *   - the cache sits on the same venue-local day as a retracted visit. Same
+ *     day rather than same instant, because a later report merged into an
+ *     ongoing row advances the cache to the REPORT's time, not the row's
+ *     occurred_at, so the instants need not match. A cache on any other day
+ *     belongs to a different visit and is not touched;
+ *   - the newest visit still standing is earlier than the cache. A cache that
+ *     already equals or trails it is left alone, precision included.
+ *
+ * It is then rewritten to that newest standing visit, or to null when none is
+ * left, compare-and-set on the value that was read so a concurrent forward
+ * write wins. One accepted imprecision: a standing visit on the SAME day as
+ * the retracted one can see the cache move from a later merged time back to
+ * its own occurred_at and precision. Every consumer of the cache is
+ * day-granular, so the visit it points at is still the right one.
+ *
+ * A failure in this half is logged and reported as 'unreadable', never as a
+ * failed retraction: the transaction rows are the record and are already
+ * correct.
  */
 export async function retractReportedVisits(
   ctx: RuntimeContext,
@@ -236,50 +282,74 @@ export async function retractReportedVisits(
     if (!retracted || retracted.length === 0) {
       return { kind: 'nothing_to_retract' }
     }
-
-    const { data: newest, error: newestError } = await supabase
-      .from('transactions')
-      .select('occurred_at, occurred_at_precision')
-      .eq('venue_id', ctx.venue.id)
-      .eq('guest_id', ctx.guest.id)
-      .is('retracted_at', null)
-      .order('occurred_at', { ascending: false })
-      .limit(1)
-      .maybeSingle()
     const transactionIds = retracted.map((r) => r.id)
-    if (newestError) {
+
+    const [guestResult, newestResult] = await Promise.all([
+      supabase
+        .from('guests')
+        .select('last_visit_at')
+        .eq('id', ctx.guest.id)
+        .maybeSingle(),
+      supabase
+        .from('transactions')
+        .select('occurred_at, occurred_at_precision')
+        .eq('venue_id', ctx.venue.id)
+        .eq('guest_id', ctx.guest.id)
+        .is('retracted_at', null)
+        .order('occurred_at', { ascending: false })
+        .limit(1)
+        .maybeSingle(),
+    ])
+    if (guestResult.error || newestResult.error) {
       logger.warn(
-        '[agent] retracted a reported visit but could not recompute last_visit_at',
-        { guestId: ctx.guest.id, error: newestError.message },
+        '[agent] retracted a reported visit but could not read last_visit_at',
+        {
+          guestId: ctx.guest.id,
+          error: (guestResult.error ?? newestResult.error)?.message,
+        },
       )
-      return { kind: 'retracted', transactionIds, lastVisitAt: null }
+      return { kind: 'retracted', transactionIds, lastVisit: 'unreadable' }
     }
 
-    const earliestRetracted = retracted
-      .map((r) => r.occurred_at)
-      .reduce((min, iso) =>
-        new Date(iso).getTime() < new Date(min).getTime() ? iso : min,
+    const cached = guestResult.data?.last_visit_at ?? null
+    const newest = newestResult.data
+    const timezone = ctx.venue.timezone
+    const pointsAtRetracted =
+      cached !== null &&
+      retracted.some(
+        (r) =>
+          venueLocalDayKey(timezone, new Date(r.occurred_at)) ===
+          venueLocalDayKey(timezone, new Date(cached)),
       )
-    const lastVisitAt = newest?.occurred_at ?? null
-    const walkBack = supabase
+    const standingIsEarlier =
+      newest === null ||
+      (cached !== null &&
+        new Date(newest.occurred_at).getTime() < new Date(cached).getTime())
+    if (cached === null || !pointsAtRetracted || !standingIsEarlier) {
+      return { kind: 'retracted', transactionIds, lastVisit: 'left' }
+    }
+
+    const { data: walked, error: walkError } = await supabase
       .from('guests')
       .update({
-        last_visit_at: lastVisitAt,
+        last_visit_at: newest?.occurred_at ?? null,
         last_visit_precision: newest?.occurred_at_precision ?? null,
       })
       .eq('id', ctx.guest.id)
-      .gte('last_visit_at', earliestRetracted)
-    const { error: guestError } = await (lastVisitAt === null
-      ? walkBack
-      : walkBack.gt('last_visit_at', lastVisitAt))
-    if (guestError) {
+      .eq('last_visit_at', cached)
+      .select('id')
+    if (walkError) {
       logger.warn(
         '[agent] retracted a reported visit but last_visit_at update failed',
-        { guestId: ctx.guest.id, error: guestError.message },
+        { guestId: ctx.guest.id, error: walkError.message },
       )
+      return { kind: 'retracted', transactionIds, lastVisit: 'unreadable' }
     }
-
-    return { kind: 'retracted', transactionIds, lastVisitAt }
+    return {
+      kind: 'retracted',
+      transactionIds,
+      lastVisit: (walked ?? []).length === 1 ? 'walked_back' : 'left',
+    }
   } catch (e) {
     return {
       kind: 'failed',

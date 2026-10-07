@@ -2141,8 +2141,9 @@ import {
 //   3. Not prompt text, but decided at the same seam: a reply that is checking
 //      or accepting a retraction has its getting-to-know-you question and its
 //      review ask dropped in code (generate-message.ts), the TAC-567 lesson
-//      one gate over. The section says "ask nothing else" as well; the code is
-//      the guarantee.
+//      one gate over. That guarantee reaches those two FIELDS only: an ask
+//      the model writes into `body` itself is covered by the section's "ask
+//      nothing else" and by nothing else.
 //
 //   Both quoted shapes are Jaipal's own example from the ruling. They are
 //   quoted knowing a quoted example is what a model reproduces: here the
