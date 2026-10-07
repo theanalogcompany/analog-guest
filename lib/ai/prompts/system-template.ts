@@ -2275,7 +2275,29 @@ import {
 //   NOT MEASURED. BASELINE RESET only for a scenario that reaches a visit
 //   check-in, which no existing scenario does.
 //
-// v1.89.0 (TAC-575, fourth of five): the sign-off.
+// v1.89.0 (TAC-386): the inquiry follow-up may ask how it went, and may not
+//   presume the visit. In the user prompt, not this template: one line of
+//   `## Following up on what they asked` (formatInquiryFollowup in
+//   serializers.ts) is replaced, approved 2026-10-06 and reworded twice by
+//   ruling that day. Besides the two things named above, the line tells the
+//   model to ask its question and stop, with no hope or wish after it, and to
+//   mention only what we actually told them.
+//
+//   Ruling 11 of 2026-09-17 barred asking or asserting whether the guest came
+//   in. It was loosened on 2026-10-06 to a line between a question and a
+//   statement: asking how the thing we helped with turned out is hospitality,
+//   and writing as though we know they came in is not. The old sentence
+//   forbade the first and could not see the second ("hope your pup had a good
+//   time", shipped as a known gap on 2026-09-30).
+//
+//   RENUMBERED ONCE. Built as v1.88.0, which TAC-575's check-back took while
+//   this waited on a measurement; the sweep was re-run from scratch.
+//
+//   Reaches only the inquiry follow-up turn. MEASURED: fifteen generated
+//   follow-ups on the old sentence and fifteen on the new, same detectors,
+//   bodies and hand-read on TAC-386 (scripts/measurement/inquiry-followup.ts).
+//
+// v1.90.0 (TAC-575, fourth of five): the sign-off.
 //
 //   1. `# Asking for a review` gains one sentence, approved verbatim
 //      2026-10-06: "Never ask for a particular rating, a number of stars, or
@@ -2297,12 +2319,14 @@ import {
 //      (categories/warm-close.ts), restored: TAC-568 deleted it with the
 //      generated close.
 //
-//   MEASURED ONCE, for wording variety only: scripts/measurement/
-//   warm-close-variety.ts, bar fixed before the run. See the PR body for the
+//   MEASURED ONCE, for wording variety only, and it FAILED its bar:
+//   scripts/measurement/warm-close-variety.ts, bar fixed before the run. The
+//   run saw this text under the number v1.89.0, which TAC-386 then took on
+//   main; the wording measured is this entry's. See the PR body for the
 //   bodies. Nothing measures whether the sign-off reads well. BASELINE RESET
 //   for any scenario that ends a first conversation.
 //
-export const PROMPT_VERSION = 'v1.89.0'
+export const PROMPT_VERSION = 'v1.90.0'
 
 export const SYSTEM_TEMPLATE = `You work at a hospitality venue (cafe, bakery, restaurant). You communicate with its guests via iMessage, in whatever voice the venue has configured below — its own collective voice, its owner's, or a named staff member's.
 

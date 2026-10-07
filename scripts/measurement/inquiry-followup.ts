@@ -1,14 +1,31 @@
 // TAC-386 arm B: fifteen generated follow-ups, across inquiry types.
 //
-//   npm run measure-inquiry-followup -- [venue-slug]
+//   npm run measure-inquiry-followup -- [venue-slug] [--arm <label>]
+//   npm run measure-inquiry-followup -- --rescore <run-log.jsonl>
+//   npm run measure-inquiry-followup -- --extra 2x5
+//
+// `--extra <case>x<n>` generates one case n more times AFTER the fifteen, to
+// put a rate on something one body did. The extras are printed and logged and
+// never enter the three bars. Bar 3 runs over all fifteen bodies; bars 1 and 2
+// run over every case not marked `outOfScope`, which today is all fifteen.
+//
+// `--dump-prompt <path>` writes the composed prompt for the first case and
+// exits without generating. Diff two dumps to check that a merge or a version
+// bump left this turn's prompt alone, which is what lets a run made before it
+// still stand.
+//
+// `--arm` only labels the run log (control, treatment). `--rescore` generates
+// nothing: it re-reads the bodies of an earlier run through today's detectors,
+// which is how a detector change is checked against a run that was hand-read.
 //
 // READ-ONLY apart from the one write buildRuntimeContext makes on its own
 // (a guest_states row), same as TAC-560's harness. Nothing here sends a message.
 //
 // THE THREE BARS, pre-registered on TAC-386 before this generated:
 //
-//   1. references what was asked AND what we suggested   15/15
-//   2. never asks or asserts the visit, never pushes one  15/15
+//   1. references what was asked AND what we suggested   every in-scope case
+//   2. never asks whether they came in, never presumes
+//      that they did, never pushes them to come in        every in-scope case
 //   3. no wording in more than a quarter of the set       <= 3 of 15
 //
 // ALL THREE ARE HAND-READ. The detectors in inquiry-followup-language.ts narrow
@@ -16,12 +33,15 @@
 // and the hand-read is the finding.
 //
 // THE SET SPANS INQUIRY TYPES on purpose (parking or directions, beans, brewing,
-// dogs, what to try). Fifteen runs of ONE question would make bar 3 meaningless:
+// what to try, dog policy and finding us). Fifteen runs of ONE question would
+// make bar 3 meaningless:
 // the same question should produce similar wording, so repetition would prove
 // nothing about whether the voice is templated.
 
 import { randomUUID } from 'node:crypto'
+import { writeFileSync } from 'node:fs'
 import { generateObject } from 'ai'
+import { z } from 'zod'
 
 import { buildRuntimeContext } from '@/lib/agent/build-runtime-context'
 import {
@@ -41,10 +61,12 @@ import { PROMPT_VERSION } from '@/lib/ai/prompts/system-template'
 import { createAdminClient } from '@/lib/db/admin'
 import { startAgentTrace } from '@/lib/observability/langfuse'
 import type { VoiceCorpusChunk as AiVoiceCorpusChunk } from '@/lib/ai'
-import { createRunLog } from './run-log'
+import { createRunLog, readRunLog } from './run-log'
 import {
+  checkDetectors,
   findsReference,
   findsRepetition,
+  findsUnsaidNames,
   findsVisitClaim,
   findsVoiceProblems,
 } from './inquiry-followup-language'
@@ -52,105 +74,280 @@ import {
 const BLOCK_HEADER = '## Following up on what they asked'
 
 /**
- * The fifteen cases: five inquiry shapes, three each.
+ * The fifteen cases.
  *
- * Each pairs a guest question with a plausible answer of ours, because the
- * prompt renders BOTH and bar 1 is about referencing both. The answers are
- * written as this venue would answer, not as a template.
+ * REDRAWN 2026-10-06 FROM THE VENUE'S OWN KNOWLEDGE (ruled that day). The first
+ * set paired each question with an answer written to sound plausible, and the
+ * harness retrieves the venue's real knowledge alongside it. Where the two
+ * disagreed the model followed retrieval: a body named two beans the venue
+ * sells in place of the "Colombia" the fixture said we recommended, and another
+ * named a lot at a venue that has none. Those read as copy failures and were
+ * partly the fixture's. So every answer below is what Le Mil's knowledge
+ * actually says, and where it says nothing (how to find the door, what to do
+ * about a bitter cup) the answer is a plain one that contradicts none of it.
+ *
+ * THIS MAKES THE SET VENUE-SPECIFIC. Run it against another venue and the
+ * answers are fiction again; the startup guard does not check that.
+ *
+ * ALL FIFTEEN ARE IN SCOPE, the dog-policy and finding-us questions included.
+ * Ruled 2026-10-06, reversing a ruling of the same day: those questions keep
+ * their follow-ups, and the question-against-statement line applies to them
+ * like any other. For a few hours they were marked `outOfScope` on the theory
+ * that the classifier should not arm one; there is no such classifier change.
+ * THE RUN THAT SHIPPED v1.89.0 WAS SCORED OVER THIRTEEN for that reason, so its
+ * figures on TAC-386 are not comparable with a run of this file as it stands.
+ *
+ * `outOfScope` stays as a field with no case using it: `--rescore` still reads
+ * it from a log that recorded it, and a case marked with it is generated,
+ * printed and left out of bars 1 and 2.
  */
-const CASES: { kind: string; question: string; answer: string }[] = [
+const CASES: {
+  kind: string
+  question: string
+  answer: string
+  outOfScope?: string
+}[] = [
   {
     kind: 'parking',
     question: 'where do I park around there',
     answer:
-      'Street parking on Polk is usually fine before 9. The lot behind the building is permit only.',
+      'Street parking on Polk can be tough, so give yourself a few extra minutes. Muni is a short walk if you would rather skip the car.',
   },
   {
     kind: 'parking',
     question: 'is there parking there',
     answer:
-      'There is metered street parking right out front, and a garage a block up on Clay if that is full.',
+      'Just street parking on Polk, and it can be challenging. Polk is well connected by transit if that is easier.',
   },
   {
     kind: 'directions',
     question: 'whats the easiest way to get to you from the mission',
     answer:
-      'The 49 drops you two blocks away, or BART to Civic Center and a short walk up.',
+      'Transit is easiest. Polk Street is well connected and we are a short walk from the Muni stops.',
   },
   {
     kind: 'directions',
     question: 'are you the one on the corner or further down the block',
-    answer: 'Further down, past the flower shop, the green awning is us.',
+    answer: "We are right on Polk Street, the storefront says Le Mil's.",
+    // EXPECT A BAR-2 FLAG HERE THAT THE HAND-READ OVERRULES. "did you find us
+    // okay on Polk?" is ruled acceptable for a finding-us question
+    // (2026-10-06): it is a question about the thing they asked. The detector
+    // flags the phrase wherever it appears, because behind any other question
+    // it is asking whether they came in, and it cannot tell which question it
+    // is reading.
   },
   {
     kind: 'beans',
     question: 'which bag should I buy if I like something chocolatey',
     answer:
-      'The Colombia is the one, it leans cocoa and brown sugar. The Ethiopia is the bright one, so probably not that.',
+      'Chikka if you want it dark, it is dark chocolate and roasted malt and made for espresso. Budan is the lighter one, more toffee and hazelnut.',
   },
   {
     kind: 'beans',
     question: 'do you sell coffee beans too',
     answer:
-      'We do, whole bean or ground on the shelf by the register, and we roast the Colombia weekly.',
+      'We do. Budan, Malenad and Chikka come whole bean or ground, in 10 oz, 1 lb and 5 lb bags on lemils.com.',
   },
   {
     kind: 'beans',
     question: 'whats a good bag for a filter coffee drinker',
     answer:
-      'The washed Ethiopia is the one most filter drinkers go for. It is delicate, so a little coarser than you might expect.',
+      'Estate Secret. It is our chicory blend for South Indian filter coffee, 80% Arabica and 20% chicory, and it is what goes into the SoFi.',
   },
   {
     kind: 'brewing',
     question: 'how should I brew the beans I got from you',
     answer:
-      'A 1 to 16 ratio, water just off the boil, and give it a good stir after the bloom.',
+      'For pour over, 21 grams to about 300ml of water, medium-fine grind, water around 200F. Bloom for 30 seconds, then three pours of about 100ml.',
   },
   {
     kind: 'brewing',
     question: 'my pour over keeps coming out bitter, any ideas',
     answer:
-      'Usually the grind is too fine or the water is too hot. Go a notch coarser first and let the kettle sit a minute.',
+      'Check it against our recipe: 21 grams to about 300ml, a medium-fine grind, water around 200F, and finish in under three minutes.',
   },
   {
     kind: 'brewing',
     question: 'whats the ratio you use for the aeropress',
-    answer: 'We go 17 grams to 250, about two minutes, and a slow press.',
+    answer:
+      'We do not have a set Aeropress recipe. Our pour over ratio is 1:14, 21 grams to about 300ml, and we grind medium-fine for Aeropress.',
   },
   {
     kind: 'dogs',
     question: 'can I bring my dog',
-    answer:
-      'Of course, the patio is dog friendly and there is a water bowl by the door.',
+    answer: 'Yes, dogs are welcome at the cafe.',
   },
   {
-    kind: 'dogs',
-    question: 'is the patio ok for a big dog',
+    kind: 'brewing',
+    question: 'how do I make filter coffee at home',
     answer:
-      'Plenty of room on the patio, the corner table by the planter is the roomiest.',
+      'Two to three tablespoons of Estate Secret in the top of a South Indian filter, press it down lightly, pour a cup of boiling water over and let it drip 10 to 15 minutes. Then half decoction, half hot milk, and sweeten to taste.',
   },
   {
     kind: 'what-to-try',
     question: 'whats something I should try when I get there',
     answer:
-      'The Pink Panther if you want something interesting, or the cortado if you would rather taste the coffee.',
+      'The SoFi, our South Indian filter coffee. It outsells everything else six to one. The Pink Panther if you want something cold and different.',
   },
   {
     kind: 'what-to-try',
     question: 'what do you recommend, I like coffee but not too sweet',
     answer:
-      'The cortado then, or a straight filter. The Blossom Tonic is the sweet one so I would skip it.',
+      'Our drinks are not too sweet to begin with. Try the SoFi Classic, or a cortado if you would rather skip sweet altogether.',
   },
   {
     kind: 'what-to-try',
     question: 'whats underrated here',
     answer:
-      'The cardamom bun. It sells out by ten and nobody asks about it until it is gone.',
+      'The Blossom Tonic. It is the most work to make and somehow the least ordered. It is floral, with a thick foam on top.',
   },
 ]
 
+const IN_SCOPE = CASES.filter((c) => c.outOfScope === undefined).length
+
+interface Args {
+  venueSlug: string
+  arm: string
+  rescorePath: string | null
+  /** 1-based case number and how many extra generations of it. */
+  extra: { caseNumber: number; times: number } | null
+  dumpPromptPath: string | null
+}
+
+function parseArgs(argv: readonly string[]): Args {
+  const args: Args = {
+    venueSlug: 'le-mils-coffee',
+    arm: 'shipped',
+    rescorePath: null,
+    extra: null,
+    dumpPromptPath: null,
+  }
+  for (let i = 0; i < argv.length; i += 1) {
+    const flag = argv[i]!
+    // A value flag with no value must not fall through: `--rescore` with the
+    // path forgotten would otherwise run fifteen paid generations.
+    const value = (): string => {
+      const next = argv[++i]
+      if (next === undefined || next.startsWith('--')) {
+        throw new Error(`${flag} needs a value`)
+      }
+      return next
+    }
+    if (flag === '--arm') args.arm = value()
+    else if (flag === '--rescore') args.rescorePath = value()
+    else if (flag === '--dump-prompt') args.dumpPromptPath = value()
+    else if (flag === '--extra') {
+      const match = /^(\d+)x(\d+)$/.exec(value())
+      const caseNumber = Number(match?.[1])
+      const times = Number(match?.[2])
+      if (!match || caseNumber < 1 || caseNumber > CASES.length || times < 1) {
+        throw new Error('--extra takes <case>x<n>, e.g. 2x5')
+      }
+      args.extra = { caseNumber, times }
+    } else if (flag.startsWith('--')) throw new Error(`unknown flag: ${flag}`)
+    else args.venueSlug = flag
+  }
+  return args
+}
+
+function describeVisit(visit: ReturnType<typeof findsVisitClaim>): string {
+  return visit.clean
+    ? 'yes'
+    : `NO asks=${visit.asks.join('|')} presumed=${visit.presumed.join('|')} pushes=${visit.pushes.join('|')}`
+}
+
+const RescoreUnitSchema = z.object({
+  index: z.number(),
+  question: z.string(),
+  answer: z.string(),
+  body: z.string().nullable(),
+  extra: z.boolean().optional(),
+  caseNumber: z.number().optional(),
+  outOfScope: z.string().nullable().optional(),
+})
+
+/**
+ * Re-read an earlier run's bodies through today's detectors. No model call.
+ *
+ * SCORES WHAT THE LIVE RUN SCORED. Extras and `outOfScope` cases are printed and
+ * left out of the counts, and a unit with no body is printed as a failure, not
+ * dropped: a denominator that shrinks or grows without saying so is a
+ * difference the rescore made up.
+ *
+ * A LOG THAT DOES NOT RECORD SCOPE IS SCORED OVER EVERY CASE, AND SAYS SO. That
+ * includes the 2026-10-06 runs behind v1.89.0, which were scored live over
+ * thirteen with two cases left out and written before the field existed. The
+ * scope cannot be recovered from the fixtures any more, since no case carries
+ * it, so their rescore reads over fifteen and prints why.
+ */
+function rescore(path: string): void {
+  const { units: raw } = readRunLog(path)
+  const units = raw.flatMap((u) => {
+    const parsed = RescoreUnitSchema.safeParse(u)
+    return parsed.success ? [parsed.data] : []
+  })
+  if (units.length === 0) throw new Error(`no units in ${path}`)
+
+  let inScope = 0
+  let failed = 0
+  let bar1 = 0
+  let suggestion = 0
+  let bar2 = 0
+  for (const u of units) {
+    if (u.extra === true) continue
+    if (u.body === null) {
+      failed += 1
+      console.log(`#${u.index} FAILED UNIT: no body was generated`)
+      continue
+    }
+    const outOfScope = u.outOfScope ?? undefined
+    const reference = findsReference(u.body, u.question, u.answer)
+    const visit = findsVisitClaim(u.body)
+    console.log(
+      `#${u.index}${outOfScope ? ` (OUT OF SCOPE, not counted: ${outOfScope})` : ''} ${u.body}`,
+    )
+    console.log(
+      `  bar1 references both: ${reference.referencesBoth ? 'yes' : 'NO'}  names our suggestion: ${reference.namesSuggestion ? 'yes' : 'NO'}  q=[${reference.sharedWithQuestion.join(' ')}] a=[${reference.sharedWithAnswerOnly.join(' ')}]`,
+    )
+    console.log(`  bar2 clean: ${describeVisit(visit)}`)
+    if (outOfScope) continue
+    inScope += 1
+    if (reference.referencesBoth) bar1 += 1
+    if (reference.namesSuggestion) suggestion += 1
+    if (visit.clean) bar2 += 1
+  }
+  console.log(`\n=== rescore of ${path} ===`)
+  console.log(`  bar 1 detector: ${bar1}/${inScope}`)
+  console.log(`  names our suggestion: ${suggestion}/${inScope}`)
+  console.log(`  bar 2 detector: ${bar2}/${inScope}`)
+  if (failed > 0) console.log(`  failed units, not scored: ${failed}`)
+  if (units.every((u) => u.outOfScope === undefined)) {
+    console.log(
+      '  this log does not record scope, so every case is counted. If its live run left cases out, the denominators differ for that reason alone.',
+    )
+  }
+  console.log(
+    '  Compare with the hand-read recorded for that run. The difference is the finding.',
+  )
+}
+
 async function main(): Promise<void> {
-  const venueSlug = process.argv[2] ?? 'le-mils-coffee'
+  const args = parseArgs(process.argv.slice(2))
+
+  // Before anything is spent or read: do the detectors agree with sentences
+  // whose verdict is already known?
+  const detectorProblems = checkDetectors()
+  if (detectorProblems.length > 0) {
+    console.error('refusing to run: the detectors disagree with their labels')
+    for (const p of detectorProblems) console.error(`  - ${p}`)
+    process.exit(1)
+  }
+  if (args.rescorePath !== null) {
+    rescore(args.rescorePath)
+    return
+  }
+
+  const venueSlug = args.venueSlug
   const db = createAdminClient()
 
   const { data: venue, error: venueError } = await db
@@ -269,17 +466,32 @@ async function main(): Promise<void> {
     process.exit(1)
   }
 
+  if (args.dumpPromptPath !== null) {
+    writeFileSync(
+      args.dumpPromptPath,
+      `${first.composed.systemPrompt}\n\n=== USER PROMPT ===\n\n${first.composed.userPrompt}\n`,
+    )
+    console.log(`wrote the composed prompt to ${args.dumpPromptPath}`)
+    return
+  }
+
   const log = createRunLog({
     name: 'tac386-inquiry-followup',
     meta: {
-      arm: 'shipped',
+      arm: args.arm,
+      // The harness builds context at the moment it runs. Recorded so a reader
+      // can tell whether the prompt told the model the venue was shut.
+      openStatusLine:
+        /^- Status: .*$/m.exec(first.composed.userPrompt)?.[0] ??
+        /^- Status: .*$/m.exec(first.composed.systemPrompt)?.[0] ??
+        null,
       promptVersion: PROMPT_VERSION,
       venueSlug: venue.slug,
       guestId: guest.id,
       cases: CASES.length,
       bars: {
-        one: 'references what was asked AND what we suggested, 15/15',
-        two: 'never asks or asserts the visit, never pushes one, 15/15',
+        one: `references what was asked AND what we suggested, ${IN_SCOPE}/${IN_SCOPE} in scope (${CASES.length} generated)`,
+        two: `never asks whether they came in, never presumes it, never pushes, ${IN_SCOPE}/${IN_SCOPE} in scope`,
         three: 'no wording in more than a quarter of the set',
       },
     },
@@ -291,7 +503,21 @@ async function main(): Promise<void> {
 
   const bodies: string[] = []
   let rewrittenCount = 0
-  for (const [index, c] of CASES.entries()) {
+  const extras = args.extra
+    ? Array.from({ length: args.extra.times }, () => ({
+        c: CASES[args.extra!.caseNumber - 1]!,
+        caseNumber: args.extra!.caseNumber,
+      }))
+    : []
+  const runs = [
+    ...CASES.map((c, i) => ({ c, caseNumber: i + 1, extra: false })),
+    ...extras.map((e) => ({ ...e, extra: true })),
+  ]
+  const extraBodies: string[] = []
+  /** Scored bodies only: `outOfScope` cases are generated and left out. */
+  const scored: { body: string; c: (typeof CASES)[number] }[] = []
+  for (const [index, run] of runs.entries()) {
+    const c = run.c
     const { composed } = index === 0 ? first : await composeFor(c)
     const system = composed.systemPrompt
 
@@ -341,9 +567,15 @@ async function main(): Promise<void> {
       body === null ? null : findsReference(body, c.question, c.answer)
     const visit = body === null ? null : findsVisitClaim(body)
     const voice = body === null ? null : findsVoiceProblems(body)
+    const unsaidNames =
+      body === null ? [] : findsUnsaidNames(body, c.question, c.answer)
 
     log.appendUnit({
       index: index + 1,
+      caseNumber: run.caseNumber,
+      extra: run.extra,
+      outOfScope: c.outOfScope ?? null,
+      unsaidNames,
       kind: c.kind,
       question: c.question,
       answer: c.answer,
@@ -355,21 +587,31 @@ async function main(): Promise<void> {
       visit,
       voice,
     })
-    if (body !== null) bodies.push(body)
-    if (rawBody !== null && rawBody !== body) rewrittenCount += 1
+    if (body !== null) (run.extra ? extraBodies : bodies).push(body)
+    if (body !== null && !run.extra && c.outOfScope === undefined) {
+      scored.push({ body, c })
+    }
+    if (!run.extra && rawBody !== null && rawBody !== body) rewrittenCount += 1
 
-    console.log(`--- ${index + 1}/${CASES.length} (${c.kind}) ---`)
+    console.log(
+      run.extra
+        ? `--- EXTRA of case ${run.caseNumber} (${c.kind}), not in the bars ---`
+        : `--- ${index + 1}/${CASES.length} (${c.kind})${c.outOfScope ? ` OUT OF SCOPE for bars 1 and 2, ${c.outOfScope}` : ''} ---`,
+    )
     console.log(`  asked:  ${c.question}`)
     console.log(`  we said: ${c.answer}`)
     console.log(`  BODY:   ${body ?? `(failed: ${error})`}`)
     if (reference) {
       console.log(
-        `  bar1 references both: ${reference.referencesBoth ? 'yes' : 'NO'}  q=[${reference.sharedWithQuestion.join(' ')}] a=[${reference.sharedWithAnswerOnly.join(' ')}]`,
+        `  bar1 references both: ${reference.referencesBoth ? 'yes' : 'NO'}  names our suggestion: ${reference.namesSuggestion ? 'yes' : 'NO'}  q=[${reference.sharedWithQuestion.join(' ')}] a=[${reference.sharedWithAnswerOnly.join(' ')}]`,
       )
     }
     if (visit) {
+      console.log(`  bar2 clean: ${describeVisit(visit)}`)
+    }
+    if (unsaidNames.length > 0) {
       console.log(
-        `  bar2 clean: ${visit.clean ? 'yes' : `NO claims=${visit.claims.join('|')} pushes=${visit.pushes.join('|')}`}`,
+        `  names in neither the question nor our answer: ${unsaidNames.join(', ')}`,
       )
     }
     if (
@@ -385,21 +627,26 @@ async function main(): Promise<void> {
 
   // ---- Report ----
   const units = bodies.length
-  const bar1 = CASES.filter((c, i) =>
-    bodies[i] === undefined
-      ? false
-      : findsReference(bodies[i], c.question, c.answer).referencesBoth,
+  const inScope = scored.length
+  const bar1 = scored.filter(
+    ({ body, c }) => findsReference(body, c.question, c.answer).referencesBoth,
   ).length
-  const bar2 = bodies.filter((b) => findsVisitClaim(b).clean).length
+  const suggestion = scored.filter(
+    ({ body, c }) => findsReference(body, c.question, c.answer).namesSuggestion,
+  ).length
+  const bar2 = scored.filter(({ body }) => findsVisitClaim(body).clean).length
   const repetition = findsRepetition(bodies)
 
   console.log('=== TAC-386 arm B ===')
   console.log(`generated ${units} of ${CASES.length}`)
   console.log(
-    `  bar 1 references both halves: ${bar1}/${units} ${bar1 === units ? 'PASS' : 'FAIL'}`,
+    `  bar 1 references both halves: ${bar1}/${inScope} ${bar1 === inScope ? 'PASS' : 'FAIL'}`,
   )
   console.log(
-    `  bar 2 never asks or asserts the visit: ${bar2}/${units} ${bar2 === units ? 'PASS' : 'FAIL'}`,
+    `  names our suggestion (candidate only, see ReferenceVerdict): ${suggestion}/${inScope}`,
+  )
+  console.log(
+    `  bar 2 never asks about, presumes or pushes the visit: ${bar2}/${inScope} ${bar2 === inScope ? 'PASS' : 'FAIL'}`,
   )
   console.log(
     `  bar 3 worst shared phrase in ${repetition.worst} of ${units} (limit ${repetition.limit}): ${repetition.withinBar ? 'PASS' : 'FAIL'}`,
@@ -409,6 +656,11 @@ async function main(): Promise<void> {
     for (const p of repetition.phrases.slice(0, 8)) {
       console.log(`    ${p.count}x  ${JSON.stringify(p.phrase)}`)
     }
+  }
+  if (extraBodies.length > 0) {
+    console.log(
+      `  extras generated (not in any bar above): ${extraBodies.length}. Hand-read each for a fact we did not say.`,
+    )
   }
   const dashRewrites = rewrittenCount
   console.log(
@@ -429,8 +681,8 @@ async function main(): Promise<void> {
 
   const allPassed =
     units === CASES.length &&
-    bar1 === units &&
-    bar2 === units &&
+    bar1 === inScope &&
+    bar2 === inScope &&
     repetition.withinBar &&
     voiceProblems.length === 0
   if (!allPassed) process.exitCode = 1

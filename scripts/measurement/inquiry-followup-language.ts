@@ -15,11 +15,24 @@
 // always flatters whichever arm is scripted). So the overlap below is biased to
 // RECALL and every miss is printed with its body for reading.
 //
-// BAR 2 IS DIFFERENT, and is the one place a pattern list is close to sufficient:
-// "did you come in" is a narrow, enumerable move, and the cost of a false
-// positive is a hand-read that disagrees while the cost of a false negative is
-// shipping the one thing ruling 11 forbids. So VISIT_CLAIMS is wide and errs
-// toward flagging.
+// BAR 2 IS A LINE BETWEEN A QUESTION AND A STATEMENT (ruled 2026-10-06, which
+// loosened ruling 11). The follow-up may ASK how the thing we helped with turned
+// out, or whether they got to it. It may not ask whether they came in, may not
+// write as though it knows they did, and may not push them to come in. So there
+// are three lists, and an outcome question ("did you find a spot okay", "did you
+// end up picking any up") is on none of them.
+//
+// The first version had one list, VISIT_CLAIMS, of interrogative and assertive
+// phrasings. It flagged the outcome question the ruling now allows and missed
+// the presumption it still bars: "hope your pup had a good time" names no visit
+// and uses none of those phrasings. A presumption is not enumerable the way
+// "did you come in" is, so VISIT_PRESUMED is wide, errs toward flagging, and is
+// still only where the hand-read starts.
+//
+// THE DETECTORS ARE CHECKED AGAINST LABELLED SENTENCES BEFORE THEY ARE USED
+// (`checkDetectors`, called by the harness at startup). A scorer nobody can
+// contradict is not evidence, and this module was wrong twice without anything
+// saying so.
 
 /** Words that carry no information about what was asked. */
 const STOPWORDS = new Set([
@@ -94,6 +107,18 @@ const STOPWORDS = new Set([
   'would',
   'you',
   'your',
+  // Added after the fixtures were redrawn from real answers (review,
+  // 2026-10-06). Those answers contain ordinary verbs, and "did that work out?"
+  // counted as naming our suggestion because one answer said "the most work to
+  // make". None of these says what we suggested.
+  'come',
+  'easier',
+  'else',
+  'like',
+  'make',
+  'try',
+  'want',
+  'work',
 ])
 
 function fold(body: string): string {
@@ -104,11 +129,27 @@ function fold(body: string): string {
     .replace(/[‘’]/g, "'")
 }
 
-/** Content words, stemmed crudely so "parking" and "park" match. */
+/**
+ * Content words, stemmed crudely so "parking" and "park" match.
+ *
+ * NUMBERS ARE CONTENT. The first version split on non-letters and dropped
+ * anything under three characters, so "the 49", "1:16" and "17g to 250" were
+ * invisible, each being the exact thing we had told the guest: bar 1 read 4 of
+ * 15 where the hand-read was 12. Any token containing a digit is kept whole,
+ * whatever its length. "1:16" splits into "1" and "16", which is what lets it
+ * match an answer that said "1 to 16".
+ */
 export function contentWords(text: string): Set<string> {
   const out = new Set<string>()
-  for (const raw of fold(text).split(/[^a-z']+/)) {
+  for (const raw of fold(text).split(/[^a-z0-9']+/)) {
     const word = raw.replace(/'s$/, '')
+    if (/\d/.test(word)) {
+      out.add(word)
+      // And the bare number, so "300ml" matches a body that wrote "300 ml".
+      const digits = /^\d+/.exec(word)?.[0]
+      if (digits !== undefined) out.add(digits)
+      continue
+    }
     if (word.length < 3) continue
     if (STOPWORDS.has(word)) continue
     // Crude stem: drop a trailing "ing", "ed" or "s" so the paraphrase of a
@@ -144,6 +185,20 @@ export interface ReferenceVerdict {
    * echoes only our answer does not connect to their situation.
    */
   referencesBoth: boolean
+  /**
+   * Does it name something we suggested that the guest's question did not
+   * already contain?
+   *
+   * Reported BESIDE `referencesBoth`, not in place of it. Rescoring the
+   * 2026-09-30 run after the digit fix still read 5 of 15 against a hand-read
+   * of 12, and the digits were not why: seven bodies named our suggestion
+   * ("the green awning", "the Pink Panther or the cortado") without repeating
+   * a word of the question, and `referencesBoth` demands both. On that run
+   * this field alone read 12 of 15 and missed the same three the hand-read
+   * did. It was found by looking at that result, so it is offered as the
+   * better candidate and is not the bar.
+   */
+  namesSuggestion: boolean
 }
 
 /** Bar 1: does this message reference what was asked and what we suggested? */
@@ -165,38 +220,88 @@ export function findsReference(
     sharedWithAnswerOnly,
     referencesBoth:
       sharedWithQuestion.length > 0 && sharedWithAnswerOnly.length > 0,
+    namesSuggestion: sharedWithAnswerOnly.length > 0,
   }
 }
 
 /**
- * Phrasings that assert or ask about a visit.
+ * Asking whether they came in. Barred.
  *
- * WIDE ON PURPOSE, and biased toward flagging: bar 2 is ruling 11 and AC7, the
- * one thing this message must never do. A false positive costs a hand-read that
- * disagrees; a false negative ships surveillance.
+ * Narrow on purpose: every pattern names the coming-in itself. "did you find a
+ * spot", "did you get to try it" and "did you end up picking any up" ask about
+ * the errand and are allowed.
  */
-const VISIT_CLAIMS: RegExp[] = [
-  /\bdid you (come|make|get|stop|swing|pop|drop)\b/,
-  /\bdid you end up\b/,
-  /\bhave you (come|been|made it|stopped)\b/,
-  /\bhow was your (visit|trip)\b/,
-  /\bwhen you (came|were) (in|here)\b/,
-  /\b(you )?came (in|by|through)\b/,
-  /\bstopped (in|by)\b/,
-  /\bswung by\b/,
-  /\bmade it (in|over|down|by)\b/,
+const VISIT_ASKS: RegExp[] = [
+  /\bdid you (come|stop|swing|pop|drop) (in|by|over|through)\b/,
+  // The same ask behind a filler: "did you end up stopping by", "did you guys
+  // make it in", "ever make it in?". Dropping the old bare /did you end up/
+  // freed the outcome question and, until review caught it, this with it.
+  /\b(did (you|y'all)|ever)( guys| all| ever| end up)* (com|stopp|swing|popp|dropp|mak)(e|ing)( it)? (in|by|over|through)\b/,
+  /\bdid (you|y'all)( guys| all)? ever make it\b/,
+  /\bdid you (make|get) (it )?(in|over|down|by)\b/,
+  /\bhave you (come|been|made it|stopped) (in|by|over|here)\b/,
+  /\bwere you able to (come|make it|stop)\b/,
+  /\bif you (made it|came|stopped|were|got) (in|by|here|over)\b/,
+  /\bhow was (your|the) (visit|trip)\b/,
+  // Ruled barred 2026-10-06: finding the venue is the visit.
+  /\bdid you find (us|the (shop|cafe|place|spot we))\b/,
+  // An ask in statement form, found in the 2026-10-06 treatment run: "hope you
+  // got a chance to bring your pup by". It presumes nothing, and it is still
+  // about the coming-in and not about how our help turned out.
+  /\bhope you (got|get|had|found) (a|the) (chance|time) to (come|stop|swing|pop|drop|bring|make it)\b/,
+]
+
+/**
+ * Writing as though we know they came in. Barred, and the gap the first
+ * version could not see.
+ *
+ * Two shapes. The explicit ones name the visit ("good to see you", "while you
+ * were here"). The presumptions describe the guest, or someone or something
+ * with them, as having had or enjoyed something: "hope your pup had a good
+ * time". "Hope the parking worked out" is NOT one: it is about our help, it
+ * describes nobody, and it was ruling 11's own example of an acceptable line.
+ *
+ * WIDE ON PURPOSE. A false positive costs a hand-read that disagrees; a false
+ * negative ships a claim about the guest's movements that nothing else in the
+ * pipeline can contradict.
+ */
+const VISIT_PRESUMED: RegExp[] = [
+  // `hoping` as well as `hope`, and a subject behind an article: "hope the pup
+  // had a good time" is one determiner from the body this list exists for,
+  // and the first version of this line could not see it (review, 2026-10-06).
+  /\b(hope|hoping) (you|y'all|(your|the) [a-z' ]{1,24}?|they|she|he|everyone|everybody) (all |both )?(had|enjoyed|liked|loved)\b/,
+  /\b(so )?(glad|happy) [a-z' ]{0,30}?\b(hit the spot|enjoyed|liked|loved)\b/,
+  /\b(glad|happy|great|good|nice) (that )?(you|your [a-z' ]{1,24}?) (came|made it|stopped|enjoyed|liked|loved|had)\b/,
+  /\b(good|great|nice|lovely) (to see|seeing|having) (you|y'all)\b/,
   /\bsaw you\b/,
-  /\bgood to see you\b/,
-  /\bthanks for (coming|stopping|visiting)\b/,
+  /\bthanks for (coming|stopping|visiting|swinging)\b/,
   /\bsince your visit\b/,
-  /\bwhile you were here\b/,
-  /\byour last visit\b/,
-  /\bhope you enjoyed\b/,
+  /\bwhile you were (here|in)\b/,
+  /\byour (last|next|recent) visit\b/,
+  /\bwhen you (came|were) (in|here|by)\b/,
+  /\byou (came|stopped|swung|popped) (in|by|through)\b/,
+  /\b(had|enjoyed|liked|loved) [a-z' ]{0,30}?\b(here|with us)\b/,
+  // Found in the 2026-10-06 control run, which the lines above read as clean:
+  // "hoping the Pink Panther or the cortado hit the spot for you" states that
+  // they had the drink. A hope about how something we recommended WAS.
+  /\b(hope|hoping) [a-z' ,]{0,48}?\b(hit the [a-z ]{0,16}?(spot|note|notes|mark)|went down|was (good|great|tasty|nice))\b/,
+  // Both ruled barred 2026-10-06, from the control run. "hoping it was the
+  // cocoa hit you were after" says they had it; "hope the corner table worked
+  // out for your dog" seats the dog. "worked out for you" stays allowed.
+  // KNOWN FALSE POSITIVE, left in: "hope that was helpful" is a hope about our
+  // help and is flagged here. The copy now bars every hope, so a body with one
+  // is worth a hand-read whichever kind it is.
+  /\b(hope|hoping) (it|that|they|the [a-z' ]{1,24}?) (was|were)\b/,
+  // A HOPE only. "did the corner table work out for your pup?" is a question
+  // about the thing, which the ruling allows, and the second treatment run
+  // showed the unanchored pattern flagging it.
+  /\b(hope|hoping) [a-z' ,]{0,48}?\bwork(ed)? out for (your|the) (dog|pup|puppy|kid|kids|friend|friends|family|group)\b/,
 ]
 
 /** Phrasings that push the guest to come in, also barred by ruling 2. */
 const VISIT_PUSHES: RegExp[] = [
-  /\bcome (on )?(in|by|down|over)\b/,
+  // Not "come in handy", which the second treatment run produced.
+  /\bcome (on )?(in|by|down|over)\b(?! handy)/,
   /\bswing by\b/,
   /\bstop (in|by)\b/,
   /\bpop (in|by)\b/,
@@ -206,20 +311,155 @@ const VISIT_PUSHES: RegExp[] = [
 ]
 
 export interface VisitVerdict {
-  /** Matched phrasings that assert or ask about a visit. */
-  claims: string[]
+  /** Matched phrasings that ask whether they came in. */
+  asks: string[]
+  /** Matched phrasings that write as though we know they came in. */
+  presumed: string[]
   /** Matched phrasings that push the guest to come in. */
   pushes: string[]
-  /** The candidate answer to bar 2: clean on both counts. */
+  /** The candidate answer to bar 2: clean on all three counts. */
   clean: boolean
 }
 
-/** Bar 2: does this message ask or assert the visit, or push for one? */
+/** Bar 2: does this message ask about the visit, presume it, or push for one? */
 export function findsVisitClaim(body: string): VisitVerdict {
   const folded = fold(body)
-  const claims = VISIT_CLAIMS.filter((p) => p.test(folded)).map((p) => p.source)
-  const pushes = VISIT_PUSHES.filter((p) => p.test(folded)).map((p) => p.source)
-  return { claims, pushes, clean: claims.length === 0 && pushes.length === 0 }
+  const matches = (patterns: readonly RegExp[]) =>
+    patterns.filter((p) => p.test(folded)).map((p) => p.source)
+  const asks = matches(VISIT_ASKS)
+  const presumed = matches(VISIT_PRESUMED)
+  const pushes = matches(VISIT_PUSHES)
+  return {
+    asks,
+    presumed,
+    pushes,
+    clean: asks.length === 0 && presumed.length === 0 && pushes.length === 0,
+  }
+}
+
+/**
+ * Sentences with a known verdict, from the rulings and from bodies the first
+ * measurement runs produced. Each `clean: false` row names the list that must
+ * catch it, so a pattern moved to the wrong list fails here too.
+ */
+const VISIT_CASES: {
+  body: string
+  clean: boolean
+  via?: 'asks' | 'presumed' | 'pushes'
+}[] = [
+  // Allowed by name in the 2026-10-06 ruling.
+  { body: 'did you find a spot okay?', clean: true },
+  { body: "how'd the pour over turn out?", clean: true },
+  // Outcome questions the first version flagged and the ruling allows.
+  { body: 'did you end up picking any up?', clean: true },
+  { body: 'did you get to try the cardamom bun?', clean: true },
+  // Ruling 11's own example. A hope about our help, describing nobody.
+  { body: 'hope the parking worked out', clean: true },
+  // Barred by name in the 2026-10-06 ruling.
+  { body: 'hope your pup had a good time here', clean: false, via: 'presumed' },
+  // The 2026-09-30 body, which has no "here" to catch it by.
+  { body: 'hope your pup had a good time 🐾', clean: false, via: 'presumed' },
+  { body: 'hope you enjoyed the cortado', clean: false, via: 'presumed' },
+  {
+    body: 'hoping the Pink Panther or the cortado hit the spot for you.',
+    clean: false,
+    via: 'presumed',
+  },
+  {
+    body: 'let us know if you have any questions before your next visit',
+    clean: false,
+    via: 'presumed',
+  },
+  { body: 'did you make it in?', clean: false, via: 'asks' },
+  { body: 'did you end up stopping by?', clean: false, via: 'asks' },
+  { body: 'did you guys make it in', clean: false, via: 'asks' },
+  { body: 'hoping you enjoyed the cortado', clean: false, via: 'presumed' },
+  { body: 'hope the pup had a good time', clean: false, via: 'presumed' },
+  {
+    body: 'hope the SoFi was everything you wanted',
+    clean: false,
+    via: 'presumed',
+  },
+  { body: 'hey, did you find us okay?', clean: false, via: 'asks' },
+  {
+    body: 'hoping it was the cocoa hit you were after',
+    clean: false,
+    via: 'presumed',
+  },
+  {
+    body: 'hope the corner table worked out for your dog',
+    clean: false,
+    via: 'presumed',
+  },
+  { body: 'hope the parking tip worked out for you', clean: true },
+  { body: 'did the corner table work out for your pup? 🐾', clean: true },
+  { body: 'did the water bowl come in handy?', clean: true },
+  {
+    body: 'hoping it hit the right note for you.',
+    clean: false,
+    via: 'presumed',
+  },
+  {
+    body: 'hope you got a chance to bring your pup by 🐾',
+    clean: false,
+    via: 'asks',
+  },
+  { body: 'hope it helped if you made it in', clean: false, via: 'asks' },
+  { body: 'swing by whenever', clean: false, via: 'pushes' },
+]
+
+/**
+ * Run both detectors over sentences whose verdict is known, and return every
+ * disagreement. Empty means they agree with every label.
+ *
+ * The harness calls this before spending a generation and refuses to run on a
+ * non-empty result: a bar read off a detector that mislabels the ruling's own
+ * examples is not a measurement.
+ */
+export function checkDetectors(): string[] {
+  const problems: string[] = []
+  for (const c of VISIT_CASES) {
+    const verdict = findsVisitClaim(c.body)
+    if (verdict.clean !== c.clean) {
+      problems.push(
+        `bar 2: ${JSON.stringify(c.body)} should be ${c.clean ? 'clean' : 'flagged'} and was not`,
+      )
+    } else if (c.via !== undefined && verdict[c.via].length === 0) {
+      problems.push(
+        `bar 2: ${JSON.stringify(c.body)} was flagged, but not as ${c.via}`,
+      )
+    }
+  }
+
+  // Bar 1 must see a number we gave them, in both of the forms it took.
+  const bus = findsReference(
+    'did the 49 get you over alright?',
+    'whats the easiest way to get to you from the mission',
+    'The 49 drops you two blocks away, or BART to Civic Center.',
+  )
+  if (!bus.sharedWithAnswerOnly.includes('49')) {
+    problems.push('bar 1: "the 49" is invisible to the reference check')
+  }
+  const ratio = findsReference(
+    'how did the 1:16 come out?',
+    'how should I brew the beans I got from you',
+    'A 1 to 16 ratio, water just off the boil.',
+  )
+  if (!ratio.sharedWithAnswerOnly.includes('16')) {
+    problems.push('bar 1: "1:16" does not match an answer that said "1 to 16"')
+  }
+  // And must still refuse a body that names only the topic.
+  const topicOnly = findsReference(
+    'hey, did that work out?',
+    'whats underrated here',
+    'The Blossom Tonic. It is the most work to make and somehow the least ordered. It is floral, with a thick foam on top.',
+  )
+  if (topicOnly.namesSuggestion) {
+    problems.push(
+      'bar 1: a body naming only the topic passes as naming our suggestion',
+    )
+  }
+  return problems
 }
 
 export interface RepetitionVerdict {
@@ -269,6 +509,46 @@ export function findsRepetition(
 
   const worst = phrases[0]?.count ?? 0
   return { phrases, worst, withinBar: worst <= limit, limit }
+}
+
+/**
+ * Capitalised words in the body that neither the question nor our answer
+ * contains: a candidate list for "added a fact we did not say".
+ *
+ * Ruled 2026-10-06 to carry the same weight as presuming the visit, after a
+ * body named "the lot on Bush and Polk" where our answer said a garage on Clay.
+ * A NARROW INSTRUMENT, and it says so: it sees an invented proper noun and
+ * nothing else. Invisible to it, all found in review: a lower-case invention
+ * (a "lot", a price, an opening time); a name that OPENS a sentence, because
+ * each sentence's first word is skipped; and an all-caps name such as BART. So
+ * an empty list is not a clean bill. The hand-read is.
+ */
+export function findsUnsaidNames(
+  body: string,
+  question: string,
+  answer: string,
+): string[] {
+  const said = new Set(
+    fold(`${question} ${answer}`)
+      .split(/[^a-z0-9']+/)
+      .filter(Boolean)
+      // The body's words lose their possessive below, so ours must too, or
+      // "Le Mil's" in both reads as a name we never said.
+      .map((w) => w.replace(/'s$/, '')),
+  )
+  const unsaid = new Set<string>()
+  // Skip each sentence's first word, which is capitalised for another reason.
+  for (const sentence of body.split(/[.!?\n]+/)) {
+    const words = sentence.trim().split(/\s+/).slice(1)
+    for (const raw of words) {
+      // Straighten the apostrophe before stripping, or a curly one is dropped
+      // and "Mil’s" becomes "Mils".
+      const word = raw.replace(/[‘’]/g, "'").replace(/[^A-Za-z']/g, '')
+      if (!/^[A-Z][a-z]+/.test(word)) continue
+      if (!said.has(fold(word).replace(/'s$/, ''))) unsaid.add(word)
+    }
+  }
+  return [...unsaid].sort()
 }
 
 /** Voice checks that are not bars but would each be a defect. */
