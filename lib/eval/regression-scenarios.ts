@@ -35,6 +35,7 @@ export type RegressionTell =
   | 'what-can-i-do'
   | 'two-questions'
   | 'either-or'
+  | 'off-channel-redirect'
 
 export const REGRESSION_TELL_DESCRIPTIONS = {
   emoji:
@@ -48,6 +49,8 @@ export const REGRESSION_TELL_DESCRIPTIONS = {
     'RETIRED TELL (owner-ruled 2026-10-05: okay to ask). Was: service-desk register ("what can I do for you?") where a host welcome belongs (v2.2.0 lesson). Kept so stored breaches from older runs still render',
   'two-questions':
     'question stacking - two SUBSTANTIVE questions in one bubble, or three-plus across the reply. A social check-in is not a substantive question (owner-ruled 2026-10-06 on "Alex, nice to meet you. how was this morning? what did you get?" - technically two, meaningfully one). Substantive-vs-phatic is a Jev judgment, not a pattern match: clause extraction stays deterministic, the classification is semantic (lib/eval/question-substance.ts). Rhetorical tags ("right?") are not questions, and one body question plus the own-bubble getting-to-know-you question is the decision-0007 shape and fine (owner-ruled 2026-10-05; v2.8.0 lesson)',
+  'off-channel-redirect':
+    'sent the guest to Instagram for something askable right here - the guest IS on Instagram (template v2.12.0). Deliberately narrow: only the preposition-led redirect forms ("through Instagram", "via Instagram", "DM us") and never the bare "on Instagram", which is how a legitimate announcement reads ("the date is posted on our Instagram"). An under-counting tell leaves a breach unseen; an over-counting one fails a correct reply, and the announcement form is the common case',
   'either-or':
     'hedged either/or question ("anything catch your eye, or want a nudge in a direction?") - an AI tell, a question asking permission for its own alternative. The normalizer strips the ", or ...?" tail at the generation seam, so a hit here means the strip missed (owner-ruled 2026-10-05)',
 } satisfies Record<RegressionTell, string>
@@ -215,6 +218,18 @@ export const BUILTIN_REGRESSION_SCENARIOS: RegressionScenario[] = [
     expectFirstName: null,
     noTurnOneNameAsk: true,
     expectReplyContains: 'SoFi',
+    forbidPolicyKeys: [],
+    enabled: true,
+  },
+  {
+    key: 'buyout-inquiry',
+    lesson:
+      'The guest is already on Instagram, so Instagram is never the answer to "where do I take this" (template v2.12.0). Caught live on Le Mil\'s: "best way to get the details sorted is through Instagram, @lemilscoffee", sent to a guest in the Instagram inbox. TWO causes, and the tell guards the one that outranks the other. The frame had carried SMS framing in three phrases since v2.0.0, so the model did not know where it was; that is fixed in copy. But the sentence itself came from a knowledge row - the ONLY buyout chunk retrieval returned for this exact script (rank 3 of 4, similarity 0.450, the others seating/laptops/landlord) - and knowledge renders in tier 1, after the frame, where it wins. That row was rewritten in place; its sibling saying "ask here" ranked below 30 on every buyout phrasing and could not have rescued it. The pricing bar is what keeps this from passing vacuously: a reply that never engages the buyout has not been tested, and "depends" is the fact all three surviving rows agree on.',
+    script: ['can i rent out your space'],
+    target: [],
+    expectFirstName: null,
+    noTurnOneNameAsk: true,
+    expectReplyContains: 'depends',
     forbidPolicyKeys: [],
     enabled: true,
   },

@@ -114,8 +114,20 @@ const BAR_MIN = 2
 // The service-desk pair (how-can-i-help, what-can-i-do) is RETIRED
 // (owner-ruled 2026-10-05: okay to ask) - the keys stay in RegressionTell
 // so stored breaches from older runs still render.
+// `off-channel-redirect` is deliberately narrow (template v2.12.0). v2 is
+// Instagram-only, so steering a guest to Instagram is steering them to where
+// they already are - but only the preposition-led and imperative forms are
+// redirects. Bare "on Instagram" is excluded: it is how the legitimate
+// announcement reads ("the date is posted on our Instagram"), and a tell that
+// fails a correct reply is worse here than one that misses a wrong one,
+// because every scenario's bubbles run through this list.
 const REGISTER_PATTERNS: Array<{ tell: RegressionTell; pattern: RegExp }> = [
   { tell: 'call-you', pattern: /what\s+(should|do|can)\s+i\s+call\s+you/i },
+  {
+    tell: 'off-channel-redirect',
+    pattern:
+      /\b(?:through|via|over)\s+(?:our\s+)?instagram\b|\bdm\s+(?:us|me)\b/i,
+  },
 ]
 // Spaced en dash only: "3–5pm" must survive (normalize-output.ts).
 const DASH_PATTERN = /—|\s–\s/

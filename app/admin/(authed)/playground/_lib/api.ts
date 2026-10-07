@@ -1,7 +1,12 @@
+import type { PlaygroundConversationTurn } from '@/lib/schemas/playground'
+import type { PlaygroundSession } from '@/lib/relationship/run-turn'
 import type {
   GuestListResponse,
   RunRequestBody,
   RunResponseBody,
+  SavedConversationDetail,
+  SavedConversationListResponse,
+  SavedConversationSummary,
   TimelineResponse,
 } from './types'
 
@@ -75,4 +80,68 @@ export function fetchTimeline(
   return getJson(
     `/admin/playground/api/venues/${venueId}/guests/${guestId}/timeline`,
   )
+}
+
+export function fetchSavedConversations(
+  venueId: string,
+): Promise<FetchResult<SavedConversationListResponse>> {
+  return getJson(`/admin/playground/api/venues/${venueId}/conversations`)
+}
+
+export function fetchSavedConversation(
+  venueId: string,
+  conversationId: string,
+): Promise<FetchResult<SavedConversationDetail>> {
+  return getJson(
+    `/admin/playground/api/venues/${venueId}/conversations/${conversationId}`,
+  )
+}
+
+export async function postSaveConversation(
+  venueId: string,
+  body: {
+    name: string
+    turns: PlaygroundConversationTurn[]
+    nextSession: PlaygroundSession | null
+  },
+): Promise<FetchResult<SavedConversationSummary>> {
+  try {
+    const response = await fetch(
+      `/admin/playground/api/venues/${venueId}/conversations`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      },
+    )
+    if (!response.ok) return { ok: false, error: await readError(response) }
+    return {
+      ok: true,
+      data: (await response.json()) as SavedConversationSummary,
+    }
+  } catch (e) {
+    return {
+      ok: false,
+      error: e instanceof Error ? e.message : 'network request failed',
+    }
+  }
+}
+
+export async function deleteSavedConversation(
+  venueId: string,
+  conversationId: string,
+): Promise<FetchResult<{ ok: true }>> {
+  try {
+    const response = await fetch(
+      `/admin/playground/api/venues/${venueId}/conversations/${conversationId}`,
+      { method: 'DELETE' },
+    )
+    if (!response.ok) return { ok: false, error: await readError(response) }
+    return { ok: true, data: { ok: true } }
+  } catch (e) {
+    return {
+      ok: false,
+      error: e instanceof Error ? e.message : 'network request failed',
+    }
+  }
 }

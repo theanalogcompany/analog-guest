@@ -9,10 +9,16 @@ import { PolicySetSchema, type PolicySet } from './schema'
 // encodes "prefer to queue when ambiguous" (a false positive costs one
 // operator glance; a false negative is unapproved money reaching a guest).
 //
-// The semantic rows all ask the DISCREPANCY question - "...not covered by
+// The LEAK rows all ask the DISCREPANCY question - "...not covered by
 // `declared_actions`" - never the open-ended one. A draft that declared its
 // comp as an action is already queued by the structural row; the Noul exists
 // to catch the leak, and a matching declared action is exonerating context.
+//
+// `complaint_resolution` is the one semantic row that is NOT a discrepancy
+// question, because it is not guarding a commitment - the leak rows already
+// do that, in every situation. It asks what the draft is DOING, so that the
+// opening of a complaint can go out at conversation speed while the reply
+// that decides something waits. Its header comment carries the reasoning.
 
 const DEFAULT_POLICIES_INPUT = {
   policies: [
@@ -48,13 +54,64 @@ const DEFAULT_POLICIES_INPUT = {
     // Situation-scoped: the v2 successor of v1's category_requires_approval.
     // Any draft written while the situation is active queues for the owner,
     // whatever the draft says. A venue tunes these rows per its own comfort.
+    //
+    // COMPLAINT IS THE ONE EXCEPTION, and it is split across the two rows
+    // below. The situation row holds nothing and only tells the owner; the
+    // resolution row is what queues.
+    //
+    // Why: "whatever the draft says" made the OPENING of a complaint wait on
+    // a human. "sorry to hear that. what happened?" is what the owner would
+    // have typed, and making a guest wait on an operator before you will even
+    // ask what went wrong is worse service than any draft this row protects
+    // against. v1 had reached the same conclusion from the other direction -
+    // canAutoSendComplaintTurn (lib/agent/complaint-routing.ts) exempted a
+    // genuine clarifying question from the category hold - and v2 dropped it.
+    // This is that carve-out restored in policy-row form, inverted because v2
+    // rows ask "must this queue?" rather than "may this send?".
+    //
+    // What still holds the money is unchanged and is NOT these rows: the four
+    // structural action rows above and comp_leak / promise_leak /
+    // cancellation_leak below all run unscoped by situation and all fail
+    // closed. The 2026-08-07 incident ("come by and I'll have another made
+    // for you") is caught by those whether or not a complaint was detected.
+    // What complaint_resolution adds on top is the non-commitment half: who
+    // gets to accept blame, deny it, or tell a guest the drink was meant to
+    // taste that way.
     {
-      key: 'complaint_requires_approval',
-      label: 'Reply to a complaint',
+      key: 'complaint_notifies_owner',
+      label: 'Complaint in progress',
       detection: { kind: 'always' },
       conditions: { situations: ['complaint'] },
-      then: 'queue',
+      then: 'notify',
       onCheckFailure: 'open',
+    },
+    // MEASURED by `npm run measure-complaint-split`, 9/9 as specified:
+    // the asking arm lands 0.020 - 0.100, the deciding arm 0.770 - 0.960.
+    // 0.3 sits in that gap with room on both sides, so it is a placeholder
+    // only in the sense that the gap, not the number, is the evidence - move
+    // it when a case lands between 0.1 and 0.77, and add that case first.
+    //
+    // The run also answers "does this row earn its place": the dismissal
+    // ("that's actually how the cortado is meant to taste") is caught by
+    // complaint_resolution ALONE - no structural row, no leak row, nothing
+    // else in the set. Every other deciding draft is double-covered.
+    {
+      key: 'complaint_resolution',
+      label: 'Answers a complaint rather than asking about it',
+      detection: {
+        kind: 'semantic',
+        instructions:
+          'Does `draft_messages` respond to the substance of the complaint, rather than only acknowledging it and asking what happened?',
+        criteria: {
+          true: 'The text decides something: it accepts or denies fault, explains why the problem happened, states what the venue will or will not do, or tells the guest the experience was intended. A reply that both asks and decides is true.',
+          false:
+            'The text only acknowledges the problem and asks what happened, what they ordered, or when they came in. Sympathy carrying no claim about the problem ("sorry to hear that") is false.',
+        },
+        threshold: 0.3,
+      },
+      conditions: { situations: ['complaint'] },
+      then: 'queue',
+      onCheckFailure: 'closed',
     },
     {
       key: 'mechanic_request_requires_approval',
