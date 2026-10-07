@@ -1959,6 +1959,62 @@ function formatHappySignOff(reviewAsk: { url: string }): string {
 }
 
 /**
+ * TAC-575: the sign-off for a guest whose earlier complaint has been followed
+ * up, on a visit where they have not said the order is good. (One who has gets
+ * formatHappySignOff: by then its premise is true of them.)
+ *
+ * THE SAME INVITATION AS THE HAPPY ONE, WITH A PREMISE THAT IS TRUE OF THIS
+ * GUEST. Ruled 2026-10-06: every guest who answers "how is it?" is eventually
+ * offered the link, "unhappy guests after the fix", with no happiness
+ * condition, because a link offered only to guests who say they are happy is
+ * review gating. So this block must not say they are enjoying anything.
+ *
+ * "DO NOT MENTION WHAT WENT WRONG": an invitation to review that names the
+ * complaint reads as asking them to review the complaint.
+ *
+ * The two-field split, the verbatim url and the rating sentence are
+ * formatHappySignOff's, for the reasons given there.
+ */
+function formatAfterComplaintSignOff(reviewAsk: { url: string }): string {
+  return [
+    '## Sign off',
+    '',
+    'The conversation has reached a natural pause. This guest had a visit',
+    'that went wrong and has come back. In `body`, write a short, warm',
+    'sign-off that thanks them for coming back. In `reviewAsk`, invite them,',
+    'with no pressure, to leave a review if they have a moment, and include',
+    'the link.',
+    '',
+    `The only link you may use, exactly as written: ${reviewAsk.url}`,
+    '',
+    'Never ask for a particular rating or number of stars. Do not offer',
+    'anything in return. Do not mention what went wrong. Ask nothing else.',
+  ].join('\n')
+}
+
+/**
+ * TAC-575: on the reply to a returning guest's own first message at the
+ * counter, when their last visit ended in a complaint. The scan greeting says
+ * the same thing through its category instruction
+ * (GUEST_ARRIVED_INSTRUCTIONS_AFTER_COMPLAINT); this is for the guest who wrote
+ * before the greeting went out, so there was no greeting to carry it.
+ *
+ * "ONCE, IN THIS REPLY": the block renders on one turn only (the follow-up is
+ * claimed as that reply goes out), and the word keeps the model from spreading
+ * it across bubbles. The three bars are the greeting's, for its reasons.
+ */
+function formatLastVisitWentWrong(): string {
+  return [
+    '## Their last visit',
+    '',
+    'The last time this guest was in, they told you something was wrong with',
+    'what they got. They are back today. Once, in this reply, say you are',
+    'glad they came back. Do not apologise again, do not repeat what went',
+    'wrong, and do not offer anything.',
+  ].join('\n')
+}
+
+/**
  * TAC-575: the warm close with no link, for every first conversation that ends
  * without a "good" check-in. Wording approved verbatim 2026-10-06; the
  * sentences about a visit were added the same day on a ruling (below).
@@ -2191,6 +2247,12 @@ export function runtimeToProse(
   if (runtime.scanArrival) {
     blocks.push(formatScanArrival(runtime.scanArrival))
   }
+  // TAC-575: in the same place, for the same reason: a fact about this moment.
+  // Never alongside `## Guest just arrived`, which is a greeting turn and
+  // carries the same fact through its category instruction.
+  if (runtime.lastVisitWentWrong) {
+    blocks.push(formatLastVisitWentWrong())
+  }
   // TAC-560 rendered a warm-close block in this slot, beside `## Guest just
   // arrived`, and TAC-568 removed it when the close became a fixed string.
   // TAC-575 generates the close again, but its blocks render further down, in
@@ -2348,6 +2410,8 @@ export function runtimeToProse(
   // something genuinely good"). `plain` is the close with no link.
   if (runtime.signOff === 'happy' && runtime.reviewAsk) {
     blocks.push(formatHappySignOff(runtime.reviewAsk))
+  } else if (runtime.signOff === 'after_complaint' && runtime.reviewAsk) {
+    blocks.push(formatAfterComplaintSignOff(runtime.reviewAsk))
   } else if (runtime.signOff === 'plain') {
     blocks.push(formatPlainClose(runtime.warmCloseGuidance ?? ''))
   } else if (runtime.reviewAsk) {

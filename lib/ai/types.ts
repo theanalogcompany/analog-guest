@@ -274,9 +274,23 @@ export type RuntimeContext = {
   scanArrival?: {
     /** Any message with this guest on OUR record, which is not "have they ever messaged". */
     hadPriorConversation: boolean
-    /** A transaction in the visit-history window, or a commitment marked arrived. */
+    /**
+     * A transaction in the visit-history window, a commitment marked arrived,
+     * or (TAC-575) a counter scan on an earlier day.
+     */
     hasRecordedVisit: boolean
+    /**
+     * TAC-575: this greeting follows up a complaint from an earlier visit.
+     * Picks the third greeting instruction (guest-arrived.ts).
+     */
+    afterComplaint?: boolean
   } | null
+  /**
+   * TAC-575: this reply is the first of a counter visit by a guest whose last
+   * visit ended in a complaint. Renders `## Their last visit`. Absent on every
+   * other turn; a scan greeting carries the same fact on `scanArrival`.
+   */
+  lastVisitWentWrong?: boolean
   today?: {
     isoDate: string
     dayOfWeek: string
@@ -324,13 +338,14 @@ export type RuntimeContext = {
    */
   visitCheckback?: boolean
   /**
-   * TAC-575: this turn is a sign-off, and which one. `happy` renders the
-   * `## Sign off` block in place of `## Ask for a review` (it needs
-   * `reviewAsk` set, which carries the link); `plain` renders
+   * TAC-575: this turn is a sign-off, and which one. `happy` and
+   * `after_complaint` each render a `## Sign off` block in place of
+   * `## Ask for a review` (both need `reviewAsk` set, which carries the
+   * link), with different premises; `plain` renders
    * `## Closing this conversation` with `warmCloseGuidance`. Absent on every
    * other turn.
    */
-  signOff?: 'happy' | 'plain'
+  signOff?: 'happy' | 'after_complaint' | 'plain'
   /**
    * TAC-575: the venue's own close text (`followup_rules.warm_close_text`),
    * handed to a `plain` sign-off as a guide to what the close covers. It used

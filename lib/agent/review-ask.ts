@@ -98,14 +98,17 @@ export function deriveReviewAsk(
  * guest who said their order is good is invited at the sign-off, whether they
  * said goodbye or simply went quiet.
  *
- * PURE, and it takes its three facts as arguments rather than a RuntimeContext,
- * because it has two callers that hold them differently: handleInbound on a
- * goodbye turn, and the pause timer, which has no context built yet when it
+ * PURE, and it takes its facts as arguments rather than a RuntimeContext,
+ * because its one caller, the pause timer, has no context built yet when it
  * decides which sign-off to send.
  *
- *   the check-in reads `good`   Nothing weaker. `not_yet` is a guest who never
- *                               said they liked it, and `bad` is the next
- *                               visit's follow-up.
+ *   the check-in reads `good`   Nothing weaker on its own. `not_yet` is a
+ *                               guest who never said they liked it, and `bad`
+ *                               is the next visit's follow-up.
+ *   OR a followed-up complaint  The other half of the ruling: "unhappy guests
+ *                               after the fix", with no happiness condition,
+ *                               so the link is never offered only to guests
+ *                               who say they are happy.
  *   never asked before          The once-ever marker, shared with the praise
  *                               ask: one invitation per guest, whichever path
  *                               gets there.
@@ -117,10 +120,16 @@ export function deriveReviewAsk(
  */
 export function deriveSignOffReviewAsk(input: {
   checkinAnswer: VisitCheckinAnswer | null
+  /**
+   * TAC-575 PR 5: this guest's earlier complaint has been followed up and they
+   * are on a visit now without complaining again
+   * (owesAfterComplaintReviewAsk, lib/agent/visit-checkin.ts).
+   */
+  afterComplaint: boolean
   reviewAskedAt: Date | null
   links: unknown
 }): { url: string; label: string } | null {
-  if (input.checkinAnswer !== 'good') return null
+  if (input.checkinAnswer !== 'good' && !input.afterComplaint) return null
   if (input.reviewAskedAt !== null) return null
   const link = findReviewLink(parseVenueLinks(input.links))
   if (link === null) return null

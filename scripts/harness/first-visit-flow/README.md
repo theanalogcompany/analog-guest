@@ -71,5 +71,15 @@ Each was mutated in the source, the harness run, and the source restored (2026-1
 | the once-ever marker in `deriveSignOffReviewAsk` | not happy: already asked once |
 | the window in `isCheckinFresh` (replaced with `return true`) | not the same visit: seven hours ago |
 | the happy branch in the serializer's sign-off slot | happy turn: the sign-off block; never a rating; not the praise block |
+| the earlier-day bound in `owedComplaintFollowup` | not owed: today's own complaint |
+| the claimed guard in `owedComplaintFollowup` | not owed: already followed up |
+| the thirty-day limit in `owedComplaintFollowup` (replaced with `true`) | owed but not mentioned: the complaint is 31 days old |
+| the complained-again stop in `owesAfterComplaintReviewAsk` | no link: they complained again today |
+| the followed-up condition in `owesAfterComplaintReviewAsk` | no link: the complaint was never followed up |
+| the visit window in `owesAfterComplaintReviewAsk` | no link: followed up three days ago, and this is a message from home |
+| the wrote-this-visit condition in `owesAfterComplaintReviewAsk` (replaced with `true`) | no link: greeted and never wrote; has never written at all |
+| the after-complaint half of `deriveSignOffReviewAsk` | after a complaint: the link, with no "good" on file |
+| the after-complaint branch in the serializer's sign-off slot (pointed at the happy block) | after-complaint sign-off: its own premise; never says they are enjoying it |
+| the after-complaint pick in `guestArrivedInstructionsFor` | greeting after a complaint: glad they came back, no second apology |
 
 A check not in that table has not been shown able to fail.

@@ -159,7 +159,10 @@ const CATEGORY_INSTRUCTIONS_BY_CHANNEL: Record<
 export function categoryInstructionsFor(
   category: MessageCategory,
   channel: MessageChannel | null,
-  scanArrival: { hadPriorConversation: boolean } | null = null,
+  scanArrival: {
+    hadPriorConversation: boolean
+    afterComplaint?: boolean
+  } | null = null,
   // TAC-386: a per-turn exception, on the same reasoning as the scan-arrival one
   // above. An inquiry follow-up stores `category: 'follow_up'`, but that
   // category's text is written for a message days after a VISIT and tells the

@@ -61,7 +61,7 @@ import {
 import { recordProactiveSend } from '@/lib/followups/inquiry-followup-store'
 import { isTooSoonAfterProactive } from '@/lib/followups/proactive-spacing'
 import { isQuietHour } from './followup-rules'
-import type { AgentResult } from './types'
+import type { AgentResult, SignOffKind } from './types'
 import {
   deriveSignOffReviewAsk,
   markReviewAsked,
@@ -72,11 +72,18 @@ import {
   COUNTER_ARRIVAL_WINDOW_MS,
   isCheckbackTooLate,
   isCheckinFresh,
+  lastComplaintFollowupAt,
   lastProactiveWasThisVisit,
+  owesAfterComplaintReviewAsk,
   owesCheckback,
+  visitStartFor,
   type VisitCheckin,
 } from './visit-checkin'
-import { loadLastInboundAt, loadVisitCheckin } from './visit-checkin-store'
+import {
+  loadComplaintCheckins,
+  loadLastInboundAt,
+  loadVisitCheckin,
+} from './visit-checkin-store'
 import { handleFollowup } from './handle-followup'
 import { loadPendingRowsBySlot } from './pending-slots'
 import {
@@ -396,12 +403,67 @@ async function considerCandidate(
   // Only a check-in from THIS visit counts (isCheckinFresh): the row is keyed
   // on the day, and a guest who said "so good" this morning and asked about
   // closing time this afternoon is not signing off the morning's drink.
+  //
+  // TAC-575 PR 5: AND A GUEST WHOSE COMPLAINT HAS BEEN FOLLOWED UP gets the
+  // invitation too, with no happiness condition (ruled 2026-10-06): they wrote
+  // at least once this visit and did not complain again
+  // (owesAfterComplaintReviewAsk). Read only while the once-ever marker is
+  // unspent, since nothing else here depends on it. An unreadable complaint
+  // history skips the tick rather than reading as "no complaint": the wrong
+  // guess sends this guest a plain close and they are never invited.
+  const freshAnswer =
+    checkin !== null && isCheckinFresh(checkin, now) ? checkin.answer : null
+  let followedUpAt: Date | null = null
+  let afterComplaint = false
+  if (facts.data.reviewAskedAt === null) {
+    const complaints = await loadComplaintCheckins(
+      supabase,
+      candidate.venueId,
+      candidate.guestId,
+    )
+    if (!complaints.ok) {
+      console.warn('[warm-close] complaint check-ins unreadable; skipping', {
+        guestId: candidate.guestId,
+        error: complaints.error,
+      })
+      return 'guest_unreadable'
+    }
+    followedUpAt = lastComplaintFollowupAt(complaints.data)
+    if (followedUpAt !== null) {
+      const lastInbound = await loadLastInboundAt(
+        supabase,
+        candidate.venueId,
+        candidate.guestId,
+      )
+      if (!lastInbound.ok) {
+        console.warn('[warm-close] last inbound unreadable; skipping', {
+          guestId: candidate.guestId,
+          error: lastInbound.error,
+        })
+        return 'guest_unreadable'
+      }
+      afterComplaint = owesAfterComplaintReviewAsk({
+        followedUpAt,
+        todaysCheckin: checkin,
+        lastInboundAt: lastInbound.data,
+        now,
+      })
+    }
+  }
   const reviewAsk = deriveSignOffReviewAsk({
-    checkinAnswer:
-      checkin !== null && isCheckinFresh(checkin, now) ? checkin.answer : null,
+    checkinAnswer: freshAnswer,
+    afterComplaint,
     reviewAskedAt: facts.data.reviewAskedAt,
     links: gate.venue.links,
   })
+  // `happy` wins when both hold: a followed-up guest who says today's order is
+  // good is, by then, exactly who the happy block describes.
+  const signOff: SignOffKind =
+    reviewAsk === null
+      ? 'plain'
+      : freshAnswer === 'good'
+        ? 'happy'
+        : 'after_complaint'
   const firstConversation =
     facts.data.firstContactedAt !== null &&
     isFirstConversation(
@@ -424,12 +486,24 @@ async function considerCandidate(
   // The stretch read is the conversation this close would end: all of a first
   // conversation, or, for a returning guest's happy sign-off, this visit, which
   // starts no earlier than the counter window before the order.
-  const blockerSince =
-    firstConversation && facts.data.firstContactedAt !== null
-      ? facts.data.firstContactedAt
-      : checkin !== null
-        ? new Date(checkin.orderedAt.getTime() - COUNTER_ARRIVAL_WINDOW_MS)
+  //
+  // A FOLLOWED-UP COMPLAINT IS NOT "A COMPLAINT IN THIS CONVERSATION". For a
+  // guest whose complaint has been followed up, the stretch is this visit even
+  // inside a first conversation: read from first contact it would find the
+  // very complaint the follow-up answered and refuse the invitation the ruling
+  // sends them. A NEW complaint this visit is still inside the stretch.
+  const visitStart =
+    checkin !== null
+      ? new Date(checkin.orderedAt.getTime() - COUNTER_ARRIVAL_WINDOW_MS)
+      : followedUpAt !== null
+        ? visitStartFor(followedUpAt)
         : new Date(now.getTime() - WARM_CLOSE_MAX_AGE_MS)
+  const blockerSince =
+    reviewAsk !== null && followedUpAt !== null
+      ? visitStart
+      : firstConversation && facts.data.firstContactedAt !== null
+        ? facts.data.firstContactedAt
+        : visitStart
   const blocker = await loadWarmCloseBlocker(
     supabase,
     candidate.venueId,
@@ -575,7 +649,7 @@ async function considerCandidate(
         reviewAsk !== null && reviewClaimedAt !== null
           ? {
               answersMessageId: candidate.messageId,
-              signOff: 'happy',
+              signOff,
               reviewAsk,
               reviewClaimedAt,
             }
@@ -608,7 +682,7 @@ async function considerCandidate(
     console.warn('[warm-close] sign-off did not send; claim released', {
       agentRunId,
       guestId: candidate.guestId,
-      signOff: reviewAsk !== null ? 'happy' : 'plain',
+      signOff,
       status: result.status,
     })
     await captureWarmCloseSkipped({

@@ -53,6 +53,14 @@ import { captureInstagramScanGreeting } from '@/lib/analytics/posthog'
 import { recordProactiveSend } from '@/lib/followups/inquiry-followup-store'
 import { isTooSoonAfterProactive } from '@/lib/followups/proactive-spacing'
 import { handleFollowup } from './handle-followup'
+import { loadPendingRowsBySlot } from './pending-slots'
+import { owedComplaintFollowup } from './visit-checkin'
+import {
+  claimComplaintFollowup,
+  loadComplaintCheckins,
+  releaseComplaintFollowupClaim,
+} from './visit-checkin-store'
+import { RELEASES_CLAIM } from './warm-close-timeout'
 import {
   insertInboundTurnOutcome,
   ledgerEntryFor,
@@ -327,6 +335,76 @@ async function suppress(
 }
 
 /** What became of one row on one visit by one runner. */
+/**
+ * TAC-575: if this guest is owed a follow-up on an earlier complaint, take it
+ * for this greeting. Null when nothing is owed, when it must wait, or when it
+ * could not be decided; the greeting then goes out in its ordinary wording.
+ *
+ * Called AFTER the scan row's own claim, so only the tick that owns the
+ * greeting can take the follow-up, and BEFORE generation, the claim-before-send
+ * rule every unprompted message here follows. The caller gives the claim back
+ * if the greeting does not reach the guest.
+ *
+ * IT WAITS WHEN A CARD IS PENDING for this guest. The apology for the earlier
+ * complaint is held for an operator, and may be that card: a follow-up to an
+ * apology that has not gone out reads as if it had. An unreadable queue waits
+ * too. The follow-up stays owed, and the guest's own next message at the
+ * counter, or their next visit, picks it up.
+ *
+ * `mention` is false for a complaint too old to bring up (thirty days, ruled
+ * 2026-10-06). It is still claimed: the claim is what makes the review link
+ * owed at this visit's sign-off.
+ */
+async function claimFollowupForGreeting(
+  supabase: AdminSupabaseClient,
+  row: PendingScanArrival,
+  todayLocalDate: string,
+  now: Date,
+): Promise<{ mention: boolean; claimedAt: Date } | null> {
+  const complaints = await loadComplaintCheckins(
+    supabase,
+    row.venueId,
+    row.guestId,
+  )
+  if (!complaints.ok) {
+    logger.warn(
+      '[scan-greeting] complaint check-ins unreadable; no follow-up',
+      {
+        scanArrivalId: row.id,
+        error: complaints.error,
+      },
+    )
+    return null
+  }
+  const owed = owedComplaintFollowup(complaints.data, todayLocalDate, now)
+  if (owed === null) return null
+
+  const pending = await loadPendingRowsBySlot(row.venueId, row.guestId)
+  if (
+    pending === null ||
+    pending.obligation !== null ||
+    pending.conversation.length > 0
+  ) {
+    return null
+  }
+
+  const claim = await claimComplaintFollowup(supabase, {
+    venueId: row.venueId,
+    guestId: row.guestId,
+    todayLocalDate,
+    now,
+  })
+  if (claim.status === 'failed') {
+    logger.error('[scan-greeting] complaint follow-up claim failed', {
+      scanArrivalId: row.id,
+      error: claim.error,
+    })
+    return null
+  }
+  if (claim.status === 'lost') return null
+  return { mention: owed.mention, claimedAt: now }
+}
+
 export type ScanArrivalRowResult =
   /** The greeting delay has not elapsed. Nothing written. */
   | { kind: 'not_yet' }
@@ -367,6 +445,7 @@ export async function processScanArrival(
   // before the claim and a throw after it are not the same event.
   let claimed = false
   let recordedGreeting = false
+  let followup: { mention: boolean; claimedAt: Date } | null = null
   try {
     if (!isScanGreetingDue(row.scannedAt, now)) {
       return { kind: 'not_yet' }
@@ -442,6 +521,8 @@ export async function processScanArrival(
 
     claimed = true
 
+    followup = await claimFollowupForGreeting(supabase, row, localDate, now)
+
     const agentRunId = randomUUID()
     const outcome = await handleFollowup({
       venueId: row.venueId,
@@ -453,9 +534,22 @@ export async function processScanArrival(
         instagramScanArrival: {
           scanMessageId: row.scanMessageId,
           hadPriorConversation: row.hadPriorConversation,
+          afterComplaint: followup?.mention === true,
         },
       },
     })
+
+    // TAC-575: the follow-up rode this greeting, so it is spent only if the
+    // greeting reached the guest or is held for an operator. Anything else
+    // gives it back, by the same total map the close and the check-back use.
+    if (followup !== null && RELEASES_CLAIM[outcome.status]) {
+      await releaseComplaintFollowupClaim(supabase, {
+        venueId: row.venueId,
+        guestId: row.guestId,
+        claimedAt: followup.claimedAt,
+      })
+      followup = null
+    }
 
     await resolveScanArrival(
       supabase,
@@ -480,6 +574,8 @@ export async function processScanArrival(
       outcome: 'greeted',
       hadPriorConversation: row.hadPriorConversation,
       agentStatus: outcome.status,
+      followedUpComplaint: followup !== null,
+      mentionedComplaint: followup?.mention === true,
     })
     return { kind: 'greeted' }
   } catch (e) {
@@ -491,6 +587,16 @@ export async function processScanArrival(
     // bookkeeping throw does not change that. Otherwise `errored` is written
     // as whoever this call is. Unclaimed, it can lose to the other runner,
     // and then the row and its ledger entry are that runner's.
+    // TAC-575: a throw before the greeting was recorded means the follow-up
+    // it carried did not go out either. After that point the greeting is on
+    // its way and the claim stands.
+    if (followup !== null && !recordedGreeting) {
+      await releaseComplaintFollowupClaim(supabase, {
+        venueId: row.venueId,
+        guestId: row.guestId,
+        claimedAt: followup.claimedAt,
+      }).catch(() => undefined)
+    }
     if (!recordedGreeting) {
       const resolved = await resolveScanArrival(
         supabase,
