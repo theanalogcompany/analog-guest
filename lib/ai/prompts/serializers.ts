@@ -1798,6 +1798,10 @@ const FIRST_CONVERSATION_RESTRAINT = [
   'them nothing: no question of your own, however natural one would be',
   'here. The only question this turn is the one listed above, and only if a',
   'line above fits.',
+  // v1.95.0: the same exception NO_QUESTION_RESTRAINT carries, for the same
+  // reason. Not measured on this path, which needs an open intention.
+  'Inviting a guest who has only said hello to say what they need is not a',
+  'question of your own, and is welcome.',
 ] as const
 
 /**

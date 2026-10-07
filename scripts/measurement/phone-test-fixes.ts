@@ -163,7 +163,7 @@ const RULE_APOLOGY =
   '- Apologise for a thing once. If your last reply to this guest already opened with an apology, do not open this one with another, in the same words or in different ones. The apology has been made. Start with what is new instead: the answer, the next step, or what you are doing about it. A new problem the guest raises is a new thing and gets its own apology, once. This is separate from the rule above on repeating a line, which is about wording; this one is about not apologising again at all.'
 
 const RULE_SELF_CORRECTION =
-  "- When a guest corrects something they themselves told you, like saying it was a different place or that they mixed something up, the slip is theirs and it is a small one. Take the correction lightly and move on in one short line. Do not apologise, do not call it your mistake or the venue's, and do not make anything of it. This is separate from the rule above on a guest questioning something you said: that one is about your own earlier message, and there you do own an error. Here nothing you said was wrong."
+  "- When a guest corrects something they themselves told you, like saying it was a different place or that they mixed something up, the slip is theirs and it is a small one. Take the correction lightly and move on in one short line. Do not apologise, do not call it your mistake or the venue's, and do not make anything of it. This is separate from the rule above on a guest questioning something you said: that one is about your own earlier message, and there you do own an error. Here nothing you said was wrong. A guest who only says they have never been here, without saying they got something wrong, has not corrected themselves yet: # A visit the guest takes back covers that turn, and its one gentle check comes first."
 
 interface WordingEdit {
   label: string
@@ -207,7 +207,7 @@ const EDITS = {
       target: 'system',
       before: ' Reply in kind and stop.',
       after:
-        ' When that message is a greeting, greet them back warmly and invite them to say what they need, in one short line, and stop there. When it is anything else with no content of its own, reply in kind and stop.',
+        ' When that message is a greeting, greet them back warmly and invite them to say how you can help or what they are after, in one short line, and stop there. Say it your own way rather than reaching for a stock phrase, and never as taking an order: someone messaging you may be nowhere near the counter. When it is anything else with no content of its own, reply in kind and stop.',
     },
     // The half the ablation found: the first-conversation block outranks the
     // rule above, so the rule alone moved 4 of 10 and this took it to 10.
@@ -218,6 +218,14 @@ const EDITS = {
         'exception is a question another block in this prompt tells you to ask.',
       after:
         'exception is a question another block in this prompt tells you to ask.\nInviting a guest who has only said hello to say what they need is not a\nquestion of your own, and is welcome.',
+      optional: true,
+    },
+    {
+      label: 'first-conversation exception',
+      target: 'user',
+      before: 'line above fits.',
+      after:
+        'line above fits.\nInviting a guest who has only said hello to say what they need is not a\nquestion of your own, and is welcome.',
       optional: true,
     },
   ],
@@ -235,11 +243,12 @@ const EDITS = {
   '4': [
     appendRule('self-correction rule', RULE_SELF_CORRECTION),
     {
-      label: 'retraction: no apology',
+      label: 'take-back section',
       target: 'system',
-      before: 'Believe them plainly and move on in one short line.',
+      before:
+        'The first time this happens, set it to "checking" and make the reply one gentle check in the guest\'s own words, the way a friend who half remembers would: "oh wait, didn\'t you mention a cold latte earlier? or was that somewhere else?" is the shape. Ask it once and ask nothing else.\nIf you already asked that and the guest confirms they have not been here, set it to "retracted". Believe them plainly and move on in one short line. Do not explain, and do not ask them anything. Anything the venue already offered them still stands: do not take it back, and leave cancelsCommitmentId empty.',
       after:
-        'Believe them plainly and move on in one short line, with no apology: nothing you said was wrong.',
+        'If the guest says outright that they got it wrong, like that it was a different place or the wrong cafe, there is nothing to check: set it to "retracted" straight away.\nIf they only say something that does not fit, like that they have never been here, without saying they got anything wrong, then the first time this happens set it to "checking" and make the reply one gentle check in the guest\'s own words, the way a friend who half remembers would: "oh wait, didn\'t you mention a cold latte earlier? or was that somewhere else?" is the shape. Ask it once and ask nothing else.\nIf you already asked that and the guest confirms they have not been here, set it to "retracted".\nWhenever you set "retracted", believe them plainly and move on in one short line, with no apology: nothing you said was wrong. Do not explain, and do not ask them anything. Anything the venue already offered them still stands: do not take it back, and leave cancelsCommitmentId empty.',
     },
   ],
   '5': [
@@ -302,8 +311,27 @@ const DROP_LENGTH_RULE = dropLine(
 /** What v1.95.0 ships. Items 1a and 3 are not in it. */
 const SHIPPED = [...EDITS['1b'], ...EDITS['4'], ...EDITS['5']]
 
+const GREETING_SHIPPED =
+  ' When that message is a greeting, greet them back warmly and invite them to say how you can help or what they are after, in one short line, and stop there. Say it your own way rather than reaching for a stock phrase, and never as taking an order: someone messaging you may be nowhere near the counter. When it is anything else with no content of its own, reply in kind and stop.'
+
 const ARMS: Record<string, readonly Transform[]> = {
   shipped: [],
+  'try-greeting-a': [
+    swap(
+      'system',
+      'greeting a',
+      GREETING_SHIPPED,
+      ' When that message is a greeting, greet them back warmly and ask how you can help or what they are looking for, in one short line, and stop there. They are messaging you, not standing at the counter, so do not ask what you can get them or what they would like: that is taking an order. Say it your own way rather than reaching for a stock phrase. When it is anything else with no content of its own, reply in kind and stop.',
+    ),
+  ],
+  'try-greeting-b': [
+    swap(
+      'system',
+      'greeting b',
+      GREETING_SHIPPED,
+      ' When that message is a greeting, greet them back and ask how you can help or what they are looking for, in one short line, and stop there. They are messaging you, not standing at the counter, so do not ask what you can get them or what they would like: that is taking an order. There is no set greeting and no set way to ask: write both halves fresh, the way a person does who is not reading from a card, and do not start with the first greeting that comes to mind. When it is anything else with no content of its own, reply in kind and stop.',
+    ),
+  ],
   control: reverse(SHIPPED),
   // Candidate wording applied to a prompt that does not ship it yet.
   'cand-1a': forward(EDITS['1a']),
@@ -578,6 +606,24 @@ const CELLS: readonly Cell[] = [
     ].map((x, i) => ({
       id: `takeback-${i + 1}`,
       ...x,
+      reportedItems: ['cold brew'],
+    })),
+  },
+  {
+    id: '4-vague',
+    what: 'the guest only says they have never been in, no check asked yet (constructed)',
+    kind: 'inbound',
+    established: true,
+    units: [
+      "wait, i've never actually been to yours",
+      "i haven't been in before though",
+      'never been there tbh',
+      "hm i don't think i've ever come in",
+      "i've never been to le mil's",
+    ].map((inbound, i) => ({
+      id: `never-${i + 1}`,
+      inbound,
+      history: RETRACTION_UNPROMPTED,
       reportedItems: ['cold brew'],
     })),
   },
