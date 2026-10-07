@@ -14,16 +14,16 @@
 // leave a Jev run reading as a production measurement.
 //
 // WHAT MAKES THIS EVIDENCE rather than a demonstration: every case carries a
-// hand-assigned `expected` written BEFORE the run, and the five false-positive
+// hand-assigned `expected` written BEFORE the run, and the six false-positive
 // arms below are hand-chosen from the rulings' own exclusions. Labelling after
 // the fact, or deriving labels from the classifier's output, measures nothing —
 // the bar was posted on TAC-386 before any of this generated.
 //
-// THE FIVE NAMED ARMS EACH HAVE A BAR OF ZERO. They are separate rather than
+// THE SIX NAMED ARMS EACH HAVE A BAR OF ZERO. They are separate rather than
 // pooled so a failure says WHICH line moved. Complaints have a structural belt
 // behind them in lib/agent/schedule-inquiry-followup.ts, and so do the
 // operator-arranged messages that classify as `manual`, so a hit there is a
-// prompt failure with a working backstop. Pure facts, small talk, arrivals and
+// prompt failure with a working backstop. Pure facts, small talk, arrivals, off-topic and
 // the operator-arranged messages that classify as anything else have no belt,
 // which is why they carry the same bar.
 //
@@ -73,6 +73,21 @@ const A1_PURE_FACTS: LabelledFixture[] = [
   { id: 'a1-open-early', body: 'do you open early in the summer?' },
   { id: 'a1-wifi', body: 'do you have wifi' },
   { id: 'a1-open-now', body: 'are you open right now?' },
+  // Added 2026-10-06 after the 30-day replay: the first Jev wording fired on
+  // these three shapes in real traffic. Written here as analogues, not as the
+  // guests' own messages.
+  { id: 'a1-menu', body: 'show me the menu' },
+  { id: 'a1-what-is', body: 'whats the pink panther' },
+  { id: 'a1-beans-used', body: 'what beans do you use for the cold brew?' },
+]
+
+/**
+ * ARM A6 — nothing to do with the venue. Same replay, same reason: an
+ * off-topic shopping question scored 0.76. No belt behind this one.
+ */
+const A6_OFF_TOPIC: LabelledFixture[] = [
+  { id: 'a6-cards', body: 'where can I get trading cards around here?' },
+  { id: 'a6-phone', body: 'do you know where I can get my phone fixed' },
 ]
 
 /** ARM A2 — small talk. No belt behind this one either. */
@@ -394,7 +409,7 @@ async function main(): Promise<void> {
       outputTokenCap: OUTPUT_TOKEN_CAP,
       classifierInputCap: MAX_CLASSIFIER_INPUT_CHARS,
       bars: {
-        falsePositiveArms: 'zero true in each of A1..A5',
+        falsePositiveArms: 'zero true in each of A1..A6',
         positiveControl: 'every case fires',
         acceptance: 'every phrase gets the verdict the ticket names',
       },
@@ -407,7 +422,7 @@ async function main(): Promise<void> {
 
   const tokens: number[] = []
 
-  // The five named arms, each bar zero.
+  // The six named arms, each bar zero.
   const arms: FalsePositiveArm[] = []
   for (const [name, fixtures] of [
     ['A1 pure facts', A1_PURE_FACTS],
@@ -415,6 +430,7 @@ async function main(): Promise<void> {
     ['A3 complaints', A3_COMPLAINTS],
     ['A4 operator-arranged', A4_OPERATOR_ARRANGED],
     ['A5 explicit arrivals', A5_ARRIVALS],
+    ['A6 off-topic', A6_OFF_TOPIC],
   ] as const) {
     arms.push(await runFalsePositiveArm(arm, name, fixtures, log, tokens))
   }

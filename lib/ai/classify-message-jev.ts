@@ -59,7 +59,17 @@ export const JEV_CLASSIFICATION_ENABLED = true
 //
 // Adding a question must not move the other four answers. Check that on the
 // replay (jev-classify-eval.ts) by comparing category per message id against a
-// run on the previous wording, not by reading the agreement rate.
+// run on the previous wording, not by reading the agreement rate. The bar
+// (ruled 2026-10-06) is NO MORE FLIPS THAN A REPEAT RUN OF THE SAME WORDING
+// SHOWS, not zero: Jev is not deterministic, and two runs on identical wording
+// moved 10 low-confidence categories of 297.
+//
+// The first draft of the criteria missed every real public-events question
+// (0.58 to 0.72 against 0.75) and fired on six pure facts ("show me the menu",
+// "what is <item>", which beans a drink uses, an off-topic shopping question).
+// Hence the events sentence in TRUE and the menu, what-is and unrelated
+// clauses in FALSE. The threshold was ruled to stay; no threshold separates
+// the events questions from "what's the wifi password" on the first draft.
 // jev-v1.3.0 (TAC-574): `mechanic_request` says ordering from the menu is NOT
 // one, and `new_question` says ordering and availability questions belong to
 // it. "can i get a flat white" and "can i order ahead" had both been classed
@@ -243,9 +253,9 @@ const FOLLOW_UP_WORTHY_INSTRUCTIONS =
  * `scripts/measurement/follow-up-worthy.ts` are what holds them at zero.
  */
 const FOLLOW_UP_WORTHY_CRITERIA = {
-  true: 'The answer is something the guest then goes and does: where to park or how to find the place; which beans or bag to buy; how to brew something at home; whether they can bring a dog; what to order or try; whether there are public events coming up. A question can be factual and still qualify when the guest acts on the answer: asking how to get there qualifies, asking when you close does not.',
+  true: 'The answer is something the guest then goes and does: where to park or how to find the place; which beans or bag to buy; how to brew something at home; whether they can bring a dog; what to order or try. Asking whether the venue has public events coming up, or what is on, also qualifies, because the guest may then go to one ("do you have any events coming up", "anything happening in November"). A question can be factual and still qualify when the guest acts on the answer: asking how to get there qualifies, asking when you close does not.',
   false:
-    'There is nothing to have worked out: a pure fact with no action behind it ("what time do you close", "are you open Monday", "do you have wifi"); small talk, thanks or a passing comment; a complaint or a report that something was wrong; anything involving someone\'s safety or an emergency; anything an operator arranges rather than the venue simply answering (catering, a private event or renting the space, taking a booking or reservation, wholesale, press, hiring or partnership enquiries); a guest saying they are arriving or on their way ("omw", "walking over", "heading in now", "can you get my order ready"); and any genuinely unclear case. A wrongly-false answer costs one missed check-in; a wrongly-true one sends a guest a message they did not need.',
+    'There is nothing to have worked out: a pure fact with no action behind it ("what time do you close", "are you open Monday", "do you have wifi"), which includes asking to see the menu or prices, asking what an item is or what is in it, and asking which beans or ingredients the venue uses; a question about something unrelated to the venue, such as where to buy a thing the venue does not sell; small talk, thanks or a passing comment; a complaint or a report that something was wrong; anything involving someone\'s safety or an emergency; anything an operator arranges rather than the venue simply answering (catering, a PRIVATE event or renting the space, taking a booking or reservation, wholesale, press, hiring or partnership enquiries), which is different from asking about public events; a guest saying they are arriving or on their way ("omw", "walking over", "heading in now", "can you get my order ready"); and any genuinely unclear case. A wrongly-false answer costs one missed check-in; a wrongly-true one sends a guest a message they did not need.',
 } as const
 
 const CORRECTS_PENDING_INSTRUCTIONS =
