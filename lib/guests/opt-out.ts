@@ -22,6 +22,10 @@
 //   - One exception to that silence: the retry of an `opt_out` turn that
 //     failed after recording. The guest is opted out by then and did not say
 //     START, but the confirmation is still owed.
+//   - TAC-574, NOT in decideOptOutTurn: a message with media and no text is
+//     never classified and NEVER opts anyone back in, on either channel. SMS:
+//     silence. Instagram: an operator card, opt-out left set
+//     (persistMediaOnlyCard in lib/agent/handle-inbound.ts).
 //
 // START ONLY, NOT UNSTOP. Sendblue suppresses its own outbound to a number
 // that replied STOP and resumes only on START (its support docs), so clearing

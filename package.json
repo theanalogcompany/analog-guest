@@ -26,6 +26,7 @@
     "prepare": "husky",
     "measure-instagram-copy": "tsx --env-file=.env.local scripts/measurement/instagram-channel-copy.ts",
     "measure-jev-classify": "tsx --env-file=.env.local scripts/measurement/jev-classify-eval.ts",
+    "measure-classifier-mechanic": "tsx --env-file=.env.local scripts/measurement/classifier-mechanic.ts",
     "measure-first-contact-replay": "tsx --env-file=.env.local scripts/measurement/first-contact-replay.ts",
     "measure-judge-variance": "tsx --env-file=.env.local scripts/measurement/judge-variance.ts",
     "measure-turn-one-move": "tsx --env-file=.env.local scripts/measurement/turn-one-move.ts",

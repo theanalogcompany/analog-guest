@@ -2164,7 +2164,25 @@ import {
 //      on the turn that opts a guest back in (serializers.ts RE_OPT_IN_LINES),
 //      telling the model not to welcome them back or mention the opt-out.
 //
-export const PROMPT_VERSION = 'v1.84.0'
+// v1.85.0 (TAC-574): NO change to any rule, block or wording in this file.
+//   The bump is here for the v1.62.0 reason: the CLASSIFIER stamps this
+//   version on its output, and its prompt changed. `mechanic_request` now
+//   says ordering from the menu is NOT one, and `new_question` says ordering
+//   and availability questions belong to it, after "can i get a flat white"
+//   and "can i order ahead" were both held for approval as mechanic requests
+//   (ruled 2026-10-06). The Jev arm carries the same wording under its own
+//   CLASSIFY_JEV_PROMPT_VERSION (jev-v1.3.0), and classify-message-jev.ts
+//   records why the wording is this narrow.
+//
+//   Same ticket, in serializers.ts: one new user-prompt line under "The guest
+//   just sent", rendered only when the guest's text arrived with a photo, GIF
+//   or other attachment (`[guest also sent a photo] You cannot see it. ...`).
+//   Absent on every other turn. lib/agent/inbound-media.ts decides when.
+//
+//   BASELINE RESET for routing grades: a scenario whose inbound is an
+//   ordering question can move from queued to sent across this bump.
+//
+export const PROMPT_VERSION = 'v1.85.0'
 
 export const SYSTEM_TEMPLATE = `You work at a hospitality venue (cafe, bakery, restaurant). You communicate with its guests via iMessage, in whatever voice the venue has configured below — its own collective voice, its owner's, or a named staff member's.
 

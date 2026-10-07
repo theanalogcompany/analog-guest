@@ -83,9 +83,9 @@ Model-written text (a commitment description) reaching a card is stripped of em 
 dashes and capped at a word boundary first. Checking the **static** map
 cannot see a dash arriving that way.
 
-`messages.review_reason` holds three values outside `APPROVAL_TRIGGERS` -
-`operator_decline_initiated`, `crisis_safety_reply`, `generation_failed` - stamped by the
-path that owns them. `ExtraReviewReason` exists so the label map stays exhaustive at compile
+`messages.review_reason` holds values outside `APPROVAL_TRIGGERS` -
+`operator_decline_initiated`, `crisis_safety_reply`, `generation_failed`,
+`instagram_send_failed`, `media_only_inbound` - stamped by the path that owns them. `ExtraReviewReason` exists so the label map stays exhaustive at compile
 time.
 
 ## Dispatch
