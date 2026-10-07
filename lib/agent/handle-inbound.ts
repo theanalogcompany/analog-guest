@@ -1539,6 +1539,8 @@ async function runInboundTurn(
         output: {
           category: ctx.classification.category,
           classifierConfidence: ctx.classification.classifierConfidence,
+          // Present only when an open complaint thread replaced the pick.
+          classifierCategory: ctx.classification.classifierCategory ?? null,
         },
         content: { reasoning: ctx.classification.reasoning },
         model: ctx.classification.modelId,
@@ -1548,6 +1550,7 @@ async function runInboundTurn(
         agentRunId,
         category: ctx.classification.category,
         classifierConfidence: ctx.classification.classifierConfidence,
+        classifierCategory: ctx.classification.classifierCategory ?? null,
       })
     } catch (e) {
       const errMsg = e instanceof Error ? e.message : String(e)

@@ -353,6 +353,10 @@ export interface Classification {
   // here. THE-228: previously a hand-maintained union that lagged the AI
   // module by 4 categories.
   category: MessageCategory
+  // The classifier's own pick, present ONLY on a turn where an open complaint
+  // thread replaced it with comp_complaint (complaint-thread.ts). Kept so the
+  // override stays countable; nothing routes on it.
+  classifierCategory?: MessageCategory
   classifierConfidence: number
   reasoning: string
   // TAC-348: independent of category — see lib/ai/types.ts's
@@ -432,6 +436,14 @@ export interface RuntimeContext {
    * so the two cannot drift into two definitions of the same thing.
    */
   conversationWindowMs: number
+  /**
+   * Is the newest outbound in this thread a complaint's clarifying question
+   * that auto-sent? Then this turn is a complaint turn whatever the classifier
+   * makes of the message, and classifyStage carries the category. Resolved
+   * once in build-runtime-context; rule and reasons in complaint-thread.ts.
+   * Always false off the inbound path.
+   */
+  openComplaintClarification: boolean
   /**
    * TAC-567: is the guest still inside their FIRST conversation with the venue?
    *

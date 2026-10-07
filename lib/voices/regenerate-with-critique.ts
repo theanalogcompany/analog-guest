@@ -44,6 +44,7 @@ import {
   type VoiceCorpusChunk as AiVoiceCorpusChunk,
 } from '@/lib/ai'
 import { buildRuntimeContext } from '@/lib/agent/build-runtime-context'
+import { resolveComplaintThreadCategory } from '@/lib/agent/complaint-thread'
 import {
   buildAiRuntime,
   retrieveKnowledgeWithContextStage,
@@ -334,6 +335,21 @@ export async function regenerateWithCritique(
     }
   }
 
+  // The answer to a complaint's clarifying question runs as comp_complaint on
+  // the live path (complaint-thread.ts), so its regen picks the category the
+  // same way: the pure half of classifyStage's carry, without the stage's
+  // event. This is a RE-DERIVATION from pinned history, not a read of what the
+  // live turn stored, so the two can differ: history here stops at the
+  // inbound, which hides a question whose row was written after it, and shows
+  // none of what arrived between the inbound and the live context build. And
+  // it carries the category only: this path never sets ctx.classification, so
+  // willBeReviewed stays false on every complaint regen, carried or not.
+  const { category } = resolveComplaintThreadCategory({
+    classifierCategory: classification.data.category,
+    crisisSafety: classification.data.crisisSafety,
+    openComplaintClarification: ctx.openComplaintClarification,
+  })
+
   // 4. Load the static voice pack (decision 0008) — the same pack the live
   // turn used, because it is the same pack every turn uses. Mirrors
   // retrieveCorpusStage's inbound direction: fail closed on a DB error or an
@@ -371,7 +387,7 @@ export async function regenerateWithCritique(
   // emits no PostHog or Langfuse event, only a console.warn on degrade.
   const knowledgeRows = await retrieveKnowledgeWithContextStage(
     ctx,
-    classification.data.category,
+    category,
     load.data.inbound.body,
   )
   const knowledgeChunks: AiKnowledgeCorpusChunk[] = knowledgeRows.map((c) => ({
@@ -402,7 +418,7 @@ export async function regenerateWithCritique(
   // and returns the best attempt. No SEND_FIDELITY_FLOOR check — operator
   // decides what's good enough by reading the result.
   const gen = await generateMessage({
-    category: classification.data.category,
+    category,
     persona: ctx.venue.brandPersona,
     venueInfo: ctx.venue.venueInfo,
     ragChunks,
