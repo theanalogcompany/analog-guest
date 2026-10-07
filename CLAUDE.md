@@ -286,7 +286,7 @@ The live floors, all in `lib/agent/stages.ts`. A number quoted anywhere else may
 | --- | --- |
 | voice pack (`lib/rag/voice-pack.ts`) | static per venue, no similarity; empty pack fails **closed** on inbound (decision 0008) |
 | `KNOWLEDGE_RELEVANCE_FLOOR` 0.3 | knowledge retrieval, degrades **gracefully** |
-| `PROMPT_VERSION` v1.85.0 | bumping it is a repo-wide sweep - `.claude/rules/prompt-versioning.md` |
+| `PROMPT_VERSION` v1.86.0 | bumping it is a repo-wide sweep - `.claude/rules/prompt-versioning.md` |
 
 **20 approval triggers compose; any one queues the draft.** The four post-generation LLM
 checks run **post-send** on inbound (Slack forward on a finding, never a hold) and keep the

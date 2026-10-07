@@ -57,6 +57,14 @@ import {
 import { extractReportedOrder } from './extract-reported-order'
 import { retractReportedVisits } from './retract-reported-visit'
 import {
+  MEDIA_ONLY_SETTLE_MS,
+  MEDIA_ONLY_SETTLE_POLL_MS,
+  isMediaOnly,
+  loadTurnMediaRows,
+  mediaAlongsideText,
+  resolveMediaOnlyTurn,
+} from './inbound-media'
+import {
   bodyContainsReviewLink,
   deriveReviewAsk,
   markReviewAsked,
@@ -85,6 +93,7 @@ import {
   classifyStage,
   generateStage,
   GENERATION_FAILED_REVIEW_REASON,
+  MEDIA_ONLY_REVIEW_REASON,
   KNOWLEDGE_GAP_WINDOW_MS,
   mayAutoSendAfterClassification,
   retrieveCorpusStage,
@@ -156,6 +165,10 @@ async function loadVenueStatus(venueId: string): Promise<string | null> {
 
 async function loadInbound(messageId: string): Promise<{
   message: InboundMessage
+  // TAC-574: beside the message rather than on InboundMessage, because only
+  // this file reads it (lib/agent/inbound-media.ts decides what it means) and
+  // InboundMessage is constructed at thirty sites that have no media.
+  mediaUrls: string[]
   guestId: string
   venueId: string
 }> {
@@ -163,7 +176,7 @@ async function loadInbound(messageId: string): Promise<{
   const { data, error } = await supabase
     .from('messages')
     .select(
-      'id, body, provider_message_id, created_at, venue_id, guest_id, direction, channel, referral_source',
+      'id, body, media_urls, provider_message_id, created_at, venue_id, guest_id, direction, channel, referral_source',
     )
     .eq('id', messageId)
     .single()
@@ -194,6 +207,7 @@ async function loadInbound(messageId: string): Promise<{
       // isScanReferral stays the single place that decides what counts.
       referralSource: data.referral_source,
     },
+    mediaUrls: data.media_urls ?? [],
     guestId: data.guest_id,
     venueId: data.venue_id,
   }
@@ -438,6 +452,98 @@ async function persistGenerationFailureCard(
 }
 
 /**
+ * TAC-574: a turn with media and no text at all becomes a blank card the owner
+ * answers by hand (ruled 2026-10-06, both channels). Nothing was classified or
+ * generated, so there is no draft and no category: the card is written
+ * directly, the way the crash card is, with the same synthetic generation
+ * standing in for one that never happened.
+ *
+ * ITS OWN CARD, always: `own_card`, keyed to the inbound message by migration
+ * 054's index. It never regenerates or overwrites a card already waiting,
+ * because a photo is not a correction to anything. A duplicate delivery of
+ * the same message collides on that index and is reported as the card that
+ * already exists (persistOrRegenQueuedDraft's own-draft recovery).
+ *
+ * OPT-OUT (ruled 2026-10-06, revising the same day's earlier ruling): a
+ * message with media and no text NEVER opts an opted-out guest back in, on
+ * either channel. Only a typed message does, through TAC-572's path
+ * (lib/guests/opt-out.ts), which reads a category this turn does not have.
+ *   - text: an opted-out guest gets no card and hears nothing. runInboundTurn
+ *     decides that before it calls this, so this function never sees one.
+ *   - Instagram: the card is still written, and `opted_out_at` is left set.
+ *     That covers a thumbs-up GIF after the confirmation and a story tag, which
+ *     arrive here looking exactly like a photo and are not the guest writing.
+ *
+ * CONSEQUENCE, stated because nothing else says it: the operator's send on
+ * that Instagram card is refused (`opted_out` in dispatchOperatorOutbound)
+ * until the guest types something. The card tells the owner the guest sent
+ * something; it cannot be answered from the app while the opt-out stands.
+ *
+ * Never throws. A card that cannot be written is a `failed` turn, which the
+ * turn retries once.
+ */
+async function persistMediaOnlyCard(
+  ctx: RuntimeContext,
+  agentRunId: string,
+): Promise<AgentResult> {
+  try {
+    const persisted = await persistOrRegenQueuedDraft(
+      ctx,
+      buildGenerationFailureGeneration(),
+      MEDIA_ONLY_REVIEW_REASON,
+      null,
+      { blankBody: true, conversationDisposition: 'own_card' },
+    )
+    if (persisted.outboundMessageId === null) {
+      // Unreachable: `own_card` never silences. Handled for the reason the
+      // crash card gives, a null id typed `string` is found too late.
+      return {
+        status: 'failed',
+        stage: 'persist',
+        error: 'media-only card came back with no id',
+      }
+    }
+    console.log('[agent] media-only inbound carded for the operator', {
+      agentRunId,
+      outboundMessageId: persisted.outboundMessageId,
+    })
+    await captureDraftQueued({
+      agentRunId,
+      venueId: ctx.venue.id,
+      guestId: ctx.guest.id,
+      triggers: [MEDIA_ONLY_REVIEW_REASON],
+      primaryTrigger: MEDIA_ONLY_REVIEW_REASON,
+      modelRequiresApproval: false,
+      modelApprovalReason: '',
+      compRegexMatchedPattern: null,
+      hasPreviousPending: false,
+      slot: 'conversation',
+      otherSlotOccupied: false,
+      kind: 'inbound',
+      // Nothing was classified. 'unknown' satisfies the non-null contract
+      // without inventing a category, as on the crash card.
+      category: 'unknown',
+      inboundBody: null,
+      generatedBody: '',
+    })
+    pushOperatorCard(ctx, persisted.outboundMessageId, MEDIA_ONLY_REVIEW_REASON)
+    return {
+      status: 'queued',
+      outboundMessageId: persisted.outboundMessageId,
+      triggers: [MEDIA_ONLY_REVIEW_REASON],
+      primaryTrigger: MEDIA_ONLY_REVIEW_REASON,
+    }
+  } catch (e) {
+    // persistOrRegenQueuedDraft already fired a red alert.
+    return {
+      status: 'failed',
+      stage: 'persist',
+      error: e instanceof Error ? e.message : String(e),
+    }
+  }
+}
+
+/**
  * Synthetic generation for the failure card. The body is blank and
  * `blankBody: true` is passed alongside, so nothing here reaches the row's
  * body — this exists to satisfy the shape `buildOutboundInsert` reads.
@@ -607,7 +713,16 @@ async function releaseClaimedWarmClose(
 }
 
 function pushSendFailureCard(ctx: RuntimeContext, cardId: string): void {
-  if (!shouldSendDraftFlaggedPush(INSTAGRAM_SEND_FAILED_REVIEW_REASON)) return
+  pushOperatorCard(ctx, cardId, INSTAGRAM_SEND_FAILED_REVIEW_REASON)
+}
+
+/** The push for a card a path wrote itself, outside the approval gate. */
+function pushOperatorCard(
+  ctx: RuntimeContext,
+  cardId: string,
+  reviewReason: string,
+): void {
+  if (!shouldSendDraftFlaggedPush(reviewReason)) return
   waitUntil(
     sendDraftFlaggedPush({
       agentRunId: ctx.agentRunId,
@@ -615,7 +730,7 @@ function pushSendFailureCard(ctx: RuntimeContext, cardId: string): void {
       guestId: ctx.guest.id,
       guestFirstName: ctx.guest.firstName,
       draftId: cardId,
-      primaryTrigger: INSTAGRAM_SEND_FAILED_REVIEW_REASON,
+      primaryTrigger: reviewReason,
       guestQuestion: ctx.currentMessage?.body ?? null,
       guestCategory: ctx.classification?.category ?? null,
       // TAC-532 code review: THIS is the path that made the crisis leak real.
@@ -1238,6 +1353,136 @@ async function runInboundTurn(
       id: inbound.message.id,
       createdAt: inbound.message.receivedAt,
     }
+
+    // TAC-574: what this turn does with a photo, GIF or other attachment.
+    // lib/agent/inbound-media.ts carries the ruling and the reasoning.
+    //
+    // AFTER `turn.answered`, and the order is load-bearing: a media-only
+    // message answered through the text beside it swaps `inbound` to that
+    // text below, but the turn still COVERS the media message, which is the
+    // newer of the two. Recording the text instead would make the handoff
+    // find the photo uncovered and run a second turn for it.
+    //
+    // Started here and awaited where it is needed, so an ordinary text turn
+    // pays for the read alongside the context build rather than before it.
+    // loadTurnMediaRows never rejects.
+    const turnMediaRows = loadTurnMediaRows({
+      venueId: inbound.venueId,
+      guestId: inbound.guestId,
+      around: inbound.message.receivedAt,
+    })
+    let mediaOnlyTurn = false
+    if (isMediaOnly(inbound.message.body, inbound.mediaUrls)) {
+      const rows = await turnMediaRows
+      if (!rows.ok) {
+        // Fail toward a human: with no rows to judge, the card is written.
+        console.warn('[agent] media-only turn could not read its rows', {
+          agentRunId,
+          error: rows.error,
+        })
+      }
+      const resolution = rows.ok
+        ? resolveMediaOnlyTurn(turn.answered, rows.data)
+        : ({ kind: 'card' } as const)
+      if (resolution.kind === 'covered') {
+        // The media arrived inside a turn whose reply or card went out after
+        // it. A card now would be a reply AND a card for one burst.
+        console.log('[agent] media-only message already covered by a turn', {
+          agentRunId,
+          mediaMessageId: turn.answered.id,
+        })
+        trace.update({
+          output: { status: 'skipped_duplicate', mediaOnly: 'covered' },
+        })
+        skipLatencyEmit = true
+        return { status: 'skipped_duplicate' }
+      }
+      mediaOnlyTurn = resolution.kind === 'card'
+      if (resolution.kind === 'answer_text') {
+        try {
+          inbound = await loadInbound(resolution.textMessageId)
+          console.log('[agent] media-only message answered through its text', {
+            agentRunId,
+            mediaMessageId: turn.answered.id,
+            answering: inbound.message.id,
+          })
+        } catch (e) {
+          console.warn('[agent] media-only turn could not load its text', {
+            agentRunId,
+            textMessageId: resolution.textMessageId,
+            error: e instanceof Error ? e.message : String(e),
+          })
+          mediaOnlyTurn = true
+        }
+      }
+      // An opted-out TEXT guest gets no card and hears nothing
+      // (persistMediaOnlyCard's docstring has the two channels' rules), the
+      // same outcome TAC-572 gives their text messages. Decided here, before
+      // the wait and the context build. A failed read is treated as not opted
+      // out, so the photo reaches a human.
+      if (mediaOnlyTurn && inbound.message.channel !== 'instagram') {
+        const optedOut = await readOptedOut({
+          venueId: inbound.venueId,
+          guestId: inbound.guestId,
+        })
+        if (!optedOut.ok) {
+          // Counted, as TAC-572's own read is: a degrade nobody can count is
+          // one nobody will notice. The card that follows cannot reach the
+          // guest by itself; the operator dispatch refuses an opted-out send.
+          console.warn('[agent] opt-out read failed on a media-only turn', {
+            agentRunId,
+            guestId: inbound.guestId,
+            error: optedOut.error,
+          })
+          await capturePostHogEvent('opt_out_read_failed', agentRunId, {
+            agentRunId,
+            venueId: inbound.venueId,
+            guestId: inbound.guestId,
+            error: optedOut.error,
+          })
+        }
+        if (optedOut.ok && optedOut.data) {
+          console.log('[agent] media-only inbound not carded: opted out', {
+            agentRunId,
+            guestId: inbound.guestId,
+          })
+          trace.update({ output: { status: 'guest_opted_out' } })
+          return { status: 'guest_opted_out' }
+        }
+      }
+      // Wait for a caption before carding, looking every
+      // MEDIA_ONLY_SETTLE_POLL_MS up to MEDIA_ONLY_SETTLE_MS. This run holds
+      // the claim, so a text arriving now stands down into it; adopting it
+      // here is the same extension the auto-send path makes before dispatch,
+      // out of the same budget.
+      for (
+        let waited = 0;
+        mediaOnlyTurn && mayExtend(turn) && waited < MEDIA_ONLY_SETTLE_MS;
+        waited += MEDIA_ONLY_SETTLE_POLL_MS
+      ) {
+        await coalesceDeps.sleep(MEDIA_ONLY_SETTLE_POLL_MS)
+        const uncovered = await findUncoveredInbound(
+          { venueId: inbound.venueId, guestId: inbound.guestId },
+          turn,
+          coalesceDeps,
+        )
+        if (uncovered.status === 'found') {
+          turn.extensionsUsed += 1
+          console.log('[agent] media-only turn extending to a newer message', {
+            agentRunId,
+            extensionsUsed: turn.extensionsUsed,
+            from: turn.answered.id,
+            to: uncovered.message.id,
+          })
+          return await runInboundTurn(
+            uncovered.message.id,
+            agentRunId,
+            turn,
+            coalesceDeps,
+          )
+        }
+      }
+    }
     trace.update({
       metadata: { venueId: inbound.venueId, guestId: inbound.guestId },
       content: { inboundBody: inbound.message.body },
@@ -1321,6 +1566,34 @@ async function runInboundTurn(
         errorStack: errStack,
       })
       return { status: 'failed', stage: 'context_build', error: errMsg }
+    }
+
+    // TAC-574: no text anywhere in this turn, so there is nothing to classify
+    // and nothing to generate. The owner gets a blank card. Before retrieval
+    // and classification, so neither runs on an empty body.
+    if (mediaOnlyTurn) {
+      const carded = await persistMediaOnlyCard(ctx, agentRunId)
+      trace.update({ output: { status: carded.status, mediaOnly: true } })
+      return carded
+    }
+    // A turn with text: tell the agent what arrived beside it, if anything.
+    // A failed read costs the acknowledgement, never the reply.
+    const mediaRows = await turnMediaRows
+    if (mediaRows.ok) {
+      ctx.inboundMedia = mediaAlongsideText(
+        {
+          id: inbound.message.id,
+          body: inbound.message.body,
+          mediaUrls: inbound.mediaUrls,
+          createdAt: inbound.message.receivedAt,
+        },
+        mediaRows.data,
+      )
+    } else {
+      console.warn('[agent] inbound media read failed, no note rendered', {
+        agentRunId,
+        error: mediaRows.error,
+      })
     }
 
     // TAC-540 part C: the voice-pack load starts HERE, alongside

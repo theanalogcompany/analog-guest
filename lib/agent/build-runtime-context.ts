@@ -974,6 +974,9 @@ export async function buildRuntimeContext(input: {
     // Always null here. handle-inbound.ts is the only writer, post-classify,
     // which is what keeps the review ask off every other path.
     reviewAsk: null,
+    // TAC-574: always null here, for the same reason. handle-inbound.ts sets
+    // it once it knows what arrived beside the text.
+    inboundMedia: null,
     corpus: null,
     knowledgeCorpus: null,
     classification: null,

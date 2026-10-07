@@ -462,6 +462,22 @@ export type ApprovalTrigger =
 export const GENERATION_FAILED_REVIEW_REASON = 'generation_failed'
 
 /**
+ * TAC-574: `messages.review_reason` on the blank card written for a turn with
+ * media and no text (lib/agent/inbound-media.ts has the ruling; the writer is
+ * persistMediaOnlyCard in handle-inbound.ts). Outside the policy union like
+ * the value above: no gate fires it, the path stamps it itself.
+ *
+ * Here rather than in inbound-media.ts so lib/operator/queue.ts and
+ * lib/notifications/send.ts can import the one constant without loading that
+ * module's database client.
+ *
+ * NOT in KNOWLEDGE_GAP_CARD_REVIEW_REASONS, and that is a decision. That
+ * family is "the guest asked something and is owed an answer", which arms the
+ * unanswered-question block on later turns. A photo is not a question.
+ */
+export const MEDIA_ONLY_REVIEW_REASON = 'media_only_inbound'
+
+/**
  * Priority order for picking the `primaryTrigger` (the value that lands on
  * messages.review_reason and shows up first in the operator queue UI). NOT
  * the order triggers are evaluated in (that's enumeration order, which
@@ -2872,6 +2888,7 @@ export function buildAiRuntime(
   return {
     guestName: ctx.guest.firstName ?? undefined,
     inboundMessage: ctx.currentMessage?.body,
+    inboundMedia: ctx.inboundMedia ?? undefined,
     perkBeingUnlocked,
     additionalContext,
     operatorInstruction,
