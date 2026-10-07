@@ -283,6 +283,9 @@ const RELEASES_CLAIM = {
   // reachable, holding the marker costs a missed close rather than a second one.
   skipped_duplicate: false,
   coalesced: false,
+  // TAC-572: inbound-only as well. This path checks the opt-out itself before
+  // it ever runs the agent, and `false` is the same safe direction.
+  guest_opted_out: false,
 } as const satisfies Record<AgentResult['status'], boolean>
 
 /**

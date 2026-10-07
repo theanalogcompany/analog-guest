@@ -53,6 +53,7 @@
  */
 
 import { createAdminClient } from '@/lib/db/admin'
+import type { ReOptIn } from '@/lib/guests/opt-out'
 import type { AgentResult } from './types'
 
 /**
@@ -176,6 +177,9 @@ const RETRYABLE_OUTCOME = {
   // openCoalescedTurn, so a halted venue never takes a claim and
   // `turn.answered` is still null when shouldRetryTurn returns above.
   venue_halted: false,
+  // TAC-572: a decision not to reply to an opted-out guest, so a retry would
+  // reach the same decision.
+  guest_opted_out: false,
   failed: true,
 } as const satisfies Record<AgentResult['status'], boolean>
 
@@ -612,6 +616,15 @@ export interface InboundTurnState {
    * prevent.
    */
   typingInFlight: Promise<unknown> | null
+  /**
+   * TAC-572: this turn opted the guest back in, and which way.
+   *
+   * On the turn for the reason `typingShownFor` is: an extension RE-ENTERS
+   * `runInboundTurn` with a rebuilt context, and by then the opt-out is
+   * already cleared, so the second pass would otherwise read an ordinary guest
+   * and drop the prompt line that keeps the reply from framing a return.
+   */
+  reOptIn: ReOptIn | null
 }
 
 export function newInboundTurnState(
@@ -626,6 +639,7 @@ export function newInboundTurnState(
     retryDepth,
     typingShownFor: null,
     typingInFlight: null,
+    reOptIn: null,
   }
 }
 
