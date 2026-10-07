@@ -51,6 +51,7 @@ import {
 import {
   resolveCategoryPolicy,
   resolvePolicyDecision,
+  resolveSignOffReviewAskDisposition,
   resolveVisitCheckbackDisposition,
   type PolicyDecision,
   resolveReviewAskDisposition,
@@ -2055,10 +2056,17 @@ export async function applyApprovalPolicyStage(
   // not a category (see the schema field's comment). The demo-guest bypass
   // below overrides this like every trigger, which is the intended
   // on-device test path.
+  //
+  // TAC-575: the invitation on a happy guest's SIGN-OFF reads a setting of its
+  // own (`signOffReviewAsk`), for the reason on that key: turning the sign-off
+  // on at a venue must not also turn the praise ask on.
+  const reviewAskDisposition =
+    ctx.signOff === 'happy'
+      ? resolveSignOffReviewAskDisposition(ctx.venue.approvalPolicy)
+      : resolveReviewAskDisposition(ctx.venue.approvalPolicy)
   if (
     generation.reviewAsk !== '' &&
-    resolveReviewAskDisposition(ctx.venue.approvalPolicy) ===
-      'operator_approval'
+    reviewAskDisposition === 'operator_approval'
   ) {
     triggers.push(APPROVAL_TRIGGERS.REVIEW_ASK)
   }

@@ -1954,7 +1954,9 @@ async function runInboundTurn(
       // They said how it is in the same breath as what it is. That IS the
       // visit's check-in, so it is recorded without a question having been
       // asked: the sign-off and the next-visit follow-up read this row either
-      // way.
+      // way. It also makes this a check-in turn, so "iced sofi, so good" does
+      // not raise the review ask here; that is the sign-off's.
+      if (verdict === 'good' || verdict === 'bad') ctx.insideVisitCheckin = true
       if (
         (verdict === 'good' || verdict === 'bad') &&
         ctx.visitLocalDate !== null
@@ -2065,6 +2067,9 @@ async function runInboundTurn(
       // renderableIntentions runs, like ctx.reviewAsk below.
       const answerNow = answer ?? checkin.answer
       ctx.visitCheckinHold = answerNow !== 'good'
+      // Praise on this turn is the answer to our own question, so the review
+      // ask it would raise is saved for the sign-off (deriveReviewAsk).
+      ctx.insideVisitCheckin = true
       // THREE TURNS THE CHECK-BACK MUST NOT RIDE, even when the clock says it
       // is due. Removed from the eligibility write too, as for the order turn
       // above: a row would keep a required question open on their next message.

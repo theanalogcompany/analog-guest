@@ -485,7 +485,7 @@ async function considerCandidate(
     trigger: {
       reason: 'warm_close',
       triggeredAt: now,
-      warmClose: { answersMessageId: candidate.messageId },
+      warmClose: { answersMessageId: candidate.messageId, signOff: 'plain' },
     },
   })
 
