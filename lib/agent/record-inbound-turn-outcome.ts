@@ -131,13 +131,11 @@ const LEDGER_DERIVERS: LedgerDerivers = {
   }),
   refused: (r) => ({
     outcome: 'refused',
-    // The v1.80.0 schema diet removed the fidelity floor ('low_fidelity' in
-    // the vocabulary is historical rows only). ONE inbound path produces
-    // 'refused' today: TAC-574's media-only message from an opted-out text
-    // guest, which gets no card (detail.refusedReason
-    // 'media_only_guest_opted_out'). `reason` stays null because the CHECK'd
-    // vocabulary has no value for it; detail carries it, so it shows up in the
-    // data before it shows up in the vocabulary.
+    // No inbound path produces 'refused' since the v1.80.0 schema diet
+    // removed the fidelity floor ('low_fidelity' in the vocabulary is
+    // historical rows only). The deriver stays because the map is total over
+    // AgentResult; detail carries whatever reason a future refusal names, so
+    // it shows up in the data before it shows up in the vocabulary.
     reason: null,
     outboundMessageId: null,
     detail: { refusedReason: r.reason },
@@ -205,6 +203,16 @@ const LEDGER_DERIVERS: LedgerDerivers = {
     reason: 'venue_paused',
     outboundMessageId: null,
     detail: { venueStatus: r.venueStatus },
+  }),
+  // TAC-572. The guest is opted out and this message did not opt them back
+  // in. Same outcome and reason a suppressed scan greeting records (migration
+  // 064), so "people we did not message because they asked us to stop" is one
+  // bucket across the proactive and the inbound path.
+  guest_opted_out: () => ({
+    outcome: 'not_run',
+    reason: 'guest_opted_out',
+    outboundMessageId: null,
+    detail: {},
   }),
   failed: (r) => ({
     outcome: 'failed',

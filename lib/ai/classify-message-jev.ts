@@ -55,7 +55,7 @@ export const JEV_CLASSIFICATION_ENABLED = true
 // it. "can i get a flat white" and "can i order ahead" had both been classed
 // mechanic_request, which always holds the reply for approval. Ruled
 // 2026-10-06; the Haiku prompt carries the same wording under PROMPT_VERSION
-// v1.84.0.
+// v1.85.0.
 //
 // THE WORDING IS NARROW ON PURPOSE, and two wider drafts are why. Both passed
 // the seven-phrase harness (scripts/measurement/classifier-mechanic.ts) and

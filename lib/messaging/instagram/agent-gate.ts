@@ -44,9 +44,8 @@
 //     in the thread and in the agent's history. ACCEPTED, not fixed.
 //   - A STOP received while the gate was shut was never classified. DONE
 //     2026-09-20: every Instagram inbound row read, none is an opt-out. Opt-out
-//     is still not recorded on any channel (TAC-475), so an Instagram guest who
-//     says STOP from here on is handled only by the classifier inside the agent
-//     run this flip turns on, and PR B still records a follow-up task for them.
+//     is recorded since TAC-572 (lib/guests/opt-out.ts): the agent run this
+//     flip turns on classifies the STOP and writes guests.opted_out_at.
 //   - The icebreaker titles (TAC-492). A QR guest's first message is the title
 //     of the icebreaker they tapped, which lives in Meta's settings and nowhere
 //     in this repo. RULED 2026-09-19: keep every title a greeting. A question-

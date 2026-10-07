@@ -107,6 +107,11 @@ ladder: the timestamp advances past a stale precision and nothing rewrites it.
 predating the column. Do not tidy the gate from `=== 'approximate'` to `!== 'pinned'`; that
 silently switches off every legacy row.
 
+## Opt-out
+
+`opt-out.ts` is the only writer of `guests.opted_out_at`; the rules and rulings are in its
+header. Read the column anywhere, write it nowhere else.
+
 ---
 
 Root `CLAUDE.md` is the index for the whole repo, `docs/decisions/README.md` holds the

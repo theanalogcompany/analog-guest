@@ -15,6 +15,12 @@ import {
 } from '@/lib/analytics/posthog'
 import { createAdminClient } from '@/lib/db/admin'
 import { isEmptyContextUpdate, updateGuestContext } from '@/lib/guests/context'
+import {
+  clearOptOut,
+  decideOptOutTurn,
+  readOptedOut,
+  recordOptOut,
+} from '@/lib/guests/opt-out'
 import { sendCommitmentArrivalPush } from '@/lib/notifications/send-commitment-push'
 import {
   sendDraftFlaggedPush,
@@ -236,6 +242,7 @@ async function findExistingReply(
  *
  * Policy, matching the gate's behavior rather than reinventing it:
  *   - `opted_out_at` → NO card. Nobody is going to reply to someone who left.
+ *     Except on the opt_out turn itself (TAC-572): its confirmation is owed.
  *   - `hold_all_outbound` → card ANYWAY. A queue card IS the hold outcome;
  *     suppressing it would restore the exact silence this fixes, and would do
  *     it specifically at the venues that asked for more oversight. That flag
@@ -253,7 +260,18 @@ async function persistGenerationFailureCard(
   { kind: 'carded'; outboundMessageId: string } | { kind: 'skipped' }
 > {
   try {
-    if (await isGuestOptedOut(ctx.guest.id)) {
+    const supabase = createAdminClient()
+    const { data: guestRow } = await supabase
+      .from('guests')
+      .select('opted_out_at')
+      .eq('id', ctx.guest.id)
+      .maybeSingle()
+    // TAC-572: an opt_out turn records the opt-out BEFORE it generates, so
+    // this read is true on the very turn whose confirmation just failed. That
+    // guest is still owed the confirmation, and the card is the only way an
+    // operator learns it did not go; dispatchOperatorOutbound lets an
+    // opt_out-category card through for the same reason.
+    if (guestRow?.opted_out_at && ctx.classification?.category !== 'opt_out') {
       console.warn(
         '[agent] generation-failure card skipped — guest opted out',
         {
@@ -429,16 +447,6 @@ async function persistGenerationFailureCard(
   }
 }
 
-/** Whether `guests.opted_out_at` is set. A failed read reads as not opted out. */
-async function isGuestOptedOut(guestId: string): Promise<boolean> {
-  const { data } = await createAdminClient()
-    .from('guests')
-    .select('opted_out_at')
-    .eq('id', guestId)
-    .maybeSingle()
-  return Boolean(data?.opted_out_at)
-}
-
 /**
  * TAC-574: a turn with media and no text at all becomes a blank card the owner
  * answers by hand (ruled 2026-10-06, both channels). Nothing was classified or
@@ -452,17 +460,18 @@ async function isGuestOptedOut(guestId: string): Promise<boolean> {
  * the same message collides on that index and is reported as the card that
  * already exists (persistOrRegenQueuedDraft's own-draft recovery).
  *
- * OPT-OUT, and the two channels differ on purpose:
- *   - text: an opted-out guest gets no card, as on the crash card. Only START
+ * OPT-OUT, and the two channels differ on purpose (lib/guests/opt-out.ts has
+ * TAC-572's rules; this path returns before the classification those rules
+ * read, so it applies the two that need no category itself):
+ *   - text: an opted-out guest gets no card and hears nothing. Only START
  *     opts a text guest back in, and a photo is not START. runInboundTurn
  *     decides that before it calls this, so this function never sees one.
- *   - Instagram: the card is written. Ruled 2026-10-06: a media-only message
- *     from an opted-out Instagram guest counts as writing again and opts them
- *     back in. NOTHING ON THIS BRANCH CLEARS `opted_out_at`, because nothing on
- *     `main` writes it yet; TAC-572 adds both halves. Whichever of the two
- *     merges second must call TAC-572's re-opt-in on this path. Until then the
- *     state is unreachable, and after TAC-572 alone it is a card whose send
- *     the operator dispatch would refuse.
+ *   - Instagram: ruled 2026-10-06, a media-only message from an opted-out
+ *     guest counts as writing again and opts them back in. The opt-out is
+ *     cleared HERE, before the card is written, because the operator's send
+ *     on that card is refused while `opted_out_at` is set. If the clear fails
+ *     the card is still written and a red alert says the guest is still opted
+ *     out, the same direction TAC-572 takes for a text reply.
  *
  * Never throws. A card that cannot be written is a `failed` turn, which the
  * turn retries once.
@@ -472,6 +481,9 @@ async function persistMediaOnlyCard(
   agentRunId: string,
 ): Promise<AgentResult> {
   try {
+    if (ctx.conversationChannel === 'instagram') {
+      await reOptInForInstagramMedia(ctx, agentRunId)
+    }
     const persisted = await persistOrRegenQueuedDraft(
       ctx,
       buildGenerationFailureGeneration(),
@@ -525,6 +537,41 @@ async function persistMediaOnlyCard(
       stage: 'persist',
       error: e instanceof Error ? e.message : String(e),
     }
+  }
+}
+
+/**
+ * TAC-574 ruling 3: an Instagram guest who had opted out and now sends a photo
+ * or GIF on its own is opted back in. clearOptOut is a CAS, so for the
+ * ordinary guest who never opted out this is one no-op UPDATE and no read.
+ *
+ * Never throws and never blocks the card: clearOptOut returns its failure.
+ */
+async function reOptInForInstagramMedia(
+  ctx: RuntimeContext,
+  agentRunId: string,
+): Promise<void> {
+  const ids = { venueId: ctx.venue.id, guestId: ctx.guest.id }
+  let cleared = await clearOptOut(ids)
+  if (!cleared.ok) cleared = await clearOptOut(ids)
+  if (!cleared.ok) {
+    await fireRedAlert({
+      agentRunId,
+      venueId: ctx.venue.id,
+      guestId: ctx.guest.id,
+      kind: 'inbound',
+      stage: 'persist',
+      errorMessage: `re-opt-in NOT recorded on a media-only message, guest may still be opted out: ${cleared.error}`,
+      extra: { step: 'opt_out_clear', via: 'instagram_media_only' },
+    })
+    return
+  }
+  if (cleared.data.changed) {
+    console.log('[agent] guest opted back in', {
+      agentRunId,
+      guestId: ctx.guest.id,
+      via: 'instagram_media_only',
+    })
   }
 }
 
@@ -773,6 +820,7 @@ const TYPING_OFF_AFTER = {
   superseded: true,
   coalesced: true,
   venue_halted: true,
+  guest_opted_out: true,
   failed: true,
 } as const satisfies Record<AgentResult['status'], boolean>
 
@@ -1374,20 +1422,24 @@ async function runInboundTurn(
           mediaOnlyTurn = true
         }
       }
-      // An opted-out TEXT guest gets no card (persistMediaOnlyCard's docstring
-      // has the two channels' rules). Decided here, before the wait and the
-      // context build, because 'refused' is retried once and the retry should
-      // cost two reads rather than both of those again.
-      if (
-        mediaOnlyTurn &&
-        inbound.message.channel !== 'instagram' &&
-        (await isGuestOptedOut(inbound.guestId))
-      ) {
-        console.warn('[agent] media-only card skipped: guest opted out', {
-          agentRunId,
+      // An opted-out TEXT guest gets no card and hears nothing
+      // (persistMediaOnlyCard's docstring has the two channels' rules), the
+      // same outcome TAC-572 gives their text messages. Decided here, before
+      // the wait and the context build. A failed read is treated as not opted
+      // out, so the photo reaches a human.
+      if (mediaOnlyTurn && inbound.message.channel !== 'instagram') {
+        const optedOut = await readOptedOut({
+          venueId: inbound.venueId,
           guestId: inbound.guestId,
         })
-        return { status: 'refused', reason: 'media_only_guest_opted_out' }
+        if (optedOut.ok && optedOut.data) {
+          console.log('[agent] media-only inbound not carded: opted out', {
+            agentRunId,
+            guestId: inbound.guestId,
+          })
+          trace.update({ output: { status: 'guest_opted_out' } })
+          return { status: 'guest_opted_out' }
+        }
       }
       // Wait for a caption before carding, looking every
       // MEDIA_ONLY_SETTLE_POLL_MS up to MEDIA_ONLY_SETTLE_MS. This run holds
@@ -1700,6 +1752,116 @@ async function runInboundTurn(
         return { status: 'failed', stage, error: errMsg }
       }
     }
+
+    // TAC-572: the guest's opt-out, decided once per turn by decideOptOutTurn
+    // (lib/guests/opt-out.ts, which carries the rules and the rulings).
+    //
+    // BELOW THE CRISIS SHORT-CIRCUIT, so an opted-out guest in crisis still
+    // gets the crisis reply: that path already outranks every hold in this
+    // file, and silence is worst on exactly that turn. AFTER classification
+    // rather than before context build, because the Instagram rule reads the
+    // category ("thanks" after the confirmation must not opt them back in).
+    //
+    // THE READ FAILS OPEN. An unreadable row is treated as not opted out, so
+    // the guest who wrote to us is answered; an `opt_out` turn still records,
+    // because recording does not depend on the read. The proactive paths fail
+    // the other way (isOptedOut in instagram-scan-greeting.ts suppresses), and
+    // the asymmetry is deliberate: nobody asked for those messages.
+    const optOutIds = { venueId: ctx.venue.id, guestId: ctx.guest.id }
+    const optedOutRead = await readOptedOut(optOutIds)
+    if (!optedOutRead.ok) {
+      console.warn('[agent] opt-out read failed, treating as not opted out', {
+        agentRunId,
+        guestId: ctx.guest.id,
+        error: optedOutRead.error,
+      })
+      // An event as well as a line: this is the one path on which an
+      // opted-out SMS guest can be answered, and a degrade nobody can count
+      // is one nobody will notice.
+      await capturePostHogEvent('opt_out_read_failed', agentRunId, {
+        agentRunId,
+        venueId: ctx.venue.id,
+        guestId: ctx.guest.id,
+        error: optedOutRead.error,
+      })
+    }
+    const optOutDecision = decideOptOutTurn({
+      channel: ctx.conversationChannel,
+      optedOut: optedOutRead.ok ? optedOutRead.data : false,
+      category: ctx.classification.category,
+      body: inbound.message.body,
+      isRetry: turn.retryDepth > 0,
+    })
+    if (optOutDecision.action === 'silence') {
+      console.log('[agent] inbound not answered: guest is opted out', {
+        agentRunId,
+        guestId: ctx.guest.id,
+        channel: ctx.conversationChannel,
+        category: ctx.classification.category,
+      })
+      trace.update({
+        output: {
+          status: 'guest_opted_out',
+          category: ctx.classification.category,
+        },
+      })
+      retrieveSpan.end({ output: { discarded: 'guest_opted_out' } })
+      return { status: 'guest_opted_out' }
+    }
+    if (optOutDecision.action === 'record') {
+      // Awaited, so the opt-out is saved BEFORE the confirmation goes out and
+      // "we'll stop" is never said ahead of the fact. One retry, then a red
+      // alert, and the confirmation still sends: a guest who asked to stop and
+      // heard nothing is the compliance failure, and the alert is what makes
+      // the unrecorded opt-out somebody's problem rather than nobody's.
+      let recorded = await recordOptOut(optOutIds)
+      if (!recorded.ok) recorded = await recordOptOut(optOutIds)
+      if (recorded.ok) {
+        console.log('[agent] opt-out recorded', {
+          agentRunId,
+          guestId: ctx.guest.id,
+          newlyOptedOut: recorded.data.changed,
+        })
+      } else {
+        await fireRedAlert({
+          agentRunId,
+          venueId: ctx.venue.id,
+          guestId: ctx.guest.id,
+          kind: 'inbound',
+          stage: 'persist',
+          errorMessage: `opt-out NOT recorded, confirmation still sent: ${recorded.error}`,
+          extra: { step: 'opt_out_record' },
+        })
+      }
+    }
+    if (optOutDecision.action === 'clear') {
+      let cleared = await clearOptOut(optOutIds)
+      if (!cleared.ok) cleared = await clearOptOut(optOutIds)
+      if (cleared.ok) {
+        console.log('[agent] guest opted back in', {
+          agentRunId,
+          guestId: ctx.guest.id,
+          via: optOutDecision.reOptIn,
+        })
+      } else {
+        // The reply still goes: they wrote to us and this message is the one
+        // that earns an answer. But they are still opted out in the database,
+        // so every proactive path keeps skipping them until someone looks.
+        await fireRedAlert({
+          agentRunId,
+          venueId: ctx.venue.id,
+          guestId: ctx.guest.id,
+          kind: 'inbound',
+          stage: 'persist',
+          errorMessage: `re-opt-in NOT recorded, guest is still opted out: ${cleared.error}`,
+          extra: { step: 'opt_out_clear', via: optOutDecision.reOptIn },
+        })
+      }
+      turn.reOptIn = optOutDecision.reOptIn
+    }
+    // Read from the turn, not the decision: on an extension the opt-out is
+    // already cleared and the decision above is 'none'.
+    ctx.reOptIn = turn.reOptIn
 
     // TAC-540: show the guest typing dots, if this turn looks headed for an
     // auto-send.
@@ -2743,7 +2905,15 @@ async function runInboundTurn(
     // before retrieval. A crisis reply is fixed and unconditional, and
     // deferring it to a newer fragment is the worst failure this feature could
     // have.
-    if (mayExtend(turn)) {
+    //
+    // NOT ON AN OPT_OUT TURN (TAC-572). The opt-out is already recorded by
+    // here, so re-entering would re-decide against an opted-out guest on a
+    // different message: "thanks" would silence the turn and discard the
+    // confirmation, and anything else would opt the guest straight back in
+    // inside the turn that opted them out. The confirmation goes out as
+    // generated, and the newer message becomes its own turn at the handoff,
+    // where the opt-out rules apply to it as they would a minute later.
+    if (ctx.classification.category !== 'opt_out' && mayExtend(turn)) {
       const uncovered = await findUncoveredInbound(
         { venueId: ctx.venue.id, guestId: ctx.guest.id },
         turn,
@@ -2797,18 +2967,24 @@ async function runInboundTurn(
     // The pause timer cannot race this: its candidate scan only produces a guest
     // whose NEWEST message is our outbound, and an inbound turn in flight means
     // the guest's own message is newest. The CAS is the belt anyway.
-    const claimedWarmClose = closesFirstConversation({
-      guestSignedOff: ctx.classification.category === SIGN_OFF_CATEGORY,
-      agentSaidGoodbye: gen.result.closedTheConversation,
-      // TAC-568 follow-on: learning the name is the other closing moment, and
-      // since are_they_new_here came off the first conversation it is the
-      // ordinary one. Set above, from the identity-column write.
-      nameJustStored,
-      isFirstConversation: ctx.firstConversation,
-      warmCloseText: ctx.venue.warmCloseText,
-    })
-      ? await claimWarmCloseForTurn(ctx, agentRunId)
-      : null
+    //
+    // TAC-572: never on an opt_out turn. The confirmation is the last thing a
+    // guest who asked to stop should read, and a close that invites them back
+    // in riding behind it is a message they did not ask for.
+    const claimedWarmClose =
+      ctx.classification.category !== 'opt_out' &&
+      closesFirstConversation({
+        guestSignedOff: ctx.classification.category === SIGN_OFF_CATEGORY,
+        agentSaidGoodbye: gen.result.closedTheConversation,
+        // TAC-568 follow-on: learning the name is the other closing moment, and
+        // since are_they_new_here came off the first conversation it is the
+        // ordinary one. Set above, from the identity-column write.
+        nameJustStored,
+        isFirstConversation: ctx.firstConversation,
+        warmCloseText: ctx.venue.warmCloseText,
+      })
+        ? await claimWarmCloseForTurn(ctx, agentRunId)
+        : null
 
     const sendSpan = trace.span('send', { bodyLength: gen.result.body.length })
     try {
