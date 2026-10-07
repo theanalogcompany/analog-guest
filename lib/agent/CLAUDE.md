@@ -347,14 +347,15 @@ carried on `RuntimeContext.firstConversation`.
 not by the guest saying goodbye: the pause timer sends it after about ten quiet minutes, for
 any first Instagram conversation, scanned or not.
 
-### Two sign-offs, both written by the model (TAC-575)
+### Three sign-offs, all written by the model (TAC-575)
 
 | kind | who | carries | once per guest of |
 | --- | --- | --- | --- |
 | `plain` | a FIRST conversation ending without a "good" check-in | the warm close; `followup_rules.warm_close_text` is a guide to its content, never sent | the close, `warm_close_sent_at` |
 | `happy` | a guest whose visit check-in reads `good`, never asked, venue has a review link; first conversation OR NOT | the review invitation, in the `reviewAsk` field | the review ask, `review_asked_at` |
+| `after_complaint` | a guest whose earlier complaint has been followed up, on a visit where they wrote and did not complain again; NO happiness condition | the same invitation, with a premise true of them | the same marker |
 
-`deriveSignOffReviewAsk` (`review-ask.ts`) is the one rule for `happy`. `ctx.signOff` carries
+`deriveSignOffReviewAsk` (`review-ask.ts`) is the one rule for both link kinds. `ctx.signOff` carries
 the kind; the serializer renders `## Sign off` or `## Closing this conversation`.
 
 - **ONLY THE PAUSE TIMER SIGNS OFF. No inbound turn does** (ruled 2026-10-06). The one
@@ -368,10 +369,10 @@ the kind; the serializer renders `## Sign off` or `## Closing this conversation`
   hands it, with the link, through the `warm_close` trigger.
 - **The link rides `reviewAsk`**, never `body`: that field is what dispatch sends as its own
   message, what the approval gate reads, and what the once-ever marker is stamped from.
-- **Its approval is `approval_policy.signOffReviewAsk`**, default hold, read when
-  `ctx.signOff === 'happy'`. The praise-triggered ask keeps `reviewAsk`. Turning one on must
+- **Its approval is `approval_policy.signOffReviewAsk`**, default hold, read on `happy` AND
+  `after_complaint` (ruled: a card held only for past complainers invites skipping them). The praise-triggered ask keeps `reviewAsk`. Turning one on must
   not turn the other on.
-- **The timer CLAIMS `review_asked_at` before sending a happy sign-off** (two ticks would
+- **The timer CLAIMS `review_asked_at` before sending either link sign-off** (two ticks would
   otherwise both find the guest unasked) and gives it back only if the send fails
   (`releaseReviewAskClaim`). A held card keeps the claim, so a skipped one uses up the ask.
 - **A happy sign-off that goes out WITHOUT its link still spends the ask.** Giving the marker
@@ -379,6 +380,13 @@ the kind; the serializer renders `## Sign off` or `## Closing this conversation`
   the rate can be counted.
 - **Praise inside a visit check-in never raises the praise ask** (`ctx.insideVisitCheckin`,
   condition 5a of `deriveReviewAsk`): that guest is asked at the sign-off.
+- **The follow-up after a complaint rides a counter visit, never a DM** (ruled 2026-10-06):
+  the scan greeting's third wording, or `## Their last visit` on the guest's own first
+  message at the counter. One column, `visit_checkins.followup_claimed_at` on the `bad`
+  row: claimed means followed up, and that is what the `after_complaint` link waits on. It
+  waits while a card is pending. Rules and reasons: `visit-checkin.ts`, last section.
+  **That greeting is generated without the earlier thread** (`messagesFromThisVisit`): with
+  it, eight of ten answered the old complaint again. Measurement: `guest-arrived.ts`.
 - Three things stop either kind: a check-back still owed, staff in the thread, a complaint
   (`warmCloseBlocker`, before any marker is claimed).
 - **"The same visit" is two hours, not the day.** The check-in row is keyed on the

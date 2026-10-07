@@ -1,5 +1,10 @@
 import { createAdminClient } from '@/lib/db/admin'
+import { logger } from '@/lib/observability/logger'
 import { extractMenuExploration } from './extract-menu-exploration'
+import {
+  loadInstagramScanInstants,
+  scanVisitInstants,
+} from './load-scan-visits'
 import type { RawSignals, RecognitionResult } from './types'
 import { dedupeVisitsByLocalDate } from './visit-dedupe'
 
@@ -9,12 +14,25 @@ const MS_PER_DAY = 24 * 60 * 60 * 1000
 /**
  * Internal: load all raw signals for a guest at a venue from the database.
  *
- * Server-only. Uses the admin DB client, which bypasses RLS. Issues five
+ * Server-only. Uses the admin DB client, which bypasses RLS. Issues seven
  * SELECTs in parallel (venue + venue_configs embed for timezone and menu;
- * transactions; outbound/inbound message counts; engagement events). Visits
- * and the visit-date list are deduplicated by calendar date in the venue's
- * local timezone — multiple transactions on the same local day count as
- * one visit.
+ * transactions; outbound/inbound message counts; engagement events; the
+ * guest's enrolment; their scans). Visits and the visit-date list are
+ * deduplicated by calendar date in the venue's local timezone — multiple
+ * transactions on the same local day count as one visit.
+ *
+ * TAC-575 (ruled 2026-10-06): A SCAN DAY IS A VISIT. A guest who scans the
+ * counter code five mornings and never says what they got was at the counter
+ * five times, and counted as zero visits before this. Scan days are merged
+ * into the visit list AT READ TIME, before the per-day dedupe, so a scan and
+ * an order on one day are one visit. Nothing is written: no `transactions`
+ * row and no `last_visit_at`, whose three writers (lib/guests/CLAUDE.md) stay
+ * three. Spend is untouched; visit count, recency and consistency move.
+ *
+ * THE SCAN READS FAIL OPEN TO ORDERS ALONE, unlike the five above. An
+ * unreadable scan history undercounts a guest for one turn, which is what
+ * every guest got before this change; failing recognition over it would cost
+ * the turn its state band.
  *
  * The venue SELECT embeds venue_configs(venue_info) so percentMenuExplored
  * has the menu universe to intersect against. We do defensive shallow
@@ -26,9 +44,15 @@ const MS_PER_DAY = 24 * 60 * 60 * 1000
 export async function loadSignals({
   guestId,
   venueId,
+  includeScanVisits = true,
 }: {
   guestId: string
   venueId: string
+  // NOT A RUNTIME SWITCH. Nothing in the app passes it, and no venue setting
+  // reads it. `false` exists for one caller,
+  // scripts/measurement/scan-visits-before-after.ts, which needs the count the
+  // way it was before scans were visits to print the difference.
+  includeScanVisits?: boolean
 }): Promise<RecognitionResult<RawSignals>> {
   const supabase = createAdminClient()
   const lookbackIso = new Date(
@@ -41,6 +65,8 @@ export async function loadSignals({
     outboundMessagesResult,
     inboundMessagesResult,
     engagementEventsResult,
+    guestResult,
+    scansResult,
   ] = await Promise.all([
     supabase
       .from('venues')
@@ -83,6 +109,16 @@ export async function loadSignals({
       .select('event_type')
       .eq('venue_id', venueId)
       .eq('guest_id', guestId),
+    supabase
+      .from('guests')
+      .select('created_via, created_at')
+      .eq('id', guestId)
+      .maybeSingle(),
+    loadInstagramScanInstants(supabase, {
+      venueId,
+      guestId,
+      sinceIso: lookbackIso,
+    }),
   ])
 
   if (venueResult.error) {
@@ -137,6 +173,17 @@ export async function loadSignals({
     totalSpentCents += row.amount_cents ?? 0
     occurredAtList.push(row.occurred_at)
   }
+  for (const iso of !includeScanVisits
+    ? []
+    : scanVisitIsoList({
+        guest: guestResult,
+        scans: scansResult,
+        lookbackIso,
+        venueId,
+        guestId,
+      })) {
+    occurredAtList.push(iso)
+  }
   const visitDateList = dedupeVisitsByLocalDate(occurredAtList, timezone)
 
   const visitsLast90Days = visitDateList.length
@@ -189,6 +236,45 @@ export async function loadSignals({
       visitDateList,
     },
   }
+}
+
+/**
+ * The scan instants inside the lookback window, as ISO strings for the visit
+ * list. Empty, with a warning, when either read failed: see the header for why
+ * that fails open.
+ *
+ * The enrolment day needs the window applied here, because `guests.created_at`
+ * is not filtered by the query the way `scanned_at` is.
+ */
+function scanVisitIsoList(input: {
+  guest: {
+    data: { created_via: string; created_at: string } | null
+    error: { message: string } | null
+  }
+  scans: Awaited<ReturnType<typeof loadInstagramScanInstants>>
+  lookbackIso: string
+  venueId: string
+  guestId: string
+}): string[] {
+  if (input.guest.error || !input.scans.ok) {
+    logger.warn('[recognition] scans unreadable; counting visits from orders', {
+      venueId: input.venueId,
+      guestId: input.guestId,
+      error:
+        input.guest.error?.message ??
+        (input.scans.ok ? null : input.scans.error),
+    })
+    return []
+  }
+  if (input.guest.data === null) return []
+  const lookbackMs = new Date(input.lookbackIso).getTime()
+  return scanVisitInstants({
+    createdVia: input.guest.data.created_via,
+    createdAt: new Date(input.guest.data.created_at),
+    instagramScans: input.scans.data,
+  })
+    .filter((instant) => instant.getTime() >= lookbackMs)
+    .map((instant) => instant.toISOString())
 }
 
 // PostgREST returns `venue_configs` as either an object or a single-element

@@ -8,7 +8,11 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 
 import type { Database } from '@/db/types'
 import { DELIVERED_OUTBOUND_STATUSES } from './group-responses'
-import type { VisitCheckin, VisitCheckinAnswer } from './visit-checkin'
+import type {
+  ComplaintCheckin,
+  VisitCheckin,
+  VisitCheckinAnswer,
+} from './visit-checkin'
 
 type AdminSupabaseClient = SupabaseClient<Database>
 
@@ -423,4 +427,109 @@ export async function wasCheckbackAskedInConversation(
     .limit(1)
   if (error) return { ok: false, error: error.message }
   return { ok: true, data: (data ?? []).length > 0 }
+}
+
+// ---------------------------------------------------------------------------
+// The follow-up on the next visit after a complaint (visit-checkin.ts)
+// ---------------------------------------------------------------------------
+
+// A guest's complaints are read newest first. Twenty is far more `bad` days
+// than one guest plausibly has; the cap only keeps the read bounded.
+const COMPLAINT_ROW_LIMIT = 20
+
+/**
+ * Every `bad` check-in this guest has at this venue, newest first.
+ *
+ * Returns the error rather than an empty list: "no complaints" and "could not
+ * tell" must not look alike to a caller deciding whether to bring one up.
+ */
+export async function loadComplaintCheckins(
+  supabase: AdminSupabaseClient,
+  venueId: string,
+  guestId: string,
+): Promise<StoreResult<ComplaintCheckin[]>> {
+  try {
+    const { data, error } = await supabase
+      .from('visit_checkins')
+      .select('venue_local_date, ordered_at, followup_claimed_at')
+      .eq('venue_id', venueId)
+      .eq('guest_id', guestId)
+      .eq('answer', 'bad')
+      .order('ordered_at', { ascending: false })
+      .limit(COMPLAINT_ROW_LIMIT)
+    if (error) return { ok: false, error: error.message }
+    return {
+      ok: true,
+      data: (data ?? []).map((row) => ({
+        venueLocalDate: row.venue_local_date,
+        orderedAt: new Date(row.ordered_at),
+        followupClaimedAt: row.followup_claimed_at
+          ? new Date(row.followup_claimed_at)
+          : null,
+      })),
+    }
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) }
+  }
+}
+
+export type ComplaintFollowupClaimResult =
+  /** This caller owns the follow-up. */
+  | { status: 'claimed' }
+  /** Another scan or turn took it first. */
+  | { status: 'lost' }
+  | { status: 'failed'; error: string }
+
+/**
+ * Take the follow-up for EVERY complaint this guest has from before today.
+ *
+ * One statement, so two scans racing cannot both follow up: the second finds
+ * no unclaimed row and reads `lost`. All of them rather than the newest,
+ * because an older complaint left unclaimed would come back as a second
+ * follow-up on a later visit.
+ */
+export async function claimComplaintFollowup(
+  supabase: AdminSupabaseClient,
+  args: { venueId: string; guestId: string; todayLocalDate: string; now: Date },
+): Promise<ComplaintFollowupClaimResult> {
+  try {
+    const { data, error } = await supabase
+      .from('visit_checkins')
+      .update({ followup_claimed_at: args.now.toISOString() })
+      .eq('venue_id', args.venueId)
+      .eq('guest_id', args.guestId)
+      .eq('answer', 'bad')
+      .lt('venue_local_date', args.todayLocalDate)
+      .is('followup_claimed_at', null)
+      .select('id')
+    if (error) return { status: 'failed', error: error.message }
+    return (data ?? []).length > 0 ? { status: 'claimed' } : { status: 'lost' }
+  } catch (e) {
+    return {
+      status: 'failed',
+      error: e instanceof Error ? e.message : String(e),
+    }
+  }
+}
+
+/**
+ * Give back a claim whose follow-up never reached the guest, scoped to the
+ * exact timestamp this caller wrote so it cannot release someone else's.
+ */
+export async function releaseComplaintFollowupClaim(
+  supabase: AdminSupabaseClient,
+  args: { venueId: string; guestId: string; claimedAt: Date },
+): Promise<void> {
+  const { error } = await supabase
+    .from('visit_checkins')
+    .update({ followup_claimed_at: null })
+    .eq('venue_id', args.venueId)
+    .eq('guest_id', args.guestId)
+    .eq('followup_claimed_at', args.claimedAt.toISOString())
+  if (error) {
+    console.error('[complaint-followup] claim release failed', {
+      guestId: args.guestId,
+      error: error.message,
+    })
+  }
 }

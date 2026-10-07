@@ -1312,7 +1312,10 @@ export async function handleFollowup(input: {
       // third. A sign-off that went out without its link costs this guest
       // their one invitation, the same accepted cost as a held card an
       // operator skips. It is logged so the rate can be counted.
-      if (ctx.signOff === 'happy' && ctx.reviewAsk !== null) {
+      if (
+        (ctx.signOff === 'happy' || ctx.signOff === 'after_complaint') &&
+        ctx.reviewAsk !== null
+      ) {
         const carried = bodyContainsReviewLink(
           dispatched.deliveredBody,
           ctx.reviewAsk.url,
@@ -1325,8 +1328,13 @@ export async function handleFollowup(input: {
           })
         } else {
           console.warn(
-            '[agent] happy sign-off went out without the review link; the ask is spent',
-            { agentRunId, guestId: ctx.guest.id, outboundMessageId },
+            '[agent] sign-off went out without the review link; the ask is spent',
+            {
+              agentRunId,
+              guestId: ctx.guest.id,
+              outboundMessageId,
+              signOff: ctx.signOff,
+            },
           )
         }
       }

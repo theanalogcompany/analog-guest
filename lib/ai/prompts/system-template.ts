@@ -2330,7 +2330,38 @@ import {
 //   bodies. Nothing measures whether the sign-off reads well. BASELINE RESET
 //   for any scenario that ends a first conversation.
 //
-export const PROMPT_VERSION = 'v1.90.0'
+// v1.91.0 (TAC-575, fifth of five): the follow-up on the next visit after a
+// complaint. Nothing in THIS file's prompt text changes; the three additions
+// are in the user prompt and one category instruction, and each reaches only
+// a guest with a `bad` visit check-in on file:
+//
+//   1. A third scan-greeting instruction (categories/guest-arrived.ts,
+//      GUEST_ARRIVED_INSTRUCTIONS_AFTER_COMPLAINT), for the greeting that is
+//      also the follow-up.
+//   2. `## Their last visit` (serializers.ts), the same follow-up on the reply
+//      to the guest's own first message at the counter, when they wrote
+//      before the greeting.
+//   3. A second `## Sign off` block (serializers.ts,
+//      formatAfterComplaintSignOff): the review invitation for a guest whose
+//      complaint has been followed up, with no happiness condition (ruled
+//      2026-10-06). The universal `# Asking for a review` section already
+//      names `## Sign off` as a block that may give a link, so it needs no
+//      edit.
+//
+//   4. The greeting in (1) is generated WITHOUT the earlier conversation
+//      (stages.ts, buildAiRuntime; messagesFromThisVisit). Not wording, but it
+//      changes what that one generation is sent, so it is recorded here.
+//
+//   The three wordings were NOT approved before the build (ruled 2026-10-06:
+//   ruled on in PR review, with the bodies). MEASURED ONCE, bar fixed on the
+//   ticket before any generation (scripts/measurement/complaint-followup.ts),
+//   and THE GREETINGS FAILED IT: eight of ten answered the old complaint
+//   instead of greeting. The sign-offs passed. (4) is the fix; a later run
+//   with it met every number, but that run is informational, not a second
+//   verdict. See the PR body for all the bodies. Every other turn's prompt is
+//   byte-identical to v1.90.0, so no baseline resets.
+//
+export const PROMPT_VERSION = 'v1.91.0'
 
 export const SYSTEM_TEMPLATE = `You work at a hospitality venue (cafe, bakery, restaurant). You communicate with its guests via iMessage, in whatever voice the venue has configured below — its own collective voice, its owner's, or a named staff member's.
 

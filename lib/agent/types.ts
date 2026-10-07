@@ -50,10 +50,13 @@ export interface IntentionDerivation {
 export type AgentRunId = string
 
 /**
- * TAC-575: the two sign-offs. `happy` is for a guest who said their order is
- * good and carries the review invitation; `plain` is the warm close.
+ * TAC-575: the three sign-offs. `happy` is for a guest who said their order is
+ * good and carries the review invitation. `after_complaint` carries it too,
+ * for a guest whose earlier complaint has been followed up and who has not
+ * said today's order is good (one who has gets `happy`). `plain` is the warm
+ * close, with no link.
  */
-export type SignOffKind = 'happy' | 'plain'
+export type SignOffKind = 'happy' | 'after_complaint' | 'plain'
 
 export interface VenueContext {
   id: string
@@ -252,6 +255,14 @@ export interface FollowupTrigger {
   instagramScanArrival?: {
     scanMessageId: string | null
     hadPriorConversation: boolean
+    /**
+     * TAC-575: true when this greeting is also the follow-up on a complaint
+     * from an earlier visit, which the processor has just claimed
+     * (instagram-scan-greeting.ts). It picks the third greeting instruction.
+     * Absent or false on every other greeting, including one for a guest whose
+     * complaint is too old to bring up.
+     */
+    afterComplaint?: boolean
   }
   /**
    * TAC-560: set only when `reason === 'warm_close'`. Typed channel rather than
@@ -273,11 +284,11 @@ export interface FollowupTrigger {
      * the check-in, the marker and the venue's links together.
      */
     signOff: SignOffKind
-    /** The venue's review link, on a `happy` sign-off only. */
+    /** The venue's review link, on every sign-off but `plain`. */
     reviewAsk?: { url: string; label: string }
     /**
-     * When the processor claimed the once-ever review marker for a `happy`
-     * sign-off, so the claim can be given back, scoped to this timestamp, if
+     * When the processor claimed the once-ever review marker for a `happy` or
+     * `after_complaint` sign-off, so the claim can be given back, scoped to this timestamp, if
      * the invitation does not reach the guest.
      */
     reviewClaimedAt?: Date
@@ -383,6 +394,8 @@ export interface RuntimeContext {
   scanArrival: {
     hadPriorConversation: boolean
     hasRecordedVisit: boolean
+    /** TAC-575: carried from the trigger; see instagramScanArrival. */
+    afterComplaint: boolean
   } | null
   /**
    * TAC-386: the question and our answer, on an inquiry-follow-up turn only.
@@ -508,11 +521,23 @@ export interface RuntimeContext {
   // raise the review ask, which is saved for the sign-off (deriveReviewAsk).
   // False as built; handleInbound sets it before deriveReviewAsk runs.
   insideVisitCheckin: boolean
+  // TAC-575: set on an INBOUND turn with a counter scan live, for a guest
+  // still owed a follow-up on an earlier complaint. Usually their first
+  // message of the visit, but not enforced as that: if the follow-up waited
+  // on a pending card it lands on whichever counter turn comes after. With
+  // `mention: true` the reply carries `## Their last visit`; with `false`
+  // (the complaint is over thirty days old) it says nothing and the follow-up
+  // is claimed all the same.
+  // Built by build-runtime-context; handleInbound clears it when the turn
+  // turns out to be a complaint itself, and claims the follow-up once the
+  // reply is on its way. Null on every other turn and on every followup run:
+  // a scan greeting carries the same fact on `scanArrival.afterComplaint`.
+  complaintFollowup: { mention: boolean } | null
   // TAC-575: which sign-off this turn is, or null on every turn that is not
   // one. Set by build-runtime-context from the pause timer's trigger and by
   // nothing else: no inbound turn is a sign-off (ruled 2026-10-06, because a
   // goodbye and an "ok cool" classify the same). The serializer renders the matching
-  // block, and the approval gate reads `happy` to route the review invitation
+  // block, and the approval gate routes the review invitation on any sign-off
   // by `approval_policy.signOffReviewAsk` instead of `reviewAsk`.
   signOff: SignOffKind | null
   // TAC-380: the rest of this turn's derivation. Empty/false on followup runs.

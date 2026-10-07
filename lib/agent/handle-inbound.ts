@@ -81,6 +81,7 @@ import {
   orderTurnVerdict,
 } from './visit-checkin'
 import {
+  claimComplaintFollowup,
   claimVisitCheckback,
   recordVisitCheckinAnswer,
   recordVisitCheckinAsked,
@@ -2090,6 +2091,34 @@ async function runInboundTurn(
     // same predicate.
     ctx.reviewAsk = deriveReviewAsk(ctx)
 
+    // TAC-575: the follow-up on an earlier complaint, when this is the guest's
+    // own first message of a counter visit (build-runtime-context decided they
+    // are owed one). Two turns it must not ride, decided here because both
+    // need the classification or a read the context build does not make:
+    //
+    //   - this message is a complaint itself. "Glad you came back" in the
+    //     reply to "my latte is cold again" is the wrong sentence.
+    //   - a card for this guest is still waiting on an operator. The apology
+    //     for the earlier complaint may be that card, and a follow-up to an
+    //     apology that has not gone out reads as if it had. An unreadable
+    //     queue is treated the same way.
+    //
+    // Cleared, not claimed: the follow-up stays owed for a later turn or visit.
+    if (ctx.complaintFollowup !== null) {
+      const pendingCards = await loadPendingRowsBySlot(
+        ctx.venue.id,
+        ctx.guest.id,
+      )
+      if (
+        ctx.classification.category === 'comp_complaint' ||
+        pendingCards === null ||
+        pendingCards.obligation !== null ||
+        pendingCards.conversation.length > 0
+      ) {
+        ctx.complaintFollowup = null
+      }
+    }
+
     // NO SIGN-OFF IS DECIDED ON AN INBOUND TURN (TAC-575, ruled 2026-10-06).
     // The only message that classifies as a goodbye is `acknowledgment`, which
     // is also "ok cool", "thanks" and "got a cortado", and nothing tells those
@@ -2907,6 +2936,18 @@ async function runInboundTurn(
             }),
           )
         }
+        // TAC-575: a held reply keeps the follow-up's claim, as a held
+        // check-back keeps its own. If an operator skips the card the
+        // follow-up is spent unsaid, the accepted cost of every held card.
+        //
+        // NOT WHEN THE CARD IS BLANK. A blank-body card (a question the venue
+        // could not answer) discards the draft, so the follow-up it carried
+        // was never written and no operator can send it. Claiming here would
+        // spend it for certain, and would make the review link owed for a
+        // follow-up nobody said. Left owed for the next counter turn.
+        if (!approval.blankBody) {
+          recordComplaintFollowedUp(ctx, agentRunId, 'queued')
+        }
         trace.update({
           output: {
             status: 'queued',
@@ -3203,6 +3244,7 @@ async function runInboundTurn(
       ) {
         waitUntil(recordAskedHowItIs('sent_field'))
       }
+      recordComplaintFollowedUp(ctx, agentRunId, 'sent')
       // TAC-575: this reply worked the check-back in, so the visit's one
       // check-back is spent. Claimed and stamped sent in one write, AFTER the
       // send, because here the question has already gone: the timer's
@@ -3484,4 +3526,61 @@ async function runInboundTurn(
     // already inside a `waitUntil` keep-alive window so the flush completes.
     await trace.flushAsync()
   }
+}
+
+/**
+ * TAC-575: the reply that carried the follow-up on an earlier complaint is on
+ * its way, so the follow-up is spent. Claimed AFTER the reply is sent or
+ * queued, the order the in-conversation check-back uses and for its reason:
+ * the claim-before-send order protects against a send that might not happen,
+ * and here it has. Little races it: the scan greeting stands down for a guest
+ * who wrote inside its window, and a burst of messages is one turn. What is
+ * left is a message landing in the moment between the greeting's "has the
+ * guest written" read and its claim. Both then follow up, this claim reads
+ * `lost`, and that is logged as a warning so the rate can be counted.
+ *
+ * Also called when the complaint was too old to bring up (`mention: false`).
+ * The reply said nothing about it, and the claim is still what makes the review
+ * link owed at this visit's sign-off.
+ */
+function recordComplaintFollowedUp(
+  ctx: RuntimeContext,
+  agentRunId: string,
+  via: 'sent' | 'queued',
+): void {
+  const owed = ctx.complaintFollowup
+  const todayLocalDate = ctx.visitLocalDate
+  if (owed === null || todayLocalDate === null) return
+  const guestId = ctx.guest.id
+  waitUntil(
+    claimComplaintFollowup(createAdminClient(), {
+      venueId: ctx.venue.id,
+      guestId,
+      todayLocalDate,
+      now: new Date(),
+    }).then((claim) => {
+      if (claim.status === 'failed') {
+        // The next counter turn will follow up a second time. Visible.
+        console.error('[agent] complaint follow-up claim failed', {
+          agentRunId,
+          guestId,
+          error: claim.error,
+        })
+        return
+      }
+      if (claim.status === 'lost') {
+        console.warn(
+          '[agent] complaint follow-up was already claimed; this reply may have followed up a second time',
+          { agentRunId, guestId, via, mentioned: owed.mention },
+        )
+        return
+      }
+      console.log('[agent] complaint followed up in conversation', {
+        agentRunId,
+        guestId,
+        via,
+        mentioned: owed.mention,
+      })
+    }),
+  )
 }
