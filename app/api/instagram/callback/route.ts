@@ -16,8 +16,10 @@
 // authorize link carries no state, so there is no venue or operator to tie
 // the callback to and nothing here may act on it: that branch returns before
 // the environment is read, before a database client exists and before any
-// exchange. It renders the code for a person to carry to us by hand, and it
-// never logs it. A `state` is still the only thing that connects a venue.
+// exchange. It renders the code for a person to carry to us by hand, and
+// nothing in this route logs it — the URL itself still reaches the platform's
+// request log, as every callback's does. A `state` is still the only thing
+// that connects a venue.
 //
 // WHY THE ORDER OF WRITES IS WHAT IT IS. There is no transaction across
 // PostgREST, so the credential and `venues.instagram_account_id` cannot move
