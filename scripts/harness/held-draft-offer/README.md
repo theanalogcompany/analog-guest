@@ -58,4 +58,6 @@ Each of these was applied and the harness re-run before this was committed:
 | one storage site put back to the whole reply | both wiring checks |
 | the once-per-conversation veto removed from `decideFurtherHelpOffer` | both "once: ..." checks |
 | `couldCarryOffer` made to accept every category | the five "sent as ..." pairs |
+| `replyBeforeOffer` made to ignore whether the reply carries an ask | "a reply carrying an ask keeps it" |
+| `previousReplyOffered` made to count an uncategorised message | the "typed by hand ... answering our offer" check |
 | `previousReplyOffered` put back on the wide wording list | all eight "not an offer" checks |

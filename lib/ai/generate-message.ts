@@ -396,6 +396,40 @@ function normalizeForDuplicate(text: string): string {
  * the question, which is sound because prepending characters can only keep or
  * grow a normalized length.
  */
+/**
+ * stripTrailingDuplicate for the offer line, with two more conditions.
+ * stripTrailingDuplicate compares with punctuation and case folded away and
+ * will cut at any character, which is fine for a question it joined on
+ * itself. For a line the model may or may not have repeated:
+ *
+ *   the cut falls between words, never inside one, and
+ *   the line is at least three words. A one-word offer ("enjoy!") would
+ *   otherwise take the last word off a reply that simply ends on it.
+ */
+export function withoutDuplicatedOffer(body: string, offer: string): string {
+  if (offer.trim().split(/\s+/).length < 3) return body
+  const stripped = stripTrailingDuplicate(body, offer)
+  if (stripped === body) return body
+  const at = body.lastIndexOf(body.slice(stripped.length).trimStart())
+  return stripped === '' || /\s/.test(body.charAt(at - 1)) ? stripped : body
+}
+
+/**
+ * The reply as it stands before any offer line is added: the body, less a
+ * copy of the offer the model also wrote into it. Untouched when the reply
+ * carries an ask, whose text is the end of the body by construction. Its own
+ * function so the no-model check can drive the exact rule generateMessage
+ * applies (scripts/harness/held-draft-offer).
+ */
+export function replyBeforeOffer(
+  body: string,
+  offer: string,
+  carriesAnAsk: boolean,
+): string {
+  if (offer === '' || carriesAnAsk) return body
+  return withoutDuplicatedOffer(body, offer)
+}
+
 export function stripTrailingDuplicate(
   answer: string,
   question: string,
@@ -930,10 +964,21 @@ export async function generateMessage(
       // tail dispatch is about to peel off as its own message.
       const offerLine = replaceDashes(rawObject.furtherHelpOffer).trim()
       // The model put the line in the reply as well as in the field. One copy.
-      const beforeOffer =
-        offerLine === ''
-          ? withAsk.body
-          : stripTrailingDuplicate(withAsk.body, offerLine)
+      //
+      // NEVER ON A REPLY THAT CARRIES AN ASK. There the end of `body` IS the
+      // getting-to-know-you question or the review invitation, by
+      // construction, and dispatch peels it off by that identity. An offer
+      // field repeating the question would have this cut the question out of
+      // the reply while `intentionQuestion` still said it was asked: v1.100.0
+      // did exactly that for a few hours, on the veto path. No offer is sent
+      // on such a reply anyway (`carriesAnAsk`), so there is nothing to dedupe.
+      const carriesAnAsk =
+        composed.intentionQuestion !== '' || withAsk.reviewAsk !== ''
+      const beforeOffer = replyBeforeOffer(
+        withAsk.body,
+        offerLine,
+        carriesAnAsk,
+      )
       const offerDecision = decideFurtherHelpOffer({
         body: beforeOffer,
         offer: offerLine,
@@ -945,8 +990,7 @@ export async function generateMessage(
           input.runtime.signOff != null ||
           input.runtime.timedClose === true,
         onComplaintTurn: rawObject.complaintIntent !== 'none',
-        carriesAnAsk:
-          composed.intentionQuestion !== '' || withAsk.reviewAsk !== '',
+        carriesAnAsk,
         knowledgeGap: rawObject.knowledgeGap,
         correctingVisit: correcting,
         offeredThisConversation: input.runtime.offeredThisConversation === true,

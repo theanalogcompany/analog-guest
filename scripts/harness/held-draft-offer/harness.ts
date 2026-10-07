@@ -25,6 +25,10 @@ import {
   appendFurtherHelpOffer,
   decideFurtherHelpOffer,
 } from '@/lib/ai/further-help-offer'
+import {
+  replyBeforeOffer,
+  withoutDuplicatedOffer,
+} from '@/lib/ai/generate-message'
 import type { RecentMessage } from '@/lib/ai/types'
 
 let failures = 0
@@ -191,15 +195,18 @@ const msg = (
 // The 2026-10-07 phone thread, constructed.
 const beansThread = [
   msg('inbound', 'can you help me buy beans', 3),
-  msg(
-    'outbound',
-    "you can browse everything at https://example.com/collections/all happy to point you toward a specific bean if you tell me what you're brewing",
-    2,
-  ),
+  {
+    ...msg(
+      'outbound',
+      "you can browse everything at https://example.com/collections/all happy to point you toward a specific bean if you tell me what you're brewing",
+      2,
+    ),
+    category: 'new_question',
+  },
 ]
 const noOfferThread = [
   msg('inbound', 'what time do you close', 3),
-  msg('outbound', '3pm today', 2),
+  { ...msg('outbound', '3pm today', 2), category: 'new_question' },
 ]
 const base = {
   body: 'for black coffee the light roast is the one: https://example.com/products/light',
@@ -261,7 +268,10 @@ check(
 // the veto on purpose: a false hit here tells the model something untrue.
 const answering = (thread: RecentMessage[], asOf = NOW): boolean =>
   previousReplyOffered(thread, asOf, WINDOW_MS)
-const afterOurs = (body: string, category?: string): RecentMessage[] => [
+const afterOurs = (
+  body: string,
+  category: string | null = 'reply',
+): RecentMessage[] => [
   msg('inbound', 'hey', 3),
   { ...msg('outbound', body, 2), category },
 ]
@@ -358,6 +368,77 @@ check(
     ]).reason,
   ],
   [false, 'offered_this_conversation'],
+)
+
+// A MESSAGE WITH NO CATEGORY: a reply staff typed by hand arrives that way.
+const typedByHand = afterOurs('let us know if you need anything else', null)
+check(
+  'typed by hand: the guest has had their offer, so the veto counts it',
+  decide(typedByHand),
+  { append: false, reason: 'offered_this_conversation' },
+)
+check(
+  'typed by hand: the agent did not write it, so nobody is "answering our offer"',
+  answering(typedByHand),
+  false,
+)
+check(
+  'control: the same words in a reply of ours do turn the block on',
+  answering(afterOurs('let us know if you need anything else')),
+  true,
+)
+check(
+  'a curly apostrophe does not hide an offer from the veto',
+  decide(afterOurs('if you\u2019d like more detail on sizes, i\u2019ve got it'))
+    .reason,
+  'offered_this_conversation',
+)
+
+// A TURN THE CLASSIFIER MARKED AS NEEDING AN OPERATOR carries no offer.
+check(
+  'manual turn: no offer',
+  decideFurtherHelpOffer({
+    ...base,
+    category: 'manual',
+    offeredThisConversation: false,
+  }),
+  { append: false, reason: 'needs_operator' },
+)
+
+// THE DUPLICATE STRIP. A line the model also wrote into the reply is cut once.
+check(
+  'duplicate: an offer repeated at the end of the reply is removed',
+  withoutDuplicatedOffer(
+    'head to example.com/collections/all glad to help you pick one',
+    'glad to help you pick one',
+  ),
+  'head to example.com/collections/all',
+)
+check(
+  'duplicate: a one-word offer never takes the last word off a reply',
+  withoutDuplicatedOffer('all set, hope you enjoy', 'Enjoy!'),
+  'all set, hope you enjoy',
+)
+check(
+  'control: with no duplicate the reply is untouched',
+  withoutDuplicatedOffer('3pm today', 'glad to help you pick one'),
+  '3pm today',
+)
+
+// THE REGRESSION v1.100.0 SHIPPED. The offer field repeats the turn's
+// getting-to-know-you question; the question is the end of the reply and must
+// stay there, because dispatch sends it as its own message by that identity.
+const withQuestion =
+  'the light roast is the one for black coffee. what do you usually brew with?'
+check(
+  'a reply carrying an ask keeps it, even when the offer field repeats it',
+  replyBeforeOffer(withQuestion, 'What do you usually brew with?', true),
+  withQuestion,
+)
+check(
+  'control: the same text with no ask on the turn is a duplicate, and is cut',
+  replyBeforeOffer(withQuestion, 'What do you usually brew with?', false),
+  'the light roast is the one for black coffee.',
 )
 
 if (failures > 0) {

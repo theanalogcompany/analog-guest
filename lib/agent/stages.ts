@@ -3113,15 +3113,15 @@ export function buildAiRuntime(
           ctx.conversationWindowMs,
         )) ||
       undefined,
-    // Withheld on the turns knownGuest is, for the same reason: each carries
-    // its own account of why the guest is writing, and this block would
-    // contradict it (the re-opt-in line most directly).
+    // Withheld on the re-opt-in and scan turns, for knownGuest's reason: each
+    // carries its own account of why the guest is writing, and this block
+    // would contradict it. (First touch after a scan needs no gate: it has no
+    // history, so there is no message of ours to have offered anything.)
     answeringOurOffer:
       (ctx.currentMessage !== null &&
         ctx.followupTrigger === null &&
         ctx.reOptIn === null &&
         ctx.scanArrival === null &&
-        !firstTouchAfterQrScan &&
         previousReplyOffered(
           ctx.recentMessages,
           ctx.currentMessage.receivedAt,

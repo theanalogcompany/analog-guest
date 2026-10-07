@@ -22,8 +22,8 @@
 // WHICH MESSAGES CAN HAVE CARRIED ONE IS DECIDED BY HOW THEY WERE SENT, NOT BY
 // HOW THEY READ (ruled 2026-10-07). An offer is only ever appended to a reply
 // to a guest's message, in a category the decision allows. A warm close, a
-// sign-off, a scan greeting, a follow-up and an operator's own message are
-// never offers, whatever they say: a close's "message us anytime about the
+// sign-off, a scan greeting, a follow-up and a holding message are never
+// offers, whatever they say: a close's "message us anytime about the
 // menu" is its whole job. So a row counts only when its stored category is one
 // a reply with an offer can have. That is an ALLOW-list on purpose: a close or
 // sign-off sent under a category that does not exist yet is excluded without
@@ -57,23 +57,35 @@ const OFFER_REPLY_CATEGORIES: ReadonlySet<MessageCategory> = new Set([
 /**
  * Could this message of ours have carried an offer at all?
  *
- * A message with NO category recorded counts. In production every row has
- * one; the only threads without are built by hand in a harness, and there the
- * wording is all there is to go on.
+ * A MESSAGE WITH NO CATEGORY IS NOT ONE OF OURS IN THE USUAL SENSE. Production
+ * has them: a reply staff typed by hand in Instagram arrives as an echo row
+ * with none, and so does a card an operator wrote out after a photo-only
+ * message. The two callers treat it differently, and say so:
+ *
+ *   the veto    counts it by its wording. If staff wrote "let us know if you
+ *               need anything else", the guest has had their offer.
+ *   the block   does not. "Your last message ended by offering more help" is
+ *               a claim about what the agent did, and it did not write this.
  */
-function couldCarryOffer(m: RecentMessage): boolean {
+function couldCarryOffer(
+  m: RecentMessage,
+  uncategorised: 'counts' | 'does_not_count',
+): boolean {
   if (m.direction !== 'outbound' || !reachedGuest(m)) return false
-  if (m.category == null) return true
+  if (m.category == null) return uncategorised === 'counts'
   return (OFFER_REPLY_CATEGORIES as ReadonlySet<string>).has(m.category)
 }
 
+/** A model may write either apostrophe; the lists below use the plain one. */
+const plain = (s: string): string => s.replace(/[\u2018\u2019]/g, "'")
+
 /** Wide, for the veto. */
 const OFFER_WORDING =
-  /\b(happy to|glad to|anything else|any other|more questions|if you(?:'d| would)? (?:want|need|have|tell|let|ever|like)|let (?:me|us) know|just ask|ask away|ask (?:me|us)|feel free|more about|point you|narrow it down|here (?:if|for)|reach out|shout|holler|can help)\b/i
+  /\b(happy to|glad to|anything else|any other|more questions|if you(?:'d|'re| would| are)? (?:want|need|have|tell|let|ever|like|curious|interested|not sure|unsure)|let (?:me|us) know|just ask|ask away|ask (?:me|us)|tell (?:me|us)|say the word|feel free|more about|point you|narrow it down|here (?:if|for|whenever)|whenever you need|reach out|shout|holler|can help|(?:i|we) can (?:walk|help|pick|point|go|talk|explain|find))\b/i
 
 /** Narrow, for the block: phrasing that is an offer of more help and little else. */
 const CLEAR_OFFER =
-  /\b(?:happy|glad) to (?:help|answer|point|say|share|narrow|go|walk|tell|talk|explain|find)\b|\banything else\b|\bany (?:other|more) questions?\b|\bif you(?:'d| would)? (?:want|need|have|like) (?:more|any|help|a hand|anything)\b|\blet (?:me|us) know if\b|\bask away\b|\bfeel free to ask\b/i
+  /\b(?:happy|glad) to (?:help|answer|point|narrow|walk|talk|explain|(?:say|share|tell you) more|go deeper)\b|\banything else\b|\bany (?:other|more) questions?\b|\bif you(?:'d| would)? (?:want|need|have|like) (?:more|any (?:other|more)|help|a hand|anything)\b|\blet (?:me|us) know if you (?:want|need|have|'d like)\b|\bask away\b|\bfeel free to ask\b/i
 
 /** How much of the end of a message each test reads. An offer is its last line. */
 const WIDE_TAIL_CHARS = 160
@@ -94,9 +106,9 @@ export function offeredThisConversation(
 ): boolean {
   return recentMessages.some(
     (m) =>
-      couldCarryOffer(m) &&
+      couldCarryOffer(m, 'counts') &&
       asOf.getTime() - m.createdAt.getTime() <= conversationWindowMs &&
-      OFFER_WORDING.test(m.body.slice(-WIDE_TAIL_CHARS)),
+      OFFER_WORDING.test(plain(m.body).slice(-WIDE_TAIL_CHARS)),
   )
 }
 
@@ -116,9 +128,11 @@ export function previousReplyOffered(
   const last = recentMessages
     .filter((m) => m.direction === 'outbound' && reachedGuest(m))
     .at(-1)
-  if (last === undefined || !couldCarryOffer(last)) return false
+  if (last === undefined || !couldCarryOffer(last, 'does_not_count')) {
+    return false
+  }
   if (asOf.getTime() - last.createdAt.getTime() > conversationWindowMs) {
     return false
   }
-  return CLEAR_OFFER.test(last.body.slice(-CLEAR_TAIL_CHARS))
+  return CLEAR_OFFER.test(plain(last.body).slice(-CLEAR_TAIL_CHARS))
 }

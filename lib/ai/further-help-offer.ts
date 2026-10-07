@@ -72,6 +72,7 @@ export type FurtherHelpOfferReason =
   | 'nothing_to_offer_about'
   | 'not_a_reply'
   | 'sign_off'
+  | 'needs_operator'
   | 'complaint'
   | 'already_asks'
   | 'knowledge_gap'
@@ -143,6 +144,12 @@ export function decideFurtherHelpOffer(input: FurtherHelpOfferInput): {
     return no('complaint')
   }
   if (input.signsOff || NEVER_ON.has(input.category)) return no('sign_off')
+  // A turn the classifier marked as needing an operator's eyes is not one to
+  // round off with an offer. It also keeps lib/agent/previous-offer.ts exact:
+  // `manual` is what holding messages and an operator's own sends are stored
+  // under, so that file cannot count it, and an offer sent under it would be
+  // one the once-per-conversation rule could never see.
+  if (input.category === 'manual') return no('needs_operator')
   if (input.carriesAnAsk || proseOf(input.body).includes('?')) {
     return no('already_asks')
   }
