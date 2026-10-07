@@ -48,6 +48,7 @@ import {
 import {
   APPROVAL_TRIGGERS,
   GENERATION_FAILED_REVIEW_REASON,
+  MEDIA_ONLY_REVIEW_REASON,
   type ApprovalTrigger,
 } from '@/lib/agent/stages'
 import type { MessageCategory } from '@/lib/ai/types'
@@ -94,6 +95,10 @@ const COMPLAINT_REASON = 'something went wrong'
 
 const BODY_COMPLAINT = 'Complaint waiting for review'
 const BODY_NO_QUESTION = 'Draft ready to review'
+// TAC-574, approved verbatim 2026-10-06. The media-only card has no draft and
+// no guest words to quote, so the shared fallback above would be false on it.
+// Scoped to that one card by review reason; every other card is unchanged.
+const BODY_MEDIA_ONLY = 'Sent an attachment. Reply by hand.'
 
 // Used only for a reason this map does not know. The map is total over every
 // value that can reach a push, so this is reachable only if primaryTrigger
@@ -148,10 +153,13 @@ export const REASON_BY_REVIEW_REASON = {
   [APPROVAL_TRIGGERS.HOLD_ALL_OUTBOUND]: 'needs review',
   [GENERATION_FAILED_REVIEW_REASON]: "couldn't write it",
   [INSTAGRAM_SEND_FAILED_REASON]: "didn't send",
+  // TAC-574, approved 2026-10-06.
+  [MEDIA_ONLY_REVIEW_REASON]: 'sent an attachment',
 } as const satisfies Record<
   | ApprovalTrigger
   | typeof GENERATION_FAILED_REVIEW_REASON
-  | typeof INSTAGRAM_SEND_FAILED_REASON,
+  | typeof INSTAGRAM_SEND_FAILED_REASON
+  | typeof MEDIA_ONLY_REVIEW_REASON,
   string
 >
 
@@ -359,11 +367,14 @@ export async function sendDraftFlaggedPush(
     input.primaryTrigger,
     input.guestCategory,
   )
-  const body = buildPushBody(
-    input.guestQuestion,
-    input.guestCategory,
-    input.guestIsCrisis,
-  )
+  const body =
+    input.primaryTrigger === MEDIA_ONLY_REVIEW_REASON
+      ? BODY_MEDIA_ONLY
+      : buildPushBody(
+          input.guestQuestion,
+          input.guestCategory,
+          input.guestIsCrisis,
+        )
 
   for (const recipient of recipients) {
     const badge = await countPendingForOperator(recipient.id)

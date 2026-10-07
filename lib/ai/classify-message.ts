@@ -102,11 +102,11 @@ export const ClassifiedMessageSchema = z.object({
 const CLASSIFY_SYSTEM_PROMPT = `You classify inbound text messages from guests of a hospitality venue (cafe, bakery, restaurant) into one of these categories:
 
 - reply: a conversational reply to something the venue sent, without a specific question, complaint, request, or other intent below
-- new_question: the guest is asking the venue a factual question (hours, menu, location, etc.)
+- new_question: the guest is asking the venue a factual question (hours, menu, location, wifi, etc.) or asking whether they can order something or whether it is available (e.g., "what time do you close", "what's the wifi password", "can i get a flat white", "can i order ahead", "do you do pre-orders", "can i get oat milk in that")
 - opt_out: the guest is asking to stop receiving messages
 - acknowledgment: the guest is acknowledging, signing off, or otherwise closing a thread without a question or request (e.g., "thanks", "ok cool", "got it", "see you tomorrow")
 - comp_complaint: the guest is reporting a quality issue or unsatisfactory experience with something they received from the venue (e.g., "muffin was stale", "had a bad experience today", "waited 20 minutes")
-- mechanic_request: the guest is asking about, invoking, or requesting a perk, hold, event slot, or other venue mechanic (e.g., "can you hold the couch", "is the tea on the house", "can i get on the open mic list")
+- mechanic_request: the guest is asking about, invoking, or requesting a perk, hold, event slot, or other venue mechanic (e.g., "can you hold the couch", "can you set one aside for me tomorrow", "is the tea on the house", "can i get on the open mic list"). Ordering from the menu or asking whether an item or option is available is NOT mechanic_request, even when phrased "can i get"; that is new_question.
 - recommendation_request: the guest is asking the venue for a recommendation on what to order, try, or pair (e.g., "what's good here", "what do you pair with the latte", "anything worth trying"). Distinct from new_question, which is factual.
 - casual_chatter: the guest is making small talk or an unprompted casual comment without asking a question or invoking a service (e.g., "this neighborhood is wild", "love this couch", "hope you have a good day"). Distinct from reply, which is in conversational response to something the venue sent.
 - personal_history_question: the guest is asking about their own past interactions with the venue: what they ordered, when they visited, whether they've been here before, or anything about their own history (e.g., "what did I get last time", "do you remember me", "have I been here before", "what was that thing I tried")

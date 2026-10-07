@@ -20,6 +20,7 @@ import {
 import type {
   FollowupContext,
   FollowupReason,
+  InboundMediaKind,
   KnowledgeCorpusChunk,
   MessageCategory,
   MessageDelivery,
@@ -1948,6 +1949,25 @@ function formatEmojiDirective(directive: EmojiDirective): string {
 export const FIRST_TOUCH_SIGNAL_LINE =
   "This is the guest's first message, sent after they scanned your venue's QR sign."
 
+// TAC-574 (ruled 2026-10-06): a turn with text AND a photo is answered
+// normally, and the agent is told the photo exists so it can acknowledge it.
+// The bracketed marker is the ruling's own wording. The sentence after it is
+// there because the marker alone invites "love the photo!": the model has not
+// seen the image, and a reaction to its contents would be invented.
+//
+// `satisfies Record` so a new kind cannot arrive without wording.
+const INBOUND_MEDIA_LABELS = {
+  photo: 'a photo',
+  gif: 'a GIF',
+  video: 'a video',
+  other: 'an attachment',
+  unknown: 'a photo or GIF',
+} as const satisfies Record<InboundMediaKind, string>
+
+export function formatInboundMediaLine(kind: InboundMediaKind): string {
+  return `[guest also sent ${INBOUND_MEDIA_LABELS[kind]}] You cannot see it. You can say you got it, but do not describe it or react to what is in it.`
+}
+
 /**
  * `channel` picks the channel copy (today, only the first-visit opener's). It
  * defaults to null, the unknown channel, which gets the copy that asserts no
@@ -2163,6 +2183,9 @@ export function runtimeToProse(
   // eventBeingInvited set). Type-system enforcement is TAC-243 backlog.
   if (runtime.inboundMessage) {
     lines.push(`The guest just sent: "${runtime.inboundMessage}"`)
+    if (runtime.inboundMedia) {
+      lines.push(formatInboundMediaLine(runtime.inboundMedia))
+    }
   }
   // TAC-324: R1 carve-out signal. This is the ONLY place createdVia/timing
   // surfaces in the prompt — without this line the model has no way to know
