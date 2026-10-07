@@ -464,27 +464,47 @@ check(
 
 check(
   'order turn, an order report: ask',
-  orderTurnVerdict({ category: 'casual_chatter', praisedExperience: false }),
+  orderTurnVerdict({
+    category: 'casual_chatter',
+    praisedExperience: false,
+    mentionsMenuItem: true,
+  }),
   'ask',
 )
 check(
   'order turn, "got the sofi" classified as a sign-off: ask',
-  orderTurnVerdict({ category: 'acknowledgment', praisedExperience: false }),
+  orderTurnVerdict({
+    category: 'acknowledgment',
+    praisedExperience: false,
+    mentionsMenuItem: true,
+  }),
   'ask',
 )
 check(
   'order turn that already praises it: recorded good, not asked',
-  orderTurnVerdict({ category: 'casual_chatter', praisedExperience: true }),
+  orderTurnVerdict({
+    category: 'casual_chatter',
+    praisedExperience: true,
+    mentionsMenuItem: true,
+  }),
   'good',
 )
 check(
   'order turn that is a complaint: recorded bad',
-  orderTurnVerdict({ category: 'comp_complaint', praisedExperience: false }),
+  orderTurnVerdict({
+    category: 'comp_complaint',
+    praisedExperience: false,
+    mentionsMenuItem: true,
+  }),
   'bad',
 )
 check(
   'a question that names a menu item: nothing',
-  orderTurnVerdict({ category: 'new_question', praisedExperience: false }),
+  orderTurnVerdict({
+    category: 'new_question',
+    praisedExperience: false,
+    mentionsMenuItem: true,
+  }),
   'skip',
 )
 check(
@@ -492,6 +512,25 @@ check(
   orderTurnVerdict({
     category: 'recommendation_request',
     praisedExperience: true,
+    mentionsMenuItem: true,
+  }),
+  'skip',
+)
+check(
+  'a bare item name in answer to our question, classified reply: ask',
+  orderTurnVerdict({
+    category: 'reply',
+    praisedExperience: false,
+    mentionsMenuItem: true,
+  }),
+  'ask',
+)
+check(
+  'a reply that names nothing on the menu ("not yet", "haha"): nothing',
+  orderTurnVerdict({
+    category: 'reply',
+    praisedExperience: false,
+    mentionsMenuItem: false,
   }),
   'skip',
 )

@@ -147,6 +147,21 @@ const ORDER_REPORT_CATEGORIES: ReadonlySet<string> = new Set([
 ])
 
 /**
+ * `reply` is an order report ONLY WHEN THE MESSAGE NAMES A MENU ITEM (ruled
+ * 2026-10-07). The 2026-10-07 phone test: we asked "what did you get just
+ * now?", the guest answered "pink panther", the classifier called it `reply`
+ * (0.57) and the question was never asked. A bare item name in answer to our
+ * own question is the plainest order report there is, and the two categories
+ * above were measured on "got a X" phrasings, not on it.
+ *
+ * It is conditional because `reply` is also what "not yet", "yes" and "haha"
+ * classify as. The menu match is the one arming already uses
+ * (bodyMentionsMenuItem), asked again here so this function does not rest on
+ * every caller having armed first.
+ */
+const ORDER_REPORT_WHEN_NAMING_AN_ITEM = 'reply'
+
+/**
  * The turn that armed the question has now been classified: should it ask?
  *
  * Decided here because the arming ran first and could not know. Three things
@@ -164,9 +179,15 @@ const ORDER_REPORT_CATEGORIES: ReadonlySet<string> = new Set([
 export function orderTurnVerdict(input: {
   category: string
   praisedExperience: boolean
+  /** bodyMentionsMenuItem for this message against the venue's menu. */
+  mentionsMenuItem: boolean
 }): OrderTurnVerdict {
   if (input.category === 'comp_complaint') return 'bad'
-  if (!ORDER_REPORT_CATEGORIES.has(input.category)) return 'skip'
+  const isOrderReport =
+    ORDER_REPORT_CATEGORIES.has(input.category) ||
+    (input.category === ORDER_REPORT_WHEN_NAMING_AN_ITEM &&
+      input.mentionsMenuItem)
+  if (!isOrderReport) return 'skip'
   return input.praisedExperience ? 'good' : 'ask'
 }
 

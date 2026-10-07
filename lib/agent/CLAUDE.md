@@ -232,7 +232,8 @@ the answer, so a one-in-three raise rate would make them a matter of luck.
   is live, and the message names a menu item (`resolveSameVisitOrderAt`, `visit-checkin.ts`).
   The menu-name prefilter, not a transaction - the order extractor runs after the reply is
   sent. The prefilter over-matches by design, so once the turn is classified
-  `orderTurnVerdict` decides again: only `casual_chatter` / `acknowledgment` ask; a complaint
+  `orderTurnVerdict` decides again: `casual_chatter` / `acknowledgment` ask, and so does a
+  `reply` that names a menu item (a bare "pink panther" classifies `reply`); a complaint
   or a message that already praises the item is recorded as the answer with no question; a
   question that merely names a menu item arms nothing and leaves no row.
 - While it is open it is the ONLY open intention (`requiredAlone` in `derive.ts`), and the

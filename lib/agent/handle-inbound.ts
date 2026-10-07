@@ -53,7 +53,10 @@ import {
   EMPTY_PENDING_ROWS,
   loadPendingRowsBySlot,
 } from './pending-slots'
-import { extractReportedOrder } from './extract-reported-order'
+import {
+  bodyMentionsMenuItem,
+  extractReportedOrder,
+} from './extract-reported-order'
 import { retractReportedVisits } from './retract-reported-visit'
 import {
   MEDIA_ONLY_SETTLE_MS,
@@ -1800,6 +1803,10 @@ async function runInboundTurn(
       const verdict = orderTurnVerdict({
         category: ctx.classification.category,
         praisedExperience: ctx.classification.praisedExperience === true,
+        mentionsMenuItem: bodyMentionsMenuItem(
+          ctx.currentMessage.body,
+          ctx.venue.venueInfo.menu.items,
+        ),
       })
       if (verdict !== 'ask') {
         ctx.openIntentions = ctx.openIntentions.filter(
