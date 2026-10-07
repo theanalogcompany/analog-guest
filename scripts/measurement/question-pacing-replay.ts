@@ -162,7 +162,7 @@ async function main(): Promise<void> {
       fixture: 'fixtures/question-pacing-phone-test.json (CONSTRUCTED)',
       measuredInbound: fixture.measuredInbound,
       repliedMessageCount,
-      bar: 'getting-to-know-you questions on the menu turn: 0',
+      bar: 'on the menu turn: getting-to-know-you questions 0, bare-link replies 0',
       draftDropOnlyIs:
         'rules_off with the draft drop left on, to show that gate firing on its own',
       controlIs:
@@ -334,6 +334,7 @@ async function main(): Promise<void> {
   let valid = 0
   let failed = 0
   let withLink = 0
+  let bareLink = 0
   let withPacedQuestion = 0
   let draftDropFired = 0
   const attributed = new Map<string, number>()
@@ -376,10 +377,19 @@ async function main(): Promise<void> {
           (INTENTION_KEYS as readonly string[]).includes(k) &&
           isConversationPaced(k as (typeof INTENTION_KEYS)[number]),
       )
-      const hasLink = extractUrls(gen.data.body).length > 0
+      const urls = extractUrls(gen.data.body)
+      const hasLink = urls.length > 0
+      // A reply that is nothing but its link: no letter or digit is left once
+      // the links are taken out. Ruled 2026-10-07 as not acceptable.
+      const isBareLink =
+        hasLink &&
+        !/[\p{L}\p{N}]/u.test(
+          urls.reduce((rest, url) => rest.split(url).join(''), gen.data.body),
+        )
 
       valid += 1
       if (hasLink) withLink += 1
+      if (isBareLink) bareLink += 1
       if (pacedKeys.length > 0) withPacedQuestion += 1
       if (gen.data.intentionQuestionDroppedForTaskDraft) draftDropFired += 1
       for (const k of askedKeys) attributed.set(k, (attributed.get(k) ?? 0) + 1)
@@ -388,6 +398,7 @@ async function main(): Promise<void> {
         body: gen.data.body,
         intentionQuestion: gen.data.intentionQuestion,
         hasLink,
+        isBareLink,
         questions,
         askedKeys,
         pacedKeys,
@@ -397,7 +408,7 @@ async function main(): Promise<void> {
         error: null,
       })
       console.log(
-        `[${unitId}] link=${hasLink ? 'yes' : 'NO'} paced=[${pacedKeys.join(',')}]\n    -> ${gen.data.body}`,
+        `[${unitId}] link=${hasLink ? 'yes' : 'NO'} bare=${isBareLink ? 'YES' : 'no'} paced=[${pacedKeys.join(',')}]\n    -> ${gen.data.body}`,
       )
     } catch (e) {
       // A failed unit is not a result: it is counted apart and never as clean.
@@ -426,6 +437,9 @@ async function main(): Promise<void> {
     `[pacing] replies with a getting-to-know-you question : ${withPacedQuestion}/${valid}${arm === 'rules_on' ? ' (bar 0)' : ' (contrast: 0 here means this run shows nothing about the rules)'}`,
   )
   console.log(`[pacing] replies carrying a link : ${withLink}/${valid}`)
+  console.log(
+    `[pacing] replies that are a bare link : ${bareLink}/${valid}${arm === 'rules_on' ? ' (bar 0)' : ''}`,
+  )
   console.log(`[pacing] draft drop fired : ${draftDropFired}/${valid}`)
   for (const [k, n] of [...attributed.entries()].sort((a, b) => b[1] - a[1]))
     console.log(`[pacing]   asked ${k}: ${n}`)
