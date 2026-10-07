@@ -4,6 +4,7 @@ import { createServerClient } from '@/lib/db/server'
 import { Eyebrow, HairlineRow, SectionHeader, StatusDot } from '@/lib/ui'
 import { checkApns } from './check-apns'
 import { checkLangfuse } from './check-langfuse'
+import { checkKimi } from './check-kimi'
 import { checkTypesafe } from './check-typesafe'
 
 // /admin/health — three-row status panel. Server component; runs all
@@ -57,6 +58,7 @@ export default async function HealthPage() {
     checkLangfuse(),
     checkApns(),
     checkTypesafe(),
+    checkKimi(),
     await checkCurrentAdmin(),
   ]
 

@@ -1,6 +1,6 @@
-import { generateObject } from 'ai'
 import { z } from 'zod'
-import { getGenerationModel } from '@/lib/ai/client'
+import { JUDGE_MODEL_ID } from '@/lib/ai/client'
+import { generateKimiObject } from '@/lib/ai/kimi-client'
 import type { AIResult } from '@/lib/ai/types'
 import { openMoves, type GuestProfile, type InteractionMemory } from './profile'
 import type { RelationshipGraph } from './schema'
@@ -23,8 +23,26 @@ import { frontier, requiresAssessor, validateAssessorPick } from './state'
 // closed a move).
 // v1.2.0: memory entries tag the open move they pursued (moveKey), so the
 // open-moves render can show each aim's own attempt history.
-export const ASSESSOR_PROMPT_VERSION = 'assessor-v1.2.0'
-export const ASSESSOR_MAX_OUTPUT_TOKENS = 1_200
+// v1.3.0 (owner-ruled 2026-10-06): off the generation model onto Kimi, with
+// the judge. No prompt text changed - the MODEL did, which is the bigger
+// break, and ASSESSOR_PROMPT_VERSION is stamped on every stored assessment so
+// rows across this line are not comparable.
+// Heavier than the judge swap: the judge only observes, while the assessor
+// DECIDES - state transitions, profile and memory writes, and the pursuit and
+// first_name bars in the regression gate. Two consequences follow. kimi-k3
+// allows only temperature 1, so what ran at 0.2 for idempotency is now at the
+// provider default and the move tags that decide `pursued` will wobble more.
+// And every verdict stays bounded by code regardless: validateAssessorPick
+// still refuses any state outside the hard-predicate frontier, so a worse
+// assessor can fail to promote but can never promote illegally.
+export const ASSESSOR_PROMPT_VERSION = 'assessor-v1.3.0'
+// Raised from 1200 with the Kimi swap, and NOT as a guess: at 1200 the
+// assessor truncated on turn 2 of both smoke scenarios, 2/2. kimi-k3 is a
+// reasoning model and spends output budget on reasoning_content before the
+// JSON, so a budget measured against Anthropic does not transfer. This is the
+// "re-measure the output-token distribution when the shape changes" rule in
+// lib/ai/CLAUDE.md, with the model rather than the schema as the change.
+export const ASSESSOR_MAX_OUTPUT_TOKENS = 4_000
 
 // reasoning FIRST: structured output generates fields in declaration order,
 // and a verdict declared before the analysis is produced before the analysis
@@ -127,17 +145,22 @@ export async function runAssessor(
         .map((e) => e.note),
     )}\n\nThe exchange:\n${input.transcript}`
 
+  const result = await generateKimiObject({
+    model: JUDGE_MODEL_ID,
+    system,
+    user,
+    schema: AssessorOutputSchema,
+    schemaName: 'assessment',
+    maxOutputTokens: ASSESSOR_MAX_OUTPUT_TOKENS,
+    // NO TEMPERATURE: kimi-k3 rejects anything but 1. This ran at 0.2 for
+    // idempotency, so assessment variance rises by construction - and unlike
+    // the judge, the assessor DECIDES things (state transitions, profile
+    // writes, and the pursuit and first_name bars in the regression gate).
+  })
+
   try {
-    const { object } = await generateObject({
-      model: getGenerationModel(),
-      messages: [
-        { role: 'system', content: system },
-        { role: 'user', content: user },
-      ],
-      schema: AssessorOutputSchema,
-      maxOutputTokens: ASSESSOR_MAX_OUTPUT_TOKENS,
-      temperature: 0.2,
-    })
+    if (!result.ok) throw new Error(result.error)
+    const object = result.data
 
     const pick = object.statePick.trim()
     let validatedStateKey: string | null = null
