@@ -73,6 +73,10 @@ import {
 } from './review-ask'
 import { scheduleInquiryFollowup } from './schedule-inquiry-followup'
 import { renderableIntentions } from './intentions/derive'
+// The dispatch-side split, imported rather than restated: the v1 test draft's
+// bubbles have to be the bubbles dispatch would have produced, and a second
+// copy of that rule is the drift this directory already pays for.
+import { resolveDispatchBubbles, resolveOutboundTail } from './sentence-split'
 import {
   recordIntentionEligibility,
   recordIntentionPrompts,
@@ -122,7 +126,12 @@ import {
 import { AI_ERROR_TRUNCATED } from '@/lib/ai/generate-message'
 import { PROMPT_VERSION } from '@/lib/ai/prompts/system-template'
 import type { GenerateMessageResult } from '@/lib/ai'
-import type { AgentResult, InboundMessage, RuntimeContext } from './types'
+import type {
+  AgentResult,
+  InboundMessage,
+  OpenIntention,
+  RuntimeContext,
+} from './types'
 
 /**
  * TAC-529: the venue's own `venues.status`, for the halt gate below.
@@ -890,6 +899,202 @@ export async function handleInbound(
 }
 
 /**
+ * What a test run produces: the reply v1 WOULD have sent, and nothing else.
+ *
+ * `bubbles` is the load-bearing field. v1 generates one `body` and dispatch
+ * splits it; v2 emits `messages[]` directly. Comparing an unsplit v1 body
+ * against v2's bubbles would make v2 look better on bubble shape for free, so
+ * this runs the real `resolveDispatchBubbles` with the real tail resolution -
+ * the same call `scheduleAndSend` makes - and hands back what would have gone
+ * out, bubble for bubble.
+ *
+ * The split's coin is PINNED (see `TEST_RUN_SPLIT_RNG`), so the shape is
+ * reproducible across runs. `splitCoinPinned` says so, because an operator
+ * reading two runs that differ needs to know this one thing cannot be the
+ * cause.
+ */
+export interface TestDraft {
+  /** The bubbles dispatch would have sent, in order. */
+  bubbles: string[]
+  /** The joined body as generated, before the split. */
+  body: string
+  /** The getting-to-know-you question, '' when this turn asks none. */
+  intentionQuestion: string
+  /** The classifier's category for this turn. */
+  category: string
+  /** The guest's recognition band the prompt was built with. */
+  recognitionState: string
+  /** The v1 prompt version that wrote it, for the column header. */
+  promptVersion: string
+  /** Always true: the split coin was pinned, not rolled. */
+  splitCoinPinned: true
+  /**
+   * Set when the draft is NOT an ordinary generation: a crisis-safety canned
+   * reply, or a turn v1 would have answered with a blank operator card rather
+   * than text. Null on an ordinary turn.
+   *
+   * Carried rather than collapsed to an empty draft because "v1 would have
+   * sent this fixed text" and "v1 would have sent nothing and carded it" are
+   * different answers, and a comparison surface that renders both as silence
+   * is lying about one of them.
+   */
+  substitute:
+    'crisis_safety' | 'media_only_card' | 'opt_out_confirmation' | null
+}
+
+/**
+ * The sink a test run fills instead of sending.
+ *
+ * An out-param rather than a return value, and that is a deliberate trade.
+ * `runInboundTurn` has ~23 return sites typed `AgentResult`, and `AgentResult`
+ * is what the ledger's `LEDGER_DERIVERS` map is total over - adding a member
+ * for a value that must never be written would also mean widening the
+ * `inbound_turn_outcomes` outcome vocabulary, i.e. a migration for a row that
+ * by definition never exists. So the test path returns an ordinary
+ * `{status:'refused', reason:'test_run'}` (already in the vocabulary, already
+ * has a deriver) and leaves the draft here. Nothing records it either way:
+ * `draftInboundReply` never calls `recordInboundTurnOutcome`.
+ */
+interface TestRunSink {
+  draft: TestDraft | null
+}
+
+/**
+ * The pinned coin for a test run's bubble split.
+ *
+ * 0.99 keeps a 2-3 sentence body as ONE bubble (the split fires below
+ * SPLIT_PROBABILITY = 0.5), which is the conservative choice: it never
+ * manufactures the multi-bubble shape v2 produces, so a bubble-count
+ * difference in the playground is always real rather than a coin this side
+ * happened to win. See resolveDispatchBubbles for the rule.
+ */
+const TEST_RUN_SPLIT_RNG = (): number => 0.99
+
+/**
+ * The intentions this turn actually rendered, from a context whose
+ * post-classification fields are all set (`visitCheckinHold`, `reviewAsk`,
+ * `insideVisitCheckin`).
+ *
+ * ONE definition for the two call sites that need the count - the approval/
+ * dispatch path and the test-run exit. The count gates whether the
+ * getting-to-know-you question earns its own bubble, so two copies of this
+ * five-argument call would be two answers to "did the intentions block
+ * render", and the test draft's bubbles would stop matching dispatch's for a
+ * reason nobody would look for.
+ *
+ * Call only AFTER `ctx.reviewAsk` is derived; before that it answers a
+ * question the turn has not decided yet.
+ */
+function renderedIntentionsFor(ctx: RuntimeContext): OpenIntention[] {
+  return renderableIntentions(
+    ctx.openIntentions,
+    ctx.classification?.category ?? null,
+    ctx.pendingQuestion !== null,
+    ctx.reviewAsk !== null,
+    ctx.visitCheckinHold,
+  )
+}
+
+/**
+ * A test draft for a turn v1 answers WITHOUT generating text: the crisis
+ * canned reply, a media-only card, an opt-out confirmation. The caller fills
+ * `bubbles`/`body` when there is fixed text to show; `substitute` is what
+ * tells the playground to label the column rather than render it as a reply.
+ */
+function emptyTestDraft(
+  ctx: RuntimeContext,
+  substitute: NonNullable<TestDraft['substitute']>,
+): TestDraft {
+  return {
+    bubbles: [],
+    body: '',
+    intentionQuestion: '',
+    category: ctx.classification?.category ?? 'unclassified',
+    recognitionState: ctx.recognition.state,
+    promptVersion: PROMPT_VERSION,
+    splitCoinPinned: true,
+    substitute,
+  }
+}
+
+/**
+ * Run one inbound message through the WHOLE v1 pipeline and return the reply
+ * it would have sent, having sent nothing and written nothing.
+ *
+ * This is the v1 arm of the playground's side-by-side: the point is to see
+ * v1's answer next to v2's for the same message, so fidelity to production is
+ * the entire value. It therefore goes through `runInboundTurn` - the same
+ * context build, the same classifier, the same retrieval, the same prompt, the
+ * same generation and retry, the same bubble split - rather than a parallel
+ * reimplementation. A copy would drift, and `lib/voices/regenerate-with-critique.ts`
+ * already records what that costs: it mirrored this pipeline, TAC-350 moved the
+ * knowledge relevance floor, and the mirror ran months on stale semantics.
+ *
+ * WHAT IT STOPS SHORT OF, and why each is safe to skip for a comparison:
+ *   - the four post-generation checks and the 20 approval triggers. They
+ *     decide whether v1 SENDS, never what it says, so they cannot change the
+ *     text in the column.
+ *   - dispatch, the ledger row, the typing indicator, the guests.context
+ *     write, PostHog/Slack/Langfuse.
+ *   - the coalescing claim: a test run must not take a conversation claim a
+ *     real inbound is waiting on.
+ *   - the idempotency check, which is REQUIRED to skip rather than merely
+ *     harmless: in replay the guest's real reply already exists, so
+ *     `findExistingReply` would return `skipped_duplicate` on every historical
+ *     turn and the arm would be empty exactly where it is most useful.
+ *
+ * Two layers stop a send. This function returns before dispatch; and
+ * `scheduleAndSend` throws on `ctx.testRun`, so a future branch that falls
+ * through fails loudly instead of texting a guest. The second is the one that
+ * still holds after someone edits this file.
+ *
+ * `{ok:false}` on any stage failure, with the stage named - the playground
+ * renders that rather than an empty column, because "v1 errored here" and "v1
+ * had nothing to say" are different findings.
+ */
+export async function draftInboundReply(
+  inboundMessageId: string,
+): Promise<
+  { ok: true; data: TestDraft } | { ok: false; error: string; stage: string }
+> {
+  const agentRunId = randomUUID()
+  // Coalescing OFF and its deps unused: the test path skips the claim
+  // entirely. `newInboundTurnState(false, 0)` is the no-coalescing shape.
+  const turn = newInboundTurnState(false, 0)
+  const sink: TestRunSink = { draft: null }
+  try {
+    const result = await runInboundTurn(
+      inboundMessageId,
+      agentRunId,
+      turn,
+      defaultCoalesceDeps(),
+      sink,
+    )
+    if (sink.draft !== null) return { ok: true, data: sink.draft }
+    // No draft and no throw: the pipeline took an early exit that produced no
+    // text. Name the exit AND carry the stage's own error message - a column
+    // reading only "context_build" tells the operator which stage broke and
+    // nothing about why, which is one bisect short of useful. (The first
+    // version of this dropped `result.error` on the floor and a real run was
+    // what surfaced it.)
+    return {
+      ok: false,
+      error:
+        result.status === 'failed'
+          ? result.error
+          : `v1 produced no reply on this turn: the pipeline exited as '${result.status}'`,
+      stage: result.status === 'failed' ? result.stage : result.status,
+    }
+  } catch (e) {
+    return {
+      ok: false,
+      error: e instanceof Error ? e.message : String(e),
+      stage: 'unexpected',
+    }
+  }
+}
+
+/**
  * Release the claim, then re-invoke for anything this turn did not cover.
  *
  * THE SECOND HALF IS NOT AN OPTIMISATION, and this comment is here because a
@@ -1082,7 +1287,39 @@ async function runInboundTurn(
   agentRunId: string,
   turn: InboundTurnState,
   coalesceDeps: CoalesceDeps,
+  /**
+   * Non-null makes this a TEST RUN: generate the draft into the sink, send
+   * nothing, write nothing, return before the gate. Only `draftInboundReply`
+   * passes it; every production caller leaves it undefined. See that function
+   * for the full list of what a test run skips and why.
+   */
+  testSink?: TestRunSink,
 ): Promise<AgentResult> {
+  const testRun = testSink !== undefined
+
+  // SIX `if (!testRun) waitUntil(...)` GATES FOLLOW, all before the test
+  // exit, and they are not optional tidying.
+  //
+  // The test return sits after the generation, which is after every one of
+  // these fire-and-forget recorders: the visit check-in rows, intention
+  // eligibility, the inquiry follow-up, the review-ask capture, and
+  // `extractReportedOrder` - which writes a `transactions` row AND makes a
+  // model call of its own. Without the gates a "writes nothing" test run
+  // wrote five kinds of row and paid for an extra extraction every time.
+  //
+  // THEY LAND ASYNCHRONOUSLY, which is why this survived the first round of
+  // checking: a test that ran the flow and immediately counted rows saw zero,
+  // and the writes arrived afterwards. It showed up as a `guest_states` row
+  // appearing between one run and the next, attributed at first to the wrong
+  // call entirely.
+  //
+  // Gated as STATEMENTS rather than through a helper taking a thunk, because
+  // a callback loses TypeScript's narrowing of `ctx` (declared `let ... |
+  // null`) and every field access inside them fails to compile.
+  //
+  // Dispatch and the typing indicator need no gate here: a test run has
+  // already returned before them, and `scheduleAndSend` refuses on
+  // `ctx.testRun` besides.
   const start = Date.now()
   // Captured at ENTRY, because an extension increments the counter before it
   // recurses. Only the outermost call emits latency, so one turn produces one
@@ -1112,8 +1349,12 @@ async function runInboundTurn(
       traceId: trace.id,
     })
 
-    // Idempotency
-    const existing = await findExistingReply(inboundMessageId)
+    // Idempotency. SKIPPED on a test run, and this skip is required rather
+    // than a tidy-up: the playground replays messages the guest has ALREADY
+    // been answered, so a reply always exists and this check would return
+    // skipped_duplicate on every historical turn - emptying the v1 column
+    // exactly where the comparison matters most.
+    const existing = testRun ? null : await findExistingReply(inboundMessageId)
     if (existing) {
       console.log('[agent] inbound skipped (duplicate)', {
         agentRunId,
@@ -1179,7 +1420,12 @@ async function runInboundTurn(
     // generation it had already paid for. Found in code review; the old
     // comment was false for it.
     let inbound = invoked
-    if (entryExtensionDepth === 0) {
+    // A test run takes no claim: the claim table is how two real runs agree
+    // which one answers a guest, and a debugging surface must not enter that
+    // negotiation. It also means no settle wait and no adoption of a newer
+    // message - the playground replays the message it was asked about, not
+    // whichever one arrived since.
+    if (entryExtensionDepth === 0 && !testRun) {
       const opened = await openCoalescedTurn(
         {
           venueId: invoked.venueId,
@@ -1400,6 +1646,9 @@ async function runInboundTurn(
         venueId: inbound.venueId,
         currentMessage: inbound.message,
         trace,
+        // Suppresses the recognition-band write and sets ctx.testRun, which
+        // is what scheduleAndSend refuses on.
+        testRun,
       })
       // TAC-244: inbound-XOR-outbound invariant. handleInbound is the inbound
       // entry point; currentMessage MUST be set and followupTrigger MUST be
@@ -1475,6 +1724,13 @@ async function runInboundTurn(
     // and nothing to generate. The owner gets a blank card. Before retrieval
     // and classification, so neither runs on an empty body.
     if (mediaOnlyTurn) {
+      // A test run writes no card. It reports that v1 would have answered
+      // with a blank card and no text, which is a real answer and a different
+      // one from "v1 said nothing".
+      if (testSink !== undefined) {
+        testSink.draft = emptyTestDraft(ctx, 'media_only_card')
+        return { status: 'refused', reason: 'test_run' }
+      }
       const carded = await persistMediaOnlyCard(ctx, agentRunId)
       trace.update({ output: { status: carded.status, mediaOnly: true } })
       return carded
@@ -1599,6 +1855,25 @@ async function runInboundTurn(
       })
       try {
         const result = buildCrisisSafetyResult()
+        // A test run reports the canned text and dispatches nothing. This is
+        // what v1 WOULD send on this turn, so the column shows it: the
+        // comparison question on a crisis message is whether v2 also refuses
+        // to improvise, and an empty v1 column would hide that v1 has a fixed
+        // answer here at all.
+        if (testSink !== undefined) {
+          testSink.draft = {
+            ...emptyTestDraft(ctx, 'crisis_safety'),
+            bubbles: resolveDispatchBubbles(
+              result.body,
+              TEST_RUN_SPLIT_RNG,
+              '',
+            ),
+            body: result.body,
+          }
+          crisisSpan.end({ output: { testRun: true } })
+          retrieveSpan.end({ output: { discarded: 'crisis_safety' } })
+          return { status: 'refused', reason: 'test_run' }
+        }
         const dispatched = await dispatchReply(ctx, result, {
           skipHumanFeelDelay: true,
           reviewReason: CRISIS_SAFETY_REVIEW_REASON,
@@ -1726,6 +2001,16 @@ async function runInboundTurn(
       return { status: 'guest_opted_out' }
     }
     if (optOutDecision.action === 'record') {
+      // A test run records no opt-out and sends no confirmation. Replaying a
+      // "stop messaging me" through the playground must not actually opt the
+      // guest out - that is a TCPA-relevant row, and a debugging surface is
+      // not allowed to write it. Reported as a substitute so the column says
+      // v1 would have sent the confirmation rather than reading as silence.
+      if (testSink !== undefined) {
+        testSink.draft = emptyTestDraft(ctx, 'opt_out_confirmation')
+        retrieveSpan.end({ output: { discarded: 'test_run_opt_out' } })
+        return { status: 'refused', reason: 'test_run' }
+      }
       // Awaited, so the opt-out is saved BEFORE the confirmation goes out and
       // "we'll stop" is never said ahead of the fact. One retry, then a red
       // alert, and the confirmation still sends: a guest who asked to stop and
@@ -1875,32 +2160,33 @@ async function runInboundTurn(
         ctx.visitLocalDate !== null
       ) {
         const checkinGuestId = ctx.guest.id
-        waitUntil(
-          recordVisitCheckinAsked(createAdminClient(), {
-            venueId: ctx.venue.id,
-            guestId: checkinGuestId,
-            venueLocalDate: ctx.visitLocalDate,
-            orderMessageId: ctx.currentMessage.id,
-            orderedAt: ctx.currentMessage.receivedAt,
-            askedAt: ctx.currentMessage.receivedAt,
-            answer: verdict,
-          }).then((recorded) => {
-            if (!recorded.ok) {
-              console.error('[agent] visit check-in write failed', {
+        if (!testRun)
+          waitUntil(
+            recordVisitCheckinAsked(createAdminClient(), {
+              venueId: ctx.venue.id,
+              guestId: checkinGuestId,
+              venueLocalDate: ctx.visitLocalDate,
+              orderMessageId: ctx.currentMessage.id,
+              orderedAt: ctx.currentMessage.receivedAt,
+              askedAt: ctx.currentMessage.receivedAt,
+              answer: verdict,
+            }).then((recorded) => {
+              if (!recorded.ok) {
+                console.error('[agent] visit check-in write failed', {
+                  agentRunId,
+                  guestId: checkinGuestId,
+                  error: recorded.error,
+                })
+                return
+              }
+              console.log('[agent] visit check-in answered on the order turn', {
                 agentRunId,
                 guestId: checkinGuestId,
-                error: recorded.error,
+                answer: verdict,
+                outcome: recorded.data,
               })
-              return
-            }
-            console.log('[agent] visit check-in answered on the order turn', {
-              agentRunId,
-              guestId: checkinGuestId,
-              answer: verdict,
-              outcome: recorded.data,
-            })
-          }),
-        )
+            }),
+          )
       }
       console.log('[agent] order turn read', { agentRunId, verdict })
     }
@@ -1924,33 +2210,34 @@ async function runInboundTurn(
       ctx.intentionDerivation.newlyEligible.length > 0 &&
       ctx.classification.category !== 'opt_out'
     ) {
-      waitUntil(
-        recordIntentionEligibility({
-          venueId: ctx.venue.id,
-          guestId: ctx.guest.id,
-          entries: ctx.intentionDerivation.newlyEligible,
-        })
-          .then((outcome) => {
-            if (outcome.kind === 'failed') {
-              console.warn(
-                '[agent] intention eligibility write failed (continuing)',
+      if (!testRun)
+        waitUntil(
+          recordIntentionEligibility({
+            venueId: ctx.venue.id,
+            guestId: ctx.guest.id,
+            entries: ctx.intentionDerivation.newlyEligible,
+          })
+            .then((outcome) => {
+              if (outcome.kind === 'failed') {
+                console.warn(
+                  '[agent] intention eligibility write failed (continuing)',
+                  {
+                    agentRunId,
+                    error: outcome.error,
+                  },
+                )
+              }
+            })
+            .catch((e) => {
+              console.error(
+                '[agent] recordIntentionEligibility threw unexpectedly',
                 {
                   agentRunId,
-                  error: outcome.error,
+                  error: e instanceof Error ? e.message : String(e),
                 },
               )
-            }
-          })
-          .catch((e) => {
-            console.error(
-              '[agent] recordIntentionEligibility threw unexpectedly',
-              {
-                agentRunId,
-                error: e instanceof Error ? e.message : String(e),
-              },
-            )
-          }),
-      )
+            }),
+        )
     }
 
     // TAC-575: if this guest was asked how their order is on this visit, read
@@ -2017,35 +2304,36 @@ async function runInboundTurn(
       }
       if (answer !== null) {
         const checkinGuestId = ctx.guest.id
-        waitUntil(
-          recordVisitCheckinAnswer(createAdminClient(), {
-            id: checkin.id,
-            venueId: ctx.venue.id,
-            guestId: checkinGuestId,
-            expected: checkin.answer,
-            answer,
-            answeredAt: ctx.currentMessage.receivedAt,
-          }).then((written) => {
-            if (!written.ok) {
-              // Logged, not swallowed: an unrecorded answer means this guest
-              // gets a check-back they did not need, or no review ask.
-              console.error('[agent] visit check-in answer write failed', {
+        if (!testRun)
+          waitUntil(
+            recordVisitCheckinAnswer(createAdminClient(), {
+              id: checkin.id,
+              venueId: ctx.venue.id,
+              guestId: checkinGuestId,
+              expected: checkin.answer,
+              answer,
+              answeredAt: ctx.currentMessage.receivedAt,
+            }).then((written) => {
+              if (!written.ok) {
+                // Logged, not swallowed: an unrecorded answer means this guest
+                // gets a check-back they did not need, or no review ask.
+                console.error('[agent] visit check-in answer write failed', {
+                  agentRunId,
+                  guestId: checkinGuestId,
+                  answer,
+                  error: written.error,
+                })
+                return
+              }
+              console.log('[agent] visit check-in answer', {
                 agentRunId,
                 guestId: checkinGuestId,
                 answer,
-                error: written.error,
+                previous: checkin.answer,
+                outcome: written.data,
               })
-              return
-            }
-            console.log('[agent] visit check-in answer', {
-              agentRunId,
-              guestId: checkinGuestId,
-              answer,
-              previous: checkin.answer,
-              outcome: written.data,
-            })
-          }),
-        )
+            }),
+          )
       }
     }
 
@@ -2059,36 +2347,37 @@ async function runInboundTurn(
     // TAC-575: a turn that armed "how is it so far?" has already started it
     // and waited (above). That run is reused here, never repeated: for a
     // first-visit guest a second run would write a second transaction.
-    waitUntil(
-      (armedOrderExtraction ?? extractReportedOrder(ctx))
-        .then((outcome) => {
-          if (outcome.kind === 'recorded') {
-            console.log('[agent] inbound self-reported order recorded', {
-              agentRunId,
-              transactionId: outcome.transactionId,
-              amountCents: outcome.amountCents,
-              itemCount: outcome.itemCount,
-              // TAC-377: 'approximate' means this visit does NOT schedule
-              // post_visit_* followups, so it's worth seeing in the log line.
-              precision: outcome.precision,
-            })
-          } else if (outcome.kind === 'failed') {
-            console.warn(
-              '[agent] inbound self-reported order extraction failed (continuing)',
-              {
+    if (!testRun)
+      waitUntil(
+        (armedOrderExtraction ?? extractReportedOrder(ctx))
+          .then((outcome) => {
+            if (outcome.kind === 'recorded') {
+              console.log('[agent] inbound self-reported order recorded', {
                 agentRunId,
-                error: outcome.error,
-              },
-            )
-          }
-        })
-        .catch((e) => {
-          console.error('[agent] extractReportedOrder threw unexpectedly', {
-            agentRunId,
-            error: e instanceof Error ? e.message : String(e),
+                transactionId: outcome.transactionId,
+                amountCents: outcome.amountCents,
+                itemCount: outcome.itemCount,
+                // TAC-377: 'approximate' means this visit does NOT schedule
+                // post_visit_* followups, so it's worth seeing in the log line.
+                precision: outcome.precision,
+              })
+            } else if (outcome.kind === 'failed') {
+              console.warn(
+                '[agent] inbound self-reported order extraction failed (continuing)',
+                {
+                  agentRunId,
+                  error: outcome.error,
+                },
+              )
+            }
           })
-        }),
-    )
+          .catch((e) => {
+            console.error('[agent] extractReportedOrder threw unexpectedly', {
+              agentRunId,
+              error: e instanceof Error ? e.message : String(e),
+            })
+          }),
+      )
 
     // TAC-386: arm the inquiry follow-up. Non-blocking by design (waitUntil),
     // the same posture as extractReportedOrder above and for the same reason: a
@@ -2100,37 +2389,41 @@ async function runInboundTurn(
     // after the crisis short-circuit's early return above, so a guest in crisis
     // never arms one. The module re-checks crisisSafety anyway; the placement is
     // not the only thing stopping it.
-    waitUntil(
-      scheduleInquiryFollowup(ctx)
-        .then((outcome) => {
-          if (outcome.kind === 'armed') {
-            console.log('[agent] inquiry follow-up armed', {
-              agentRunId,
-              dueAt: outcome.dueAt.toISOString(),
-            })
-          } else if (outcome.kind === 'failed') {
-            console.warn(
-              '[agent] inquiry follow-up could not be armed (continuing)',
-              { agentRunId, error: outcome.error },
-            )
-          } else {
-            // Every other outcome is an ordinary decision not to arm one, and
-            // they are the common case. Logged at debug volume because the
-            // reason is the only interesting part when a follow-up is missing.
-            console.log('[agent] inquiry follow-up not armed', {
-              agentRunId,
-              outcome: outcome.kind,
-              reason: 'reason' in outcome ? outcome.reason : undefined,
-            })
-          }
-        })
-        .catch((e) => {
-          console.error('[agent] scheduleInquiryFollowup threw unexpectedly', {
-            agentRunId,
-            error: e instanceof Error ? e.message : String(e),
+    if (!testRun)
+      waitUntil(
+        scheduleInquiryFollowup(ctx)
+          .then((outcome) => {
+            if (outcome.kind === 'armed') {
+              console.log('[agent] inquiry follow-up armed', {
+                agentRunId,
+                dueAt: outcome.dueAt.toISOString(),
+              })
+            } else if (outcome.kind === 'failed') {
+              console.warn(
+                '[agent] inquiry follow-up could not be armed (continuing)',
+                { agentRunId, error: outcome.error },
+              )
+            } else {
+              // Every other outcome is an ordinary decision not to arm one, and
+              // they are the common case. Logged at debug volume because the
+              // reason is the only interesting part when a follow-up is missing.
+              console.log('[agent] inquiry follow-up not armed', {
+                agentRunId,
+                outcome: outcome.kind,
+                reason: 'reason' in outcome ? outcome.reason : undefined,
+              })
+            }
           })
-        }),
-    )
+          .catch((e) => {
+            console.error(
+              '[agent] scheduleInquiryFollowup threw unexpectedly',
+              {
+                agentRunId,
+                error: e instanceof Error ? e.message : String(e),
+              },
+            )
+          }),
+      )
 
     // The once-ever Google review ask. Placed here, post-classify, because
     // `praisedExperience` is what it reads, and after the crisis
@@ -2188,15 +2481,16 @@ async function runInboundTurn(
         agentRunId,
         linkLabel: ctx.reviewAsk.label,
       })
-      waitUntil(
-        captureReviewAskRaised({
-          agentRunId,
-          venueId: ctx.venue.id,
-          guestId: ctx.guest.id,
-          linkLabel: ctx.reviewAsk.label,
-          inboundBody: ctx.currentMessage.body,
-        }).catch(() => {}),
-      )
+      if (!testRun)
+        waitUntil(
+          captureReviewAskRaised({
+            agentRunId,
+            venueId: ctx.venue.id,
+            guestId: ctx.guest.id,
+            linkLabel: ctx.reviewAsk.label,
+            inboundBody: ctx.currentMessage.body,
+          }).catch(() => {}),
+        )
     }
 
     // Voice pack. TAC-540: the load was STARTED above, next to
@@ -2389,6 +2683,42 @@ async function runInboundTurn(
       agentRunId,
       attempts: gen.result.attempts,
     })
+
+    // THE TEST RUN'S EXIT. Here and not a line later: everything below is a
+    // write or a send - the typing refresh, the guests.context capture, the
+    // four checks, the approval gate, dispatch, the ledger.
+    //
+    // The draft is complete at this point. The checks and the 20 triggers that
+    // follow decide whether v1 would SEND this text, never what the text is,
+    // so stopping here costs the comparison nothing.
+    //
+    // THE SPLIT IS RUN HERE RATHER THAN LEFT TO THE CALLER, with the same tail
+    // resolution scheduleAndSend uses, because the bubbles ARE the thing being
+    // compared: v2 emits messages[] and v1 emits one body, so a caller that
+    // forgot the split would render v1 as one wall of text beside v2's bubbles
+    // and read it as a v2 improvement.
+    if (testSink !== undefined) {
+      const tail = resolveOutboundTail(
+        gen.result.reviewAsk,
+        gen.result.intentionQuestion,
+        renderedIntentionsFor(ctx).length,
+      )
+      testSink.draft = {
+        bubbles: resolveDispatchBubbles(
+          gen.result.body,
+          TEST_RUN_SPLIT_RNG,
+          tail,
+        ),
+        body: gen.result.body,
+        intentionQuestion: gen.result.intentionQuestion,
+        category: ctx.classification.category,
+        recognitionState: ctx.recognition.state,
+        promptVersion: gen.result.promptVersion,
+        splitCoinPinned: true,
+        substitute: null,
+      }
+      return { status: 'refused', reason: 'test_run' }
+    }
 
     // TAC-540: refresh the dots, and this second call is REQUIRED rather than
     // belt-and-braces. Meta turns the indicator off "after 20 seconds or
@@ -2771,13 +3101,7 @@ async function runInboundTurn(
     // (A residual recorded here until TAC-575: learn_name used to be open on
     // the opener turn too, so a false-positive name prompt could close it for
     // good. No replies_only intention is open on a guest's first reply now.)
-    const renderedIntentions = renderableIntentions(
-      ctx.openIntentions,
-      ctx.classification.category,
-      ctx.pendingQuestion !== null,
-      ctx.reviewAsk !== null,
-      ctx.visitCheckinHold,
-    )
+    const renderedIntentions = renderedIntentionsFor(ctx)
 
     if (approval.action === 'queue') {
       retractConfirmedVisit()

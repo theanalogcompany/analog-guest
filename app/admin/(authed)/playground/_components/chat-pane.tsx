@@ -4,7 +4,13 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import type { PlaygroundTurn } from '../_lib/types'
-import { GuestBubbles, TurnReply, V1ActualReply } from './bubbles'
+import {
+  GuestBubbles,
+  TurnReply,
+  V1ActualReply,
+  V1ComparisonCaveat,
+  V1V2Columns,
+} from './bubbles'
 
 // Sandbox chat: the operator plays the guest, each send runs one full v2
 // turn. Also renders replay results (same turn shape, plus the v1
@@ -146,18 +152,38 @@ export function ChatPane({
                     />
                   </span>
                 )}
-                <TurnReply
-                  turn={turn}
-                  selected={turn.id === selectedTurnId}
-                  onSelect={() => onSelectTurn(turn.id)}
-                  onReveal={scrollToBottom}
-                />
+                {/* One or the other, never both: the comparison block carries
+                    v2's reply in its own column, so rendering TurnReply above
+                    it would print the same reply twice. TurnReply still owns
+                    the running / failed / restored states, which the
+                    comparison has nothing to show for - and it keeps the
+                    staggered reveal, which the comparison deliberately does
+                    not take (see V1V2Columns). */}
+                {turn.status === 'done' && turn.response?.v1 != null ? (
+                  <>
+                    <V1V2Columns
+                      turn={turn}
+                      selected={turn.id === selectedTurnId}
+                      onSelect={() => onSelectTurn(turn.id)}
+                    />
+                    <V1ComparisonCaveat />
+                  </>
+                ) : (
+                  <TurnReply
+                    turn={turn}
+                    selected={turn.id === selectedTurnId}
+                    onSelect={() => onSelectTurn(turn.id)}
+                    onReveal={scrollToBottom}
+                  />
+                )}
                 {turn.mode === 'replay' && turn.status === 'done' && (
                   <>
                     <V1ActualReply bubbles={turn.v1Reply ?? null} />
                     <p className="text-[11px] italic text-ink-faint">
-                      Replay uses transcript-only context: profile, memory and
-                      state start empty at the replay point.
+                      Replay uses transcript-only context for v2: profile,
+                      memory and state start empty at the replay point. v1
+                      builds its own context from the guest&apos;s real row, so
+                      it sees their recognition band and visits.
                     </p>
                   </>
                 )}

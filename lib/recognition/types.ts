@@ -148,6 +148,22 @@ export const DEFAULT_STATE_THRESHOLDS: StateThresholds = {
 export type ComputeStateInput = {
   guestId: string
   venueId: string
+  /**
+   * Compute the band but never persist the transition. The returned
+   * `stateChanged` still reports the semantic change, so a read-only caller
+   * sees the same answer a persisting one would - it just leaves no
+   * `guest_states` row or audit row behind.
+   *
+   * The only caller is the playground's v1 test run (`draftInboundReply`),
+   * which replays an old turn against today's signals: the band it computes
+   * is true, but a debugging surface should not be what writes it.
+   *
+   * Optional rather than required because the persisting behaviour is what
+   * every production path wants and what this function has always done;
+   * silence here means "persist", which is the safe direction for a field
+   * whose other value suppresses a write.
+   */
+  readOnly?: boolean
 }
 
 // Per-signal score-point contribution (signal value × weight) for each of the

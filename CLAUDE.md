@@ -137,7 +137,8 @@ report changes, deviations, and anything you would push back on. Commit only whe
   plan as `[PLAN]`; on approval post `[HUMAN-REVIEW-REQUIRED]` and **stop** - a human drives
   the build.
 - **Plan gate** - the agent runtime contract: retrieval floors, the
-  universal voice rules. Post `[PLAN]`, wait, then build and open a draft PR.
+  universal voice rules. Post `[PLAN]`, wait, then build and open a PR - **ready for review,
+  not a draft**, per the Git section below. The gate is on the plan, not on the PR's state.
 
 Neither tier proceeds on `[NEEDS-INPUT]` alone. A change to guest-facing copy shows the new
 wording **verbatim** in the plan and waits for approval of that wording.
@@ -203,6 +204,34 @@ report both import it, so they cannot disagree about what a ticket branch is. Se
 Commits: lowercase imperative, no emoji, `THE-XXX: <subject>` (or a `docs:`-style prefix with
 no ticket). The body explains **why** when the change is not obvious. Never add your agent
 name as co-author. Never hand-edit `CHANGELOG.md` or any generated file.
+
+**An interactive session opens every PR ready for review, never as a draft, and rebases it
+onto `main` before handing it over.** A draft reads as "not finished", so it sits unlooked-at
+while the branch rots behind `main`; "I'll mark it ready once you've seen it" is backwards.
+
+**The unattended CI session is the exception, and it is deliberate**: `work-ticket.md` says
+"Draft, always", and the Actions allowlist refuses it `gh pr ready` outright
+(`.github/CLAUDE.md`) - a scheduled run's PR is for a human to read, not a request to merge.
+Do not "fix" one of those two to match the other.
+
+Both halves, every time, interactively:
+
+```
+gh pr create --base main --title "..." --body-file <file>   # no --draft
+git fetch origin main && git rebase origin/main             # then re-run the gates
+git push --force-with-lease origin <branch>:<branch>
+```
+
+**Rebase with `git`, and check with `git`.** `gh pr update-branch` reported
+`PR branch already up-to-date` on a branch that `git rev-list --count HEAD..origin/main`
+put **two commits behind** seconds after a fresh fetch - and those two commits landed in the
+same directory the branch was changing. Trust the local ref you just fetched, and treat the
+API's answer as a cache.
+
+**A rebase is not done when it merges clean.** Re-run every gate plus whatever harness
+covers the files the incoming commits touched, and re-grep anything the rules say to grep
+(`PROMPT_VERSION` especially). A clean rebase means no textual conflict, which is not a claim
+about behaviour: `tsc` passing only proves the arity of a call you now share with new code.
 
 Merge with `gh pr merge <num> --squash --delete-branch`.
 

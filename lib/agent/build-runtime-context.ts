@@ -134,7 +134,27 @@ export async function buildRuntimeContext(input: {
    * default unbounded-upward behavior.
    */
   historyEndIso?: string
+  /**
+   * This context is for a TEST RUN - generate, send nothing, write nothing.
+   *
+   * Lands on `RuntimeContext.testRun` (read that field for the guard it feeds)
+   * and suppresses the ONE write this function makes: computeGuestState
+   * persisting a `guest_states` row plus an audit row on a band change, which
+   * this function's own header calls out as its single side effect. Everything
+   * else here is a read.
+   *
+   * The band is still COMPUTED, so the prompt sees the recognition snapshot
+   * production would see. Only the row is withheld - a playground replay of a
+   * month-old turn recomputes against today's signals, and a debugging surface
+   * should not be what writes that.
+   *
+   * Set only by `draftInboundReply` (handle-inbound.ts). Omitted on every
+   * production path, which is the persisting behaviour this function has
+   * always had.
+   */
+  testRun?: boolean
 }): Promise<RuntimeContext> {
+  const testRun = input.testRun === true
   const supabase = createAdminClient()
   const computedAt = new Date()
   const historyCutoffIso = new Date(
@@ -223,7 +243,12 @@ export async function buildRuntimeContext(input: {
       )
       .eq('id', input.guestId)
       .single(),
-    computeGuestState({ guestId: input.guestId, venueId: input.venueId }),
+    computeGuestState({
+      guestId: input.guestId,
+      venueId: input.venueId,
+      // The one side effect this function has; withheld on a test run.
+      readOnly: testRun,
+    }),
     messagesQuery,
     supabase
       .from('mechanics')
@@ -1192,6 +1217,7 @@ export async function buildRuntimeContext(input: {
     guest,
     currentMessage: input.currentMessage ?? null,
     followupTrigger: input.followupTrigger ?? null,
+    testRun,
     scanArrival,
     conversationChannel: channelResolution.channel,
     recentMessages,

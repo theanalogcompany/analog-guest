@@ -115,25 +115,40 @@ export async function computeGuestState(
     // persistence success. A persistence failure is logged below and visible
     // through monitoring; callers still need to know the state changed.
     stateChanged = true
-    const transitionResult = await transitionState({
-      guestId: input.guestId,
-      venueId: input.venueId,
-      fromState: currentState,
-      toState: newState,
-      reason: 'recompute',
-    })
-    if (!transitionResult.ok) {
-      logger.error(
-        'computeGuestState: state transition persistence failed; returning computed state with stateChanged=true',
+    // readOnly: the band is still computed and still reported as changed, so
+    // the prompt sees the same recognition snapshot production would. Only
+    // the row is withheld. See ComputeStateInput.readOnly.
+    if (input.readOnly === true) {
+      logger.info(
+        'computeGuestState: read-only run, state transition not persisted',
         {
           guestId: input.guestId,
           venueId: input.venueId,
           fromState: currentState,
           toState: newState,
-          error: transitionResult.error,
-          errorCode: transitionResult.errorCode,
         },
       )
+    } else {
+      const transitionResult = await transitionState({
+        guestId: input.guestId,
+        venueId: input.venueId,
+        fromState: currentState,
+        toState: newState,
+        reason: 'recompute',
+      })
+      if (!transitionResult.ok) {
+        logger.error(
+          'computeGuestState: state transition persistence failed; returning computed state with stateChanged=true',
+          {
+            guestId: input.guestId,
+            venueId: input.venueId,
+            fromState: currentState,
+            toState: newState,
+            error: transitionResult.error,
+            errorCode: transitionResult.errorCode,
+          },
+        )
+      }
     }
   }
 
