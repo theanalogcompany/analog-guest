@@ -28,6 +28,7 @@ import type { AlertContext } from './alerts'
 import type { Visit } from './extract-recent-visits'
 import type { RetractableReportedVisit } from './retract-reported-visit'
 import type { NewlyEligibleIntention, OpenIntention } from './intentions/derive'
+import type { PacingVerdict } from './intentions/pacing'
 import type { VisitCheckin } from './visit-checkin'
 
 export type { AlertContext }
@@ -45,6 +46,12 @@ export interface IntentionDerivation {
   brakeEngaged: boolean
   /** TAC-575: true when the quiet after a warm close suppressed every intention this turn. */
   quietAfterWarmClose: boolean
+  /**
+   * The getting-to-know-you pacing verdict for this turn: whether those
+   * questions are held, why, and whether the guest reads as engaged
+   * (lib/agent/intentions/pacing.ts). Logged by handle-inbound.
+   */
+  pacing: PacingVerdict
 }
 
 export type AgentRunId = string

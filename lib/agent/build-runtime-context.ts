@@ -62,6 +62,7 @@ import {
   resolveInboundHistoryFrom,
 } from './intentions/derive'
 import { loadIntentionRows } from './intentions/load'
+import { NO_PACING_HOLD } from './intentions/pacing'
 import {
   loadScanDayKeys,
   retractedInConversation,
@@ -614,6 +615,7 @@ export async function buildRuntimeContext(input: {
     newlyEligible: [],
     brakeEngaged: false,
     quietAfterWarmClose: false,
+    pacing: NO_PACING_HOLD,
   }
   // TAC-573: inbound runs only, like the intentions above. A followup has no
   // guest message that could be taking anything back.
@@ -909,6 +911,17 @@ export async function buildRuntimeContext(input: {
         .map((m) => m.createdAt),
       input.currentMessage.receivedAt,
     ]
+    // The same messages with their text. The pacing rules judge whether a
+    // guest is engaged on what they wrote (lib/agent/intentions/pacing.ts).
+    const inboundMessages = [
+      ...recentMessages
+        .filter((m) => m.direction === 'inbound')
+        .map((m) => ({ at: m.createdAt, body: m.body })),
+      {
+        at: input.currentMessage.receivedAt,
+        body: input.currentMessage.body,
+      },
+    ]
 
     // The brake can only judge a prompt whose answer it can see. See
     // resolveInboundHistoryFrom.
@@ -945,6 +958,7 @@ export async function buildRuntimeContext(input: {
       checkbackDueAt,
       rows: intentionRows,
       inboundTimes,
+      inboundMessages,
       inboundHistoryFrom,
       // TAC-567, reopened by TAC-575: while this is true, the two intentions
       // about a past order or suggestion are held back. Everything else waits
@@ -1181,6 +1195,7 @@ export async function buildRuntimeContext(input: {
       newlyEligible: intentions.newlyEligible,
       brakeEngaged: intentions.brakeEngaged,
       quietAfterWarmClose: intentions.quietAfterWarmClose,
+      pacing: intentions.pacing,
     },
     // TAC-308: null when nothing is outstanding (the overwhelmingly common
     // case) — the serializer omits the block entirely at zero token cost.

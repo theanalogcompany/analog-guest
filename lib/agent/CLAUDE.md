@@ -368,6 +368,36 @@ carried on `RuntimeContext.firstConversation`.
 not by the guest saying goodbye: the pause timer sends it after about ten quiet minutes, for
 any first Instagram conversation, scanned or not.
 
+### Getting-to-know-you questions are paced (ruled 2026-10-07)
+
+Five intentions carry `pacing: 'conversation'` on their definition: `learn_name`,
+`are_they_new_here`, `are_they_local`, `their_rhythm`, `why_theyre_here`. Three rules hold
+them, on top of the reply counts, and touch nothing marked `pacing: 'visit'`. Rules, limits
+and reasons: `intentions/pacing.ts`.
+
+| rule | decided in | from |
+| --- | --- | --- |
+| one open question at a time; an ignored one ends the asking for the conversation | `deriveOpenIntentions` (`derivePacing`) | prompted rows, and the asked intention's own `isSatisfied` as "answered" |
+| only on a relaxed turn: `casual_chatter`, `acknowledgment`, `reply` | `renderableIntentions` | this turn's category |
+| never on a reply carrying a link or a commitment | `generateMessage` (`lib/ai/task-draft.ts`) | the draft |
+| two per conversation, three if engaged | `deriveOpenIntentions` | prompted rows, the guest's messages |
+
+- **A hold writes and closes nothing**, like the brake. `ctx.intentionDerivation.pacing`
+  carries the reason and the engaged verdict and is logged every turn. The draft drop sets
+  `intentionQuestionDroppedForTaskDraft` and logs a warn line; nothing in production counts
+  the flag yet.
+- **A question in a card still waiting on an operator is invisible to these rules.** It has
+  no prompted row until it is dispatched.
+- **The turn that carries an answer never asks.** The fact is written inside that turn,
+  after derivation.
+- **`their_rhythm` and `why_theyre_here` store no answer**, so once either is asked nothing
+  follows it in that conversation.
+- **The draft drop applies only when every rendered line is paced.** The field does not say
+  which line the model took.
+- **The engaged thresholds are a first guess**, approved as one, to be set from the log.
+
+Checks: `scripts/harness/question-pacing/`. Live replay: `npm run measure-question-pacing`.
+
 ### Three sign-offs, all written by the model (TAC-575)
 
 | kind | who | carries | once per guest of |

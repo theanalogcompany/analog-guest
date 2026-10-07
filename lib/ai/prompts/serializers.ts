@@ -1837,6 +1837,12 @@ const NO_QUESTION_RESTRAINT = [
   // it won 9 in 10.
   'Inviting a guest who has only said hello to say what they need is not a',
   'question of your own, and is welcome.',
+  // v1.96.0, wording approved 2026-10-07. Question pacing made this block
+  // render on most first-conversation turns that ask for something, and a
+  // menu request came back as the bare link 7 times in 10. "Leave it there"
+  // reads as "say as little as possible" without this.
+  'Asking nothing is not the same as saying little: the reply is still a warm',
+  'sentence or two in your usual voice, never a bare link or a one-word answer.',
 ].join('\n')
 
 /**

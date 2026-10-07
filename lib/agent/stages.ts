@@ -66,7 +66,10 @@ import { canAutoSendComplaintTurn } from './complaint-routing'
 import { resolveComplaintThreadCategory } from './complaint-thread'
 import { REPORTED_ORDER_WINDOW_DAYS } from './extract-reported-order'
 import { INTENTION_DEFINITION_BY_KEY } from './intentions/definitions'
-import { renderableIntentions } from './intentions/derive'
+import {
+  renderableIntentions,
+  rendersOnlyConversationPaced,
+} from './intentions/derive'
 import { getPrimaryTagPreference } from './knowledge-tag-mapping'
 import {
   buildContextQuery,
@@ -2853,6 +2856,24 @@ function rendersRequiredIntention(ctx: RuntimeContext): boolean {
   )
 }
 
+/**
+ * Is every intention this turn renders a getting-to-know-you question?
+ *
+ * The same renderableIntentions call as the two above, so the drop it switches
+ * on in generateMessage is about the lines that actually rendered.
+ */
+function rendersOnlyPacedIntentions(ctx: RuntimeContext): boolean {
+  return rendersOnlyConversationPaced(
+    renderableIntentions(
+      ctx.openIntentions,
+      ctx.classification?.category ?? null,
+      ctx.pendingQuestion !== null,
+      ctx.reviewAsk !== null,
+      ctx.visitCheckinHold,
+    ),
+  )
+}
+
 export function buildAiRuntime(
   ctx: RuntimeContext,
   // TAC-362: injectable so both branches of the emoji coin are reachable
@@ -3041,6 +3062,7 @@ export function buildAiRuntime(
     // priority order. Not simply ctx.openIntentions; see renderedIntentionLines.
     openIntentions: renderedIntentionLines(ctx),
     mustAskIntention: rendersRequiredIntention(ctx),
+    conversationPacedIntentionsOnly: rendersOnlyPacedIntentions(ctx),
     firstTouchAfterQrScan,
     // TAC-567: carried, never recomputed. build-runtime-context resolved it
     // against the same conversationWindowMs the intention derivation used, so

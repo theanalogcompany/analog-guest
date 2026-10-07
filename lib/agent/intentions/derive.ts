@@ -12,6 +12,13 @@ import {
   resolveIntentionKey,
 } from './definitions'
 import type { IntentionRows, PromptedIntentionRow } from './load'
+import {
+  derivePacing,
+  isConversationPaced,
+  isRelaxedCategory,
+  NO_PACING_HOLD,
+  type PacingVerdict,
+} from './pacing'
 
 // TAC-324 / TAC-380. Pure: no DB access. build-runtime-context.ts loads every
 // fact this needs and passes it in, mirroring filterEligibleMechanics.
@@ -337,6 +344,11 @@ export interface DeriveOpenIntentionsInput {
   rows: IntentionRows | null
   /** The guest's inbound times in the loaded history, including the current message. */
   inboundTimes: readonly Date[]
+  /**
+   * The same messages with their text, for the pacing rules (pacing.ts): being
+   * engaged is judged on what the guest wrote, which the times cannot say.
+   */
+  inboundMessages: readonly { at: Date; body: string | null }[]
   conversationWindowMs: number
   /**
    * Where that loaded history starts. The brake ignores prompts older than
@@ -386,6 +398,13 @@ export interface DeriveOpenIntentionsResult {
   brakeEngaged: boolean
   /** Echoes the input, so the caller can log why a turn rendered nothing. */
   quietAfterWarmClose: boolean
+  /**
+   * The pacing rules' verdict for this turn (pacing.ts). While `hold` is not
+   * `'none'`, no `pacing: 'conversation'` intention is in `open`. Carried whole
+   * so the caller can log it: a hold nobody can count is not a guarantee, and
+   * the engaged verdict is logged every turn to calibrate its thresholds.
+   */
+  pacing: PacingVerdict
 }
 
 /** One arming of an intention: the anchor it records, and the event behind it. */
@@ -675,6 +694,7 @@ export function deriveOpenIntentions(
       newlyEligible: [],
       brakeEngaged: false,
       quietAfterWarmClose: input.quietAfterWarmClose,
+      pacing: NO_PACING_HOLD,
     }
 
   const entries = new Map<IntentionKey, IntentionStateEntry>()
@@ -768,6 +788,19 @@ export function deriveOpenIntentions(
     streak: input.rules.unanswered_streak,
   })
 
+  // Ruled 2026-10-07: one open getting-to-know-you question at a time, and a
+  // ceiling per conversation. Beside the brake because it has the brake's
+  // shape: arming above still ran, nothing is written, nothing closes. Unlike
+  // the brake it holds only the paced intentions, so a question about this
+  // visit's order is untouched.
+  const pacing = derivePacing({
+    prompted: input.rows.prompted,
+    facts: input.facts,
+    inboundMessages: input.inboundMessages,
+    now: input.now,
+    conversationWindowMs: input.conversationWindowMs,
+  })
+
   const derivedOpen =
     brakeEngaged || input.quietAfterWarmClose
       ? []
@@ -784,7 +817,11 @@ export function deriveOpenIntentions(
             // guest mid-first-conversation when this shipped has rows for
             // intentions the ruling now suppresses, and only this filter sees
             // them.
-            !isSuppressedOnFirstConversation(o.key, input.isFirstConversation),
+            !isSuppressedOnFirstConversation(
+              o.key,
+              input.isFirstConversation,
+            ) &&
+            !(pacing.hold !== 'none' && isConversationPaced(o.key)),
         )
 
   return {
@@ -795,6 +832,7 @@ export function deriveOpenIntentions(
     newlyEligible,
     brakeEngaged,
     quietAfterWarmClose: input.quietAfterWarmClose,
+    pacing,
   }
 }
 
@@ -890,8 +928,17 @@ export function applyCurrentTurnSuppression(
  *   turn is classified. Same cost shape as the others: a turn, never the
  *   intention.
  *
- * A null category (no classification yet) suppresses nothing here; the
- * serializer keeps its own opt_out check as a second line of defence.
+ * - Not a relaxed turn (ruled 2026-10-07): a getting-to-know-you question
+ *   never rides on a reply that is answering something. Only the
+ *   `pacing: 'conversation'` intentions are dropped, and only the category
+ *   half of the rule is decided here; the draft half (a link, a commitment) is
+ *   the task-draft drop in lib/ai/generate-message.ts. See isRelaxedCategory
+ *   in pacing.ts. A turn, never the intention.
+ *
+ * A null category (no classification yet) suppresses nothing in the list
+ * above; the serializer keeps its own opt_out check as a second line of
+ * defence. It DOES drop the paced intentions, because a turn nobody classified
+ * is not known to be relaxed.
  */
 export function renderableIntentions(
   open: readonly OpenIntention[],
@@ -914,5 +961,25 @@ export function renderableIntentions(
     return open.filter(
       (o) => INTENTION_DEFINITION_BY_KEY[o.key].raise === 'always',
     )
+  if (!isRelaxedCategory(category))
+    return open.filter((o) => !isConversationPaced(o.key))
   return [...open]
+}
+
+/**
+ * Is every intention this turn renders a getting-to-know-you question?
+ *
+ * The compose seam drops the question from a reply that carries a link or a
+ * commitment, and it cannot tell which rendered line the model took. So the
+ * drop applies only when all of them are paced: with a visit-tied line in the
+ * set (understand_order beside learn_name is the common one), the question may
+ * be the visit's, which the pacing rules do not touch. That turn rests on the
+ * category half of the rule alone.
+ */
+export function rendersOnlyConversationPaced(
+  rendered: readonly OpenIntention[],
+): boolean {
+  return (
+    rendered.length > 0 && rendered.every((o) => isConversationPaced(o.key))
+  )
 }

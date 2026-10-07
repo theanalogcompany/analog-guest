@@ -585,6 +585,7 @@ function buildGenerationFailureGeneration(): GenerateMessageResult {
     intentionQuestionDuplicateStripped: false,
     // TAC-567: this path composes no question, so the gate never fired.
     intentionQuestionDroppedForBodyQuestion: false,
+    intentionQuestionDroppedForTaskDraft: false,
     askDroppedForVisitCorrection: false,
     // This path composes no review ask, so that gate never fired either.
     reviewAskDroppedForBodyQuestion: false,
@@ -1437,6 +1438,9 @@ async function runInboundTurn(
           intentionBrakeEngaged: ctx.intentionDerivation.brakeEngaged,
           // TAC-575: a suppression nobody can count is not a guarantee.
           quietAfterWarmClose: ctx.intentionDerivation.quietAfterWarmClose,
+          // Ruled 2026-10-07: the pacing hold and the engaged verdict, on
+          // every turn, so the engaged thresholds can be set from real threads.
+          intentionPacing: ctx.intentionDerivation.pacing,
         },
         content: trace.captureContent
           ? buildRecognitionContent(ctx.recognition)
