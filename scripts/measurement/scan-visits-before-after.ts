@@ -9,6 +9,10 @@
 // and once with scan days merged in (how it is), and prints the guests for whom
 // either the count or the band the score falls in differs.
 //
+// BOTH ARMS APPLY THE TODAY RULE (visitDaysThatCount, 2026-10-07): a guest
+// whose only visit day is today counts zero in each. So "how it was" is orders
+// alone under today's rule, not the count main printed before that rule.
+//
 // THE TWO ARMS DIFFER IN ONE THING, the `includeScanVisits` argument, and are
 // read back to back for the same guest, so a difference is the scans and not a
 // message that arrived between two runs.
@@ -126,7 +130,11 @@ async function main(): Promise<void> {
     if (guest.created_via === 'qr_scan' && guest.created_at >= sinceIso) {
       days.add(dayOf(guest.created_at))
     }
-    const reconciles = days.size === after.data.visitsLast90Days
+    // A guest whose only day is today counts zero (visitDaysThatCount), so
+    // the independent count applies the same rule from its own day set.
+    const today = dayOf(new Date().toISOString())
+    const expectedVisits = [...days].some((d) => d < today) ? days.size : 0
+    const reconciles = expectedVisits === after.data.visitsLast90Days
     if (!reconciles) mismatches += 1
 
     const bandBefore = evaluateState(scoreBefore.data.score, thresholds.data)
@@ -136,6 +144,7 @@ async function main(): Promise<void> {
       visitsBefore: before.data.visitsLast90Days,
       visitsAfter: after.data.visitsLast90Days,
       independentDayCount: days.size,
+      expectedVisits,
       reconciles,
       scoreBefore: scoreBefore.data.score,
       scoreAfter: scoreAfter.data.score,

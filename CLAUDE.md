@@ -262,6 +262,7 @@ Everything else, including the high-stakes list and the SQL patterns: `db/migrat
 | `npx tsc --noEmit` | typecheck. Run it directly, **never through a pipe** - `$?` after a pipe reports the pipe and has misread a failing typecheck as clean |
 | `npm run lint` | eslint. `-- --fix` for the auto-fixable |
 | `npm run build` | Next.js build |
+| `npm run dev:worktree` | **the only way to start a dev server here**, never bare `next dev`. Browse the `<checkout>.localhost` URL it prints - several checkouts run servers at once, so a bare port does not tell you which branch answered |
 | `npm run db:types` | regenerate `db/types.ts` after a migration |
 | `npm run seed-venue -- <slug>` | ingest a 06-spec. First-write-only; `--force` rewrites config stores only |
 | `npm run run-test-scenarios -- <slug>` | the scenario harness. **Run during the venue's open hours** |
@@ -286,7 +287,7 @@ The live floors, all in `lib/agent/stages.ts`. A number quoted anywhere else may
 | --- | --- |
 | voice pack (`lib/rag/voice-pack.ts`) | static per venue, no similarity; empty pack fails **closed** on inbound (decision 0008) |
 | `KNOWLEDGE_RELEVANCE_FLOOR` 0.3 | knowledge retrieval, degrades **gracefully** |
-| `PROMPT_VERSION` v1.93.0 | bumping it is a repo-wide sweep - `.claude/rules/prompt-versioning.md` |
+| `PROMPT_VERSION` v1.94.0 | bumping it is a repo-wide sweep - `.claude/rules/prompt-versioning.md` |
 
 **20 approval triggers compose; any one queues the draft.** The four post-generation LLM
 checks run **post-send** on inbound (Slack forward on a finding, never a hold) and keep the

@@ -302,4 +302,9 @@ export const UNIVERSAL_RULES_DISPLAY: ReadonlyArray<UniversalRule> = [
     summary:
       'Never reuse a line already sent to this guest. Greetings, questions about the guest, check-ins and sign-offs are the lines most likely to come out the same every time, so the agent looks at what it has already sent in this conversation and says it a different way. About wording, not facts: a fact the guest asks for again is still given plainly.',
   },
+  {
+    id: 'R42',
+    summary:
+      'Don\'t call anything a morning, afternoon, evening or late-night thing unless that matches the time at the venue. If unsure, leave the time of day out. Added after a compliment called a drink "a proper afternoon drink" at 11am.',
+  },
 ]

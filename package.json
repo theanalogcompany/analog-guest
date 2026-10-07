@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "dev:worktree": "set -a && . \"$(dirname \"$(git rev-parse --path-format=absolute --git-common-dir)\")/.env.local\" && set +a && ADMIN_AUTH_DISABLED=1 next dev",
+    "dev:worktree": "set -a && . \"$(dirname \"$(git rev-parse --path-format=absolute --git-common-dir)\")/.env.local\" && set +a && node scripts/dev-worktree.mjs",
     "build": "next build",
     "build:worktree": "set -a && . \"$(dirname \"$(git rev-parse --path-format=absolute --git-common-dir)\")/.env.local\" && set +a && next build",
     "start": "next start",
