@@ -383,6 +383,9 @@ async function loadConversationData({
       .select('occurred_at, amount_cents')
       .eq('guest_id', guestId)
       .eq('venue_id', venueRow.id)
+      // TAC-573: a visit the guest took back counts toward neither the visit
+      // count nor the spend.
+      .is('retracted_at', null)
       .gte('occurred_at', lookbackIso),
     supabase
       .from('engagement_events')
@@ -419,6 +422,7 @@ async function loadConversationData({
       .select('occurred_at')
       .eq('venue_id', venueRow.id)
       .eq('guest_id', guestId)
+      .is('retracted_at', null)
       .order('occurred_at', { ascending: true })
       .limit(1)
       .maybeSingle(),
@@ -427,9 +431,16 @@ async function loadConversationData({
     // header reflects "showing 50 of N" via a caveat in copy. Real-pilot
     // guests shouldn't hit this cap; if/when they do, "show all" is a
     // separate ticket.
+    //
+    // TAC-573: NOT filtered on retracted_at, unlike the two reads above. A
+    // retracted row is kept as the record of what the guest said and took
+    // back, so the operator still sees it; TransactionsList lists it apart
+    // from the visits and leaves it out of the count and the totals.
     supabase
       .from('transactions')
-      .select('id, occurred_at, amount_cents, item_count, raw_data, source')
+      .select(
+        'id, occurred_at, amount_cents, item_count, raw_data, source, retracted_at',
+      )
       .eq('venue_id', venueRow.id)
       .eq('guest_id', guestId)
       .gte('occurred_at', lookbackIso)
@@ -600,6 +611,7 @@ async function loadConversationData({
     itemCount: t.item_count,
     rawData: t.raw_data,
     source: t.source,
+    retractedAt: t.retracted_at === null ? null : new Date(t.retracted_at),
   }))
 
   return {

@@ -833,6 +833,11 @@ export async function extractReportedOrder(
       .eq('venue_id', ctx.venue.id)
       .eq('guest_id', ctx.guest.id)
       .eq('source', 'guest_reported_ongoing')
+      // TAC-573: never merge new items into a row the guest took back. The
+      // enrollment gate above deliberately does NOT filter: a retracted
+      // 'guest_reported' row still holds the one-per-guest index slot, so a
+      // later genuine report has to land here as ongoing.
+      .is('retracted_at', null)
       .order('occurred_at', { ascending: false })
       .limit(ONGOING_MERGE_LOOKBACK_LIMIT)
     if (recentOngoingError) {

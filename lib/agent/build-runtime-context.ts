@@ -210,6 +210,9 @@ export async function buildRuntimeContext(input: {
       .select('occurred_at, raw_data')
       .eq('venue_id', input.venueId)
       .eq('guest_id', input.guestId)
+      // TAC-573: a visit the guest took back is not a visit. It leaves the
+      // ## Visit history block and every intention fact built from this read.
+      .is('retracted_at', null)
       .gte('occurred_at', visitHistoryCutoffIso)
       .order('occurred_at', { ascending: false })
       .limit(MAX_VISIT_HISTORY_TRANSACTIONS),

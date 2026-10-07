@@ -36,6 +36,9 @@ export interface Transaction {
   itemCount: number | null
   rawData: unknown
   source: string
+  // TAC-573: set when the guest took this reported visit back. The row is
+  // kept; TransactionsList lists it apart and counts nothing from it.
+  retractedAt: Date | null
 }
 
 interface TransactionRowProps {
