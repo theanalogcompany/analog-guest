@@ -250,7 +250,7 @@ export const UNIVERSAL_RULES_DISPLAY: ReadonlyArray<UniversalRule> = [
   {
     id: 'R31',
     summary:
-      "Don't name a specific product (a drink, a bean, a menu item) in reply to a greeting or any message with no question or content of its own. Reply in kind and stop. Doesn't restrict a question you ask back, answering once the guest actually asks or orders something, or asking how an item went when it's already in their visit history or an open recommendation to them.",
+      "Don't name a specific product (a drink, a bean, a menu item) in reply to a greeting or any message with no question or content of its own. A greeting gets a warm welcome and a question about how the venue can help, in one short line and never worded as taking an order; anything else with no content gets a reply in kind. Doesn't restrict a question you ask back, answering once the guest actually asks or orders something, or asking how an item went when it's already in their visit history or an open recommendation to them.",
   },
   {
     id: 'R32',
@@ -306,5 +306,10 @@ export const UNIVERSAL_RULES_DISPLAY: ReadonlyArray<UniversalRule> = [
     id: 'R42',
     summary:
       'Don\'t call anything a morning, afternoon, evening or late-night thing unless that matches the time at the venue. If unsure, leave the time of day out. Added after a compliment called a drink "a proper afternoon drink" at 11am.',
+  },
+  {
+    id: 'R43',
+    summary:
+      "When a guest corrects something they themselves told you, like saying it was a different place, the slip is theirs and a small one. Take it lightly and move on in one short line, with no apology and no calling it the venue's mistake. Separate from a guest questioning something the agent said, where an error is owned. A guest who only says they have never been in still gets the one gentle check first.",
   },
 ]
