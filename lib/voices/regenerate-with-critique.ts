@@ -326,16 +326,6 @@ export async function regenerateWithCritique(
   // handle-inbound.ts's identical short circuit) — regenerating it here
   // would run exactly the generateMessage call that mechanism exists to
   // bypass, on a message this repo has decided must never be persona-styled.
-  // The live turn's category, not only the classifier's pick: the answer to a
-  // complaint's clarifying question ran as comp_complaint (complaint-thread.ts),
-  // so its regen must too or it is rewritten under the wrong instructions. The
-  // pure half of classifyStage's carry, without the stage's event.
-  const { category } = resolveComplaintThreadCategory({
-    classifierCategory: classification.data.category,
-    crisisSafety: classification.data.crisisSafety,
-    openComplaintClarification: ctx.openComplaintClarification,
-  })
-
   if (classification.data.crisisSafety) {
     return {
       ok: false,
@@ -344,6 +334,21 @@ export async function regenerateWithCritique(
         'This message was a crisis-safety reply (self-harm or medical-emergency signal). It sends a fixed, hardcoded response and is not eligible for voice regeneration.',
     }
   }
+
+  // The answer to a complaint's clarifying question runs as comp_complaint on
+  // the live path (complaint-thread.ts), so its regen picks the category the
+  // same way: the pure half of classifyStage's carry, without the stage's
+  // event. This is a RE-DERIVATION from pinned history, not a read of what the
+  // live turn stored, so the two can differ: history here stops at the
+  // inbound, which hides a question whose row was written after it, and shows
+  // none of what arrived between the inbound and the live context build. And
+  // it carries the category only: this path never sets ctx.classification, so
+  // willBeReviewed stays false on every complaint regen, carried or not.
+  const { category } = resolveComplaintThreadCategory({
+    classifierCategory: classification.data.category,
+    crisisSafety: classification.data.crisisSafety,
+    openComplaintClarification: ctx.openComplaintClarification,
+  })
 
   // 4. Load the static voice pack (decision 0008) — the same pack the live
   // turn used, because it is the same pack every turn uses. Mirrors

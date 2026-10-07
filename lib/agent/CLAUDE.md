@@ -156,7 +156,9 @@ subject included (ruled 2026-10-07); only `opt_out` and a crisis signal are exem
 turn in the ordinary case: any later outbound row, a waiting draft included, closes the thread.
 It stays open only while the question is still the newest thing we said, or the carried turn
 auto-sent a second clarifying question. `review_reason` must be null, which keeps a demo
-bypass and the crisis reply from reading as a question.
+bypass and the crisis reply from reading as a question. **So the rule is inert for a demo
+guest**: every demo send is stamped `demo_bypass`, its clarifying question included, and the
+thread never opens. Verify it on a guest that is not `is_demo`.
 
 `classifyStage` applies it, so the scenario harness sees it too. The classifier's own pick
 rides `Classification.classifierCategory` and the `complaint_thread_turn` event, fired on

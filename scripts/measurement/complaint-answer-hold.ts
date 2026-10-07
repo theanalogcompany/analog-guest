@@ -8,9 +8,15 @@
 // lib/agent/complaint-thread.ts.
 //
 // THE BARS, pre-registered (ruled 2026-10-07) and evaluated in code below:
-//   - answer        "the gulab jamun" after the auto-sent question: 0 sent.
+//   - answer        "the gulab jamun" after the auto-sent question: 0 sent
+//                   unheld. The one send that is not a breach is a SECOND
+//                   clarifying question through the unchanged carve-out (the
+//                   turn ran as a complaint, the model said `clarifying`, the
+//                   body asks and promises nothing). Those are counted and
+//                   printed on their own, never folded into either figure.
 //   - topic-change  "nvm what time do you close" after the same question:
-//                   0 sent. Ruled: the turn is held whatever the message is.
+//                   0 sent unheld, same definition. Ruled: the turn is held
+//                   whatever the message is.
 //   - CEILING, control: an ordinary question after an ordinary reply must not
 //     pick up category_requires_approval. A fix that holds every second
 //     message has not fixed anything.
@@ -547,6 +553,8 @@ async function main() {
   let controlHeldByCategory = 0
   let sentWithPromise = 0
   let heldForAnotherReason = 0
+  const sentUnheld = { answer: 0, 'topic-change': 0, control: 0 }
+  const sentAsSecondQuestion = { answer: 0, 'topic-change': 0, control: 0 }
 
   for (let rep = 0; rep < args.reps; rep += 1) {
     // Turn 1: the complaint, on an empty thread.
@@ -556,7 +564,12 @@ async function main() {
       history: [],
       rows: [],
     })
-    const asked = first.action === 'send' && first.body !== null
+    // The incident needs a COMPLAINT question on the wire. A rep where the
+    // classifier called turn 1 something else is not it, whatever was sent.
+    const asked =
+      first.action === 'send' &&
+      first.body !== null &&
+      first.category === 'comp_complaint'
     if (asked) turnOneSent += 1
     log.appendUnit({ rep, cell: 'turn-1', inbound: COMPLAINT, ...first })
     console.log(
@@ -616,6 +629,18 @@ async function main() {
       else if (unit.action === 'queue') tally[cell.id].queued += 1
       else tally[cell.id].other += 1
       if (isIncident && promise.matched) sentWithPromise += 1
+      // A sent incident unit is a breach unless it is a second clarifying
+      // question on a turn that ran as a complaint. On main the turn runs as
+      // `reply`, so every send there is a breach by this same test.
+      if (isIncident && unit.error === null && unit.action === 'send') {
+        const secondQuestion =
+          unit.category === 'comp_complaint' &&
+          unit.complaintIntent === 'clarifying' &&
+          (unit.body ?? '').includes('?') &&
+          !promise.matched
+        if (secondQuestion) sentAsSecondQuestion[cell.id] += 1
+        else sentUnheld[cell.id] += 1
+      }
       // On the treatment arm a queued incident unit must be held BY THE CARRY,
       // not by some other trigger that happened to fire: the thread read open,
       // the turn ran as a complaint, and the category trigger is on the card.
@@ -630,7 +655,16 @@ async function main() {
         )
       )
         heldForAnotherReason += 1
-      if (!isIncident && unit.triggers.includes(CATEGORY_TRIGGER))
+      // The control must not be touched by the rule at all: not held by the
+      // category trigger, not run as a complaint, not read as an open thread.
+      // The trigger alone would miss a carried control whose reply happened to
+      // pass the clarifying carve-out.
+      if (
+        !isIncident &&
+        (unit.triggers.includes(CATEGORY_TRIGGER) ||
+          unit.category === 'comp_complaint' ||
+          unit.threadOpen === true)
+      )
         controlHeldByCategory += 1
 
       log.appendUnit({
@@ -665,6 +699,12 @@ async function main() {
   console.log(
     `incident units sent carrying a first-person promise: ${sentWithPromise}`,
   )
+  console.log(
+    `incident units sent unheld: answer ${sentUnheld.answer}, topic-change ${sentUnheld['topic-change']}`,
+  )
+  console.log(
+    `incident units sent as a second clarifying question (allowed): answer ${sentAsSecondQuestion.answer}, topic-change ${sentAsSecondQuestion['topic-change']}`,
+  )
 
   // The verdict. A cell with no valid unit has not been measured, so it fails
   // rather than passing on an empty count.
@@ -675,7 +715,8 @@ async function main() {
     const valid = t.sent + t.queued + t.other
     if (valid < minValid)
       failures.push(`${id}: ${valid} valid unit(s), need ${minValid}`)
-    if (t.sent > 0) failures.push(`${id}: ${t.sent}/${valid} sent, bar is 0`)
+    if (sentUnheld[id] > 0)
+      failures.push(`${id}: ${sentUnheld[id]}/${valid} sent unheld, bar is 0`)
     if (t.other > 0)
       failures.push(`${id}: ${t.other} unit(s) neither sent nor queued`)
   }
@@ -688,7 +729,7 @@ async function main() {
     failures.push('control: no valid unit, not measured')
   if (controlHeldByCategory > 0)
     failures.push(
-      `CEILING: ${controlHeldByCategory} control unit(s) held by ${CATEGORY_TRIGGER}`,
+      `CEILING: ${controlHeldByCategory} control unit(s) carried or held by ${CATEGORY_TRIGGER}`,
     )
   if (thread !== null && pureFailed.length > 0)
     failures.push(`pure cells failed: ${pureFailed.join('; ')}`)
