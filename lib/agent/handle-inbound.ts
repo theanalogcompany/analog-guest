@@ -3414,12 +3414,45 @@ async function runInboundTurn(
           outcome: claim.status,
         })
       }
-      if (
+      const checkbackSeenInField =
         checkedBack !== undefined &&
         sentQuestion !== '' &&
         dispatched.deliveredBody.includes(sentQuestion)
-      ) {
+      if (checkbackSeenInField) {
         waitUntil(recordCheckedBack('sent_field'))
+      }
+      // TAC-575, ruled 2026-10-06: COUNT THE CASE NEITHER SIGNAL CATCHES. The
+      // model can write the check-back into `body` and the classifier can miss
+      // it; nothing then claims the row and the guest can be checked back on a
+      // second time. That is an accepted limit, but an unmeasured one, so when
+      // the check-back was the turn's one rendered question, neither signal
+      // recorded it, and the reply that went out still asks SOMETHING, say so.
+      //
+      // "Looks like one" is a bare `?` in what the guest received. Crude on
+      // purpose and safe on this population: on this turn the prompt told the
+      // model the reply asks nothing but the check-back, so a question mark in
+      // it is the check-back far more often than not. Our outbound copy always
+      // punctuates a question (the detector composeReplyWithIntention uses).
+      // A false positive costs a log line, and the message id is on it.
+      const checkbackLooksUnrecorded = (classifierRaisedIt: boolean): boolean =>
+        checkedBack !== undefined &&
+        !checkbackSeenInField &&
+        !classifierRaisedIt &&
+        dispatched.deliveredBody.includes('?')
+      const warnCheckbackUnrecorded = (
+        classifier: 'not_raised' | 'failed',
+      ): void => {
+        console.warn(
+          '[agent] visit check-back may have gone out unrecorded; a second can follow',
+          {
+            agentRunId,
+            guestId: checkinGuestId,
+            classifier,
+            // The row id, not the text: the body is the guest's conversation
+            // and this is a console line. The message is one lookup away.
+            outboundMessageId,
+          },
+        )
       }
       // TAC-324 / TAC-380: close the intentions this send raised. Fire-and-
       // forget, mirroring extractReportedOrder's waitUntil posture: it never
@@ -3455,8 +3488,14 @@ async function runInboundTurn(
                 if (outcome.raisedKeys.includes('hows_it_so_far')) {
                   await recordAskedHowItIs('classifier')
                 }
-                if (outcome.raisedKeys.includes('check_back_on_order')) {
+                const classifierSawCheckback = outcome.raisedKeys.includes(
+                  'check_back_on_order',
+                )
+                if (classifierSawCheckback) {
                   await recordCheckedBack('classifier')
+                }
+                if (checkbackLooksUnrecorded(classifierSawCheckback)) {
+                  warnCheckbackUnrecorded('not_raised')
                 }
                 console.log('[agent] inbound intention prompts recorded', {
                   agentRunId,
@@ -3481,6 +3520,11 @@ async function runInboundTurn(
                   sentBody: dispatched.deliveredBody,
                 })
               } else if (outcome.kind === 'closed_pessimistically') {
+                // TAC-575: no verdict at all is also "the classifier did not
+                // record it".
+                if (checkbackLooksUnrecorded(false)) {
+                  warnCheckbackUnrecorded('failed')
+                }
                 // Ruling 4: nothing re-asks, but these closed without a
                 // verdict. Alerted so a run of them is visible.
                 console.warn(
