@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import type { PlaygroundTurn } from '../_lib/types'
@@ -75,10 +75,16 @@ export function ChatPane({
   const [saveName, setSaveName] = useState('')
   const scrollRef = useRef<HTMLDivElement>(null)
 
-  useEffect(() => {
+  // Stable identity: TurnReply calls this from an effect on every bubble
+  // reveal, so a fresh closure each render would re-fire it on every paint.
+  const scrollToBottom = useCallback(() => {
     const el = scrollRef.current
     if (el) el.scrollTop = el.scrollHeight
-  }, [turns])
+  }, [])
+
+  useEffect(() => {
+    scrollToBottom()
+  }, [turns, scrollToBottom])
 
   // Adopt a rewound inbound exactly once per seq bump - the documented
   // adjust-state-during-render pattern, not an effect, so the composer
@@ -144,6 +150,7 @@ export function ChatPane({
                   turn={turn}
                   selected={turn.id === selectedTurnId}
                   onSelect={() => onSelectTurn(turn.id)}
+                  onReveal={scrollToBottom}
                 />
                 {turn.mode === 'replay' && turn.status === 'done' && (
                   <>
