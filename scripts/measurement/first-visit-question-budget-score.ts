@@ -26,8 +26,9 @@
  *   TAC-567 (2026-09-30): order, name, first-visit question.
  *   TAC-568 (2026-09-30): order and name; the first-visit question moved
  *     behind the warm close.
- *   TAC-575 (2026-10-06): order, name, first time or regular, then local,
- *     rhythm and why they are here, "only while they keep engaging".
+ *   TAC-575 (2026-10-06): order, how it is so far, name, first time or
+ *     regular, then local, rhythm and why they are here, "only while they
+ *     keep engaging".
  *
  * WHAT THIS BAR NO LONGER CATCHES: with six of the eight allowed, "off-target"
  * now means only a question about a past order or suggestion. The interview
@@ -36,6 +37,7 @@
  */
 export const ALLOWED_KEYS = [
   'understand_order',
+  'hows_it_so_far',
   'learn_name',
   'are_they_new_here',
   'are_they_local',
