@@ -23,6 +23,13 @@ Etiquette is the model's job, informed by facts; quality is measured by the judg
 
 **Kept, untouched** (the test is "outside a single model call's reach"): coalescing, proactive spacing, the opt-out TCPA rail, the operator approval queue, Langfuse.
 
+**Bubble CADENCE is code, even though bubble CONTENT is the model's.**
+Every message in `messages: string[]` is ready at the same instant, so with no pacing a three-bubble reply arrives as one block.
+`bubble-pacing.ts` is the one rule: the delay before each bubble after the first is its own character count times `MS_PER_CHAR`, floored and capped.
+It is pure and import-free so the playground's `'use client'` bubbles can read it and phase 6's dispatch can read the same copy - two copies of a cadence rule is the drift `lib/agent/CLAUDE.md` pays for on the intention-question gate.
+`MS_PER_CHAR` is calibrated so that at 43 characters, a typical bubble, it reproduces v1's flat `INTER_BUBBLE_GAP_MS`; the floor and the cap are choices and say so at the constant.
+The playground reveal is **presentation only** - `replyBubblesOf` stays the one definition of a turn's reply, and nothing paced reaches the transcript, a save, or the inspector.
+
 ## The prompt: volatility tiers decide placement
 
 Cache is prefix-based, so **anything that changes per turn sits after everything that does not**.
