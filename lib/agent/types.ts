@@ -6,6 +6,7 @@ import type {
   PendingQuestion,
   RecentMessage,
 } from '@/lib/ai'
+import type { InboundMediaKind } from '@/lib/ai/types'
 import type { AgentTrace } from '@/lib/observability'
 import type { KnowledgeCorpusChunk, VoiceCorpusChunk } from '@/lib/rag'
 import type {
@@ -443,6 +444,12 @@ export interface RuntimeContext {
   // maps it onto the AI runtime, where it renders the `## Ask for a review`
   // block and gates composeReplyWithReviewAsk.
   reviewAsk: { url: string; label: string } | null
+  // TAC-574: the guest sent a photo, GIF or other attachment beside the text
+  // this turn answers. buildRuntimeContext always initializes it null;
+  // handle-inbound.ts is the ONLY writer (lib/agent/inbound-media.ts decides
+  // it), so no proactive path can render the line. buildAiRuntime maps it onto
+  // the AI runtime. Null on a turn with no media, which is nearly all of them.
+  inboundMedia: InboundMediaKind | null
   corpus: CorpusMatch[] | null
   // Retrieved knowledge_corpus chunks. Populated by retrieveKnowledgeStage
   // when shouldRetrieveKnowledge fires (always for inbound; followups

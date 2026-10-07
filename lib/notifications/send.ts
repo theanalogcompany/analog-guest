@@ -48,6 +48,7 @@ import {
 import {
   APPROVAL_TRIGGERS,
   GENERATION_FAILED_REVIEW_REASON,
+  MEDIA_ONLY_REVIEW_REASON,
   type ApprovalTrigger,
 } from '@/lib/agent/stages'
 import type { MessageCategory } from '@/lib/ai/types'
@@ -148,10 +149,13 @@ export const REASON_BY_REVIEW_REASON = {
   [APPROVAL_TRIGGERS.HOLD_ALL_OUTBOUND]: 'needs review',
   [GENERATION_FAILED_REVIEW_REASON]: "couldn't write it",
   [INSTAGRAM_SEND_FAILED_REASON]: "didn't send",
+  // TAC-574, approved 2026-10-06.
+  [MEDIA_ONLY_REVIEW_REASON]: 'sent a photo or GIF',
 } as const satisfies Record<
   | ApprovalTrigger
   | typeof GENERATION_FAILED_REVIEW_REASON
-  | typeof INSTAGRAM_SEND_FAILED_REASON,
+  | typeof INSTAGRAM_SEND_FAILED_REASON
+  | typeof MEDIA_ONLY_REVIEW_REASON,
   string
 >
 

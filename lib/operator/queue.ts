@@ -11,7 +11,10 @@
 
 import { createAdminClient } from '@/lib/db/admin'
 import type { Json } from '@/db/types'
-import type { ApprovalTrigger } from '@/lib/agent/stages'
+import type {
+  ApprovalTrigger,
+  MEDIA_ONLY_REVIEW_REASON,
+} from '@/lib/agent/stages'
 import type { ThreadMessage } from '@/lib/schemas'
 import { PendingCommitmentSchema } from '@/lib/schemas/guest-commitment'
 import type { MessageChannel } from '@/lib/schemas/message-channel'
@@ -174,8 +177,15 @@ export type ListPendingQueueResult =
 //     timeout, missing configuration), so the Instagram dispatch wrote the
 //     reply as a card instead. Outside APPROVAL_TRIGGERS for the decline's
 //     reason: the gate had already said send.
+//   media_only_inbound — TAC-574: the guest sent a photo, GIF or other
+//     attachment with no text, so nothing was classified or generated and
+//     handle-inbound wrote a blank card for the owner to answer by hand.
+//     Outside APPROVAL_TRIGGERS because no gate ran.
 type ExtraReviewReason =
-  'operator_decline_initiated' | 'generation_failed' | 'instagram_send_failed'
+  | 'operator_decline_initiated'
+  | 'generation_failed'
+  | 'instagram_send_failed'
+  | typeof MEDIA_ONLY_REVIEW_REASON
 
 // Operator-facing copy for `messages.review_reason`.
 //
@@ -367,6 +377,15 @@ const REVIEW_REASON_LABELS: Record<
   // would be in the Instagram thread.
   instagram_send_failed:
     "This reply didn't send on Instagram. Check the thread before sending it again.",
+  // TAC-574, copy approved verbatim 2026-10-06. It does not say where to look,
+  // because the app cannot show the media on either channel.
+  //
+  // KNOWN GAP against this file's own rule that a label is true on every case
+  // it fires for: the card is written for ANY attachment with no text, so a
+  // video, or over text a voice memo or a PDF, is also labelled "a photo or
+  // GIF". Raised on the TAC-574 PR; the wording is the owner's to change.
+  media_only_inbound:
+    'Sent a photo or GIF with no text. Write your reply by hand.',
 
   // --- You're mid-thread with this guest ------------------------------------
   // Ranked 9th, so it only ever wins when nothing else fired: the draft itself

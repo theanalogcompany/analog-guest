@@ -199,6 +199,12 @@ the `demo_bypassed_approval_gate` event, which relays to Slack only when
 - `findUncoveredInbound` is **three-state**. `unreadable` is not `none`: collapsing them
   silences a folded message permanently.
 
+### Photos, GIFs and other attachments (TAC-574)
+
+A turn with text is answered normally and told `[guest also sent a photo]`; a turn with no
+text at all becomes a blank operator card (`media_only_inbound`), with no classifier call.
+The rule, its window and its limits are in `inbound-media.ts`'s header.
+
 ## Venue status
 
 `isVenueProcessingHalted` from `lib/venues/status.ts` is the only behavioural reader of

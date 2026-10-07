@@ -131,11 +131,13 @@ const LEDGER_DERIVERS: LedgerDerivers = {
   }),
   refused: (r) => ({
     outcome: 'refused',
-    // No inbound path produces 'refused' since the v1.80.0 schema diet
-    // removed the fidelity floor ('low_fidelity' in the vocabulary is
-    // historical rows only). The deriver stays because the map is total over
-    // AgentResult; detail carries whatever reason a future refusal names, so
-    // it shows up in the data before it shows up in the vocabulary.
+    // The v1.80.0 schema diet removed the fidelity floor ('low_fidelity' in
+    // the vocabulary is historical rows only). ONE inbound path produces
+    // 'refused' today: TAC-574's media-only message from an opted-out text
+    // guest, which gets no card (detail.refusedReason
+    // 'media_only_guest_opted_out'). `reason` stays null because the CHECK'd
+    // vocabulary has no value for it; detail carries it, so it shows up in the
+    // data before it shows up in the vocabulary.
     reason: null,
     outboundMessageId: null,
     detail: { refusedReason: r.reason },

@@ -175,9 +175,23 @@ export type FollowupContext = {
   anchorVisit?: FollowupAnchorVisit
 }
 
+/**
+ * TAC-574: what a guest sent beside their text, as far as the stored links can
+ * say. 'unknown' is a link with no file extension, which is every Instagram
+ * attachment, and renders as "a photo or GIF". 'other' is an extension nothing
+ * recognizes (a voice memo, a PDF) and renders as "an attachment".
+ * lib/agent/inbound-media.ts decides it; the serializer renders it.
+ */
+export type InboundMediaKind = 'photo' | 'gif' | 'video' | 'other' | 'unknown'
+
 export type RuntimeContext = {
   guestName?: string
   inboundMessage?: string
+  // TAC-574: set only on an inbound turn whose text arrived with a photo, GIF
+  // or other attachment. Rendered as one line under "The guest just sent".
+  // Absent on every other turn, at zero token cost. The model never sees the
+  // media itself, and the line says so.
+  inboundMedia?: InboundMediaKind
   perkBeingUnlocked?: {
     name: string
     qualification: string
