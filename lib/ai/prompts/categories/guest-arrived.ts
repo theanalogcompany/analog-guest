@@ -67,9 +67,9 @@ export const GUEST_ARRIVED_INSTRUCTIONS_NEW = `The guest just scanned the sign a
  * offered were the complaint path's job on the day, and went through an
  * operator. Repeating them here would re-open a complaint at the counter in an
  * unprompted message nobody approved, and "do not offer anything" is what
- * keeps a comp from being promised twice. The details are barred because the
- * model may not have them: the conversation is in its history for fourteen
- * days and this renders for thirty.
+ * keeps a comp from being promised twice. The details are barred because
+ * the model does not have them: this greeting is generated without the
+ * earlier conversation (below).
  *
  * "TODAY" in "what they got today" is deliberate: without it the question
  * reads as being about the order that went wrong.
@@ -101,6 +101,9 @@ export const GUEST_ARRIVED_INSTRUCTIONS_NEW = `The guest just scanned the sign a
  *     fact: a joke, a plan mentioned in passing, what they were unsure about
  *     last time.
  *   - It cannot match the register the thread had settled into.
+ *   - It cannot see a message from earlier the same day that is more than half
+ *     an hour old. "On my way, any almond croissants left?" forty minutes
+ *     before the scan is gone from the greeting's view.
  *
  * What it KEEPS, because none of it travels in the thread: the guest's name
  * and stored notes, their visit history, open commitments, and the two facts
