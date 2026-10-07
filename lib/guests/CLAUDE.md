@@ -100,6 +100,8 @@ legacy shape in place.
 
 A counter scan is a visit too (TAC-575), but **at read time only**: `loadSignals` merges scan
 days in and writes nothing. It is not a fourth writer. `lib/recognition/load-scan-visits.ts`.
+A guest whose only visit day is today counts zero visits there (`visitDaysThatCount`), so the
+visit that is happening never makes them `returning`.
 
 Two Square paths and the self-reported-order path. **Any writer of `last_visit_at` must
 write `last_visit_precision` in the same statement**, or a guest who self-reports once

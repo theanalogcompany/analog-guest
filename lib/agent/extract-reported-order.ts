@@ -22,7 +22,10 @@ import type { RuntimeContext } from './types'
 //
 // Non-blocking by design: called from handle-inbound.ts via `waitUntil`
 // right after classification succeeds, so a slow or failed Haiku call can
-// never delay or block the reply. One consequence, called out explicitly
+// never delay or block the reply. ONE EXCEPTION (TAC-575): a turn that armed
+// "how is it so far?" awaits it, bounded by ORDER_READ_WAIT_MS, because whether
+// an order was recorded is what decides that question (orderTurnVerdict,
+// visit-checkin.ts). One consequence, called out explicitly
 // because it's easy to mistake for a bug later: the extracted order is NOT
 // available to generateStage, so the reply itself can never reference it.
 //
@@ -59,13 +62,14 @@ export type ExtractReportedOrderOutcome =
   | { kind: 'vague_past_report' }
   // TAC-325: an ongoing report whose every item was already present on the
   // same-local-day transaction it would have merged into. Nothing written.
-  | { kind: 'no_new_items_ongoing' }
+  | { kind: 'no_new_items_ongoing'; occurredAtIso: string }
   | {
       kind: 'recorded'
       transactionId: string
       amountCents: number | null
       itemCount: number
       precision: VisitTimePrecision
+      occurredAtIso: string
     }
   // TAC-325: a new `guest_reported_ongoing` row — no same-local-day
   // transaction existed to merge into (or continuesRecentVisit said this is
@@ -76,6 +80,7 @@ export type ExtractReportedOrderOutcome =
       amountCents: number | null
       itemCount: number
       precision: VisitTimePrecision
+      occurredAtIso: string
     }
   // TAC-325: new items appended to an existing same-local-day
   // `guest_reported_ongoing` row. `itemCount`/`amountCents` reflect the
@@ -86,8 +91,41 @@ export type ExtractReportedOrderOutcome =
       amountCents: number | null
       itemCount: number
       addedItemCount: number
+      occurredAtIso: string
     }
   | { kind: 'failed'; error: string }
+
+/**
+ * What this module reads off a turn. RuntimeContext satisfies it; the narrow
+ * shape is what lets scripts/measurement/order-turn-verdict.ts drive the read
+ * half (readReportedOrder) without a database.
+ */
+export interface ReportedOrderContext {
+  currentMessage: { body: string; receivedAt: Date } | null
+  guest: Pick<RuntimeContext['guest'], 'id' | 'createdVia' | 'createdAt'>
+  venue: {
+    id: string
+    timezone: string
+    venueInfo: Pick<RuntimeContext['venue']['venueInfo'], 'hours' | 'menu'>
+  }
+}
+
+/**
+ * What the message says, before anything is looked up or written.
+ * `order` means: it reports items off this menu on one identifiable day.
+ */
+export type ReportedOrderRead =
+  | { kind: 'no_menu_item_mentioned' }
+  | { kind: 'vague_past_report' }
+  | { kind: 'no_items_resolved' }
+  | { kind: 'failed'; error: string }
+  | {
+      kind: 'order'
+      resolved: ResolvedReportedItem[]
+      occurredAt: Date
+      precision: VisitTimePrecision
+      continuesRecentVisit: boolean
+    }
 
 interface ResolvedReportedItem {
   name: string
@@ -230,7 +268,7 @@ function bodyContainsWord(normalizedBody: string, word: string): boolean {
  *     ARMS A REQUIRED QUESTION ("how is it so far?") about a drink the guest
  *     may not have. It does not rest on this function alone for that reason:
  *     it also requires that the guest is answering a question of ours, and
- *     the turn's classification can still veto it (orderTurnVerdict). A false
+ *     the armed turn then waits for the extractor itself (orderTurnVerdict). A false
  *     negative costs one unasked question.
  * Any future change to this function should move in the direction of fewer
  * false positives, even at the cost of occasionally more false negatives —
@@ -349,7 +387,7 @@ export function resolveReportedItems(
  * use, which lands on the same safe side for the same reason.
  */
 function resolvePresentPrecision(
-  ctx: RuntimeContext,
+  ctx: ReportedOrderContext,
   reportedAt: Date,
 ): VisitTimePrecision {
   const openState = resolveOpenState(
@@ -465,7 +503,7 @@ function sameVenueLocalDay(
  * takes the unchanged branch below.
  */
 function reportsTodaysScanVisit(
-  ctx: RuntimeContext,
+  ctx: ReportedOrderContext,
   occurredAt: Date,
   reportedAt: Date,
 ): boolean {
@@ -510,7 +548,7 @@ function reportsTodaysScanVisit(
 export function resolveOccurredAt(
   reportTiming: 'present' | 'specific_past_day',
   occurredOnDate: string,
-  ctx: RuntimeContext,
+  ctx: ReportedOrderContext,
   reportedAt: Date,
 ): { occurredAt: Date; precision: VisitTimePrecision } {
   if (reportTiming === 'present') {
@@ -682,6 +720,120 @@ async function advanceLastVisit(
 }
 
 /**
+ * The read half: one model call, no table touched. Never throws.
+ */
+export async function readReportedOrder(
+  ctx: ReportedOrderContext,
+): Promise<ReportedOrderRead> {
+  try {
+    if (ctx.currentMessage === null) return { kind: 'no_menu_item_mentioned' }
+    const menuItems = ctx.venue.venueInfo.menu.items
+    if (!bodyMentionsMenuItem(ctx.currentMessage.body, menuItems)) {
+      return { kind: 'no_menu_item_mentioned' }
+    }
+    const reportedAt = ctx.currentMessage.receivedAt
+    const extraction = await callExtractReportedOrder({
+      inboundBody: ctx.currentMessage.body,
+      menuItemNames: menuItems.map((m) => m.name),
+      todayInVenueTimezone: formatTodayInVenueTimezone(
+        ctx.venue.timezone,
+        reportedAt,
+      ),
+    })
+    if (!extraction.ok) {
+      return { kind: 'failed', error: extraction.error }
+    }
+    // TAC-325 ruling 6c: a genuinely vague past reference writes nothing on
+    // either path — checked before item resolution so an empty-items vague
+    // report and a populated-items vague report both report the same,
+    // more-informative outcome rather than collapsing into no_items_resolved.
+    if (extraction.data.reportTiming === 'vague_past') {
+      return { kind: 'vague_past_report' }
+    }
+    if (extraction.data.items.length === 0) {
+      return { kind: 'no_items_resolved' }
+    }
+    const resolved = resolveReportedItems(extraction.data.items, menuItems)
+    if (resolved.length === 0) {
+      return { kind: 'no_items_resolved' }
+    }
+    const { occurredAt, precision } = resolveOccurredAt(
+      extraction.data.reportTiming,
+      extraction.data.occurredOnDate,
+      ctx,
+      reportedAt,
+    )
+    return {
+      kind: 'order',
+      resolved,
+      occurredAt,
+      precision,
+      continuesRecentVisit: extraction.data.continuesRecentVisit,
+    }
+  } catch (e) {
+    return { kind: 'failed', error: e instanceof Error ? e.message : String(e) }
+  }
+}
+
+/**
+ * Is this order part of the visit the message arrived on? True when it is
+ * dated the same venue-local day as the message that reported it.
+ *
+ * TAC-575 (ruled 2026-10-07): on a turn that armed "how is it so far?" this is
+ * what decides whether to ask, in place of the classifier's category. The
+ * extractor is the thing that tells "pour over" from "is the pour over good"
+ * and from "pour over or americano"; the day check is what stops "i had the
+ * pour over yesterday" from being asked about in the present tense.
+ */
+export function isOrderOnTheMessagesDay(
+  occurredAt: Date,
+  reportedAt: Date,
+  timezone: string,
+): boolean {
+  return (
+    venueLocalDayKey(timezone, occurredAt) ===
+    venueLocalDayKey(timezone, reportedAt)
+  )
+}
+
+/**
+ * Is an order on file for the visit this message arrived on, as far as this
+ * run of the extractor can say?
+ *
+ * The three outcomes that wrote or extended a transaction, plus
+ * `no_new_items_ongoing`: every item named is ALREADY on today's row (the
+ * guest said "grabbing a cortado" before they scanned, then answered our
+ * question with "cortado"). Nothing was written on this turn, and the order
+ * is on file all the same, so the question is asked. That fourth outcome is a
+ * choice the ruling ("it recorded an order") does not spell out.
+ *
+ * An order that was understood and then failed to write is not one, which
+ * costs one unasked question and never asks about a row that does not exist.
+ *
+ * KNOWN SOFT EDGE: resolveOccurredAt falls back to the message's own time for
+ * a date it cannot read, and that fallback now also reads as "today's order".
+ */
+export function recordedOrderForThisVisit(
+  outcome: ExtractReportedOrderOutcome,
+  reportedAt: Date,
+  timezone: string,
+): boolean {
+  if (
+    outcome.kind !== 'recorded' &&
+    outcome.kind !== 'recorded_ongoing' &&
+    outcome.kind !== 'merged_ongoing' &&
+    outcome.kind !== 'no_new_items_ongoing'
+  ) {
+    return false
+  }
+  return isOrderOnTheMessagesDay(
+    new Date(outcome.occurredAtIso),
+    reportedAt,
+    timezone,
+  )
+}
+
+/**
  * Never throws. Every branch — including DB and LLM failures — returns a
  * typed outcome and is logged (console.warn/console.error), matching the
  * updateGuestContext failure-handling precedent already in handle-inbound.ts
@@ -689,15 +841,16 @@ async function advanceLastVisit(
  * voice/reply contract fireRedAlert exists to protect).
  */
 export async function extractReportedOrder(
-  ctx: RuntimeContext,
+  ctx: ReportedOrderContext,
 ): Promise<ExtractReportedOrderOutcome> {
   try {
-    if (ctx.currentMessage === null) return { kind: 'no_menu_item_mentioned' }
-
-    const menuItems = ctx.venue.venueInfo.menu.items
-    if (!bodyMentionsMenuItem(ctx.currentMessage.body, menuItems)) {
-      return { kind: 'no_menu_item_mentioned' }
-    }
+    // The read comes first and touches no table (readReportedOrder). It used
+    // to follow the two lookups below; the order between them never mattered
+    // to what is written.
+    const read = await readReportedOrder(ctx)
+    if (read.kind !== 'order') return read
+    const { resolved, occurredAt, precision } = read
+    const occurredAtIso = occurredAt.toISOString()
 
     const supabase = createAdminClient()
     const [existingResult, guestRowResult] = await Promise.all([
@@ -733,44 +886,6 @@ export async function extractReportedOrder(
       Date.now() - createdAt.getTime() <=
       REPORTED_ORDER_WINDOW_DAYS * MS_PER_DAY
     const enrollmentEligible = !existingResult.data && withinEnrollmentWindow
-
-    const reportedAt = ctx.currentMessage.receivedAt
-    const todayInVenueTimezone = formatTodayInVenueTimezone(
-      ctx.venue.timezone,
-      reportedAt,
-    )
-
-    const extraction = await callExtractReportedOrder({
-      inboundBody: ctx.currentMessage.body,
-      menuItemNames: menuItems.map((m) => m.name),
-      todayInVenueTimezone,
-    })
-    if (!extraction.ok) {
-      return { kind: 'failed', error: extraction.error }
-    }
-    // TAC-325 ruling 6c: a genuinely vague past reference writes nothing on
-    // either path — checked before item resolution so an empty-items vague
-    // report and a populated-items vague report both report the same,
-    // more-informative outcome rather than collapsing into no_items_resolved.
-    if (extraction.data.reportTiming === 'vague_past') {
-      return { kind: 'vague_past_report' }
-    }
-    if (extraction.data.items.length === 0) {
-      return { kind: 'no_items_resolved' }
-    }
-
-    const resolved = resolveReportedItems(extraction.data.items, menuItems)
-    if (resolved.length === 0) {
-      return { kind: 'no_items_resolved' }
-    }
-
-    const { occurredAt, precision } = resolveOccurredAt(
-      extraction.data.reportTiming,
-      extraction.data.occurredOnDate,
-      ctx,
-      reportedAt,
-    )
-    const occurredAtIso = occurredAt.toISOString()
 
     if (enrollmentEligible) {
       const amountCents = computeAmountCents(resolved)
@@ -825,6 +940,7 @@ export async function extractReportedOrder(
         amountCents,
         itemCount: resolved.length,
         precision,
+        occurredAtIso,
       }
     }
 
@@ -851,7 +967,7 @@ export async function extractReportedOrder(
       return { kind: 'failed', error: recentOngoingError.message }
     }
 
-    const mergeTarget = extraction.data.continuesRecentVisit
+    const mergeTarget = read.continuesRecentVisit
       ? (recentOngoing ?? []).find(
           (row) =>
             typeof row.occurred_at === 'string' &&
@@ -876,7 +992,7 @@ export async function extractReportedOrder(
 
       const itemsToAdd = dropAlreadyRecordedItems(resolved, existingParsed)
       if (itemsToAdd.length === 0) {
-        return { kind: 'no_new_items_ongoing' }
+        return { kind: 'no_new_items_ongoing', occurredAtIso }
       }
 
       const mergedRawLineItems: Json[] = [
@@ -913,6 +1029,7 @@ export async function extractReportedOrder(
         amountCents,
         itemCount: mergedRawLineItems.length,
         addedItemCount: itemsToAdd.length,
+        occurredAtIso,
       }
     }
 
@@ -961,6 +1078,7 @@ export async function extractReportedOrder(
       amountCents,
       itemCount: resolved.length,
       precision,
+      occurredAtIso,
     }
   } catch (e) {
     return {
