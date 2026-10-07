@@ -2697,11 +2697,19 @@ async function runInboundTurn(
     // compared: v2 emits messages[] and v1 emits one body, so a caller that
     // forgot the split would render v1 as one wall of text beside v2's bubbles
     // and read it as a v2 improvement.
+    //
+    // THIS IS THE THIRD resolveOutboundTail CALL SITE, after scheduleAndSend
+    // and dispatchInstagramReply, and it must pass what they pass. TAC's
+    // further-help offer added a fourth argument and broke exactly this line
+    // on a rebase that merged without a conflict. `tsc` catches a missing
+    // argument; it cannot catch two of the same type swapped, so check this
+    // against both arms rather than against the signature.
     if (testSink !== undefined) {
       const tail = resolveOutboundTail(
         gen.result.reviewAsk,
         gen.result.intentionQuestion,
         renderedIntentionsFor(ctx).length,
+        gen.result.furtherHelpOffer,
       )
       testSink.draft = {
         bubbles: resolveDispatchBubbles(
