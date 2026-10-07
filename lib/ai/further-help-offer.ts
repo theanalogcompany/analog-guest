@@ -170,8 +170,8 @@ export function decideFurtherHelpOffer(input: FurtherHelpOfferInput): {
  * with a newline and would have delivered "...pages/cafe-menu happy to answer
  * anything else" as one run-on bubble.
  *
- * A draft held for an operator is still one message, as it is for the two
- * asks, so there the line is folded in.
+ * A draft held for an operator is one message, so it does not carry this line
+ * at all: lib/agent/held-draft-body.ts takes it back off.
  */
 export function appendFurtherHelpOffer(body: string, offer: string): string {
   return `${body.trimEnd()} ${offer.trim()}`

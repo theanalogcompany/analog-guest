@@ -527,6 +527,9 @@ a warm-close anchor, excluded inside `loadWarmCloseCandidates`. Reasons in those
   guest written to us before, and how long ago) and `already-apologised.ts` (have we already
   said sorry in this conversation). `buildAiRuntime` derives both from the thread the
   context carries. Neither reads `recognition.state`, which scores visits.
+- **A draft held for an operator never carries the offer-more-help line** (`held-draft-body.ts`,
+  ruled 2026-10-07). An approved draft is one message, so nothing would send the line as its
+  own. The other two tails are still folded in. `scripts/harness/held-draft-offer` checks it.
 - `dispatch-reply.ts` is the one place a reply picks its transport. Nothing routes on a
   null channel.
 

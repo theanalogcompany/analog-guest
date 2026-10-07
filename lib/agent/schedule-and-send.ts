@@ -33,8 +33,9 @@ import {
   type SlotDropReason,
   type PendingRowsBySlot,
 } from './pending-slots'
+import { heldDraftBody } from './held-draft-body'
 import { resolveDispatchBubbles, resolveOutboundTail } from './sentence-split'
-import { INTER_BUBBLE_GAP_MS, collapseToSingleMessage } from './split-message'
+import { INTER_BUBBLE_GAP_MS } from './split-message'
 import type { RuntimeContext } from './types'
 
 type AdminSupabaseClient = ReturnType<typeof createAdminClient>
@@ -307,7 +308,9 @@ export function buildOutboundInsert(
     // a delimiter surviving here would go straight to a guest over text the
     // operator was never shown. The auto-send path overrides `body` with each
     // bubble's own text. Between them, no delimiter ever reaches the database.
-    body: collapseToSingleMessage(generation.body),
+    // heldDraftBody also leaves the offer-more-help line out: a held draft is
+    // one message, and nothing would send that line as its own.
+    body: heldDraftBody(generation),
     generated_by: 'llm',
     // voice_fidelity is no longer written (v1.80.0 schema diet): the model's
     // self-score never gated anything and the column stays nullable for the
@@ -1367,7 +1370,7 @@ async function tryRegenUpdate(
     const updatePayload: MessageUpdate = {
       // TAC-313: same strip as the INSERT path in buildOutboundInsert — a
       // regenerated draft is still a card an operator approves verbatim.
-      body: blank ? '' : collapseToSingleMessage(generation.body),
+      body: blank ? '' : heldDraftBody(generation),
       // v1.80.0 schema diet: no new score exists, and a pre-diet row's old
       // score would otherwise be claiming to describe this regen's new body.
       voice_fidelity: null,
