@@ -373,7 +373,7 @@ export async function loadPriorGreetings(
         (data ?? []).map((row) => ({
           id: row.id,
           generationId: row.generation_id,
-          body: row.body ?? '',
+          body: row.body,
           createdAt: new Date(row.created_at),
         })),
       ),

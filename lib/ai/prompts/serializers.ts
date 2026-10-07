@@ -690,8 +690,7 @@ function formatScanArrival(
  *
  * THIS IS THE ONE PLACE A QUOTED LINE OF OURS IS SHOWN ON PURPOSE. Everywhere
  * else a quoted example is avoided because it gets copied. Here the lines are
- * the thing to avoid, the instruction says so in the sentence that introduces
- * them and again after them, and without them the greeting has nothing to
+ * the thing to avoid, the sentence straight after them says so, and without them the greeting has nothing to
  * differ from: it is generated without the earlier conversation (see
  * PRIOR_GREETING_LIMIT, lib/agent/scan-arrival.ts).
  *

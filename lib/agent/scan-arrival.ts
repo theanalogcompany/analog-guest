@@ -217,7 +217,13 @@ export function scanCarryForwardAt(input: ScanCarryForwardInput): Date | null {
  * thread, a greeting answered an old complaint instead of greeting). That also
  * took away the only place it could see what it said last time, and ten
  * greetings in a row came out as one sentence. These are those lines back,
- * and ONLY those lines: nothing the guest said, and nothing else we said.
+ * and only greetings: nothing the guest said, and no other message of ours.
+ *
+ * A GREETING IS WHATEVER REACHED THE GUEST UNDER THAT CATEGORY, so two kinds
+ * of line come back that the model did not write as an ordinary greeting: one
+ * an operator edited before sending, and one that followed up a complaint
+ * ("glad you came back"). Both are shown as lines not to repeat. Whether a
+ * later greeting ever refers to one is not measured.
  */
 export const PRIOR_GREETING_LIMIT = 3
 

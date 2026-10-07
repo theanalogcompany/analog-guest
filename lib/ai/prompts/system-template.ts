@@ -2382,7 +2382,8 @@ import {
 // conversation away from the greeting, and with it the only place it could
 // see what it said last time: ten greetings in a row came out as one
 // sentence. Only its own greetings come back; the this-visit-only rule stands
-// for everything else. New wording, three lines, shown in the PR body.
+// for everything else. New wording, two sentences around the list, shown in
+// the PR body.
 //
 //   MEASURED, bar fixed on the ticket before any generation
 //   (scripts/measurement/complaint-followup.ts, MEASURE_PRIORS=1): see the PR
