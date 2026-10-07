@@ -316,6 +316,13 @@ export type RuntimeContext = {
    * instructions, whose text tells the model to check in on a past visit.
    */
   inquiryFollowup?: { question: string; answer: string }
+  /**
+   * TAC-575: true on the timed check-back. Reaches composePrompt for the reason
+   * inquiryFollowup does: the stored category is `follow_up`, whose own
+   * instructions describe a message days after a visit. What the guest got is
+   * not passed as data: their own message naming it is in the chat history.
+   */
+  visitCheckback?: boolean
   recentMessages?: RecentMessage[]
   // Mechanics this guest is currently eligible for. The serializer renders
   // a "What this guest can access" block when this is provided. An empty

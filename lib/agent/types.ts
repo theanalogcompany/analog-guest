@@ -199,6 +199,11 @@ export interface FollowupTrigger {
     // other), and the third that routes its send through dispatchReply rather
     // than scheduleAndSend.
     | 'inquiry_followup'
+    // TAC-575: a guest was asked how their order is, has not said, and has
+    // gone quiet, so the venue checks back once. The FOURTH reason allowed on
+    // an Instagram conversation, and the fourth that routes its send through
+    // dispatchReply rather than scheduleAndSend.
+    | 'visit_checkback'
   // TAC-123: engine-aggregated secondary reasons for this run. The primary
   // already lives on `reason` above; this array carries the OTHER reasons that
   // also applied on this guest's tick, already mapped to the AI-side
@@ -275,6 +280,15 @@ export interface FollowupTrigger {
     question: string
     answer: string
     answerMessageId: string
+  }
+  /**
+   * TAC-575: set only when `reason === 'visit_checkback'`. `answersMessageId`
+   * is OUR last outbound row, the one the guest went quiet after, written to
+   * reply_to_message_id for the warm close's reason: a send naming nothing is
+   * read by the Instagram reply check as answering everything before it.
+   */
+  visitCheckback?: {
+    answersMessageId: string
   }
   triggeredAt: Date
   metadata?: Record<string, unknown>
@@ -354,6 +368,11 @@ export interface RuntimeContext {
    * instructions, whose own text tells the model to check in on a past visit.
    */
   inquiryFollowup: { question: string; answer: string } | null
+  // TAC-575: true only on the timed check-back (followupTrigger.reason ===
+  // 'visit_checkback'). Read off the trigger, like inquiryFollowup above, and
+  // threaded to composePrompt to replace the follow_up category's instructions,
+  // which are written for a message days after a visit.
+  visitCheckback: boolean
   // TAC-495: the conversation's channel. Set once by build-runtime-context.ts
   // via resolveConversationChannel, from the guest's identifiers, the inbound
   // message's channel and (TAC-469) the guest's last inbound channel. It picks

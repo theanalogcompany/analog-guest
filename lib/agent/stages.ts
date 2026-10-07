@@ -51,6 +51,8 @@ import {
 import {
   resolveCategoryPolicy,
   resolvePolicyDecision,
+  resolveVisitCheckbackDisposition,
+  type PolicyDecision,
   resolveReviewAskDisposition,
 } from '@/lib/schemas/approval-policy'
 import { parseVenueLinks } from '@/lib/schemas/venue-info'
@@ -1975,10 +1977,28 @@ export async function applyApprovalPolicyStage(
   // Every venue stores `perCategory: {}` today, so this is a no-op against
   // current behaviour — and the moment a category is ticked in Command
   // Center it becomes strictly stronger than the default it replaces.
-  const policyDecision = resolvePolicyDecision(
-    ctx.venue.approvalPolicy,
-    ctx.classification?.category,
-  )
+  //
+  // TAC-575: THE CHECK-BACK DOES NOT ROUTE BY ITS CATEGORY. It is stored as
+  // `follow_up`, and a venue that holds follow-ups for approval (Le Mil's
+  // does) would hold every check-back with them, where the ruling is that the
+  // check-back auto-sends as a venue setting of its own (2026-10-06: "not a
+  // global default, and not under follow_up's operator_approval"). So it reads
+  // its own knob, `approval_policy.visitCheckback`, which defaults to HOLD.
+  // Treated as `stored` because a venue chose it, which also keeps the
+  // complaint carve-out below off it. `hold_all_outbound` still applies: that
+  // trigger is separate and nothing here touches it.
+  const policyDecision: PolicyDecision =
+    ctx.followupTrigger?.reason === 'visit_checkback'
+      ? {
+          disposition: resolveVisitCheckbackDisposition(
+            ctx.venue.approvalPolicy,
+          ),
+          source: 'stored',
+        }
+      : resolvePolicyDecision(
+          ctx.venue.approvalPolicy,
+          ctx.classification?.category,
+        )
   if (policyDecision.disposition === 'operator_approval') {
     const carveOutAvailable = policyDecision.source === 'code_default'
     const exemptedByClarifyingQuestion =
@@ -2594,6 +2614,10 @@ function triggerReasonToFollowupReason(
     // what the guest asked and what we said, and nothing about whether they came
     // in.
     case 'inquiry_followup':
+    // TAC-575: a check-back is about a drink in the guest's hand now. "You
+    // visited N days ago" is the opposite of that, and its category instruction
+    // (visit-checkback.ts) carries everything the turn needs.
+    case 'visit_checkback':
       return null
   }
 }
@@ -2990,6 +3014,7 @@ export function buildAiRuntime(
     // TAC-386: undefined rather than null on every other turn, matching how the
     // optional RuntimeContext fields around it read.
     inquiryFollowup: ctx.inquiryFollowup ?? undefined,
+    visitCheckback: ctx.visitCheckback || undefined,
     // The once-ever review ask. Set only by handle-inbound's eligibility
     // predicate (lib/agent/review-ask.ts); null → undefined so the serializer
     // omits the `## Ask for a review` block and composeReplyWithReviewAsk

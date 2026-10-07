@@ -37,6 +37,7 @@ import { UNKNOWN_INSTRUCTIONS } from './unknown'
 // MessageCategory (it stores `acknowledgment`), it is a per-turn replacement
 // chosen in categoryInstructionsFor. See that function.
 import { INQUIRY_FOLLOWUP_INSTRUCTIONS } from './inquiry-followup'
+import { VISIT_CHECKBACK_INSTRUCTIONS } from './visit-checkback'
 import { WELCOME_INSTRUCTIONS } from './welcome'
 
 export function getCategoryInstructions(category: MessageCategory): string {
@@ -169,7 +170,12 @@ export function categoryInstructionsFor(
   // TAC-560 added a second such exception for the warm close; TAC-568 removed it
   // again, because the close is no longer generated.
   inquiryFollowup = false,
+  // TAC-575: the same exception for the timed check-back, which also stores
+  // `category: 'follow_up'` and is about a drink the guest has NOW. See
+  // visit-checkback.ts.
+  visitCheckback = false,
 ): string {
+  if (visitCheckback) return VISIT_CHECKBACK_INSTRUCTIONS
   if (inquiryFollowup) return INQUIRY_FOLLOWUP_INSTRUCTIONS
   if (category === 'guest_arrived')
     return guestArrivedInstructionsFor(scanArrival)

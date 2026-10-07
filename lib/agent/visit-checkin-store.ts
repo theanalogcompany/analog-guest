@@ -7,6 +7,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 
 import type { Database } from '@/db/types'
+import { DELIVERED_OUTBOUND_STATUSES } from './group-responses'
 import type { VisitCheckin, VisitCheckinAnswer } from './visit-checkin'
 
 type AdminSupabaseClient = SupabaseClient<Database>
@@ -320,5 +321,54 @@ export async function markVisitCheckbackSent(
       id: args.id,
       error: error.message,
     })
+  }
+}
+
+/** The newest message in a guest's thread, as the check-back timer needs it. */
+export interface NewestThreadMessage {
+  id: string
+  direction: 'inbound' | 'outbound'
+  createdAt: Date
+  /** An outbound that reached the guest. Always false for an inbound. */
+  reachedGuest: boolean
+}
+
+/**
+ * The newest message for this guest at this venue, whatever it is.
+ *
+ * WHATEVER IT IS, for the reason loadWarmCloseCandidates gives: filtering to
+ * delivered outbound rows in SQL would silently promote an older reply of ours
+ * to "our last word" when the guest has in fact written since, or when a draft
+ * is sitting in the operator's queue. The newest row decides, and the caller
+ * reads what kind it is. A counter re-scan is an inbound row too, and
+ * correctly counts as the guest acting.
+ */
+export async function loadNewestThreadMessage(
+  supabase: AdminSupabaseClient,
+  venueId: string,
+  guestId: string,
+): Promise<StoreResult<NewestThreadMessage | null>> {
+  const { data, error } = await supabase
+    .from('messages')
+    .select('id, direction, status, review_state, created_at')
+    .eq('venue_id', venueId)
+    .eq('guest_id', guestId)
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+  if (error) return { ok: false, error: error.message }
+  if (!data) return { ok: true, data: null }
+  const outbound = data.direction === 'outbound'
+  return {
+    ok: true,
+    data: {
+      id: data.id,
+      direction: outbound ? 'outbound' : 'inbound',
+      createdAt: new Date(data.created_at),
+      reachedGuest:
+        outbound &&
+        data.review_state !== 'pending' &&
+        DELIVERED_OUTBOUND_STATUSES.has(data.status),
+    },
   }
 }

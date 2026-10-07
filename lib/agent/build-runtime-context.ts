@@ -1087,6 +1087,7 @@ export async function buildRuntimeContext(input: {
     // TAC-386: the question and our answer both come off the trigger, which the
     // processor filled in after resolving the answer from `messages`. Nothing
     // here reads the database for them.
+    visitCheckback: input.followupTrigger?.reason === 'visit_checkback',
     inquiryFollowup:
       input.followupTrigger?.reason === 'inquiry_followup' &&
       input.followupTrigger.inquiryFollowup
