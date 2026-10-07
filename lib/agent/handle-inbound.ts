@@ -460,31 +460,20 @@ async function persistGenerationFailureCard(
  * the same message collides on that index and is reported as the card that
  * already exists (persistOrRegenQueuedDraft's own-draft recovery).
  *
- * OPT-OUT, and the two channels differ on purpose (lib/guests/opt-out.ts has
- * TAC-572's rules; this path returns before the classification those rules
- * read, so it applies the two that need no category itself):
- *   - text: an opted-out guest gets no card and hears nothing. Only START
- *     opts a text guest back in, and a photo is not START. runInboundTurn
+ * OPT-OUT (ruled 2026-10-06, revising the same day's earlier ruling): a
+ * message with media and no text NEVER opts an opted-out guest back in, on
+ * either channel. Only a typed message does, through TAC-572's path
+ * (lib/guests/opt-out.ts), which reads a category this turn does not have.
+ *   - text: an opted-out guest gets no card and hears nothing. runInboundTurn
  *     decides that before it calls this, so this function never sees one.
- *   - Instagram: ruled 2026-10-06, a media-only message from an opted-out
- *     guest counts as writing again and opts them back in. The opt-out is
- *     cleared HERE, before the card is written, because the operator's send
- *     on that card is refused while `opted_out_at` is set. If the clear fails
- *     the card is still written and a red alert says the guest is still opted
- *     out, the same direction TAC-572 takes for a text reply.
+ *   - Instagram: the card is still written, and `opted_out_at` is left set.
+ *     That covers a thumbs-up GIF after the confirmation and a story tag, which
+ *     arrive here looking exactly like a photo and are not the guest writing.
  *
- * THREE GAPS IN THE INSTAGRAM RULE, open on the TAC-574 PR for a ruling. This
- * path has no category and no attachment type, so it cannot make the
- * distinctions TAC-572's text rules make:
- *   1. An acknowledgment GIF. TAC-572 keeps "thanks" after the confirmation
- *      from undoing an opt-out. A thumbs-up GIF sent after the confirmation
- *      lands here and DOES undo it.
- *   2. A story mention or a shared post. parse-events.ts stores a link for
- *      every attachment kind, so a guest who tags the venue in a story, without
- *      writing to it, is opted back in and carded.
- *   3. No "back in touch" guard. TAC-572 sets `turn.reOptIn` so the reply does
- *      not welcome the guest back. Nothing durable is set here, so the first
- *      TEXT after this card runs as an ordinary turn and can.
+ * CONSEQUENCE, stated because nothing else says it: the operator's send on
+ * that Instagram card is refused (`opted_out` in dispatchOperatorOutbound)
+ * until the guest types something. The card tells the owner the guest sent
+ * something; it cannot be answered from the app while the opt-out stands.
  *
  * Never throws. A card that cannot be written is a `failed` turn, which the
  * turn retries once.
@@ -494,9 +483,6 @@ async function persistMediaOnlyCard(
   agentRunId: string,
 ): Promise<AgentResult> {
   try {
-    if (ctx.conversationChannel === 'instagram') {
-      await reOptInForInstagramMedia(ctx, agentRunId)
-    }
     const persisted = await persistOrRegenQueuedDraft(
       ctx,
       buildGenerationFailureGeneration(),
@@ -550,41 +536,6 @@ async function persistMediaOnlyCard(
       stage: 'persist',
       error: e instanceof Error ? e.message : String(e),
     }
-  }
-}
-
-/**
- * TAC-574 ruling 3: an Instagram guest who had opted out and now sends a photo
- * or GIF on its own is opted back in. clearOptOut is a CAS, so for the
- * ordinary guest who never opted out this is one no-op UPDATE and no read.
- *
- * Never throws and never blocks the card: clearOptOut returns its failure.
- */
-async function reOptInForInstagramMedia(
-  ctx: RuntimeContext,
-  agentRunId: string,
-): Promise<void> {
-  const ids = { venueId: ctx.venue.id, guestId: ctx.guest.id }
-  let cleared = await clearOptOut(ids)
-  if (!cleared.ok) cleared = await clearOptOut(ids)
-  if (!cleared.ok) {
-    await fireRedAlert({
-      agentRunId,
-      venueId: ctx.venue.id,
-      guestId: ctx.guest.id,
-      kind: 'inbound',
-      stage: 'persist',
-      errorMessage: `re-opt-in NOT recorded on a media-only message, guest may still be opted out: ${cleared.error}`,
-      extra: { step: 'opt_out_clear', via: 'instagram_media_only' },
-    })
-    return
-  }
-  if (cleared.data.changed) {
-    console.log('[agent] guest opted back in', {
-      agentRunId,
-      guestId: ctx.guest.id,
-      via: 'instagram_media_only',
-    })
   }
 }
 

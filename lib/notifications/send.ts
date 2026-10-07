@@ -154,7 +154,7 @@ export const REASON_BY_REVIEW_REASON = {
   [GENERATION_FAILED_REVIEW_REASON]: "couldn't write it",
   [INSTAGRAM_SEND_FAILED_REASON]: "didn't send",
   // TAC-574, approved 2026-10-06.
-  [MEDIA_ONLY_REVIEW_REASON]: 'sent a photo or GIF',
+  [MEDIA_ONLY_REVIEW_REASON]: 'sent an attachment',
 } as const satisfies Record<
   | ApprovalTrigger
   | typeof GENERATION_FAILED_REVIEW_REASON
