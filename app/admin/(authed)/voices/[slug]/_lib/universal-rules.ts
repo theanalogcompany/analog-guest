@@ -250,7 +250,7 @@ export const UNIVERSAL_RULES_DISPLAY: ReadonlyArray<UniversalRule> = [
   {
     id: 'R31',
     summary:
-      "Don't name a specific product (a drink, a bean, a menu item) in reply to a greeting or any message with no question or content of its own. A greeting gets a warm welcome and an invitation to say how the venue can help, in one short line and never worded as taking an order; anything else with no content gets a reply in kind. Doesn't restrict a question you ask back, answering once the guest actually asks or orders something, or asking how an item went when it's already in their visit history or an open recommendation to them.",
+      "Don't name a specific product (a drink, a bean, a menu item) in reply to a greeting or any message with no question or content of its own. A greeting gets a warm welcome and a question about how the venue can help, in one short line and never worded as taking an order; anything else with no content gets a reply in kind. Doesn't restrict a question you ask back, answering once the guest actually asks or orders something, or asking how an item went when it's already in their visit history or an open recommendation to them.",
   },
   {
     id: 'R32',

@@ -207,7 +207,7 @@ const EDITS = {
       target: 'system',
       before: ' Reply in kind and stop.',
       after:
-        ' When that message is a greeting, greet them back warmly and invite them to say how you can help or what they are after, in one short line, and stop there. Say it your own way rather than reaching for a stock phrase, and never as taking an order: someone messaging you may be nowhere near the counter. When it is anything else with no content of its own, reply in kind and stop.',
+        ' When that message is a greeting, greet them back warmly and ask how you can help or what they are looking for, in one short line, and stop there. They are messaging you, not standing at the counter, so do not ask what you can get them or what they would like: that is taking an order. Say it your own way rather than reaching for a stock phrase. When it is anything else with no content of its own, reply in kind and stop.',
     },
     // The half the ablation found: the first-conversation block outranks the
     // rule above, so the rule alone moved 4 of 10 and this took it to 10.
@@ -311,27 +311,8 @@ const DROP_LENGTH_RULE = dropLine(
 /** What v1.95.0 ships. Items 1a and 3 are not in it. */
 const SHIPPED = [...EDITS['1b'], ...EDITS['4'], ...EDITS['5']]
 
-const GREETING_SHIPPED =
-  ' When that message is a greeting, greet them back warmly and invite them to say how you can help or what they are after, in one short line, and stop there. Say it your own way rather than reaching for a stock phrase, and never as taking an order: someone messaging you may be nowhere near the counter. When it is anything else with no content of its own, reply in kind and stop.'
-
 const ARMS: Record<string, readonly Transform[]> = {
   shipped: [],
-  'try-greeting-a': [
-    swap(
-      'system',
-      'greeting a',
-      GREETING_SHIPPED,
-      ' When that message is a greeting, greet them back warmly and ask how you can help or what they are looking for, in one short line, and stop there. They are messaging you, not standing at the counter, so do not ask what you can get them or what they would like: that is taking an order. Say it your own way rather than reaching for a stock phrase. When it is anything else with no content of its own, reply in kind and stop.',
-    ),
-  ],
-  'try-greeting-b': [
-    swap(
-      'system',
-      'greeting b',
-      GREETING_SHIPPED,
-      ' When that message is a greeting, greet them back and ask how you can help or what they are looking for, in one short line, and stop there. They are messaging you, not standing at the counter, so do not ask what you can get them or what they would like: that is taking an order. There is no set greeting and no set way to ask: write both halves fresh, the way a person does who is not reading from a card, and do not start with the first greeting that comes to mind. When it is anything else with no content of its own, reply in kind and stop.',
-    ),
-  ],
   control: reverse(SHIPPED),
   // Candidate wording applied to a prompt that does not ship it yet.
   'cand-1a': forward(EDITS['1a']),
