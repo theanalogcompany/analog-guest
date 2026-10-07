@@ -68,7 +68,6 @@ export interface WarmCloseCandidate {
 
 /** The guest facts every check needs, in one read. */
 export interface WarmCloseGuestFacts {
-  createdVia: string | null
   /**
    * TAC-386: when a proactive message last reached this guest, from ANY of the
    * three mechanisms. Read before the claim to keep PROACTIVE_SPACING_MINUTES
@@ -234,7 +233,7 @@ export async function loadWarmCloseGuestFacts(
   const { data, error } = await supabase
     .from('guests')
     .select(
-      'created_via, first_contacted_at, warm_close_sent_at, opted_out_at, instagram_scoped_id, phone_number, last_proactive_send_at',
+      'first_contacted_at, warm_close_sent_at, opted_out_at, instagram_scoped_id, phone_number, last_proactive_send_at',
     )
     .eq('id', guestId)
     .maybeSingle()
@@ -253,7 +252,6 @@ export async function loadWarmCloseGuestFacts(
   return {
     ok: true,
     data: {
-      createdVia: data.created_via ?? null,
       lastProactiveSendAt:
         typeof data.last_proactive_send_at === 'string' &&
         Number.isFinite(new Date(data.last_proactive_send_at).getTime())

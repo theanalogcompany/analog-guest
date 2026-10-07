@@ -498,9 +498,9 @@ interface ClaimedWarmClose {
  *
  * FAILS CLOSED. A marker write that errors returns null, so the bubble is NOT
  * appended. The alternative — sending on an unknown marker state — is the one
- * outcome this mechanism is built to avoid. For an Instagram scan guest the
- * pause timer will try again inside its own window; for an SMS or non-scan
- * guest there is no second attempt, and failing closed is still right, because
+ * outcome this mechanism is built to avoid. For an Instagram guest the pause
+ * timer will try again inside its own window; for an SMS guest there is no
+ * second attempt, and failing closed is still right, because
  * a duplicated close is worse than a missing one (TAC-569).
  */
 async function claimWarmCloseForTurn(
@@ -1837,17 +1837,6 @@ async function runInboundTurn(
     // Empty contextUpdate short-circuits with no DB hit, no Langfuse span,
     // no log noise. Failures log + continue; context-write is diagnostic,
     // not load-bearing. Never blocks dispatch.
-    // TAC-568 follow-on: did THIS turn learn the guest's name?
-    //
-    // Declared here rather than inside the block below because the warm close
-    // reads it ~600 lines down, at the send. It is deliberately seeded from the
-    // guest as the turn STARTED: `nameOnRecordBefore` is what makes the flag
-    // mean "we just learned it" rather than "the model repeated one we already
-    // had", and it matches learn_name's own isSatisfied (`hasFirstName`), so
-    // the close fires on the turn the intention actually closes.
-    const nameOnRecordBefore = (ctx.guest.firstName ?? '').trim() !== ''
-    let nameJustStored = false
-
     if (!isEmptyContextUpdate(gen.result.contextUpdate)) {
       const contextWriteSpan = trace.span('context_write', {
         tool: 'update_guest_context',
@@ -1862,29 +1851,11 @@ async function runInboundTurn(
         now: ctx.recognition.computedAt,
       })
       if (writeResult.ok) {
-        // TAC-568 follow-on: the closing signal is the COLUMN WRITE.
-        // identityColumnsChanged is updateGuestContext's own report of which
-        // identity columns the UPDATE actually carried, so a write that failed,
-        // or a patch that never mentioned first_name, leaves this false and
-        // sends no close.
-        //
-        // That is narrower than "a verified name": WHAT was written still came
-        // from the model's contextUpdate. See closesFirstConversation's own
-        // docstring, which states the bound rather than claiming a guarantee.
-        //
-        // A miss here costs nothing for an Instagram scan guest, whom the pause
-        // timer still covers inside its own window, and is PERMANENT for anyone
-        // else — the timer gates on qr_scan and Instagram, this path does not.
-        // TAC-569.
-        nameJustStored =
-          !nameOnRecordBefore &&
-          writeResult.data.identityColumnsChanged.includes('first_name')
         contextWriteSpan.end({ output: writeResult.data })
         console.log('[agent] inbound context written', {
           agentRunId,
           guestId: ctx.guest.id,
           updatedFields: writeResult.data,
-          nameJustStored,
         })
       } else {
         contextWriteSpan.end({
@@ -2467,10 +2438,9 @@ async function runInboundTurn(
     // normal untriggered send).
     // TAC-568: does this reply close the guest's first conversation?
     //
-    // TWO WAYS IN, both decided by closesFirstConversation: the guest said
-    // goodbye and we answered with one, or this turn learned their name. The
-    // second was added when are_they_new_here came off the first conversation,
-    // which left the name as the last thing a first visit gathers.
+    // ONE WAY IN, decided by closesFirstConversation: the guest said goodbye
+    // and we answered with one. TAC-575 removed the second (the turn that
+    // learned their name); a guest who simply goes quiet is the pause timer's.
     //
     // Decided BEFORE the send, and the marker is CLAIMED before the send too,
     // because the claim is what makes "once per guest, ever" a fact Postgres
@@ -2484,10 +2454,6 @@ async function runInboundTurn(
     const claimedWarmClose = closesFirstConversation({
       guestSignedOff: ctx.classification.category === SIGN_OFF_CATEGORY,
       agentSaidGoodbye: gen.result.closedTheConversation,
-      // TAC-568 follow-on: learning the name is the other closing moment, and
-      // since are_they_new_here came off the first conversation it is the
-      // ordinary one. Set above, from the identity-column write.
-      nameJustStored,
       isFirstConversation: ctx.firstConversation,
       warmCloseText: ctx.venue.warmCloseText,
     })
@@ -2527,7 +2493,7 @@ async function runInboundTurn(
         trace.update({ output: { status: dispatched.kind } })
         // TAC-568: nothing reached the guest, so the close did not happen. Give
         // the marker back rather than spending this guest's one close on a
-        // message they never saw. An Instagram scan guest then gets the timer's
+        // message they never saw. An Instagram guest then gets the timer's
         // own two-hour window; on SMS this turn was the only chance, which is
         // the more reason to release rather than keep a claim nothing spent.
         await releaseClaimedWarmClose(claimedWarmClose, agentRunId)

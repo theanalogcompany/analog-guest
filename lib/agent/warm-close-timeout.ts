@@ -12,11 +12,14 @@
 // GUESTS, and a dedicated cron-job.org entry can be paused in one click without
 // also switching off the operator window warnings.
 //
-// SCOPE, ruled 2026-09-29 and narrower than the ticket's first draft:
+// SCOPE:
 //
-//   Instagram only. The text arm is one refusal, recorded as a follow-up.
-//   First-visit QR scans only (`created_via = 'qr_scan'`). A guest who first
-//   DM'd without scanning is not eligible.
+//   Instagram only (ruled 2026-09-29). The text arm is one refusal, recorded as
+//   a follow-up.
+//   Any first Instagram conversation (TAC-575, ruled 2026-10-06). It was
+//   first-visit QR scans only; a guest who simply DMs and then goes quiet is
+//   now closed the same way, because the in-conversation close no longer rides
+//   on a stored name and nothing else would reach them.
 //
 // EVERY CONDITION IS RE-CHECKED HERE, never settled earlier. Nothing is stored
 // between ticks except the marker, so there is nothing that could be stale: the
@@ -80,8 +83,6 @@ export type WarmCloseSkipReason =
   | 'already_closed'
   /** Their last inbound was a sign-off, so the in-conversation close went out. */
   | 'closed_in_conversation'
-  /** Not a counter-scan guest. */
-  | 'not_a_scan_guest'
   /** Past their first conversation. */
   | 'not_first_conversation'
   | 'opted_out'
@@ -304,7 +305,7 @@ async function considerCandidate(
   const floorMs = warmCloseFloorMs(gate.pauseMs, askedQuestion)
   if (!isWarmCloseDue(candidate.sentAt, now, floorMs)) return 'not_yet'
 
-  // One read for the marker, the origin, the opt-out and the channel.
+  // One read for the marker, the opt-out and the channel.
   const facts = await loadWarmCloseGuestFacts(supabase, candidate.guestId)
   if (!facts.ok) {
     console.warn('[warm-close] guest unreadable; skipping', {
@@ -316,10 +317,6 @@ async function considerCandidate(
 
   if (facts.data.warmCloseSentAt !== null) return 'already_closed'
   if (facts.data.optedOutAt !== null) return 'opted_out'
-  // Ruled 2026-09-29: first-visit QR scans only. `qr_scan` is set at guest
-  // creation and never after (TAC-492), so this is the guest's ORIGIN, not a
-  // claim about the current turn.
-  if (facts.data.createdVia !== 'qr_scan') return 'not_a_scan_guest'
   // Instagram only. An Instagram conversation needs an Instagram identifier;
   // resolving the channel properly is dispatchReply's job and it re-checks.
   if (facts.data.instagramScopedId === null) return 'not_instagram'
