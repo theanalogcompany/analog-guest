@@ -2390,7 +2390,7 @@ import {
 //   body. A guest with no greeting on file gets a prompt byte-identical to
 //   v1.92.0. BASELINE RESET for a scan greeting to a guest who has had one.
 //
-// v1.94.0 (TAC-575): a new universal rule, appended last. Phone test
+// v1.94.0 (TAC-575): new R42, appended last and displayed. Phone test
 // 2026-10-07: a compliment on a Pink Panther called it "a proper afternoon
 // drink" at 10:59. `## Right now` carried the time, nothing in the item's menu
 // entry or knowledge says afternoon, and no rule tied a time-of-day word to
