@@ -29,6 +29,7 @@ const MS_PER_DAY = 24 * 60 * 60 * 1000
 
 export type IntentionKey =
   | 'understand_order'
+  | 'hows_it_so_far'
   | 'are_they_new_here'
   | 'got_the_recommendation'
   | 'did_they_like_it'
@@ -111,6 +112,24 @@ export type IntentionArmsOn =
    * on one turn. See the priority comment on are_they_new_here.
    */
   | { kind: 'first_recorded_order' }
+  /**
+   * TAC-575: the guest has just named what they got, on a visit that is still
+   * happening. Armed on THAT TURN, anchored to that message.
+   *
+   * THE THIRD ORDER-SHAPED KIND, and it is neither of the two above.
+   * `recorded_order` waits for the order to leave the conversation, because
+   * "did you like it?" a minute later is absurd; this one exists for exactly
+   * that minute, because "how is it so far?" is only askable while the cup is
+   * in their hand. `first_recorded_order` reads a transaction; this cannot,
+   * because the order extractor runs after the reply is sent and no
+   * transaction exists on the turn that names the order.
+   *
+   * Resolved by the caller (resolveSameVisitOrderAt, lib/agent/visit-checkin.ts)
+   * from the scan and the menu-name prefilter, and passed in as
+   * `sameVisitOrderAt`. Null on every turn that is not that moment, which
+   * leaves an already-open row exactly as it is.
+   */
+  | { kind: 'same_visit_order' }
 
 /**
  * Whether a strictly newer event re-arms an intention that already has a row
@@ -134,6 +153,10 @@ export function rearmsOnNewerEvent(armsOn: IntentionArmsOn): boolean {
       return false
     case 'open_recommendation':
     case 'recorded_order':
+    // TAC-575. A later visit is a new drink to ask about. What stops a second
+    // ask INSIDE one visit is not this: the caller withholds the event once a
+    // check-in row exists for the day (resolveSameVisitOrderAt).
+    case 'same_visit_order':
       return true
   }
 }
@@ -315,6 +338,29 @@ export interface IntentionDefinition {
    */
   onFirstConversation: FirstConversationPolicy
   /**
+   * TAC-575: is raising this left to the model's judgement, or required?
+   *
+   * EVERY INTENTION BUT ONE IS 'when_it_fits', which is the whole design of
+   * this file: a goal carried into a conversation the agent does not control,
+   * raised when there is a natural opening and usually not at all (measured
+   * raise rate 37% from the best block position).
+   *
+   * 'always' is for a question that is part of a ruled sequence rather than a
+   * hope: "how is it so far?" comes right after the guest names their order
+   * (ruled 2026-10-06), and a one-in-three chance of asking it would make the
+   * check-back, the sign-off and the complaint follow-up that hang off the
+   * answer a matter of luck. While one is open it renders ALONE, with a
+   * paragraph that says to ask it, and everything else waits a turn
+   * (deriveOpenIntentions and the serializer's MUST_ASK_PARAGRAPH).
+   *
+   * It still goes out through `intentionQuestion` as its own last message
+   * (decision 0007) and still closes prompted-once through the post-send
+   * classifier. Only the model's licence to skip it is removed, and only in
+   * prose: a reply that already asks a question still drops it in code
+   * (composeReplyWithIntention), and it comes back open next turn.
+   */
+  raise: 'when_it_fits' | 'always'
+  /**
    * Rendered verbatim as one line in the "## What you're hoping to get to"
    * block. Phrased as a state Sana is in ("you don't know...") rather than an
    * instruction ("ask...") — the difference is the whole mechanism.
@@ -373,6 +419,14 @@ export const EVENT_ARMED_WINDOW_DAYS = 3
 // a natural opening. Measured from the turn the gate first opened. PLACEHOLDER.
 export const FIRST_CONTACT_WINDOW_DAYS = 14
 
+// TAC-575. "How is it so far?" is about a drink in the guest's hand, so it is
+// the shortest-lived intention here by two orders of magnitude. Two hours, the
+// bound the warm close uses for "the moment has gone" (WARM_CLOSE_MAX_AGE_MS).
+// It only matters when the question could not be asked on the turn it armed
+// (the reply already asked something, or was held): after this it is not
+// asked late.
+export const HOWS_IT_SO_FAR_WINDOW_MS = 2 * 60 * 60 * 1000
+
 const DEFINITIONS = {
   understand_order: {
     key: 'understand_order',
@@ -382,6 +436,7 @@ const DEFINITIONS = {
     // The one question with no gate: it is the reason the guest scanned at
     // all, and the opener asks it outright.
     onFirstConversation: 'allowed',
+    raise: 'when_it_fits',
     promptLine: "You haven't heard what this guest ordered yet.",
     // Deliberately says nothing about how the drink or food WAS: that belongs
     // to did_they_like_it. Left in, a "how was your drink?" send would close
@@ -391,6 +446,38 @@ const DEFINITIONS = {
       'Closes once raised, or once any transaction exists for this guest, from any source.',
     expiresAfterMs: UNDERSTAND_ORDER_WINDOW_DAYS * MS_PER_DAY,
     isSatisfied: (facts) => facts.hasQualifyingTransaction,
+  },
+  hows_it_so_far: {
+    key: 'hows_it_so_far',
+    // Straight after the order and ahead of everything about the guest
+    // (TAC-575, ruled 2026-10-06: order, compliment, how is it, THEN the name).
+    // 12 sits between understand_order (10), which the turn that arms this has
+    // just answered, and the getting-to-know-you questions from 40 up.
+    priority: 12,
+    armsOn: { kind: 'same_visit_order' },
+    // No gate: the guest answering "what did you get?" is the licence. It can
+    // therefore ride a guest's first reply, which is the ruled flow and not an
+    // exception to "no getting-to-know-you question in a first reply": that
+    // rule belongs to the replies_only gate, and this is not one of those.
+    gate: { kind: 'none' },
+    onFirstConversation: 'allowed',
+    // The one required question. See `raise`.
+    raise: 'always',
+    // A STATE, like every line here, and it names the item nowhere: the guest's
+    // own message is in the thread, and a line that quoted an example drink
+    // would be the thing a model reproduces.
+    promptLine:
+      "This guest has just told you what they got, and you don't know yet how it is.",
+    // Scoped to SO FAR and to what they JUST got, so it does not collide with
+    // did_they_like_it ("whether they enjoyed what they ordered"), which is
+    // suppressed on a first conversation and cannot render beside this anyway:
+    // this renders alone.
+    classifierDescription:
+      'asks how the item the guest has just got is so far, or how it is treating them',
+    satisfactionLabel:
+      'Closes once raised. A later visit re-arms it. What the guest answers is recorded on the visit check-in, not here.',
+    expiresAfterMs: HOWS_IT_SO_FAR_WINDOW_MS,
+    isSatisfied: () => false,
   },
   are_they_new_here: {
     key: 'are_they_new_here',
@@ -434,6 +521,7 @@ const DEFINITIONS = {
     // the close is triggered by a lull rather than by anything this waits on.
     // The history above is why it was never simply 'suppressed'.
     onFirstConversation: 'allowed',
+    raise: 'when_it_fits',
     // Ruled verbatim by Jaipal, 2026-09-29. THIS IS THE ORIGINAL WORDING, ruled
     // back after a second one was tried and measured worse. Read the history
     // before rewording it, because the obvious fix has been tried.
@@ -494,6 +582,7 @@ const DEFINITIONS = {
     // TAC-567: not on a first visit. A suggestion made in that first sitting is
     // not something to follow up inside it.
     onFirstConversation: 'suppressed',
+    raise: 'when_it_fits',
     promptLine:
       "You suggested something to this guest and haven't heard whether they tried it.",
     classifierDescription:
@@ -515,6 +604,7 @@ const DEFINITIONS = {
     // question the ruled flow deletes; the device transcript shows the agent
     // inventing it in the body on turn 2.
     onFirstConversation: 'suppressed',
+    raise: 'when_it_fits',
     promptLine:
       'You know what this guest ordered, but not whether they liked it.',
     classifierDescription:
@@ -546,6 +636,7 @@ const DEFINITIONS = {
     // the first conversation's closing moment: TAC-568 sent the warm close on
     // the turn that stored a name, and TAC-575 moved the close to a lull.
     onFirstConversation: 'allowed',
+    raise: 'when_it_fits',
     // TAC-541 ruling 3. THE SHAPE IS PART OF THE LINE, and the generic
     // restraint paragraph is what made that necessary: "one short question on
     // the end is fine" is true of every intention here, and on a name it
@@ -583,6 +674,7 @@ const DEFINITIONS = {
     // TAC-575: back on a first visit, behind its own reply count. See
     // onFirstConversation.
     onFirstConversation: 'allowed',
+    raise: 'when_it_fits',
     promptLine: "You don't know whether this guest lives or works nearby.",
     classifierDescription:
       "asks whether the guest lives or works nearby, or where they're coming from",
@@ -602,6 +694,7 @@ const DEFINITIONS = {
     // TAC-575: back on a first visit, behind its own reply count. See
     // onFirstConversation.
     onFirstConversation: 'allowed',
+    raise: 'when_it_fits',
     // TIME OF DAY, never frequency (TAC-380 ruling 2). R23 bans stating or
     // implying how often a guest visits, and the real trip is the turn AFTER
     // the question — "since you're in most mornings" — when the model uses the
@@ -626,6 +719,7 @@ const DEFINITIONS = {
     // TAC-575: back on a first visit, behind its own reply count. See
     // onFirstConversation.
     onFirstConversation: 'allowed',
+    raise: 'when_it_fits',
     promptLine: "You don't know what brings this guest in.",
     classifierDescription:
       'asks what brings the guest in, or what they come in for',

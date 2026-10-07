@@ -28,12 +28,14 @@ import type { AlertContext } from './alerts'
 import type { Visit } from './extract-recent-visits'
 import type { RetractableReportedVisit } from './retract-reported-visit'
 import type { NewlyEligibleIntention, OpenIntention } from './intentions/derive'
+import type { VisitCheckin } from './visit-checkin'
 
 export type { AlertContext }
 export type { RecentMessage }
 export type { EligibleMechanic }
 export type { Visit }
 export type { OpenIntention }
+export type { VisitCheckin }
 
 /** TAC-380: the parts of one turn's intention derivation that aren't the open set. */
 export interface IntentionDerivation {
@@ -442,6 +444,21 @@ export interface RuntimeContext {
   // once the turn is classified, and both the prompt mapper (buildAiRuntime)
   // and the recording gate read that narrowed set, never this one directly.
   openIntentions: OpenIntention[]
+  // TAC-575: this guest's "how is it so far?" check-in for the venue-local day
+  // of the current message, or null when they have not been asked on it (or
+  // on any path with no current message, or when it could not be read).
+  // handle-inbound reads it to record what the guest answers.
+  visitCheckin: VisitCheckin | null
+  // TAC-575: that venue-local day, the check-in table's key, so the write
+  // after a sent question uses the same day the read used. Null when the
+  // venue's clock could not be read, in which case nothing is written.
+  visitLocalDate: string | null
+  // TAC-575: true while this guest has been asked how their order is and has
+  // not said it is good. False as built; handleInbound sets it after
+  // classification, the way it sets reviewAsk, because it depends on what THIS
+  // message read as. While true no intention renders (renderableIntentions)
+  // and the prompt is told to ask nothing (buildAiRuntime).
+  visitCheckinHold: boolean
   // TAC-380: the rest of this turn's derivation. Empty/false on followup runs.
   intentionDerivation: IntentionDerivation
   // TAC-308: the question this guest is still owed an answer to, when a

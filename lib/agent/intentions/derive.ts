@@ -312,6 +312,16 @@ export interface DeriveOpenIntentionsInput {
   openRecommendationsUnreadable: boolean
   /** occurred_at of this guest's recorded orders at this venue, in any order. */
   recordedOrderTimes: readonly Date[]
+  /**
+   * TAC-575: when the guest named what they got on the visit that is happening
+   * now, or null on every turn that is not that moment. Arms hows_it_so_far.
+   *
+   * Resolved by the caller through resolveSameVisitOrderAt
+   * (lib/agent/visit-checkin.ts), which also withholds it once the guest has
+   * been asked on this visit. Null does not close anything: a row already open
+   * stays open until it is asked or its two hours run out.
+   */
+  sameVisitOrderAt: Date | null
   /** null means the rows could not be read, and the derivation fails CLOSED: nothing renders. */
   rows: IntentionRows | null
   /** The guest's inbound times in the loaded history, including the current message. */
@@ -485,6 +495,15 @@ function armingFor(
     // eventAt and eligibleAt are the same instant, as for visit_confirmed: there
     // is no window to wait out, so the moment the order is on record is both the
     // event and the moment it became askable.
+    // TAC-575. This turn, or not at all. eventAt and eligibleAt are the same
+    // instant, as for visit_confirmed: there is no window to wait out.
+    case 'same_visit_order':
+      return input.sameVisitOrderAt === null
+        ? null
+        : {
+            eligibleAt: input.sameVisitOrderAt,
+            eventAt: input.sameVisitOrderAt,
+          }
     case 'first_recorded_order': {
       const earliest = earliestFinite(input.recordedOrderTimes)
       return earliest === null
@@ -732,35 +751,56 @@ export function deriveOpenIntentions(
     streak: input.rules.unanswered_streak,
   })
 
+  const derivedOpen =
+    brakeEngaged || input.quietAfterWarmClose
+      ? []
+      : deriveIntentionState({
+          entries,
+          facts: input.facts,
+          now: input.now,
+        }).filter(
+          (o) =>
+            !held.has(o.key) &&
+            // TAC-567. NOT redundant with the arming-loop skip above: that one
+            // stops a row being written, this one stops a row already on file
+            // from rendering. First-contact eligibility is sticky, so every
+            // guest mid-first-conversation when this shipped has rows for
+            // intentions the ruling now suppresses, and only this filter sees
+            // them.
+            !isSuppressedOnFirstConversation(o.key, input.isFirstConversation),
+        )
+
   return {
     // TAC-575: the quiet after a warm close sits beside the brake because it
     // has the brake's shape. Nothing renders, nothing is recorded, and arming
     // above still ran, so a first-contact window starts on time.
-    open:
-      brakeEngaged || input.quietAfterWarmClose
-        ? []
-        : deriveIntentionState({
-            entries,
-            facts: input.facts,
-            now: input.now,
-          }).filter(
-            (o) =>
-              !held.has(o.key) &&
-              // TAC-567. NOT redundant with the arming-loop skip above: that one
-              // stops a row being written, this one stops a row already on file
-              // from rendering. First-contact eligibility is sticky, so every
-              // guest mid-first-conversation when this shipped has rows for
-              // intentions the ruling now suppresses, and only this filter sees
-              // them.
-              !isSuppressedOnFirstConversation(
-                o.key,
-                input.isFirstConversation,
-              ),
-          ),
+    open: requiredAlone(derivedOpen),
     newlyEligible,
     brakeEngaged,
     quietAfterWarmClose: input.quietAfterWarmClose,
   }
+}
+
+/**
+ * TAC-575: while a REQUIRED intention is open, it is the only one.
+ *
+ * `raise: 'always'` means the turn asks that question. Rendering it beside
+ * optional lines would hand the model the "take the one listed first, and
+ * only if it fits" choice the field exists to remove, and the paragraph that
+ * says to ask it could not be written for a list.
+ *
+ * Applied HERE, upstream of both the prompt mapper and the recording gate, for
+ * the reason the quiet after a warm close is: both read `ctx.openIntentions`,
+ * so neither can see a wider set than the other. The intentions left out are
+ * not recorded and not closed; they are open again next turn.
+ *
+ * Reads the definition, never the key.
+ */
+function requiredAlone(open: OpenIntention[]): OpenIntention[] {
+  const required = open.find(
+    (o) => INTENTION_DEFINITION_BY_KEY[o.key].raise === 'always',
+  )
+  return required === undefined ? open : [required]
 }
 
 /**
@@ -820,6 +860,16 @@ export function applyCurrentTurnSuppression(
  *   veto HERE is what keeps the prompt mapper and the recording gate in step
  *   by construction rather than by two call sites agreeing.
  *
+ * - A visit check-in still waiting on a good answer (`checkinHold`, TAC-575):
+ *   we asked how their order is and they have not said it is good, so the
+ *   venue asks nothing else yet (ruled 2026-10-06: the name comes after "good",
+ *   and a guest who has not tried it is answered "with no questions of its
+ *   own"). It is decided HERE rather than in deriveOpenIntentions because it
+ *   turns on this turn's classification: the message saying "it's great" has
+ *   to lift the hold on the turn it arrives, and derivation runs before the
+ *   turn is classified. Same cost shape as the others: a turn, never the
+ *   intention.
+ *
  * A null category (no classification yet) suppresses nothing here; the
  * serializer keeps its own opt_out check as a second line of defence.
  */
@@ -828,12 +878,14 @@ export function renderableIntentions(
   category: MessageCategory | null,
   hasPendingQuestion: boolean,
   reviewAskRaised: boolean,
+  checkinHold: boolean,
 ): OpenIntention[] {
   if (
     category === 'opt_out' ||
     category === 'comp_complaint' ||
     hasPendingQuestion ||
-    reviewAskRaised
+    reviewAskRaised ||
+    checkinHold
   )
     return []
   return [...open]

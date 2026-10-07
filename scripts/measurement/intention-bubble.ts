@@ -600,6 +600,7 @@ async function main(): Promise<void> {
           ctx.classification?.category ?? null,
           ctx.pendingQuestion !== null,
           ctx.reviewAsk !== null,
+          ctx.visitCheckinHold,
         )
         row.renderedBlock = rendered.length > 0
 

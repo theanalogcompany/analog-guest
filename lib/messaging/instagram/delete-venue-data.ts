@@ -98,6 +98,11 @@
 //     guest_id, so it re-identifies the shell on their next tap.
 //   - `inbound_turn_outcomes.detail` is reset to {}. TAC-523 put a phone's
 //     last four digits there.
+//   - `visit_checkins` rows are DELETED (TAC-575). Enumerated from migration
+//     073: venue_id, guest_id, venue_local_date, order_message_id, ordered_at,
+//     asked_at, answer, answered_at, the three claim timestamps, created_at.
+//     No free text. Deleted for the scan-arrival reason below: a row still
+//     owed its check-back is a pending unprompted message.
 //   - `instagram_scan_arrivals` rows are DELETED (TAC-536). Enumerated from
 //     the schema rather than waved through: venue_id, guest_id,
 //     scan_message_id, scanned_at, had_prior_conversation, claimed_at,
@@ -281,6 +286,24 @@ export async function deleteInstagramVenueData(
         return {
           ok: false,
           error: scanArrivals.error.message,
+          confirmationCode,
+        }
+      }
+
+      // TAC-575's visit check-ins. No free text and nothing that identifies
+      // anybody (ids, timestamps, a date, a three-value answer), and deleted
+      // for the reason scan arrivals are: a row still owed its check-back is
+      // an unprompted message waiting to be sent to someone who asked to be
+      // erased.
+      const visitCheckins = await supabase
+        .from('visit_checkins')
+        .delete()
+        .eq('venue_id', venueId)
+        .in('guest_id', guestIds)
+      if (visitCheckins.error) {
+        return {
+          ok: false,
+          error: visitCheckins.error.message,
           confirmationCode,
         }
       }

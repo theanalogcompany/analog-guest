@@ -19,6 +19,7 @@ import {
   toActiveCommitment,
   toParsedGuestContext,
   VenueInfoSchema,
+  venueLocalDate,
 } from '@/lib/schemas'
 import {
   findActiveCommitmentsForGuest,
@@ -28,7 +29,10 @@ import { parseApprovalPolicy } from '@/lib/schemas/approval-policy'
 import { parseFollowupRules } from '@/lib/schemas/followup-rules'
 import { parseIntentionRules } from '@/lib/schemas/intention-rules'
 import { isScanReferral } from '@/lib/schemas/referral-source'
+import { bodyMentionsMenuItem } from './extract-reported-order'
 import { scanCarryForwardAt } from './scan-arrival'
+import { resolveSameVisitOrderAt, type VisitCheckin } from './visit-checkin'
+import { loadVisitCheckin } from './visit-checkin-store'
 // TAC-567: TAC-560's predicate, reused rather than a second definition of
 // "first conversation". warm-close.ts is pure and builds no client at import.
 import { hasAnsweredGuestBefore, reachedGuest } from './retrieval-context'
@@ -591,6 +595,10 @@ export async function buildRuntimeContext(input: {
   // TAC-573: inbound runs only, like the intentions above. A followup has no
   // guest message that could be taking anything back.
   let retractableReportedVisits: RetractableReportedVisit[] = []
+  // TAC-575: the same-visit check-in. Inbound runs only, like intentions, and
+  // null on every other path.
+  let visitCheckin: VisitCheckin | null = null
+  let visitLocalDate: string | null = null
   if (input.currentMessage) {
     // "Have we heard what they ordered" reuses the visit-history query rather
     // than issuing another: the RAW row count, before extractRecentVisits's
@@ -704,6 +712,52 @@ export async function buildRuntimeContext(input: {
       : carriedScanAt
     const visitConfirmedAt = scanAt ?? earliestConfirmedVisit
 
+    // TAC-575: has this guest been asked how their order is on THIS visit, and
+    // is this the message that names it?
+    //
+    // The visit is the venue-local day, the key the check-in table is unique
+    // on. Read on every inbound turn rather than only when a scan is live: the
+    // answer to the question usually arrives on a turn with no scan signal at
+    // all, and handle-inbound reads `ctx.visitCheckin` to record it.
+    //
+    // FAILS TOWARD NOT ASKING. An unreadable clock or an unreadable table has
+    // not shown that we have not asked, and the intention this arms re-arms on
+    // a newer event, so reading a failure as "not asked" is how one visit gets
+    // the question twice. It also means the migration can never break a turn:
+    // with the table missing the read errors, and the question is not asked.
+    visitLocalDate = venueLocalDate(
+      input.currentMessage.receivedAt,
+      venue.timezone,
+    )
+    let checkinUnreadable = visitLocalDate === null
+    if (visitLocalDate !== null) {
+      const checkinResult = await loadVisitCheckin(
+        supabase,
+        input.venueId,
+        input.guestId,
+        visitLocalDate,
+      )
+      if (checkinResult.ok) {
+        visitCheckin = checkinResult.data
+      } else {
+        checkinUnreadable = true
+        console.warn(
+          `[agent] buildRuntimeContext: visit check-in load failed for guest ${input.guestId}: ${checkinResult.error}. "How is it so far?" is not armed this turn.`,
+        )
+      }
+    }
+    const sameVisitOrderAt = resolveSameVisitOrderAt({
+      scanAt,
+      guestCreatedVia: guest.createdVia,
+      guestCreatedAt: guest.createdAt,
+      inboundAt: input.currentMessage.receivedAt,
+      mentionsMenuItem: bodyMentionsMenuItem(
+        input.currentMessage.body,
+        venue.venueInfo.menu.items,
+      ),
+      alreadyAskedThisVisit: checkinUnreadable || visitCheckin !== null,
+    })
+
     // The positive half of TAC-518's open question. Without it, a referral that
     // DID arrive for a returning guest leaves no trace until the model happens
     // to raise understand_order's line, and this repo has already had a stretch
@@ -799,6 +853,7 @@ export async function buildRuntimeContext(input: {
       openRecommendationTouchedTimes,
       openRecommendationsUnreadable: !activeCommitmentsResult.ok,
       recordedOrderTimes,
+      sameVisitOrderAt,
       rows: intentionRows,
       inboundTimes,
       inboundHistoryFrom,
@@ -948,6 +1003,9 @@ export async function buildRuntimeContext(input: {
     // TAC-380: empty on every followup run and while the brake is engaged.
     // The serializer omits the block entirely when empty.
     openIntentions: intentions.open,
+    visitCheckin,
+    visitLocalDate,
+    visitCheckinHold: false,
     // TAC-560: true only on the pause-triggered warm close. Read off the
     // trigger rather than derived, because whether this turn is a close is the
     // caller's decision (the processor claimed it), not something re-inferable

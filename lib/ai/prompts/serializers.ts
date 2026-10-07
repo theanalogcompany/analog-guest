@@ -1764,14 +1764,44 @@ const NO_QUESTION_RESTRAINT = [
   'exception is a question another block in this prompt tells you to ask.',
 ].join('\n')
 
+/**
+ * TAC-575: the paragraph under a REQUIRED intention, in place of the ordinary
+ * "these are things you'd like to get to, not a checklist" one.
+ *
+ * The ordinary paragraph exists to make asking rare, and it works: 37% from
+ * the best block position. "How is it so far?" is a step in a ruled sequence
+ * (order, compliment, how is it), so the turn that renders it gets a paragraph
+ * that says to ask. Nothing else changes: same block, same last position, same
+ * `intentionQuestion` field, same post-send recording.
+ *
+ * IT ALSO CARRIES THE FIRST-CONVERSATION RESTRAINT'S JOB ("asks them nothing
+ * else"), so that paragraph is not appended after it. Two closing paragraphs
+ * about questions, the second saying "only if a line above fits", would hand
+ * back the licence to skip that this one removes.
+ *
+ * NO QUOTED QUESTION. The ruling's own wording ("how is it so far?") is the
+ * line every guest would then receive, and R41 exists because that is the
+ * defect.
+ */
+const MUST_ASK_PARAGRAPH = [
+  'This one is not optional. Ask it this turn, in `intentionQuestion`, in',
+  'your own words: one short question about the thing they just told you they',
+  'got. The reply itself receives what they said and asks them nothing else.',
+].join('\n')
+
 function formatOpenIntentions(
   lines: readonly string[],
   firstTouchAfterQrScan: boolean,
   channel: MessageChannel | null,
   firstConversation: boolean,
+  mustAsk: boolean,
 ): string | null {
   if (lines.length === 0) return null
   const header = "## What you're hoping to get to"
+  // TAC-575: a required question renders with its own paragraph and WITHOUT
+  // the first-touch opener. The opener says "Ask what they just got", and this
+  // line only exists because they have just said what they got.
+  if (mustAsk) return `${header}\n${lines.join('\n')}\n\n${MUST_ASK_PARAGRAPH}`
   // TAC-423, ruled 2026-09-18. The opener's fallback question used to be
   // "ask whether it's their first time" — a second, independently-authored
   // instruction competing with understand_order's own line in this same
@@ -2169,6 +2199,7 @@ export function runtimeToProse(
       runtime.firstTouchAfterQrScan === true,
       channel,
       runtime.firstConversation === true,
+      runtime.mustAskIntention === true,
     )
     if (block) blocks.push(block)
   } else if (
