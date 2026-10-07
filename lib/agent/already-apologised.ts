@@ -11,8 +11,10 @@
 //
 // SIMPLE ON PURPOSE (ruled 2026-10-07). It reads our own outbound, where the
 // copy says sorry in so many words; the same reasoning as the bare `?` test in
-// composeReplyWithIntention. It does not try to tell WHAT was apologised for:
-// the block's own last sentence leaves room for a different problem.
+// composeReplyWithIntention. It does not try to tell WHAT was apologised for,
+// and "sorry, we're closed sundays" counts. That is why the block it switches
+// on asks the model whether this is the same thing, rather than saying so: a
+// wording that asserted it cost a first complaint its apology 6 times in 10.
 
 import { reachedGuest } from './retrieval-context'
 import type { RecentMessage } from '@/lib/ai/types'
@@ -24,18 +26,19 @@ const APOLOGY = /\b(sorry|apolog(?:y|ies|ise|ize|ised|ized|ising|izing))\b/i
  *
  * Only messages that REACHED the guest count: an apology in a held draft is one
  * they never read. "Current conversation" is the caller's window, the one
- * definition build-runtime-context hoists.
+ * definition build-runtime-context hoists, measured back from `asOf`: when the
+ * guest's message arrived, so a replayed turn is judged as of its own moment.
  */
 export function alreadyApologised(
   recentMessages: readonly RecentMessage[],
-  now: Date,
+  asOf: Date,
   conversationWindowMs: number,
 ): boolean {
   return recentMessages.some(
     (m) =>
       m.direction === 'outbound' &&
       reachedGuest(m) &&
-      now.getTime() - m.createdAt.getTime() <= conversationWindowMs &&
+      asOf.getTime() - m.createdAt.getTime() <= conversationWindowMs &&
       APOLOGY.test(m.body),
   )
 }

@@ -440,6 +440,8 @@ async function main(): Promise<void> {
 
       const ctx: RuntimeContext = {
         ...baseCtx,
+        // The real base guest's, like the thread: a constructed guest has none.
+        wroteBeforeHistoryWindow: false,
         // THE GUEST IS MADE A FRESH SCAN, and without this the whole of bar 3 is
         // vacuous. computeFirstTouchAfterQrScan requires created_via = 'qr_scan'
         // AND a createdAt inside the freshness window; the derived guest is a real

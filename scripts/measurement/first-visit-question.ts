@@ -484,6 +484,8 @@ async function main(): Promise<void> {
 
       const ctx: RuntimeContext = {
         ...baseCtx,
+        // The real base guest's, like the thread: a constructed guest has none.
+        wroteBeforeHistoryWindow: false,
         recentMessages: [...history],
         recentVisits,
         conversationChannel: 'text',

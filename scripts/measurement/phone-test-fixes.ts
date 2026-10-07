@@ -29,8 +29,10 @@
 // in that pull request's history, with the bodies in its description. They
 // edited text that change has since replaced.
 //
-// THE SYSTEM PROMPT IS SENT THE WAY PRODUCTION SENDS IT: the stable half with
-// a cache breakpoint, then the per-message half. The run prints how many input
+// THE SYSTEM PROMPT IS SPLIT WHERE PRODUCTION SPLITS IT: the stable half with
+// a cache breakpoint, then the per-message half. (Production's breakpoint has
+// a one-hour lifetime; this one has the default five minutes, which a run
+// stays well inside.) The run prints how many input
 // tokens were read from cache. An arm that edits the stable half pays one
 // write and then reads; a run of ~750 uncached generations is what this
 // replaced.
@@ -63,9 +65,7 @@ import {
   MAX_OUTPUT_TOKENS,
 } from '@/lib/ai/generate-message'
 import { PROMPT_VERSION } from '@/lib/ai/prompts/system-template'
-import { alreadyApologised } from '@/lib/agent/already-apologised'
 import { buildRuntimeContext } from '@/lib/agent/build-runtime-context'
-import { deriveKnownGuest } from '@/lib/agent/known-guest'
 import {
   buildAiRuntime,
   classifyStage,
@@ -73,8 +73,8 @@ import {
   retrieveKnowledgeWithContextStage,
 } from '@/lib/agent/stages'
 import type { RuntimeContext } from '@/lib/agent/types'
-import { WARM_CLOSE_PAUSE_MINUTES_DEFAULT } from '@/lib/agent/warm-close'
 import { createAdminClient } from '@/lib/db/admin'
+import type { ReOptIn } from '@/lib/guests/opt-out'
 import { startAgentTrace } from '@/lib/observability/langfuse'
 import { toParsedGuestContext } from '@/lib/schemas/guest-context'
 import { createRunLog } from './run-log'
@@ -131,7 +131,18 @@ function swap(
   return { label, target, apply: (p) => p.replace(from, to), optional }
 }
 
-/** Remove a `## Heading` block from the user prompt, up to the next heading. */
+/** Where the user prompt's blocks end and its closing lines begin. */
+const TAIL_ANCHORS = ['\n\nThe guest just sent:', '\n\nGenerate '] as const
+
+/**
+ * Remove a `## Heading` block from the user prompt.
+ *
+ * The block ends at the next heading OR at the closing lines, whichever comes
+ * first. The first version cut to the next heading only, and a block that
+ * happened to be last took "The guest just sent" with it: on a complaint turn
+ * the apology block is last (no emoji directive follows), so the control arm
+ * generated those replies without the guest's message.
+ */
 function dropBlock(label: string, heading: string): Transform {
   return {
     label,
@@ -140,22 +151,26 @@ function dropBlock(label: string, heading: string): Transform {
     apply: (p) => {
       const start = p.indexOf(heading)
       if (start === -1) return p
-      const next = p.indexOf('\n## ', start + heading.length)
-      return next === -1
-        ? p.slice(0, start)
-        : p.slice(0, start) + p.slice(next + 1)
+      const ends = ['\n\n## ', ...TAIL_ANCHORS]
+        .map((a) => p.indexOf(a, start + heading.length))
+        .filter((at) => at !== -1)
+      if (ends.length === 0) return p.slice(0, start).trimEnd()
+      const end = Math.min(...ends)
+      // Blocks are joined by a blank line: drop this one and one separator.
+      return start === 0
+        ? p.slice(end).replace(/^\n\n/, '')
+        : p.slice(0, start).replace(/\n\n$/, '') + p.slice(end)
     },
   }
 }
 
 /** Add a block at the end of the user prompt's blocks, before the closing lines. */
 function insertUserBlock(label: string, block: string): Transform {
-  const anchors = ['\n\nThe guest just sent:', '\n\nGenerate ']
   return {
     label,
     target: 'user',
     apply: (p) => {
-      const anchor = anchors.find((a) => p.includes(a))
+      const anchor = TAIL_ANCHORS.find((a) => p.includes(a))
       if (anchor === undefined) return p
       const at = p.lastIndexOf(anchor)
       return `${p.slice(0, at)}\n\n${block}${p.slice(at)}`
@@ -282,7 +297,7 @@ interface Unit {
   /** The guest wrote before the history window (an imported thread, say). */
   wroteBeforeHistoryWindow?: boolean
   /** This is the turn that opted the guest back in. */
-  reOptIn?: 'instagram'
+  reOptIn?: ReOptIn
 }
 
 interface Cell {
@@ -476,7 +491,7 @@ const CELLS: readonly Cell[] = [
           ['out', "done, you won't hear from us again"],
         ] as const,
         gapMinutes: 120,
-        reOptIn: 'instagram' as const,
+        reOptIn: 'instagram' as const satisfies ReOptIn,
       }),
     ),
   },
@@ -492,6 +507,27 @@ const CELLS: readonly Cell[] = [
       u('still-2', 'yeah it was just disappointing', COMPLAINT_ANSWERED),
       u('logistics', 'can i come by saturday instead?', COMPLAINT_ANSWERED),
     ],
+  },
+  {
+    id: '3-first-complaint',
+    what: 'a first complaint after an unrelated "sorry" of ours: the apology block renders, and the reply should still apologise (constructed)',
+    kind: 'inbound',
+    established: true,
+    units: [
+      'my latte was cold when i got it today',
+      'the cortado i got this morning was burnt',
+      'waited 25 minutes for a flat white today',
+      'my pastry was stale this morning',
+      'got the wrong drink today, asked for oat',
+    ].map((inbound, i) => ({
+      id: `first-${i + 1}`,
+      inbound,
+      history: [
+        ['in', 'do you have matcha?'],
+        ['out', "sorry, no matcha here. it's all coffee and tea"],
+      ] as const,
+      gapMinutes: 180,
+    })),
   },
   {
     id: '4-selfcorrect',
@@ -638,23 +674,9 @@ function unitContext(
             referralSource: null,
           },
     recentMessages,
-    // Derived by the production functions from the constructed thread, so the
-    // cell measures the derivation and the block together. The pause is the
-    // venue default; the conversation window is the base context's own.
-    knownGuest:
-      unit.inbound === undefined
-        ? null
-        : deriveKnownGuest({
-            recentMessages,
-            receivedAt: now,
-            pauseMs: WARM_CLOSE_PAUSE_MINUTES_DEFAULT * 60_000,
-            wroteBeforeHistoryWindow: unit.wroteBeforeHistoryWindow === true,
-          }),
-    alreadyApologised: alreadyApologised(
-      recentMessages,
-      now,
-      base.conversationWindowMs,
-    ),
+    // The blocks are derived by buildAiRuntime from the constructed thread and
+    // this one fact, so the cell measures the derivation and the block together.
+    wroteBeforeHistoryWindow: unit.wroteBeforeHistoryWindow === true,
     // NOTHING OF THE REAL GUEST'S (the TAC-575 contamination: a leaked open
     // comp reached a ruling).
     recentVisits: [],
@@ -864,7 +886,9 @@ async function main(): Promise<void> {
         }
 
         // MEASURE_DRY=1 prints what the code can know about each unit before
-        // any reply exists, and generates nothing.
+        // any reply exists. It writes no reply, but it has still classified
+        // the unit and retrieved its knowledge, which is one small model call
+        // and one embedding per unit.
         if (process.env.MEASURE_DRY === '1') {
           const chunks = knowledge.get(unit.id) ?? []
           console.log(
@@ -943,11 +967,19 @@ async function main(): Promise<void> {
             number | null | undefined) ?? 0
         cache.uncached += usage?.inputTokenDetails?.noCacheTokens ?? 0
         cache.calls += 1
+        const blocks = [
+          '## You know this guest',
+          '## You have already apologised',
+        ].filter((h) => user.includes(h))
         const reply = composeReplyWithIntention(
           object.body,
           object.intentionQuestion,
         ).body
-        const flags = detect(reply)
+        const flags = {
+          ...detect(reply),
+          knownBlock: blocks.includes('## You know this guest'),
+          apologyBlock: blocks.includes('## You have already apologised'),
+        }
         for (const [k, v] of Object.entries(flags)) {
           if (v) tallies[k] = (tallies[k] ?? 0) + 1
         }
@@ -959,6 +991,7 @@ async function main(): Promise<void> {
           failed: false,
           category,
           applied,
+          blocks,
           inbound: unit.inbound ?? null,
           body: reply,
           knowledgeGap: object.knowledgeGap,

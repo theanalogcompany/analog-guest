@@ -44,8 +44,6 @@ import { loadComplaintCheckins, loadVisitCheckin } from './visit-checkin-store'
 // TAC-567: TAC-560's predicate, reused rather than a second definition of
 // "first conversation". warm-close.ts is pure and builds no client at import.
 import { hasAnsweredGuestBefore, reachedGuest } from './retrieval-context'
-import { alreadyApologised } from './already-apologised'
-import { deriveKnownGuest } from './known-guest'
 import { isFirstConversation, isQuietAfterWarmClose } from './warm-close'
 import { loadPriorGreetings, loadScanCarryForward } from './scan-arrival-store'
 import {
@@ -178,6 +176,22 @@ export async function buildRuntimeContext(input: {
     messagesQuery = messagesQuery.lt('created_at', input.historyEndIso)
   }
 
+  let olderInboundQuery = supabase
+    .from('messages')
+    .select('id')
+    .eq('venue_id', input.venueId)
+    .eq('guest_id', input.guestId)
+    .eq('direction', 'inbound')
+    .neq('body', '')
+    .lt('created_at', historyCutoffIso)
+    .limit(1)
+  if (input.currentMessage) {
+    olderInboundQuery = olderInboundQuery.neq('id', input.currentMessage.id)
+  }
+  if (input.historyEndIso) {
+    olderInboundQuery = olderInboundQuery.lt('created_at', input.historyEndIso)
+  }
+
   const visitHistoryCutoffIso = new Date(
     Date.now() - MAX_VISIT_HISTORY_DAYS * MS_PER_DAY,
   ).toISOString()
@@ -266,20 +280,11 @@ export async function buildRuntimeContext(input: {
       : Promise.resolve(null),
     // Did this guest write to us before the history window begins? The one
     // fact the loaded history cannot answer, and the one an imported thread
-    // (TAC-515) older than the window depends on. Inbound runs only. Bounded
-    // by the same cutoff as the history, so a message of this turn's own burst
-    // can never satisfy it.
-    input.currentMessage
-      ? supabase
-          .from('messages')
-          .select('id')
-          .eq('venue_id', input.venueId)
-          .eq('guest_id', input.guestId)
-          .eq('direction', 'inbound')
-          .neq('body', '')
-          .lt('created_at', historyCutoffIso)
-          .limit(1)
-      : Promise.resolve(null),
+    // (TAC-515) older than the window depends on. Inbound runs only. The
+    // message being answered is excluded by id, and a pinned history
+    // (historyEndIso, the Voices regen path) bounds this the same way it
+    // bounds the history, so a replayed old message cannot match itself.
+    input.currentMessage ? olderInboundQuery : Promise.resolve(null),
   ])
 
   if (venueResult.error || !venueResult.data) {
@@ -469,6 +474,7 @@ export async function buildRuntimeContext(input: {
     // reads below. '' when this venue has none configured, which means neither
     // the goodbye path nor the pause timer sends one.
     warmCloseText: followupRules.warm_close_text,
+    warmClosePauseMinutes: followupRules.warm_close_pause_minutes,
   }
 
   // TAC-296: parse guests.context JSONB at the boundary. fail-OPEN on
@@ -539,23 +545,16 @@ export async function buildRuntimeContext(input: {
   const conversationWindowMs =
     followupRules.recent_conversation_hours * 60 * 60 * 1000
 
-  // Fails toward "new": an unreadable lookup renders no block, which is what
-  // every guest got before this existed.
+  // A lookup that comes back as an error renders no block, which is what
+  // every guest got before this existed. (A thrown read fails the whole batch,
+  // as it does for every query beside it.)
   if (olderInboundResult?.error) {
     console.warn('[agent] older-inbound lookup failed', {
       guestId: input.guestId,
       error: olderInboundResult.error.message,
     })
   }
-  const knownGuest =
-    input.currentMessage == null
-      ? null
-      : deriveKnownGuest({
-          recentMessages,
-          receivedAt: input.currentMessage.receivedAt,
-          pauseMs: followupRules.warm_close_pause_minutes * 60 * 1000,
-          wroteBeforeHistoryWindow: (olderInboundResult?.data?.length ?? 0) > 0,
-        })
+  const wroteBeforeHistoryWindow = (olderInboundResult?.data?.length ?? 0) > 0
 
   // Is this message the answer to a complaint's clarifying question? Read off
   // the history rows already loaded above (`category` rides that select for
@@ -1201,12 +1200,7 @@ export async function buildRuntimeContext(input: {
     firstConversation,
     // TAC-572: null as built. handleInbound sets it after classification.
     reOptIn: null,
-    knownGuest,
-    alreadyApologised: alreadyApologised(
-      recentMessages,
-      computedAt,
-      conversationWindowMs,
-    ),
+    wroteBeforeHistoryWindow,
     recognition,
     mechanics,
     recentVisits,

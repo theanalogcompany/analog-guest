@@ -57,27 +57,50 @@ export interface KnownGuestInput {
  * THE MESSAGES THIS TURN IS ANSWERING ARE NOT HISTORY. A burst is one turn
  * (decision 0005), so a guest's "hey" and "are you open" seconds apart are
  * both in the table by the time this runs, and the first would otherwise make
- * a brand-new guest "known". Everything the guest has sent since our last
- * message that reached them is treated as this turn. The cost is a guest whose
- * earlier message we never answered: they stay new, which is the safe side.
+ * a brand-new guest "known". Trailing guest messages inside one pause of this
+ * one are treated as this turn.
+ *
+ * BOUNDED BY TIME, and it has to be. Stripping every unanswered trailing
+ * message, however old, was the first version: a guest whose "thanks" three
+ * days ago drew no reply came back as new, and one we never answered 19 hours
+ * ago had the gap measured from that message and was asked if there was
+ * anything ELSE we could help with.
+ *
+ * `earlier` NEEDS BOTH HALVES OF A CONVERSATION inside the window: something
+ * of ours that reached them, and something of theirs. A guest answering our
+ * own follow-up ten days after they last wrote is known, not "back"; so is a
+ * guest we never replied to.
  */
 export function deriveKnownGuest(input: KnownGuestInput): KnownGuest | null {
   const reached = input.recentMessages.filter(reachedGuest)
+  const at = input.receivedAt.getTime()
   let end = reached.length
-  while (end > 0 && reached[end - 1]?.direction === 'inbound') end -= 1
+  while (end > 0) {
+    const m = reached[end - 1]
+    if (m?.direction !== 'inbound') break
+    if (at - m.createdAt.getTime() > input.pauseMs) break
+    end -= 1
+  }
   const before = reached.slice(0, end)
-  const turnStartedAt = reached[end]?.createdAt ?? input.receivedAt
+  const turnStartedAt = reached[end]?.createdAt.getTime() ?? at
 
-  const wroteInWindow = before.some((m) => m.direction === 'inbound')
-  if (!wroteInWindow && !input.wroteBeforeHistoryWindow) return null
+  const theirLast = before.findLast((m) => m.direction === 'inbound')
+  if (theirLast === undefined && !input.wroteBeforeHistoryWindow) return null
 
   const last = before.at(-1)
   if (last === undefined) return 'known'
 
-  const gapMs = turnStartedAt.getTime() - last.createdAt.getTime()
+  const gapMs = turnStartedAt - last.createdAt.getTime()
   if (!Number.isFinite(gapMs)) return null
   // Still mid-conversation: no greeting is at stake.
   if (gapMs < input.pauseMs) return null
-  if (wroteInWindow && gapMs < CONTINUITY_MAX_GAP_MS) return 'earlier'
+
+  const weReplied = before.some((m) => m.direction === 'outbound')
+  const theyWroteRecently =
+    theirLast !== undefined &&
+    turnStartedAt - theirLast.createdAt.getTime() < CONTINUITY_MAX_GAP_MS
+  if (gapMs < CONTINUITY_MAX_GAP_MS && weReplied && theyWroteRecently) {
+    return 'earlier'
+  }
   return 'known'
 }

@@ -2199,13 +2199,17 @@ function formatKnownGuest(
  * "AND DO NOT SAY AGAIN WHOSE FAULT IT WAS": with only the apology barred, the
  * opener became "that's on us", which is the same sentence in other words.
  *
- * The last sentence is the room for a second, different problem. The detector
- * cannot tell what was apologised for, so the block has to.
+ * IT DOES NOT SAY WHAT THE EARLIER SORRY WAS FOR, because the detector cannot
+ * know. The first wording said "for this", and a guest whose first complaint
+ * came three hours after our "sorry, no matcha here" got an apology 4 times in
+ * 10 where the control gave 10. With the condition left to the model ("if ...
+ * the same thing") that cell is 10 of 10 again and the repeat cell still 0 of
+ * 8. Approved wording was the first; this one is pending approval.
  */
 const ALREADY_APOLOGISED = [
   '## You have already apologised',
   '',
-  'You have already said sorry to this guest for this, earlier in this conversation. Do not apologise again, and do not say again whose fault it was. Start with what is new: the answer, the next step, or what you are doing about it. If they raise a different problem, that one gets its own apology, once.',
+  'Earlier in this conversation you already said sorry to this guest. If what they are writing about now is the same thing, do not apologise again, and do not say again whose fault it was: start with what is new, the answer, the next step, or what you are doing about it. If it is a different problem, it gets its own apology, once.',
 ].join('\n')
 
 /**

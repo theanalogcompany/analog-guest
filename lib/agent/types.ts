@@ -29,7 +29,6 @@ import type { Visit } from './extract-recent-visits'
 import type { RetractableReportedVisit } from './retract-reported-visit'
 import type { NewlyEligibleIntention, OpenIntention } from './intentions/derive'
 import type { PacingVerdict } from './intentions/pacing'
-import type { KnownGuest } from './known-guest'
 import type { VisitCheckin } from './visit-checkin'
 
 export type { AlertContext }
@@ -109,6 +108,8 @@ export interface VenueContext {
    * read that could disagree with it.
    */
   warmCloseText: string
+  /** `followup_rules.warm_close_pause_minutes`: this venue's definition of a pause. */
+  warmClosePauseMinutes: number
 }
 
 export interface GuestContext {
@@ -490,14 +491,13 @@ export interface RuntimeContext {
    */
   reOptIn: ReOptIn | null
   /**
-   * Which `## You know this guest` block this turn may carry, decided from the
-   * guest's own earlier messages (known-guest.ts). Null on a proactive turn
-   * and for a guest who has not written before. buildAiRuntime still withholds
-   * it on turns that carry their own facts about the guest's return.
+   * Did this guest write to us before the loaded history begins? The one fact
+   * behind `## You know this guest` that the history itself cannot answer
+   * (known-guest.ts). False on a proactive turn. buildAiRuntime derives the
+   * block from this and `recentMessages`, so a caller that swaps in another
+   * thread gets a block that matches it.
    */
-  knownGuest: KnownGuest | null
-  /** Have we already said sorry in this conversation? See already-apologised.ts. */
-  alreadyApologised: boolean
+  wroteBeforeHistoryWindow: boolean
   recognition: RecognitionSnapshot
   // Mechanics this guest is currently eligible for. Filtered at load time in
   // build-runtime-context.ts by guest's recognition state and redemption
