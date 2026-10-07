@@ -69,8 +69,14 @@ order: venue, guest, duplicate check on `provider_message_id`, insert.
 
 - **Every insert names `channel: 'instagram'` explicitly.** Migration 048 defaults the column
   to `'text'`, so an omitted channel silently records an Instagram message as a text.
-- Only a guest's own message or postback creates a guest. An echo or a read for an unknown
-  IGSID is skipped, so staff messaging a supplier from the venue account creates no guest.
+- Only a guest's own message, postback or standalone referral creates a guest. An echo or a
+  read for an unknown IGSID is skipped, so staff messaging a supplier from the venue account
+  creates no guest. The history import (`scripts/backfill-instagram-contacts.ts`) follows the
+  same rule: a thread with nothing importable from the guest makes none.
+- **An imported row is not a webhook row.** The import writes `created_at` as Meta's time and
+  leaves `provider_sent_at` NULL, so an inbound Instagram row can now lack one for a reason
+  other than age. `instagram_backfill_messages` (migration 075) lists the imported ids, and
+  `guests.created_via = 'instagram_backfill'` marks the guests it made.
 - **`is_echo` marks the venue's side, not staff.** A reply typed by hand in the Instagram app
   and the agent's own API sends both arrive as echoes.
 - A read receipt's key is `read`, not `messaging_seen` (that is only the subscription field

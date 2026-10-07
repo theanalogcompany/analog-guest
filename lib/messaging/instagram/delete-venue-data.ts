@@ -116,6 +116,11 @@
 //     no longer there. Deleting is also what `on delete cascade` would have
 //     done if this path deleted guests, which is the point of the next
 //     paragraph.
+//   - `instagram_backfill_messages` rows are LEFT (TAC-515). Enumerated from
+//     migration 075: message_id, venue_id, guest_id, run_id, created_at. Ids
+//     only, so there is nothing to redact, and nothing reads the table except
+//     the import script, so no row is a pending send. The messages it points
+//     at are redacted by the `messages` pass like any other.
 //
 // CASCADE NEVER FIRES ON THIS PATH, and that is why every guest-keyed table
 // has to be named here by hand. The guest ROW survives, anonymised, so a
