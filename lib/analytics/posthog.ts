@@ -341,6 +341,37 @@ function formatClassificationLowConfidence(
   return lines.join('\n')
 }
 
+export interface ComplaintThreadTurnProps {
+  agentRunId: string
+  venueId: string
+  guestId: string
+  /** What the classifier picked, after the low-confidence reroute. */
+  classifierCategory: string
+  classifierConfidence: number
+  /** What the turn ran under. */
+  category: string
+  /** True when the open complaint thread replaced the classifier's pick. */
+  carried: boolean
+  crisisSafety: boolean
+}
+
+/**
+ * A turn that answered a complaint's auto-sent clarifying question
+ * (lib/agent/complaint-thread.ts). Fired whether or not the category was
+ * carried, so `carried: true` over all events is the override rate, and
+ * `classifierCategory` says what the classifier would have run the turn as.
+ *
+ * PostHog only. Carries no message content, and the turn it describes is
+ * already an operator card, which is where a human sees it.
+ */
+export async function captureComplaintThreadTurn(
+  props: ComplaintThreadTurnProps,
+): Promise<void> {
+  await capturePostHogEvent('complaint_thread_turn', props.guestId, {
+    ...props,
+  })
+}
+
 // `corpus_retrieval_below_threshold` (and CORPUS_TOP_SIMILARITY_LOW_THRESHOLD)
 // lived here until decision 0008 (2026-09-29): voice is a static per-venue
 // pack, so there is no similarity left to be thin. Historical PostHog rows

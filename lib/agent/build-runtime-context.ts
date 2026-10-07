@@ -53,6 +53,7 @@ import {
 import { extractRecentVisits } from './extract-recent-visits'
 import { loadLastInboundChannel } from './last-inbound-channel'
 import { groupIntoResponses } from './group-responses'
+import { isComplaintClarificationOpen } from './complaint-thread'
 import {
   applyCurrentTurnSuppression,
   buildSatisfactionFacts,
@@ -159,7 +160,7 @@ export async function buildRuntimeContext(input: {
   let messagesQuery = supabase
     .from('messages')
     .select(
-      'id, direction, body, created_at, generation_id, status, review_state',
+      'id, direction, body, created_at, generation_id, status, review_state, category',
     )
     .eq('venue_id', input.venueId)
     .eq('guest_id', input.guestId)
@@ -517,6 +518,20 @@ export async function buildRuntimeContext(input: {
   // retrieval layer reads the same number rather than re-deriving it.
   const conversationWindowMs =
     followupRules.recent_conversation_hours * 60 * 60 * 1000
+
+  // Is this message the answer to a complaint's clarifying question? Read off
+  // the history rows already loaded above (`category` rides that select for
+  // this one reader). Inbound only: a proactive send answers nothing. Measured
+  // from the message's own received time, for the re-dating reason
+  // retrieval-context.ts gives.
+  const openComplaintClarification =
+    input.currentMessage !== undefined
+      ? isComplaintClarificationOpen(
+          messagesResult.data ?? [],
+          input.currentMessage.receivedAt,
+          conversationWindowMs,
+        )
+      : false
 
   // TAC-567: resolved ONCE here, beside the window it measures against, and
   // carried on the context. Two readers need it (the intention derivation and
@@ -1131,6 +1146,7 @@ export async function buildRuntimeContext(input: {
     conversationChannel: channelResolution.channel,
     recentMessages,
     conversationWindowMs,
+    openComplaintClarification,
     firstConversation,
     // TAC-572: null as built. handleInbound sets it after classification.
     reOptIn: null,

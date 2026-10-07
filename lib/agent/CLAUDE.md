@@ -147,6 +147,20 @@ protected-card drop. The two are separate expressions and a new check must be ad
 both, or a guest already holding a card gets silence. Both matter only where the checks
 still run pre-send.
 
+### A complaint stays a complaint across its clarifying question
+
+`complaint-thread.ts`. When the newest outbound in the thread is a `comp_complaint` reply that
+auto-sent (the clarifying carve-out), the guest's next turn runs as `comp_complaint` whatever
+the classifier picked, so the make-it-right is held. **Every** message is carried, a change of
+subject included (ruled 2026-10-07); only `opt_out` and a crisis signal are exempt. It is one
+turn: any later outbound row, a waiting draft included, closes the thread.
+
+`classifyStage` applies it, so the scenario harness sees it too. The classifier's own pick
+rides `Classification.classifierCategory` and the `complaint_thread_turn` event, fired on
+every open-thread turn so the override rate has a denominator. No trigger was added: the hold
+is the existing `category_requires_approval`. `npm run measure-complaint-answer-hold` is the
+check, and its header says how to take the before-figure on `main`.
+
 ### Two pending slots per guest
 
 Migration 041 plus 054. **Obligation slot**: pending rows whose `pending_commitment.type`

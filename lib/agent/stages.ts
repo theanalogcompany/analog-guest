@@ -3,6 +3,7 @@ import {
   captureCancellationCheckUnavailable,
   captureCancellationClaimUnbacked,
   captureClassificationLowConfidence,
+  captureComplaintThreadTurn,
   captureDashViolationPersisted,
   captureDemoBypassedApprovalGate,
   captureEmojiDirectiveViolated,
@@ -62,6 +63,7 @@ import { fireRedAlert } from './alerts'
 import { matchComp } from './comp-backstop'
 import { isFloorCategory, matchForwardCommitment } from './complaint-floor'
 import { canAutoSendComplaintTurn } from './complaint-routing'
+import { resolveComplaintThreadCategory } from './complaint-thread'
 import { REPORTED_ORDER_WINDOW_DAYS } from './extract-reported-order'
 import { INTENTION_DEFINITION_BY_KEY } from './intentions/definitions'
 import { renderableIntentions } from './intentions/derive'
@@ -712,8 +714,36 @@ export async function classifyStage(
     })
   }
 
+  // A complaint stays a complaint across its own clarifying question: when the
+  // newest outbound is that question, this turn runs as comp_complaint
+  // whatever the classifier made of the answer (complaint-thread.ts). Applied
+  // AFTER the confidence reroute, so a low-confidence answer that would have
+  // shipped a holding ack as `unknown` is held as the complaint it belongs to.
+  const classifierCategory = autoRoutedToUnknown ? 'unknown' : r.data.category
+  const thread = resolveComplaintThreadCategory({
+    classifierCategory,
+    crisisSafety: r.data.crisisSafety,
+    openComplaintClarification: ctx.openComplaintClarification,
+  })
+  // Fired on every turn the thread is open, carried or not, so the override
+  // RATE has its denominator: a count of overrides alone cannot say how often
+  // the classifier already agreed.
+  if (ctx.openComplaintClarification) {
+    await captureComplaintThreadTurn({
+      agentRunId: ctx.agentRunId,
+      venueId: ctx.venue.id,
+      guestId: ctx.guest.id,
+      classifierCategory,
+      classifierConfidence: r.data.classifierConfidence,
+      category: thread.category,
+      carried: thread.carried,
+      crisisSafety: r.data.crisisSafety,
+    })
+  }
+
   return {
-    category: autoRoutedToUnknown ? 'unknown' : r.data.category,
+    category: thread.category,
+    ...(thread.carried ? { classifierCategory } : {}),
     classifierConfidence: r.data.classifierConfidence,
     reasoning: r.data.reasoning,
     // TAC-348: passed through unmodified — independent of the confidence
