@@ -463,35 +463,56 @@ check(
 )
 
 check(
-  'order turn, an order report: ask',
-  orderTurnVerdict({ category: 'casual_chatter', praisedExperience: false }),
+  'order turn, the extractor recorded an order: ask',
+  orderTurnVerdict({
+    category: 'reply',
+    praisedExperience: false,
+    orderRecorded: true,
+  }),
   'ask',
 )
 check(
-  'order turn, "got the sofi" classified as a sign-off: ask',
-  orderTurnVerdict({ category: 'acknowledgment', praisedExperience: false }),
+  'order turn the classifier calls a question, but an order was recorded: ask',
+  orderTurnVerdict({
+    category: 'new_question',
+    praisedExperience: false,
+    orderRecorded: true,
+  }),
   'ask',
 )
 check(
   'order turn that already praises it: recorded good, not asked',
-  orderTurnVerdict({ category: 'casual_chatter', praisedExperience: true }),
+  orderTurnVerdict({
+    category: 'casual_chatter',
+    praisedExperience: true,
+    orderRecorded: true,
+  }),
   'good',
 )
 check(
-  'order turn that is a complaint: recorded bad',
-  orderTurnVerdict({ category: 'comp_complaint', praisedExperience: false }),
+  'order turn that is a complaint: recorded bad, whatever the extractor found',
+  orderTurnVerdict({
+    category: 'comp_complaint',
+    praisedExperience: false,
+    orderRecorded: false,
+  }),
   'bad',
 )
 check(
-  'a question that names a menu item: nothing',
-  orderTurnVerdict({ category: 'new_question', praisedExperience: false }),
+  'no order recorded (a question, "not yet", a timed-out wait): nothing',
+  orderTurnVerdict({
+    category: 'casual_chatter',
+    praisedExperience: false,
+    orderRecorded: false,
+  }),
   'skip',
 )
 check(
-  'a recommendation ask that praises the place: nothing',
+  'praise with no order recorded: nothing',
   orderTurnVerdict({
     category: 'recommendation_request',
     praisedExperience: true,
+    orderRecorded: false,
   }),
   'skip',
 )

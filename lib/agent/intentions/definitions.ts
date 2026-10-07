@@ -122,8 +122,8 @@ export type IntentionArmsOn =
    * "did you like it?" a minute later is absurd; this one exists for exactly
    * that minute, because "how is it so far?" is only askable while the cup is
    * in their hand. `first_recorded_order` reads a transaction; this cannot,
-   * because the order extractor runs after the reply is sent and no
-   * transaction exists on the turn that names the order.
+   * because arming is derived before the order extractor has run and no
+   * transaction exists yet on the turn that names the order.
    *
    * Resolved by the caller (resolveSameVisitOrderAt, lib/agent/visit-checkin.ts)
    * from the scan and the menu-name prefilter, and passed in as
