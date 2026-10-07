@@ -6,7 +6,7 @@ their order, how their answer is read, and the quiet after a warm close.
 
 **Run by hand. Not in CI, not an npm script, not a test suite.** Run it when you change
 `lib/agent/intentions/definitions.ts`, `lib/agent/intentions/derive.ts`,
-`lib/agent/visit-checkin.ts`, `lib/agent/warm-close.ts`, `lib/agent/retrieval-context.ts`, or
+`lib/agent/visit-checkin.ts`, `lib/agent/visit-checkin-timeout.ts`, `lib/agent/warm-close.ts`, `lib/agent/retrieval-context.ts`, or
 the intentions block in `lib/ai/prompts/serializers.ts`.
 
 ## Run it
@@ -38,6 +38,10 @@ database. So these are covered by reading, not by this harness:
   closes the intention once a check-in exists). The first check marked `EXPECTED` shows why
   they matter: the derivation alone re-arms on a second order event;
 - "our last message asked something", which is computed from stored history.
+- the timed check-back processor (`visit-checkin-timeout.ts`): its gate order, the claim,
+  the release and the sent stamp. Its pure timing rules are covered here; the processor that
+  strings them together against a database is not;
+- the warm close standing down for a pending or unanswered check-back.
 
 Two checks are marked `EXPECTED`. They record what the derivation does, not what anyone
 ruled, so that a change to either is noticed.
@@ -56,5 +60,11 @@ Each was mutated in the source, the harness run, and the source restored (2026-1
 | `checkinHold` in `renderableIntentions` | nothing else renders while waiting |
 | the answering-our-question guard in `resolveSameVisitOrderAt` | names a menu item but is not answering |
 | the category allow-list in `orderTurnVerdict` | a question that names a menu item; a recommendation ask |
+| the claim in `owesCheckback` | not owed: already claimed; not once the timer has claimed it |
+| the time bound in `resolveCheckbackDueAt` | not the next morning |
+| the visit bound in `lastProactiveWasThisVisit` | a follow-up fifty minutes before the order |
+| a required intention surviving the hold in `renderableIntentions` | the check-back itself survives the hold |
+| the claim fallback in `checkbackWentUnanswered` | held for an operator, nothing from the guest since |
+| a "not yet" restarting the wait in `resolveCheckbackDueAt` | "not yet" two minutes ago restarts the wait |
 
 A check not in that table has not been shown able to fail.

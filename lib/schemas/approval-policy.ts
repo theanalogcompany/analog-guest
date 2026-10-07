@@ -68,6 +68,24 @@ export const ApprovalPolicySchema = z.object({
    * field, malformed policy, degraded context) lands on operator approval.
    */
   reviewAsk: DispositionSchema.optional(),
+  /**
+   * Disposition for the same-visit check-back (lib/agent/visit-checkin-timeout.ts),
+   * the one unprompted "how's it treating you?" to a guest who was asked how
+   * their order is and went quiet.
+   *
+   * NOT a perCategory entry, for reviewAsk's reason and a sharper one: the
+   * check-back is stored as `follow_up`, and a venue that holds follow-ups
+   * would hold it with them. Ruled 2026-10-06 that it auto-sends at Le Mil's
+   * "as a venue-level approval setting, not a global default, and not under
+   * follow_up's operator_approval".
+   *
+   * Optional, and the DEFAULT IS QUEUE, owned by
+   * resolveVisitCheckbackDisposition below for the reason reviewAsk's is: a
+   * check-back held for approval mostly arrives too late to mean anything, so
+   * a venue that wants this feature sets "visitCheckback": "auto_send", and a
+   * venue that has not been asked sends nothing unprompted.
+   */
+  visitCheckback: DispositionSchema.optional(),
 })
 
 export type ApprovalPolicy = z.infer<typeof ApprovalPolicySchema>
@@ -207,6 +225,19 @@ export function resolveReviewAskDisposition(
   policy: ApprovalPolicy | null | undefined,
 ): ApprovalDisposition {
   return policy?.reviewAsk ?? 'operator_approval'
+}
+
+/**
+ * Effective disposition for the same-visit check-back.
+ *
+ * 'operator_approval' on every fallback path, the launch posture
+ * resolveReviewAskDisposition takes. Flipping a venue to auto-send is one
+ * Studio JSONB edit and no deploy.
+ */
+export function resolveVisitCheckbackDisposition(
+  policy: ApprovalPolicy | null | undefined,
+): ApprovalDisposition {
+  return policy?.visitCheckback ?? 'operator_approval'
 }
 
 /**

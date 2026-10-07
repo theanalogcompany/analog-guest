@@ -17,11 +17,19 @@ import {
 // venue_configs.approval_policy; nothing else in the repo writes it except the
 // seed script's initial literal.
 //
-// Unlike the sibling venue-info route this does NOT read-modify-write, and the
-// difference is structural rather than a shortcut: approval_policy holds
-// exactly {default, perCategory} and the client sends both, so a whole-object
-// replace loses nothing. venue_info needs the merge because it has sibling keys
-// (address, hours, menu, staff, currentContext) a partial write would drop.
+// READ-MODIFY-WRITE, like the sibling venue-info route, since TAC-575. This
+// used to replace the whole object, on the stated grounds that approval_policy
+// "holds exactly {default, perCategory}". That stopped being true when
+// `reviewAsk` was added and is false twice over with `visitCheckback`: both are
+// set by a Studio edit, neither has a control here, and a whole-object replace
+// silently reverted them to their default (hold) the next time anyone toggled
+// a category. For a check-back that means every one queues behind an operator
+// and mostly arrives too late, with nothing logged.
+//
+// So this writes the two keys the UI owns and carries every OTHER key over
+// untouched. The read and the write are not one statement; two operators
+// saving at once is last-write-wins on `default` and `perCategory`, as before,
+// and neither can lose a key they do not send.
 //
 // STRICTER THAN THE RUNTIME READER, DELIBERATELY. PerCategorySchema keys on a
 // loose z.string() so a typo'd key in a hand-edited row degrades to "that one
@@ -106,11 +114,35 @@ export async function PATCH(
   }
 
   const supabase = createAdminClient()
+  const current = await supabase
+    .from('venue_configs')
+    .select('approval_policy')
+    .eq('venue_id', venueId)
+    .maybeSingle()
+  if (current.error) {
+    logger.error('[admin] approval-policy read failed', {
+      venueId,
+      error: current.error.message,
+    })
+    return NextResponse.json({ error: 'db_error' }, { status: 500 })
+  }
+  if (!current.data) {
+    return NextResponse.json({ error: 'not_found' }, { status: 404 })
+  }
+  // Only a plain object has keys to carry. A null or malformed stored value
+  // contributes nothing, and the write below replaces it with a valid policy.
+  const stored: unknown = current.data.approval_policy
+  const carried =
+    typeof stored === 'object' && stored !== null && !Array.isArray(stored)
+      ? (stored as Record<string, unknown>)
+      : {}
+
   const { error, count } = await supabase
     .from('venue_configs')
     .update(
       {
         approval_policy: toJson({
+          ...carried,
           default: body.default,
           perCategory: body.perCategory,
         }),

@@ -322,6 +322,17 @@ export interface DeriveOpenIntentionsInput {
    * stays open until it is asked or its two hours run out.
    */
   sameVisitOrderAt: Date | null
+  /**
+   * TAC-575: from when this visit's check-back has been askable on a turn, or
+   * null when it is not owed, not yet due, or the guest has moved on. Arms
+   * check_back_on_order.
+   *
+   * Resolved by the caller through resolveCheckbackDueAt
+   * (lib/agent/visit-checkin.ts). The caller also removes the intention from
+   * the open set when this is null, because a row armed on an earlier turn
+   * must stop rendering the moment the timer sends the check-back instead.
+   */
+  checkbackDueAt: Date | null
   /** null means the rows could not be read, and the derivation fails CLOSED: nothing renders. */
   rows: IntentionRows | null
   /** The guest's inbound times in the loaded history, including the current message. */
@@ -494,6 +505,12 @@ function armingFor(
             eligibleAt: input.sameVisitOrderAt,
             eventAt: input.sameVisitOrderAt,
           }
+    // TAC-575. The anchor is fixed for the visit (order plus delay), so on every
+    // later turn it is not strictly newer than the stored row and never re-arms.
+    case 'checkback_due':
+      return input.checkbackDueAt === null
+        ? null
+        : { eligibleAt: input.checkbackDueAt, eventAt: input.checkbackDueAt }
     // TAC-558. The EARLIEST recorded order, and NO conversation-window hold -
     // the contrast with `recorded_order` directly above is documented on the
     // arming kind itself. Reuses recordedOrderTimes rather than adding an input:
@@ -864,7 +881,10 @@ export function applyCurrentTurnSuppression(
  *   we asked how their order is and they have not said it is good, so the
  *   venue asks nothing else yet (ruled 2026-10-06: the name comes after "good",
  *   and a guest who has not tried it is answered "with no questions of its
- *   own"). It is decided HERE rather than in deriveOpenIntentions because it
+ *   own"). A REQUIRED intention survives it, which in practice is the
+ *   check-back worked into this reply: asking how the order is cannot be what
+ *   the wait for that answer forbids. It is decided HERE rather than in
+ *   deriveOpenIntentions because it
  *   turns on this turn's classification: the message saying "it's great" has
  *   to lift the hold on the turn it arrives, and derivation runs before the
  *   turn is classified. Same cost shape as the others: a turn, never the
@@ -884,9 +904,15 @@ export function renderableIntentions(
     category === 'opt_out' ||
     category === 'comp_complaint' ||
     hasPendingQuestion ||
-    reviewAskRaised ||
-    checkinHold
+    reviewAskRaised
   )
     return []
+  // The hold stops the venue's OPTIONAL questions, not the check-back, which is
+  // the one thing the venue is supposed to ask a guest who has not said how it
+  // is. Read off the definition's `raise`, never a key.
+  if (checkinHold)
+    return open.filter(
+      (o) => INTENTION_DEFINITION_BY_KEY[o.key].raise === 'always',
+    )
   return [...open]
 }

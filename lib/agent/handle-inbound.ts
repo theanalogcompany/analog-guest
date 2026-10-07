@@ -83,10 +83,13 @@ import {
 import {
   classifyCheckinAnswer,
   isAwaitingCheckinAnswer,
+  isCheckbackTooLate,
   nextCheckinAnswer,
   orderTurnVerdict,
+  owesCheckback,
 } from './visit-checkin'
 import {
+  claimVisitCheckback,
   recordVisitCheckinAnswer,
   recordVisitCheckinAsked,
 } from './visit-checkin-store'
@@ -643,6 +646,24 @@ async function claimWarmCloseForTurn(
   ctx: RuntimeContext,
   agentRunId: string,
 ): Promise<ClaimedWarmClose | null> {
+  // TAC-575: the check-back comes before the close. A guest who says "thanks!"
+  // while their visit is still owed one is not closed on this turn; the timer
+  // checks back if they stay quiet, and the pause timer closes after that. The
+  // pause timer applies the same order (`checkback_pending`).
+  if (
+    ctx.visitCheckin !== null &&
+    ctx.visitCheckinHold &&
+    owesCheckback(ctx.visitCheckin) &&
+    !isCheckbackTooLate(ctx.visitCheckin.orderedAt, new Date())
+  ) {
+    console.log('[agent] warm close not sent on this turn', {
+      agentRunId,
+      guestId: ctx.guest.id,
+      reason: 'checkback_pending',
+    })
+    return null
+  }
+
   // TAC-575 (ruled 2026-10-06): no automated close where staff answered by hand
   // or the conversation contains a complaint. The pause timer runs the same
   // check through the same function. BEFORE the marker write, because the
@@ -2042,7 +2063,40 @@ async function runInboundTurn(
       // the row will say AFTER this message, so "it's great" lifts the hold on
       // the turn it arrives and the name ask can follow it. Set before
       // renderableIntentions runs, like ctx.reviewAsk below.
-      ctx.visitCheckinHold = (answer ?? checkin.answer) !== 'good'
+      const answerNow = answer ?? checkin.answer
+      ctx.visitCheckinHold = answerNow !== 'good'
+      // THREE TURNS THE CHECK-BACK MUST NOT RIDE, even when the clock says it
+      // is due. Removed from the eligibility write too, as for the order turn
+      // above: a row would keep a required question open on their next message.
+      //
+      //   they have just said how it is    good or bad answers it before it
+      //                                    is asked.
+      //   this message IS their answer     the row had no answer and now has
+      //                                    one. "haven't tried it yet" must
+      //                                    not get "and how is it?" back in
+      //                                    the same breath. Their answer also
+      //                                    restarts the wait
+      //                                    (resolveCheckbackDueAt).
+      //   they are signing off             a goodbye is not a turn to put a
+      //                                    question on. If they go quiet the
+      //                                    timer still checks back.
+      const firstAnswerThisTurn = checkin.answer === null && answer !== null
+      if (
+        answerNow === 'good' ||
+        answerNow === 'bad' ||
+        firstAnswerThisTurn ||
+        ctx.classification.category === SIGN_OFF_CATEGORY
+      ) {
+        ctx.openIntentions = ctx.openIntentions.filter(
+          (o) => o.key !== 'check_back_on_order',
+        )
+        ctx.intentionDerivation = {
+          ...ctx.intentionDerivation,
+          newlyEligible: ctx.intentionDerivation.newlyEligible.filter(
+            (e) => e.key !== 'check_back_on_order',
+          ),
+        }
+      }
       if (answer !== null) {
         const checkinGuestId = ctx.guest.id
         waitUntil(
@@ -3319,6 +3373,87 @@ async function runInboundTurn(
       ) {
         waitUntil(recordAskedHowItIs('sent_field'))
       }
+      // TAC-575: this reply worked the check-back in, so the visit's one
+      // check-back is spent. Claimed and stamped sent in one write, AFTER the
+      // send, because here the question has already gone: the timer's
+      // claim-before-send order protects against a send that might not
+      // happen, and this one did. The timer cannot race it. It needs our
+      // message to be the newest and to have sat for CHECKBACK_QUIET_FLOOR_MS,
+      // and this write lands seconds after the reply.
+      //
+      // The same two signals as the question above, for the same reason.
+      const checkedBack = renderedIntentions.find(
+        (o) => o.key === 'check_back_on_order',
+      )
+      const checkbackRowId = ctx.visitCheckin?.id ?? null
+      const recordCheckedBack = async (
+        via: 'sent_field' | 'classifier',
+      ): Promise<void> => {
+        if (checkedBack === undefined || checkbackRowId === null) return
+        const claim = await claimVisitCheckback(createAdminClient(), {
+          id: checkbackRowId,
+          venueId: checkinVenueId,
+          guestId: checkinGuestId,
+          now: new Date(),
+          sent: true,
+        })
+        if (claim.status === 'failed') {
+          // The timer may now send a second check-back. Visible, not silent.
+          console.error('[agent] visit check-back claim failed', {
+            agentRunId,
+            guestId: checkinGuestId,
+            via,
+            error: claim.error,
+          })
+          return
+        }
+        console.log('[agent] visit check-back asked in conversation', {
+          agentRunId,
+          guestId: checkinGuestId,
+          via,
+          outcome: claim.status,
+        })
+      }
+      const checkbackSeenInField =
+        checkedBack !== undefined &&
+        sentQuestion !== '' &&
+        dispatched.deliveredBody.includes(sentQuestion)
+      if (checkbackSeenInField) {
+        waitUntil(recordCheckedBack('sent_field'))
+      }
+      // TAC-575, ruled 2026-10-06: COUNT THE CASE NEITHER SIGNAL CATCHES. The
+      // model can write the check-back into `body` and the classifier can miss
+      // it; nothing then claims the row and the guest can be checked back on a
+      // second time. That is an accepted limit, but an unmeasured one, so when
+      // the check-back was the turn's one rendered question, neither signal
+      // recorded it, and the reply that went out still asks SOMETHING, say so.
+      //
+      // "Looks like one" is a bare `?` in what the guest received. Crude on
+      // purpose and safe on this population: on this turn the prompt told the
+      // model the reply asks nothing but the check-back, so a question mark in
+      // it is the check-back far more often than not. Our outbound copy always
+      // punctuates a question (the detector composeReplyWithIntention uses).
+      // A false positive costs a log line, and the message id is on it.
+      const checkbackLooksUnrecorded = (classifierRaisedIt: boolean): boolean =>
+        checkedBack !== undefined &&
+        !checkbackSeenInField &&
+        !classifierRaisedIt &&
+        dispatched.deliveredBody.includes('?')
+      const warnCheckbackUnrecorded = (
+        classifier: 'not_raised' | 'failed',
+      ): void => {
+        console.warn(
+          '[agent] visit check-back may have gone out unrecorded; a second can follow',
+          {
+            agentRunId,
+            guestId: checkinGuestId,
+            classifier,
+            // The row id, not the text: the body is the guest's conversation
+            // and this is a console line. The message is one lookup away.
+            outboundMessageId,
+          },
+        )
+      }
       // TAC-324 / TAC-380: close the intentions this send raised. Fire-and-
       // forget, mirroring extractReportedOrder's waitUntil posture: it never
       // blocks the reply. Uses the SENT body.
@@ -3353,6 +3488,15 @@ async function runInboundTurn(
                 if (outcome.raisedKeys.includes('hows_it_so_far')) {
                   await recordAskedHowItIs('classifier')
                 }
+                const classifierSawCheckback = outcome.raisedKeys.includes(
+                  'check_back_on_order',
+                )
+                if (classifierSawCheckback) {
+                  await recordCheckedBack('classifier')
+                }
+                if (checkbackLooksUnrecorded(classifierSawCheckback)) {
+                  warnCheckbackUnrecorded('not_raised')
+                }
                 console.log('[agent] inbound intention prompts recorded', {
                   agentRunId,
                   raisedKeys: outcome.raisedKeys,
@@ -3376,6 +3520,11 @@ async function runInboundTurn(
                   sentBody: dispatched.deliveredBody,
                 })
               } else if (outcome.kind === 'closed_pessimistically') {
+                // TAC-575: no verdict at all is also "the classifier did not
+                // record it".
+                if (checkbackLooksUnrecorded(false)) {
+                  warnCheckbackUnrecorded('failed')
+                }
                 // Ruling 4: nothing re-asks, but these closed without a
                 // verdict. Alerted so a run of them is visible.
                 console.warn(

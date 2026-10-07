@@ -726,7 +726,7 @@ function formatScanArrival(
  *   the preferences this message may legitimately use. The suppression is
  *   therefore an instruction here rather than data withheld upstream.
  *
- * THE REFERENCE LINE WAS REWRITTEN AT v1.88.0, approved verbatim 2026-10-06,
+ * THE REFERENCE LINE WAS REWRITTEN AT v1.89.0, approved verbatim 2026-10-06,
  * because ruling 11 was loosened that day and the old line now forbade what the
  * ruling allows. THE LINE IS A QUESTION AGAINST A STATEMENT: we may ASK how the
  * thing we helped with turned out, or whether they got to it ("did you find a
@@ -1822,10 +1822,16 @@ const NO_QUESTION_RESTRAINT = [
  * line every guest would then receive, and R41 exists because that is the
  * defect.
  */
+//
+// v1.88.0 REWORDED IT, because it now sits under two lines. It used to say
+// "the thing they JUST told you they got" and "the reply itself RECEIVES what
+// they said", both true only of the order turn. Under the check-back the
+// guest's message is about something else entirely, and this paragraph renders
+// after the line, so on most-proximate-wins its framing beat the line's.
 const MUST_ASK_PARAGRAPH = [
   'This one is not optional. Ask it this turn, in `intentionQuestion`, in',
-  'your own words: one short question about the thing they just told you they',
-  'got. The reply itself receives what they said and asks them nothing else.',
+  'your own words: one short question about what they got. The reply itself',
+  'answers what they wrote and asks them nothing else.',
 ].join('\n')
 
 function formatOpenIntentions(

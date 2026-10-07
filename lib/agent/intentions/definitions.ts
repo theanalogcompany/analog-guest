@@ -30,6 +30,7 @@ const MS_PER_DAY = 24 * 60 * 60 * 1000
 export type IntentionKey =
   | 'understand_order'
   | 'hows_it_so_far'
+  | 'check_back_on_order'
   | 'are_they_new_here'
   | 'got_the_recommendation'
   | 'did_they_like_it'
@@ -130,6 +131,21 @@ export type IntentionArmsOn =
    * leaves an already-open row exactly as it is.
    */
   | { kind: 'same_visit_order' }
+  /**
+   * TAC-575: this visit is still owed its one check-back, the guest is still
+   * chatting, and enough time has passed since the order to ask again.
+   *
+   * The in-conversation half of the check-back. The timed half
+   * (lib/agent/visit-checkin-timeout.ts) only fires for a guest who has gone
+   * quiet, so a guest who keeps writing would never be checked back on; this
+   * arms the question onto one of their turns instead.
+   *
+   * Resolved by the caller (resolveCheckbackDueAt, lib/agent/visit-checkin.ts)
+   * and passed in as `checkbackDueAt`. The anchor is the order plus the delay,
+   * NOT the current turn, so it is the same instant on every turn of the visit
+   * and never looks like a newer event than itself.
+   */
+  | { kind: 'checkback_due' }
 
 /**
  * Whether a strictly newer event re-arms an intention that already has a row
@@ -157,6 +173,8 @@ export function rearmsOnNewerEvent(armsOn: IntentionArmsOn): boolean {
     // ask INSIDE one visit is not this: the caller withholds the event once a
     // check-in row exists for the day (resolveSameVisitOrderAt).
     case 'same_visit_order':
+    // TAC-575. A later visit's check-in is a later order, so a newer anchor.
+    case 'checkback_due':
       return true
   }
 }
@@ -476,6 +494,34 @@ const DEFINITIONS = {
       'asks how the item the guest has just got is so far, or how it is treating them',
     satisfactionLabel:
       'Closes once raised. A later visit re-arms it. What the guest answers is recorded on the visit check-in, not here.',
+    expiresAfterMs: HOWS_IT_SO_FAR_WINDOW_MS,
+    isSatisfied: () => false,
+  },
+  check_back_on_order: {
+    key: 'check_back_on_order',
+    // Beside hows_it_so_far and for the same reason: it is about the order,
+    // and it comes before anything about the guest. The two are never open
+    // together. This one needs a check-in row, and a check-in row closes that
+    // one (build-runtime-context).
+    priority: 13,
+    armsOn: { kind: 'checkback_due' },
+    gate: { kind: 'none' },
+    onFirstConversation: 'allowed',
+    // REQUIRED, like hows_it_so_far and for its reason. The ruling says the
+    // reply "works the check-back in" once five minutes have passed; left to
+    // judgement it would be worked in about one time in three, and the guest
+    // who keeps chatting is the one the timer never reaches.
+    raise: 'always',
+    // A STATE, and it says why this is a second ask rather than a first: the
+    // model can see its own earlier "how is it?" in the thread, and R41 tells
+    // it not to reuse a line, so it has to know this is a deliberate return to
+    // the subject and not a repeat to avoid.
+    promptLine:
+      "A little while ago this guest told you what they got, and they still haven't said how it is: they hadn't tried it yet, or didn't say. You're checking back on it now.",
+    classifierDescription:
+      'checks back on how the item the guest got earlier in this visit is, after they had not tried it yet or had not said',
+    satisfactionLabel:
+      "Closes once raised, and takes the visit's one check-back with it. Also closes when the timed check-back goes out or the guest says how it is.",
     expiresAfterMs: HOWS_IT_SO_FAR_WINDOW_MS,
     isSatisfied: () => false,
   },

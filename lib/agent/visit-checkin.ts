@@ -15,9 +15,14 @@
 //   `visit_checkins` (migration 073) carries that for the rest of the visit:
 //   the sign-off, the check-back and the next-visit follow-up all read it.
 //
-// WHAT THIS MODULE DOES NOT DECIDE: when the check-back goes out and what the
-// sign-off says. Those belong to later parts of the ticket and read the row
-// this one writes.
+//   If they have not said it is good or bad (they had not tried it, or did
+//   not reply), we check back ONCE: about ten minutes after the order if they
+//   have gone quiet, or worked into a reply once about five minutes have
+//   passed if they are still chatting. If they do not answer the check-back,
+//   nothing more is sent.
+//
+// WHAT THIS MODULE DOES NOT DECIDE: what the sign-off says. That belongs to a
+// later part of the ticket and reads the row this one writes.
 
 /** What a guest said when asked how their order is. */
 export type VisitCheckinAnswer = 'good' | 'bad' | 'not_yet'
@@ -30,6 +35,10 @@ export interface VisitCheckin {
   askedAt: Date
   answer: VisitCheckinAnswer | null
   answeredAt: Date | null
+  /** The check-back's claim, taken before it is sent. Null until then. */
+  checkbackClaimedAt: Date | null
+  /** Set once the check-back has reached the guest. */
+  checkbackSentAt: Date | null
 }
 
 /**
@@ -227,4 +236,172 @@ export function nextCheckinAnswer(
   if (current === 'bad') return null
   if (current === 'good') return incoming === 'bad' ? 'bad' : null
   return incoming
+}
+
+// ---------------------------------------------------------------------------
+// The check-back
+// ---------------------------------------------------------------------------
+
+/**
+ * How long after the ORDER a quiet guest is checked back on.
+ *
+ * Ten minutes, from the ruling ("check back once about ten minutes after the
+ * order"). Measured from the order, not from our question, because the thing
+ * being waited on is the guest getting to their drink.
+ */
+export const CHECKBACK_DELAY_MS = 10 * 60 * 1000
+
+/**
+ * How long after the order the check-back may be worked into a reply to a
+ * guest who is still chatting. Five minutes, from the ruling.
+ */
+export const CHECKBACK_IN_CONVERSATION_DELAY_MS = 5 * 60 * 1000
+
+/**
+ * How long our own last message has to have sat unanswered before the TIMED
+ * check-back goes out.
+ *
+ * NOT IN THE RULING, and stated as a choice. "Ten minutes after the order" on
+ * its own would send the check-back thirty seconds after a reply of ours to a
+ * guest who was chatting until minute nine and a half, which reads as two
+ * messages in a row about different things. Two minutes is long enough that
+ * the guest has had the chance to answer what we last said, and short enough
+ * that the check-back still lands near the ten-minute mark.
+ */
+export const CHECKBACK_QUIET_FLOOR_MS = 2 * 60 * 1000
+
+/**
+ * How late the timed check-back may still fire, measured from the order.
+ *
+ * Thirty minutes, ALSO A CHOICE the ruling does not make. Past it the drink is
+ * finished and "how's it treating you?" asserts a present tense that has gone,
+ * which is the reasoning behind SCAN_GREETING_MAX_AGE_MS and
+ * WARM_CLOSE_MAX_AGE_MS: a catch-up that asserts the present is worse than no
+ * catch-up. It bounds how long a blocked check-back (quiet hours, a card
+ * waiting on an operator) keeps being retried.
+ */
+export const CHECKBACK_MAX_AGE_MS = 30 * 60 * 1000
+
+/**
+ * Is this visit still owed its one check-back?
+ *
+ * Owed while the guest has not said it is good or bad, and nobody has claimed
+ * the check-back. The claim is what makes it "once": the timer takes it before
+ * sending, and a reply that works the check-back in takes it after.
+ */
+export function owesCheckback(checkin: VisitCheckin): boolean {
+  return (
+    checkin.checkbackClaimedAt === null &&
+    (checkin.answer === null || checkin.answer === 'not_yet')
+  )
+}
+
+/** Is the timed check-back too late to send? `>`, so the bound itself is inside. */
+export function isCheckbackTooLate(orderedAt: Date, now: Date): boolean {
+  return now.getTime() - orderedAt.getTime() > CHECKBACK_MAX_AGE_MS
+}
+
+/** Has our last message sat long enough for the timed check-back to follow it? */
+export function hasBeenQuietLongEnough(
+  lastOutboundAt: Date,
+  now: Date,
+): boolean {
+  return now.getTime() - lastOutboundAt.getTime() >= CHECKBACK_QUIET_FLOOR_MS
+}
+
+/**
+ * On an inbound turn: should this reply work the check-back in, and from when
+ * was it askable? Null when not.
+ *
+ * The guest is still chatting, so the timer will not fire for them (it needs
+ * our message to be the newest). Once five minutes have passed the reply
+ * carries the question instead. Bounded by the answer window, so a guest who
+ * writes again the next morning is not asked how yesterday's drink is treating
+ * them.
+ *
+ * FIVE MINUTES FROM THE LATER OF TWO THINGS: the order, and the guest telling
+ * us they had not got to it yet. Measured from the order alone, "haven't tried
+ * it yet, too hot" six minutes in would be answered with "and how is it?" in
+ * the same breath, which is asking the question they have just declined. Their
+ * "not yet" restarts the wait. (The turn that GIVES that answer is handled by
+ * the caller, which knows what this message read as; this function only sees
+ * the row as it stood before the turn.)
+ *
+ * The returned instant is the intention's anchor, and it is STABLE across the
+ * visit: `answeredAt` is written once, when the answer first becomes "not
+ * yet", and a later "still not yet" does not move it (nextCheckinAnswer
+ * returns null for a repeat). An anchor that moved would look like a newer
+ * event on every turn.
+ */
+export function resolveCheckbackDueAt(
+  checkin: VisitCheckin | null,
+  inboundAt: Date,
+): Date | null {
+  if (checkin === null || !owesCheckback(checkin)) return null
+  const waitFrom = Math.max(
+    checkin.orderedAt.getTime(),
+    checkin.answer === 'not_yet' && checkin.answeredAt !== null
+      ? checkin.answeredAt.getTime()
+      : 0,
+  )
+  const dueAt = new Date(waitFrom + CHECKBACK_IN_CONVERSATION_DELAY_MS)
+  if (inboundAt.getTime() < dueAt.getTime()) return null
+  if (!isAwaitingCheckinAnswer(checkin, inboundAt)) return null
+  return dueAt
+}
+
+/**
+ * Was the last unprompted message to this guest part of THIS visit?
+ *
+ * Ruled 2026-10-06: the greeting, the check-back and the sign-off within one
+ * visit are not spaced against each other; the one-hour rule still applies
+ * against everything else. A visit starts no earlier than the scan, and a scan
+ * precedes the order it leads to by at most the counter window, so an
+ * unprompted send at or after `orderedAt - COUNTER_ARRIVAL_WINDOW_MS` is this
+ * visit's own greeting (or its check-back). Anything older is some other
+ * mechanism's message and the hour rule stands.
+ *
+ * False when there was no such send, which leaves the caller's ordinary
+ * spacing check to say "not too soon" on its own.
+ */
+export function lastProactiveWasThisVisit(
+  lastProactiveSendAt: Date | null,
+  orderedAt: Date,
+): boolean {
+  if (lastProactiveSendAt === null) return false
+  return (
+    lastProactiveSendAt.getTime() >=
+    orderedAt.getTime() - COUNTER_ARRIVAL_WINDOW_MS
+  )
+}
+
+/**
+ * Did the check-back go out and get no answer?
+ *
+ * Ruled 2026-10-06: "no reply to the check-back: send nothing more". The warm
+ * close reads this and stands down, for the rest of the visit.
+ *
+ * READ FROM THE GUEST'S SIDE: nothing of theirs has arrived since it went out.
+ * An earlier version compared our own newest message's time against the sent
+ * stamp, and could never be true, because the stamp was the tick's clock from
+ * BEFORE generation and the message row is written after the send. A
+ * comparison between two of our own timestamps depends on which was written
+ * first; "has the guest written since" does not.
+ *
+ * Falls back to the CLAIM when there is no sent stamp. A check-back that was
+ * held for an operator keeps its claim and never gets the stamp, and if it was
+ * approved it reached the guest all the same. If it was skipped instead, this
+ * reads a check-back that never went as unanswered and the visit gets no close
+ * either, which is the cheap direction: a missing close, not a message nobody
+ * should have had.
+ */
+export function checkbackWentUnanswered(
+  checkin: VisitCheckin,
+  lastInboundAt: Date | null,
+): boolean {
+  const wentOutAt = checkin.checkbackSentAt ?? checkin.checkbackClaimedAt
+  if (wentOutAt === null) return false
+  return (
+    lastInboundAt === null || lastInboundAt.getTime() <= wentOutAt.getTime()
+  )
 }
