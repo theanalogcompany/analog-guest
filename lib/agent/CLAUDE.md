@@ -217,14 +217,14 @@ so a halted venue never accumulates recognition state or takes a claim.
 
 ## Intentions
 
-`intentions/`. Nine keys in `definitions.ts`, priority-ordered, arming on
-`visit_confirmed` / `same_visit_order` / `first_recorded_order` / `open_recommendation` /
-`recorded_order` / `first_contact`.
+`intentions/`. Ten keys in `definitions.ts`, priority-ordered, arming on
+`visit_confirmed` / `same_visit_order` / `checkback_due` / `first_recorded_order` /
+`open_recommendation` / `recorded_order` / `first_contact`.
 
-### One intention is required, and it renders alone (TAC-575)
+### Two intentions are required, and a required one renders alone (TAC-575)
 
-`raise: 'always'` on a definition removes the model's licence to skip it. Only
-`hows_it_so_far` carries it: "how is it so far?" comes right after a guest names their order
+`raise: 'always'` on a definition removes the model's licence to skip it. `hows_it_so_far`
+and `check_back_on_order` (below) carry it. For the first: "how is it so far?" comes right after a guest names their order
 (ruled 2026-10-06), and the check-back, the sign-off and the complaint follow-up all hang off
 the answer, so a one-in-three raise rate would make them a matter of luck.
 
@@ -252,7 +252,8 @@ operator-approved send), so arming reads both and a check-in closes the intentio
 `comp_complaint` category and `praisedExperience` flag (`classifyCheckinAnswer`); "not yet" is
 the default, not a detection. Bad is final, good is not.
 
-**Until they say it is good, nothing else is asked, for at most two hours from the question**
+**Until they say it is good, no OPTIONAL question is asked, for at most two hours from the
+question**; a required one still renders, which is how the check-back gets through
 (`ctx.visitCheckinHold`, set by `handleInbound` after classification and read by
 `renderableIntentions`; `CHECKIN_ANSWER_WINDOW_MS` bounds it, and a `bad` answer holds for the
 whole of it). **Interim until TAC-575's PR 4:** praise inside a check-in still raises the
@@ -260,6 +261,40 @@ review ask on that turn, as any praise does; the ruled behaviour (saved for the 
 lands with the sign-off, as one condition at the marked line in `deriveReviewAsk`. It is decided
 post-classification on purpose: the message saying "it's great" has to lift the hold on the
 turn it arrives.
+
+### The check-back: once per visit, by a timer or by a reply (TAC-575)
+
+A visit is owed ONE check-back while the guest has not said good or bad and nobody has claimed
+it (`owesCheckback`). Two paths can spend it, and `visit_checkins.checkback_claimed_at` is the
+compare-and-set that makes it exactly one:
+
+| the guest | path | when |
+| --- | --- | --- |
+| went quiet | `visit-checkin-timeout.ts`, every-minute cron at `/api/cron/visit-checkbacks` | 10 to 30 min after the ORDER, and our last message has sat 2 min |
+| is still chatting | the `check_back_on_order` intention on a later turn | from 5 min after the order, or after their "not yet" if that is later |
+
+The timer needs OUR message to be the newest in the thread, so the two cannot both fire. It
+claims BEFORE sending and releases if nothing reached the guest (`RELEASES_CLAIM`, shared with
+the warm close); the reply claims AFTER sending, because by then the question has gone.
+
+- **Never on the turn that answers the question, and never on a goodbye.** "Haven't tried it
+  yet" must not get "and how is it?" in the same breath; `handleInbound` drops the intention
+  on the turn the row first gets an answer and on a sign-off turn, post-classification.
+- **No check-back where staff replied by hand or the visit holds a complaint**
+  (`loadWarmCloseBlocker`, the warm close's own check, applied here by the same reasoning
+  and not yet ruled for this message specifically).
+- **An operator-approved reply that carried the check-back does not claim the row**, so the
+  timer also reads the intention's prompt (`wasCheckbackAskedInConversation`) and settles it.
+- **Its approval does not follow its category.** It is stored as `follow_up`, and reads
+  `approval_policy.visitCheckback` instead (default HOLD; a venue opts in with `"auto_send"`).
+- **The one-hour spacing rule does not apply against this visit's own greeting**
+  (`lastProactiveWasThisVisit`); it does against everything else.
+- **The warm close waits for it and yields to it**, on both its paths: `checkback_pending`
+  while one is owed, `checkback_unanswered` once it went out and got no reply ("send nothing
+  more"). Unanswered is read from the GUEST's side, nothing of theirs since it went out; a
+  comparison between two of our own timestamps was the first version and could never be true.
+- Instagram only. 10 and 5 minutes are ruled; the 2-minute quiet floor and the 30-minute
+  bound are choices, stated at the constants.
 
 `resolveSameVisitOrderAt` is handed `alreadyAskedThisVisit: true` when the check-in could not
 be read. The intention re-arms on a newer event, so reading a failure as "not asked" is how
@@ -284,8 +319,8 @@ never saw.
 ### A first conversation gets to know the guest in a fixed order (TAC-575)
 
 Ruled 2026-10-06, replacing TAC-567/568's "two questions, then the close". On a guest's
-FIRST conversation seven of the nine may be raised, in `priority` order: `understand_order`,
-`hows_it_so_far`, `learn_name`, `are_they_new_here`, then `are_they_local`, `their_rhythm`, `why_theyre_here`.
+FIRST conversation eight of the ten may be raised, in `priority` order: `understand_order`,
+`hows_it_so_far`, `check_back_on_order`, `learn_name`, `are_they_new_here`, then `are_they_local`, `their_rhythm`, `why_theyre_here`.
 The two about a PAST order or suggestion stay suppressed.
 
 **No getting-to-know-you question rides on a guest's first reply** (the two order questions,
@@ -373,7 +408,8 @@ Prompt wording cannot reach any of this: see `docs/decisions/0007-intention-ques
 
 ## Proactive sends (TAC-386)
 
-Three paths reach a guest with no inbound behind them: the scan greeting (TAC-536; started by
+Four paths reach a guest with no inbound behind them (the fourth is TAC-575's timed
+check-back, described under Intentions): the scan greeting (TAC-536; started by
 the Instagram webhook's fast path, cron as backstop, so only pausing the venue stops it), the warm
 close (TAC-560; any first Instagram conversation since TAC-575), the inquiry follow-up (TAC-386, `lib/followups/`). **No two within 60
 minutes**, via `proactive-spacing.ts` and `guests.last_proactive_send_at`. A follow-up is NOT

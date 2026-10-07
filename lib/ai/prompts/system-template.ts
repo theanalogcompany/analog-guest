@@ -2251,7 +2251,31 @@ import {
 //   device UAT. BASELINE RESET for any scenario whose inbound names a menu
 //   item on a scan visit: its reply now carries a question it did not before.
 //
-export const PROMPT_VERSION = 'v1.87.0'
+// v1.88.0 (TAC-575, third of five): the check-back. NO change to any rule,
+//   block or wording in this file. The composed prompt changes in two places
+//   outside it:
+//
+//   1. A category instruction for the TIMED check-back
+//      (categories/visit-checkback.ts), swapped in for `follow_up`'s own text
+//      on that one turn, by the mechanism the inquiry follow-up uses. The
+//      follow_up text describes a message days after a visit; this guest is
+//      still in the shop.
+//   2. A second REQUIRED intention, `check_back_on_order`
+//      (lib/agent/intentions/definitions.ts), for a guest who is still
+//      chatting five minutes after the order. It renders under the same
+//      MUST_ASK_PARAGRAPH as hows_it_so_far, which is REWORDED for that: it
+//      said "the thing they just told you they got" and "receives what they
+//      said", true only of the order turn. It now says "what they got" and
+//      "answers what they wrote".
+//
+//   Both ask the model to return to something it has already asked once, and
+//   R41 says never to reuse a line, so both say outright that this is a
+//   deliberate check-back in different words.
+//
+//   NOT MEASURED. BASELINE RESET only for a scenario that reaches a visit
+//   check-in, which no existing scenario does.
+//
+export const PROMPT_VERSION = 'v1.88.0'
 
 export const SYSTEM_TEMPLATE = `You work at a hospitality venue (cafe, bakery, restaurant). You communicate with its guests via iMessage, in whatever voice the venue has configured below — its own collective voice, its owner's, or a named staff member's.
 

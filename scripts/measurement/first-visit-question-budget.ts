@@ -413,6 +413,7 @@ async function main(): Promise<void> {
         // it, so this harness still measures the questions it was built for.
         // In production the order turn now carries that question instead.
         sameVisitOrderAt: null,
+        checkbackDueAt: null,
         openRecommendationTimes: [],
         openRecommendationTouchedTimes: [],
         openRecommendationsUnreadable: false,

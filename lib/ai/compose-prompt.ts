@@ -89,7 +89,7 @@ export function composePrompt(input: GenerateMessageInput): {
   // category, because ONE category is what the storage layer, the
   // approval-policy UI and the operator queue all want.
   sections.push(
-    `## Category-specific instructions: ${category}\n${categoryInstructionsFor(category, input.channel, runtime.scanArrival ?? null, runtime.inquiryFollowup !== undefined)}`,
+    `## Category-specific instructions: ${category}\n${categoryInstructionsFor(category, input.channel, runtime.scanArrival ?? null, runtime.inquiryFollowup !== undefined, runtime.visitCheckback === true)}`,
   )
 
   return {

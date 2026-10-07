@@ -37,7 +37,7 @@
 import { randomUUID } from 'node:crypto'
 
 import { createAdminClient } from '@/lib/db/admin'
-import { parseFollowupRules } from '@/lib/schemas'
+import { parseFollowupRules, venueLocalDate } from '@/lib/schemas'
 import { isVenueProcessingHalted } from '@/lib/venues/status'
 import {
   captureWarmCloseSent,
@@ -47,6 +47,12 @@ import { recordProactiveSend } from '@/lib/followups/inquiry-followup-store'
 import { isTooSoonAfterProactive } from '@/lib/followups/proactive-spacing'
 import { isQuietHour } from './followup-rules'
 import type { AgentResult } from './types'
+import {
+  checkbackWentUnanswered,
+  isCheckbackTooLate,
+  owesCheckback,
+} from './visit-checkin'
+import { loadLastInboundAt, loadVisitCheckin } from './visit-checkin-store'
 import { handleFollowup } from './handle-followup'
 import { loadPendingRowsBySlot } from './pending-slots'
 import {
@@ -90,6 +96,17 @@ export type WarmCloseSkipReason =
   | 'staff_replied'
   /** TAC-575: the conversation contains a complaint. No automated close at all. */
   | 'complaint_in_conversation'
+  /**
+   * TAC-575: this visit is still owed its check-back. Transient: the check-back
+   * and the close both key on about ten quiet minutes, and the check-back goes
+   * first.
+   */
+  | 'checkback_pending'
+  /**
+   * TAC-575: the check-back went out and the guest did not answer it. Ruled
+   * 2026-10-06: "send nothing more".
+   */
+  | 'checkback_unanswered'
   | 'opted_out'
   | 'venue_paused'
   | 'quiet_hours'
@@ -259,12 +276,15 @@ export async function processDueWarmCloses(
  * Does this outcome mean the close will never reach the guest, so the claim
  * should be released and a later tick allowed to try again?
  *
+ * Exported for the timed check-back (visit-checkin-timeout.ts), which claims
+ * before sending in the same way and has the same answer for every status.
+ *
  * A TOTAL MAP over AgentResult['status'], not `status !== 'sent'`, because the
  * answer is not the same for every non-sent outcome and a new status must be
  * made to decide rather than inherit. `readonly Status[]` would not be
  * exhaustiveness-checked; `satisfies Record<...>` is (root CLAUDE.md).
  */
-const RELEASES_CLAIM = {
+export const RELEASES_CLAIM = {
   // It went out. The marker is correct.
   sent: false,
   // A card an operator can still approve, which would send it with no marker
@@ -356,6 +376,61 @@ async function considerCandidate(
     return 'guest_unreadable'
   }
   if (blocker.data !== null) return blocker.data
+
+  // TAC-575: the check-back comes first, and an unanswered one ends the visit.
+  //
+  // Both this close and the timed check-back fire on about ten quiet minutes,
+  // so without this the guest who had not tried their drink yet would get "the
+  // line is open" instead of being checked back on. And a guest who then
+  // ignores the check-back gets nothing more, by ruling.
+  //
+  // "Unanswered" is read from the guest's side: nothing of theirs has arrived
+  // since the check-back went out (checkbackWentUnanswered says why it is not
+  // a comparison between two of our own timestamps).
+  const closeLocalDate =
+    gate.venue.timezone !== null
+      ? venueLocalDate(now, gate.venue.timezone)
+      : null
+  if (closeLocalDate !== null) {
+    const checkin = await loadVisitCheckin(
+      supabase,
+      candidate.venueId,
+      candidate.guestId,
+      closeLocalDate,
+    )
+    if (!checkin.ok) {
+      console.warn('[warm-close] visit check-in unreadable; skipping', {
+        guestId: candidate.guestId,
+        error: checkin.error,
+      })
+      return 'guest_unreadable'
+    }
+    if (checkin.data !== null) {
+      if (
+        owesCheckback(checkin.data) &&
+        !isCheckbackTooLate(checkin.data.orderedAt, now)
+      ) {
+        return 'checkback_pending'
+      }
+      if (checkin.data.checkbackClaimedAt !== null) {
+        const lastInbound = await loadLastInboundAt(
+          supabase,
+          candidate.venueId,
+          candidate.guestId,
+        )
+        if (!lastInbound.ok) {
+          console.warn('[warm-close] last inbound unreadable; skipping', {
+            guestId: candidate.guestId,
+            error: lastInbound.error,
+          })
+          return 'guest_unreadable'
+        }
+        if (checkbackWentUnanswered(checkin.data, lastInbound.data)) {
+          return 'checkback_unanswered'
+        }
+      }
+    }
+  }
 
   // The belt behind the model's own self-report. See loadLastInboundCategory.
   if (

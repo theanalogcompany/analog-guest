@@ -217,6 +217,8 @@ function answeredMessageIdOf(trigger: FollowupTrigger): string | null {
     // second outbound claiming the same inbound would make two rows answer one
     // message. What this follows is our answer.
     trigger.inquiryFollowup?.answerMessageId ??
+    // TAC-575 names our own last outbound, as the warm close does.
+    trigger.visitCheckback?.answersMessageId ??
     scanMessageIdOf(trigger)
   )
 }
@@ -256,6 +258,11 @@ function replyCheckFor(
   // the question (ruling 5(b)), so there is never an unanswered message for this
   // send to talk over.
   if (trigger.reason === 'inquiry_followup') return 'exempt'
+  // TAC-575 is exempt for the warm close's reason: the processor only sends
+  // when OUR message is the newest in the thread and has sat unanswered, so
+  // there is no guest message for this to talk over. Staff answering by hand
+  // during the visit stops the check-back outright, in the processor.
+  if (trigger.reason === 'visit_checkback') return 'exempt'
   const id = scanMessageIdOf(trigger)
   return id === null ? 'exempt' : { inboundMessageId: id }
 }
@@ -319,6 +326,14 @@ function triggerToCategory(
     // it, which is the one thing ruling 11 forbids this message from doing. See
     // lib/ai/prompts/categories/inquiry-followup.ts.
     case 'inquiry_followup':
+      return 'follow_up'
+    // TAC-575. `follow_up` for the reason directly above: no new
+    // messages.category value. It is not separable from the other follow-ups
+    // by `category` in SQL; it is by visit_checkins.checkback_sent_at. Its
+    // instructions are swapped via the visitCheckback runtime field, and its
+    // APPROVAL does not follow the category either: see the policy trigger in
+    // applyApprovalPolicyStage.
+    case 'visit_checkback':
       return 'follow_up'
   }
 }
@@ -487,8 +502,15 @@ export async function handleFollowup(input: {
     // (lib/followups/inquiry-followup-timing.ts). The send still re-derives the
     // window immediately before going out.
     const isInquiryFollowup = input.trigger.reason === 'inquiry_followup'
+    // TAC-575 carves out the FOURTH, on the warm close's argument: it fires
+    // ten to thirty minutes after the guest's own order message, so the window
+    // cannot have closed. The send still re-derives it.
+    const isVisitCheckback = input.trigger.reason === 'visit_checkback'
     const routesThroughDispatchReply =
-      isInstagramScanArrival || isWarmClose || isInquiryFollowup
+      isInstagramScanArrival ||
+      isWarmClose ||
+      isInquiryFollowup ||
+      isVisitCheckback
     if (isWarmClose && ctx.conversationChannel !== 'instagram') {
       const reason = 'warm_close_is_instagram_only'
       console.warn(
@@ -509,6 +531,21 @@ export async function handleFollowup(input: {
       const reason = 'inquiry_followup_is_instagram_only'
       console.warn(
         '[agent] inquiry follow-up refused: not an Instagram conversation',
+        {
+          agentRunId,
+          guestId: ctx.guest.id,
+          channel: ctx.conversationChannel,
+        },
+      )
+      trace.update({ output: { status: 'refused', reason } })
+      return { status: 'refused', reason }
+    }
+    // Instagram only, like the two above. The text arm needs the scan signal
+    // the SMS path does not record per visit, and is not this ticket's.
+    if (isVisitCheckback && ctx.conversationChannel !== 'instagram') {
+      const reason = 'visit_checkback_is_instagram_only'
+      console.warn(
+        '[agent] visit check-back refused: not an Instagram conversation',
         {
           agentRunId,
           guestId: ctx.guest.id,
@@ -1290,7 +1327,12 @@ export async function handleFollowup(input: {
             //
             // A scan greeting keeps the ordinary coin: nothing in TAC-536 asks
             // for one bubble.
-            ...(isWarmClose ? { rng: NEVER_SPLIT_RNG } : {}),
+            //
+            // TAC-575: the check-back is one short line by its own instruction,
+            // and takes the same option for the same reason.
+            ...(isWarmClose || isVisitCheckback
+              ? { rng: NEVER_SPLIT_RNG }
+              : {}),
             // The scan row. NOT OPTIONAL: a reply naming no inbound is read by
             // the reply check as answering everything before it, so a greeting
             // that named nothing would silence the agent's own reply to
