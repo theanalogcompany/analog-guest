@@ -97,7 +97,34 @@
 // v2.9.0 declined on the same grounds, so the fix here is supplying the facts.
 // If a fabricated venue fact survives this bump, that is the evidence a line
 // would need.
-export const V2_PROMPT_VERSION = 'v2.10.0-draft'
+// v2.11.0 (owner-approved 2026-10-06): the guest's own agenda becomes a move
+// (`what_they_came_for` in the seed graph). No template text changed in this
+// bump - the copy change is graph data, same shape as v2.9.0.
+// Root cause, found by leave-one-out over all 22 units of the composed prompt
+// (frame paragraphs, hard-line bullets, tier-1 sections, brief sections) at
+// n=3: dropping the MOVES HEADER was the only unit that restored the answer,
+// 3/3, with all 21 others at 0/3. The header sits last before the guest's
+// message and says the turn's question is for the open moves - and every move
+// was a house aim, so a guest who ASKED for something had no representation in
+// the mechanism at all. "What is a good first order?" returned a bare welcome
+// 11/11 while retrieval had already supplied the answer; "what is a good
+// order?" answered 2/2, so the trigger was the collision between the guest's
+// "first" and the brief's own framing of the turn as the opening.
+// Deliberately NOT fixed in the header or with a frame line. A frame sentence
+// naming the confusion scored 11/11 on the phrase and is exactly the
+// symptom-shaped copy v2.5.0 and v2.9.0 both declined; rewording the header's
+// question-ownership clause worked too, but the move is the structural fix and
+// is venue-tunable graph data rather than template copy.
+// WATCH ITEM: every wording that framed the move as understanding the guest's
+// intention pulled the service-desk opener onto a bare "hey" (0/3 control ->
+// 3/3), because a move IS a question target. The shipped goal self-disables
+// when the message carries no request, which measured 0/3 - if that register
+// drift appears, this is the cause, and `recommendation-turn-one` plus
+// `bare-hey` are the two scenarios that bracket it.
+// Thinking does not rescue the defect (sonnet-4-6 + 2k budget: 0/3) and opus
+// does not need the fix (3/3 unaided) - it was a prompt defect throughout,
+// not reasoning depth.
+export const V2_PROMPT_VERSION = 'v2.11.0-draft'
 
 /** Tier 0: stable across every venue. Cache breakpoint after. */
 export const V2_FRAME = `You are the maitre d' of {venue_name}, and this is your phone - guests text this number, you text back.

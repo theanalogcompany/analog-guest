@@ -1,6 +1,6 @@
-import { generateObject } from 'ai'
 import { z } from 'zod'
-import { getGenerationModel } from '@/lib/ai/client'
+import { JUDGE_MODEL_ID } from '@/lib/ai/client'
+import { generateKimiObject } from '@/lib/ai/kimi-client'
 import type { AIResult } from '@/lib/ai/types'
 
 // The maitre d' judge: scores EVERY generated response - production (post-
@@ -48,8 +48,27 @@ import type { AIResult } from '@/lib/ai/types'
 // not in a taste rule. The economy rhythm clause stays (mechanics, not
 // strategy). working_the_room's known bimodality on turn-1 shapes stands
 // as an open defect until the axes are re-cut.
-export const JUDGE_PROMPT_VERSION = 'judge-v1.2.3'
-export const JUDGE_MAX_OUTPUT_TOKENS = 2_000
+// v1.3.0 (owner-ruled 2026-10-06): the judge moves off the generation model
+// onto Kimi (lib/ai/client.ts, getJudgeModel). No rubric text changed in this
+// bump - the MODEL changed, and that is a bigger break than any wording edit,
+// which is why it takes a minor rather than a patch. Until now generation and
+// judgment were both claude-sonnet-4-6, so every score was a model grading its
+// own output; today's n=6 run is the last one produced that way.
+// SCORES ACROSS THIS BOUNDARY ARE NOT COMPARABLE. The version is part of the
+// eval_judgments key for exactly this reason, and any --compare spanning it is
+// reading two different instruments. The pre-Kimi baseline
+// (template-regression 2026-10-06T23-17-45Z, judge-v1.2.3) stays the reference
+// for Anthropic-judged runs and must not be diffed against a v1.3.0 run.
+// scripts/measurement/judge-variance.ts is the required gate before these
+// numbers are trusted, and the phase-4 calibration set is still pending, so
+// the trust discipline below applies at least as strongly as before.
+export const JUDGE_PROMPT_VERSION = 'judge-v1.3.0'
+// Raised from 2000 with the Kimi swap, same reason as the assessor's budget:
+// kimi-k3 spends output tokens on reasoning before the JSON. The judge is the
+// more exposed of the two, because explanation and evidence are declared
+// BEFORE each score - a truncation here loses exactly the numbers and keeps
+// the prose.
+export const JUDGE_MAX_OUTPUT_TOKENS = 4_000
 
 export const JUDGE_AXES = [
   'recognition',
@@ -144,37 +163,41 @@ export async function judgeResponse(
     `# Conversation\n${input.transcript}\n\n` +
     `# The reply under judgment\n${input.replyMessages.map((m, i) => `(bubble ${i + 1}) ${m}`).join('\n')}`
 
-  try {
-    const { object } = await generateObject({
-      model: getGenerationModel(),
-      messages: [
-        { role: 'system', content: system },
-        { role: 'user', content: user },
-      ],
-      schema: JudgeOutputSchema,
-      maxOutputTokens: JUDGE_MAX_OUTPUT_TOKENS,
-      temperature: 0.2,
-    })
-
-    const clamped = Object.fromEntries(
-      JUDGE_AXES.map((axis) => {
-        const a = object[axis]
-        return [
-          axis,
-          { ...a, score: Math.min(5, Math.max(1, Math.round(a.score))) },
-        ]
-      }),
-    ) as JudgeOutput
-
-    return {
-      ok: true,
-      data: { axes: clamped, judgeVersion: JUDGE_PROMPT_VERSION },
-    }
-  } catch (e) {
+  const result = await generateKimiObject({
+    model: JUDGE_MODEL_ID,
+    system,
+    user,
+    schema: JudgeOutputSchema,
+    schemaName: 'judgment',
+    maxOutputTokens: JUDGE_MAX_OUTPUT_TOKENS,
+    // NO TEMPERATURE, and not by choice: kimi-k3 rejects anything but 1
+    // ("invalid temperature: only 1 is allowed for this model"). The judge
+    // ran at 0.2 on Anthropic for idempotency, so this swap raises judge
+    // variance by construction - the one thing that cannot be tuned away
+    // here. scripts/measurement/judge-variance.ts is the instrument that has
+    // to quantify it before any v1.3.0 score is read as a signal, and a
+    // per-axis spread that was acceptable at 0.2 may not be at 1.
+  })
+  if (!result.ok)
     return {
       ok: false,
-      error: `judge failed: ${e instanceof Error ? e.message : String(e)}`,
-      errorCode: 'judge_failed',
+      error: `judge failed: ${result.error}`,
+      errorCode: result.errorCode ?? 'judge_failed',
     }
+
+  const object = result.data
+  const clamped = Object.fromEntries(
+    JUDGE_AXES.map((axis) => {
+      const a = object[axis]
+      return [
+        axis,
+        { ...a, score: Math.min(5, Math.max(1, Math.round(a.score))) },
+      ]
+    }),
+  ) as JudgeOutput
+
+  return {
+    ok: true,
+    data: { axes: clamped, judgeVersion: JUDGE_PROMPT_VERSION },
   }
 }

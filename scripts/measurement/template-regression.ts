@@ -75,6 +75,10 @@ import { V2_PROMPT_VERSION } from '@/lib/ai/v2/template'
 import { ASSESSOR_PROMPT_VERSION } from '@/lib/relationship/assessor'
 import { JUDGE_AXES, JUDGE_PROMPT_VERSION } from '@/lib/eval/judge'
 import {
+  scoreQuestionSubstance,
+  SUBSTANTIVE_QUESTION_THRESHOLD,
+} from '@/lib/eval/question-substance'
+import {
   BUILTIN_REGRESSION_SCENARIOS,
   describeTell,
   type RegressionTell,
@@ -157,27 +161,43 @@ function attributeToPack(
  */
 const RHETORICAL_TAGS = new Set(['right', 'yeah', 'no', 'huh', 'eh'])
 
-function realQuestionCount(bubble: string): number {
+/**
+ * The question clauses in a bubble, verbatim, each ending in its "?".
+ *
+ * The DETERMINISTIC half of the two-questions ceiling: finding where the
+ * questions are, and dropping bare rhetorical tags, needs no judgment.
+ * Whether a clause is SUBSTANTIVE is the semantic half and lives in
+ * lib/eval/question-substance.ts (owner-ruled 2026-10-06).
+ */
+function questionClauses(bubble: string): string[] {
   const parts = bubble.split('?')
-  let count = 0
+  const out: string[] = []
   for (let i = 0; i < parts.length - 1; i += 1) {
-    const clause = parts[i].split(/[.!]/).pop() ?? ''
+    const clause = (parts[i].split(/[.!]/).pop() ?? '').trim()
     const tail = clause.split(',').pop() ?? ''
     const norm = tail
       .toLowerCase()
       .replace(/[^a-z\s]/g, ' ')
       .trim()
-    if (!RHETORICAL_TAGS.has(norm)) count += 1
+    if (RHETORICAL_TAGS.has(norm)) continue
+    out.push(`${clause}?`)
   }
-  return count
+  return out
 }
 
-function checkBubbles(
+/**
+ * `unavailable` non-null means the substantive-question judgment did not
+ * complete, and the CALLER DISQUALIFIES the sample. Neither direction is
+ * honest here: scoring the clauses as phatic would pass a stacked reply
+ * vacuously, and scoring them all substantive would invent a breach. A
+ * failure is never a zero (convention #5).
+ */
+async function checkBubbles(
   sample: number,
   turn: number,
   reply: string[],
   pack: Array<{ id: string; norm: string }>,
-): RegressionBreach[] {
+): Promise<{ breaches: RegressionBreach[]; unavailable: string | null }> {
   const breaches: RegressionBreach[] = []
   const add = (tell: RegressionTell, bubble: string) =>
     breaches.push({
@@ -201,14 +221,43 @@ function checkBubbles(
   // its OWN bubble is the decision-0007 shape and allowed alongside one real
   // question in the body (owner-ruled 2026-10-05: "the answer was fine").
   // The reply-total backstop still catches question stacking across bubbles.
-  const perBubble = reply.map(realQuestionCount)
+  //
+  // Only SUBSTANTIVE questions count (owner-ruled 2026-10-06). Extraction is
+  // exact; the substantive call is one Jev request with a Noul per clause,
+  // evaluated in parallel so latency is flat in question count.
+  const clausesPerBubble = reply.map(questionClauses)
+  const allClauses = clausesPerBubble.flat()
+  let substantive: boolean[] = []
+  if (allClauses.length > 0) {
+    const scored = await scoreQuestionSubstance(allClauses, reply)
+    if (!scored.ok)
+      return {
+        breaches,
+        unavailable: `question substance check failed: ${scored.error}`,
+      }
+    substantive = scored.probabilities.map(
+      (p) => p >= SUBSTANTIVE_QUESTION_THRESHOLD,
+    )
+  }
+  let cursor = 0
+  const perBubble = clausesPerBubble.map((clauses) => {
+    let n = 0
+    for (let i = 0; i < clauses.length; i += 1) {
+      // Past the module's candidate cap the probability is absent; a reply
+      // with that many questions is stacking whatever the judgments say, so
+      // the default counts rather than excuses.
+      if (substantive[cursor] ?? true) n += 1
+      cursor += 1
+    }
+    return n
+  })
   const totalQuestions = perBubble.reduce((a, b) => a + b, 0)
   if (perBubble.some((n) => n > 1)) {
     add('two-questions', reply[perBubble.findIndex((n) => n > 1)] ?? '')
   } else if (totalQuestions > 2) {
     add('two-questions', reply.join(' | '))
   }
-  return breaches
+  return { breaches, unavailable: null }
 }
 
 async function runSample(
@@ -289,9 +338,17 @@ async function runSample(
     const gateMatched =
       trace.gate === null ? [] : trace.gate.matched.map((m) => m.policyKey)
     outcome.turns.push({ inbound, reply, tagged, gateMatched })
-    outcome.breaches.push(
-      ...checkBubbles(sampleIndex, turnIndex + 1, reply, pack),
+    const bubbleCheck = await checkBubbles(
+      sampleIndex,
+      turnIndex + 1,
+      reply,
+      pack,
     )
+    if (bubbleCheck.unavailable !== null) {
+      outcome.disqualified = bubbleCheck.unavailable
+      return outcome
+    }
+    outcome.breaches.push(...bubbleCheck.breaches)
     if (turnIndex === 0 && tagged.includes('learn_name'))
       outcome.turnOneNameAsk = true
     if (tagged.some((k) => target.has(k))) outcome.pursued = true
