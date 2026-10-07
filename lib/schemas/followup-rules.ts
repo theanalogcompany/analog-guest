@@ -133,9 +133,15 @@ export const FollowupRulesSchema = z.object({
   // written before this key existed do not carry it and take the default.
   inquiry_followup_enabled: z.boolean().default(true),
 
-  // What this venue's warm close COVERS. Rendered into the prompt as a guide to
-  // content (`## Closing this conversation`, lib/ai/prompts/serializers.ts);
-  // the model writes the close itself.
+  // WHETHER THIS VENUE SENDS THE "ALWAYS HERE" CLOSE AT ALL. Since TAC-578 the
+  // text itself is NOT rendered anywhere: the close is one short line saying
+  // the guest can message anytime (ruled 2026-10-07), and names no topics. A
+  // non-empty value still switches the close on and an empty one still counts
+  // as `no_warm_close_text`, so no venue started or stopped receiving it when
+  // the wording changed. The history below is why the key holds prose.
+  //
+  // It was first what this venue's warm close COVERS, rendered into the prompt
+  // as a guide to content.
   //
   // IT USED TO BE THE MESSAGE. TAC-568 sent this string word for word, on the
   // ruling that the close is the same every time. TAC-575 reversed that (ruled
@@ -163,6 +169,27 @@ export const FollowupRulesSchema = z.object({
   // live value was written directly into `followup_rules`, so no migration
   // ships with this key.
   warm_close_text: z.string().default(''),
+
+  // TAC-578: the hours inside which a first-visit thank-you or a later-visit
+  // check-in may go out, venue-local. Ruled 2026-10-07, default 9am to 8pm.
+  //
+  // NOT `quiet_hours_*`, and the reason is the pilot venue's own day. Those
+  // keys gate the same-visit check-back and the sign-off, and Le Mil's opens
+  // at seven: moving the quiet-hours end to 09:00 to suit a next-morning
+  // message would switch both off for every guest at the counter before nine.
+  // These two bound only the messages that go out AFTER a visit
+  // (resolvePostVisitSlot, lib/agent/visit-messages.ts), which still has to be
+  // outside quiet hours as well.
+  //
+  // NOT IN MIGRATION 028's BACKFILL LITERAL, because they postdate it.
+  visit_message_earliest_local: HhmmSchema.default('09:00'),
+  visit_message_latest_local: HhmmSchema.default('20:00'),
+
+  // TAC-578: the per-venue kill switch for those two messages, matching
+  // inquiry_followup_enabled. They share a cron route with the timed
+  // check-back (/api/cron/visit-checkbacks), so pausing that entry stops both;
+  // this stops only these.
+  post_visit_message_enabled: z.boolean().default(true),
 })
 
 export type FollowupRules = z.infer<typeof FollowupRulesSchema>
@@ -187,6 +214,9 @@ export const FOLLOWUP_RULES_DEFAULT: FollowupRules = {
   warm_close_pause_minutes: 10,
   inquiry_followup_enabled: true,
   warm_close_text: '',
+  visit_message_earliest_local: '09:00',
+  visit_message_latest_local: '20:00',
+  post_visit_message_enabled: true,
 }
 
 /**

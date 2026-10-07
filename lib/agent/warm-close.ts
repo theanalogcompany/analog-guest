@@ -331,10 +331,16 @@ export function warmCloseBlocker(
 /**
  * The inbound category a goodbye classifies as.
  *
- * NOT "the guest signed off": it is also "ok cool", "thanks" and "got a
- * cortado". That is why no reply is a sign-off (ruled 2026-10-06) and only the
- * pause timer sends one. Its one reader today keeps the check-back question
- * off such a turn (handle-inbound.ts), where reading an "ok" as a goodbye
- * costs nothing.
+ * NOT ONLY "the guest signed off": it is also "ok cool", "thanks" and "got a
+ * cortado". That is why no reply is a sign-off on this category alone (ruled
+ * 2026-10-06).
+ *
+ * TWO READERS. handle-inbound keeps the check-back question off such a turn,
+ * where reading an "ok" as a goodbye costs nothing. And since TAC-578 the
+ * pause timer reads it as the guest's done-signal: the once-ever close is
+ * sent only when our last message answered a turn in this category
+ * (warm-close-timeout.ts). The loose reading is acceptable there because the
+ * one loose member that matters, an order named at the counter, is a visit,
+ * and the close is never sent on a visit.
  */
 export const SIGN_OFF_CATEGORY = 'acknowledgment'

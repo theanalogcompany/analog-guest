@@ -1,17 +1,23 @@
 // TAC-560: sign off a conversation that has gone quiet.
 //
-// TWO SIGN-OFFS since TAC-575, and the processor decides which per guest:
+// TWO SIGN-OFFS, and the processor decides which per guest (TAC-578, ruled
+// 2026-10-07; TAC-575's two were different and both are gone):
 //
-//   plain   the warm "line is open" close after a FIRST conversation goes
-//           quiet. Once per guest ever (`guests.warm_close_sent_at`).
-//   happy   for a guest whose visit check-in reads good: the sign-off carries
-//           the review invitation. Once per guest ever too, but of a different
-//           thing (`guests.review_asked_at`), and NOT limited to a first
-//           conversation: a regular who says "so good" and goes quiet is
-//           invited as well.
+//   plain   the once-ever close: a warm line about the conversation and at
+//           most one open-door clause. Once per guest EVER, across all
+//           conversations (`guests.warm_close_sent_at`). ONLY after the guest
+//           signalled they were done; never on a visit, after a question that
+//           armed an inquiry follow-up, or once an offer of more help has
+//           gone out in the conversation.
+//   visit   for a guest who was asked how their order is, never said, chatted
+//           about something else and went quiet in the shop: a light line
+//           about the visit. Once per visit (a `sign_off` row in
+//           `visit_messages`). It carries NO review link.
 //
-// Both are GENERATED. TAC-568 sent the plain close as a fixed per-venue string;
-// TAC-575 reversed that, and the venue's text is now a guide to its content.
+// A guest who SAID it is good is never signed off here: the reply to that
+// answer is the sign-off (handleInbound; rule 3 as re-ruled 2026-10-07).
+//
+// Both are GENERATED.
 //
 // Called every minute by the external HTTP cron (cron-job.org) that hits
 // /api/cron/warm-close. SIXTH concrete cron-processor sibling of
@@ -28,12 +34,10 @@
 //
 //   Instagram only (ruled 2026-09-29). The text arm is one refusal, recorded as
 //   a follow-up.
-//   Plain: any first Instagram conversation (TAC-575, ruled 2026-10-06). It
-//   was first-visit QR scans only; a guest who simply DMs and then goes quiet
-//   is now closed the same way, because the in-conversation close no longer
-//   rides on a stored name and nothing else would reach them.
-//   Happy: any Instagram guest with a good check-in on the venue-local day,
-//   never before asked for a review, at a venue with a review link.
+//   Plain: any Instagram conversation that is not a visit, for a guest never
+//   closed before.
+//   Visit: any Instagram guest with a fresh check-in on the venue-local day
+//   that reads neither good nor bad, who has written since being asked.
 //
 // EVERY CONDITION IS RE-CHECKED HERE, never settled earlier. Nothing is stored
 // between ticks except the marker, so there is nothing that could be stale: the
@@ -41,8 +45,8 @@
 //
 // ORDER, and it is not arbitrary. Everything that means "this sign-off should
 // never happen" runs BEFORE the claim, because the claim is what burns the
-// guest's one close, or their one review invitation, for ever. The claim runs
-// last, immediately before generation.
+// guest's one close, or the visit's one sign-off. The claim runs last,
+// immediately before generation.
 //
 // WHAT IS NOT CHECKED HERE: Meta's 24-hour reply window.
 // dispatch-instagram-reply.ts re-derives it unconditionally immediately before
@@ -61,42 +65,41 @@ import {
 import { recordProactiveSend } from '@/lib/followups/inquiry-followup-store'
 import { isTooSoonAfterProactive } from '@/lib/followups/proactive-spacing'
 import { isQuietHour } from './followup-rules'
+import { loadInstagramScanInstants } from '@/lib/recognition/load-scan-visits'
 import type { AgentResult, SignOffKind } from './types'
-import {
-  deriveSignOffReviewAsk,
-  markReviewAsked,
-  releaseReviewAskClaim,
-} from './review-ask'
 import {
   checkbackWentUnanswered,
   COUNTER_ARRIVAL_WINDOW_MS,
   isCheckbackTooLate,
   isCheckinFresh,
-  lastComplaintFollowupAt,
   lastProactiveWasThisVisit,
-  owedComplaintFollowup,
-  owesAfterComplaintReviewAsk,
   owesCheckback,
-  visitStartFor,
+  timedSignOffFor,
   type VisitCheckin,
 } from './visit-checkin'
+import { loadLastInboundAt, loadVisitCheckin } from './visit-checkin-store'
+import { isInsideOneMessageGap } from './visit-messages'
 import {
-  loadComplaintCheckins,
-  loadLastInboundAt,
-  loadVisitCheckin,
-} from './visit-checkin-store'
+  claimVisitMessage,
+  hasVisitMessage,
+  loadLastSpacedSendAt,
+  loadPendingInquiryFollowup,
+  releaseVisitMessage,
+  settleVisitMessage,
+} from './visit-messages-store'
 import { handleFollowup } from './handle-followup'
 import { loadPendingRowsBySlot } from './pending-slots'
+import { offeredThisConversation } from './previous-offer'
 import {
-  isFirstConversation,
   isWarmCloseDue,
   isWarmCloseTooLate,
-  WARM_CLOSE_MAX_AGE_MS,
+  SIGN_OFF_CATEGORY,
   warmCloseFloorMs,
   weAskedAQuestion,
 } from './warm-close'
 import {
   claimWarmClose,
+  loadConversationOutbound,
   loadWarmCloseBlocker,
   loadWarmCloseCandidates,
   loadWarmCloseGuestFacts,
@@ -107,6 +110,16 @@ import {
 } from './warm-close-store'
 
 type AdminSupabaseClient = ReturnType<typeof createAdminClient>
+
+/**
+ * How recently a guest has to have scanned for their conversation to count as
+ * a visit, for the plain close. THIRTY-SIX HOURS: the visit and the whole of
+ * the next morning's slot, which closes up to twenty-seven hours after an
+ * early scan. It was a day, and a guest answered at 08:30 the morning after
+ * an 08:00 visit got the close, which then held their once-ever thank-you
+ * past its slot (found in review).
+ */
+const VISIT_LOOKBACK_MS = 36 * 60 * 60 * 1000
 
 /**
  * Why a candidate was not closed. Every one is a distinct cause with a distinct
@@ -120,8 +133,35 @@ export type WarmCloseSkipReason =
   | 'too_late'
   /** Already closed, from either path. */
   | 'already_closed'
-  /** Past their first conversation. */
-  | 'not_first_conversation'
+  /** TAC-578: this visit has had its sign-off. */
+  | 'already_signed_off'
+  /** TAC-578: they said it is good. No timed sign-off follows an answered check-in. */
+  | 'answered_good'
+  /** TAC-578: asked how it is, and nothing from them since. Nothing more. */
+  | 'nothing_since_checkin'
+  /**
+   * TAC-578: the guest scanned in the last day, so this is a visit, or one
+   * with its own message still to come. No "always here" close, and the
+   * once-ever marker is not spent.
+   */
+  | 'visit_conversation'
+  /**
+   * TAC-578: the guest's last message did not signal they were done. A close
+   * follows a thanks or a bye, never an answer they simply went quiet after.
+   */
+  | 'guest_not_done'
+  /** TAC-578: an offer of more help already went out in this conversation. */
+  | 'offer_already_made'
+  /**
+   * TAC-578: a question in this conversation armed an inquiry follow-up, which
+   * is the next touch. The once-ever marker is not spent.
+   */
+  | 'followup_is_next_touch'
+  /**
+   * TAC-578: a follow-up, a thank-you or a check-in reached this guest within
+   * three hours. The close lapses unspent inside its own two-hour bound.
+   */
+  | 'inside_one_message_gap'
   /** TAC-575: staff answered this guest by hand. No automated close at all. */
   | 'staff_replied'
   /** TAC-575: the conversation contains a complaint. No automated close at all. */
@@ -244,9 +284,9 @@ export async function processDueWarmCloses(
     // Instagram only (ruled 2026-09-29). A venue with no Instagram account can
     // have no Instagram conversation, so skip it whole.
     if (venue.instagramAccountId === null) continue
-    // TAC-575: a venue with no close text is NOT skipped whole any more. Such a
-    // venue can still owe a guest a happy sign-off, which needs the review link
-    // and not the text. The text is checked per candidate, on the plain path.
+    // A venue with no close text is NOT skipped whole (TAC-575). It can still
+    // owe a guest a visit sign-off, which needs no text. The text is checked
+    // per candidate, on the plain path.
 
     // The window is bounded by the max age, so the scan is small: at two hours
     // this is a handful of rows per venue.
@@ -371,8 +411,8 @@ async function considerCandidate(
   // resolving the channel properly is dispatchReply's job and it re-checks.
   if (facts.data.instagramScopedId === null) return 'not_instagram'
 
-  // TAC-575: today's visit check-in, if this guest has one. It decides which
-  // sign-off this is, and whether a check-back still comes first.
+  // Today's visit check-in, if this guest has one. It decides which sign-off
+  // this is, and whether a check-back still comes first.
   let checkin: VisitCheckin | null = null
   const closeLocalDate =
     gate.venue.timezone !== null
@@ -395,129 +435,190 @@ async function considerCandidate(
     checkin = loaded.data
   }
 
-  // WHICH SIGN-OFF. A guest whose check-in reads good, who has never been
-  // asked, at a venue with a review link, gets the invitation as their
-  // sign-off (ruled 2026-10-06), in a first conversation or not: every guest
-  // who answers "how is it?" is eventually offered it. Everyone else gets the
-  // plain close, and only inside the rules that have always bounded it.
+  // WHICH SIGN-OFF (TAC-578, ruled 2026-10-07). What happened in the
+  // conversation decides, where one timer used to close everything alike:
   //
-  // Only a check-in from THIS visit counts (isCheckinFresh): the row is keyed
+  //   visit   the guest was asked how their order is on THIS visit, never
+  //           said good or bad, wrote about something else, and has gone
+  //           quiet in the shop. A light line about the visit, once per visit.
+  //   plain   anything else: the "always here" close, once per guest ever.
+  //
+  // AND TWO WAYS A VISIT GETS NEITHER (rule 3 as re-ruled the same day):
+  //
+  //   they said it is good     the reply to that is the sign-off
+  //                            (handleInbound, `signOff: 'answer'`), and no
+  //                            timed one follows an answered check-in.
+  //   nothing since we asked   the check-back, then silence. Nothing more.
+  //
+  // Only a check-in from this visit counts (isCheckinFresh): the row is keyed
   // on the day, and a guest who said "so good" this morning and asked about
-  // closing time this afternoon is not signing off the morning's drink.
-  //
-  // TAC-575 PR 5: AND A GUEST WHOSE COMPLAINT HAS BEEN FOLLOWED UP gets the
-  // invitation too, with no happiness condition (ruled 2026-10-06): they wrote
-  // at least once this visit and did not complain again
-  // (owesAfterComplaintReviewAsk). Read only while the once-ever marker is
-  // unspent, since nothing else here depends on it. An unreadable complaint
-  // history skips the tick rather than reading as "no complaint": the wrong
-  // guess sends this guest a plain close and they are never invited.
-  const freshAnswer =
-    checkin !== null && isCheckinFresh(checkin, now) ? checkin.answer : null
-  let followedUpAt: Date | null = null
-  let afterComplaint = false
-  if (facts.data.reviewAskedAt === null) {
-    const complaints = await loadComplaintCheckins(
+  // closing time this afternoon is not on the morning's visit. A check-in
+  // that reads `bad` is a complaint and is stopped below.
+  let visitCheckin: VisitCheckin | null = null
+  if (checkin !== null && isCheckinFresh(checkin, now)) {
+    const lastInbound = await loadLastInboundAt(
       supabase,
       candidate.venueId,
       candidate.guestId,
     )
-    if (!complaints.ok) {
-      console.warn('[warm-close] complaint check-ins unreadable; skipping', {
+    if (!lastInbound.ok) {
+      console.warn('[warm-close] last inbound unreadable; skipping', {
         guestId: candidate.guestId,
-        error: complaints.error,
+        error: lastInbound.error,
       })
       return 'guest_unreadable'
     }
-    followedUpAt = lastComplaintFollowupAt(complaints.data)
-    if (followedUpAt !== null) {
-      const lastInbound = await loadLastInboundAt(
-        supabase,
-        candidate.venueId,
-        candidate.guestId,
-      )
-      if (!lastInbound.ok) {
-        console.warn('[warm-close] last inbound unreadable; skipping', {
-          guestId: candidate.guestId,
-          error: lastInbound.error,
-        })
-        return 'guest_unreadable'
-      }
-      afterComplaint = owesAfterComplaintReviewAsk({
-        followedUpAt,
-        // An unreadable clock cannot say which complaints are from before
-        // today, so it reads as one still owed and the link waits.
-        anotherStillOwed:
-          closeLocalDate === null ||
-          owedComplaintFollowup(complaints.data, closeLocalDate, now) !== null,
-        todaysCheckin: checkin,
-        lastInboundAt: lastInbound.data,
-        now,
-      })
+    const timed = timedSignOffFor(checkin, lastInbound.data, now)
+    if (timed === 'answered_good' || timed === 'nothing_since_checkin') {
+      return timed
     }
+    if (timed === 'send') visitCheckin = checkin
   }
-  const reviewAsk = deriveSignOffReviewAsk({
-    checkinAnswer: freshAnswer,
-    afterComplaint,
-    reviewAskedAt: facts.data.reviewAskedAt,
-    links: gate.venue.links,
-  })
-  // `happy` wins when both hold: a followed-up guest who says today's order is
-  // good is, by then, exactly who the happy block describes.
-  const signOff: SignOffKind =
-    reviewAsk === null
-      ? 'plain'
-      : freshAnswer === 'good'
-        ? 'happy'
-        : 'after_complaint'
-  const firstConversation =
-    facts.data.firstContactedAt !== null &&
-    isFirstConversation(
-      facts.data.firstContactedAt,
-      now,
-      gate.conversationWindowMs,
-    )
-  if (reviewAsk === null) {
-    // The plain close: once per guest ever, first conversation only, and only
-    // for a venue that has been given one.
+  const signOff: SignOffKind = visitCheckin !== null ? 'visit' : 'plain'
+
+  if (visitCheckin !== null) {
+    // One sign-off per visit. The claim below is the guarantee; this read
+    // just keeps a signed-off visit from costing the reads in between on
+    // every tick until the two-hour bound.
+    const already = await hasVisitMessage(supabase, {
+      venueId: candidate.venueId,
+      guestId: candidate.guestId,
+      venueLocalDate: visitCheckin.venueLocalDate,
+      kinds: ['sign_off'],
+    })
+    if (!already.ok) {
+      console.warn('[warm-close] visit messages unreadable; skipping', {
+        guestId: candidate.guestId,
+        error: already.error,
+      })
+      return 'guest_unreadable'
+    }
+    if (already.data) return 'already_signed_off'
+  } else {
+    // The plain close: once per guest ever, ACROSS ALL CONVERSATIONS, and only
+    // for a venue that has been given one. TAC-560 limited it to a first
+    // conversation; ruled 2026-10-07 it is no longer tied to one, because a
+    // first conversation that was a visit, or a question that armed a
+    // follow-up, no longer spends it.
     if (facts.data.warmCloseSentAt !== null) return 'already_closed'
-    if (!firstConversation) return 'not_first_conversation'
     if (gate.warmCloseText.trim() === '') return 'no_warm_close_text'
+
+    // ONLY WHEN THE GUEST SIGNALLED THEY WERE DONE (ruled 2026-10-07, from a
+    // live test: a close ten minutes behind a purchase link "felt automated").
+    // A thanks, a bye, a "perfect", an emoji. Never a guest who simply went
+    // quiet after an answer.
+    //
+    // HOW IT KNOWS. Nothing writes a category on an inbound row; it is stamped
+    // on OUR reply, as the classifier's reading of the message that reply
+    // answered. The candidate is our newest message, so its category is the
+    // reading of the guest's last one, and `acknowledgment` is the one
+    // category that means "wrapping up" (warm-close.ts, SIGN_OFF_CATEGORY).
+    //
+    // WHAT IT MISSES, stated: a done-signal we never replied to. A bare
+    // reaction, or a "thanks" a turn judged to need no answer, leaves the
+    // guest's message as the newest row, and this timer only ever starts from
+    // one of ours. That guest gets no close, which is the direction this rule
+    // was written to lean.
+    if (candidate.category !== SIGN_OFF_CATEGORY) return 'guest_not_done'
+
+    // NOT A VISIT. A guest who scanned in the last day is on a visit, or was
+    // on one that still has its own message coming (the thank-you or the
+    // check-in, lib/agent/post-visit-timeout.ts). "Message us anytime" on top
+    // of either is the generic line beating the specific one, and it would
+    // spend the once-ever close to do it. An unreadable scan record has not
+    // shown there was no visit.
+    const scans = await loadInstagramScanInstants(supabase, {
+      venueId: candidate.venueId,
+      guestId: candidate.guestId,
+      sinceIso: new Date(now.getTime() - VISIT_LOOKBACK_MS).toISOString(),
+    })
+    if (!scans.ok) {
+      console.warn('[warm-close] scans unreadable; skipping', {
+        guestId: candidate.guestId,
+        error: scans.error,
+      })
+      return 'guest_unreadable'
+    }
+    if (scans.data.length > 0) return 'visit_conversation'
+
+    // A QUESTION THAT ARMED AN INQUIRY FOLLOW-UP GETS NO CLOSE (ruled
+    // 2026-10-07): "the follow-up is the next touch. Don't spend the
+    // once-ever close here." One pending row at most exists per guest
+    // (migration 066), and while it does this guest is not closed. A
+    // follow-up that already went is covered by the gap below.
+    const followup = await loadPendingInquiryFollowup(
+      supabase,
+      candidate.guestId,
+    )
+    if (!followup.ok) {
+      console.warn('[warm-close] inquiry follow-up unreadable; skipping', {
+        guestId: candidate.guestId,
+        error: followup.error,
+      })
+      return 'guest_unreadable'
+    }
+    if (followup.data !== null) return 'followup_is_next_touch'
+
+    // THE ONE-MESSAGE RULE (ruled 2026-10-07): no close within three hours of
+    // a follow-up, a thank-you or a check-in. The close is the lowest of the
+    // four, so it never waits for its turn: its own two-hour bound is shorter
+    // than the gap, and it lapses unspent.
+    const lastSpaced = await loadLastSpacedSendAt(supabase, {
+      venueId: candidate.venueId,
+      guestId: candidate.guestId,
+    })
+    if (!lastSpaced.ok) {
+      console.warn('[warm-close] recent sends unreadable; skipping', {
+        guestId: candidate.guestId,
+        error: lastSpaced.error,
+      })
+      return 'guest_unreadable'
+    }
+    if (isInsideOneMessageGap(lastSpaced.data, now)) {
+      return 'inside_one_message_gap'
+    }
+
+    // NEVER AFTER AN OFFER OF MORE HELP (same ruling): a guest who has been
+    // told in this conversation that they can ask for more is not told again
+    // by a close. Read with the offer feature's own detector over the same
+    // conversation window, so "what an offer looks like" has one definition.
+    // An unreadable thread has not shown there was none.
+    const ours = await loadConversationOutbound(
+      supabase,
+      candidate.venueId,
+      candidate.guestId,
+      new Date(now.getTime() - gate.conversationWindowMs),
+    )
+    if (!ours.ok) {
+      console.warn('[warm-close] conversation unreadable; skipping', {
+        guestId: candidate.guestId,
+        error: ours.error,
+      })
+      return 'guest_unreadable'
+    }
+    if (offeredThisConversation(ours.data, now, gate.conversationWindowMs)) {
+      return 'offer_already_made'
+    }
   }
 
   // TAC-575 (ruled 2026-10-06): a person in the thread, or a complaint in it,
   // means no automated close at all. With the permanent checks, before any
   // claim. An unreadable thread is not "nothing blocks": skip this tick.
   //
-  // The stretch read is the conversation this close would end: all of a first
-  // conversation, or, for a returning guest's happy sign-off, this visit, which
-  // starts no earlier than the counter window before the order.
-  //
-  // A FOLLOWED-UP COMPLAINT IS NOT "A COMPLAINT IN THIS CONVERSATION". For a
-  // guest whose complaint has been followed up, the stretch is this visit even
-  // inside a first conversation: read from first contact it would find the
-  // very complaint the follow-up answered and refuse the invitation the ruling
-  // sends them. A NEW complaint this visit is still inside the stretch.
-  //
-  // THIS ALSO NARROWS THE STAFF-REPLIED STOP, and that is the same decision,
-  // not a side effect to tidy away: the apology for the complaint is held for
-  // an operator, and an operator who edits it counts as staff in the thread.
-  // Read from first contact, nearly every followed-up guest inside their
-  // first forty-eight hours would be refused on the reply that fixed things.
-  // Staff writing by hand THIS visit still stops it. Flagged on the PR as a
-  // call for Jaipal.
-  const visitStart =
-    checkin !== null
-      ? new Date(checkin.orderedAt.getTime() - COUNTER_ARRIVAL_WINDOW_MS)
-      : followedUpAt !== null
-        ? visitStartFor(followedUpAt)
-        : new Date(now.getTime() - WARM_CLOSE_MAX_AGE_MS)
+  // The stretch read is the conversation this close would end: for a visit,
+  // from the earliest a scan for this order could have been; for the plain
+  // close, the conversation window (TAC-380 ruling 1's one definition), and no
+  // further back than the guest's first contact.
+  const conversationStart = new Date(
+    Math.max(
+      now.getTime() - gate.conversationWindowMs,
+      facts.data.firstContactedAt?.getTime() ?? 0,
+    ),
+  )
   const blockerSince =
-    reviewAsk !== null && followedUpAt !== null
-      ? visitStart
-      : firstConversation && facts.data.firstContactedAt !== null
-        ? facts.data.firstContactedAt
-        : visitStart
+    visitCheckin !== null
+      ? new Date(visitCheckin.orderedAt.getTime() - COUNTER_ARRIVAL_WINDOW_MS)
+      : conversationStart
   const blocker = await loadWarmCloseBlocker(
     supabase,
     candidate.venueId,
@@ -536,9 +637,9 @@ async function considerCandidate(
   // TAC-575: the check-back comes first, and an unanswered one ends the visit.
   //
   // Both this close and the timed check-back fire on about ten quiet minutes,
-  // so without this the guest who had not tried their drink yet would get "the
-  // line is open" instead of being checked back on. And a guest who then
-  // ignores the check-back gets nothing more, by ruling.
+  // so without this the guest who had not tried their drink yet would be
+  // signed off instead of being checked back on. And a guest who then ignores
+  // the check-back gets nothing more, by ruling.
   //
   // "Unanswered" is read from the guest's side: nothing of theirs has arrived
   // since the check-back went out (checkbackWentUnanswered says why it is not
@@ -566,14 +667,8 @@ async function considerCandidate(
     }
   }
 
-  // NO "ALREADY CLOSED IN CONVERSATION" CHECK ANY MORE. TAC-560 stood the timer
-  // down when the guest's last message was a sign-off, because the goodbye
-  // reply had carried the close. Ruled 2026-10-06, no reply carries one: a
-  // guest who says "bye" is signed off HERE, ten quiet minutes later, so that
-  // check would now refuse exactly the guests this is for.
-
-  // An operator holding a card for this guest is mid-decision; a warm close
-  // landing under them would answer for them. loadPendingRowsBySlot is the ONE
+  // An operator holding a card for this guest is mid-decision; a close landing
+  // under them would answer for them. loadPendingRowsBySlot is the ONE
   // per-guest pending read in the repo and it fails OPEN to two empty slots.
   const pending = await loadPendingRowsBySlot(
     candidate.venueId,
@@ -586,9 +681,9 @@ async function considerCandidate(
     return 'card_pending'
   }
 
-  // TAC-386: no two proactive messages within the hour (ruled 2026-09-30). A
-  // DELAY, not a refusal: the close comes round again on a later tick inside
-  // its own two-hour bound.
+  // TAC-386: no two proactive messages within the hour (ruled 2026-09-30).
+  // This is the rule that also covers the scan greeting, which the three-hour
+  // one above does not. A DELAY, not a refusal.
   //
   // TAC-575 (ruled 2026-10-06): EXCEPT against this visit's own greeting and
   // check-back. The three belong to one visit and are not spaced against each
@@ -607,37 +702,34 @@ async function considerCandidate(
   }
 
   // CLAIM LAST, immediately before generating. Everything above could have said
-  // "never"; from here on something of the guest's that exists once is spent.
+  // "never"; from here on something that exists once is spent.
   //
-  // WHICH marker depends on the sign-off, because each kind is once of a
-  // different thing:
+  //   plain   the "always here" close, once per guest ever:
+  //           `guests.warm_close_sent_at`.
+  //   visit   this visit's sign-off, once per visit: a `sign_off` row in
+  //           `visit_messages` (migration 076). TAC-575 claimed it through
+  //           `review_asked_at`, because it carried the link; it no longer
+  //           does, and it must not touch the guest's one invitation.
   //
-  //   plain   the warm close, once per guest ever: `warm_close_sent_at`.
-  //   happy   the review invitation, once per guest ever: `review_asked_at`.
-  //           markReviewAsked is already the compare-and-set. The praise ask
-  //           stamps that marker AFTER the send; this path cannot, because two
-  //           ticks a minute apart would both find the guest unasked.
-  //
-  // A happy sign-off in a first conversation ALSO takes the warm-close marker,
-  // best effort: it is that guest's close, and a plain one must not follow it.
-  // Losing that second claim does not stop the send.
-  let reviewClaimedAt: Date | null = null
-  let warmCloseClaimed = false
-  if (reviewAsk !== null) {
-    const marked = await markReviewAsked({
+  // A visit sign-off does NOT take the warm-close marker. It did under
+  // TAC-575, when both were "this guest's close". They are different things
+  // now, and a guest signed off in the shop can still be told, once, on some
+  // later question, that they can message anytime.
+  let visitRowId: string | null = null
+  if (visitCheckin !== null) {
+    const claim = await claimVisitMessage(supabase, {
       venueId: candidate.venueId,
       guestId: candidate.guestId,
+      venueLocalDate: visitCheckin.venueLocalDate,
+      kind: 'sign_off',
+      slot: null,
       now,
     })
-    if (!marked.ok) {
-      throw new Error(`sign-off review claim failed: ${marked.error}`)
+    if (claim.status === 'lost') return 'claim_lost'
+    if (claim.status === 'failed') {
+      throw new Error(`sign-off claim failed: ${claim.error}`)
     }
-    if (marked.data === 'already_marked') return 'claim_lost'
-    reviewClaimedAt = now
-    if (firstConversation && facts.data.warmCloseSentAt === null) {
-      const alsoClose = await claimWarmClose(supabase, candidate.guestId, now)
-      warmCloseClaimed = alsoClose.status === 'claimed'
-    }
+    visitRowId = claim.id
   } else {
     const claim = await claimWarmClose(supabase, candidate.guestId, now)
     if (claim.status === 'lost') return 'claim_lost'
@@ -648,8 +740,15 @@ async function considerCandidate(
       })
       throw new Error(`warm-close claim failed: ${claim.error}`)
     }
-    warmCloseClaimed = true
   }
+  const visitRow =
+    visitRowId === null
+      ? null
+      : {
+          id: visitRowId,
+          venueId: candidate.venueId,
+          guestId: candidate.guestId,
+        }
 
   const agentRunId = randomUUID()
   const result = await handleFollowup({
@@ -659,40 +758,23 @@ async function considerCandidate(
     trigger: {
       reason: 'warm_close',
       triggeredAt: now,
-      warmClose:
-        reviewAsk !== null && reviewClaimedAt !== null
-          ? {
-              answersMessageId: candidate.messageId,
-              signOff,
-              reviewAsk,
-              reviewClaimedAt,
-            }
-          : { answersMessageId: candidate.messageId, signOff: 'plain' },
+      warmClose: { answersMessageId: candidate.messageId, signOff },
     },
   })
 
   // A sign-off that will NEVER reach the guest releases what it claimed, so a
-  // later tick inside the two-hour window can try again. Without this a refused
-  // generation or a shut Meta window would spend the guest's one close, or
-  // their one review invitation, on nothing.
+  // later tick inside the two-hour window can try again. Without this a
+  // refused generation or a shut Meta window would spend the guest's one
+  // close, or the visit's one sign-off, on nothing.
   //
   // `queued` DELIBERATELY KEEPS THE CLAIM, and that asymmetry is the whole reason
   // RELEASES_CLAIM is a total map rather than `status !== 'sent'`. A queued
   // sign-off is a card an operator can still approve, which sends it; releasing
   // there opens a double-send. Keeping it costs at most one guest never being
-  // closed, or never being asked, if the operator skips the card (the second
-  // accepted 2026-10-06 rather than add a claim column of its own).
+  // closed if the operator skips the card.
   if (RELEASES_CLAIM[result.status]) {
-    if (warmCloseClaimed) {
-      await releaseWarmCloseClaim(supabase, candidate.guestId, now)
-    }
-    if (reviewClaimedAt !== null) {
-      await releaseReviewAskClaim({
-        venueId: candidate.venueId,
-        guestId: candidate.guestId,
-        claimedAt: reviewClaimedAt,
-      })
-    }
+    if (visitRow !== null) await releaseVisitMessage(supabase, visitRow)
+    else await releaseWarmCloseClaim(supabase, candidate.guestId, now)
     console.warn('[warm-close] sign-off did not send; claim released', {
       agentRunId,
       guestId: candidate.guestId,
@@ -714,7 +796,24 @@ async function considerCandidate(
   // and an operator can see the whole thread. A fresh clock, for the reason the
   // check-back uses one: `now` predates the message it would describe.
   if (result.status === 'sent') {
-    await recordProactiveSend(supabase, candidate.guestId, new Date())
+    const sentAt = new Date()
+    await recordProactiveSend(supabase, candidate.guestId, sentAt)
+    if (visitRow !== null) {
+      // The row carries the message so a later check-in can be checked
+      // against what this sign-off said (loadPriorCheckins).
+      await settleVisitMessage(supabase, {
+        ...visitRow,
+        outcome: 'sent',
+        messageId: result.outboundMessageId,
+        sentAt,
+      })
+    }
+  } else if (visitRow !== null) {
+    await settleVisitMessage(supabase, {
+      ...visitRow,
+      outcome: 'queued',
+      messageId: result.status === 'queued' ? result.outboundMessageId : null,
+    })
   }
 
   await captureWarmCloseSent({

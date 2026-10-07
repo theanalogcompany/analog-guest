@@ -1264,12 +1264,16 @@ export async function buildRuntimeContext(input: {
     // case) — the serializer omits the block entirely at zero token cost.
     pendingQuestion: pendingQuestionResult?.question ?? null,
     // Null on every path but one. handle-inbound.ts sets it post-classify, and
-    // TAC-575's pause timer hands the link in on a `happy` sign-off: it has
-    // already read the check-in, claimed the once-ever marker and resolved the
+    // TAC-578's post-visit processor hands the link in on a first-visit
+    // thank-you: it has already claimed the once-ever marker and resolved the
     // venue's link, so this is a pass-through of a decision made upstream, not
     // a second place that decides.
-    reviewAsk: input.followupTrigger?.warmClose?.reviewAsk ?? null,
+    reviewAsk: input.followupTrigger?.postVisit?.reviewAsk ?? null,
     signOff: input.followupTrigger?.warmClose?.signOff ?? null,
+    postVisit:
+      input.followupTrigger?.reason === 'post_visit'
+        ? (input.followupTrigger.postVisit ?? null)
+        : null,
     insideVisitCheckin: false,
     complaintFollowup,
     // TAC-574: always null here, for the same reason. handle-inbound.ts sets

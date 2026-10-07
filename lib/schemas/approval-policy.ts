@@ -87,23 +87,26 @@ export const ApprovalPolicySchema = z.object({
    */
   visitCheckback: DispositionSchema.optional(),
   /**
-   * Disposition for the review invitation carried by a happy guest's SIGN-OFF
-   * (TAC-575): the guest said their order is good, and the conversation is
-   * closing.
+   * Disposition for the two messages that go out AFTER a visit (TAC-578): the
+   * first-visit thank-you, with its review invitation, and the later-visit
+   * check-in (lib/agent/post-visit-timeout.ts).
    *
-   * A KEY OF ITS OWN, NOT `reviewAsk` (ruled 2026-10-06, "option A"). The two
-   * asks have different evidence behind them. `reviewAsk` covers praise the
-   * classifier noticed in passing, and launched held "until the praise
-   * classifier's precision is proven on real traffic". This one follows a
-   * question we asked and an answer the guest gave to it, and was ruled to
-   * auto-send at the pilot venue "as a venue-level approval setting, not a
-   * global default". Reusing `reviewAsk` would have flipped the first to
-   * auto-send as a side effect of turning on the second.
+   * A KEY OF ITS OWN, for visitCheckback's reason: both are stored as
+   * `follow_up`, and a venue that holds follow-ups would hold them with the
+   * rest. It also governs the thank-you's review invitation, NOT `reviewAsk`,
+   * so switching these on does not switch the praise ask on with them.
+   *
+   * IT REPLACES `signOffReviewAsk`, which governed the invitation on the
+   * in-shop sign-off. Ruled 2026-10-07, the sign-off carries no link, so that
+   * key had nothing left to decide and went with its reader. A stored
+   * `signOffReviewAsk` is ignored (the schema strips unknown keys).
    *
    * Optional, and the DEFAULT IS QUEUE, owned by
-   * resolveSignOffReviewAskDisposition below, like the two above it.
+   * resolvePostVisitMessageDisposition below. A held thank-you will not land
+   * in its slot, so a venue that wants this sets "postVisitMessage":
+   * "auto_send" once the generation check has passed.
    */
-  signOffReviewAsk: DispositionSchema.optional(),
+  postVisitMessage: DispositionSchema.optional(),
 })
 
 export type ApprovalPolicy = z.infer<typeof ApprovalPolicySchema>
@@ -259,15 +262,16 @@ export function resolveVisitCheckbackDisposition(
 }
 
 /**
- * Effective disposition for the review invitation on a happy guest's sign-off.
+ * Effective disposition for the first-visit thank-you and the later-visit
+ * check-in.
  *
  * 'operator_approval' on every fallback path. A venue opts in with
- * "signOffReviewAsk": "auto_send", one Studio JSONB edit and no deploy.
+ * "postVisitMessage": "auto_send", one Studio JSONB edit and no deploy.
  */
-export function resolveSignOffReviewAskDisposition(
+export function resolvePostVisitMessageDisposition(
   policy: ApprovalPolicy | null | undefined,
 ): ApprovalDisposition {
-  return policy?.signOffReviewAsk ?? 'operator_approval'
+  return policy?.postVisitMessage ?? 'operator_approval'
 }
 
 /**

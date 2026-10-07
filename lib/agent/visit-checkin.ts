@@ -503,70 +503,6 @@ export function owedComplaintFollowup(
   }
 }
 
-/** When this guest's most recent complaint follow-up was claimed, if ever. */
-export function lastComplaintFollowupAt(
-  complaints: readonly ComplaintCheckin[],
-): Date | null {
-  let latest: Date | null = null
-  for (const complaint of complaints) {
-    const at = complaint.followupClaimedAt
-    if (at !== null && (latest === null || at > latest)) latest = at
-  }
-  return latest
-}
-
-/**
- * Should this sign-off invite a guest whose complaint has been followed up to
- * leave a review? Ruled 2026-10-06 (PR 5, question 1): they wrote at least
- * once this visit and did not complain again. NO HAPPINESS CONDITION: making
- * the unhappy guest's link wait on a "good" is the review gating the ticket
- * rules out.
- *
- *   followed up              some complaint of theirs has a follow-up claimed.
- *                            Not necessarily today: a guest whose return visit
- *                            ended in an unanswered check-back got nothing
- *                            more that day, and is still owed the link.
- *   on a visit now           the follow-up was claimed within the answer
- *                            window, or today's check-in is still fresh. A DM
- *                            from home days later is not a visit.
- *   wrote this visit         a fresh check-in is itself a message from them;
- *                            otherwise their last message must be no older
- *                            than the visit.
- *   did not complain again   today's check-in is not `bad`. A complaint in the
- *                            thread with no check-in is caught by the timer's
- *                            own complaint stop, scoped to this visit.
- *
- * Whether they were ever asked before, and whether the venue has a link, are
- * deriveSignOffReviewAsk's to decide (lib/agent/review-ask.ts).
- */
-export function owesAfterComplaintReviewAsk(input: {
-  followedUpAt: Date | null
-  /**
-   * A LATER complaint of theirs is still waiting for its own follow-up (it
-   * was held back by a pending card, say). The link waits with it: inviting a
-   * review off the first complaint's follow-up while the second has had none
-   * is the invitation arriving before the fix.
-   */
-  anotherStillOwed: boolean
-  todaysCheckin: VisitCheckin | null
-  lastInboundAt: Date | null
-  now: Date
-}): boolean {
-  const { followedUpAt, todaysCheckin, lastInboundAt, now } = input
-  if (followedUpAt === null) return false
-  if (input.anotherStillOwed) return false
-  if (todaysCheckin?.answer === 'bad') return false
-  if (todaysCheckin !== null && isCheckinFresh(todaysCheckin, now)) return true
-  const sinceFollowup = now.getTime() - followedUpAt.getTime()
-  if (sinceFollowup < 0 || sinceFollowup > CHECKIN_ANSWER_WINDOW_MS) {
-    return false
-  }
-  return (
-    lastInboundAt !== null &&
-    lastInboundAt.getTime() >= visitStartFor(followedUpAt).getTime()
-  )
-}
-
 /**
  * Where "this visit" starts for a follow-up claimed at `followedUpAt`. The
  * claim is taken as the greeting goes out, or just after the reply to the
@@ -595,4 +531,139 @@ export function messagesFromThisVisit<T extends { createdAt: Date }>(
 ): T[] {
   const since = visitStartFor(visitBeganAt).getTime()
   return messages.filter((m) => m.createdAt.getTime() >= since)
+}
+
+// ---------------------------------------------------------------------------
+// The sign-off (TAC-578, rule 3 as re-ruled 2026-10-07)
+// ---------------------------------------------------------------------------
+//
+// "When the guest answers 'how is it?' (good, or not yet and then good), the
+// reply to that answer IS the sign-off: one light line tied to the visit. The
+// timed sign-off only remains for a visit where the check-in went unanswered
+// and the guest has chatted since (otherwise nothing)."
+
+/**
+ * The one getting-to-know-you question a sign-off reply may carry, and only
+ * on a first visit (ruled 2026-10-07: "may ask the name and nothing else").
+ */
+export const SIGN_OFF_REPLY_QUESTION = 'learn_name'
+
+/**
+ * Which of this turn's open questions may ride the reply that signs a visit
+ * off. On a first visit, the name ask if it is open; on any later visit,
+ * nothing. It only ever NARROWS what pacing and the first-conversation rules
+ * already allowed, so a name ask those hold back stays held back.
+ */
+export function signOffReplyQuestions<T extends { key: string }>(
+  open: readonly T[],
+  firstVisit: boolean,
+): T[] {
+  return firstVisit ? open.filter((o) => o.key === SIGN_OFF_REPLY_QUESTION) : []
+}
+
+/**
+ * The categories a sign-off reply may be. AN ALLOW-LIST, and the direction is
+ * chosen: the block tells the model to answer the praise in one line and ask
+ * nothing, which is wrong for a message that also asks for something ("so
+ * good! what's the wifi?" classifies as a question) and must never sit over
+ * an opt-out confirmation ("loved it, please stop messaging me"). A category
+ * missing from this list costs one ordinary reply where a sign-off would have
+ * done; the other direction costs an unanswered question or a compliance
+ * turn told to be light. Found in review.
+ */
+const SIGN_OFF_REPLY_CATEGORIES: ReadonlySet<string> = new Set([
+  'reply',
+  'casual_chatter',
+  'acknowledgment',
+])
+
+/**
+ * Is the reply to THIS message the visit's sign-off?
+ *
+ * Two ways in, and the second is not redundant:
+ *
+ *   this message changed the row to `good`   the ordinary case.
+ *   the row already says `good`, and         a burst. "so good" arrives, the
+ *   nothing of ours has reached the guest    answer is written, and a second
+ *   since they said it                       message lands while the reply is
+ *                                            being written. The turn is run
+ *                                            again from a fresh context, finds
+ *                                            the row already `good`, and
+ *                                            without this would send an
+ *                                            ordinary reply while the timer
+ *                                            stood down for a sign-off that
+ *                                            never went (found in review).
+ *                                            The same holds for a retried
+ *                                            turn, and for a reply that was
+ *                                            held on a card.
+ *
+ * "Nothing of ours since" is read off delivered outbound rows, so a sign-off
+ * that DID go out ends it: the next "thanks!" is an ordinary turn.
+ */
+export function replySignsOffVisit(input: {
+  category: string
+  /** What this message changed the row to, or null when it changed nothing. */
+  answerThisTurn: VisitCheckinAnswer | null
+  /** The row as loaded for this turn. */
+  rowAnswer: VisitCheckinAnswer | null
+  rowAnsweredAt: Date | null
+  /** Our newest message that reached the guest, or null. */
+  lastDeliveredOutboundAt: Date | null
+}): boolean {
+  if (!SIGN_OFF_REPLY_CATEGORIES.has(input.category)) return false
+  if (input.answerThisTurn === 'good') return true
+  if (input.answerThisTurn !== null) return false
+  if (input.rowAnswer !== 'good' || input.rowAnsweredAt === null) return false
+  return (
+    input.lastDeliveredOutboundAt === null ||
+    input.lastDeliveredOutboundAt.getTime() < input.rowAnsweredAt.getTime()
+  )
+}
+
+/** What the pause timer should do about a visit's sign-off. */
+export type TimedSignOff =
+  /** Send the light line. */
+  | 'send'
+  /** They said it is good. No timed sign-off follows a check-in that was answered. */
+  | 'answered_good'
+  /** Asked, and nothing from them since. Nothing more is sent. */
+  | 'nothing_since_checkin'
+  /** No check-in from this visit (or it reads bad): not a visit sign-off. */
+  | 'not_a_visit_sign_off'
+
+/**
+ * Does this visit still get a TIMED sign-off?
+ *
+ * Only when the guest was asked how it is, has not said good or bad, and has
+ * written something since we asked.
+ *
+ * A CHECK-IN THAT READS `good` NEVER GETS ONE, whatever the reply to it was.
+ * That is the ruling as written (2026-10-07: "no separate timed sign-off after
+ * a check-in is answered"), and it is also the only version of this with no
+ * way to send a second sign-off. THE KNOWN COST: the reply to "it's good" is
+ * the sign-off only on a turn that asks for nothing (replySignsOffVisit), so a
+ * guest who writes "so good! what's the wifi?" gets their answer and no
+ * sign-off line at all, from the reply or from here. One light line fewer for
+ * that guest was judged better than the machinery it took to send it.
+ *
+ * `not_yet` is where every reply that is neither praise nor a complaint lands
+ * (classifyCheckinAnswer), so "has written since" and "the answer is not_yet"
+ * usually arrive together; the inbound time is read anyway, because the answer
+ * write is fire-and-forget and a row can still say null after the guest has
+ * replied.
+ */
+export function timedSignOffFor(
+  checkin: VisitCheckin | null,
+  lastInboundAt: Date | null,
+  now: Date,
+): TimedSignOff {
+  if (checkin === null || !isCheckinFresh(checkin, now)) {
+    return 'not_a_visit_sign_off'
+  }
+  if (checkin.answer === 'bad') return 'not_a_visit_sign_off'
+  if (checkin.answer === 'good') return 'answered_good'
+  const chattedSince =
+    lastInboundAt !== null &&
+    lastInboundAt.getTime() > checkin.askedAt.getTime()
+  return chattedSince ? 'send' : 'nothing_since_checkin'
 }

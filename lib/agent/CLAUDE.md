@@ -277,8 +277,8 @@ the default, not a detection. Bad is final, good is not.
 question**; a required one still renders, which is how the check-back gets through
 (`ctx.visitCheckinHold`, set by `handleInbound` after classification and read by
 `renderableIntentions`; `CHECKIN_ANSWER_WINDOW_MS` bounds it, and a `bad` answer holds for the
-whole of it). Praise inside a check-in does not raise the review ask on that turn; it is
-saved for the sign-off (see the sign-offs below). The hold is decided
+whole of it). Praise inside a check-in on a FIRST visit does not raise the review ask on that
+turn; the first-visit thank-you carries it (see "What a conversation ends in"). The hold is decided
 post-classification on purpose: the message saying "it's great" has to lift the hold on the
 turn it arrives.
 
@@ -398,16 +398,58 @@ and reasons: `intentions/pacing.ts`.
 
 Checks: `scripts/harness/question-pacing/`. Live replay: `npm run measure-question-pacing`.
 
-### Three sign-offs, all written by the model (TAC-575)
+### What a conversation ends in (TAC-578, replacing TAC-575's three sign-offs)
 
-| kind | who | carries | once per guest of |
+What happened decides what follows, where one quiet-gap timer used to close everything
+alike. Rules and reasons: `visit-messages.ts` (pure) and the two processors.
+
+| message | when | once per | claim |
 | --- | --- | --- | --- |
-| `plain` | a FIRST conversation ending without a "good" check-in | the warm close; `followup_rules.warm_close_text` is a guide to its content, never sent | the close, `warm_close_sent_at` |
-| `happy` | a guest whose visit check-in reads `good`, never asked, venue has a review link; first conversation OR NOT | the review invitation, in the `reviewAsk` field | the review ask, `review_asked_at` |
-| `after_complaint` | a guest whose earlier complaint has been followed up, on a visit where they wrote and did not complain again; NO happiness condition | the same invitation, with a premise true of them | the same marker |
+| `plain` close | quiet after the guest signalled they were done, in a conversation that is not a visit, armed no inquiry follow-up and carried no offer of more help | guest, ever, across conversations | `guests.warm_close_sent_at` |
+| `answer` sign-off | NOT timed: the REPLY to a guest who has just said their order is good (`replySignsOffVisit`, `signOffInThisReply`) | visit | none: once the check-in reads `good` the timer sends no sign-off at all |
+| `visit` sign-off | timed: asked how it is, never said good or bad, wrote since, went quiet (`timedSignOffFor`) | visit | `visit_messages` row, kind `sign_off` |
+| first-visit thank-you | the next morning, or that evening, after a guest's first visit; carries the review invitation | guest, ever | `visit_messages` row + `review_asked_at` |
+| later-visit check-in | same slots, after a later visit with order history; a compliment, sent only if fresh | visit | `visit_messages` row |
 
-`deriveSignOffReviewAsk` (`review-ask.ts`) is the one rule for both link kinds. `ctx.signOff` carries
-the kind; the serializer renders `## Sign off` or `## Closing this conversation`.
+The first two are `warm-close-timeout.ts` (`ctx.signOff`); the last two are
+`post-visit-timeout.ts` (`ctx.postVisit`, trigger `post_visit`), which rides the
+`/api/cron/visit-checkbacks` tick. **No timed sign-off carries a link.**
+
+- **The reply to "it's good" is the sign-off, and no timed one follows it** (rule 3, re-ruled
+  2026-10-07). It may carry ONE thing: on a first visit the name ask if it is open
+  (`signOffReplyQuestions` only narrows what pacing already allowed), or past the first
+  visit the once-ever review invitation (`deriveReviewAsk`). Never both. A guest who was
+  asked and wrote nothing since gets nothing.
+
+- **The plain close follows a done-signal, never an answer the guest went quiet after**
+  (`guest_not_done`): our last message must have answered a turn classified
+  `acknowledgment`. It is also never sent once an offer of more help has gone out in the
+  conversation (`offer_already_made`, the offer feature's own detector), after a question
+  that armed an inquiry follow-up (`followup_is_next_touch`), or to a guest who scanned in
+  the last 36 hours (`visit_conversation`). None of these spends the once-ever marker.
+- **The slot is recomputed every tick, never stored** (`resolvePostVisitSlot`): morning if
+  Meta's window is still open then, else that evening, else skip. It fails toward NOT
+  sending on any unreadable input, the opposite of `isQuietHour`.
+- **Send hours are `followup_rules.visit_message_earliest_local` / `_latest_local`, not
+  quiet hours**: moving quiet hours to suit a 9am message would switch off the check-back
+  for a venue that opens at seven.
+- **A check-in that is not fresh is not sent and not queued** (`handleFollowup`'s
+  `beforeSend`, `judgeCheckin`): wording, then the judge, then a floor in code over the
+  angle the judge named. The row is kept as `skipped`, so the day is settled. **The angle
+  list must never reach the generation prompt.**
+- **Complaint visits** (`complaintStanding`, derived; nothing stores "resolved"): unresolved
+  waits, resolved sends the thank-you WITH the same invitation, and a later-visit check-in
+  is never sent on one.
+- **Approval is `approval_policy.postVisitMessage`**, default hold, for both messages and
+  for the thank-you's invitation. The praise ask keeps `reviewAsk`.
+- **Praise inside a visit check-in raises the praise ask only past the first visit**
+  (condition 5a of `deriveReviewAsk`).
+- **The one-message rule**: a follow-up, a thank-you or check-in, and a close are three
+  hours apart (`ONE_MESSAGE_GAP_MS`), read from `loadLastSpacedSendAt`, NOT from
+  `last_proactive_send_at`, which the scan greeting also writes. Priority in
+  `SPACED_MESSAGE_PRIORITY`. The day-1 operator task is dropped for a visit with a row.
+
+Checks: `scripts/harness/post-visit-timing/`. Generation: `npm run measure-post-visit-messages`.
 
 - **ONLY THE PAUSE TIMER SIGNS OFF. No inbound turn does** (ruled 2026-10-06). The one
   category that means goodbye is `acknowledgment`, which is also "ok cool", "thanks" and
@@ -416,26 +458,10 @@ the kind; the serializer renders `## Sign off` or `## Closing this conversation`
   Text-message guests have no timer and get none; accepted with the ruling. An earlier
   version of this PR decided a sign-off on the goodbye turn and closed a first-visit guest
   on their order message.
-- **Decided BEFORE generation**, because the model writes it: the timer picks the kind and
-  hands it, with the link, through the `warm_close` trigger.
-- **The link rides `reviewAsk`**, never `body`: that field is what dispatch sends as its own
-  message, what the approval gate reads, and what the once-ever marker is stamped from.
-- **Its approval is `approval_policy.signOffReviewAsk`**, default hold, read on `happy` AND
-  `after_complaint` (ruled: a card held only for past complainers invites skipping them). The praise-triggered ask keeps `reviewAsk`. Turning one on must
-  not turn the other on.
-- **The timer CLAIMS `review_asked_at` before sending either link sign-off** (two ticks would
-  otherwise both find the guest unasked) and gives it back only if the send fails
-  (`releaseReviewAskClaim`). A held card keeps the claim, so a skipped one uses up the ask.
-- **A happy sign-off that goes out WITHOUT its link still spends the ask.** Giving the marker
-  back on a sent reply made the timer send the sign-off again every ten minutes. Logged, so
-  the rate can be counted.
-- **Praise inside a visit check-in never raises the praise ask** (`ctx.insideVisitCheckin`,
-  condition 5a of `deriveReviewAsk`): that guest is asked at the sign-off.
 - **The follow-up after a complaint rides a counter visit, never a DM** (ruled 2026-10-06):
   the scan greeting's third wording, or `## Their last visit` on the guest's own first
   message at the counter. One column, `visit_checkins.followup_claimed_at` on the `bad`
-  row: claimed means followed up, and that is what the `after_complaint` link waits on. It
-  waits while a card is pending. Rules and reasons: `visit-checkin.ts`, last section.
+  row: claimed means followed up. It waits while a card is pending. Rules and reasons: `visit-checkin.ts`, last section.
   **Every scan greeting is generated without the earlier thread** (`messagesFromThisVisit`):
   with it, a thread ending on a complaint got that complaint answered again. The
   measurements and what a greeting gives up: `guest-arrived.ts`. It is handed its own last
@@ -443,7 +469,7 @@ the kind; the serializer renders `## Sign off` or `## Closing this conversation`
 - Three things stop either kind: a check-back still owed, staff in the thread, a complaint
   (`warmCloseBlocker`, before any marker is claimed).
 - **"The same visit" is two hours, not the day.** The check-in row is keyed on the
-  venue-local day; only a fresh one makes a sign-off happy (`isCheckinFresh`,
+  venue-local day; only a fresh one makes it a `visit` sign-off (`isCheckinFresh`,
   `visit-checkin.ts`), so "so good" at nine does not turn a quiet spell at four into a review
   ask.
 - **A close may hope to see them again, softly. It may not invite them in for something
@@ -513,8 +539,9 @@ Prompt wording cannot reach any of this: see `docs/decisions/0007-intention-ques
 
 ## Proactive sends (TAC-386)
 
-Four paths reach a guest with no inbound behind them (the fourth is TAC-575's timed
-check-back, described under Intentions): the scan greeting (TAC-536; started by
+Six paths reach a guest with no inbound behind them (the fourth is TAC-575's timed
+check-back, described under Intentions; the fifth and sixth are TAC-578's first-visit
+thank-you and later-visit check-in, described under "What a conversation ends in"): the scan greeting (TAC-536; started by
 the Instagram webhook's fast path, cron as backstop, so only pausing the venue stops it), the warm
 close (TAC-560; any first Instagram conversation since TAC-575), the inquiry follow-up (TAC-386, `lib/followups/`). **No two within 60
 minutes**, via `proactive-spacing.ts` and `guests.last_proactive_send_at`. A follow-up is NOT

@@ -300,6 +300,21 @@ export async function deleteInstagramVenueData(
       // for the reason scan arrivals are: a row still owed its check-back is
       // an unprompted message waiting to be sent to someone who asked to be
       // erased.
+      // TAC-578's visit messages, for the same reason: a claimed row is a
+      // thank-you or a check-in still to be sent. First, so nothing can be
+      // claimed against a check-in that is about to go.
+      const visitMessages = await supabase
+        .from('visit_messages')
+        .delete()
+        .eq('venue_id', venueId)
+        .in('guest_id', guestIds)
+      if (visitMessages.error) {
+        return {
+          ok: false,
+          error: visitMessages.error.message,
+          confirmationCode,
+        }
+      }
       const visitCheckins = await supabase
         .from('visit_checkins')
         .delete()

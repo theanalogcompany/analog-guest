@@ -52,7 +52,7 @@ import {
 import {
   resolveCategoryPolicy,
   resolvePolicyDecision,
-  resolveSignOffReviewAskDisposition,
+  resolvePostVisitMessageDisposition,
   resolveVisitCheckbackDisposition,
   type PolicyDecision,
   resolveReviewAskDisposition,
@@ -2025,6 +2025,10 @@ export async function applyApprovalPolicyStage(
   // Treated as `stored` because a venue chose it, which also keeps the
   // complaint carve-out below off it. `hold_all_outbound` still applies: that
   // trigger is separate and nothing here touches it.
+  //
+  // TAC-578: THE MESSAGE AFTER A VISIT DOES NOT EITHER, for the same reason
+  // and by the same shape. The thank-you and the check-in are stored as
+  // `follow_up` and read `approval_policy.postVisitMessage`, default HOLD.
   const policyDecision: PolicyDecision =
     ctx.followupTrigger?.reason === 'visit_checkback'
       ? {
@@ -2033,10 +2037,17 @@ export async function applyApprovalPolicyStage(
           ),
           source: 'stored',
         }
-      : resolvePolicyDecision(
-          ctx.venue.approvalPolicy,
-          ctx.classification?.category,
-        )
+      : ctx.followupTrigger?.reason === 'post_visit'
+        ? {
+            disposition: resolvePostVisitMessageDisposition(
+              ctx.venue.approvalPolicy,
+            ),
+            source: 'stored',
+          }
+        : resolvePolicyDecision(
+            ctx.venue.approvalPolicy,
+            ctx.classification?.category,
+          )
   if (policyDecision.disposition === 'operator_approval') {
     const carveOutAvailable = policyDecision.source === 'code_default'
     const exemptedByClarifyingQuestion =
@@ -2094,15 +2105,16 @@ export async function applyApprovalPolicyStage(
   // below overrides this like every trigger, which is the intended
   // on-device test path.
   //
-  // TAC-575: the invitation on a happy guest's SIGN-OFF reads a setting of its
-  // own (`signOffReviewAsk`), for the reason on that key: turning the sign-off
-  // on at a venue must not also turn the praise ask on. The invitation after a
-  // followed-up complaint reads the SAME setting (ruled 2026-10-06, PR 5): a
-  // card held only for past complainers invites skipping exactly those, which
-  // is the review gating the ticket rules out.
+  // TAC-578: the invitation on a FIRST-VISIT THANK-YOU reads the thank-you's
+  // own setting (`postVisitMessage`), not `reviewAsk`: turning the thank-you
+  // on at a venue must not also turn the praise ask on. It is the same setting
+  // whether or not a complaint was put right on that visit (ruled 2026-10-07:
+  // the same invitation), so no card is held only for past complainers.
+  // TAC-575's `signOffReviewAsk` went with the link the sign-off no longer
+  // carries.
   const reviewAskDisposition =
-    ctx.signOff === 'happy' || ctx.signOff === 'after_complaint'
-      ? resolveSignOffReviewAskDisposition(ctx.venue.approvalPolicy)
+    ctx.followupTrigger?.reason === 'post_visit'
+      ? resolvePostVisitMessageDisposition(ctx.venue.approvalPolicy)
       : resolveReviewAskDisposition(ctx.venue.approvalPolicy)
   if (
     generation.reviewAsk !== '' &&
@@ -2666,6 +2678,11 @@ function triggerReasonToFollowupReason(
     // visited N days ago" is the opposite of that, and its category instruction
     // (visit-checkback.ts) carries everything the turn needs.
     case 'visit_checkback':
+    // TAC-578: the message after a visit renders its own block
+    // (`## Thanking them for their first visit` or `## A word about their
+    // visit`) and states when the visit was. "Post-visit day 1" framing on top
+    // would give the model two accounts of the same visit.
+    case 'post_visit':
       return null
   }
 }
@@ -3153,11 +3170,20 @@ export function buildAiRuntime(
     inquiryFollowup: ctx.inquiryFollowup ?? undefined,
     visitCheckback: ctx.visitCheckback || undefined,
     // TAC-575: the sign-off. The kind is decided upstream, by the pause timer
-    // and nothing else; this only carries it. The venue's close
-    // text rides along on a plain close as a guide to its content.
+    // and nothing else; this only carries it.
     signOff: ctx.signOff ?? undefined,
-    warmCloseGuidance:
-      ctx.signOff === 'plain' ? ctx.venue.warmCloseText : undefined,
+    // TAC-578: the message after a visit, carried the same way. The trigger's
+    // routing fields (the row it answers, the link) stay behind; `reviewAsk`
+    // below carries the link.
+    postVisit: ctx.postVisit
+      ? {
+          kind: ctx.postVisit.kind,
+          when: ctx.postVisit.when,
+          afterResolvedComplaint: ctx.postVisit.afterResolvedComplaint,
+          order: ctx.postVisit.order,
+          priorCheckins: ctx.postVisit.priorCheckins,
+        }
+      : undefined,
     timedClose: ctx.followupTrigger?.reason === 'warm_close' || undefined,
     // The once-ever review ask. Set only by handle-inbound's eligibility
     // predicate (lib/agent/review-ask.ts); null → undefined so the serializer

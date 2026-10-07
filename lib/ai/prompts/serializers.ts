@@ -1962,75 +1962,253 @@ function formatOpenIntentions(
 }
 
 /**
- * TAC-575: the sign-off for a guest who said their order is good. Carries the
- * review invitation. Wording approved verbatim 2026-10-06.
+ * TAC-578: the sign-off for a guest who has gone quiet in the shop. Wording
+ * approved verbatim 2026-10-07.
  *
- * TWO FIELDS, AND THAT SPLIT IS THE ONE CHANGE from the single instruction the
- * plan first approved. The link has to ride `reviewAsk`: that is what dispatch
- * peels off as its own message, what the approval gate reads, and what the
- * once-ever marker is stamped from (lib/agent/review-ask.ts). So the warm half
- * goes in `body` and the invitation in `reviewAsk`.
+ * ONE BLOCK WHERE TAC-575 HAD TWO, and no link in it. `happy` and
+ * `after_complaint` each carried the review invitation; ruled 2026-10-07 the
+ * in-shop sign-off is "a light line only, tied to the visit", and the
+ * invitation moved to the first-visit thank-you (formatFirstVisitThanks). With
+ * the link gone the two premises have nothing left to differ over, so the
+ * block states neither: it does not say the guest is enjoying anything, which
+ * was false of one who never said so.
  *
- * NO QUOTED SIGN-OFF. The ruling's own example ("so glad you're enjoying it.
- * no pressure at all...") is the line every guest would then receive, and the
- * acceptance criterion is that no two guests get the same close.
+ * "DO NOT THANK THEM FOR COMING IN" keeps this from spending the thank-you
+ * that goes out the next morning.
  *
- * "NEVER ASK FOR A PARTICULAR RATING" is here as well as in the universal
- * `# Asking for a review` section, because this block renders later and on
- * most-proximate-wins it is the one the model reads last. Asking for stars is
- * also against Google's own review policy, not only this venue's taste.
- *
- * The url is rendered verbatim, as formatReviewAsk's is and for its reason: it
- * is the string the url-detector's allowlist carries.
+ * NO QUOTED SIGN-OFF: a quoted line is the one every guest would receive.
  */
-function formatHappySignOff(reviewAsk: { url: string }): string {
+function formatVisitSignOff(): string {
   return [
     '## Sign off',
     '',
-    'The conversation has reached a natural pause and this guest told you',
-    'they are enjoying what they got. In `body`, write a short, warm sign-off',
-    'that says you are glad they are enjoying it. In `reviewAsk`, invite',
-    'them, with no pressure, to leave a review if they have a moment, and',
-    'include the link.',
-    '',
-    `The only link you may use, exactly as written: ${reviewAsk.url}`,
-    '',
-    'Never ask for a particular rating or number of stars. Do not offer',
-    'anything in return. Ask nothing else.',
+    'The conversation has reached a natural pause while this guest is still on',
+    'their visit. Write one short, light line that signs off for now and is',
+    'about this visit: what they got, or what they told you about it. Say it',
+    'in your own words, different from anything you have already sent this',
+    'guest. Do not thank them for coming in, do not ask for a review, do not',
+    'include a link, and do not invite them back for anything specific. Ask',
+    'nothing.',
   ].join('\n')
 }
 
 /**
- * TAC-575: the sign-off for a guest whose earlier complaint has been followed
- * up, on a visit where they have not said the order is good. (One who has gets
- * formatHappySignOff: by then its premise is true of them.)
+ * The review invitation as a first-visit thank-you and a sign-off reply both
+ * carry it. ONE DEFINITION, so the two cannot drift: ruled 2026-10-07, the
+ * reply's ask follows "the same rules as the thank-you".
  *
- * THE SAME INVITATION AS THE HAPPY ONE, WITH A PREMISE THAT IS TRUE OF THIS
- * GUEST. Ruled 2026-10-06: every guest who answers "how is it?" is eventually
- * offered the link, "unhappy guests after the fix", with no happiness
- * condition, because a link offered only to guests who say they are happy is
- * review gating. So this block must not say they are enjoying anything.
+ * "NEVER ASK FOR A PARTICULAR RATING" is repeated from the universal
+ * `# Asking for a review` section because these blocks render later, and later
+ * beats earlier. The url is rendered verbatim: it is the string the
+ * url-detector's allowlist carries.
  *
- * "DO NOT MENTION WHAT WENT WRONG": an invitation to review that names the
- * complaint reads as asking them to review the complaint.
- *
- * The two-field split, the verbatim url and the rating sentence are
- * formatHappySignOff's, for the reasons given there.
+ * REWORDED AFTER THE FIRST MEASURED RUN (approved 2026-10-07). The first
+ * wording said "invite them ... to leave a review if they ever feel like it",
+ * and thirty of thirty asks came back beginning "if you ever feel like". A
+ * permission with a phrase in it is a quoted example by another name
+ * (formatInquiryFollowup learned the same thing), so this one describes what
+ * the sentence does and gives it no words.
  */
-function formatAfterComplaintSignOff(reviewAsk: { url: string }): string {
+function reviewInvitationLines(url: string): string[] {
   return [
+    'In `reviewAsk`, write one sentence of your own telling them where they',
+    'can leave a review, and include the link. Make plain that it is entirely',
+    'up to them: no urgency, no second mention, and nothing offered in return.',
+    'Never ask for a particular rating or number of stars.',
+    '',
+    `The only link you may use, exactly as written: ${url}`,
+  ]
+}
+
+/**
+ * TAC-578, rule 3 as re-ruled 2026-10-07: the REPLY to a guest who has just
+ * said their order is good is the visit's sign-off. The base wording was
+ * approved verbatim that day.
+ *
+ * THREE SHAPES, because two rulings of the same day let one thing each ride on
+ * it, and "Ask nothing" over either would win on proximity and remove it:
+ *
+ *   base         a light line and nothing else.
+ *   mayAskName   a first visit with the name ask still open. The question is
+ *                written in `intentionQuestion` and sent as its own last
+ *                message (decision 0007), so the line itself still asks
+ *                nothing; the last sentence says where the question goes
+ *                instead of forbidding it.
+ *   reviewAsk    a guest past their first visit who has never been asked. The
+ *                invitation goes in `reviewAsk`, on the thank-you's rules.
+ *
+ * The two never meet: a review ask empties the questions (renderableIntentions).
+ *
+ * "DO NOT ADD FACTS ABOUT THE ITEM" was added on a ruling (2026-10-07) after
+ * the first twenty replies. Nine added something the guest had not said:
+ * the bean a pour over uses, what a blend has in it, that a brownie is
+ * gluten-free. Eight of those nine were true, drawn from the venue's own menu
+ * in the system prompt, and that is the point of the sentence: a sign-off is
+ * not the place to tell a guest about their drink, and a fact nobody asked
+ * for is one more thing that can be wrong with nothing checking it.
+ *
+ * NOT THE TIMER'S BLOCK (formatVisitSignOff). That one's premise is a guest
+ * who went quiet and its message replies to nothing; this one answers what
+ * the guest just said.
+ */
+function formatAnswerSignOff(input: {
+  reviewAsk: { url: string } | undefined
+  mayAskName: boolean
+}): string {
+  const lines = [
     '## Sign off',
     '',
-    'The conversation has reached a natural pause. This guest had a visit',
-    'that went wrong and has come back. In `body`, write a short, warm',
-    'sign-off that thanks them for coming back. In `reviewAsk`, invite them,',
-    'with no pressure, to leave a review if they have a moment, and include',
-    'the link.',
+    'This guest has just told you how their order is. Answer that in one',
+    'short, light line about this visit: what they got, or what they said',
+    'about it. This is your last word for now. Say it in your own words,',
+    'different from anything you have already sent this guest. Answer what',
+    'they said, in your own words. Do not add facts about the item, how it is',
+    'made, or what is in it, unless they are already in the conversation above.',
+  ]
+  if (input.reviewAsk) {
+    lines.push(
+      'Do not thank them for coming in, do not put a link in `body`, and do',
+      'not invite them back for anything specific. Ask nothing in `body`.',
+      '',
+      ...reviewInvitationLines(input.reviewAsk.url),
+    )
+  } else if (input.mayAskName) {
+    lines.push(
+      'Do not thank them for coming in, do not ask for a review, do not',
+      'include a link, and do not invite them back for anything specific.',
+      'Ask nothing in `body`: the one question listed above, if you raise',
+      'it, goes in `intentionQuestion`.',
+    )
+  } else {
+    lines.push(
+      'Do not thank them for coming in, do not ask for a review, do not',
+      'include a link, and do not invite them back for anything specific.',
+      'Ask nothing.',
+    )
+  }
+  return lines.join('\n')
+}
+
+/**
+ * TAC-578: the thank-you after a guest's FIRST visit, once per guest ever.
+ * Wording approved verbatim 2026-10-07, in three parts that render together or
+ * apart:
+ *
+ *   the thanks             always.
+ *   the review invitation  when the runtime carries `reviewAsk`: the venue has
+ *                          a link and this guest has never been asked. It goes
+ *                          in the `reviewAsk` field, which
+ *                          composeReplyWithReviewAsk joins onto the body and
+ *                          dispatch sends as its own last message.
+ *   the resolved complaint when staff put something right on that visit. Ruled
+ *                          2026-10-07: that guest gets the SAME invitation, so
+ *                          the link is never offered only to guests who had
+ *                          nothing to complain about, and the message says
+ *                          nothing of what went wrong.
+ *
+ * `when` is "earlier today" or "yesterday", decided from the slot. The model
+ * is told the day; it is not left to work it out from timestamps (the
+ * time-of-day rule, v1.94.0).
+ *
+ * REWORDED AFTER THE FIRST MEASURED RUN (approved 2026-10-07), for three
+ * things twenty and ten bodies did:
+ *
+ *   "START WITH ONE SPECIFIC THING ... DO NOT OPEN WITH THE THANKS". The first
+ *   wording led with "Thank them for coming in", and twelve of twenty
+ *   thank-yous opened "glad you came in" or "glad you made it" (eight of ten
+ *   after a complaint).
+ *
+ *   "THIS WAS THEIR FIRST TIME". One body hoped the drink "hit the same way
+ *   it did the first time", to a guest on their first visit.
+ *
+ *   THE COMPLAINT PARAGRAPH no longer says "choose something else from the
+ *   visit to mention", which is impossible when the order is all the visit
+ *   holds, and it bars the hope that stood in for the apology: three of ten
+ *   said they hoped the drink "hit the way it should".
+ *
+ * "NEVER ASK FOR A PARTICULAR RATING" is repeated from the universal
+ * `# Asking for a review` section because this block renders later, and later
+ * beats earlier. The url is rendered verbatim: it is the string the
+ * url-detector's allowlist carries.
+ */
+function formatFirstVisitThanks(
+  postVisit: { when: string; afterResolvedComplaint: boolean },
+  reviewAsk: { url: string } | undefined,
+): string {
+  const lines = [
+    '## Thanking them for their first visit',
     '',
-    `The only link you may use, exactly as written: ${reviewAsk.url}`,
+    `This guest came in for the first time ${postVisit.when}. Write them one`,
+    'short message about that visit. Start with one specific thing from it:',
+    'something they ordered or something they told you, taken from the',
+    'conversation above. Then thank them for the visit, in a few words of your',
+    'own. Do not open with the thanks, and do not open by saying you are glad',
+    'they came. Mention only what is in the conversation, and do not guess how',
+    'they found it. This was their first time: do not write as though they',
+    'have been in before. Say it in your own words, different from anything',
+    'you have already sent this guest. Do not invite them in for anything',
+    'specific. Ask nothing.',
+  ]
+  if (postVisit.afterResolvedComplaint) {
+    lines.push(
+      '',
+      'Something went wrong during that visit and staff put it right. Write',
+      'exactly as you would to any first-time guest. Do not mention or hint at',
+      'what went wrong, do not apologise, and do not say how you hope anything',
+      'was in the end.',
+    )
+  }
+  if (reviewAsk) {
+    lines.push('', ...reviewInvitationLines(reviewAsk.url))
+  }
+  return lines.join('\n')
+}
+
+/**
+ * TAC-578: the check-in after a LATER visit. Wording approved verbatim
+ * 2026-10-07 ("compliment", not "remark", on that day's review).
+ *
+ * THE EARLIER MESSAGES ARE SHOWN ON PURPOSE, as formatPriorGreetings shows
+ * earlier greetings: they are the thing to differ from, and the sentence
+ * before them says so. Each is flattened to one line so a line break in a
+ * stored body cannot end the list or start a block.
+ *
+ * NO LIST OF ANGLES, AND NONE MAY BE ADDED (ruled 2026-10-07). The freshness
+ * judge names an angle for the safety floor (lib/ai/verify-visit-checkin.ts);
+ * here the same six words would be six templates.
+ *
+ * NO WAY TO DECLINE IS OFFERED. Whether this is sent is decided after it is
+ * written, by the judge and the floor, and a model told it may decline has
+ * been handed a second job it does worse than they do.
+ *
+ * The earlier orders are not repeated here: `## Visit history` renders above
+ * on a `follow_up` turn, and the block points at it.
+ */
+function formatVisitCheckin(postVisit: {
+  order: string
+  priorCheckins: readonly string[]
+}): string {
+  const earlier = postVisit.priorCheckins
+    .map((c) => c.replace(/\s+/g, ' ').trim())
+    .filter((c) => c !== '')
+  return [
+    '## A word about their visit',
     '',
-    'Never ask for a particular rating or number of stars. Do not offer',
-    'anything in return. Do not mention what went wrong. Ask nothing else.',
+    'Below is what this guest got this time and every message of this kind you',
+    'have sent them before. Their earlier orders are in their history above.',
+    '',
+    'Write one short, warm compliment on what they got this time that only',
+    'someone who knows their history could make. It must be specific to this',
+    'guest and this order, and it must take a different angle from every',
+    'earlier message listed below, not only different words. Do not thank them',
+    'for visiting or for coming in. Do not ask how it was. Do not invite them',
+    'in for anything specific. Mention only what is in their history. Ask',
+    'nothing.',
+    '',
+    `What they got this time: ${postVisit.order.replace(/\s+/g, ' ').trim()}`,
+    '',
+    'Your earlier messages of this kind to them, newest first:',
+    ...(earlier.length === 0 ? ['- (none yet)'] : earlier.map((c) => `- ${c}`)),
   ].join('\n')
 }
 
@@ -2057,78 +2235,52 @@ function formatLastVisitWentWrong(): string {
 }
 
 /**
- * TAC-575: the warm close with no link, for every first conversation that ends
- * without a "good" check-in. Wording approved verbatim 2026-10-06; the
- * sentences about a visit were added the same day on a ruling (below).
+ * TAC-578: the once-ever close. Wording shown for approval 2026-10-07.
  *
- * THE VENUE'S TEXT IS A GUIDE TO CONTENT, NOT COPY. TAC-568 sent
- * `followup_rules.warm_close_text` word for word, on the ruling that the close
- * is the same every time; the Oct 6 device test is what that reads like across
- * guests, and TAC-575 reversed it. The text still decides WHAT the close
- * covers, because that is a per-venue product decision (which topics a guest
- * may message about), and the block says outright not to reuse its words.
+ * WHEN IT RENDERS IS DECIDED BEFORE THIS, in the pause timer
+ * (lib/agent/warm-close-timeout.ts), from two live phone tests of the closes
+ * this replaces:
  *
- * "A SOFT HOPE TO SEE THEM AGAIN" and the two bars after it came from a ruling
- * (2026-10-06) after the first generated closes: four of ten said "hope to see
- * you soon", which is allowed, and one invited a guest in for a drink they had
- * never mentioned, which is not.
+ *   only when the guest's last message signalled they were done (a thanks, a
+ *     bye, an emoji), never when they simply went quiet after an answer: a
+ *     close ten minutes behind a purchase link read as automated
+ *   never when an offer of more help already went out in the conversation:
+ *     they have been told once
  *
- * CORRECTION (TAC-575 PR 5). This comment used to say the invented item came
- * from the venue's guide naming topics ("what to get next time"). That was a
- * guess and it was wrong: the measurement harness built every constructed
- * guest on a real one who holds an open comp for exactly that drink, and the
- * comp rode into the prompt. The sentence stays, because it is a rule Jaipal
- * gave about what a close may say, not a fix for that run. Nothing has shown
- * the guide produces an invented item.
+ * WHAT IT SAYS: a warm line tied to the conversation, and at most one short
+ * open-door clause. No list of what they can ask about (v1.95.0 drew examples
+ * from the venue's text, and it read as a script), so the venue's
+ * `warm_close_text` no longer reaches the prompt; it still decides whether
+ * the venue sends a close at all (lib/schemas/followup-rules.ts).
  *
- * TWO PARTS, IN ORDER (v1.95.0, wording approved 2026-10-07 and one sentence
- * added on the first generated closes, below). The phone test's close was an
- * open door with nothing of the conversation in it. Now a line that belongs to
- * this conversation comes first, then the open door with a few examples, and
- * the examples lean on the menu, events and recommendations where the venue's
- * guide has them (Jaipal's steer), without its words.
+ * "DO NOT WRITE 'MESSAGE US ANYTIME'" QUOTES THE ONE LINE THIS MUST NOT BE, on
+ * purpose and against the house rule about quoted lines, the way
+ * formatPriorGreetings shows greetings not to repeat. An earlier version
+ * described the clause as "telling them they can message here anytime" and
+ * ten of ten closes came back with those words. So the clause is described
+ * without them, and the phrase appears once, as the thing to avoid.
  *
- * "IT DOES NOT REPEAT AN ANSWER..., AND IT DOES NOT ASSUME THEY ARE AT THE
- * VENUE" is the added sentence. Asked for a line about what was talked about,
- * two closes in the first ten answered the question a second time ("dogs are
- * always welcome here") or placed the guest inside ("hope the WiFi treats you
- * well in there"). The first is the rule on restating context; the second is
- * the rule on assuming a visit, and this block renders after both.
- *
- * "DO NOT INCLUDE A LINK AND DO NOT ASK FOR A REVIEW" belongs to this close
- * only. The happy and after-complaint sign-offs keep their invitation.
- *
- * An empty guide renders the block without the examples' source. The callers do not
- * send a plain close for a venue with no text (the setting's empty default
- * still means "this venue has not been given a close"), so this is the
- * defensive branch, not a path.
+ * THE WARM LINE'S TWO BARS ARE v1.95.0's, kept because they were paid for:
+ * asked for a line about the conversation, two closes in ten answered the
+ * question a second time or placed the guest inside the shop.
  */
-function formatPlainClose(guidance: string): string {
-  // One line, whatever the stored value holds. It is a hand-edited setting, and
-  // a line break or a leading `#` in it would end this block early or start a
-  // new one in the middle of the instruction.
-  const guide = guidance
-    .replace(/\s+/g, ' ')
-    .replace(/^#+\s*/, '')
-    .trim()
+function formatPlainClose(): string {
   return [
     '## Closing this conversation',
     '',
-    'The conversation has reached a natural pause. Close it in two short',
-    'parts. First, one line that belongs to this conversation: something warm',
-    'about what you and this guest actually talked about, or a soft hope to',
-    'see them again. It does not repeat an answer you already gave, and it',
-    'does not assume they are at the venue or have been in. Then a light open',
-    'door: they can message here anytime with other questions, with two or',
-    'three examples of what they might ask about.' +
-      (guide === ''
-        ? ''
-        : ` Take those examples from what this venue's close usually covers, leaning on the menu, events and recommendations where it has them, choosing different ones each time and never reusing its words: ${guide}`),
+    'The guest has signalled they are done, and the conversation has gone',
+    'quiet. Close it in two short sentences at most. First, one warm line',
+    'that belongs to this conversation: something about what you and this',
+    'guest actually talked about. It does not repeat an answer you already',
+    'gave, and it does not assume they are at the venue or have been in.',
+    'Then, only if it adds something, one short clause that leaves the door',
+    'open, in words of your own. Do not write "message us anytime" or a near',
+    'copy of it, and do not list or give examples of what they can ask about.',
     '',
-    'Say all of it in your own words, different from anything you have',
-    'already sent this guest. Do not include a link and do not ask for a',
-    'review. Do not invite them in for anything specific, and do not name any',
-    'item they did not mention themselves. Ask nothing.',
+    'Say it in your own words, different from anything you have already sent',
+    'this guest. Do not include a link, do not ask for a review, do not invite',
+    'them in for anything specific, and do not name any item they did not',
+    'mention themselves. Ask nothing.',
   ].join('\n')
 }
 
@@ -2416,7 +2568,7 @@ export function runtimeToProse(
   // TAC-560 rendered a warm-close block in this slot, beside `## Guest just
   // arrived`, and TAC-568 removed it when the close became a fixed string.
   // TAC-575 generates the close again, but its blocks render further down, in
-  // the review-ask slot (formatHappySignOff, formatPlainClose): a sign-off is
+  // the review-ask slot (formatVisitSignOff, formatPlainClose): a sign-off is
   // an ask-shaped last word, and that slot is the measured last-content one.
   if (runtime.inquiryFollowup) {
     blocks.push(formatInquiryFollowup(runtime.inquiryFollowup))
@@ -2563,17 +2715,28 @@ export function runtimeToProse(
   // (lib/agent/review-ask.ts), so no turn ever carries two asks. The slot is
   // TAC-519's measured one — asks raise from last position, not from third.
   //
-  // TAC-575: a sign-off takes this slot instead. `happy` is the review
+  // A sign-off takes this slot instead (TAC-575), and so does the message
+  // after a visit (TAC-578). The first-visit thank-you is the review
   // invitation's other occasion, so it replaces `## Ask for a review` rather
-  // than joining it (one ask per turn, and its premise is different: the
-  // guest answered a question, where the block above says they "just said
-  // something genuinely good"). `plain` is the close with no link.
-  if (runtime.signOff === 'happy' && runtime.reviewAsk) {
-    blocks.push(formatHappySignOff(runtime.reviewAsk))
-  } else if (runtime.signOff === 'after_complaint' && runtime.reviewAsk) {
-    blocks.push(formatAfterComplaintSignOff(runtime.reviewAsk))
+  // than joining it: one ask per turn, on a different premise. Neither
+  // sign-off carries a link.
+  if (runtime.postVisit?.kind === 'first_visit_thanks') {
+    blocks.push(formatFirstVisitThanks(runtime.postVisit, runtime.reviewAsk))
+  } else if (runtime.postVisit?.kind === 'visit_checkin') {
+    blocks.push(formatVisitCheckin(runtime.postVisit))
+  } else if (runtime.signOff === 'answer') {
+    // Before the plain review-ask branch below, which this replaces on a
+    // sign-off reply: one block states the premise and carries the ask.
+    blocks.push(
+      formatAnswerSignOff({
+        reviewAsk: runtime.reviewAsk,
+        mayAskName: (runtime.openIntentions?.length ?? 0) > 0,
+      }),
+    )
+  } else if (runtime.signOff === 'visit') {
+    blocks.push(formatVisitSignOff())
   } else if (runtime.signOff === 'plain') {
-    blocks.push(formatPlainClose(runtime.warmCloseGuidance ?? ''))
+    blocks.push(formatPlainClose())
   } else if (runtime.reviewAsk) {
     blocks.push(formatReviewAsk(runtime.reviewAsk))
   }

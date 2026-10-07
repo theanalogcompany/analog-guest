@@ -24,6 +24,10 @@ import {
   guestArrivedInstructionsFor,
 } from './guest-arrived'
 import { MANUAL_INSTRUCTIONS } from './manual'
+import {
+  firstVisitThanksInstructions,
+  visitCheckinInstructions,
+} from './post-visit'
 import { MECHANIC_REQUEST_INSTRUCTIONS } from './mechanic-request'
 import { NEW_QUESTION_INSTRUCTIONS } from './new-question'
 import { OPT_OUT_INSTRUCTIONS } from './opt-out'
@@ -182,7 +186,20 @@ export function categoryInstructionsFor(
   // `category: 'acknowledgment'` although the guest signed off on nothing. See
   // warm-close.ts.
   timedClose = false,
+  // TAC-578: and for the message that follows a visit, which stores
+  // `category: 'follow_up'` and is neither days later nor a check on the
+  // visit. See post-visit.ts.
+  postVisit: {
+    kind: 'first_visit_thanks' | 'visit_checkin'
+    when: string
+  } | null = null,
 ): string {
+  if (postVisit?.kind === 'first_visit_thanks') {
+    return firstVisitThanksInstructions()
+  }
+  if (postVisit?.kind === 'visit_checkin') {
+    return visitCheckinInstructions(postVisit.when)
+  }
   if (timedClose) return WARM_CLOSE_INSTRUCTIONS
   if (visitCheckback) return VISIT_CHECKBACK_INSTRUCTIONS
   if (inquiryFollowup) return INQUIRY_FOLLOWUP_INSTRUCTIONS

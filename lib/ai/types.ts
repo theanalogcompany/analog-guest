@@ -350,21 +350,33 @@ export type RuntimeContext = {
    */
   visitCheckback?: boolean
   /**
-   * TAC-575: this turn is a sign-off, and which one. `happy` and
-   * `after_complaint` each render a `## Sign off` block in place of
-   * `## Ask for a review` (both need `reviewAsk` set, which carries the
-   * link), with different premises; `plain` renders
-   * `## Closing this conversation` with `warmCloseGuidance`. Absent on every
-   * other turn.
+   * This turn is a sign-off, and which one (TAC-578). `visit` renders
+   * `## Sign off`, a light line about the visit; `plain` renders
+   * `## Closing this conversation`, the once-ever "always here" line. Neither
+   * carries a link. `answer` is the reply to a guest who has just said their
+   * order is good: its own `## Sign off`, which carries the review invitation
+   * when `reviewAsk` is set and leaves room for the one question in
+   * `openIntentions` when there is one. Absent on every other turn.
    */
-  signOff?: 'happy' | 'after_complaint' | 'plain'
+  signOff?: 'visit' | 'plain' | 'answer'
   /**
-   * TAC-575: the venue's own close text (`followup_rules.warm_close_text`),
-   * handed to a `plain` sign-off as a guide to what the close covers. It used
-   * to be SENT, word for word (TAC-568); since TAC-575 the model writes the
-   * close and this says what it is about.
+   * TAC-578: set only on the message that follows a visit. `first_visit_thanks`
+   * renders `## Thanking them for their first visit` (with the review
+   * invitation when `reviewAsk` is also set); `visit_checkin` renders
+   * `## A word about their visit`. Reaches composePrompt as well, for the
+   * reason inquiryFollowup does: the stored category is `follow_up`, whose own
+   * instructions describe a different message.
+   *
+   * `when` is "earlier today" or "yesterday", decided from the slot the
+   * message goes out in. `order` and `priorCheckins` are the check-in's.
    */
-  warmCloseGuidance?: string
+  postVisit?: {
+    kind: 'first_visit_thanks' | 'visit_checkin'
+    when: string
+    afterResolvedComplaint: boolean
+    order: string
+    priorCheckins: string[]
+  }
   /**
    * TAC-575: true on the pause timer's sign-off, where the guest sent nothing.
    * Reaches composePrompt to swap the stored category's instructions

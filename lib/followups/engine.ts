@@ -72,6 +72,8 @@ import {
   venueMessagingNumberRequired,
 } from '@/lib/agent/conversation-channel'
 import { isVenueProcessingHalted } from '@/lib/venues/status'
+import { hasVisitMessage } from '@/lib/agent/visit-messages-store'
+import { venueLocalDate } from '@/lib/schemas/venue-hours'
 import type { FollowupTrigger } from '@/lib/agent/types'
 import {
   dedupKeyForReason,
@@ -730,7 +732,38 @@ async function scanVenue(
     // cold_dedup_days) even though the run as a whole proceeds. If the
     // primary reason was filtered out, we re-pick from what remains. The
     // perkMechanic only stays if perk_unlock survives.
-    const allowedReasons = gateResult.allowedReasons
+    let allowedReasons = gateResult.allowedReasons
+
+    // TAC-578 (approved 2026-10-07): a visit that already has its own message
+    // (the first-visit thank-you or a check-in, sent, held or deliberately
+    // skipped) does not ALSO raise the day-after task for an operator. Both
+    // would land the same morning about the same visit, and the one-message
+    // rule exists to stop exactly that. Day 3 onward is untouched: by then it
+    // is a different touch.
+    //
+    // Fails OPEN: an unreadable record leaves the task in, which is the state
+    // before this change. Instagram guests only, because only they get either
+    // message.
+    if (
+      allowedReasons.includes('post_visit_day_1') &&
+      guest.hasInstagramId &&
+      guest.lastVisitAt !== null
+    ) {
+      const visitDay = venueLocalDate(guest.lastVisitAt, ctx.timezone)
+      const covered =
+        visitDay === null
+          ? null
+          : await hasVisitMessage(createAdminClient(), {
+              venueId: ctx.id,
+              guestId: guest.id,
+              venueLocalDate: visitDay,
+              kinds: ['first_visit_thanks', 'visit_checkin'],
+            })
+      if (covered?.ok && covered.data) {
+        allowedReasons = allowedReasons.filter((r) => r !== 'post_visit_day_1')
+        if (allowedReasons.length === 0) continue
+      }
+    }
     if (allowedReasons.length === 0) {
       // Defensive — the gate guarantees non-empty when ok=true, but type
       // doesn't enforce. Skip rather than crash.
