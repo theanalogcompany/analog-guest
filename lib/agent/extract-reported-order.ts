@@ -486,8 +486,21 @@ function reportsTodaysScanVisit(
  * precision rather than losing the report — the same "unreadable clock
  * never asserts a confident thing, but never throws the report away either"
  * posture resolvePresentPrecision already carries.
+ *
+ * TAC-573: the noon anchor is for a PAST day only. The extractor answers
+ * 'specific_past_day' with today's date for "this morning", "earlier today"
+ * and any report with no timing cue at all, and noon is then a claim nobody
+ * made: "my latte was cold" at 2:39pm was stored at 12:00, and a report sent
+ * before noon was stored in the future. So a report resolving to the
+ * venue-local TODAY takes the message's own timestamp, still `approximate`
+ * (the guest did not say it was happening now). The `>` clamp is the same rule
+ * stated as the invariant: no visit is ever stamped later than the message
+ * that reported it, which also covers a date the model resolved to tomorrow.
+ * The scan-day branch above it is unchanged and still decides `pinned`.
+ *
+ * Exported for scripts/harness/reported-visits only.
  */
-function resolveOccurredAt(
+export function resolveOccurredAt(
   reportTiming: 'present' | 'specific_past_day',
   occurredOnDate: string,
   ctx: RuntimeContext,
@@ -518,6 +531,13 @@ function resolveOccurredAt(
       occurredAt: reportedAt,
       precision: resolvePresentPrecision(ctx, reportedAt),
     }
+  }
+  if (
+    instant.getTime() > reportedAt.getTime() ||
+    venueLocalDayKey(ctx.venue.timezone, instant) ===
+      venueLocalDayKey(ctx.venue.timezone, reportedAt)
+  ) {
+    return { occurredAt: reportedAt, precision: 'approximate' }
   }
   return { occurredAt: instant, precision: 'approximate' }
 }
