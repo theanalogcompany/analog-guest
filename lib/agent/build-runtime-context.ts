@@ -29,7 +29,10 @@ import { parseApprovalPolicy } from '@/lib/schemas/approval-policy'
 import { parseFollowupRules } from '@/lib/schemas/followup-rules'
 import { parseIntentionRules } from '@/lib/schemas/intention-rules'
 import { isScanReferral } from '@/lib/schemas/referral-source'
-import { bodyMentionsMenuItem } from './extract-reported-order'
+import {
+  bodyMentionsMenuItem,
+  venueLocalDayKey,
+} from './extract-reported-order'
 import { scanCarryForwardAt } from './scan-arrival'
 import {
   resolveCheckbackDueAt,
@@ -1047,12 +1050,31 @@ export async function buildRuntimeContext(input: {
       venueId: input.venueId,
       guestId: input.guestId,
     })
+    // TAC-575: a scan on an EARLIER day is a visit too (scans count as visits,
+    // ruled 2026-10-06), so a guest who scanned yesterday and never said what
+    // they got is no longer told apart from a stranger. Today's own scan is
+    // what this greeting answers and does not count: it would make the line
+    // true for every guest. An unreadable scan history reads as no earlier
+    // scan, the understating direction this fact already fails in.
+    const scanDayKeys = await loadScanDayKeys(supabase, {
+      venueId: input.venueId,
+      guestId: input.guestId,
+      timezone: venue.timezone,
+      createdVia: guest.createdVia,
+      createdAt: guest.createdAt,
+    })
+    const todayKey = venueLocalDayKey(venue.timezone, new Date())
+    const scannedOnAnEarlierDay =
+      scanDayKeys !== null &&
+      [...scanDayKeys].some((dayKey) => dayKey !== todayKey)
     scanArrival = {
       hadPriorConversation:
         input.followupTrigger.instagramScanArrival?.hadPriorConversation ===
         true,
       hasRecordedVisit:
-        liveVisitRows.length > 0 || (arrival.ok && arrival.data !== null),
+        liveVisitRows.length > 0 ||
+        (arrival.ok && arrival.data !== null) ||
+        scannedOnAnEarlierDay,
     }
   }
 

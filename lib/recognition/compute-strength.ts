@@ -63,9 +63,12 @@ async function loadFormula(
 export async function computeRelationshipStrength({
   guestId,
   venueId,
+  includeScanVisits,
 }: {
   guestId: string
   venueId: string
+  // Passed straight to loadSignals, where it is documented. Measurement only.
+  includeScanVisits?: boolean
 }): Promise<
   RecognitionResult<{
     score: number
@@ -85,7 +88,11 @@ export async function computeRelationshipStrength({
   if (!formulaResult.ok) return formulaResult
   const formula = formulaResult.data
 
-  const signalsResult = await loadSignals({ guestId, venueId })
+  const signalsResult = await loadSignals({
+    guestId,
+    venueId,
+    includeScanVisits,
+  })
   if (!signalsResult.ok) return signalsResult
 
   const signals = normalizeSignals(signalsResult.data, formula)
