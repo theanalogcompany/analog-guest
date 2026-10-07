@@ -8,19 +8,23 @@
 // week for a reason that had nothing to do with the wording. So the run says
 // which classifier it is measuring, the Jev arm runs WITHOUT its Haiku
 // fallback (a Jev failure throws here; it must not score as Haiku's answer),
-// and the default is `jev` because that is the arm answering production.
+// and the default is `jev` because that is the arm answering production while
+// JEV_CLASSIFICATION_ENABLED is true. The run prints and records whether the
+// arm it measured is the production one, so a rollback of that flag cannot
+// leave a Jev run reading as a production measurement.
 //
 // WHAT MAKES THIS EVIDENCE rather than a demonstration: every case carries a
-// hand-assigned `expected` written BEFORE the run, and the four false-positive
+// hand-assigned `expected` written BEFORE the run, and the five false-positive
 // arms below are hand-chosen from the rulings' own exclusions. Labelling after
 // the fact, or deriving labels from the classifier's output, measures nothing —
 // the bar was posted on TAC-386 before any of this generated.
 //
-// THE FOUR NAMED ARMS EACH HAVE A BAR OF ZERO. They are separate rather than
-// pooled so a failure says WHICH line moved. Two of them (complaints, business
-// inquiries) have a structural belt behind them in
-// lib/agent/schedule-inquiry-followup.ts, so a hit there is a prompt failure
-// with a working backstop; the other two (pure facts, small talk) have no belt,
+// THE FIVE NAMED ARMS EACH HAVE A BAR OF ZERO. They are separate rather than
+// pooled so a failure says WHICH line moved. Complaints have a structural belt
+// behind them in lib/agent/schedule-inquiry-followup.ts, and so do the
+// operator-arranged messages that classify as `manual`, so a hit there is a
+// prompt failure with a working backstop. Pure facts, small talk, arrivals and
+// the operator-arranged messages that classify as anything else have no belt,
 // which is why they carry the same bar.
 //
 // It also measures the classifier's OUTPUT-TOKEN HEADROOM against its 200-token
@@ -33,7 +37,10 @@ import {
   classifyMessageJevArm,
   MAX_CLASSIFIER_INPUT_CHARS,
 } from '@/lib/ai/classify-message'
-import { CLASSIFY_JEV_PROMPT_VERSION } from '@/lib/ai/classify-message-jev'
+import {
+  CLASSIFY_JEV_PROMPT_VERSION,
+  JEV_CLASSIFICATION_ENABLED,
+} from '@/lib/ai/classify-message-jev'
 import { PROMPT_VERSION } from '@/lib/ai/prompts/system-template'
 import { createAdminClient } from '@/lib/db/admin'
 import { createRunLog } from './run-log'
@@ -371,11 +378,13 @@ async function main(): Promise<void> {
     process.exit(1)
   }
 
+  const measuredArmIsProduction = (arm === 'jev') === JEV_CLASSIFICATION_ENABLED
   const log = createRunLog({
     name: 'tac386-follow-up-worthy',
     meta: {
       arm: `followUpWorthy:${arm}:${venueSlug ?? 'fixtures-only'}`,
       classifierArm: arm,
+      measuredArmIsProduction,
       jevPromptVersion: CLASSIFY_JEV_PROMPT_VERSION,
       // The convention asks for the code state as well as the arm. The
       // classifier prompt does not embed this string, so a bump alone does not
@@ -392,10 +401,13 @@ async function main(): Promise<void> {
     },
   })
   console.log(`run log: ${log.path}`)
+  console.log(
+    `measuring the ${arm} arm, which ${measuredArmIsProduction ? 'IS' : 'is NOT'} the arm answering production`,
+  )
 
   const tokens: number[] = []
 
-  // The four named arms, each bar zero.
+  // The five named arms, each bar zero.
   const arms: FalsePositiveArm[] = []
   for (const [name, fixtures] of [
     ['A1 pure facts', A1_PURE_FACTS],
@@ -548,7 +560,14 @@ async function main(): Promise<void> {
   )
 
   // Jev is not generative: it returns no usage and has no output cap to hit.
-  if (tokens.length === 0) {
+  // Keyed on the arm, not on an empty sample: Haiku reporting no usage would
+  // otherwise read as "not applicable" and the truncation check would go quiet.
+  if (arm === 'haiku' && tokens.length === 0) {
+    console.log(
+      '\n--- output-token headroom: NOT MEASURED — haiku returned no usage ---',
+    )
+    process.exitCode = 1
+  } else if (arm === 'jev') {
     console.log('\n--- output-token headroom: not applicable on this arm ---')
   } else {
     const headroom = scoreHeadroom(OUTPUT_TOKEN_CAP, tokens)

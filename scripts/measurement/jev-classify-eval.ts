@@ -40,6 +40,19 @@
  *     history than the original run saw. Identical for both arms.
  *   - A failed unit is NOT a result: it disqualifies its unit from the
  *     agreement figure and is printed per-unit, per the harness convention.
+ *   - The "wrote again" counts under followUpWorthy are per MESSAGE ROW, and
+ *     production handles a burst as one coalesced turn. A second message
+ *     seconds after the first counts the first as skipped, which overstates
+ *     skips. In the other direction the counts are right-censored: a unit in
+ *     the last 24h before the run may yet be followed by an inbound.
+ *   - "Passes the scheduler's gates" reads `messages.channel` off the row,
+ *     where the scheduler reads the conversation's resolved channel.
+ *   - Jev's p(yes) is read from its 2-decimal reasoning string while the
+ *     verdict uses the unrounded value, so a unit printed at exactly the
+ *     threshold can carry either verdict. Trust the verdict.
+ *   - Jev is NOT deterministic run to run (measured 2026-10-06: 10 category
+ *     flips and p(yes) moving by up to 0.07 between two runs on identical
+ *     wording). Compare two wordings only against a repeat of one of them.
  *
  * PRIVACY: the repo is public and this log leaves the machine. Production
  * units are logged by message id and verdicts ONLY - never bodies, names or
