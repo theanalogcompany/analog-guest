@@ -228,6 +228,7 @@ async function findExistingReply(
  *
  * Policy, matching the gate's behavior rather than reinventing it:
  *   - `opted_out_at` → NO card. Nobody is going to reply to someone who left.
+ *     Except on the opt_out turn itself (TAC-572): its confirmation is owed.
  *   - `hold_all_outbound` → card ANYWAY. A queue card IS the hold outcome;
  *     suppressing it would restore the exact silence this fixes, and would do
  *     it specifically at the venues that asked for more oversight. That flag
@@ -251,7 +252,12 @@ async function persistGenerationFailureCard(
       .select('opted_out_at')
       .eq('id', ctx.guest.id)
       .maybeSingle()
-    if (guestRow?.opted_out_at) {
+    // TAC-572: an opt_out turn records the opt-out BEFORE it generates, so
+    // this read is true on the very turn whose confirmation just failed. That
+    // guest is still owed the confirmation, and the card is the only way an
+    // operator learns it did not go; dispatchOperatorOutbound lets an
+    // opt_out-category card through for the same reason.
+    if (guestRow?.opted_out_at && ctx.classification?.category !== 'opt_out') {
       console.warn(
         '[agent] generation-failure card skipped — guest opted out',
         {
@@ -1476,12 +1482,22 @@ async function runInboundTurn(
         guestId: ctx.guest.id,
         error: optedOutRead.error,
       })
+      // An event as well as a line: this is the one path on which an
+      // opted-out SMS guest can be answered, and a degrade nobody can count
+      // is one nobody will notice.
+      await capturePostHogEvent('opt_out_read_failed', agentRunId, {
+        agentRunId,
+        venueId: ctx.venue.id,
+        guestId: ctx.guest.id,
+        error: optedOutRead.error,
+      })
     }
     const optOutDecision = decideOptOutTurn({
       channel: ctx.conversationChannel,
       optedOut: optedOutRead.ok ? optedOutRead.data : false,
       category: ctx.classification.category,
       body: inbound.message.body,
+      isRetry: turn.retryDepth > 0,
     })
     if (optOutDecision.action === 'silence') {
       console.log('[agent] inbound not answered: guest is opted out', {
@@ -2596,7 +2612,15 @@ async function runInboundTurn(
     // before retrieval. A crisis reply is fixed and unconditional, and
     // deferring it to a newer fragment is the worst failure this feature could
     // have.
-    if (mayExtend(turn)) {
+    //
+    // NOT ON AN OPT_OUT TURN (TAC-572). The opt-out is already recorded by
+    // here, so re-entering would re-decide against an opted-out guest on a
+    // different message: "thanks" would silence the turn and discard the
+    // confirmation, and anything else would opt the guest straight back in
+    // inside the turn that opted them out. The confirmation goes out as
+    // generated, and the newer message becomes its own turn at the handoff,
+    // where the opt-out rules apply to it as they would a minute later.
+    if (ctx.classification.category !== 'opt_out' && mayExtend(turn)) {
       const uncovered = await findUncoveredInbound(
         { venueId: ctx.venue.id, guestId: ctx.guest.id },
         turn,

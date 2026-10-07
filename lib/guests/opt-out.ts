@@ -19,6 +19,9 @@
 //   - SMS: only START opts back in, and it is the keyword that decides, never
 //     the category: a bare "START" can classify as an acknowledgment. Anything
 //     else from an opted-out SMS guest gets silence.
+//   - One exception to that silence: the retry of an `opt_out` turn that
+//     failed after recording. The guest is opted out by then and did not say
+//     START, but the confirmation is still owed.
 //
 // START ONLY, NOT UNSTOP. Sendblue suppresses its own outbound to a number
 // that replied STOP and resumes only on START (its support docs), so clearing
@@ -62,16 +65,26 @@ export function decideOptOutTurn(input: {
   optedOut: boolean
   category: string
   body: string
+  /**
+   * This run is the one retry of a turn that failed (`turn.retryDepth > 0`).
+   * A failed `opt_out` turn has already recorded the opt-out, so on SMS its
+   * retry would otherwise read an opted-out guest who did not say START and
+   * go silent, and the confirmation the first attempt failed to send would
+   * never go out.
+   */
+  isRetry: boolean
 }): OptOutTurnDecision {
-  const { channel, optedOut, category, body } = input
+  const { channel, optedOut, category, body, isRetry } = input
 
   if (!optedOut) {
     return category === 'opt_out' ? { action: 'record' } : { action: 'none' }
   }
 
   if (channel !== 'instagram') {
-    return isSmsOptInKeyword(body)
-      ? { action: 'clear', reOptIn: 'sms_start' }
+    if (isSmsOptInKeyword(body))
+      return { action: 'clear', reOptIn: 'sms_start' }
+    return isRetry && category === 'opt_out'
+      ? { action: 'record' }
       : { action: 'silence' }
   }
 

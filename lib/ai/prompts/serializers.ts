@@ -1814,18 +1814,6 @@ function formatOpenIntentions(
 }
 
 /**
- * The once-ever review-ask block (v1.82.0). Rendered only when the runtime
- * carries `reviewAsk`, which lib/agent/review-ask.ts sets on an eligible
- * praise turn and nothing else sets, so this block cannot appear on a
- * followup, decline, or holding turn by construction.
- *
- * The url is rendered verbatim from the venue's curated `venue_info.links`
- * entry — the same string the url-detector's allowlist carries — so a model
- * that copies it character for character always passes the link check. The
- * closing "no other question" line is the prompt half of the one-ask-per-turn
- * rule; composeReplyWithReviewAsk is the structural half.
- */
-/**
  * TAC-572: the turn that opts a guest back in after an opt-out. Both texts were
  * approved verbatim on 2026-10-06; changing either is a copy change.
  *
@@ -1845,6 +1833,18 @@ function formatReOptIn(reOptIn: ReOptIn): string {
   return ['## Guest is back in touch', '', RE_OPT_IN_LINES[reOptIn]].join('\n')
 }
 
+/**
+ * The once-ever review-ask block (v1.82.0). Rendered only when the runtime
+ * carries `reviewAsk`, which lib/agent/review-ask.ts sets on an eligible
+ * praise turn and nothing else sets, so this block cannot appear on a
+ * followup, decline, or holding turn by construction.
+ *
+ * The url is rendered verbatim from the venue's curated `venue_info.links`
+ * entry — the same string the url-detector's allowlist carries — so a model
+ * that copies it character for character always passes the link check. The
+ * closing "no other question" line is the prompt half of the one-ask-per-turn
+ * rule; composeReplyWithReviewAsk is the structural half.
+ */
 function formatReviewAsk(reviewAsk: { url: string; label: string }): string {
   return [
     '## Ask for a review',
