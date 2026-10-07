@@ -85,9 +85,12 @@ export interface VenueContext {
   // MORE operator oversight, never less.
   approvalPolicy: ApprovalPolicy
   /**
-   * TAC-568: `followup_rules.warm_close_text`, the fixed close this venue sends
-   * word for word on both paths. '' when the venue has none configured, which
-   * means no close is sent at all rather than some fallback wording.
+   * `followup_rules.warm_close_text`: what this venue's warm close covers. '' when
+   * the venue has none configured, which means no plain close is sent at all.
+   *
+   * TAC-568 sent it word for word. Since TAC-575 the model writes the close and
+   * this is rendered into the prompt as a guide to its content
+   * (`## Closing this conversation`), never sent.
    *
    * Carried on the context rather than re-read at dispatch for the reason
    * conversationWindowMs is: build-runtime-context already parses

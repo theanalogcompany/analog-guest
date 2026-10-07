@@ -261,57 +261,47 @@ export function isQuietAfterWarmClose(
 export const NEVER_SPLIT_RNG = (): number => 1
 
 /**
- * Is THIS reply the one that closes the guest's first conversation?
+ * May this turn be the warm close of the guest's first conversation?
  *
- * TAC-568. The in-conversation path's whole decision, pure, so every boundary
- * is drivable without a database or a model.
+ * The in-conversation path's precondition, pure, so every boundary is drivable
+ * without a database or a model.
  *
- * ONE WAY TO CLOSE: THE GOODBYE. Two signals, ANDed, and the AND is the point.
- * They answer the two halves of the ruling's own sentence ("the guest signed
- * off AND the agent answered with a goodbye"), and both already existed for
- * TAC-560:
+ * ONE SIGNAL NOW: THE GUEST SIGNED OFF. TAC-568 ANDed that with the model's
+ * own `closedTheConversation` report ("the guest signed off AND the agent
+ * answered with a goodbye"). That AND made sense while the close was a fixed
+ * string appended AFTER the reply was written: the report said whether the
+ * reply was a goodbye worth appending to. TAC-575 has the model WRITE the
+ * close, so the decision is made before there is a reply to report on, and the
+ * `## Closing this conversation` block is what makes the reply a close. A
+ * self-report was never trusted alone here (TAC-350: 8 of 8 fabrications
+ * self-reported clean), and it is no longer consulted at all.
  *
- *   guestSignedOff   the inbound classified `acknowledgment`. Venue-neutral and
- *                    structural.
- *   agentSaidGoodbye the model's closedTheConversation self-report, reworded in
- *                    v1.78.0 from "this reply IS the warm close" to "this reply
- *                    says goodbye".
+ * TAC-575 ALSO REMOVED the name trigger (the turn that stored the guest's
+ * name), ruled 2026-10-06: "the warm close is triggered by a natural lull, not
+ * by a stored name".
  *
- * Self-report is not trusted alone, on this repo's record (TAC-350: 8 of 8
- * fabrications self-reported clean), which is why it is ANDed with something
- * structural rather than read on its own.
+ * WHAT A MISS COSTS. A guest who never says goodbye is closed by the pause
+ * timer, for any first Instagram conversation. A text-message guest has no
+ * timer, so for them a miss is permanent. A FALSE POSITIVE is still the
+ * expensive direction: `acknowledgment` covers "ok cool" as well as "bye", and
+ * a close on a turn that was not closing anything spends the guest's one.
  *
- * THERE WAS A SECOND WAY, AND TAC-575 REMOVED IT (ruled 2026-10-06: "the warm
- * close is triggered by a natural lull, not by a stored name"). TAC-568's
- * follow-on closed on the turn that stored the guest's name, because the name
- * was then the last thing a first visit gathered. With the name ask now the
- * FIRST of several questions, closing on it would end the conversation at the
- * point the ruling says it starts. It also spent the guest's one close on a
- * column write the model proposed and nothing verified (TAC-569).
+ * `alreadyClosed` is the once-ever marker, read by the caller before
+ * generation. `warmCloseText` empty means the venue has not been given a
+ * close, and no path sends a plain one.
  *
- * WHAT A MISS COSTS NOW. A guest who never says goodbye is closed by the pause
- * timer, which since TAC-575 covers any first Instagram conversation, scanned
- * or not. A text-message guest still has no timer, so for them a miss here is
- * permanent. The narrowing is still right: a FALSE POSITIVE is the expensive
- * direction, because it spends the guest's one close, for ever, on a turn that
- * was not closing anything.
- *
- * NO qr_scan CHECK AND NO CHANNEL CHECK. The close happens on SMS too, and the
- * marker has always meant "this guest has been closed", not "the timer ran".
- *
- * `warmCloseText` empty means the venue has no close configured, and no path
- * sends one. Checked here rather than at dispatch so the claim is never taken
- * for a message that was never going to exist.
+ * NO qr_scan CHECK AND NO CHANNEL CHECK. The close happens on SMS too.
  */
 export function closesFirstConversation(input: {
   guestSignedOff: boolean
-  agentSaidGoodbye: boolean
   isFirstConversation: boolean
+  alreadyClosed: boolean
   warmCloseText: string
 }): boolean {
   if (input.warmCloseText.trim() === '') return false
   if (!input.isFirstConversation) return false
-  return input.guestSignedOff && input.agentSaidGoodbye
+  if (input.alreadyClosed) return false
+  return input.guestSignedOff
 }
 
 /** Why a first conversation gets no automated warm close at all. */

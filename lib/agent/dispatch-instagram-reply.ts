@@ -388,12 +388,6 @@ export interface InstagramReplyOptions {
   reviewReason?: string
   rng?: () => number
   renderedIntentions?: readonly OpenIntention[]
-  /**
-   * TAC-568: the venue's fixed warm-close text, appended as this response's own
-   * last bubble. See schedule-and-send.ts for why it is optional here and
-   * required on the splitter.
-   */
-  warmCloseBubble?: string
   /** The guest message this reply answers, for the reply check; 'exempt' skips the check (crisis-safety). */
   replyCheck: { inboundMessageId: string } | 'exempt'
   /**
@@ -537,10 +531,6 @@ export async function dispatchInstagramReply(
     generation.body,
     options.rng ?? Math.random,
     intentionTail,
-    // TAC-568: the close is the last bubble of the reply on this arm too. If a
-    // later bubble fails to send, `undelivered` names it and handle-inbound
-    // releases the claim rather than marking a close the guest never saw.
-    options.warmCloseBubble ?? '',
   )
 
   // Report and card what didn't go out. `sent` messages went out; everything
