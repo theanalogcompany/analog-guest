@@ -6,11 +6,18 @@ import { type VenueScope } from '@/lib/auth/venue-scope'
 import { loadVenues } from '../_lib/load-venues'
 import { PlaygroundClient } from './playground-client'
 
-// The v2 playground (phase 5 of the relationship-engine redesign,
-// lib/relationship/CLAUDE.md): a debug chat against runTurn. Dry run by
-// design - it reads prod data and calls real models but writes nothing, so
-// an operator can poke at any venue's v2 behaviour before the per-venue
+// The playground (phase 5 of the relationship-engine redesign,
+// lib/relationship/CLAUDE.md): a debug chat that runs v1 and v2 on the same
+// inbound, concurrently, and renders the two replies side by side - so the
+// question "does v2 regress against v1" is answerable before the per-venue
 // flag ever flips.
+//
+// NOTHING IS SENT on either arm. It is not, however, write-free, and the
+// distinction is worth stating where someone reads it: v1 builds its context
+// from the database (buildRuntimeContext), so the sandbox arm materializes
+// its transcript against a per-venue synthetic guest. See
+// api/run/v1-arm.ts for the scope of those writes and why they are not a
+// hand-built context instead.
 //
 // Session + allowlist resolve here rather than in the (authed) layout, which
 // confirms analog-admin status but not WHICH venues - same split as
@@ -50,7 +57,7 @@ export default async function PlaygroundPage() {
       <SectionHeader
         eyebrow={<Eyebrow>Command Center</Eyebrow>}
         title="Playground"
-        subtitle="v2 relationship engine · dry run · reads prod, writes nothing"
+        subtitle="v1 vs v2 · dry run · real models, nothing sent"
       />
       <PlaygroundClient venues={venues} />
     </div>

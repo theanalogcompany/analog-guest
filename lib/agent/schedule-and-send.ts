@@ -456,6 +456,23 @@ export async function scheduleAndSend(
   generationId: string
   bubbleCount: number
 }> {
+  // THE TEST-RUN BACKSTOP. A test run (draftInboundReply, the playground's v1
+  // arm) returns the draft long before this function, so reaching here with
+  // ctx.testRun means a branch was added that falls through to dispatch -
+  // exactly the refactor that would otherwise text a real guest a reply to a
+  // message they sent weeks ago. Throw rather than return: the top-level catch
+  // turns it into a visible failed run on a debugging surface, which is the
+  // cheapest possible way to find out.
+  //
+  // Checked FIRST, before the split and before any write, so nothing has
+  // happened by the time it fires.
+  if (ctx.testRun) {
+    throw new Error(
+      'scheduleAndSend reached on a test run: a test run must never dispatch. ' +
+        'The early return in runInboundTurn was bypassed - see RuntimeContext.testRun.',
+    )
+  }
+
   const skipDelay = options.skipHumanFeelDelay === true
 
   // TAC-319: dispatch decides the split, not the model. Stray [[BREAK]]

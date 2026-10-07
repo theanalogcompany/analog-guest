@@ -10,6 +10,11 @@ import { DEFAULT_RELATIONSHIP_GRAPH } from '@/lib/relationship/default-graph'
 import { parseRelationshipGraph } from '@/lib/relationship/schema'
 import { runTurn } from '@/lib/relationship/run-turn'
 import type { RunResponseBody } from '../../_lib/types'
+import {
+  draftV1ForReplay,
+  draftV1ForSandbox,
+  type V1ArmOutcome,
+} from './v1-arm'
 
 // POST /admin/playground/api/run - one inbound exchange through the whole v2
 // pipeline via runTurn. DRY RUN: reads prod data, calls real models, writes
@@ -26,6 +31,28 @@ import type { RunResponseBody } from '../../_lib/types'
 // provider call pin a function for the platform maximum.
 export const maxDuration = 120
 export const dynamic = 'force-dynamic'
+
+/**
+ * The whole turn's budget, under `maxDuration` on purpose.
+ *
+ * A replay turn was measured at 4.1 MINUTES locally. On Vercel that is not a
+ * slow answer, it is the platform killing the function at 120s and the
+ * operator getting a dead request with nothing to read. Returning our own
+ * failure a little early turns that into a trace-shaped answer that says which
+ * stage was still running.
+ *
+ * 110s AND NOT 20s, deliberately, because 20 would fail every turn. Measured
+ * on this branch: v2 alone 42-66s in sandbox, and one real sandbox turn with
+ * the v1 arm on at 85.4s. A 90s budget was the first number here and it sat
+ * 4.6s above a turn that had already happened - it would have 504'd normal
+ * turns and read as a bug in the arm. 110 leaves the platform's 120s
+ * maxDuration room to serialize the answer instead of being killed mid-write.
+ *
+ * 20s is the right TARGET and reaching it is a latency project on v2's serial
+ * calls, not a constant. Make v2 faster, then lower this - do not lower it
+ * first and call the resulting failures a timeout policy.
+ */
+const TURN_BUDGET_MS = 110_000
 
 const HistoryTurnSchema = z.object({
   role: z.enum(['user', 'assistant']),
@@ -69,6 +96,16 @@ const PostBodySchema = z.object({
   // Replay mode: what production actually sent after this inbound, judged
   // alongside the v2 draft against the same notes (judge calibration data).
   actualReply: z.array(z.string().min(1)).max(10).optional(),
+  // The v1 arm, run concurrently with v2. See v1-arm.ts.
+  v1Arm: z
+    .discriminatedUnion('mode', [
+      z.object({ mode: z.literal('sandbox') }),
+      z.object({
+        mode: z.literal('replay'),
+        inboundMessageId: z.string().uuid(),
+      }),
+    ])
+    .optional(),
 })
 
 export async function POST(request: Request): Promise<NextResponse> {
@@ -94,19 +131,76 @@ export async function POST(request: Request): Promise<NextResponse> {
   // ...), so a try/catch here only guards the outer boundary: a thrown
   // supabase read or a bug, surfaced as JSON the inspector can render.
   try {
-    const trace = await runTurn({
-      venueId: body.venueId,
-      guestId: body.guestId,
-      inbound: body.inbound,
-      sessionHistory: body.sessionHistory,
-      session: body.session,
-      overrides: body.overrides,
-      actualReply: body.actualReply,
+    // THE TWO ARMS RUN CONCURRENTLY, which is what keeps this inside
+    // maxDuration: v1 and v2 are independent given the same inbound, so the
+    // wall clock is max(v1, v2) rather than the sum. Sequential would put a
+    // full v1 generation in front of v2's three calls.
+    //
+    // `allSettled`, not `all`: a v1 arm that throws must cost the v1 column
+    // and nothing else. The v2 trace is the primary payload and a debugging
+    // surface losing it because the retiring engine fell over would be the
+    // wrong failure.
+    const started = Date.now()
+    const settled = await Promise.race([
+      Promise.allSettled([
+        runTurn({
+          venueId: body.venueId,
+          guestId: body.guestId,
+          inbound: body.inbound,
+          sessionHistory: body.sessionHistory,
+          session: body.session,
+          overrides: body.overrides,
+          actualReply: body.actualReply,
+        }),
+        runV1Arm(body),
+      ]),
+      new Promise<'timed_out'>((resolve) =>
+        setTimeout(() => resolve('timed_out'), TURN_BUDGET_MS),
+      ),
+    ])
+
+    // Over budget: answer with something readable rather than letting the
+    // platform kill the function at maxDuration and hand back a dead request.
+    // 504 because that is what this is - an upstream that did not answer in
+    // time. The underlying model calls are NOT cancelled (no AbortSignal is
+    // threaded yet), so they keep running and still bill; the message says so
+    // rather than implying the work stopped.
+    if (settled === 'timed_out') {
+      return NextResponse.json(
+        {
+          error: 'turn exceeded its budget',
+          detail:
+            `No answer within ${TURN_BUDGET_MS / 1000}s. The run was abandoned, not cancelled - ` +
+            `its model calls may still be in flight. Replay turns are the slow case: v2 runs a second ` +
+            `judge over what production actually sent.`,
+        },
+        { status: 504 },
+      )
+    }
+
+    const [v2Settled, v1Settled] = settled
+    if (v2Settled.status === 'rejected') throw v2Settled.reason
+    console.log('[playground] turn complete', {
+      ms: Date.now() - started,
+      v1Arm: body.v1Arm?.mode ?? 'off',
     })
 
     const response: RunResponseBody = {
-      trace,
+      trace: v2Settled.value,
       graphStates: await loadGraphStates(body.venueId),
+      v1:
+        v1Settled.status === 'fulfilled'
+          ? v1Settled.value
+          : {
+              outcome: {
+                ok: false,
+                error:
+                  v1Settled.reason instanceof Error
+                    ? v1Settled.reason.message
+                    : String(v1Settled.reason),
+                stage: 'unexpected',
+              },
+            },
     }
     return NextResponse.json(response)
   } catch (e) {
@@ -118,6 +212,62 @@ export async function POST(request: Request): Promise<NextResponse> {
       { status: 500 },
     )
   }
+}
+
+/**
+ * How long the v1 arm gets before the response gives up on it.
+ *
+ * v1 is ONE generation plus a classify and a retrieval; it measured ~15s
+ * against a real venue. 20s is that with headroom, and past it the arm is
+ * not slow, it is wedged - a comparison column is never worth making the
+ * operator wait on a hung provider call.
+ *
+ * IT BOUNDS THE RESPONSE, NOT THE SPEND. `draftInboundReply` takes no
+ * AbortSignal, so the generation it already started keeps running and still
+ * bills after this fires. Stopping the spend as well means threading a signal
+ * down through generateStage into the AI SDK call - worth doing, not done
+ * here, and the column says "timed out" rather than implying the work stopped.
+ */
+const V1_ARM_TIMEOUT_MS = 20_000
+
+/**
+ * The v1 arm, or null when the request did not ask for one.
+ *
+ * Returns the outcome as a value in every case - an arm failure is a column
+ * with a reason in it, which is a finding ("v1 errors on this input"), not an
+ * error for the whole run.
+ */
+async function runV1Arm(
+  body: z.infer<typeof PostBodySchema>,
+): Promise<RunResponseBody['v1']> {
+  if (body.v1Arm === undefined) return null
+  const arm =
+    body.v1Arm.mode === 'replay'
+      ? draftV1ForReplay(body.v1Arm.inboundMessageId)
+      : draftV1ForSandbox({
+          venueId: body.venueId,
+          sessionHistory: body.sessionHistory ?? [],
+          inbound: body.inbound,
+        })
+
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const timeout = new Promise<V1ArmOutcome>((resolve) => {
+    timer = setTimeout(
+      () =>
+        resolve({
+          ok: false,
+          error: `v1 did not answer within ${V1_ARM_TIMEOUT_MS / 1000}s. The call was not cancelled - it may still be running.`,
+          stage: 'timeout',
+        }),
+      V1_ARM_TIMEOUT_MS,
+    )
+  })
+
+  const outcome = await Promise.race([arm, timeout])
+  // Cleared whichever side won, so a fast arm does not hold the event loop
+  // open for the rest of the timeout.
+  if (timer !== undefined) clearTimeout(timer)
+  return { outcome }
 }
 
 /**

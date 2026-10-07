@@ -18,6 +18,7 @@
     "send-test": "tsx --env-file=.env.local scripts/send-test-message.ts",
     "extract-venue-spec": "tsx --env-file=.env.local scripts/extract-venue-spec.ts",
     "extract-test-scenarios": "tsx --env-file=.env.local scripts/extract-test-scenarios.ts",
+    "check-v1-arm-flow": "tsx --env-file=\"$(dirname \"$(git rev-parse --path-format=absolute --git-common-dir)\")/.env.local\" scripts/check-v1-arm-flow.ts",
     "run-test-scenarios": "tsx --env-file=.env.local scripts/run-test-scenarios.ts",
     "ingest-response-review": "tsx --env-file=.env.local scripts/ingest-response-review.ts",
     "seed-venue": "tsx --env-file=.env.local scripts/seed-venue.ts",

@@ -25,11 +25,13 @@ export function SetupBar({
   selectedVenueId,
   mode,
   busy,
+  compareV1,
   saved,
   savedError,
   savedHasMore,
   onVenueChange,
   onModeChange,
+  onCompareV1Change,
   onLoadConversation,
   onDeleteConversation,
 }: {
@@ -38,12 +40,15 @@ export function SetupBar({
   mode: PlaygroundMode
   /** A run is in flight; switching venue mid-run would orphan it. */
   busy: boolean
+  /** Run the v1 arm beside v2. OFF by default - see onCompareV1Change. */
+  compareV1: boolean
   saved: SavedConversationSummary[]
   savedError: string | null
   /** Saves exist beyond the listed window; the picker says so rather than implying completeness. */
   savedHasMore: boolean
   onVenueChange: (venueId: string | null) => void
   onModeChange: (mode: PlaygroundMode) => void
+  onCompareV1Change: (next: boolean) => void
   onLoadConversation: (conversationId: string) => void
   onDeleteConversation: (conversationId: string) => void
 }) {
@@ -90,6 +95,33 @@ export function SetupBar({
             onClick={() => onModeChange('replay')}
           />
         </div>
+      </div>
+
+      {/* OFF BY DEFAULT, and the default is the whole point. The v1 arm is a
+          second full generation per turn - classify + embed + generate on top
+          of v2's four calls - so a playground that ran it unconditionally
+          would double every operator's model spend whether or not they were
+          comparing anything. The first version of this had no toggle and did
+          exactly that. */}
+      <div className="flex flex-col gap-1">
+        <span className="text-xs uppercase tracking-wider text-ink-soft">
+          Compare
+        </span>
+        <label className="flex cursor-pointer items-center gap-2 whitespace-nowrap text-xs text-ink-soft">
+          <input
+            type="checkbox"
+            checked={compareV1}
+            disabled={busy}
+            onChange={(e) => onCompareV1Change(e.target.checked)}
+            className="size-3.5 cursor-pointer accent-clay disabled:cursor-not-allowed"
+          />
+          {/* The cost rides the CONTROL, not the note on the right. That note
+              lives in a fixed h-14 bar with four columns beside it, so any
+              copy long enough to explain the cost gets squeezed into a narrow
+              column and spills out of the bar - which is exactly what a
+              conditional longer string did here once already. */}
+          also run v1 · 2× spend
+        </label>
       </div>
 
       {mode === 'sandbox' && selectedVenueId !== null && (
@@ -139,10 +171,12 @@ export function SetupBar({
         </div>
       )}
 
-      <div className="ml-auto flex max-w-sm flex-col items-end gap-0.5">
-        <p className="text-right text-xs text-ink-faint">
-          Dry run. Reads prod data, calls real models, writes nothing.
-        </p>
+      {/* NO DRY-RUN NOTE HERE any more. With four controls in a fixed h-14 bar
+          there is no width left for it: `ml-auto` collapsed it to nothing and
+          it rendered as invisible dead markup. The same statement lives in the
+          page subtitle, which has the room. The cost of running v1 rides the
+          checkbox label instead, where it is next to the thing that causes it. */}
+      <div className="ml-auto flex flex-col items-end gap-0.5">
         {savedError !== null && (
           <p className="text-right text-[11px] text-destructive">
             saved conversations: {savedError}
@@ -169,13 +203,16 @@ function ModeButton({
   disabled: boolean
   onClick: () => void
 }) {
+  // whitespace-nowrap: "Replay real guest" was wrapping to three lines and
+  // clipping against the bar's fixed h-14. Pre-existing, fixed here because it
+  // sits next to the copy this change touched.
   return (
     <button
       type="button"
       onClick={onClick}
       disabled={disabled}
       aria-pressed={active}
-      className={`px-3 py-1.5 text-xs font-medium cursor-pointer disabled:cursor-not-allowed disabled:opacity-50 ${
+      className={`cursor-pointer whitespace-nowrap px-3 py-1.5 text-xs font-medium disabled:cursor-not-allowed disabled:opacity-50 ${
         active
           ? 'bg-clay text-paper'
           : 'bg-paper text-ink-soft hover:bg-parchment'

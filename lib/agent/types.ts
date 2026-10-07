@@ -399,6 +399,24 @@ export interface RuntimeContext {
   currentMessage: InboundMessage | null
   followupTrigger: FollowupTrigger | null
   /**
+   * This turn is a TEST RUN: generate the draft, send nothing, write nothing.
+   * Set only by `draftInboundReply` (handle-inbound.ts), which the playground
+   * calls to put v1's reply beside v2's. False on every production path.
+   *
+   * IT IS A GUARD, NOT A MODE SWITCH, and that distinction is the point. The
+   * test path already returns before dispatch, so nothing reads this field to
+   * decide what to do - `scheduleAndSend` reads it to decide what to REFUSE.
+   * It throws on a true value, so a future refactor that lets a test run fall
+   * through to dispatch crashes the playground instead of texting a guest.
+   * "The early return covers it" is the kind of claim that holds until
+   * someone adds a branch; this is what makes it hold afterwards.
+   *
+   * Required rather than optional so the one construction site
+   * (buildRuntimeContext) has to say which it is. A default of false would
+   * mean a future second constructor silently gets the sending behaviour.
+   */
+  testRun: boolean
+  /**
    * TAC-536: the two facts a scan greeting may state, or null on every other
    * turn. Computed in build-runtime-context.ts and mapped straight through by
    * buildAiRuntime; see the AI-side field for why both axes are carried rather

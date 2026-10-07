@@ -2,6 +2,12 @@
 
 import { useEffect, useState, useSyncExternalStore } from 'react'
 import { typingDelayMsFor } from '@/lib/relationship/bubble-pacing'
+import type { TestDraft } from '@/lib/agent/handle-inbound'
+// A value import, unlike the type-only ones: `lib/ai/v2/template.ts` has NO
+// imports of its own (pure constants), so this pulls nothing server-side into
+// the client bundle. The judge's axis list is declared locally for exactly the
+// opposite reason - judge.ts drags the AI SDK in. Check before copying this.
+import { V2_PROMPT_VERSION } from '@/lib/ai/v2/template'
 import { replyBubblesOf } from '../_lib/history'
 import type { PlaygroundTurn } from '../_lib/types'
 
@@ -341,5 +347,171 @@ export function V1ActualReply({ bubbles }: { bubbles: string[] | null }) {
         ))
       )}
     </div>
+  )
+}
+
+/** Outbound bubbles rendered flush left, for the side-by-side columns. */
+function ColumnBubbles({
+  bubbles,
+  tone,
+}: {
+  bubbles: string[]
+  /** 'v2' takes the live blue; 'v1' is outlined, so the eye lands on v2. */
+  tone: 'v1' | 'v2'
+}) {
+  return (
+    <div className="flex flex-col items-start gap-0.5">
+      {bubbles.map((text, i) => (
+        <div
+          key={i}
+          className={`max-w-full whitespace-pre-wrap break-words rounded-[18px] rounded-bl-[4px] px-3 py-1.5 text-[14px] leading-[1.3] ${
+            tone === 'v1'
+              ? 'border border-stone-light bg-paper text-ink-soft'
+              : ''
+          }`}
+          style={tone === 'v2' ? VENUE_BUBBLE : undefined}
+        >
+          {text}
+        </div>
+      ))}
+    </div>
+  )
+}
+
+/**
+ * The substitute label: v1 answered this turn with something other than a
+ * generated reply. Rendered as a statement of what v1 would have done, never
+ * as an empty column - "v1 sends a fixed crisis message here" and "v1 had
+ * nothing to say" are different answers and must not look alike.
+ */
+const SUBSTITUTE_COPY = {
+  crisis_safety:
+    'v1 short-circuits this turn: a fixed crisis-safety reply, never generated, and the approval gate never runs.',
+  media_only_card:
+    'v1 sends no text on this turn - it writes a blank card for the operator.',
+  opt_out_confirmation:
+    'v1 records the opt-out and sends its fixed confirmation. Not reproduced here: a test run must not write a TCPA opt-out.',
+} satisfies Record<NonNullable<TestDraft['substitute']>, string>
+
+/**
+ * v1 and v2 side by side for one turn.
+ *
+ * The columns carry their prompt versions because that is what makes the
+ * comparison legible: these are two engines AND two prompts, and a difference
+ * attributed to the engine when it came from a prompt revision is the obvious
+ * way to misread this surface.
+ *
+ * NO SCORES HERE, and that is a decision rather than an omission. The judge
+ * scores v2's reply against v2's house notes; v1's prompt carried different
+ * context, so judging it against v2's notes would penalize it for not using
+ * facts it never saw. The operator reads the two replies.
+ *
+ * NO STAGGERED REVEAL HERE EITHER, unlike the standalone TurnReply. The
+ * pacing exists to show what the guest's phone does; this surface answers a
+ * different question - whether the two TEXTS differ - and the reader is
+ * comparing them, not watching them arrive. Pacing only the v2 column would
+ * also make v1 look instant beside it, which is a difference in the harness
+ * rather than in the engine, and that is the one thing this surface must not
+ * invent. Turning COMPARE off gets the paced single reply, unchanged.
+ */
+export function V1V2Columns({
+  turn,
+  selected,
+  onSelect,
+}: {
+  turn: PlaygroundTurn
+  selected: boolean
+  onSelect: () => void
+}) {
+  const v1 = turn.response?.v1 ?? null
+  if (v1 === null) return null
+
+  const v2Bubbles = replyBubblesOf(turn)
+
+  return (
+    <div
+      className={`mt-1 grid grid-cols-2 gap-px overflow-hidden rounded-[2px] border bg-stone-light/60 ${
+        selected
+          ? 'border-clay/50 ring-2 ring-clay/40 ring-offset-2 ring-offset-paper'
+          : 'border-stone-light/60'
+      }`}
+    >
+      <div className="flex flex-col gap-1.5 bg-paper p-2.5">
+        <span className="text-[11px] uppercase tracking-wider text-ink-faint">
+          v1
+          {v1.outcome.ok && (
+            <span className="ml-1 normal-case tracking-normal text-ink-faint/80">
+              {v1.outcome.data.promptVersion}
+            </span>
+          )}
+        </span>
+        {!v1.outcome.ok ? (
+          <p className="text-xs text-destructive">
+            v1 failed at {v1.outcome.stage}: {v1.outcome.error}
+          </p>
+        ) : (
+          <>
+            {v1.outcome.data.bubbles.length > 0 && (
+              <ColumnBubbles bubbles={v1.outcome.data.bubbles} tone="v1" />
+            )}
+            {v1.outcome.data.substitute !== null && (
+              <p className="text-[11px] italic leading-relaxed text-ink-soft">
+                {SUBSTITUTE_COPY[v1.outcome.data.substitute]}
+              </p>
+            )}
+            <p className="pt-0.5 text-[10px] text-ink-faint">
+              {v1.outcome.data.category} · {v1.outcome.data.recognitionState}
+            </p>
+          </>
+        )}
+      </div>
+
+      {/* The v2 column is the clickable one: it carries the trace, and this
+          block REPLACES the standalone reply bubble rather than sitting under
+          it, so the reply appears exactly once. */}
+      <button
+        type="button"
+        onClick={onSelect}
+        aria-pressed={selected}
+        className="flex cursor-pointer flex-col gap-1.5 bg-paper p-2.5 text-left"
+      >
+        <span className="text-[11px] uppercase tracking-wider text-ink-faint">
+          v2
+          <span className="ml-1 normal-case tracking-normal text-ink-faint/80">
+            {V2_PROMPT_VERSION}
+          </span>
+        </span>
+        {v2Bubbles.length > 0 ? (
+          <ColumnBubbles bubbles={v2Bubbles} tone="v2" />
+        ) : (
+          <p className="text-xs italic text-ink-faint">
+            no reply was generated on this turn
+          </p>
+        )}
+        {turn.response?.trace.gate?.verdict !== undefined &&
+          turn.response.trace.gate.verdict !== 'send' && (
+            <span className="text-[11px] italic text-ink-soft">
+              gate: {turn.response.trace.gate.verdict}
+            </span>
+          )}
+      </button>
+    </div>
+  )
+}
+
+/**
+ * The one thing a reader must know before trusting a bubble-count difference:
+ * v1's split coin is pinned to the no-split branch, so v1 can look like one
+ * bubble where production would sometimes have sent two or three.
+ */
+export function V1ComparisonCaveat() {
+  return (
+    <p className="text-[11px] italic leading-relaxed text-ink-faint">
+      v1 runs the real pipeline and sends nothing, but it does write its sandbox
+      transcript to a synthetic guest - it builds context from the database. Its
+      bubble split is pinned to the no-split branch, so where v1 shows one
+      bubble production would sometimes have split it; a bubble-count difference
+      here is not evidence on its own.
+    </p>
   )
 }

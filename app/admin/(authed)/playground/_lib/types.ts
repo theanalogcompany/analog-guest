@@ -1,4 +1,9 @@
 import type { HistoryTurn } from '@/lib/ai/v2/compose'
+// Type-only, like every other engine import here: `handle-inbound` is the v1
+// orchestrator and pulls the whole server pipeline, so a value import would
+// drag it into the client bundle. Imported rather than re-declared because a
+// second copy of this shape is a contract that can disagree with itself.
+import type { TestDraft } from '@/lib/agent/handle-inbound'
 import type { PlaygroundConversationTurn } from '@/lib/schemas/playground'
 import type {
   PlaygroundSession,
@@ -26,6 +31,28 @@ export interface RunRequestBody {
   overrides?: TurnOverrides
   /** Replay mode: what production actually sent, for the comparison judgment. */
   actualReply?: string[]
+  /**
+   * Run the v1 arm beside v2 and return its draft. Replay needs the real
+   * inbound row id (v1 is invoked on the row); sandbox needs nothing beyond
+   * the request's own `sessionHistory` + `inbound`.
+   *
+   * Omitted = v2 only, which is what every pre-existing caller gets.
+   */
+  v1Arm?: { mode: 'sandbox' } | { mode: 'replay'; inboundMessageId: string }
+}
+
+/**
+ * The v1 column. `null` when the arm was not requested.
+ *
+ * NOT JUDGED, deliberately. The judge scores v2's draft against v2's house
+ * notes; v1 was written from a different prompt carrying different context, so
+ * a score over v1 using v2's notes would mark it down for not using facts its
+ * prompt never held. The operator reads the two replies. (Replay's existing
+ * `actualJudge` over what production really sent is unchanged and separate.)
+ */
+export interface V1Column {
+  outcome:
+    { ok: true; data: TestDraft } | { ok: false; error: string; stage: string }
 }
 
 export interface RunResponseBody {
@@ -35,6 +62,8 @@ export interface RunResponseBody {
    * the trace itself only carries the resolved state, not the menu.
    */
   graphStates: GraphStateOption[]
+  /** The v1 arm's result, or null when it was not requested. */
+  v1: V1Column | null
 }
 
 /** One row of the replay-mode guest picker. */

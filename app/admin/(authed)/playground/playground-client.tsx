@@ -63,6 +63,11 @@ export function PlaygroundClient({ venues }: { venues: VenueListRow[] }) {
   const [venueId, setVenueId] = useState<string | null>(null)
   const [mode, setMode] = useState<PlaygroundMode>('sandbox')
 
+  // Run v1 beside v2. FALSE by default: the arm is a second full generation
+  // per turn, so defaulting it on would double the model spend of every
+  // operator who opened this page to look at v2 alone.
+  const [compareV1, setCompareV1] = useState(false)
+
   const [turns, setTurns] = useState<PlaygroundTurn[]>([])
   const [selectedTurnId, setSelectedTurnId] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
@@ -254,10 +259,14 @@ export function PlaygroundClient({ venues }: { venues: VenueListRow[] }) {
         inbound: [text],
         sessionHistory: sessionHistoryFromTurns(turns),
         ...(session !== null ? { session } : {}),
+        // Only when the operator asked for it. v1 cannot run on a sandbox
+        // guest, so the arm materializes the chat against the venue's
+        // synthetic guest - see api/run/v1-arm.ts.
+        ...(compareV1 ? { v1Arm: { mode: 'sandbox' as const } } : {}),
       }
       runNewTurn(request, 'sandbox', null)
     },
-    [venueId, busy, turns, session, runNewTurn],
+    [venueId, busy, turns, session, runNewTurn, compareV1],
   )
 
   /**
@@ -308,10 +317,17 @@ export function PlaygroundClient({ venues }: { venues: VenueListRow[] }) {
         // Judge what v1 actually sent alongside the v2 draft - same notes,
         // same transcript - so real replies become judge-calibration reads.
         ...(context.v1Reply !== null ? { actualReply: context.v1Reply } : {}),
+        // And, when asked, run v1 LIVE on the same inbound row. Three things
+        // then end up on a replay turn and they are three different claims:
+        // what v1 sent at the time, what v1 would send today, and what v2
+        // drafts now.
+        ...(compareV1
+          ? { v1Arm: { mode: 'replay' as const, inboundMessageId: messageId } }
+          : {}),
       }
       runNewTurn(request, 'replay', context.v1Reply)
     },
-    [venueId, busy, timeline, runNewTurn],
+    [venueId, busy, timeline, runNewTurn, compareV1],
   )
 
   /** Re-run the selected turn with overrides; replaces its trace in place. */
@@ -423,11 +439,13 @@ export function PlaygroundClient({ venues }: { venues: VenueListRow[] }) {
         selectedVenueId={venueId}
         mode={mode}
         busy={busy}
+        compareV1={compareV1}
         saved={saved}
         savedError={savedError}
         savedHasMore={savedHasMore}
         onVenueChange={onVenueChange}
         onModeChange={onModeChange}
+        onCompareV1Change={setCompareV1}
         onLoadConversation={onLoadConversation}
         onDeleteConversation={onDeleteConversation}
       />
