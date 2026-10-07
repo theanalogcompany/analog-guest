@@ -1,24 +1,29 @@
-// TAC-578: the once-ever close, in its two shapes, for a hand-read.
+// TAC-578: the once-ever close, for a hand-read.
 //
-// Ruled 2026-10-07 from a live phone test: ten generations of each shape,
-// read by Jaipal before the branch merges. THERE IS NO MECHANICAL VERDICT. The
-// counts printed are what code can see of the three rules, as an aid to the
+// Ruled 2026-10-07 from two live phone tests: ten generations, read by Jaipal
+// before the branch merges. THERE IS NO MECHANICAL VERDICT. The counts printed
+// are what code can see of the rules for what the close says, as an aid to the
 // read and not a substitute for it:
 //
+//   a warm line tied to the conversation, plus at most one short open-door
+//     clause, two short sentences at most
+//   never "message us anytime" verbatim
 //   never a list of examples of what they can ask about
-//   after an offer of more help already went out in the conversation, the
-//     warm line only, with no open door
-//   otherwise the warm line plus one short open-door clause, two short
-//     sentences at most
 //
-// The two arms share ten guests. In `after_offer` our answer ends with an
-// offer of more help, which is what production's own detector reads
-// (lib/agent/previous-offer.ts); the harness does not set the flag, so a
-// detector that missed the offer would show up as an open door in that arm.
+// WHEN the close is sent is not exercised here: only after the guest signalled
+// they were done, and never once an offer of more help has gone out. Both are
+// decided in the pause timer before any prompt is composed
+// (lib/agent/warm-close-timeout.ts). Every guest here HAS signalled it: each
+// thread ends with a thanks, a bye or an emoji from the guest and our short
+// reply to it, which is the state the timer sends from.
+//
+// An earlier version of this file ran two arms of ten (with and without an
+// earlier offer) against wording that has since been replaced; its outputs
+// are in the run log of 2026-10-07T22-05.
 //
 // GENERATE-ONLY, one call at a time through generateMessage so each reads the
-// cached system prefix. Counted against the ticket's cap, which these twenty
-// take three past 450: they were asked for after the cap was set.
+// cached system prefix. Counted against the ticket's cap, which these ten take
+// past 450: they were asked for after the cap was set.
 
 import { randomUUID } from 'node:crypto'
 
@@ -37,64 +42,76 @@ import { startAgentTrace } from '@/lib/observability/langfuse'
 import { toParsedGuestContext } from '@/lib/schemas/guest-context'
 import { createRunLog } from './run-log'
 
-const MAX_MODEL_CALLS = 453
+const MAX_MODEL_CALLS = 463
 
-/** What ten guests asked, what we said, and the offer the second arm adds. */
-const EXCHANGES: readonly { asked: string; answered: string; offer: string }[] =
-  [
-    {
-      asked: 'what time do you close today?',
-      answered: "we're open till 3 today",
-      offer: 'let us know if you need anything else',
-    },
-    {
-      asked: 'do you have oat milk?',
-      answered: 'yep, oat and almond',
-      offer: 'happy to help with anything else',
-    },
-    {
-      asked: 'is there wifi?',
-      answered: 'there is, the password is on the counter',
-      offer: 'just ask if you need a hand with anything',
-    },
-    {
-      asked: 'can i bring my dog?',
-      answered: 'dogs are welcome out front',
-      offer: 'let us know if you have any other questions',
-    },
-    {
-      asked: 'which beans would you get for a moka pot at home?',
-      answered: 'the darker house blend, ground a little coarser than espresso',
-      offer: 'happy to walk you through brewing it if you want',
-    },
-    {
-      asked: 'is there parking nearby?',
-      answered: 'street parking, usually easy before noon',
-      offer: 'let us know if you need anything else',
-    },
-    {
-      asked: 'do you take card?',
-      answered: 'card and tap, yes',
-      offer: 'anything else, just ask',
-    },
-    {
-      asked: 'anything decaf?',
-      answered: 'yes, any espresso drink can be decaf',
-      offer: 'happy to suggest one if you want',
-    },
-    {
-      asked: 'are you open on sundays?',
-      answered: 'we are, same hours',
-      offer: 'let us know if you need anything else',
-    },
-    {
-      asked: 'do you have somewhere to sit and work?',
-      answered: 'a few tables inside, quieter after lunch',
-      offer: 'happy to help if you have other questions',
-    },
-  ]
-
-type Arm = 'no_offer_yet' | 'after_offer'
+/** What ten guests asked, what we said, how they signed off and our reply. */
+const EXCHANGES: readonly {
+  asked: string
+  answered: string
+  done: string
+  ack: string
+}[] = [
+  {
+    asked: 'what time do you close today?',
+    answered: "we're open till 3 today",
+    done: 'perfect thanks',
+    ack: 'of course',
+  },
+  {
+    asked: 'do you have oat milk?',
+    answered: 'yep, oat and almond',
+    done: '🙌',
+    ack: '🙂',
+  },
+  {
+    asked: 'is there wifi?',
+    answered: 'there is, the password is on the counter',
+    done: 'great, thank you!',
+    ack: 'anytime',
+  },
+  {
+    asked: 'can i bring my dog?',
+    answered: 'dogs are welcome out front',
+    done: 'amazing, thanks',
+    ack: 'you got it',
+  },
+  {
+    asked: 'which beans would you get for a moka pot at home?',
+    answered: 'the darker house blend, ground a little coarser than espresso',
+    done: 'ok perfect, ordering it now. thanks!',
+    ack: 'good choice',
+  },
+  {
+    asked: 'is there parking nearby?',
+    answered: 'street parking, usually easy before noon',
+    done: 'cool thanks',
+    ack: 'sure thing',
+  },
+  {
+    asked: 'do you take card?',
+    answered: 'card and tap, yes',
+    done: '👍',
+    ack: '👍',
+  },
+  {
+    asked: 'anything decaf?',
+    answered: 'yes, any espresso drink can be decaf',
+    done: 'oh nice, thank you',
+    ack: 'of course',
+  },
+  {
+    asked: 'are you open on sundays?',
+    answered: 'we are, same hours',
+    done: 'ok bye for now!',
+    ack: 'bye!',
+  },
+  {
+    asked: 'do you have somewhere to sit and work?',
+    answered: 'a few tables inside, quieter after lunch',
+    done: 'thanks so much',
+    ack: 'no problem',
+  },
+]
 
 const turn = (
   direction: 'inbound' | 'outbound',
@@ -167,12 +184,11 @@ async function main(): Promise<void> {
     relevanceScore: ch.similarity,
   }))
 
-  const arms: readonly Arm[] = ['no_offer_yet', 'after_offer']
-  const planned = EXCHANGES.length * arms.length
+  const planned = EXCHANGES.length
   const log = createRunLog({
     name: 'tac578-plain-close',
     meta: {
-      arm: 'hand-read-two-shapes',
+      arm: 'hand-read',
       promptVersion: PROMPT_VERSION,
       venue: venueSlug,
       venueName: venue.name,
@@ -198,18 +214,13 @@ async function main(): Promise<void> {
     modelCalls += n
   }
 
-  const outputs: {
-    id: string
-    arm: Arm
-    body: string
-    blockSaidAfterOffer: boolean
-  }[] = []
+  const outputs: { id: string; body: string }[] = []
   const failed: string[] = []
   const cache = { calls: 0, hits: 0 }
 
-  for (const arm of arms) {
+  {
     for (const [i, x] of EXCHANGES.entries()) {
-      const id = `${arm}-${String(i + 1).padStart(2, '0')}`
+      const id = `close-${String(i + 1).padStart(2, '0')}`
       const ctx: RuntimeContext = {
         ...baseCtx,
         guest: {
@@ -221,12 +232,10 @@ async function main(): Promise<void> {
           reviewAskedAt: null,
         },
         recentMessages: [
-          turn('inbound', x.asked, at(14)),
-          turn(
-            'outbound',
-            arm === 'after_offer' ? `${x.answered}. ${x.offer}` : x.answered,
-            at(13),
-          ),
+          turn('inbound', x.asked, at(15)),
+          turn('outbound', x.answered, at(14)),
+          turn('inbound', x.done, at(12)),
+          turn('outbound', x.ack, at(11)),
         ],
         recentVisits: [],
         // NOTHING OF THE REAL GUEST'S (TAC-575's contaminated run).
@@ -264,23 +273,18 @@ async function main(): Promise<void> {
       })
       if (!gen.ok) {
         failed.push(id)
-        log.appendUnit({ id, arm, failed: true, error: gen.error })
+        log.appendUnit({ id, failed: true, error: gen.error })
         console.log(`  ${id}  FAILED: ${gen.error}`)
         continue
       }
       if (gen.data.attempts > 1) spend(gen.data.attempts - 1)
       cache.calls += 1
       if (gen.data.cacheReadTokens > 0) cache.hits += 1
-      const out = {
-        id,
-        arm,
-        body: gen.data.body,
-        blockSaidAfterOffer: runtime.closeAfterOffer === true,
-      }
+      const out = { id, body: gen.data.body }
       outputs.push(out)
       log.appendUnit({ ...out, asked: x.asked, attempts: gen.data.attempts })
       console.log(
-        `  ${id}  <- ${JSON.stringify(x.asked)}${arm === 'after_offer' ? `  [our answer ended: ${JSON.stringify(x.offer)}]` : ''}\n      ${JSON.stringify(gen.data.body)}`,
+        `  ${id}  asked ${JSON.stringify(x.asked)}, then ${JSON.stringify(x.done)}\n      ${JSON.stringify(gen.data.body)}`,
       )
     }
   }
@@ -294,27 +298,26 @@ async function main(): Promise<void> {
     log.appendUnit({ summary: true, void: true, failed })
     process.exit(2)
   }
-  for (const arm of arms) {
-    const list = outputs.filter((o) => o.arm === arm)
-    const summary = {
-      n: list.length,
-      detectorSawTheOffer: list.filter((o) => o.blockSaidAfterOffer).length,
-      withOpenDoorWording: list
-        .filter((o) => OPEN_DOOR.test(o.body))
-        .map((o) => o.id),
-      overTwoSentences: list
-        .filter((o) => sentenceCount(o.body) > 2)
-        .map((o) => o.id),
-      withLink: list
-        .filter((o) => extractUrls(o.body).length > 0)
-        .map((o) => o.id),
-      withQuestion: list.filter((o) => o.body.includes('?')).map((o) => o.id),
-    }
-    log.appendUnit({ summary: true, arm, ...summary })
-    console.log(
-      `[tac578] ${arm}: block rendered as after-offer ${summary.detectorSawTheOffer}/${summary.n}; open-door wording ${summary.withOpenDoorWording.length}/${summary.n}; over two sentences ${summary.overTwoSentences.length}/${summary.n}${summary.overTwoSentences.length > 0 ? ` (${summary.overTwoSentences.join(', ')})` : ''}; link ${summary.withLink.length}; question ${summary.withQuestion.length}`,
-    )
+  const summary = {
+    n: outputs.length,
+    messageUsAnytimeVerbatim: outputs
+      .filter((o) => /message (us|here|me)?\s*any ?time/i.test(o.body))
+      .map((o) => o.id),
+    withOpenDoorWording: outputs
+      .filter((o) => OPEN_DOOR.test(o.body))
+      .map((o) => o.id),
+    overTwoSentences: outputs
+      .filter((o) => sentenceCount(o.body) > 2)
+      .map((o) => o.id),
+    withLink: outputs
+      .filter((o) => extractUrls(o.body).length > 0)
+      .map((o) => o.id),
+    withQuestion: outputs.filter((o) => o.body.includes('?')).map((o) => o.id),
   }
+  log.appendUnit({ summary: true, ...summary })
+  console.log(
+    `[tac578] "message us anytime" or a near copy ${summary.messageUsAnytimeVerbatim.length}/${summary.n}; some open-door wording ${summary.withOpenDoorWording.length}/${summary.n}; over two sentences ${summary.overTwoSentences.length}/${summary.n}; link ${summary.withLink.length}; question ${summary.withQuestion.length}`,
+  )
   console.log(`[tac578] HAND-READ. No verdict. Log: ${log.path}`)
 }
 

@@ -1020,38 +1020,28 @@ check(
   true,
 )
 check(
-  'plain turn: a warm line about the conversation, then one open-door clause, no examples',
+  'plain turn: a warm line about the conversation, at most one open-door clause, no examples',
   [
+    plainTurn.includes('The guest has signalled they are done'),
     plainTurn.includes('Close it in two short sentences at most.'),
     plainTurn.includes('one warm line that belongs to this conversation'),
     plainTurn.includes(
-      'Then one short clause telling them they can message here anytime.',
+      'only if it adds something, one short clause that leaves the door open',
     ),
     plainTurn.includes(
-      'Do not list or give examples of what they can message about.',
+      'Do not write "message us anytime" or a near copy of it',
+    ),
+    plainTurn.includes(
+      'do not list or give examples of what they can ask about',
     ),
     plainTurn.includes('do not name any item they did not mention themselves'),
+    // The clause is described WITHOUT the phrase it must not use.
+    plainTurn.includes('telling them they can message here anytime'),
     // v1.95.0's examples sentence, which the phone test read as a script.
     plainTurn.includes('two or three examples'),
     plainTurn.includes('what this venue'),
   ],
-  [true, true, true, true, true, false, false],
-)
-const closeAfterOffer = flat(
-  prose({ signOff: 'plain', closeAfterOffer: true }, 'acknowledgment'),
-)
-check(
-  'plain turn after an offer already went out: the warm line alone, no open door',
-  [
-    closeAfterOffer.includes('## Closing this conversation'),
-    closeAfterOffer.includes('one warm line that belongs to this conversation'),
-    closeAfterOffer.includes(
-      'no open door, no offer of help, and nothing about messaging you.',
-    ),
-    closeAfterOffer.includes('they can message here anytime'),
-    closeAfterOffer.includes('two short sentences'),
-  ],
-  [true, true, true, false, false],
+  [true, true, true, true, true, true, true, false, false, false],
 )
 check(
   'plain turn: no link block',

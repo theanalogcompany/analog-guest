@@ -2235,57 +2235,47 @@ function formatLastVisitWentWrong(): string {
 }
 
 /**
- * TAC-578: the once-ever close, in two shapes (ruled 2026-10-07 from a live
- * phone test of the close this replaces).
+ * TAC-578: the once-ever close. Wording shown for approval 2026-10-07.
  *
- * WHAT THE PHONE TEST READ: "hope the Budan hits the spot at home ☕ if you
- * ever have questions about anything on the menu, which beans to try next, or
- * what's going on at the shop, you can always message us here." The first
- * sentence was fine. The second is v1.95.0's examples drawn from the venue's
- * text, and it read as a script. The rules given:
+ * WHEN IT RENDERS IS DECIDED BEFORE THIS, in the pause timer
+ * (lib/agent/warm-close-timeout.ts), from two live phone tests of the closes
+ * this replaces:
  *
- *   never list examples of what they can ask about
- *   if an offer of more help already went out in this conversation, the close
- *     is ONLY the warm line (`afterOffer`): they have been told once
- *   otherwise the warm line plus one short open-door clause, two short
- *     sentences at most
+ *   only when the guest's last message signalled they were done (a thanks, a
+ *     bye, an emoji), never when they simply went quiet after an answer: a
+ *     close ten minutes behind a purchase link read as automated
+ *   never when an offer of more help already went out in the conversation:
+ *     they have been told once
  *
- * So the venue's `warm_close_text` no longer reaches the prompt at all. It
- * still decides whether the venue sends this close
- * (lib/schemas/followup-rules.ts).
+ * WHAT IT SAYS: a warm line tied to the conversation, and at most one short
+ * open-door clause. No list of what they can ask about (v1.95.0 drew examples
+ * from the venue's text, and it read as a script), so the venue's
+ * `warm_close_text` no longer reaches the prompt; it still decides whether
+ * the venue sends a close at all (lib/schemas/followup-rules.ts).
+ *
+ * "DO NOT WRITE 'MESSAGE US ANYTIME'" QUOTES THE ONE LINE THIS MUST NOT BE, on
+ * purpose and against the house rule about quoted lines, the way
+ * formatPriorGreetings shows greetings not to repeat. An earlier version
+ * described the clause as "telling them they can message here anytime" and
+ * ten of ten closes came back with those words. So the clause is described
+ * without them, and the phrase appears once, as the thing to avoid.
  *
  * THE WARM LINE'S TWO BARS ARE v1.95.0's, kept because they were paid for:
  * asked for a line about the conversation, two closes in ten answered the
  * question a second time or placed the guest inside the shop.
- *
- * NO QUOTED LINE, including the one from the phone test above: a quoted
- * example is the line every guest would get.
  */
-function formatPlainClose(afterOffer: boolean): string {
+function formatPlainClose(): string {
   return [
     '## Closing this conversation',
     '',
-    afterOffer
-      ? 'The conversation has reached a natural pause. Close it with one warm'
-      : 'The conversation has reached a natural pause. Close it in two short',
-    afterOffer
-      ? 'line that belongs to this conversation: something about what you and'
-      : 'sentences at most. First, one warm line that belongs to this',
-    afterOffer
-      ? 'this guest actually talked about. It does not repeat an answer you'
-      : 'conversation: something about what you and this guest actually talked',
-    afterOffer
-      ? 'already gave, and it does not assume they are at the venue or have'
-      : 'about. It does not repeat an answer you already gave, and it does not',
-    afterOffer
-      ? 'been in. You have already told this guest in this conversation that'
-      : 'assume they are at the venue or have been in. Then one short clause',
-    afterOffer
-      ? 'they can ask for more, so do not say it again: no open door, no offer'
-      : 'telling them they can message here anytime. Do not list or give',
-    afterOffer
-      ? 'of help, and nothing about messaging you.'
-      : 'examples of what they can message about.',
+    'The guest has signalled they are done, and the conversation has gone',
+    'quiet. Close it in two short sentences at most. First, one warm line',
+    'that belongs to this conversation: something about what you and this',
+    'guest actually talked about. It does not repeat an answer you already',
+    'gave, and it does not assume they are at the venue or have been in.',
+    'Then, only if it adds something, one short clause that leaves the door',
+    'open, in words of your own. Do not write "message us anytime" or a near',
+    'copy of it, and do not list or give examples of what they can ask about.',
     '',
     'Say it in your own words, different from anything you have already sent',
     'this guest. Do not include a link, do not ask for a review, do not invite',
@@ -2746,7 +2736,7 @@ export function runtimeToProse(
   } else if (runtime.signOff === 'visit') {
     blocks.push(formatVisitSignOff())
   } else if (runtime.signOff === 'plain') {
-    blocks.push(formatPlainClose(runtime.closeAfterOffer === true))
+    blocks.push(formatPlainClose())
   } else if (runtime.reviewAsk) {
     blocks.push(formatReviewAsk(runtime.reviewAsk))
   }

@@ -360,14 +360,6 @@ export type RuntimeContext = {
    */
   signOff?: 'visit' | 'plain' | 'answer'
   /**
-   * TAC-578: on a `plain` close only. True when a message of ours in this
-   * conversation already ended with an offer of more help
-   * (lib/agent/previous-offer.ts). The close is then the warm line alone:
-   * ruled 2026-10-07, a guest who has been told they can ask for more is not
-   * told again.
-   */
-  closeAfterOffer?: boolean
-  /**
    * TAC-578: set only on the message that follows a visit. `first_visit_thanks`
    * renders `## Thanking them for their first visit` (with the review
    * invitation when `reviewAsk` is also set); `visit_checkin` renders

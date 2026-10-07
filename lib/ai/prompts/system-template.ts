@@ -2558,11 +2558,11 @@ import {
 //                    link in it. Now only for a guest who was asked how it
 //                    is, never said, chatted and went quiet.
 //     `## Closing this conversation`  a warm line about the conversation
-//                    and one short open-door clause, two sentences at most,
-//                    or the warm line alone when an offer of more help has
-//                    already gone out in the conversation. v1.95.0's examples
-//                    from the venue's text are gone, and that text no longer
-//                    reaches the prompt.
+//                    and at most one short open-door clause. v1.95.0's
+//                    examples from the venue's text are gone, and that text
+//                    no longer reaches the prompt. It now renders only after
+//                    the guest signalled they were done, and never once an
+//                    offer of more help has gone out in the conversation.
 //     `## Thanking them for their first visit`  new. The once-ever message
 //                    after a first visit, with the review invitation.
 //     `## A word about their visit`  new. A compliment on a later visit's

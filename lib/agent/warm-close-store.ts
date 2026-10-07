@@ -29,7 +29,8 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 
 import type { Database } from '@/db/types'
 import { isInquiryFollowupMessage } from '@/lib/followups/inquiry-followup-store'
-import { DELIVERED_OUTBOUND_STATUSES } from './group-responses'
+import type { RecentMessage } from '@/lib/ai/types'
+import { DELIVERED_OUTBOUND_STATUSES, deriveDelivery } from './group-responses'
 import { isPostVisitMessage } from './visit-messages-store'
 import { warmCloseBlocker, type WarmCloseBlocker } from './warm-close'
 
@@ -71,6 +72,12 @@ export interface WarmCloseCandidate {
   messageId: string
   sentAt: Date
   body: string
+  /**
+   * `messages.category` of that row: the category of the turn that sent it,
+   * which is the classifier's reading of the guest message it answered. The
+   * plain close reads it to ask whether the guest had signalled they were done.
+   */
+  category: string | null
 }
 
 /** The guest facts every check needs, in one read. */
@@ -169,7 +176,7 @@ export async function loadWarmCloseCandidates(
   const { data, error } = await supabase
     .from('messages')
     .select(
-      'id, guest_id, direction, status, review_state, body, created_at, generation_id',
+      'id, guest_id, direction, status, review_state, body, category, created_at, generation_id',
     )
     .eq('venue_id', venueId)
     .eq('channel', 'instagram')
@@ -252,6 +259,7 @@ export async function loadWarmCloseCandidates(
       messageId: row.id,
       sentAt,
       body: typeof row.body === 'string' ? row.body : '',
+      category: row.category ?? null,
     })
   }
   return { ok: true, data: candidates }
@@ -443,5 +451,46 @@ export async function markWarmCloseSent(
   return {
     ok: true,
     data: (data ?? []).length === 1 ? 'marked' : 'already_marked',
+  }
+}
+
+/**
+ * Our messages in the conversation this close would end, as the offer
+ * detector reads them (lib/agent/previous-offer.ts).
+ *
+ * The timer asks whether an offer of more help already went out; that
+ * detector takes the same `RecentMessage` shape a reply's context carries, so
+ * the rows are shaped to it here and nothing about "what an offer looks like"
+ * is restated.
+ */
+export async function loadConversationOutbound(
+  supabase: AdminSupabaseClient,
+  venueId: string,
+  guestId: string,
+  since: Date,
+): Promise<StoreResult<RecentMessage[]>> {
+  const { data, error } = await supabase
+    .from('messages')
+    .select('direction, status, review_state, body, category, created_at')
+    .eq('venue_id', venueId)
+    .eq('guest_id', guestId)
+    .eq('direction', 'outbound')
+    .gte('created_at', since.toISOString())
+    .order('created_at', { ascending: false })
+    .limit(WARM_CLOSE_BLOCKER_ROW_LIMIT)
+  if (error) return { ok: false, error: error.message }
+  return {
+    ok: true,
+    data: (data ?? []).map((row) => ({
+      direction: 'outbound' as const,
+      body: typeof row.body === 'string' ? row.body : '',
+      createdAt: new Date(row.created_at),
+      delivery: deriveDelivery({
+        direction: row.direction,
+        status: row.status,
+        review_state: row.review_state,
+      }),
+      category: row.category ?? null,
+    })),
   }
 }

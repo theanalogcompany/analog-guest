@@ -3,10 +3,12 @@
 // TWO SIGN-OFFS, and the processor decides which per guest (TAC-578, ruled
 // 2026-10-07; TAC-575's two were different and both are gone):
 //
-//   plain   the "always here" close: one short line saying the guest can
-//           message anytime. Once per guest EVER, across all conversations
-//           (`guests.warm_close_sent_at`). Not on a visit, and not after a
-//           question that armed an inquiry follow-up.
+//   plain   the once-ever close: a warm line about the conversation and at
+//           most one open-door clause. Once per guest EVER, across all
+//           conversations (`guests.warm_close_sent_at`). ONLY after the guest
+//           signalled they were done; never on a visit, after a question that
+//           armed an inquiry follow-up, or once an offer of more help has
+//           gone out in the conversation.
 //   visit   for a guest who was asked how their order is, never said, chatted
 //           about something else and went quiet in the shop: a light line
 //           about the visit. Once per visit (a `sign_off` row in
@@ -87,14 +89,17 @@ import {
 } from './visit-messages-store'
 import { handleFollowup } from './handle-followup'
 import { loadPendingRowsBySlot } from './pending-slots'
+import { offeredThisConversation } from './previous-offer'
 import {
   isWarmCloseDue,
   isWarmCloseTooLate,
+  SIGN_OFF_CATEGORY,
   warmCloseFloorMs,
   weAskedAQuestion,
 } from './warm-close'
 import {
   claimWarmClose,
+  loadConversationOutbound,
   loadWarmCloseBlocker,
   loadWarmCloseCandidates,
   loadWarmCloseGuestFacts,
@@ -140,6 +145,13 @@ export type WarmCloseSkipReason =
    * once-ever marker is not spent.
    */
   | 'visit_conversation'
+  /**
+   * TAC-578: the guest's last message did not signal they were done. A close
+   * follows a thanks or a bye, never an answer they simply went quiet after.
+   */
+  | 'guest_not_done'
+  /** TAC-578: an offer of more help already went out in this conversation. */
+  | 'offer_already_made'
   /**
    * TAC-578: a question in this conversation armed an inquiry follow-up, which
    * is the next touch. The once-ever marker is not spent.
@@ -491,6 +503,24 @@ async function considerCandidate(
     if (facts.data.warmCloseSentAt !== null) return 'already_closed'
     if (gate.warmCloseText.trim() === '') return 'no_warm_close_text'
 
+    // ONLY WHEN THE GUEST SIGNALLED THEY WERE DONE (ruled 2026-10-07, from a
+    // live test: a close ten minutes behind a purchase link "felt automated").
+    // A thanks, a bye, a "perfect", an emoji. Never a guest who simply went
+    // quiet after an answer.
+    //
+    // HOW IT KNOWS. Nothing writes a category on an inbound row; it is stamped
+    // on OUR reply, as the classifier's reading of the message that reply
+    // answered. The candidate is our newest message, so its category is the
+    // reading of the guest's last one, and `acknowledgment` is the one
+    // category that means "wrapping up" (warm-close.ts, SIGN_OFF_CATEGORY).
+    //
+    // WHAT IT MISSES, stated: a done-signal we never replied to. A bare
+    // reaction, or a "thanks" a turn judged to need no answer, leaves the
+    // guest's message as the newest row, and this timer only ever starts from
+    // one of ours. That guest gets no close, which is the direction this rule
+    // was written to lean.
+    if (candidate.category !== SIGN_OFF_CATEGORY) return 'guest_not_done'
+
     // NOT A VISIT. A guest who scanned in the last day is on a visit, or was
     // on one that still has its own message coming (the thank-you or the
     // check-in, lib/agent/post-visit-timeout.ts). "Message us anytime" on top
@@ -546,6 +576,28 @@ async function considerCandidate(
     }
     if (isInsideOneMessageGap(lastSpaced.data, now)) {
       return 'inside_one_message_gap'
+    }
+
+    // NEVER AFTER AN OFFER OF MORE HELP (same ruling): a guest who has been
+    // told in this conversation that they can ask for more is not told again
+    // by a close. Read with the offer feature's own detector over the same
+    // conversation window, so "what an offer looks like" has one definition.
+    // An unreadable thread has not shown there was none.
+    const ours = await loadConversationOutbound(
+      supabase,
+      candidate.venueId,
+      candidate.guestId,
+      new Date(now.getTime() - gate.conversationWindowMs),
+    )
+    if (!ours.ok) {
+      console.warn('[warm-close] conversation unreadable; skipping', {
+        guestId: candidate.guestId,
+        error: ours.error,
+      })
+      return 'guest_unreadable'
+    }
+    if (offeredThisConversation(ours.data, now, gate.conversationWindowMs)) {
+      return 'offer_already_made'
     }
   }
 

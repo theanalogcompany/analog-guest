@@ -3172,17 +3172,6 @@ export function buildAiRuntime(
     // TAC-575: the sign-off. The kind is decided upstream, by the pause timer
     // and nothing else; this only carries it.
     signOff: ctx.signOff ?? undefined,
-    // The same read the offer decision makes on a reply, measured back from
-    // the moment the timer fired: there is no guest message to measure from.
-    closeAfterOffer:
-      (ctx.signOff === 'plain' &&
-        ctx.followupTrigger !== null &&
-        offeredThisConversation(
-          ctx.recentMessages,
-          ctx.followupTrigger.triggeredAt,
-          ctx.conversationWindowMs,
-        )) ||
-      undefined,
     // TAC-578: the message after a visit, carried the same way. The trigger's
     // routing fields (the row it answers, the link) stay behind; `reviewAsk`
     // below carries the link.
