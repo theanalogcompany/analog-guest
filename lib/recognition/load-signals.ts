@@ -189,14 +189,17 @@ export async function loadSignals({
       })) {
     occurredAtList.push(iso)
   }
-  // Today's own day counts only when an earlier visit day exists, so the
-  // visit that is happening never lifts a first-timer out of `new`
-  // (visitDaysThatCount). Applied here, the one place visits are read for
-  // recognition, so the count, recency and consistency all agree.
-  const visitDateList = visitDaysThatCount(
-    dedupeVisitsByLocalDate(occurredAtList, timezone),
-    formatInTimeZone(new Date(), timezone, 'yyyy-MM-dd'),
-  )
+  // Today alone is not a visit on file: see visitDaysThatCount. Today's key is
+  // only computed when there is a day to compare, so a guest with no visits
+  // never reaches formatInTimeZone (it throws on an unknown zone).
+  const dedupedDays = dedupeVisitsByLocalDate(occurredAtList, timezone)
+  const visitDateList =
+    dedupedDays.length === 0
+      ? dedupedDays
+      : visitDaysThatCount(
+          dedupedDays,
+          formatInTimeZone(new Date(), timezone, 'yyyy-MM-dd'),
+        )
 
   const visitsLast90Days = visitDateList.length
   const lastVisit = visitDateList[visitDateList.length - 1]

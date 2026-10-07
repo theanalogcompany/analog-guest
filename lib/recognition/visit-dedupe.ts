@@ -32,6 +32,11 @@ export function dedupeVisitsByLocalDate(
  * message and they were welcomed back. With an earlier day on file today
  * counts as before, so a regular who is in today loses nothing.
  *
+ * "EARLIER" MEANS EARLIER IN THE LIST, and the list is the 90-day window. A
+ * guest last in 95 days ago who is in today counts zero and reads `new` for
+ * the day, where they read `returning` before. That follows from the rule as
+ * ruled, which was about first-timers; nobody has ruled on the lapsed guest.
+ *
  * `visitDates` is dedupeVisitsByLocalDate's output (midnight UTC of the local
  * day), so the ISO date of each entry IS its local day key. Pure.
  */

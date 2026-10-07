@@ -9,6 +9,10 @@
 // and once with scan days merged in (how it is), and prints the guests for whom
 // either the count or the band the score falls in differs.
 //
+// BOTH ARMS APPLY THE TODAY RULE (visitDaysThatCount, 2026-10-07): a guest
+// whose only visit day is today counts zero in each. So "how it was" is orders
+// alone under today's rule, not the count main printed before that rule.
+//
 // THE TWO ARMS DIFFER IN ONE THING, the `includeScanVisits` argument, and are
 // read back to back for the same guest, so a difference is the scans and not a
 // message that arrived between two runs.
@@ -139,7 +143,8 @@ async function main(): Promise<void> {
       guestId: guest.id,
       visitsBefore: before.data.visitsLast90Days,
       visitsAfter: after.data.visitsLast90Days,
-      independentDayCount: expectedVisits,
+      independentDayCount: days.size,
+      expectedVisits,
       reconciles,
       scoreBefore: scoreBefore.data.score,
       scoreAfter: scoreAfter.data.score,
