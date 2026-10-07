@@ -47,6 +47,11 @@ export interface WarmCloseVenue {
   status: string | null
   instagramAccountId: string | null
   followupRules: unknown
+  /**
+   * TAC-575: `venue_info.links`, unparsed. The timer reads the venue's review
+   * link from it to decide whether a sign-off carries the invitation.
+   */
+  links: unknown
 }
 
 /**
@@ -77,9 +82,20 @@ export interface WarmCloseGuestFacts {
   lastProactiveSendAt: Date | null
   firstContactedAt: Date | null
   warmCloseSentAt: Date | null
+  /** TAC-575: the once-ever review marker. Null means never asked. */
+  reviewAskedAt: Date | null
   optedOutAt: Date | null
   instagramScopedId: string | null
   phoneNumber: string | null
+}
+
+/** `venue_info.links`, or undefined when the stored value has no such key. */
+function linksOf(venueInfo: unknown): unknown {
+  return typeof venueInfo === 'object' &&
+    venueInfo !== null &&
+    'links' in venueInfo
+    ? (venueInfo as { links?: unknown }).links
+    : undefined
 }
 
 /**
@@ -95,7 +111,7 @@ export async function loadWarmCloseVenues(
   const { data, error } = await supabase
     .from('venues')
     .select(
-      'id, timezone, status, instagram_account_id, venue_configs(followup_rules)',
+      'id, timezone, status, instagram_account_id, venue_configs(followup_rules, venue_info)',
     )
   if (error) return { ok: false, error: error.message }
 
@@ -115,6 +131,7 @@ export async function loadWarmCloseVenues(
         followupRules:
           (config as { followup_rules?: unknown } | null)?.followup_rules ??
           null,
+        links: linksOf((config as { venue_info?: unknown } | null)?.venue_info),
       }
     }),
   }
@@ -234,7 +251,7 @@ export async function loadWarmCloseGuestFacts(
   const { data, error } = await supabase
     .from('guests')
     .select(
-      'first_contacted_at, warm_close_sent_at, opted_out_at, instagram_scoped_id, phone_number, last_proactive_send_at',
+      'first_contacted_at, warm_close_sent_at, review_asked_at, opted_out_at, instagram_scoped_id, phone_number, last_proactive_send_at',
     )
     .eq('id', guestId)
     .maybeSingle()
@@ -265,6 +282,10 @@ export async function loadWarmCloseGuestFacts(
       warmCloseSentAt:
         warmCloseSentAt !== null && Number.isFinite(warmCloseSentAt.getTime())
           ? warmCloseSentAt
+          : null,
+      reviewAskedAt:
+        typeof data.review_asked_at === 'string'
+          ? new Date(data.review_asked_at)
           : null,
       optedOutAt:
         typeof data.opted_out_at === 'string'

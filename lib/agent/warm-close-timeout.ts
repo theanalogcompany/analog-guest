@@ -1,5 +1,17 @@
-// TAC-560: send the warm "line is open" close after a first conversation goes
-// quiet.
+// TAC-560: sign off a conversation that has gone quiet.
+//
+// TWO SIGN-OFFS since TAC-575, and the processor decides which per guest:
+//
+//   plain   the warm "line is open" close after a FIRST conversation goes
+//           quiet. Once per guest ever (`guests.warm_close_sent_at`).
+//   happy   for a guest whose visit check-in reads good: the sign-off carries
+//           the review invitation. Once per guest ever too, but of a different
+//           thing (`guests.review_asked_at`), and NOT limited to a first
+//           conversation: a regular who says "so good" and goes quiet is
+//           invited as well.
+//
+// Both are GENERATED. TAC-568 sent the plain close as a fixed per-venue string;
+// TAC-575 reversed that, and the venue's text is now a guide to its content.
 //
 // Called every minute by the external HTTP cron (cron-job.org) that hits
 // /api/cron/warm-close. SIXTH concrete cron-processor sibling of
@@ -16,18 +28,21 @@
 //
 //   Instagram only (ruled 2026-09-29). The text arm is one refusal, recorded as
 //   a follow-up.
-//   Any first Instagram conversation (TAC-575, ruled 2026-10-06). It was
-//   first-visit QR scans only; a guest who simply DMs and then goes quiet is
-//   now closed the same way, because the in-conversation close no longer rides
-//   on a stored name and nothing else would reach them.
+//   Plain: any first Instagram conversation (TAC-575, ruled 2026-10-06). It
+//   was first-visit QR scans only; a guest who simply DMs and then goes quiet
+//   is now closed the same way, because the in-conversation close no longer
+//   rides on a stored name and nothing else would reach them.
+//   Happy: any Instagram guest with a good check-in on the venue-local day,
+//   never before asked for a review, at a venue with a review link.
 //
 // EVERY CONDITION IS RE-CHECKED HERE, never settled earlier. Nothing is stored
 // between ticks except the marker, so there is nothing that could be stale: the
 // due set is derived from `messages` on every tick.
 //
-// ORDER, and it is not arbitrary. Everything that means "this close should never
-// happen" runs BEFORE the claim, because the claim is what burns the guest's one
-// close, for ever. The claim runs last, immediately before generation.
+// ORDER, and it is not arbitrary. Everything that means "this sign-off should
+// never happen" runs BEFORE the claim, because the claim is what burns the
+// guest's one close, or their one review invitation, for ever. The claim runs
+// last, immediately before generation.
 //
 // WHAT IS NOT CHECKED HERE: Meta's 24-hour reply window.
 // dispatch-instagram-reply.ts re-derives it unconditionally immediately before
@@ -48,9 +63,17 @@ import { isTooSoonAfterProactive } from '@/lib/followups/proactive-spacing'
 import { isQuietHour } from './followup-rules'
 import type { AgentResult } from './types'
 import {
+  deriveSignOffReviewAsk,
+  markReviewAsked,
+  releaseReviewAskClaim,
+} from './review-ask'
+import {
   checkbackWentUnanswered,
+  COUNTER_ARRIVAL_WINDOW_MS,
   isCheckbackTooLate,
+  lastProactiveWasThisVisit,
   owesCheckback,
+  type VisitCheckin,
 } from './visit-checkin'
 import { loadLastInboundAt, loadVisitCheckin } from './visit-checkin-store'
 import { handleFollowup } from './handle-followup'
@@ -59,6 +82,7 @@ import {
   isFirstConversation,
   isWarmCloseDue,
   isWarmCloseTooLate,
+  WARM_CLOSE_MAX_AGE_MS,
   warmCloseFloorMs,
   weAskedAQuestion,
 } from './warm-close'
@@ -115,7 +139,7 @@ export type WarmCloseSkipReason =
   /** Not an Instagram conversation. */
   | 'not_instagram'
   /**
-   * TAC-568: this venue has no `followup_rules.warm_close_text`, so there is no
+   * This venue has no `followup_rules.warm_close_text`, so there is no plain
    * close to send. Counted rather than silent: an unconfigured venue should be
    * visible in the tick summary, not indistinguishable from one with no
    * candidates.
@@ -149,7 +173,7 @@ interface VenueGate {
   pauseMs: number
   conversationWindowMs: number
   quietHours: boolean
-  /** TAC-568: the fixed text this venue's close sends, '' when unconfigured. */
+  /** What this venue's plain close covers, '' when unconfigured (no plain close). */
   warmCloseText: string
 }
 
@@ -214,15 +238,9 @@ export async function processDueWarmCloses(
     // Instagram only (ruled 2026-09-29). A venue with no Instagram account can
     // have no Instagram conversation, so skip it whole.
     if (venue.instagramAccountId === null) continue
-    // TAC-568: no configured close, nothing to send. Checked venue-wide and
-    // BEFORE the candidate scan, for the reason the gates above are: a venue
-    // that can never close anyone should cost one venues row per tick, not a
-    // scan. handleFollowup re-checks it, because the config can change between
-    // this tick and the run.
-    if (gate.warmCloseText.trim() === '') {
-      bump('no_warm_close_text')
-      continue
-    }
+    // TAC-575: a venue with no close text is NOT skipped whole any more. Such a
+    // venue can still owe a guest a happy sign-off, which needs the review link
+    // and not the text. The text is checked per candidate, on the plain path.
 
     // The window is bounded by the max age, so the scan is small: at two hours
     // this is a handful of rows per venue.
@@ -333,7 +351,7 @@ async function considerCandidate(
   const floorMs = warmCloseFloorMs(gate.pauseMs, askedQuestion)
   if (!isWarmCloseDue(candidate.sentAt, now, floorMs)) return 'not_yet'
 
-  // One read for the marker, the opt-out and the channel.
+  // One read for the two markers, the opt-out and the channel.
   const facts = await loadWarmCloseGuestFacts(supabase, candidate.guestId)
   if (!facts.ok) {
     console.warn('[warm-close] guest unreadable; skipping', {
@@ -342,31 +360,78 @@ async function considerCandidate(
     })
     return 'guest_unreadable'
   }
-
-  if (facts.data.warmCloseSentAt !== null) return 'already_closed'
   if (facts.data.optedOutAt !== null) return 'opted_out'
   // Instagram only. An Instagram conversation needs an Instagram identifier;
   // resolving the channel properly is dispatchReply's job and it re-checks.
   if (facts.data.instagramScopedId === null) return 'not_instagram'
-  if (facts.data.firstContactedAt === null) return 'not_first_conversation'
-  if (
-    !isFirstConversation(
+
+  // TAC-575: today's visit check-in, if this guest has one. It decides which
+  // sign-off this is, and whether a check-back still comes first.
+  let checkin: VisitCheckin | null = null
+  const closeLocalDate =
+    gate.venue.timezone !== null
+      ? venueLocalDate(now, gate.venue.timezone)
+      : null
+  if (closeLocalDate !== null) {
+    const loaded = await loadVisitCheckin(
+      supabase,
+      candidate.venueId,
+      candidate.guestId,
+      closeLocalDate,
+    )
+    if (!loaded.ok) {
+      console.warn('[warm-close] visit check-in unreadable; skipping', {
+        guestId: candidate.guestId,
+        error: loaded.error,
+      })
+      return 'guest_unreadable'
+    }
+    checkin = loaded.data
+  }
+
+  // WHICH SIGN-OFF. A guest whose check-in reads good, who has never been
+  // asked, at a venue with a review link, gets the invitation as their
+  // sign-off (ruled 2026-10-06), in a first conversation or not: every guest
+  // who answers "how is it?" is eventually offered it. Everyone else gets the
+  // plain close, and only inside the rules that have always bounded it.
+  const reviewAsk = deriveSignOffReviewAsk({
+    checkinAnswer: checkin?.answer ?? null,
+    reviewAskedAt: facts.data.reviewAskedAt,
+    links: gate.venue.links,
+  })
+  const firstConversation =
+    facts.data.firstContactedAt !== null &&
+    isFirstConversation(
       facts.data.firstContactedAt,
       now,
       gate.conversationWindowMs,
     )
-  ) {
-    return 'not_first_conversation'
+  if (reviewAsk === null) {
+    // The plain close: once per guest ever, first conversation only, and only
+    // for a venue that has been given one.
+    if (facts.data.warmCloseSentAt !== null) return 'already_closed'
+    if (!firstConversation) return 'not_first_conversation'
+    if (gate.warmCloseText.trim() === '') return 'no_warm_close_text'
   }
 
   // TAC-575 (ruled 2026-10-06): a person in the thread, or a complaint in it,
-  // means no automated close at all. With the permanent checks, before the
+  // means no automated close at all. With the permanent checks, before any
   // claim. An unreadable thread is not "nothing blocks": skip this tick.
+  //
+  // The stretch read is the conversation this close would end: all of a first
+  // conversation, or, for a returning guest's happy sign-off, this visit, which
+  // starts no earlier than the counter window before the order.
+  const blockerSince =
+    firstConversation && facts.data.firstContactedAt !== null
+      ? facts.data.firstContactedAt
+      : checkin !== null
+        ? new Date(checkin.orderedAt.getTime() - COUNTER_ARRIVAL_WINDOW_MS)
+        : new Date(now.getTime() - WARM_CLOSE_MAX_AGE_MS)
   const blocker = await loadWarmCloseBlocker(
     supabase,
     candidate.venueId,
     candidate.guestId,
-    facts.data.firstContactedAt,
+    blockerSince,
   )
   if (!blocker.ok) {
     console.warn('[warm-close] thread unreadable; skipping', {
@@ -387,47 +452,25 @@ async function considerCandidate(
   // "Unanswered" is read from the guest's side: nothing of theirs has arrived
   // since the check-back went out (checkbackWentUnanswered says why it is not
   // a comparison between two of our own timestamps).
-  const closeLocalDate =
-    gate.venue.timezone !== null
-      ? venueLocalDate(now, gate.venue.timezone)
-      : null
-  if (closeLocalDate !== null) {
-    const checkin = await loadVisitCheckin(
-      supabase,
-      candidate.venueId,
-      candidate.guestId,
-      closeLocalDate,
-    )
-    if (!checkin.ok) {
-      console.warn('[warm-close] visit check-in unreadable; skipping', {
-        guestId: candidate.guestId,
-        error: checkin.error,
-      })
-      return 'guest_unreadable'
+  if (checkin !== null) {
+    if (owesCheckback(checkin) && !isCheckbackTooLate(checkin.orderedAt, now)) {
+      return 'checkback_pending'
     }
-    if (checkin.data !== null) {
-      if (
-        owesCheckback(checkin.data) &&
-        !isCheckbackTooLate(checkin.data.orderedAt, now)
-      ) {
-        return 'checkback_pending'
+    if (checkin.checkbackClaimedAt !== null) {
+      const lastInbound = await loadLastInboundAt(
+        supabase,
+        candidate.venueId,
+        candidate.guestId,
+      )
+      if (!lastInbound.ok) {
+        console.warn('[warm-close] last inbound unreadable; skipping', {
+          guestId: candidate.guestId,
+          error: lastInbound.error,
+        })
+        return 'guest_unreadable'
       }
-      if (checkin.data.checkbackClaimedAt !== null) {
-        const lastInbound = await loadLastInboundAt(
-          supabase,
-          candidate.venueId,
-          candidate.guestId,
-        )
-        if (!lastInbound.ok) {
-          console.warn('[warm-close] last inbound unreadable; skipping', {
-            guestId: candidate.guestId,
-            error: lastInbound.error,
-          })
-          return 'guest_unreadable'
-        }
-        if (checkbackWentUnanswered(checkin.data, lastInbound.data)) {
-          return 'checkback_unanswered'
-        }
+      if (checkbackWentUnanswered(checkin, lastInbound.data)) {
+        return 'checkback_unanswered'
       }
     }
   }
@@ -457,24 +500,69 @@ async function considerCandidate(
     return 'card_pending'
   }
 
-  // TAC-386: no two proactive messages within the hour (ruled 2026-09-30). This
-  // sits with `card_pending` below rather than with the permanent checks above
-  // because it is a DELAY, not a refusal: the close comes round again on a later
-  // tick inside its own two-hour bound.
-  if (isTooSoonAfterProactive(facts.data.lastProactiveSendAt, now)) {
+  // TAC-386: no two proactive messages within the hour (ruled 2026-09-30). A
+  // DELAY, not a refusal: the close comes round again on a later tick inside
+  // its own two-hour bound.
+  //
+  // TAC-575 (ruled 2026-10-06): EXCEPT against this visit's own greeting and
+  // check-back. The three belong to one visit and are not spaced against each
+  // other; the rule still applies against everything else.
+  if (
+    isTooSoonAfterProactive(facts.data.lastProactiveSendAt, now) &&
+    !(
+      checkin !== null &&
+      lastProactiveWasThisVisit(
+        facts.data.lastProactiveSendAt,
+        checkin.orderedAt,
+      )
+    )
+  ) {
     return 'too_soon_after_proactive'
   }
 
-  // Claim last, immediately before generating. Everything above could have said
-  // "never"; from here on the guest's one close is spent.
-  const claim = await claimWarmClose(supabase, candidate.guestId, now)
-  if (claim.status === 'lost') return 'claim_lost'
-  if (claim.status === 'failed') {
-    console.error('[warm-close] claim failed', {
+  // CLAIM LAST, immediately before generating. Everything above could have said
+  // "never"; from here on something of the guest's that exists once is spent.
+  //
+  // WHICH marker depends on the sign-off, because each kind is once of a
+  // different thing:
+  //
+  //   plain   the warm close, once per guest ever: `warm_close_sent_at`.
+  //   happy   the review invitation, once per guest ever: `review_asked_at`.
+  //           markReviewAsked is already the compare-and-set. The praise ask
+  //           stamps that marker AFTER the send; this path cannot, because two
+  //           ticks a minute apart would both find the guest unasked.
+  //
+  // A happy sign-off in a first conversation ALSO takes the warm-close marker,
+  // best effort: it is that guest's close, and a plain one must not follow it.
+  // Losing that second claim does not stop the send.
+  let reviewClaimedAt: Date | null = null
+  let warmCloseClaimed = false
+  if (reviewAsk !== null) {
+    const marked = await markReviewAsked({
+      venueId: candidate.venueId,
       guestId: candidate.guestId,
-      error: claim.error,
+      now,
     })
-    throw new Error(`warm-close claim failed: ${claim.error}`)
+    if (!marked.ok) {
+      throw new Error(`sign-off review claim failed: ${marked.error}`)
+    }
+    if (marked.data === 'already_marked') return 'claim_lost'
+    reviewClaimedAt = now
+    if (firstConversation && facts.data.warmCloseSentAt === null) {
+      const alsoClose = await claimWarmClose(supabase, candidate.guestId, now)
+      warmCloseClaimed = alsoClose.status === 'claimed'
+    }
+  } else {
+    const claim = await claimWarmClose(supabase, candidate.guestId, now)
+    if (claim.status === 'lost') return 'claim_lost'
+    if (claim.status === 'failed') {
+      console.error('[warm-close] claim failed', {
+        guestId: candidate.guestId,
+        error: claim.error,
+      })
+      throw new Error(`warm-close claim failed: ${claim.error}`)
+    }
+    warmCloseClaimed = true
   }
 
   const agentRunId = randomUUID()
@@ -485,28 +573,44 @@ async function considerCandidate(
     trigger: {
       reason: 'warm_close',
       triggeredAt: now,
-      warmClose: { answersMessageId: candidate.messageId, signOff: 'plain' },
+      warmClose:
+        reviewAsk !== null && reviewClaimedAt !== null
+          ? {
+              answersMessageId: candidate.messageId,
+              signOff: 'happy',
+              reviewAsk,
+              reviewClaimedAt,
+            }
+          : { answersMessageId: candidate.messageId, signOff: 'plain' },
     },
   })
 
-  // A close that will NEVER reach the guest releases the claim, so a later tick
-  // inside the two-hour window can try again. Without this a refused generation
-  // or a shut Meta window would spend the guest's one close on nothing.
+  // A sign-off that will NEVER reach the guest releases what it claimed, so a
+  // later tick inside the two-hour window can try again. Without this a refused
+  // generation or a shut Meta window would spend the guest's one close, or
+  // their one review invitation, on nothing.
   //
   // `queued` DELIBERATELY KEEPS THE CLAIM, and that asymmetry is the whole reason
-  // this is a total map rather than `status !== 'sent'`. A queued close is a card
-  // an operator can still approve, which sends it; releasing the claim there
-  // opens a double-send: the card is approved (no marker written, because
-  // dispatchOperatorOutbound knows nothing about this mechanism), the card leaves
-  // the queue, and the next tick inside the window finds a null marker and no
-  // pending card and closes the guest a second time. Keeping the claim costs at
-  // most one guest never being closed, if the operator skips the card, which is
-  // the cheap direction this whole mechanism is biased toward.
+  // RELEASES_CLAIM is a total map rather than `status !== 'sent'`. A queued
+  // sign-off is a card an operator can still approve, which sends it; releasing
+  // there opens a double-send. Keeping it costs at most one guest never being
+  // closed, or never being asked, if the operator skips the card (the second
+  // accepted 2026-10-06 rather than add a claim column of its own).
   if (RELEASES_CLAIM[result.status]) {
-    await releaseWarmCloseClaim(supabase, candidate.guestId, now)
-    console.warn('[warm-close] close did not send; claim released', {
+    if (warmCloseClaimed) {
+      await releaseWarmCloseClaim(supabase, candidate.guestId, now)
+    }
+    if (reviewClaimedAt !== null) {
+      await releaseReviewAskClaim({
+        venueId: candidate.venueId,
+        guestId: candidate.guestId,
+        claimedAt: reviewClaimedAt,
+      })
+    }
+    console.warn('[warm-close] sign-off did not send; claim released', {
       agentRunId,
       guestId: candidate.guestId,
+      signOff: reviewAsk !== null ? 'happy' : 'plain',
       status: result.status,
     })
     await captureWarmCloseSkipped({
@@ -519,11 +623,12 @@ async function considerCandidate(
     return 'claim_lost'
   }
 
-  // TAC-386: the spacing marker, so the other two proactive mechanisms can see
-  // this close. Only on a confirmed send: a `queued` card is an operator's
-  // decision and an operator can see the whole thread.
+  // TAC-386: the spacing marker, so the other proactive mechanisms can see this
+  // close. Only on a confirmed send: a `queued` card is an operator's decision
+  // and an operator can see the whole thread. A fresh clock, for the reason the
+  // check-back uses one: `now` predates the message it would describe.
   if (result.status === 'sent') {
-    await recordProactiveSend(supabase, candidate.guestId, now)
+    await recordProactiveSend(supabase, candidate.guestId, new Date())
   }
 
   await captureWarmCloseSent({
