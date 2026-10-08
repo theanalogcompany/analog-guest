@@ -46,24 +46,32 @@ import { matchForwardCommitment } from './complaint-floor'
 /**
  * Words that put a remedy on the table. Matched only on a complaint turn the
  * model called `clarifying`, where the reply is supposed to ask and propose
- * nothing. "Was it not fresh?" has to stay a question, so `fresh` counts only
- * as "a fresh one" or "another fresh".
+ * nothing. Each is shaped as an OFFER, because the question this protects is
+ * often about the very thing: "was it not fresh?", "was it the gluten free
+ * one?", "did you pay by credit card?", "was it this location or another
+ * one?" and "has the refund not come through yet?" all pass.
  */
 export const REMEDY_PATTERNS: readonly RegExp[] = [
   /\bre-?ma(?:ke|kes|king|de)\b/i,
   /\bredo\b/i,
   /\breplac(?:e|es|ed|ing|ement)\b/i,
-  /\banother\b/i,
+  // "make you another", "get you another one", "another one made". Not
+  // "another visit", "another barista", "this location or another one".
+  /\b(?:make|get|have|pour|bring|grab)\b[^.?!]*\banother\b/i,
+  /\banother (?:one|cup|drink|round) (?:on|made|for)\b/i,
   /\b(?:a|another) fresh\b|\bfresh one\b/i,
   /\bon (?:us|me|the house)\b/i,
   /\bmake (?:it|this|that) (?:right|up)\b/i,
   /\bmake up for\b/i,
   /\bput (?:it|this|that) right\b/i,
   /\bmoney back\b/i,
-  /\brefund/i,
-  /\bcredit\b/i,
-  /\bdiscount/i,
-  /\bfree\b/i,
+  // An offer of one, not a question about one: "has the refund not come
+  // through?" and "did the discount not apply?" stay questions.
+  /\b(?:a|your) (?:full |partial )?refund\b|\brefund (?:you|it|that)\b/i,
+  /\b(?:a|your|store) credit\b(?! (?:or debit )?card\b)/i,
+  /\b(?:a|your) discount\b/i,
+  // "for free", "a free one". Not "gluten free", "dairy-free".
+  /\b(?:a|an|for|your|another) free\b/i,
 ]
 
 /** True when a reply names a remedy. Pure. */

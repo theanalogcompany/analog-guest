@@ -285,6 +285,46 @@
       ],
       "inbound": "just got a cortado",
       "fullTurn": true
+    },
+    {
+      "id": "decaf-new-topic",
+      "kind": "new-topic",
+      "threads": [
+        "phone-test-before-brew",
+        "brew-clean-question"
+      ],
+      "inbound": "do you have decaf",
+      "fullTurn": true
+    },
+    {
+      "id": "wifi-new-topic",
+      "kind": "new-topic",
+      "threads": [
+        "phone-test-before-brew",
+        "brew-clean-question"
+      ],
+      "inbound": "whats the wifi password",
+      "fullTurn": true
+    },
+    {
+      "id": "dogs-new-topic",
+      "kind": "new-topic",
+      "threads": [
+        "phone-test-before-brew",
+        "brew-clean-question"
+      ],
+      "inbound": "dogs ok?",
+      "fullTurn": true
+    },
+    {
+      "id": "cortado-statement",
+      "kind": "new-topic",
+      "threads": [
+        "phone-test-before-brew",
+        "brew-clean-question"
+      ],
+      "inbound": "just got a cortado",
+      "fullTurn": true
     }
   ]
 }

@@ -10,7 +10,9 @@
  *
  * Two pure decisions live here, one per stage that read the word alone. Both
  * apply to the same turn: a message of at most SHORT_ANSWER_MAX_WORDS words
- * with no question in it, arriving when the last thing said was ours.
+ * that does not read as a question, arriving when the last thing said was
+ * ours. A second message in the same burst is not that turn (the first one is
+ * then the last thing said), and both decisions stand aside.
  *
  * 1. THE CLASSIFIER'S TIE (`resolveAnswerTie`). The classifier prompt now
  *    says how to read such an answer (jev-v1.5.0), and that moved `unknown`
@@ -31,28 +33,34 @@
  *    for reply against new_question only, the second was still 1 in 10: reply
  *    0.31 against casual_chatter 0.24. Hence the wider runner-up set.
  *
- * 2. THE RETRIEVAL QUERY (`answerQuery`). Knowledge retrieval's first arm
- *    searched with the bare message, so "budan" fetched what Budan tastes
- *    like and what a bag costs. On this turn that arm searches with what the
- *    guest had asked, the question we put back if we put one, then their
- *    answer (ruled 2026-10-07: "combines our question and their answer, not
- *    the bare word"). The contextual arm is untouched.
+ * 2. THE RETRIEVAL QUERY (`answerQuery`). Knowledge retrieval searched with
+ *    the bare message and with the last two turns in front of it. "budan"
+ *    alone fetched what Budan tastes like and what a bag costs, and the
+ *    contextual arm, which carries our whole reply, ranked the Malenad row
+ *    first because the reply quoted it nearly word for word. On this turn a
+ *    third arm searches with what the guest had asked, the question we put
+ *    back if we put one, then their answer. With it the Budan brewing row is
+ *    in the slate on the real thread and first on the three constructed ones.
  *
- *    THE GUEST'S OWN QUESTION IS IN IT, which the ruling did not ask for, and
- *    the real thread is why. Its reply left a choice without a question mark
- *    ("Depends on which beans"), so there was no question of ours to combine;
- *    and the contextual arm, which carries that whole reply, ranked the
- *    Malenad row first because the reply quoted it nearly word for word. With
- *    "how do i brew your beans" then "budan", the Budan brewing row is first
- *    on that thread and on the three constructed ones.
+ *    THE GUEST'S OWN QUESTION IS IN IT. The ruling (2026-10-07) was "our
+ *    question and their answer", and the real thread's reply left a choice
+ *    without a question mark ("Depends on which beans"), so there was no
+ *    question of ours to combine.
  *
- *    A thanks or an "ok" is a short message after a reply of ours too. There
- *    the arm searches with what they had asked, which the contextual arm
- *    already does, in place of a bare "thanks" that matches nothing.
+ *    IT IS ADDED TO THE BARE ARM, NOT PUT IN ITS PLACE, which the same ruling
+ *    asked for ("not the bare word") and which was built first. A short
+ *    message after a reply of ours is not always an answer: with the bare arm
+ *    replaced, "whats the wifi password" lost the Wi-Fi row and "just got a
+ *    cortado" lost every cortado row, each to four rows about brewing beans.
+ *    Nothing here can tell those from "budan" (`looksLikeQuestion` catches
+ *    "do you have decaf" and misses "whats"), so the bare arm stays first and
+ *    its top two survive the interleave, as lib/agent/CLAUDE.md requires. The
+ *    cost is one slot: the contextual arm keeps its first result only.
  *
  * Pure: no DB, no model call. Check: `npm run measure-answer-to-our-question`.
  */
 import type { MessageCategory } from '@/lib/ai/types'
+import { looksLikeQuestion } from './looks-like-question'
 import { contextTurns, MAX_CONTEXT_BODY_CHARS } from './retrieval-context'
 import type { RuntimeContext } from './types'
 
@@ -64,10 +72,14 @@ import type { RuntimeContext } from './types'
  */
 export const SHORT_ANSWER_MAX_WORDS = 4
 
-/** A few words with no question in them. */
+/**
+ * A few words that do not read as a question. Guests here drop the question
+ * mark as often as not ("do you have decaf"), so the mark alone would call a
+ * short new question an answer; `looksLikeQuestion` also reads the opener.
+ */
 function isShortAnswer(body: string): boolean {
   const answer = body.trim()
-  if (answer.length === 0 || answer.includes('?')) return false
+  if (answer.length === 0 || looksLikeQuestion(answer)) return false
   return answer.split(/\s+/).length <= SHORT_ANSWER_MAX_WORDS
 }
 
@@ -85,11 +97,26 @@ function exchangeBeforeThisMessage(
   }
 }
 
-/** The last question in a reply of ours, or null when it asked nothing. */
+/**
+ * The last question in a reply of ours, or null when it asked nothing.
+ *
+ * Read sentence by sentence, so a link with a query string is not a question
+ * and "$4.50" does not cut one in half. A question of one or two words
+ * ("Which one?", or the "5?" left when "No. 5?" splits) is returned with the
+ * sentence in front of it, because by itself it says nothing to search with.
+ */
 function lastQuestionIn(body: string): string | null {
-  const questions = body.match(/[^.!?\n]*\?/g)
-  const last = questions?.[questions.length - 1]?.trim()
-  return last === undefined || last.length <= 1 ? null : last
+  const sentences = body
+    .split(/(?<=[.!?])\s+|\n+/)
+    .map((sentence) => sentence.trim())
+    .filter((sentence) => sentence.length > 0)
+  for (let i = sentences.length - 1; i >= 0; i -= 1) {
+    const sentence = sentences[i]!
+    if (!/[a-z0-9][^a-z0-9]*\?+$/i.test(sentence)) continue
+    const short = sentence.split(/\s+/).length < 3
+    return short && i > 0 ? `${sentences[i - 1]} ${sentence}` : sentence
+  }
+  return null
 }
 
 const capped = (body: string) =>

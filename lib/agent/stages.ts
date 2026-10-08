@@ -722,8 +722,10 @@ export async function classifyStage(
     : null
   const autoRoutedToUnknown = belowFloor && answerTie === null
   if (answerTie !== null) {
-    // Counted, because a rule that changes routing and cannot be counted is
-    // how a backstop gets believed without evidence. Carries no guest content.
+    // A structured line, so the rule's firing rate can be read from the logs:
+    // a rule that changes routing and cannot be counted is how a backstop
+    // gets believed without evidence. Carries no guest content. The
+    // low-confidence event below still fires, with the classifier's own pick.
     console.warn('[agent] classification answer tie kept out of unknown', {
       event: 'classification_answer_tie',
       venueId: ctx.venue.id,
@@ -975,19 +977,21 @@ export async function retrieveKnowledgeWithContextStage(
   ctx: RuntimeContext,
   category: MessageCategory | null,
   query: string,
-  options?: { turns?: number; rule?: MergeRule },
+  // `withoutAnswerArm` is for the measurement harness's control arm only.
+  options?: { turns?: number; rule?: MergeRule; withoutAnswerArm?: boolean },
 ): Promise<KnowledgeMatch[]> {
   const contextQuery = buildContextQuery(ctx, options?.turns ?? CONTEXT_TURNS)
   if (contextQuery === '') return retrieveKnowledgeStage(ctx, category, query)
 
-  // A short answer to a question of ours searches with the question in front
-  // of it rather than as a bare word (answer-to-our-question.ts, decision 2).
-  // '' on every other turn, where the first arm is the message as before.
-  const directQuery = answerQuery(ctx) || query
-  const settled = await Promise.allSettled([
-    retrieveKnowledgeStage(ctx, category, directQuery),
-    retrieveKnowledgeStage(ctx, category, contextQuery),
-  ])
+  // A short answer to something we said gets a THIRD arm: what they had
+  // asked, our question, their answer (answer-to-our-question.ts, decision
+  // 2). Added, never substituted: the bare arm stays first, so its top two
+  // still survive the interleave. '' on every other turn, which is two arms.
+  const answer = options?.withoutAnswerArm === true ? '' : answerQuery(ctx)
+  const queries = [query, contextQuery, ...(answer === '' ? [] : [answer])]
+  const settled = await Promise.allSettled(
+    queries.map((q) => retrieveKnowledgeStage(ctx, category, q)),
+  )
   const arms = settled.map((s) => (s.status === 'fulfilled' ? s.value : []))
   for (const s of settled) {
     if (s.status === 'rejected') {

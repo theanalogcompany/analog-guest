@@ -543,9 +543,9 @@ a warm-close anchor, excluded inside `loadWarmCloseCandidates`. Reasons in those
 
 - **A short answer to something we said is read against what we said**
   (`answer-to-our-question.ts`, 2026-10-07). Two decisions on the same turn: under the
-  confidence floor a classifier torn between `reply` and `new_question` keeps out of `unknown`,
-  and knowledge retrieval's first arm searches with the guest's earlier question and ours in
-  front of the answer. Header has the measurements; `npm run measure-answer-to-our-question`
+  confidence floor a classifier whose pick is `reply` or `new_question`, with a conversational
+  runner-up, keeps out of `unknown`; and knowledge retrieval gets a third arm, the guest's
+  earlier question and ours in front of the answer, behind the bare arm and never in its place. Header has the measurements; `npm run measure-answer-to-our-question`
   is the check, on the real thread.
 
 - Two facts about the guest are derived from their own messages rather than left to the

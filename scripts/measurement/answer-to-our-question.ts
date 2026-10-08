@@ -22,6 +22,13 @@
 //     nothing needs asking. No reply may ask anything. A fix that lets the
 //     clarifying question through by letting every question through has not
 //     fixed anything. Main's wording scored 0 asking in 24 on these.
+//   - the `new-topic` cells: a short message after a reply of ours that
+//     opens a new subject. Run with --retrieve-only, with and without
+//     --ablate bare-query: the bare arm's first two results must be in both
+//     listings. SUBSTITUTING the answer query for the bare arm, which is what
+//     was built first, lost the Wi-Fi row for "whats the wifi password" and
+//     every cortado row for "just got a cortado"; these cells are why it is
+//     a third arm.
 //   - budan-no-history is the CONTROL and has no bar: a bare word with nothing
 //     in front of it is still a bare word. It is printed so a wording that
 //     made every one-word message confident would show.
@@ -37,12 +44,9 @@
 //                                made with a temporary switch in
 //                                serializers.ts that did not ship; their
 //                                figures are at WHICH_ONE_BAN there.
-//   --ablate bare-query          retrieval's first arm searches with the bare
-//                                message, as before the answer query. Done by
-//                                taking the `?` out of our last message for
-//                                the retrieval call only, which is what
-//                                switches that query off; the contextual
-//                                arm's text differs by that one character.
+//   --ablate bare-query          retrieval runs its two arms, the bare message
+//                                and the contextual query, without the third
+//                                one this change adds (`withoutAnswerArm`).
 //
 // WHAT IT CANNOT TELL YOU:
 //   - The guest is neutralised (no visits, commitments, intentions, mechanics,
@@ -87,7 +91,7 @@ interface Line {
 
 interface Cell {
   id: string
-  kind: 'answer' | 'brew' | 'control' | 'no-question'
+  kind: 'answer' | 'brew' | 'control' | 'no-question' | 'new-topic'
   threads: string[]
   inbound: string
   fullTurn: boolean
@@ -236,19 +240,14 @@ async function runTurn(input: TurnInput): Promise<Unit> {
     if (input.classifyOnly || !input.cell.fullTurn) return unit
 
     ctx.corpus = await retrieveCorpusStage(ctx)
-    if (input.ablate === 'bare-query')
-      ctx.recentMessages = input.history.map((m) => ({
-        ...m,
-        body: m.direction === 'outbound' ? m.body.replaceAll('?', '') : m.body,
-      }))
     ctx.knowledgeCorpus = shouldRetrieveKnowledge(ctx)
       ? await retrieveKnowledgeWithContextStage(
           ctx,
           classification.category,
           input.cell.inbound,
+          { withoutAnswerArm: input.ablate === 'bare-query' },
         )
       : []
-    ctx.recentMessages = input.history
     unit.knowledge = ctx.knowledgeCorpus.map((k) => k.text.slice(0, 70))
     if (input.retrieveOnly) return unit
 
@@ -419,7 +418,8 @@ async function main() {
     console.log(
       `${cell.id.padEnd(24)} ${cell.kind.padEnd(8)} ${String(t.valid).padEnd(6)} ${String(t.errors).padEnd(7)} ${String(t.unknown).padEnd(8)} ${full ? String(t.sent).padEnd(5) : '-    '} ${full ? t.good : '-'}`,
     )
-    if (cell.kind === 'control') continue
+    // new-topic cells are read in --retrieve-only against the bare-query arm.
+    if (cell.kind === 'control' || cell.kind === 'new-topic') continue
     // A failed unit is not a result: it disqualifies the cell.
     if (t.errors > 0) failures.push(`${cell.id}: ${t.errors} errored unit(s)`)
     if (t.valid === 0) {
