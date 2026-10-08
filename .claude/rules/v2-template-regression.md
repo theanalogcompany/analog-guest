@@ -7,7 +7,7 @@ paths:
 # A V2_PROMPT_VERSION bump ships with a regression run
 
 Every measured lesson in `lib/ai/v2/template.ts`'s changelog exists as a scenario in
-`scripts/measurement/template-regression.ts`.
+`REGRESSION_SCENARIOS` in `lib/eval/regression-scenarios.ts`.
 The comments are the record; the harness is the enforcement.
 A template or seed-graph copy change that bumps `V2_PROMPT_VERSION` is not done until:
 
@@ -21,9 +21,17 @@ A template or seed-graph copy change that bumps `V2_PROMPT_VERSION` is not done 
 
 ## When the template gains a measured lesson, the harness gains a scenario
 
-A new changelog entry citing a measurement belongs in `SCENARIOS` in the same PR -
-scenario key, script, and which bar or ceiling encodes the lesson.
+A new changelog entry citing a measurement belongs in `REGRESSION_SCENARIOS`
+(`lib/eval/regression-scenarios.ts`) in the same PR - scenario key, script, and which bar or
+ceiling encodes the lesson.
 A lesson that lives only as a comment is one rewrite away from silently undone.
+
+**Adding a scenario is a code edit and nothing else.** No migration, no Studio apply, no row
+to insert: the array is the source of truth and the harness reads it directly (decision 0011).
+The `regression_scenarios` table carries only the `enabled` flag, for silencing a case from
+`/admin/regression` without a deploy.
+It was the other way round until migration 077, and a scenario added in code alone was inert
+and silently so - that cost two false greens in two days.
 
 ## What this harness is not
 
