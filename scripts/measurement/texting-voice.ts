@@ -85,7 +85,11 @@ import {
   shorterReplyConstraint,
 } from '@/lib/ai/reply-length'
 import { buildRuntimeContext } from '@/lib/agent/build-runtime-context'
-import { offeredThisConversation } from '@/lib/agent/previous-offer'
+import { looksLikeQuestion } from '@/lib/agent/looks-like-question'
+import {
+  offeredThisConversation,
+  previousReplyOffered,
+} from '@/lib/agent/previous-offer'
 import { decidePureClose } from '@/lib/agent/pure-close'
 import {
   resolveDispatchBubbles,
@@ -502,6 +506,11 @@ async function main(): Promise<void> {
       '[texting-voice] LEAVE-ONE-OUT RUN: a prompt line is cut. Not the shipped prompt.',
     )
   }
+  if (process.env.MEASURE_FORCE_MARKS === '1') {
+    console.log(
+      '[texting-voice] FORCED MARKS: both coins land on "allowed" every reply. Not the shipped rate.',
+    )
+  }
   console.log(`[texting-voice] run log: ${log.path}`)
 
   const cache = { read: 0, write: 0, uncached: 0, calls: 0 }
@@ -549,17 +558,32 @@ async function main(): Promise<void> {
     // Decided with the function the inbound turn calls, before anything is
     // generated, so a skipped unit costs no generation here either.
     const newest = ctx.recentMessages.at(-1)
+    const ourLast =
+      newest !== undefined && newest.direction === 'outbound'
+        ? newest.body
+        : null
     const close = decidePureClose({
       category,
       crisisSafety: false,
+      praisedExperience: false,
       body: unit.inbound,
       hasMedia: false,
-      ourLastMessage:
-        newest !== undefined && newest.direction === 'outbound'
-          ? newest.body
-          : null,
+      ourLastMessage: ourLast,
+      ourLastMessageAskedOrOffered:
+        ourLast !== null &&
+        (looksLikeQuestion(ourLast) ||
+          previousReplyOffered(
+            ctx.recentMessages,
+            now,
+            ctx.conversationWindowMs,
+          )),
       hasOpenCommitment: false,
-      teamUnansweredShare: persona.voiceProfile?.closes?.unansweredShare,
+      hasVisitCheckinToday: false,
+      // Every unit here is a first conversation, where a close is answered
+      // so the warm close still has our reply to fire from. MEASURE_ESTABLISHED
+      // reads the decision as it is for a guest past their first conversation.
+      firstConversation: process.env.MEASURE_ESTABLISHED !== '1',
+      teamHabit: persona.voiceProfile?.closes,
     })
     if (!close.reply) {
       notAnswered += 1
@@ -618,7 +642,7 @@ async function main(): Promise<void> {
           const next = user.replace(/ Next open [^.]*\./, '')
           if (next === user) {
             throw new Error(
-              'no "Next open" line in this prompt: the venue is open, or the turn is an acknowledgment, where it no longer renders',
+              'no "Next open" line in this prompt: the venue is open, or the turn is small talk or a reply not about timing, where it no longer renders',
             )
           }
           user = next

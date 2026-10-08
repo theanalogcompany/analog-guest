@@ -102,13 +102,13 @@ function writingSection(profile: VoiceProfile): string {
   lines.push(
     bang < RARE
       ? `They almost never use an exclamation mark (${pct(bang)} of their messages).`
-      : `${pct(bang)} of their messages have an exclamation mark, when they are glad about something. Whether this message may is decided for you in "## Marks for this message".`,
+      : `${pct(bang)} of their messages have an exclamation mark, when they are glad about something. Whether this message carries one is decided for you in "## Marks for this message".`,
   )
 
   const smiley = profile.smileyShareOfBubbles
   if (smiley >= RARE) {
     lines.push(
-      `${pct(smiley)} of their messages have a typed smiley, the two characters :) on the end of a line. That is theirs, and it is not an emoji. Whether this message may is decided in the same block.`,
+      `${pct(smiley)} of their messages have a typed smiley, the two characters :) on the end of a line. That is theirs, and it is not an emoji. Whether this message carries one is decided in the same block.`,
     )
   }
 

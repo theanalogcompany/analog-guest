@@ -2654,10 +2654,12 @@ import {
 //   nine small-talk replies mentioned the hours.
 //
 //   AND SOME MESSAGES NOW GET NO REPLY AT ALL, decided in code before
-//   anything is generated (lib/agent/pure-close.ts): a bare "ok", "thanks" or
-//   emoji after a message of ours, at a venue whose own team left 60 of 66 of
-//   those unanswered. Not a prompt change; recorded here because it replaces
-//   the reply this prompt used to write to "ok".
+//   anything is generated (lib/agent/pure-close.ts): a bare "ok" or "thanks"
+//   after a message of ours, at a venue whose own team left 27 of 31 of those
+//   unanswered, and not in a guest's first conversation or on a day with a
+//   visit check-in, where a timer is waiting on our reply. Not a prompt
+//   change; recorded here because it replaces the reply this prompt used to
+//   write to "ok".
 //
 //   NOT FIXED: "what's so special about Indian coffee" still compares it with
 //   coffee from elsewhere, three of three ("in ways you don't get elsewhere",

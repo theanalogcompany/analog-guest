@@ -72,6 +72,8 @@ import {
   markReviewAsked,
 } from './review-ask'
 import { scheduleInquiryFollowup } from './schedule-inquiry-followup'
+import { looksLikeQuestion } from './looks-like-question'
+import { previousReplyOffered } from './previous-offer'
 import { decidePureClose } from './pure-close'
 import { renderableIntentions } from './intentions/derive'
 // The dispatch-side split, imported rather than restated: the v1 test draft's
@@ -2014,10 +2016,11 @@ async function runInboundTurn(
     }
 
     // NOT EVERY MESSAGE NEEDS A REPLY (ruled 2026-10-07). A bare "ok",
-    // "thanks" or emoji after a message of ours, at a venue whose own team
+    // "thanks" or thumbs up after a message of ours, at a venue whose own team
     // mostly left those unanswered, gets nothing: no reply, no card, no
     // follow-up. Every doubt replies as normal; lib/agent/pure-close.ts has
-    // the measurement and the list of doubts.
+    // the list of doubts, and why a first conversation and a visit check-in
+    // are on it.
     //
     // HERE, for three reasons. After classification, because the category is
     // half the test. After the opt-out decision, which has its own silence
@@ -2026,20 +2029,35 @@ async function runInboundTurn(
     // costs one classifier call and arms no follow-up or check-back.
     if (optOutDecision.action === 'none') {
       const newest = ctx.recentMessages.at(-1)
+      // Ours, read by the guest, and part of this conversation: a wave nine
+      // days after our last message is a hello, not a close.
+      const ourLast =
+        newest !== undefined &&
+        newest.direction === 'outbound' &&
+        reachedGuest(newest) &&
+        inbound.message.receivedAt.getTime() - newest.createdAt.getTime() <=
+          ctx.conversationWindowMs
+          ? newest.body
+          : null
       const close = decidePureClose({
         category: ctx.classification.category,
         crisisSafety: ctx.classification.crisisSafety,
+        praisedExperience: ctx.classification.praisedExperience,
         body: inbound.message.body,
         hasMedia: ctx.inboundMedia != null,
-        ourLastMessage:
-          newest !== undefined &&
-          newest.direction === 'outbound' &&
-          reachedGuest(newest)
-            ? newest.body
-            : null,
+        ourLastMessage: ourLast,
+        ourLastMessageAskedOrOffered:
+          ourLast !== null &&
+          (looksLikeQuestion(ourLast) ||
+            previousReplyOffered(
+              ctx.recentMessages,
+              inbound.message.receivedAt,
+              ctx.conversationWindowMs,
+            )),
         hasOpenCommitment: ctx.activeCommitments.length > 0,
-        teamUnansweredShare:
-          ctx.venue.brandPersona.voiceProfile?.closes?.unansweredShare,
+        hasVisitCheckinToday: ctx.visitCheckin !== null,
+        firstConversation: ctx.firstConversation,
+        teamHabit: ctx.venue.brandPersona.voiceProfile?.closes,
       })
       if (!close.reply) {
         if (testSink !== undefined) {

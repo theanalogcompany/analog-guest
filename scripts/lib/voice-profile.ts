@@ -23,11 +23,8 @@
 // is measured, and the script prints how many replies each one removed so the
 // choice can be argued with.
 
-import {
-  isAnsweringUs,
-  pureCloseKind,
-  type PureCloseKind,
-} from '@/lib/agent/pure-close'
+import { looksLikeQuestion } from '@/lib/agent/looks-like-question'
+import { pureCloseKind, type PureCloseKind } from '@/lib/agent/pure-close'
 import type { VoiceProfile } from '@/lib/schemas'
 
 /** A longer pause than this between two venue messages starts a new reply. */
@@ -285,15 +282,26 @@ export function exampleCandidates(
 /** A reply this long after a close is the team writing again, not answering it. */
 export const CLOSE_REPLY_WINDOW_MS = 24 * 60 * 60_000
 
+/** The guest wrote again this soon after their close: it was not their last word. */
+export const CLOSE_BURST_MS = 10 * 60_000
+
 /**
  * What the team did when a guest sent a pure close after one of their
- * messages: "ok", "thanks", a lone emoji. Counted with the same two functions
- * the inbound turn decides with (lib/agent/pure-close.ts), so the share
- * describes exactly the messages the agent would stay silent on.
+ * messages: "ok", "thanks", a thumbs up. A close is recognised by the same
+ * function the inbound turn uses (lib/agent/pure-close.ts).
+ *
+ * Counted: a close that follows the team's reply, where that reply asked
+ * nothing, and that the guest did not follow with more within CLOSE_BURST_MS
+ * (an "ok" and then a question is the start of the question, and whether the
+ * team answered it says nothing about the "ok").
  *
  * "Unanswered" means no message from the venue before the guest's next one,
- * or none within CLOSE_REPLY_WINDOW_MS. A reaction is not a message and is
- * not in the import, so a close the team hearted counts as unanswered.
+ * or none within CLOSE_REPLY_WINDOW_MS.
+ *
+ * TWO THINGS THIS CANNOT SEE, both of which push the share up. A reaction is
+ * not a message and is not in the import, so a close the team hearted counts
+ * as unanswered. Nor is a reply with no text, a photo or a voice note. So the
+ * share is an upper bound on "the team sent nothing".
  */
 export function measureCloses(messages: readonly ProfileMessage[]): {
   seen: number
@@ -315,11 +323,28 @@ export function measureCloses(messages: readonly ProfileMessage[]): {
   for (const list of byGuest.values()) {
     list.sort((a, b) => a.at.getTime() - b.at.getTime())
     list.forEach((m, i) => {
-      const before = list[i - 1]
-      if (m.direction !== 'inbound' || before?.direction !== 'outbound') return
+      if (m.direction !== 'inbound' || list[i - 1]?.direction !== 'outbound') {
+        return
+      }
       const kind = pureCloseKind(m.body)
-      if (kind === null || isAnsweringUs(before.body)) return
+      if (kind === null) return
+      // The team's whole reply before it, every message of it: a question in
+      // the first of three bubbles still makes "ok" an answer.
+      let start = i - 1
+      while (start > 0 && list[start - 1]?.direction === 'outbound') start -= 1
+      const before = list
+        .slice(start, i)
+        .map((x) => x.body)
+        .join(' ')
+      if (looksLikeQuestion(before)) return
       const after = list[i + 1]
+      if (
+        after !== undefined &&
+        after.direction === 'inbound' &&
+        after.at.getTime() - m.at.getTime() <= CLOSE_BURST_MS
+      ) {
+        return
+      }
       const answered =
         after !== undefined &&
         after.direction === 'outbound' &&
