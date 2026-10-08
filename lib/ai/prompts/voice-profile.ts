@@ -20,6 +20,13 @@
 //     lines to reuse, and the real replies shown as examples already carry
 //     how the team opens.
 //
+// ONE LIST OF LINES IS IN THE PROMPT, against the reasoning just above, and
+// on purpose (ruled 2026-10-08): how the team leaves the door open at the end
+// of a reply. The offer-more-help line came out in a register the team does
+// not use ("happy to help you navigate the rest of the menu too"), and it is
+// one short line sent at most once a conversation, so a line that lands close
+// to one of theirs is the wanted result, not a defect.
+//
 // No em dashes anywhere in this copy: the model echoes what it is shown.
 
 import type { VoiceProfile } from '@/lib/schemas'
@@ -126,16 +133,38 @@ function writingSection(profile: VoiceProfile): string {
   ].join('\n')
 }
 
+/**
+ * The team's own door-open lines, as the model for `furtherHelpOffer`.
+ * Heading and sentence approved 2026-10-08. Null when the venue has none,
+ * and the shared `# Offering more help` section then stands alone.
+ *
+ * Rendered in the persona, after the shared section, so it is the later of
+ * the two and wins on wording. Whether a line is SENT is still code's call
+ * (lib/ai/further-help-offer.ts), once a conversation.
+ */
+function offerSection(profile: VoiceProfile): string | null {
+  const lines = (profile.offerLines ?? []).filter((l) => l.trim() !== '')
+  if (lines.length === 0) return null
+  return [
+    '## How the team leaves the door open',
+    "Real lines this venue's team ended a reply with. When you write `furtherHelpOffer`, write it the way they do: short, plain, and about the thing you just helped with.",
+    ...lines.map((l) => `- ${l.trim()}`),
+  ].join('\n')
+}
+
 /** The persona sections a measured profile replaces or adds. */
 export function voiceProfileToProse(profile: VoiceProfile): {
   length: string
   emojis: string
   writing: string
+  /** Null when the venue has no approved lines. */
+  offers: string | null
 } {
   return {
     length: lengthSection(profile),
     emojis: emojiSection(profile),
     writing: writingSection(profile),
+    offers: offerSection(profile),
   }
 }
 

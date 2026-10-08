@@ -34,7 +34,7 @@ decision rather than silent drift. A **required** boolean or string is free.
 `correctsPendingReply`, `followUpWorthy`, `praisedExperience`. None is `.optional()`, which
 is what makes the compiler name every site synthesizing a `Classification`.
 
-`PROMPT_VERSION` (`prompts/system-template.ts`, currently v1.104.0) covers the
+`PROMPT_VERSION` (`prompts/system-template.ts`, currently v1.105.0) covers the
 classify/generate contract. Every other module here carries its own, and they are
 deliberately not linked:
 
@@ -117,9 +117,15 @@ unverified link. **Constraints are sticky for the whole call** and worded as sta
 instructions, not as reports on the previous attempt - a sticky directive phrased as
 feedback becomes false the moment it outlives the attempt it describes.
 
-**No check result mutates the body.** A persistent dash, self-talk or unverified link ships
-and fires an observation event; there is no strip and no rewrite to make a check pass. Do
-not read the dash loop as precedent for adding one.
+**No check result mutates the body, with ONE exception.** A persistent dash, self-talk or
+unverified link ships and fires an observation event; there is no strip and no rewrite to
+make a check pass. Do not read the dash loop as precedent for adding one.
+
+The exception is the bracket check (`parenthetical.ts`, ruled 2026-10-08). A reply to a guest
+that lists or defines something in brackets is asked for once more, and a bracket still in
+what ships is taken out, contents and all. It was ruled on knowing it drops facts, runs on
+replies only, and reports itself on `parentheticalRetry` and the `reply_parenthetical` event
+with the text as it was. It is not a precedent either.
 
 Two transformations DO run at the `replaceDashes` seam, and both are normalizations rather
 than check outcomes:

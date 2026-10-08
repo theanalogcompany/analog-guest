@@ -8,6 +8,7 @@ import {
   captureDemoBypassedApprovalGate,
   captureEmojiDirectiveViolated,
   captureReplyLengthRetry,
+  captureReplyParenthetical,
   captureMechanicOfferBackstopCaught,
   captureClosedVenueArrivalCaught,
   captureProsePromiseCaught,
@@ -1073,8 +1074,12 @@ export async function generateStage(
   // A second attempt asked for by the length check alone is not this alert's
   // subject: it has its own event below, and nothing was wrong with the first
   // answer but its length.
+  // The bracket check's second attempt is the same case one check over, but
+  // it can share its attempt with a self-talk or link rejection, so that is
+  // read off the call and not inferred from the count.
   const lengthRetryOnly =
-    r.data.replyLengthRetry !== 'none' && r.data.attempts === 2
+    (r.data.replyLengthRetry !== 'none' && r.data.attempts === 2) ||
+    (r.data.parentheticalRetry !== 'none' && !r.data.regeneratedForViolation)
   if (r.data.attempts > 1 && !lengthRetryOnly) {
     await captureRegenerationTriggered({
       agentRunId: ctx.agentRunId,
@@ -1111,6 +1116,19 @@ export async function generateStage(
       guestId: ctx.guest.id,
       category,
       emojiPolicy: ctx.venue.brandPersona.emojiPolicy,
+      finalGeneratedBody: r.data.body,
+    })
+  }
+
+  if (r.data.parentheticalRetry !== 'none') {
+    await captureReplyParenthetical({
+      agentRunId: ctx.agentRunId,
+      venueId: ctx.venue.id,
+      guestId: ctx.guest.id,
+      category,
+      outcome: r.data.parentheticalRetry,
+      attempts: r.data.attempts,
+      before: r.data.parentheticalBefore,
       finalGeneratedBody: r.data.body,
     })
   }

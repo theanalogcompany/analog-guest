@@ -3,6 +3,7 @@ import type { ReOptIn } from '@/lib/guests/opt-out'
 import type { MessageChannel } from '@/lib/schemas/message-channel'
 import type { EmojiDirective } from './emoji-cadence'
 import type { FurtherHelpOfferReason } from './further-help-offer'
+import type { ParentheticalRetry } from './parenthetical'
 import type { ReplyLengthRetry } from './reply-length'
 import type {
   ActiveCommitment,
@@ -926,6 +927,25 @@ export type GenerateMessageResult = {
   // What the length check did this call (lib/ai/reply-length.ts). 'none'
   // whenever the venue has no measured voice profile.
   replyLengthRetry: ReplyLengthRetry
+  /**
+   * What the bracket check did (lib/ai/parenthetical.ts): asked again for a
+   * reply with a list or a definition in brackets, and took the bracket out
+   * of what shipped if one was still there. 'none' on every proactive
+   * generation. Countable because 'removed' is guest-facing text taken out.
+   */
+  parentheticalRetry: ParentheticalRetry
+  /**
+   * The reply as it read before the check changed it: the first attempt on
+   * 'retry_clean', the shipped attempt before the removal on 'removed'. Null
+   * on 'none'.
+   */
+  parentheticalBefore: string | null
+  /**
+   * An attempt in this call was sent back by the self-talk or the link check.
+   * The length and bracket checks ask again too, and are not this: the
+   * regeneration alert reads it to tell the two apart.
+   */
+  regeneratedForViolation: boolean
 }
 
 export type ClassifyMessageInput = {

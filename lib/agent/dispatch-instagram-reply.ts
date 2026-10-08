@@ -95,6 +95,7 @@ import {
   resolveOutboundTail,
   splitIntoSentences,
   bubbleStyleFor,
+  replyBubbleStyleFor,
 } from './sentence-split'
 import {
   collapseToSingleMessage,
@@ -389,6 +390,13 @@ export interface InstagramReplyOptions {
   skipHumanFeelDelay?: boolean
   reviewReason?: string
   rng?: () => number
+  /**
+   * One sentence per message, no coin (ruled 2026-10-08). Set by the one
+   * caller that is answering a guest's message with a generated reply.
+   * Everything proactive, and the crisis reply, leave it off and are cut as
+   * before.
+   */
+  everySentence?: boolean
   renderedIntentions?: readonly OpenIntention[]
   /** The guest message this reply answers, for the reply check; 'exempt' skips the check (crisis-safety). */
   replyCheck: { inboundMessageId: string } | 'exempt'
@@ -534,7 +542,9 @@ export async function dispatchInstagramReply(
     generation.body,
     options.rng ?? Math.random,
     intentionTail,
-    bubbleStyleFor(ctx.venue.brandPersona.voiceProfile),
+    options.everySentence === true
+      ? replyBubbleStyleFor(ctx.venue.brandPersona.voiceProfile)
+      : bubbleStyleFor(ctx.venue.brandPersona.voiceProfile),
   )
 
   // Report and card what didn't go out. `sent` messages went out; everything

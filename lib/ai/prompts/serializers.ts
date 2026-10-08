@@ -230,6 +230,7 @@ export function personaToProse(
   if (persona.voiceProfile) {
     const measured = voiceProfileToProse(persona.voiceProfile)
     sections.push(measured.length, measured.emojis, measured.writing)
+    if (measured.offers !== null) sections.push(measured.offers)
   } else {
     sections.push(`## Length\n${persona.lengthGuide}`)
     sections.push(

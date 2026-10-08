@@ -38,6 +38,7 @@ import {
   resolveDispatchBubbles,
   resolveOutboundTail,
   bubbleStyleFor,
+  replyBubbleStyleFor,
 } from './sentence-split'
 import { INTER_BUBBLE_GAP_MS } from './split-message'
 import type { RuntimeContext } from './types'
@@ -436,6 +437,8 @@ export async function scheduleAndSend(
     skipHumanFeelDelay?: boolean
     reviewReason?: string
     rng?: () => number
+    /** One sentence per message, no coin: see InstagramReplyOptions. */
+    everySentence?: boolean
     /**
      * TAC-436 ruling 4: the intentions RENDERED into the prompt behind this
      * send, landing on `messages.rendered_intentions` (migration 045) exactly
@@ -502,7 +505,9 @@ export async function scheduleAndSend(
       options.renderedIntentions?.length ?? 0,
       generation.furtherHelpOffer,
     ),
-    bubbleStyleFor(ctx.venue.brandPersona.voiceProfile),
+    options.everySentence === true
+      ? replyBubbleStyleFor(ctx.venue.brandPersona.voiceProfile)
+      : bubbleStyleFor(ctx.venue.brandPersona.voiceProfile),
   )
   if (bubbles.length === 0) {
     // Body was empty, whitespace-only, or nothing but delimiters. Nothing has

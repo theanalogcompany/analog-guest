@@ -74,7 +74,7 @@ import { offeredThisConversation } from '@/lib/agent/previous-offer'
 import {
   resolveDispatchBubbles,
   resolveOutboundTail,
-  bubbleStyleFor,
+  replyBubbleStyleFor,
 } from '@/lib/agent/sentence-split'
 import {
   buildAiRuntime,
@@ -901,7 +901,7 @@ async function main(): Promise<void> {
           reply,
           Math.random,
           resolveOutboundTail('', '', 0, sendsOffer ? offerLine : ''),
-          bubbleStyleFor(ctx.venue.brandPersona.voiceProfile),
+          replyBubbleStyleFor(ctx.venue.brandPersona.voiceProfile),
         )
         const flags = {
           ...detect(reply),

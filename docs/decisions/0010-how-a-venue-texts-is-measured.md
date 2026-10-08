@@ -47,6 +47,18 @@ time and uses an emoji in 4% of replies.
 - Reading the split share as the share of replies that will go out split: it is only the
   coin for a short reply. Long replies are always split.
 
+## Amended 2026-10-08: a reply is split by sentence, not by the coin
+
+The split share no longer decides how a REPLY to a guest is cut. Every reply goes out one
+sentence to a message, at most four, at every venue. The measurement behind it is the same
+history read a second way: the pilot venue's team split a reply of two or more sentences
+about 70% of the time at every length, so sentence count is what their splits follow and
+length is not. `splitShare` is still the coin for proactive messages, and the per-message
+word limit still applies to both. The rule is in `lib/agent/sentence-split.ts`.
+
+The profile also gained `offerLines`: the team's own door-open lines, shown to the model as
+the pattern for the offer-more-help line.
+
 ## Where it lives
 
 `lib/schemas/brand-persona.ts` (the profile) · `scripts/lib/voice-profile.ts` (what counts as

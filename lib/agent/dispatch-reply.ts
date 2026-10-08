@@ -48,6 +48,7 @@ export async function dispatchReply(
         skipHumanFeelDelay: options.skipHumanFeelDelay,
         reviewReason: options.reviewReason,
         rng: options.rng,
+        everySentence: options.everySentence,
         renderedIntentions: options.renderedIntentions,
       })
       // The text arm sends the whole reply or throws, so what was delivered is
