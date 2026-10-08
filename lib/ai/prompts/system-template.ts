@@ -2700,7 +2700,32 @@ import {
 //   turn whose question could mean several things, and for first-conversation
 //   turns with no open intention where the guest asked something.
 //
-export const PROMPT_VERSION = 'v1.104.0'
+// v1.105.0 (phone test, 2026-10-08): three formatting fixes, two of them in
+// code and one in what the model is shown.
+//
+//   A VENUE'S OWN DOOR-OPEN LINES render under `## How the team leaves the
+//   door open` in the persona, for a venue whose measured profile carries
+//   them (`voiceProfile.offerLines`, prompts/voice-profile.ts). The offer
+//   line was coming out as "happy to answer anything else about the menu" and
+//   "happy to help you navigate the rest of the menu too". Read off the pilot
+//   venue's imported history, the team leaves a door open in 6 of 1,780
+//   messages, and always about the thing just discussed ("Let me know if you
+//   like them"). `# Offering more help` is unchanged, and so is how often a
+//   line is sent: code decides, once a conversation.
+//
+//   A NEW STICKY CONSTRAINT, on a retry only: a reply to a guest that lists
+//   or defines something in brackets is asked for once more with "this reply
+//   has nothing in brackets" (lib/ai/parenthetical.ts). What ships with one
+//   still in it has the bracket taken out in code.
+//
+//   NOT A PROMPT CHANGE, recorded here because it changes what a guest sees:
+//   a reply to a guest is sent one sentence to a message, at most four
+//   messages (lib/agent/sentence-split.ts).
+//
+//   BASELINE RESET for a venue with offer lines only. Every other venue's
+//   first-attempt prompt is byte-identical to v1.104.0.
+//
+export const PROMPT_VERSION = 'v1.105.0'
 
 export const SYSTEM_TEMPLATE = `You work at a hospitality venue (cafe, bakery, restaurant). You communicate with its guests via iMessage, in whatever voice the venue has configured below — its own collective voice, its owner's, or a named staff member's.
 

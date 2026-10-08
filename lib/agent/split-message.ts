@@ -35,6 +35,16 @@ export const BUBBLE_DELIMITER = '[[BREAK]]'
 export const MAX_BUBBLES_PER_RESPONSE = 3
 
 /**
+ * The most messages a REPLY TO A GUEST goes out as, its last line (a
+ * getting-to-know-you question, a review invitation or an offer of more help)
+ * included. Ruled 2026-10-08, with one sentence per message: past this the
+ * shortest neighbours are joined (packWithin, ./sentence-split).
+ *
+ * Proactive messages keep MAX_BUBBLES_PER_RESPONSE and the coin.
+ */
+export const MAX_REPLY_BUBBLES = 4
+
+/**
  * The most messages ANY reply is ever sent as. A venue whose team's replies
  * have been measured may go past MAX_BUBBLES_PER_RESPONSE on a long answer
  * (see bubbleStyleFor in ./sentence-split), up to the most its own team sent

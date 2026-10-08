@@ -18,6 +18,12 @@ import {
   type FurtherHelpOfferReason,
 } from './further-help-offer'
 import {
+  hasListParenthetical,
+  PARENTHETICAL_CONSTRAINT,
+  removeListParentheticals,
+  type ParentheticalRetry,
+} from './parenthetical'
+import {
   checkReplyLength,
   keepsTheFacts,
   replyLengthProfileOf,
@@ -829,6 +835,24 @@ export async function generateMessage(
       restore: () => void
     } | null = null
     let replyLengthRetry: ReplyLengthRetry = 'none'
+    // The bracket check (parenthetical.ts, ruled 2026-10-08). A reply to a
+    // guest with a list or a definition in brackets is asked for once more;
+    // whatever ships is cleaned after the loop. Off on a proactive generation.
+    const checksParentheticals = input.runtime.inboundMessage != null
+    let parentheticalAsked = false
+    // The attempt that was asked about, and every attempt in order, so the
+    // outcome can say whether what shipped came before or after the ask.
+    let flaggedAttempt: ShippedAttempt | null = null
+    const attemptObjects: ShippedAttempt[] = []
+    // That attempt kept whole when nothing else was wrong with it, the way
+    // the length check keeps its first answer: if the loop then ends on an
+    // attempt the self-talk or link check rejected, this one ships instead,
+    // with its bracket taken out.
+    let heldForParenthetical: {
+      result: ShippedAttempt
+      restore: () => void
+    } | null = null
+    let lastAttemptRejected = false
 
     for (let i = 0; i < MAX_ATTEMPTS; i++) {
       attempts++
@@ -1086,6 +1110,7 @@ export async function generateMessage(
       }
       offerReason = offerDecision.reason
       lastResult = object
+      attemptObjects.push(object)
       askDroppedForCorrection = droppedForCorrection
       droppedForTaskDraft = taskDraft
       duplicateStripped = composed.duplicateStripped
@@ -1115,7 +1140,48 @@ export async function generateMessage(
       // fix. The two checks below still gate the loop.
       const hasSelfTalk = matchSelfTalk(object.body).matched
       const badUrls = findUnverifiedUrls(object.body, allowedUrls)
-      const clean = !hasSelfTalk && badUrls.length === 0
+      // Asked for again ONCE in a call, and only while an attempt is left: a
+      // second one with a bracket still in it is not a reason to spend a
+      // third, because the removal after the loop deals with it.
+      const asksAgainForParenthetical =
+        checksParentheticals &&
+        !parentheticalAsked &&
+        i < MAX_ATTEMPTS - 1 &&
+        hasListParenthetical(object.body)
+      // This attempt and the flags that describe it, to put back later. Read
+      // when called, so call it only after the assignments above.
+      const keepThisAttempt = (): (() => void) => {
+        const held = {
+          offerReason,
+          askDroppedForCorrection,
+          droppedForTaskDraft,
+          duplicateStripped,
+          droppedForBodyQuestion,
+          reviewAskDropped,
+        }
+        return () => {
+          lastResult = object
+          offerReason = held.offerReason
+          askDroppedForCorrection = held.askDroppedForCorrection
+          droppedForTaskDraft = held.droppedForTaskDraft
+          duplicateStripped = held.duplicateStripped
+          droppedForBodyQuestion = held.droppedForBodyQuestion
+          reviewAskDropped = held.reviewAskDropped
+        }
+      }
+      lastAttemptRejected = hasSelfTalk || badUrls.length > 0
+      if (asksAgainForParenthetical) {
+        parentheticalAsked = true
+        flaggedAttempt = object
+        if (!lastAttemptRejected) {
+          heldForParenthetical = { result: object, restore: keepThisAttempt() }
+        }
+        console.warn(
+          '[ai] generateMessage: the reply lists or defines something in brackets, asking once more',
+        )
+      }
+      const clean =
+        !hasSelfTalk && badUrls.length === 0 && !asksAgainForParenthetical
       // Length is read off the answer alone: the getting-to-know-you
       // question, the review ask and the offer line are separate messages
       // with their own rules. Only a clean attempt is weighed, so a retry for
@@ -1159,27 +1225,11 @@ export async function generateMessage(
         break
       }
       if (clean) {
-        const held = {
-          offerReason,
-          askDroppedForCorrection,
-          droppedForTaskDraft,
-          duplicateStripped,
-          droppedForBodyQuestion,
-          reviewAskDropped,
-        }
         heldForLength = {
           result: object,
           words: length.words,
           answer: lengthAnswer,
-          restore: () => {
-            lastResult = object
-            offerReason = held.offerReason
-            askDroppedForCorrection = held.askDroppedForCorrection
-            droppedForTaskDraft = held.droppedForTaskDraft
-            duplicateStripped = held.duplicateStripped
-            droppedForBodyQuestion = held.droppedForBodyQuestion
-            reviewAskDropped = held.reviewAskDropped
-          },
+          restore: keepThisAttempt(),
         }
         console.warn(
           `[ai] generateMessage: answer ran ${length.words} words against this venue's ${lengthProfile?.maxWords}, asking once more`,
@@ -1200,6 +1250,7 @@ export async function generateMessage(
       if (heldForLength !== null && lengthProfile !== null) {
         feedbackParts.push(shorterReplyConstraint(lengthProfile))
       }
+      if (parentheticalAsked) feedbackParts.push(PARENTHETICAL_CONSTRAINT)
       // Reaching this line means a check fired this attempt, so feedbackParts
       // is non-empty by construction; the guard is belt only.
       regenFeedback =
@@ -1218,12 +1269,72 @@ export async function generateMessage(
       replyLengthRetry = 'kept_first'
     }
 
+    // The same, one check over: the loop ran out on a rejected attempt after
+    // the bracket check asked again. The attempt it asked about was otherwise
+    // clean, and ships with its bracket taken out below.
+    if (
+      heldForParenthetical !== null &&
+      lastAttemptRejected &&
+      lastResult === attemptObjects.at(-1) &&
+      lastResult !== heldForParenthetical.result
+    ) {
+      heldForParenthetical.restore()
+    }
+
     if (lastResult === null) {
       return {
         ok: false,
         error: 'no_result_returned',
         errorCode: 'ai_generation_failed',
       }
+    }
+
+    // The bracket check's second half, on whatever is about to ship: a list
+    // or a definition still in brackets is taken out, bracket and contents
+    // (ruled 2026-10-08: the detail is the thing not wanted). THE ONE PLACE A
+    // CHECK REMOVES WHAT THE MODEL WROTE, so it is reported on the result and
+    // logged, with the text as it was.
+    //
+    // The three tails are each the exact end of `body` and dispatch peels
+    // them off by that identity, so the same removal runs on each. It is a
+    // per-bracket edit, so the end of the cleaned body is the cleaned tail.
+    const shipped: ShippedAttempt = lastResult
+    const flagged = flaggedAttempt as ShippedAttempt | null
+    // 'retry_clean' only when what ships came AFTER the attempt that was
+    // asked about. The length check can put back an earlier attempt that
+    // never had a bracket, and that is 'none'.
+    let parentheticalRetry: ParentheticalRetry = 'none'
+    let parentheticalBefore: string | null = null
+    if (
+      flagged !== null &&
+      attemptObjects.indexOf(shipped) > attemptObjects.indexOf(flagged)
+    ) {
+      parentheticalRetry = 'retry_clean'
+      parentheticalBefore = flagged.body
+    }
+    const cleanedBody = checksParentheticals
+      ? removeListParentheticals(shipped.body)
+      : shipped.body
+    if (cleanedBody !== shipped.body) {
+      parentheticalRetry = 'removed'
+      parentheticalBefore = shipped.body
+      // A tail that no longer ends the cleaned body (it was nothing but a
+      // bracket, which the removal took from the body and will not empty a
+      // string for) is cleared, so no field claims a line that is not sent.
+      const tailOf = (tail: string): string => {
+        const cleaned = removeListParentheticals(tail)
+        return cleanedBody.endsWith(cleaned) ? cleaned : ''
+      }
+      lastResult = {
+        ...shipped,
+        body: cleanedBody,
+        intentionQuestion: tailOf(shipped.intentionQuestion),
+        reviewAsk: tailOf(shipped.reviewAsk),
+        furtherHelpOffer: tailOf(shipped.furtherHelpOffer),
+      }
+      console.warn(
+        `[ai] generateMessage: took a list or definition in brackets out of the reply. Before: ${shipped.body}`,
+      )
     }
 
     return {
@@ -1354,6 +1465,10 @@ export async function generateMessage(
         // as the flags above: it spends a second generation and chooses which
         // reply the guest gets.
         replyLengthRetry,
+        parentheticalRetry,
+        parentheticalBefore,
+        regeneratedForViolation:
+          selfTalkConstraintActive || unverifiedUrlsSeen.length > 0,
       },
     }
   } catch (e) {

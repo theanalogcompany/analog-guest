@@ -661,5 +661,8 @@ function buildFallbackGeneration(): GenerateMessageResult {
     selfTalkViolationPersisted: false,
     emojiDirectiveViolated: false,
     replyLengthRetry: 'none',
+    parentheticalRetry: 'none',
+    parentheticalBefore: null,
+    regeneratedForViolation: false,
   }
 }

@@ -118,6 +118,9 @@ The emoji directive keeps its own last-block position, separately measured.
 
 ## Things that are decided and should not be re-litigated
 
+- **A venue's own door-open lines are the one list of lines in the prompt**
+  (`voiceProfile.offerLines`, `## How the team leaves the door open`, 2026-10-08). Whether an
+  offer is sent is still code's call.
 - **Splitting is decided in code, not by the prompt.** `[[BREAK]]` is retired and the
   template must carry no trace of it. Two prompt-side rounds
   failed identically before `lib/agent/sentence-split.ts` took over.

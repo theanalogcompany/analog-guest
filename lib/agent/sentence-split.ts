@@ -35,10 +35,30 @@
 // lib/ai/generate-message.ts). The boundary is never found in text: it is the
 // join between two separately generated strings, which is why this cannot cut
 // a sentence in half.
+//
+// 2026-10-08, REPLIES ONLY: ONE SENTENCE PER MESSAGE, NO COIN (ruled after the
+// phone test; it overrides rules 3 to 5 above and decision 0010's coin for a
+// reply to a guest). In the pilot venue's own history a reply of two or more
+// sentences went out split about 70% of the time at every length, so sentence
+// count, not length, is what their splits follow. A caller asks for it with
+// replyBubbleStyleFor; the rule itself is at packWithin:
+//
+//   - every sentence is its own message, and a web address is its own message
+//   - an opener of one or two words ("Yes!", "Of course!") rides with the
+//     sentence after it
+//   - at most MAX_REPLY_BUBBLES messages, the reply's last line included;
+//     past that the shortest neighbours are joined
+//   - a sentence past the venue's own word limit is still cut at its clauses
+//   - a boundary is also seen before a lowercase letter where the venue
+//     writes in lowercase, so such a venue splits too
+//
+// Proactive messages (a scan greeting, a follow-up, a warm close, a check-back)
+// and the crisis reply keep the coin and everything above, unchanged.
 
 import {
   MAX_BUBBLES_PER_RESPONSE,
   MAX_PACKED_BUBBLES,
+  MAX_REPLY_BUBBLES,
   collapseToSingleMessage,
 } from './split-message'
 
@@ -66,6 +86,11 @@ export interface BubbleStyle {
   maxBubbles?: number
   /** Start a split-off message with a capital, as this venue's team does. */
   capitalise?: boolean
+  /**
+   * One sentence per message and no coin: a reply to a guest (ruled
+   * 2026-10-08). Absent on every proactive message.
+   */
+  everySentence?: boolean
 }
 
 export const DEFAULT_BUBBLE_STYLE: BubbleStyle = {
@@ -111,6 +136,17 @@ export function bubbleStyleFor(
 }
 
 /**
+ * How a REPLY TO A GUEST is cut: the venue's own figures where it has them,
+ * and one sentence per message whether it does or not (ruled 2026-10-08, every
+ * venue). The coin in the style is not consulted on this path.
+ */
+export function replyBubbleStyleFor(
+  measured: Parameters<typeof bubbleStyleFor>[0],
+): BubbleStyle {
+  return { ...bubbleStyleFor(measured), everySentence: true }
+}
+
+/**
  * Tokens that end with a period WITHOUT ending a sentence, lowercased.
  * Multi-dot abbreviations appear with their internal dots ('a.m', not 'am')
  * because the token is captured up to, but not including, the final period.
@@ -118,6 +154,20 @@ export function bubbleStyleFor(
  * splits mid-address, which a guest actually sees.
  */
 const ABBREVIATIONS = new Set(['st', 'ave', 'dr', 'a.m', 'p.m', 'etc', 'vs'])
+
+/**
+ * More of them, checked only when a lowercase letter may open a sentence.
+ * With the capital gate these never needed listing: "e.g. the" could not
+ * split. A single letter before the period ("J. smith") is skipped there too.
+ */
+const LOWERCASE_ABBREVIATIONS = new Set(
+  (
+    'e.g i.e approx incl hr hrs min mins mr mrs ms jr sr tel ext no apt ' +
+    'blvd rd inc co oz lb lbs ft tsp tbsp ' +
+    'mon tue tues wed thu thur thurs fri sat sun ' +
+    'jan feb mar apr jun jul aug sep sept oct nov dec'
+  ).split(' '),
+)
 
 /**
  * A sentence opener is a capital letter, a digit, or an emoji.
@@ -147,8 +197,19 @@ const SENTENCE_OPENER = /[\p{Lu}\p{N}\p{Extended_Pictographic}]/u
  * Terminal punctuation stays ON each sentence here — stripping is a separate
  * concern (stripTerminalPeriod) applied only to pieces that actually dispatch
  * as separate bubbles.
+ *
+ * `lowercaseOpeners` drops the capital gate: a lowercase letter may open a
+ * sentence too. Only a reply's dispatch split asks for it (ruled 2026-10-08),
+ * because a venue that writes in lowercase would otherwise never split. The
+ * failure direction flips with it, a wrong split instead of a missed one, so
+ * the abbreviation list is longer on that path. Every other caller keeps the
+ * gate.
  */
-export function splitIntoSentences(body: string): string[] {
+export function splitIntoSentences(
+  body: string,
+  options: { lowercaseOpeners?: boolean } = {},
+): string[] {
+  const lowercase = options.lowercaseOpeners === true
   const sentences: string[] = []
   let start = 0
   const punct = /[.!?]/g
@@ -167,7 +228,12 @@ export function splitIntoSentences(body: string): string[] {
     // The next character must open a sentence. codePointAt so an emoji's
     // surrogate pair is tested whole, not as a broken half.
     const opener = String.fromCodePoint(body.codePointAt(j)!)
-    if (!SENTENCE_OPENER.test(opener)) continue
+    if (
+      !SENTENCE_OPENER.test(opener) &&
+      !(lowercase && /\p{Ll}/u.test(opener))
+    ) {
+      continue
+    }
 
     if (match[0] === '.') {
       // Ellipsis guard: the final dot of '...' is preceded by a dot. (The
@@ -179,6 +245,16 @@ export function splitIntoSentences(body: string): string[] {
       // including any internal dots ('a.m'), checked lowercased.
       const token = body.slice(start, i).match(/([A-Za-z]+(?:\.[A-Za-z]+)*)$/)
       if (token && ABBREVIATIONS.has(token[1]!.toLowerCase())) continue
+      if (
+        lowercase &&
+        token &&
+        // A single letter, dotted initials ("U.S"), or a listed abbreviation.
+        (token[1]!.length === 1 ||
+          /^[A-Za-z](?:\.[A-Za-z])+$/.test(token[1]!) ||
+          LOWERCASE_ABBREVIATIONS.has(token[1]!.toLowerCase()))
+      ) {
+        continue
+      }
     }
 
     const sentence = body.slice(start, i + 1).trim()
@@ -232,6 +308,20 @@ function splitToBubbles(
   maxBubbles: number,
   style: BubbleStyle,
 ): string[] {
+  if (style.everySentence === true) {
+    // A reply to a guest: one sentence per message, no coin. The answer gives
+    // up a slot when a tail follows it, as on the other two paths.
+    const messages = packWithin(
+      text,
+      style.maxBubbleWords ?? Infinity,
+      MAX_REPLY_BUBBLES - (MAX_BUBBLES_PER_RESPONSE - maxBubbles),
+      style.capitalise === true,
+      true,
+    )
+    // One message is the reply as the model wrote it, its full stop included:
+    // only a piece that became its own message loses one.
+    return messages.length === 1 ? [text] : messages
+  }
   if (
     style.maxBubbleWords !== undefined &&
     wordsIn(text) > style.maxBubbleWords
@@ -246,6 +336,7 @@ function splitToBubbles(
       style.maxBubbleWords,
       most,
       style.capitalise === true,
+      false,
     )
   }
   const sentences = splitIntoSentences(text)
@@ -331,12 +422,28 @@ function splitIntoClauses(
  * rest of a sentence cut in two is a continuation and stays lowercase, as it
  * was written: a capital there reads as a new sentence that is not one. A web
  * address, and a word with a capital inside it, are left as written.
+ *
+ * `reply` IS THE 2026-10-08 RULE FOR A REPLY TO A GUEST, on top of the above
+ * (`maxWords` is Infinity for a venue with no measured limit, and then only
+ * step 1 and the count apply):
+ *
+ *   - a boundary is seen before a lowercase letter too, at a venue that
+ *     does not start its messages with a capital
+ *   - a web address is its own message, wherever it sits in its sentence, and
+ *     is the last thing joined to a neighbour when the count forces a join
+ *   - step 4 narrows: a whole sentence of one or two words is its own message
+ *     unless it opens the reply ("Yes!", "Of course!"), where it rides with
+ *     the sentence after it. A scrap left by cutting a sentence still rides
+ *     with its neighbour.
+ *
+ * With `reply` false nothing here differs from before that ruling.
  */
 function packWithin(
   text: string,
   maxWords: number,
   maxMessages: number,
   capitalise: boolean,
+  reply: boolean,
 ): string[] {
   // A limit under one word is not a limit anything can be cut to.
   if (maxWords < 1 || maxMessages < 1) return [text]
@@ -345,20 +452,64 @@ function packWithin(
     text: string
     /** Starts a sentence. False for the rest of a sentence cut in two. */
     opens: boolean
+    /** A web address on its own. Only ever set for a reply. */
+    url?: boolean
   }
   const pieces: Piece[] = []
-  // A link ends a sentence without a full stop, so the splitter cannot see
-  // the boundary after one. A capital right after a link is a new sentence.
-  const sentences = splitIntoSentences(text).flatMap((sentence) =>
-    sentence.split(/(?<=https?:\/\/\S+)\s+(?=\p{Lu})/u),
-  )
-  for (const sentence of sentences) {
-    if (wordsIn(sentence) <= maxWords) {
-      pieces.push({ text: sentence, opens: true })
+  // What is to be cut, in order: each a run of prose or, for a reply, a web
+  // address lifted out of its sentence.
+  const runs: Piece[] = []
+  if (reply) {
+    // The lowercase boundary only where the venue writes that way (or has no
+    // measured habit): at a venue that capitalises, a lowercase letter after
+    // a full stop is far more often an abbreviation than a new sentence.
+    for (const sentence of splitIntoSentences(text, {
+      lowercaseOpeners: !capitalise,
+    })) {
+      let first = true
+      for (const part of sentence.split(/(https?:\/\/\S+)/)) {
+        if (/^https?:\/\//.test(part)) {
+          // The sentence's own punctuation is not part of the address, and
+          // neither is a bracket or quote that was closed around it.
+          runs.push({
+            text: part.replace(
+              part.includes('(') ? /[.,!?;:\]"'>]+$/ : /[.,!?;:)\]"'>]+$/,
+              '',
+            ),
+            opens: false,
+            url: true,
+          })
+          first = false
+          continue
+        }
+        // The bracket or quote opened in front of an address goes with the
+        // one closed behind it.
+        const prose = part.trim().replace(/\s*[(\["'<]+$/, '')
+        // Nothing but the punctuation that sat around an address.
+        if (prose === '' || /^[\p{P}\s]+$/u.test(prose)) continue
+        // After an address, a capital starts a new sentence and anything else
+        // carries on the one the address was in.
+        runs.push({ text: prose, opens: first || /^\p{Lu}/u.test(prose) })
+        first = false
+      }
+    }
+  } else {
+    // A link ends a sentence without a full stop, so the splitter cannot see
+    // the boundary after one. A capital right after a link is a new sentence.
+    for (const sentence of splitIntoSentences(text).flatMap((sentence) =>
+      sentence.split(/(?<=https?:\/\/\S+)\s+(?=\p{Lu})/u),
+    )) {
+      runs.push({ text: sentence, opens: true })
+    }
+  }
+  for (const run of runs) {
+    const sentence = run.text
+    if (run.url === true || wordsIn(sentence) <= maxWords) {
+      pieces.push(run)
       continue
     }
     let current: { text: string; strong: boolean }[] = []
-    let opens = true
+    let opens = run.opens
     const textOf = (clauses: { text: string }[]) =>
       clauses.map((c) => c.text).join(' ')
     const flush = (clauses: { text: string }[]) => {
@@ -415,12 +566,24 @@ function packWithin(
   const merged: Piece[] = []
   for (const piece of pieces) {
     const previous = merged[merged.length - 1]
-    if (
-      previous !== undefined &&
-      (!hasRenderableContent(piece.text) ||
-        (size(piece) <= 2 && fits(previous, piece)) ||
-        (merged.length === 1 && size(previous) <= 2 && fits(previous, piece)))
-    ) {
+    const rides =
+      previous === undefined
+        ? false
+        : !hasRenderableContent(piece.text)
+          ? true
+          : reply
+            ? // An address is never a scrap and never takes one. A whole short
+              // sentence stays its own message unless it opens the reply.
+              piece.url !== true &&
+              previous.url !== true &&
+              fits(previous, piece) &&
+              ((!piece.opens && size(piece) <= 2) ||
+                (merged.length === 1 && previous.opens && size(previous) <= 2))
+            : (size(piece) <= 2 && fits(previous, piece)) ||
+              (merged.length === 1 &&
+                size(previous) <= 2 &&
+                fits(previous, piece))
+    if (previous !== undefined && rides) {
       merged[merged.length - 1] = join(previous, piece)
     } else {
       merged.push(piece)
@@ -430,23 +593,26 @@ function packWithin(
     // Which neighbours to join, best first: a pair inside the word limit
     // beats one past it; then a pair that puts a cut sentence back together
     // beats one that runs two sentences into each other; then the shortest.
+    // Ahead of all three, for a reply: a pair with a web address in it is the
+    // last to be joined, so the address stays its own message while it can.
     let best = -1
-    let bestRank: [number, number, number] = [0, 0, 0]
+    let bestRank: number[] = []
+    const before = (x: number[], y: number[]) => {
+      for (let k = 0; k < x.length; k += 1) {
+        if (x[k] !== y[k]) return (x[k] as number) < (y[k] as number)
+      }
+      return false
+    }
     for (let i = 0; i < merged.length - 1; i += 1) {
       const a = merged[i] as Piece
       const b = merged[i + 1] as Piece
-      const rank: [number, number, number] = [
+      const rank = [
+        a.url === true || b.url === true ? 1 : 0,
         fits(a, b) ? 0 : 1,
         b.opens ? 1 : 0,
         size(a) + size(b),
       ]
-      if (
-        best === -1 ||
-        rank[0] < bestRank[0] ||
-        (rank[0] === bestRank[0] &&
-          (rank[1] < bestRank[1] ||
-            (rank[1] === bestRank[1] && rank[2] < bestRank[2])))
-      ) {
+      if (best === -1 || before(rank, bestRank)) {
         best = i
         bestRank = rank
       }
@@ -460,6 +626,7 @@ function packWithin(
   }
 
   return merged.map((piece) => {
+    if (piece.url === true) return piece.text
     const trimmed = stripTerminalPeriod(
       piece.text.trim().replace(/[,;:]+$/, ''),
     )

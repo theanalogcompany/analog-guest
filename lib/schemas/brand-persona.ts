@@ -109,6 +109,12 @@ export const VoiceProfileSchema = z.object({
       unansweredShare: ShareSchema,
     })
     .optional(),
+  // Lines the team really ended a reply with, leaving the door open, read
+  // off the same imported history and approved one by one (2026-10-08). The
+  // prompt shows them as the model for the offer-more-help line
+  // (lib/ai/prompts/voice-profile.ts). Absent or empty: that line is written
+  // from the shared instruction alone, as before.
+  offerLines: z.array(z.string().min(1)).optional(),
   /** ISO time the profile was derived. Absent on a hand-built test profile. */
   derivedAt: z.string().optional(),
 })

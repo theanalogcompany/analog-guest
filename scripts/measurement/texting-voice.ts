@@ -94,7 +94,7 @@ import { decidePureClose } from '@/lib/agent/pure-close'
 import {
   resolveDispatchBubbles,
   resolveOutboundTail,
-  bubbleStyleFor,
+  replyBubbleStyleFor,
 } from '@/lib/agent/sentence-split'
 import {
   buildAiRuntime,
@@ -442,7 +442,7 @@ async function main(): Promise<void> {
     )
   }
   const lengthProfile = isControl ? null : replyLengthProfileOf(persona)
-  const bubbleStyle = bubbleStyleFor(persona.voiceProfile)
+  const bubbleStyle = replyBubbleStyleFor(persona.voiceProfile)
 
   // The voice examples each arm would load. The control gets what main loads
   // from the venue as it was: the examples since switched off are back, and

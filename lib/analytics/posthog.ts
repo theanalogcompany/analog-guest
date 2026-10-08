@@ -266,6 +266,29 @@ export async function captureReplyLengthRetry(
   })
 }
 
+// The bracket check changed a reply (lib/ai/parenthetical.ts): it was asked
+// for again without a list or definition in brackets ('retry_clean'), or one
+// was taken out of what shipped ('removed'). The second removes guest-facing
+// text, so `before` carries the reply as the model wrote it.
+export interface ReplyParentheticalProps {
+  agentRunId: string
+  venueId: string
+  guestId: string
+  category: string
+  outcome: string
+  attempts: number
+  before: string | null
+  finalGeneratedBody: string
+}
+
+export async function captureReplyParenthetical(
+  props: ReplyParentheticalProps,
+): Promise<void> {
+  await capturePostHogEvent('reply_parenthetical', props.guestId, {
+    ...props,
+  })
+}
+
 export async function captureEmojiDirectiveViolated(
   props: EmojiDirectiveViolatedProps,
 ): Promise<void> {

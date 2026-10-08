@@ -81,10 +81,11 @@ import { renderableIntentions } from './intentions/derive'
 // copy of that rule is the drift this directory already pays for.
 import {
   DEFAULT_BUBBLE_STYLE,
-  bubbleStyleFor,
+  replyBubbleStyleFor,
   resolveDispatchBubbles,
   resolveOutboundTail,
 } from './sentence-split'
+import type { ParentheticalRetry } from '@/lib/ai/parenthetical'
 import {
   recordIntentionEligibility,
   recordIntentionPrompts,
@@ -622,6 +623,9 @@ function buildGenerationFailureGeneration(): GenerateMessageResult {
     selfTalkViolationPersisted: false,
     emojiDirectiveViolated: false,
     replyLengthRetry: 'none',
+    parentheticalRetry: 'none',
+    parentheticalBefore: null,
+    regeneratedForViolation: false,
   }
 }
 
@@ -938,6 +942,10 @@ export interface TestDraft {
   promptVersion: string
   /** Always true: the split coin was pinned, not rolled. */
   splitCoinPinned: true
+  /** What the bracket check did (lib/ai/parenthetical.ts). */
+  parentheticalRetry: ParentheticalRetry
+  /** The reply as it read before that check changed it, else null. */
+  parentheticalBefore: string | null
   /**
    * Set when the draft is NOT an ordinary generation: a crisis-safety canned
    * reply, or a turn v1 would have answered with a blank operator card rather
@@ -1027,6 +1035,8 @@ function emptyTestDraft(
     recognitionState: ctx.recognition.state,
     promptVersion: PROMPT_VERSION,
     splitCoinPinned: true,
+    parentheticalRetry: 'none',
+    parentheticalBefore: null,
     substitute,
   }
 }
@@ -2818,9 +2828,13 @@ async function runInboundTurn(
           gen.result.body,
           TEST_RUN_SPLIT_RNG,
           tail,
-          bubbleStyleFor(ctx.venue.brandPersona.voiceProfile),
+          // What the send below passes (`everySentence`). The coin is not
+          // consulted on this path any more, so the pin is inert here.
+          replyBubbleStyleFor(ctx.venue.brandPersona.voiceProfile),
         ),
         body: gen.result.body,
+        parentheticalRetry: gen.result.parentheticalRetry,
+        parentheticalBefore: gen.result.parentheticalBefore,
         intentionQuestion: gen.result.intentionQuestion,
         category: ctx.classification.category,
         recognitionState: ctx.recognition.state,
@@ -3531,6 +3545,10 @@ async function runInboundTurn(
       const dispatched = await dispatchReply(ctx, gen.result, {
         skipHumanFeelDelay: ctx.guest.isDemo === true,
         reviewReason: approval.reason,
+        // Ruled 2026-10-08: a reply to a guest is one sentence per message.
+        // The test-run exit above passes replyBubbleStyleFor for the same
+        // reason, and the two must agree.
+        everySentence: true,
         // TAC-436 ruling 4: the SAME hoisted value the queue branch stores
         // and this branch records against, so what a card carries and what
         // an auto-send carries cannot drift. The recording below is what

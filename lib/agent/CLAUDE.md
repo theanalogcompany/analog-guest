@@ -96,7 +96,16 @@ else as stale.
 | `COALESCE_SETTLE_MS` (`coalesce-turn.ts`) | 0 | settle before claiming; zero since the 2026-09 coalesce-window run, kept as the rollback lever |
 | `CLAIM_LEASE_MS` / `MAX_TURN_EXTENSIONS` / `MAX_TURN_RETRIES` | 120 s / 2 / 1 | |
 | `MAX_BUBBLES_PER_RESPONSE` / `INTER_BUBBLE_GAP_MS` (`split-message.ts`) | 3 / 1500 ms | |
-| `SPLIT_PROBABILITY` (`sentence-split.ts`) | 0.5 | the split coin for a venue with no voice profile |
+| `SPLIT_PROBABILITY` (`sentence-split.ts`) | 0.5 | the split coin for a venue with no voice profile, proactive messages only |
+| `MAX_REPLY_BUBBLES` (`split-message.ts`) | 4 | the most messages a reply to a guest goes out as, its last line included |
+
+**A reply to a guest is one sentence per message, no coin** (ruled 2026-10-08, every venue;
+`replyBubbleStyleFor`, asked for with `everySentence` on the one dispatch call that answers a
+guest's message). A web address is its own message, an opener of one or two words rides with
+the next sentence, and past four messages the shortest neighbours are joined. A sentence past
+the venue's word limit is still cut at its clauses. **The next two paragraphs now describe
+proactive messages only** (a scan greeting, a follow-up, a warm close, a check-back) and the
+crisis reply, which keep the coin. A held draft is still one message.
 
 **A venue with a measured voice profile is cut differently** (`bubbleStyleFor`,
 `sentence-split.ts`, decision 0010): the coin is its team's split share, and a reply longer
