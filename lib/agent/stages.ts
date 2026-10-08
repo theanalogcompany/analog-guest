@@ -71,6 +71,7 @@ import { isFloorCategory, matchForwardCommitment } from './complaint-floor'
 import { canAutoSendComplaintTurn } from './complaint-routing'
 import { deriveKnownGuest } from './known-guest'
 import { offeredThisConversation, previousReplyOffered } from './previous-offer'
+import { answerQuery, resolveAnswerTie } from './answer-to-our-question'
 import { resolveComplaintThreadCategory } from './complaint-thread'
 import { REPORTED_ORDER_WINDOW_DAYS } from './extract-reported-order'
 import { INTENTION_DEFINITION_BY_KEY } from './intentions/definitions'
@@ -710,8 +711,29 @@ export async function classifyStage(
 
   // 3-tier routing: < 0.3 → `unknown` (holding ack); 0.3..0.7 → classifier's
   // pick + observation event; >= 0.7 → classifier's pick + silent.
-  const autoRoutedToUnknown =
+  //
+  // One exception under the floor: a classifier torn over a short answer to
+  // something we said knows what the message is, and the turn keeps out of
+  // `unknown` (answer-to-our-question.ts, decision 1).
+  const belowFloor =
     r.data.classifierConfidence < CLASSIFICATION_CONFIDENCE_REROUTE_THRESHOLD
+  const answerTie = belowFloor
+    ? resolveAnswerTie(ctx, r.data.category, r.data.runnerUpCategory)
+    : null
+  const autoRoutedToUnknown = belowFloor && answerTie === null
+  if (answerTie !== null) {
+    // A structured line, so the rule's firing rate can be read from the logs:
+    // a rule that changes routing and cannot be counted is how a backstop
+    // gets believed without evidence. Carries no guest content. The
+    // low-confidence event below still fires, with the classifier's own pick.
+    console.warn('[agent] classification answer tie kept out of unknown', {
+      event: 'classification_answer_tie',
+      venueId: ctx.venue.id,
+      category: r.data.category,
+      runnerUpCategory: r.data.runnerUpCategory,
+      classifierConfidence: r.data.classifierConfidence,
+    })
+  }
 
   if (r.data.classifierConfidence < CLASSIFICATION_CONFIDENCE_LOW_THRESHOLD) {
     await captureClassificationLowConfidence({
@@ -731,7 +753,9 @@ export async function classifyStage(
   // whatever the classifier made of the answer (complaint-thread.ts). Applied
   // AFTER the confidence reroute, so a low-confidence answer that would have
   // shipped a holding ack as `unknown` is held as the complaint it belongs to.
-  const classifierCategory = autoRoutedToUnknown ? 'unknown' : r.data.category
+  const classifierCategory = autoRoutedToUnknown
+    ? 'unknown'
+    : (answerTie ?? r.data.category)
   const thread = resolveComplaintThreadCategory({
     classifierCategory,
     crisisSafety: r.data.crisisSafety,
@@ -953,15 +977,21 @@ export async function retrieveKnowledgeWithContextStage(
   ctx: RuntimeContext,
   category: MessageCategory | null,
   query: string,
-  options?: { turns?: number; rule?: MergeRule },
+  // `withoutAnswerArm` is for the measurement harness's control arm only.
+  options?: { turns?: number; rule?: MergeRule; withoutAnswerArm?: boolean },
 ): Promise<KnowledgeMatch[]> {
   const contextQuery = buildContextQuery(ctx, options?.turns ?? CONTEXT_TURNS)
   if (contextQuery === '') return retrieveKnowledgeStage(ctx, category, query)
 
-  const settled = await Promise.allSettled([
-    retrieveKnowledgeStage(ctx, category, query),
-    retrieveKnowledgeStage(ctx, category, contextQuery),
-  ])
+  // A short answer to something we said gets a THIRD arm: what they had
+  // asked, our question, their answer (answer-to-our-question.ts, decision
+  // 2). Added, never substituted: the bare arm stays first, so its top two
+  // still survive the interleave. '' on every other turn, which is two arms.
+  const answer = options?.withoutAnswerArm === true ? '' : answerQuery(ctx)
+  const queries = [query, contextQuery, ...(answer === '' ? [] : [answer])]
+  const settled = await Promise.allSettled(
+    queries.map((q) => retrieveKnowledgeStage(ctx, category, q)),
+  )
   const arms = settled.map((s) => (s.status === 'fulfilled' ? s.value : []))
   for (const s of settled) {
     if (s.status === 'rejected') {

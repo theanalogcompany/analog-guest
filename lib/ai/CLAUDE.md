@@ -34,7 +34,7 @@ decision rather than silent drift. A **required** boolean or string is free.
 `correctsPendingReply`, `followUpWorthy`, `praisedExperience`. None is `.optional()`, which
 is what makes the compiler name every site synthesizing a `Classification`.
 
-`PROMPT_VERSION` (`prompts/system-template.ts`, currently v1.103.0) covers the
+`PROMPT_VERSION` (`prompts/system-template.ts`, currently v1.104.0) covers the
 classify/generate contract. Every other module here carries its own, and they are
 deliberately not linked:
 
@@ -106,7 +106,9 @@ more generous `MAX_CRISIS_CHECK_INPUT_CHARS` (4000) appended as a second block, 
 guest in crisis may write a long message whose actual statement lands past the cutoff.
 
 Confidence routing: above 0.7 keep the pick; 0.3 to 0.7 keep it and fire an event; below
-0.3 rewrite the category to `unknown` so the agent ships a holding response.
+0.3 rewrite the category to `unknown` so the agent ships a holding response. One exception
+under 0.3, decided in `lib/agent/answer-to-our-question.ts` from `runnerUpCategory` (Jev only):
+a short answer to something we said that the classifier is torn over is not `unknown`.
 
 ## Generation loop
 

@@ -123,6 +123,7 @@ import {
   shouldRetrieveKnowledge,
 } from './stages'
 import { runPostSendChecks } from './post-send-checks'
+import { answerQuery } from './answer-to-our-question'
 import { buildContextQuery, reachedGuest } from './retrieval-context'
 import {
   buildCorpusContent,
@@ -2629,13 +2630,18 @@ async function runInboundTurn(
     // the run can proceed without grounding.
     if (shouldRetrieveKnowledge(ctx)) {
       const contextQueryLength = buildContextQuery(ctx).length
+      // Non-zero when a third arm ran: a short answer to something we said,
+      // searched with the exchange in front of it.
+      const answerQueryLength =
+        contextQueryLength > 0 ? answerQuery(ctx).length : 0
       const knowledgeSpan = trace.span('retrieve_knowledge', {
         queryLength: ctx.currentMessage?.body.length ?? 0,
         // TAC-547: 2 when a contextual arm ran, 1 when there was no usable
         // prior turn. A venue sitting at 1 on every turn is the signal that
         // the context window is filtering everything out.
-        armCount: contextQueryLength > 0 ? 2 : 1,
+        armCount: contextQueryLength === 0 ? 1 : answerQueryLength > 0 ? 3 : 2,
         contextQueryLength,
+        answerQueryLength,
       })
       // TAC-547: two arms — the guest's message alone, and a contextual query
       // carrying the last turns that reached them — merged into one slate. A

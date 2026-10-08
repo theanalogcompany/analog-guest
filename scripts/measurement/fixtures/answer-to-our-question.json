@@ -1,0 +1,330 @@
+{
+  "note": "Threads for scripts/measurement/answer-to-our-question.ts. `phone-test` is the real thread from 2026-10-07 (le-mils-coffee-test, 21:21 to 21:23 PT), bodies verbatim, a reply's messages joined with a space the way the history query joins them. The rest are constructed siblings: none of them is the phrase the fix was written against.",
+  "threads": {
+    "phone-test-before-brew": [
+      {
+        "direction": "inbound",
+        "body": "Hi Le Mil's!"
+      },
+      {
+        "direction": "outbound",
+        "body": "Hi! Welcome, what can we help you with?"
+      },
+      {
+        "direction": "inbound",
+        "body": "can i see the menu"
+      },
+      {
+        "direction": "outbound",
+        "body": "Here you go: https://lemils.com/pages/cafe-menu Let us know if anything on there catches your eye and you have questions"
+      },
+      {
+        "direction": "inbound",
+        "body": "what’s kokum"
+      },
+      {
+        "direction": "outbound",
+        "body": "It's a dried fruit from the west coast of India, tart and a little floral We use the syrup in the Pink Panther"
+      },
+      {
+        "direction": "inbound",
+        "body": "haha nice"
+      },
+      {
+        "direction": "outbound",
+        "body": "It goes into everything from chutneys to cocktails back home By the way, what's your name?"
+      },
+      {
+        "direction": "inbound",
+        "body": "jaipal"
+      },
+      {
+        "direction": "outbound",
+        "body": "Nice to meet you, Jaipal."
+      }
+    ],
+    "phone-test-brew-as-sent": [
+      {
+        "direction": "inbound",
+        "body": "how do i brew your beans"
+      },
+      {
+        "direction": "outbound",
+        "body": "Depends on which beans Budan is great as a pour over or French press Malenad is the all-rounder, good for espresso, drip, pour over"
+      }
+    ],
+    "brew-clean-question": [
+      {
+        "direction": "inbound",
+        "body": "how do i brew your beans"
+      },
+      {
+        "direction": "outbound",
+        "body": "Which beans do you have?"
+      }
+    ],
+    "name-question": [
+      {
+        "direction": "inbound",
+        "body": "haha nice"
+      },
+      {
+        "direction": "outbound",
+        "body": "It goes into everything from chutneys to cocktails back home By the way, what's your name?"
+      }
+    ],
+    "tried-elsewhere": [
+      {
+        "direction": "inbound",
+        "body": "honestly i went to another cafe yesterday"
+      },
+      {
+        "direction": "outbound",
+        "body": "that's fair, we appreciate the honesty. what did you try there?"
+      }
+    ],
+    "had-it-before": [
+      {
+        "direction": "inbound",
+        "body": "is the spiced cold brew sweet"
+      },
+      {
+        "direction": "outbound",
+        "body": "A little. It's steeped with fennel, nutmeg and ginger. Have you had it before?"
+      }
+    ],
+    "when-coming": [
+      {
+        "direction": "inbound",
+        "body": "can i bring my dog"
+      },
+      {
+        "direction": "outbound",
+        "body": "Yes, dogs are welcome. When are you thinking of coming by?"
+      }
+    ],
+    "which-sofi": [
+      {
+        "direction": "inbound",
+        "body": "whats the difference between the sofi classic and the sofi mj"
+      },
+      {
+        "direction": "outbound",
+        "body": "Classic is sweetened with simple syrup, MJ with masala jaggery syrup. Which one sounds more like you?"
+      }
+    ],
+    "hello": [
+      {
+        "direction": "inbound",
+        "body": "Hi Le Mil's!"
+      },
+      {
+        "direction": "outbound",
+        "body": "Hi! Welcome, what can we help you with?"
+      }
+    ]
+  },
+  "cells": [
+    {
+      "id": "budan-exact",
+      "kind": "answer",
+      "threads": [
+        "phone-test-before-brew",
+        "phone-test-brew-as-sent"
+      ],
+      "inbound": "budan",
+      "fullTurn": true,
+      "mustMatch": [
+        "21\\s?(g|grams)|300\\s?ml|bloom"
+      ],
+      "mustNotMatch": [
+        "lemils\\.com/products"
+      ]
+    },
+    {
+      "id": "brew-exact",
+      "kind": "brew",
+      "threads": [
+        "phone-test-before-brew"
+      ],
+      "inbound": "how do i brew your beans",
+      "fullTurn": true
+    },
+    {
+      "id": "budan-after-question",
+      "kind": "answer",
+      "threads": [
+        "phone-test-before-brew",
+        "brew-clean-question"
+      ],
+      "inbound": "budan",
+      "fullTurn": true,
+      "mustMatch": [
+        "pour over|drip|french press"
+      ],
+      "mustNotMatch": [
+        "lemils\\.com/products"
+      ]
+    },
+    {
+      "id": "malenad-after-question",
+      "kind": "answer",
+      "threads": [
+        "phone-test-before-brew",
+        "brew-clean-question"
+      ],
+      "inbound": "malenad",
+      "fullTurn": true,
+      "mustMatch": [
+        "espresso|pour over|drip|french press"
+      ],
+      "mustNotMatch": [
+        "lemils\\.com/products"
+      ]
+    },
+    {
+      "id": "chikka-after-question",
+      "kind": "answer",
+      "threads": [
+        "phone-test-before-brew",
+        "brew-clean-question"
+      ],
+      "inbound": "chikka",
+      "fullTurn": true,
+      "mustMatch": [
+        "espresso"
+      ],
+      "mustNotMatch": [
+        "lemils\\.com/products"
+      ]
+    },
+    {
+      "id": "karak-chai",
+      "kind": "answer",
+      "threads": [
+        "tried-elsewhere"
+      ],
+      "inbound": "the karak chai",
+      "fullTurn": false
+    },
+    {
+      "id": "name",
+      "kind": "answer",
+      "threads": [
+        "name-question"
+      ],
+      "inbound": "jaipal",
+      "fullTurn": false
+    },
+    {
+      "id": "yes",
+      "kind": "answer",
+      "threads": [
+        "had-it-before"
+      ],
+      "inbound": "yes",
+      "fullTurn": false
+    },
+    {
+      "id": "tomorrow",
+      "kind": "answer",
+      "threads": [
+        "when-coming"
+      ],
+      "inbound": "tomorrow",
+      "fullTurn": false
+    },
+    {
+      "id": "the-second-one",
+      "kind": "answer",
+      "threads": [
+        "which-sofi"
+      ],
+      "inbound": "the second one",
+      "fullTurn": false
+    },
+    {
+      "id": "budan-no-history",
+      "kind": "control",
+      "threads": [],
+      "inbound": "budan",
+      "fullTurn": false
+    },
+    {
+      "id": "menu-no-question",
+      "kind": "no-question",
+      "threads": [
+        "hello"
+      ],
+      "inbound": "can i see the menu",
+      "fullTurn": true
+    },
+    {
+      "id": "kokum-no-question",
+      "kind": "no-question",
+      "threads": [
+        "hello"
+      ],
+      "inbound": "what’s kokum",
+      "fullTurn": true
+    },
+    {
+      "id": "hours-no-question",
+      "kind": "no-question",
+      "threads": [
+        "hello"
+      ],
+      "inbound": "what time do you close",
+      "fullTurn": true
+    },
+    {
+      "id": "order-no-question",
+      "kind": "no-question",
+      "threads": [
+        "hello"
+      ],
+      "inbound": "just got a cortado",
+      "fullTurn": true
+    },
+    {
+      "id": "decaf-new-topic",
+      "kind": "new-topic",
+      "threads": [
+        "phone-test-before-brew",
+        "brew-clean-question"
+      ],
+      "inbound": "do you have decaf",
+      "fullTurn": true
+    },
+    {
+      "id": "wifi-new-topic",
+      "kind": "new-topic",
+      "threads": [
+        "phone-test-before-brew",
+        "brew-clean-question"
+      ],
+      "inbound": "whats the wifi password",
+      "fullTurn": true
+    },
+    {
+      "id": "dogs-new-topic",
+      "kind": "new-topic",
+      "threads": [
+        "phone-test-before-brew",
+        "brew-clean-question"
+      ],
+      "inbound": "dogs ok?",
+      "fullTurn": true
+    },
+    {
+      "id": "cortado-statement",
+      "kind": "new-topic",
+      "threads": [
+        "phone-test-before-brew",
+        "brew-clean-question"
+      ],
+      "inbound": "just got a cortado",
+      "fullTurn": true
+    }
+  ]
+}

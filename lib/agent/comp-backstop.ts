@@ -15,6 +15,11 @@
 // are vanishingly rare in agent drafts to guests; false negatives are the
 // failure mode this exists to prevent.
 //
+// "A free <item>" after an article is the one place that rule is loosened
+// (2026-10-07), with the venue's own free things excluded by name; see the
+// entry. A standing promotion stated as a fact ("pastries are half off after
+// four") is deliberately NOT matched: it is the venue's price, not a comp.
+//
 // Same role as THE-225's DASH_REGEX but a different placement: dash check
 // runs INSIDE the regen loop (forces rewrite); comp check runs OUTSIDE the
 // regen loop (queues instead). Comp commitments are intentional speech acts —
@@ -55,6 +60,26 @@ export const COMP_PATTERNS: readonly RegExp[] = [
   // keeping "no charge for your refill" / "no charge for the round".
   /\bno charge for (?:this|that)\b/i,
   /\bno charge for (?:the|your) (?:order|tab|bill|refill|round|drink|coffee|espresso|latte|cappuccino|americano|tea|pastry|cookie|item|cup|sandwich|snack|one|pour|shot)\b/i,
+  // 2026-10-07: sixteen comp-shaped bodies were run through matchComp and
+  // these are the monetary ones it missed. Each is anchored the way the
+  // header asks, on the guest being given something, because this list holds
+  // a reply on ANY category: "the patio is covered", "a free table at 7",
+  // "we don't offer a discount for students" and "a credit or debit card" all
+  // matched a looser first draft and all send here.
+  /\bmoney back\b/i,
+  // "a credit for it", "store credit". Never a card, never "a credit to".
+  /\b(?:a|store) credit\b(?! (?:or debit )?card\b| to\b)/i,
+  /\bcredit (?:for|toward|towards|on your)\b/i,
+  /\bhalf off (?:your|the next|next|it|that)\b/i,
+  /\ba discount (?:next|on your|for you|for the)\b/i,
+  // "a free matcha": the noun list above cannot name every menu item, so any
+  // item after an article counts, except the things a venue has free that
+  // are not a comp. "gluten free milk" has no article before "free".
+  /\b(?:a|an|one|another|your) free (?!wi-?fi\b|parking\b|shipping\b|delivery\b|table\b|seat\b|spot\b|slot\b|event\b|class\b|tasting\b|moment\b|minute\b|second\b|hand\b|day\b|morning\b|afternoon\b|evening\b)[a-z]+/i,
+  // "your next one is covered", "it's covered". Not "the patio is covered",
+  // and not "it is covered in chocolate".
+  /\b(?:it|that|this|next one|your [a-z]+(?: [a-z]+)?)(?:'s| is| will be) covered\b(?! (?:in|with|by|on|until)\b)/i,
+  /\bwe owe you\b(?! an? (?:answer|reply|apology|explanation)\b)/i,
 ]
 
 export type CompMatchResult =

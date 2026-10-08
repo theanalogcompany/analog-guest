@@ -177,6 +177,14 @@ every open-thread turn so the override rate has a denominator. No trigger was ad
 is the existing `category_requires_approval`. `npm run measure-complaint-answer-hold` is the
 check, and its header says how to take the before-figure on `main`.
 
+**A clarifying question that names a remedy is held too** (ruled 2026-10-07: an offer to make
+it right always waits for the owner). `canAutoSendComplaintTurn` has a fifth check,
+`namesRemedy`, and its header says why vocabulary is acceptable there and nowhere else.
+`npm run measure-complaint-answer-hold -- --phrasings` prints every complaint reply that would
+send unreviewed; its bar is a hand read. **A comp offered on a turn the classifier did not call
+a complaint is still held only by the comp wording list, the self-flag and the commitment
+type**: the check that would catch the rest runs post-send on inbound (decision 0003).
+
 ### Two pending slots per guest
 
 Migration 041 plus 054. **Obligation slot**: pending rows whose `pending_commitment.type`
@@ -364,7 +372,7 @@ reading as an interview is the reply counts (3, 3, 5, 8, 11), one question per t
 brake - not this policy.
 
 **A turn with no intentions block still tells the model to ask nothing** on a first
-conversation and inside the post-close quiet (`NO_QUESTION_RESTRAINT`, `serializers.ts`), and
+conversation and inside the post-close quiet (`noQuestionRestraintFor`, `serializers.ts`), and
 a question the model emits with no block rendered is dropped in `generate-message.ts`. The
 restraint reaches `body`; the drop reaches the field. Neither alone covers both.
 
@@ -532,6 +540,13 @@ minutes**, via `proactive-spacing.ts` and `guests.last_proactive_send_at`. A fol
 a warm-close anchor, excluded inside `loadWarmCloseCandidates`. Reasons in those headers.
 
 ## Other rules that bite
+
+- **A short answer to something we said is read against what we said**
+  (`answer-to-our-question.ts`, 2026-10-07). Two decisions on the same turn: under the
+  confidence floor a classifier whose pick is `reply` or `new_question`, with a conversational
+  runner-up, keeps out of `unknown`; and knowledge retrieval gets a third arm, the guest's
+  earlier question and ours in front of the answer, behind the bare arm and never in its place. Header has the measurements; `npm run measure-answer-to-our-question`
+  is the check, on the real thread.
 
 - Two facts about the guest are derived from their own messages rather than left to the
   prompt, each in a pure module whose header is the authority: `known-guest.ts` (has this
