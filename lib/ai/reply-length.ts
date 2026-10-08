@@ -16,12 +16,17 @@
  *
  * WHAT IT DOES. When an answer to a simple question runs past the venue's
  * ceiling, generateMessage asks once more for the same answer in fewer words.
- * The retry ships only if it is shorter AND kept every fact (keepsTheFacts);
- * otherwise the first answer ships as written. Nothing is ever trimmed.
+ * The retry ships only if it is shorter AND kept every number, link and named
+ * thing the first answer carried (keepsTheFacts, which is a floor and says
+ * so); otherwise the first answer ships as written. Nothing is ever trimmed.
  *
  * IT NEVER FIRES WHEN THE GUEST NEEDS A FULLER ANSWER: a how-to, an event or
  * catering or wholesale inquiry, several questions at once, a follow-up on the
  * same topic, or a guest who asked for more. See needsFullerAnswer.
+ *
+ * HOW OFTEN IT APPLIES. Less than it looks. A second question in a thread
+ * that shares a word with the first exchange reads as a follow-up and is
+ * left alone, so the check mostly reaches a guest's first question.
  *
  * NO NUMBER IN THIS FILE. How long a venue's replies run is that venue's
  * style, measured from the replies its team actually sent. A venue with no
@@ -57,30 +62,45 @@ export function shorterReplyConstraint(profile: ReplyLengthProfile): string {
 }
 
 /**
- * Did the retry keep what the first answer said? Read off the text, with no
- * model call: every number, every link, and every named thing in the first
- * answer has to be in the retry.
+ * Did the retry keep the checkable things the first answer said? Read off the
+ * text, with no model call: every number, every link, and every named thing
+ * in the first answer has to be in the retry, as a whole token.
  *
  * A named thing is a capitalised word that is not opening a sentence, which
- * is how a product, a place or a person shows up in a reply. That misses a
- * fact carried by ordinary lowercase words, so this is a floor on "kept every
- * fact" and not the whole of it. It errs toward shipping the first answer,
- * which is the direction the ruling asks for.
+ * is how a product, a place or a person shows up in a reply.
+ *
+ * A FLOOR, NOT "EVERY FACT". A fact carried by ordinary lowercase words, or by
+ * a name that opens a sentence, is not seen. It errs toward shipping the
+ * first answer, which is the direction the ruling asks for.
  */
 export function keepsTheFacts(first: string, retry: string): boolean {
-  const kept = retry.toLowerCase()
-  const numbers = first.match(/\$?\d[\d.,:]*\d|\d/g) ?? []
-  const links = first.match(/\b[\w-]+(?:\.[\w-]+)+(?:\/\S*)?/g) ?? []
+  const plain = (text: string) => text.replace(/[‘’]/g, "'").toLowerCase()
+  const kept = new Set(
+    plain(retry).match(/[\p{L}\p{N}$][\p{L}\p{N}$.,:'/_-]*/gu),
+  )
+  const keptText = plain(retry)
+  const has = (token: string) => {
+    const t = plain(token).replace(/[.,:]+$/, '')
+    return [...kept].some((k) => k.replace(/[.,:]+$/, '') === t)
+  }
+  const numbers = first.match(/\$?\d[\d.,:]*\d|\$?\d/g) ?? []
+  const links =
+    first.match(/\b(?:https?:\/\/)?[\w-]+(?:\.[a-z]{2,})+(?:\/\S*)?/gi) ?? []
   const named: string[] = []
   for (const sentence of first.split(/(?<=[.!?])\s+|\n+/)) {
-    const words = sentence.split(/\s+/).slice(1)
-    for (const word of words) {
-      const bare = word.replace(/^[^\p{L}]+|[^\p{L}\p{N}'’-]+$/gu, '')
-      if (/^\p{Lu}/u.test(bare) && bare.length > 1) named.push(bare)
+    for (const word of sentence.split(/\s+/).slice(1)) {
+      const bare = word
+        .replace(/[‘’]/g, "'")
+        .replace(/^[^\p{L}]+|[^\p{L}\p{N}'-]+$/gu, '')
+        .replace(/'(s|d|m|ll|ve|re)$/i, '')
+      // "I" and its contractions are capitalised and name nothing.
+      if (bare.length > 1 && /^\p{Lu}/u.test(bare)) named.push(bare)
     }
   }
-  return [...numbers, ...links, ...named].every((piece) =>
-    kept.includes(piece.toLowerCase().replace(/[.,:]+$/, '')),
+  return (
+    numbers.every(has) &&
+    named.every((n) => has(n) || has(`${n}'s`)) &&
+    links.every((l) => keptText.includes(plain(l).replace(/[.,:]+$/, '')))
   )
 }
 

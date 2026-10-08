@@ -629,8 +629,11 @@ export function composeReplyWithReviewAsk(
 /**
  * Generate an outbound message in the venue's voice.
  *
- * Calls the model up to MAX_ATTEMPTS (3) times, retrying only on a self-talk
- * or unverified-link violation, and returns the last attempt. (Through
+ * Calls the model up to MAX_ATTEMPTS (3) times, retrying on a self-talk or
+ * unverified-link violation, and returns the last attempt. One further reason
+ * to ask again does NOT return the last attempt: the length check
+ * (reply-length.ts) ships its retry only if it is shorter and kept the facts,
+ * and otherwise the answer it was trying to shorten. (Through
  * v1.79.0 a voice-fidelity self-score below 0.7 also retried; the score was
  * removed in the v1.80.0 schema diet because it never gated anything in
  * production — see GeneratedMessageSchema.)

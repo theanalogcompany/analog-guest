@@ -70,7 +70,7 @@ import {
   selectRetractableVisits,
 } from './retract-reported-visit'
 import { findPendingQuestion } from './pending-question'
-import { MAX_BUBBLES_PER_RESPONSE } from './split-message'
+import { MAX_PACKED_BUBBLES } from './split-message'
 import type {
   AgentRunId,
   FollowupTrigger,
@@ -165,9 +165,10 @@ export async function buildRuntimeContext(input: {
   // agent runs, and gets rendered separately as `inboundMessage` in the prompt).
   // For followups there's no currentMessage, so no exclusion.
   // TAC-313: fetch enough ROWS to guarantee MAX_HISTORY_MESSAGES RESPONSES,
-  // then group. The bound is exact because the cap on bubbles per response is
-  // enforced in the sender (TAC-319: resolveDispatchBubbles never splits past
-  // MAX_BUBBLES_PER_RESPONSE sentences), so this many rows can never yield
+  // then group. The bound is exact because the cap on messages per response
+  // is enforced in the sender: resolveDispatchBubbles never sends a reply as
+  // more than MAX_PACKED_BUBBLES messages (three for a venue with no measured
+  // voice profile, up to six for one with), so this many rows can never yield
   // fewer than MAX_HISTORY_MESSAGES groups.
   //
   // TAC-394: no row is filtered on delivery. An unsent draft stays in history
@@ -188,7 +189,7 @@ export async function buildRuntimeContext(input: {
     .neq('body', '')
     .gte('created_at', historyCutoffIso)
     .order('created_at', { ascending: false })
-    .limit(MAX_HISTORY_MESSAGES * MAX_BUBBLES_PER_RESPONSE)
+    .limit(MAX_HISTORY_MESSAGES * MAX_PACKED_BUBBLES)
   if (input.currentMessage) {
     messagesQuery = messagesQuery.neq('id', input.currentMessage.id)
   }
@@ -990,7 +991,7 @@ export async function buildRuntimeContext(input: {
       recentMessages,
       responseCap: MAX_HISTORY_MESSAGES,
       rowsFetched: messagesResult.data?.length ?? 0,
-      rowCap: MAX_HISTORY_MESSAGES * MAX_BUBBLES_PER_RESPONSE,
+      rowCap: MAX_HISTORY_MESSAGES * MAX_PACKED_BUBBLES,
       historyCutoff: new Date(historyCutoffIso),
     })
 

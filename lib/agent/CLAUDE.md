@@ -102,7 +102,9 @@ else as stale.
 `sentence-split.ts`, decision 0010): the coin is its team's split share, and a reply longer
 than nine in ten of the team's own messages is ALWAYS split, at sentences and then clauses,
 into messages under that limit. That path can send more than `MAX_BUBBLES_PER_RESPONSE`
-messages, up to the most the team ever sent in one reply. Nothing is removed or reworded.
+messages: up to the most the team ever sent in one reply, and never more than
+`MAX_PACKED_BUBBLES` (6), which the history read sizes its row limit from. Past that count
+the word limit gives way, not the count. Nothing is removed or reworded.
 
 A `voice_corpus` row tagged `inactive` is left out of the pack, like `anti_pattern`: it is
 how an example is switched off without deleting it.

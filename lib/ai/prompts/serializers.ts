@@ -547,7 +547,15 @@ export function formatVenueLinks(rawLinks: unknown): string {
   ].join('\n')
 }
 
-export function ragChunksToProse(chunks: VoiceCorpusChunk[]): string {
+export function ragChunksToProse(
+  chunks: VoiceCorpusChunk[],
+  // Whether the venue has a measured voice profile. `past_message` is an old
+  // source type an operator can also add by hand, so the rows alone do not
+  // say "the team's real replies, approved as examples of how they text".
+  // The profile does: both are applied together. Without one, every row
+  // renders in the one list, in the order it always had.
+  hasVoiceProfile: boolean,
+): string {
   if (chunks.length === 0) return ''
 
   const render = (c: VoiceCorpusChunk) => {
@@ -561,8 +569,10 @@ export function ragChunksToProse(chunks: VoiceCorpusChunk[]): string {
   // their own heading, after everything else: they are the examples chosen
   // for how they are written, and later reads as closer. A venue with none
   // renders exactly the block it always did.
-  const real = chunks.filter((c) => c.sourceType === 'past_message')
-  const rest = chunks.filter((c) => c.sourceType !== 'past_message')
+  const isReal = (c: VoiceCorpusChunk) =>
+    hasVoiceProfile && c.sourceType === 'past_message'
+  const real = chunks.filter(isReal)
+  const rest = chunks.filter((c) => !isReal(c))
   const sections = [
     `## Examples of how the venue actually communicates${rest.length > 0 ? `\n${rest.map(render).join('\n\n')}` : ''}`,
   ]

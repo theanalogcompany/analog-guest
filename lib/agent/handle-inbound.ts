@@ -77,9 +77,10 @@ import { renderableIntentions } from './intentions/derive'
 // bubbles have to be the bubbles dispatch would have produced, and a second
 // copy of that rule is the drift this directory already pays for.
 import {
+  DEFAULT_BUBBLE_STYLE,
+  bubbleStyleFor,
   resolveDispatchBubbles,
   resolveOutboundTail,
-  DEFAULT_BUBBLE_STYLE,
 } from './sentence-split'
 import {
   recordIntentionEligibility,
@@ -2722,7 +2723,7 @@ async function runInboundTurn(
           gen.result.body,
           TEST_RUN_SPLIT_RNG,
           tail,
-          DEFAULT_BUBBLE_STYLE,
+          bubbleStyleFor(ctx.venue.brandPersona.voiceProfile),
         ),
         body: gen.result.body,
         intentionQuestion: gen.result.intentionQuestion,

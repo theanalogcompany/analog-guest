@@ -1037,7 +1037,12 @@ export async function generateStage(
   })
   if (!r.ok) return { status: 'failed', error: r.error, errorCode: r.errorCode }
 
-  if (r.data.attempts > 1) {
+  // A second attempt asked for by the length check alone is not this alert's
+  // subject: it has its own event below, and nothing was wrong with the first
+  // answer but its length.
+  const lengthRetryOnly =
+    r.data.replyLengthRetry !== 'none' && r.data.attempts === 2
+  if (r.data.attempts > 1 && !lengthRetryOnly) {
     await captureRegenerationTriggered({
       agentRunId: ctx.agentRunId,
       venueId: ctx.venue.id,

@@ -138,7 +138,8 @@ reason rides on `furtherHelpOfferReason`.
 **The length check is a fourth reason to ask again, and a backstop** (`reply-length.ts`,
 decision 0010). On a simple question, an answer past the venue's own ceiling (its team's
 p90, from `brand_persona.voiceProfile`) is asked for once more in fewer words. The retry
-ships only if it is shorter and `keepsTheFacts`; otherwise the first answer ships. It never
+ships only if it is shorter and `keepsTheFacts` (every number, link and named thing, a
+floor rather than every fact); otherwise the first answer ships. It never
 fires when `needsFullerAnswer` says the guest needs more (a how-to, an event or catering
 inquiry, several questions, a follow-up on the same topic), and never for a venue with no
 profile. The outcome rides on `replyLengthRetry` and the `reply_length_retry` event. This is

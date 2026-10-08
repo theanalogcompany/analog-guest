@@ -19,7 +19,8 @@ When a venue has a profile:
 - A set of the team's real replies, approved line by line, sits under its own heading in the
   voice examples.
 
-A venue with no profile behaves exactly as before. We still write CONTENT rules for every
+A venue with no profile behaves exactly as before: its `past_message` rows, which an
+operator can also add by hand, stay in the ordinary list of examples. We still write CONTENT rules for every
 venue (answer first, one point, nothing that sells, never invent a fact); those are not style.
 
 ## Why
@@ -38,7 +39,8 @@ time and uses an emoji in 4% of replies.
 - Setting the length check below the team's own long replies makes it the thing that
   shortens. At their p75 it fired on a third of question turns and one retry dropped a step
   from brewing instructions. It is a backstop at their p90, never fires when the guest
-  needs a fuller answer, and never ships a retry that lost a fact.
+  needs a fuller answer, and never ships a retry that lost a number, a link or a named
+  thing.
 - Reading the split share as the share of replies that will go out split: it is only the
   coin for a short reply. Long replies are always split.
 

@@ -848,7 +848,9 @@ export type GenerateMessageResult = {
   // Per-attempt body + flags, in attempt order. Surfaced for trace
   // observability (THE-216) so each `generate.attempt_N` span can carry the
   // actual text Sonnet returned. Length === attempts. The final entry's body
-  // equals the top-level `body` field.
+  // equals the top-level `body` field, EXCEPT when the length check kept the
+  // first answer over its retry (`replyLengthRetry` is 'kept_first' or
+  // 'kept_first_content'): then `body` is an earlier entry's.
   attemptHistory: GenerateMessageAttempt[]
   // The full system + user prompt sent to the model (THE-216). The system
   // prompt is invariant across attempts. The userPrompt here is the *parent*

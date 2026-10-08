@@ -43,11 +43,15 @@ export type VoiceAntiPattern = z.output<typeof VoiceAntiPatternSchema>
 // and the split coin. A venue without one behaves exactly as before.
 //
 // Every share is a fraction from 0 to 1. Words are whole numbers.
+// POSITIVE, not merely non-negative. These figures are applied by hand, the
+// per-message p90 is what dispatch cuts a long reply to, and the median is
+// what the prompt asks for: a zero is a typo that would otherwise cut every
+// reply into nothing or ask for "about 0 words".
 const WordSpreadSchema = z.object({
-  median: z.number().int().nonnegative(),
-  p75: z.number().int().nonnegative(),
-  p90: z.number().int().nonnegative(),
-  max: z.number().int().nonnegative(),
+  median: z.number().int().positive(),
+  p75: z.number().int().positive(),
+  p90: z.number().int().positive(),
+  max: z.number().int().positive(),
 })
 const ShareSchema = z.number().min(0).max(1)
 
@@ -124,7 +128,18 @@ export const BrandPersonaSchema = z
     // agent run, and a malformed profile must cost the venue its measured
     // style, never its whole persona: without the catch one bad number here
     // would fail the persona parse and take the venue's voice with it.
-    voiceProfile: VoiceProfileSchema.optional().catch(undefined),
+    //
+    // NOT SILENT. The venue falls back to its hand-written style, and the
+    // next save of the persona would write it back without the profile, so
+    // the drop is logged where a person looking at the venue's runs sees it.
+    voiceProfile: VoiceProfileSchema.optional().catch((ctx) => {
+      console.warn(
+        `[schemas] brand_persona.voiceProfile does not parse and is being ignored: ${ctx.error.issues
+          .map((i) => `${i.path.join('.')}: ${i.message}`)
+          .join('; ')}`,
+      )
+      return undefined
+    }),
   })
   .refine(
     (data) =>

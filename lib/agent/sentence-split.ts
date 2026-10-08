@@ -38,6 +38,7 @@
 
 import {
   MAX_BUBBLES_PER_RESPONSE,
+  MAX_PACKED_BUBBLES,
   collapseToSingleMessage,
 } from './split-message'
 
@@ -104,7 +105,7 @@ export function bubbleStyleFor(
   return {
     splitProbability: measured.splitShare,
     maxBubbleWords: measured.wordsPerBubble.p90,
-    maxBubbles: most,
+    maxBubbles: Math.min(most, MAX_PACKED_BUBBLES),
     capitalise: measured.lowercaseStartShare <= 0.3,
   }
 }
@@ -235,7 +236,17 @@ function splitToBubbles(
     style.maxBubbleWords !== undefined &&
     wordsIn(text) > style.maxBubbleWords
   ) {
-    return packWithin(text, style.maxBubbleWords, style)
+    // The answer gives up a slot when a tail follows it, exactly as the coin
+    // path does, so the reply as a whole stays inside the venue's most.
+    const most =
+      (style.maxBubbles ?? MAX_BUBBLES_PER_RESPONSE) -
+      (MAX_BUBBLES_PER_RESPONSE - maxBubbles)
+    return packWithin(
+      text,
+      style.maxBubbleWords,
+      most,
+      style.capitalise === true,
+    )
   }
   const sentences = splitIntoSentences(text)
   if (sentences.length < 2 || sentences.length > maxBubbles) return [text]
@@ -243,8 +254,16 @@ function splitToBubbles(
   return [text]
 }
 
+/**
+ * Words a guest reads, counted the way the venue's limit was measured
+ * (scripts/lib/voice-profile.ts): a link is not a word, and neither is a
+ * token with no letter or digit in it, like an emoji on its own.
+ */
 function wordsIn(text: string): number {
-  return text.split(/\s+/).filter((w) => w !== '').length
+  return text
+    .replace(/https?:\/\/\S+/g, ' ')
+    .split(/\s+/)
+    .filter((w) => /[\p{L}\p{N}]/u.test(w)).length
 }
 
 /**
@@ -269,19 +288,33 @@ function splitIntoClauses(sentence: string): string[] {
  *   1. One message per sentence.
  *   2. A sentence over the limit is cut at its clauses, packed greedily.
  *   3. A clause over the limit on its own is cut at the word, the last resort.
- *   4. A scrap of one or two words rides with its neighbour when that fits.
- *   5. Past the venue's most-ever messages, the two shortest neighbours are
- *      joined, for as long as a join still fits.
+ *   4. A scrap of one or two words rides with a neighbour when that fits.
+ *   5. Past `maxMessages`, the two shortest neighbours are joined, first only
+ *      where the join still fits the word limit.
+ *
+ * THE MESSAGE COUNT WINS OVER THE WORD LIMIT, and only at step 5's end: a
+ * reply too long for `maxMessages` messages of `maxWords` joins neighbours
+ * past the word limit rather than send more messages. The count is a hard
+ * bound other code sizes itself from (MAX_PACKED_BUBBLES); the word limit is
+ * a style. At the pilot's figures that is a reply past about 130 words.
  *
  * Then each message loses a dangling comma or its terminal period, the way a
  * piece sent on its own does (stripTerminalPeriod), and starts with a capital
- * where the venue's team writes that way.
+ * where the venue's team writes that way. That includes a message cut from
+ * the middle of a sentence, because that is what the measurement says: the
+ * pilot's team start 98% of their messages with a capital, "And it will be
+ * on the site on Sunday" among them. A web address, and a word with a capital
+ * inside it, are left as written.
  */
 function packWithin(
   text: string,
   maxWords: number,
-  style: BubbleStyle,
+  maxMessages: number,
+  capitalise: boolean,
 ): string[] {
+  // A limit under one word is not a limit anything can be cut to.
+  if (maxWords < 1 || maxMessages < 1) return [text]
+
   const pieces: string[] = []
   // A link ends a sentence without a full stop, so the splitter cannot see
   // the boundary after one. A capital right after a link is a new sentence.
@@ -294,62 +327,78 @@ function packWithin(
       continue
     }
     let current = ''
+    const flush = () => {
+      if (current !== '') pieces.push(current)
+      current = ''
+    }
     for (const clause of splitIntoClauses(sentence)) {
       const joined = current === '' ? clause : `${current} ${clause}`
       if (wordsIn(joined) <= maxWords) {
         current = joined
         continue
       }
-      if (current !== '') pieces.push(current)
-      const words = clause.split(/\s+/)
-      while (words.length > maxWords) {
-        pieces.push(words.splice(0, maxWords).join(' '))
+      flush()
+      // Cut at the word, counting tokens: a link or an emoji is a token here
+      // even though it is not a word, so the loop always makes progress.
+      const tokens = clause.split(/\s+/)
+      while (tokens.length > maxWords) {
+        current = tokens.splice(0, maxWords).join(' ')
+        flush()
       }
-      current = words.join(' ')
+      current = tokens.join(' ')
     }
-    if (current !== '') pieces.push(current)
+    flush()
   }
 
   const fits = (a: string, b: string) => wordsIn(a) + wordsIn(b) <= maxWords
   // A scrap, or a piece with nothing a guest would read as a message (an
-  // emoji on its own), rides with the message before it.
+  // emoji on its own, which counts no words and so always fits), rides with
+  // the message before it; a scrap that opens the reply rides with the next.
   const merged: string[] = []
   for (const piece of pieces) {
     const previous = merged[merged.length - 1]
     if (
       previous !== undefined &&
       (!hasRenderableContent(piece) ||
-        (wordsIn(piece) <= 2 && fits(previous, piece)))
+        (wordsIn(piece) <= 2 && fits(previous, piece)) ||
+        (merged.length === 1 &&
+          wordsIn(previous) <= 2 &&
+          fits(previous, piece)))
     ) {
       merged[merged.length - 1] = `${previous} ${piece}`
     } else {
       merged.push(piece)
     }
   }
-  const cap = style.maxBubbles ?? MAX_BUBBLES_PER_RESPONSE
-  while (merged.length > cap) {
+  while (merged.length > maxMessages) {
     let best = -1
+    let bestFits = false
+    let bestSize = Infinity
     for (let i = 0; i < merged.length - 1; i += 1) {
       const a = merged[i] as string
       const b = merged[i + 1] as string
-      if (!fits(a, b)) continue
+      const pairFits = fits(a, b)
+      const size = wordsIn(a) + wordsIn(b)
+      // A join inside the word limit always beats one past it.
       if (
         best === -1 ||
-        wordsIn(a) + wordsIn(b) <
-          wordsIn(merged[best] as string) + wordsIn(merged[best + 1] as string)
+        (pairFits && !bestFits) ||
+        (pairFits === bestFits && size < bestSize)
       ) {
         best = i
+        bestFits = pairFits
+        bestSize = size
       }
     }
-    // Nothing left that fits: more messages beats a message over the limit.
     if (best === -1) break
     merged.splice(best, 2, `${merged[best]} ${merged[best + 1]}`)
   }
 
   return merged.map((piece) => {
     const trimmed = stripTerminalPeriod(piece.trim().replace(/[,;:]+$/, ''))
-    // A web address is written lowercase and stays that way.
-    return style.capitalise && !/^[\w-]+\.[a-z]{2,}/.test(trimmed)
+    // A web address, and a word with a capital inside it, stay as written.
+    return capitalise &&
+      !/^(https?:\/\/|[\w-]+\.[a-z]{2,}|\p{Ll}[^\s]*\p{Lu})/u.test(trimmed)
       ? trimmed.replace(/^\p{Ll}/u, (c) => c.toUpperCase())
       : trimmed
   })

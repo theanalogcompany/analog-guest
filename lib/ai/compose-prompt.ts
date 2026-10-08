@@ -72,7 +72,10 @@ export function composePrompt(input: GenerateMessageInput): {
     venueInfoToProse(venueInfo),
   ]
 
-  const ragBlock = ragChunksToProse(ragChunks)
+  const ragBlock = ragChunksToProse(
+    ragChunks,
+    persona.voiceProfile !== undefined,
+  )
   if (ragBlock.length > 0) sections.push(ragBlock)
 
   // Knowledge block sits beside voice examples — voice is style, knowledge is

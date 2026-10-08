@@ -35,6 +35,16 @@ export const BUBBLE_DELIMITER = '[[BREAK]]'
 export const MAX_BUBBLES_PER_RESPONSE = 3
 
 /**
+ * The most messages ANY reply is ever sent as. A venue whose team's replies
+ * have been measured may go past MAX_BUBBLES_PER_RESPONSE on a long answer
+ * (see bubbleStyleFor in ./sentence-split), up to the most its own team sent
+ * in one reply, and never past this. It is a mechanical bound, not a style:
+ * the history read in build-runtime-context sizes its row limit from it, and
+ * each message costs an inter-message pause inside the turn.
+ */
+export const MAX_PACKED_BUBBLES = 6
+
+/**
  * Pause between bubbles, with the typing indicator showing across it.
  *
  * A fixed constant, deliberately NOT derived from the opening send sequence —
