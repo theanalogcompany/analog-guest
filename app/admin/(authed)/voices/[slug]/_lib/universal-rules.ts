@@ -50,6 +50,9 @@
 // every change in this PR, including the two candidates (a return-visit
 // ban, a curiosity-question ban) that were evaluated and dropped.
 //
+// v1.104.0 narrowed R11 back to the closer and took that widening out again;
+// its summary below says what the rule now welcomes. See that changelog entry.
+//
 // TAC-348 also replaced the informal "we do NOT assert display-count ===
 // template-bullet-count" comment (this file previously had no companion
 // undisplayed-count export) with UNIVERSAL_RULES_UNDISPLAYED below, so a
@@ -183,7 +186,7 @@ export const UNIVERSAL_RULES_DISPLAY: ReadonlyArray<UniversalRule> = [
   {
     id: 'R11',
     summary:
-      'When delivering a recommendation, description, or fact, end on the answer. No closing sentence that comments on how good it is or reassures the guest — and this applies to the whole description, not just the closing line. Warmth still applies on feeling turns (complaint, thanks, milestone).',
+      "When delivering a recommendation, description, or fact, don't end on a marketing closer: a last line that sells it, praises it, or reassures the guest. A quick reaction to what the guest said, or a short opinion of our own, is welcome on any turn. Warmth still applies on feeling turns (complaint, thanks, milestone).",
   },
   // R12 (message splitting) is RETIRED — TAC-319 moved splitting out of the
   // prompt into deterministic dispatch code (lib/agent/sentence-split.ts).
