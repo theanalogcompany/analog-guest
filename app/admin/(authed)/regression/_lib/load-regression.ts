@@ -1,26 +1,37 @@
 // Loader for /admin/regression. One loader per surface, cache()-wrapped.
 //
-// Degrade, do not 500: before migration 069 is applied both selects fail
-// with "relation does not exist" - that renders as a banner telling the
-// operator which migration to apply, never as an empty page (an unlabelled
-// empty list reads as "no scenarios", a false absolute claim).
+// Scenario definitions come from REGRESSION_SCENARIOS in code, never from the
+// database (decision 0011) - so this page cannot show a different set from
+// the one the harness runs, and the list is never empty. The table is read
+// only for the `enabled` overlay, through the same resolveScenarios the
+// harness calls.
+//
+// Degrade, do not 500: the runs tables can still be unreadable, and an
+// unreadable overlay still renders every scenario (with the code flags) plus
+// a banner - an unlabelled empty list reads as "no scenarios", a false
+// absolute claim.
 
 import { cache } from 'react'
 import { createAdminClient } from '@/lib/db/admin'
 import {
+  type ResolvedScenario,
+  resolveScenarios,
+} from '@/lib/eval/regression-scenarios'
+import {
   type RegressionSample,
-  type RegressionScenario,
   RegressionSampleSchema,
-  RegressionScenarioSchema,
   RegressionVerdictsSchema,
 } from '@/lib/schemas/regression'
 
 export const RUNS_LIMIT = 10
 
-export interface ScenarioListItem extends RegressionScenario {
-  createdAt: string
-  /** Set when the stored row failed schema parse - rendered, not hidden. */
-  parseError: string | null
+export interface ScenarioListItem extends ResolvedScenario {
+  /**
+   * 'code' is a real scenario. 'orphan' is an overlay row whose key is in no
+   * code definition: it does NOT run, and it is rendered so it cannot sit in
+   * the table looking like a guard.
+   */
+  source: 'code' | 'orphan'
 }
 
 export interface RunListItem {
@@ -45,7 +56,7 @@ export interface RunListItem {
 }
 
 export interface RegressionPageData {
-  /** Set when the tables are unreadable - almost always "apply migration 069". */
+  /** Set when the overlay or the runs tables are unreadable. */
   degraded: string | null
   scenarios: ScenarioListItem[]
   runs: RunListItem[]
@@ -56,61 +67,36 @@ export const loadRegressionPage = cache(
   async (): Promise<RegressionPageData> => {
     const supabase = createAdminClient()
 
-    const scenariosResult = await supabase
+    const overlayResult = await supabase
       .from('regression_scenarios')
-      .select(
-        'key, lesson, script, target, expect_first_name, no_turn_one_name_ask, expect_reply_contains, forbid_policy_keys, enabled, created_at',
-      )
-      .order('created_at', { ascending: true })
-    if (scenariosResult.error) {
-      return {
-        degraded: `regression tables unreadable (${scenariosResult.error.message}) - have migrations 069 and 070 been applied in Supabase Studio?`,
-        scenarios: [],
-        runs: [],
-        hasMoreRuns: false,
-      }
-    }
+      .select('key, enabled')
+    const overlayDegraded = overlayResult.error
+      ? `the enabled overlay is unreadable (${overlayResult.error.message}) - every scenario below shows its code default, and the harness would run those. Has migration 077 been applied in Supabase Studio?`
+      : null
 
-    const scenarios: ScenarioListItem[] = (scenariosResult.data ?? []).map(
-      (row) => {
-        const parsed = RegressionScenarioSchema.safeParse({
-          key: row.key,
-          lesson: row.lesson,
-          script: row.script,
-          target: row.target,
-          expectFirstName: row.expect_first_name,
-          noTurnOneNameAsk: row.no_turn_one_name_ask,
-          expectReplyContains: row.expect_reply_contains,
-          forbidPolicyKeys: row.forbid_policy_keys,
-          enabled: row.enabled,
-        })
-        if (parsed.success) {
-          return {
-            ...parsed.data,
-            createdAt: row.created_at,
-            parseError: null,
-          }
-        }
-        // Render the malformed row with its error rather than dropping it -
-        // the harness refuses the whole set over this row, so it must be
-        // visible here.
-        return {
-          key: row.key,
-          lesson: row.lesson,
-          script: [],
-          target: [],
-          expectFirstName: null,
-          noTurnOneNameAsk: false,
-          expectReplyContains: null,
-          forbidPolicyKeys: [],
-          enabled: row.enabled,
-          createdAt: row.created_at,
-          parseError: parsed.error.issues
-            .map((i) => `${i.path.join('.')}: ${i.message}`)
-            .join('; '),
-        }
-      },
-    )
+    const resolved = resolveScenarios(overlayResult.data ?? [])
+    const scenarios: ScenarioListItem[] = [
+      ...resolved.scenarios.map((scenario) => ({
+        ...scenario,
+        source: 'code' as const,
+      })),
+      // Orphans last: a row nothing in code defines. Rendered with the empty
+      // definition it has, because that is the truth about it.
+      ...resolved.orphanKeys.map((key) => ({
+        key,
+        lesson:
+          'No code definition for this key, so this row is not a scenario and the harness does not run it. Either add it to REGRESSION_SCENARIOS in lib/eval/regression-scenarios.ts, or clear the row.',
+        script: [],
+        target: [],
+        expectFirstName: null,
+        noTurnOneNameAsk: false,
+        expectReplyContains: null,
+        forbidPolicyKeys: [],
+        enabled: false,
+        enabledOverridden: false,
+        source: 'orphan' as const,
+      })),
+    ]
 
     // Newest-first window + LIMIT+1 so the page can state the cap honestly.
     const runsResult = await supabase
@@ -122,7 +108,12 @@ export const loadRegressionPage = cache(
       .limit(RUNS_LIMIT + 1)
     if (runsResult.error) {
       return {
-        degraded: `regression_runs unreadable (${runsResult.error.message})`,
+        degraded: [
+          overlayDegraded,
+          `regression_runs unreadable (${runsResult.error.message})`,
+        ]
+          .filter((m) => m !== null)
+          .join(' · '),
         scenarios,
         runs: [],
         hasMoreRuns: false,
@@ -183,6 +174,6 @@ export const loadRegressionPage = cache(
       }
     })
 
-    return { degraded: null, scenarios, runs, hasMoreRuns }
+    return { degraded: overlayDegraded, scenarios, runs, hasMoreRuns }
   },
 )

@@ -1,10 +1,23 @@
-// The builtin regression scenario set and the one verdict definition.
+// The regression scenario set, the overlay resolution, and the one verdict
+// definition.
 //
-// Scenarios live in `regression_scenarios` (migration 069) so humans can
-// inspect, add and disable them from /admin/regression; this module is the
-// seed those rows started from and the fallback when the table is missing
-// (migration unapplied) or unreadable. The harness warns whenever it falls
-// back - a silent fallback would let a disabled scenario keep running.
+// REGRESSION_SCENARIOS below IS the set. A scenario's definition - script,
+// bars, ceilings, lesson - lives here and nowhere else, so adding a test
+// case is an edit to this array, reviewed in the PR that changes the
+// template, with no SQL and no migration (decision 0011, migration 077).
+//
+// `regression_scenarios` in Postgres is an OVERLAY carrying one field,
+// `enabled`, so a case can be silenced from /admin/regression without a
+// deploy. `resolveScenarios` is the only place that merge happens; the
+// harness and the admin loader both call it, so the two surfaces cannot
+// disagree about which scenarios are live.
+//
+// It used to be the other way round - the table held definitions and this
+// array was a fallback - and a scenario added here alone was inert, silently,
+// because the fallback fires on an unreadable or empty table and never on a
+// merely incomplete one. Two false greens in two days came from that
+// (migrations 071 and 072 headers hold the measurements). The inversion is
+// what makes a code-only scenario impossible to lose.
 //
 // `scenarioVerdict` is shared between the harness (which computes and stores
 // verdicts) and anything re-deriving them, so two surfaces cannot disagree
@@ -12,12 +25,14 @@
 // changelog has a scenario here; a new lesson ships with a new scenario in
 // the same change (.claude/rules/v2-template-regression.md).
 //
-// Pure module: type-only imports, no SDK init, importable by path from
-// scripts and app code alike.
+// Pure module: no SDK init and no DB client, importable by path from scripts
+// and app code alike. The one value import is the Zod schema, which pulls in
+// nothing but zod.
 
-import type {
-  RegressionSample,
-  RegressionScenario,
+import {
+  type RegressionSample,
+  type RegressionScenario,
+  RegressionScenarioSchema,
 } from '@/lib/schemas/regression'
 
 /**
@@ -62,7 +77,13 @@ export function describeTell(tell: string): string {
     : tell
 }
 
-export const BUILTIN_REGRESSION_SCENARIOS: RegressionScenario[] = [
+/**
+ * Every regression scenario, in author order. THE source of truth: nothing
+ * reads a definition from the database. A retired scenario stays here with
+ * `enabled: false` rather than being deleted - it is the record of a lesson
+ * that was once measured, and its key still appears in stored run verdicts.
+ */
+export const REGRESSION_SCENARIOS: RegressionScenario[] = [
   {
     key: 'bare-hey',
     lesson:
@@ -164,7 +185,7 @@ export const BUILTIN_REGRESSION_SCENARIOS: RegressionScenario[] = [
   {
     key: 'knowledge-pastries',
     lesson:
-      'Pre-ingest this retrieved "what Malenad tastes like" for a pastry question. "Butter and Rose" is the Foster City micro-bakery and appears in exactly one entry, so the bar cannot be met by a plausible guess. This fact was also one of the 11 lost when voicenote transcripts stopped being knowledge, and it is now sourced from the venue site instead (lib/rag/knowledge-source-roles.ts).',
+      'Pre-ingest this retrieved "what Malenad tastes like" for a pastry question. "Butter and Rose" is the Foster City micro-bakery and appears in exactly one entry, so the bar cannot be met by a plausible guess. This fact was also one of the 11 lost when voicenote transcripts stopped being knowledge, and it is now sourced from the venue site instead (lib/rag/knowledge-source-roles.ts). MEASURED on v2.10.0 against a quorum of BAR_MIN=2: this bar hit 4/6 and 3/6 across two n=6 runs, and "Foster City" (the same entry\'s other unguessable token) 5/6 - all passing, so the bar was kept as pre-registered. This is the LOOSEST of the five knowledge bars and the one to watch. Recorded because a single sample reads it as a failure: the agent commonly answers with the full pastry list and "a micro-baker in Foster City" without naming the bakery, and the two tokens are complementary rather than nested (one run named the bakery and not the town). One such sample is not a bar failure.',
     script: ['what pastries do you have?'],
     target: [],
     expectFirstName: null,
@@ -246,6 +267,87 @@ export const BUILTIN_REGRESSION_SCENARIOS: RegressionScenario[] = [
     enabled: false,
   },
 ]
+
+/** An overlay row: the only two columns `regression_scenarios` still owns. */
+export interface ScenarioOverlayRow {
+  key: string
+  enabled: boolean
+}
+
+export interface ResolvedScenario extends RegressionScenario {
+  /** True when an overlay row set `enabled`, rather than the code default. */
+  enabledOverridden: boolean
+}
+
+export interface ResolvedScenarioSet {
+  /** Every code scenario, in author order, with `enabled` resolved. */
+  scenarios: ResolvedScenario[]
+  /**
+   * Overlay keys with no code definition. These do NOT run - the set is the
+   * code array - and they are surfaced so an orphan row cannot sit in the
+   * table looking like a guard. Reachable only by a hand-edit in Studio or
+   * by deleting a scenario from the array without clearing its row.
+   */
+  orphanKeys: string[]
+}
+
+/**
+ * Merge the code set with the overlay. The ONE definition of which scenarios
+ * are live, called by both the harness and /admin/regression so the page and
+ * the run cannot disagree.
+ *
+ * An overlay row's `enabled` wins over the code flag - that is the whole
+ * point of the table, a no-deploy lever for silencing a case. Nothing else
+ * about a row is read.
+ */
+export function resolveScenarios(
+  overlay: readonly ScenarioOverlayRow[],
+  scenarios: readonly RegressionScenario[] = REGRESSION_SCENARIOS,
+): ResolvedScenarioSet {
+  const overlayByKey = new Map(overlay.map((row) => [row.key, row]))
+  const codeKeys = new Set(scenarios.map((s) => s.key))
+  return {
+    scenarios: scenarios.map((scenario) => {
+      const row = overlayByKey.get(scenario.key)
+      return {
+        ...scenario,
+        enabled: row?.enabled ?? scenario.enabled,
+        enabledOverridden:
+          row !== undefined && row.enabled !== scenario.enabled,
+      }
+    }),
+    orphanKeys: overlay
+      .map((row) => row.key)
+      .filter((key) => !codeKeys.has(key)),
+  }
+}
+
+/**
+ * Does the code set satisfy its own schema? The array is a hand-edited
+ * literal, so `tsc` checks its shape but not a key with a capital letter, an
+ * empty script, or a nine-turn script. Offline boundary, so this fails
+ * CLOSED and loudly at the caller: better than discovering it after an hour
+ * of model calls. Returns one message per bad scenario, empty when clean.
+ */
+export function validateScenarioSet(
+  scenarios: readonly RegressionScenario[] = REGRESSION_SCENARIOS,
+): string[] {
+  const problems: string[] = []
+  const seen = new Set<string>()
+  for (const scenario of scenarios) {
+    const parsed = RegressionScenarioSchema.strict().safeParse(scenario)
+    if (!parsed.success) {
+      problems.push(
+        `${scenario.key}: ${parsed.error.issues
+          .map((i) => `${i.path.join('.')} ${i.message}`)
+          .join('; ')}`,
+      )
+    }
+    if (seen.has(scenario.key)) problems.push(`${scenario.key}: duplicate key`)
+    seen.add(scenario.key)
+  }
+  return problems
+}
 
 /**
  * The one verdict definition. Order is the severity order: a sample that

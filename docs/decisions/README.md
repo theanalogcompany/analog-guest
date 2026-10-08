@@ -41,3 +41,4 @@ decision.
 | [0008](0008-voice-is-a-static-pack.md) | Voice is a static per-venue pack, not a similarity retrieval |
 | [0009](0009-relationship-engine-v2.md) | v2: behaviour is three versioned data artifacts (graph, template, rubric), not code |
 | [0010](0010-how-a-venue-texts-is-measured.md) | How a venue texts is measured from its team's replies, not written by us |
+| [0011](0011-a-regression-scenario-is-code.md) | A regression scenario is code; the table carries only its enabled flag |

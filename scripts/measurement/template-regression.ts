@@ -3,12 +3,13 @@
  * lesson its changelog paid for? Run on every V2_PROMPT_VERSION bump
  * (.claude/rules/v2-template-regression.md); numbers go in the PR body.
  *
- * Scenarios live in `regression_scenarios` (migration 069; inspect, add and
- * disable them at /admin/regression). The builtin set in
- * lib/eval/regression-scenarios.ts is the seed and the FALLBACK - when the
- * table is missing or any row fails to parse the harness warns loudly and
- * runs the builtin set, because a silently dropped scenario is a guard
- * nobody knows is gone. Each scenario's `lesson` records what it guards.
+ * Scenarios are REGRESSION_SCENARIOS in lib/eval/regression-scenarios.ts and
+ * nowhere else - adding a case is an edit to that array, no SQL and no
+ * deploy (decision 0011, migration 077). `regression_scenarios` in Postgres
+ * is an overlay carrying only `enabled`, so a case can be silenced from
+ * /admin/regression; an unreadable overlay runs the code flags with a
+ * warning, and an overlay row with no code definition is reported and NOT
+ * run. Each scenario's `lesson` records what it guards.
  *
  * Two layers, pre-registered and evaluated in code (scripts/CLAUDE.md #5/#8):
  *
@@ -79,10 +80,12 @@ import {
   SUBSTANTIVE_QUESTION_THRESHOLD,
 } from '@/lib/eval/question-substance'
 import {
-  BUILTIN_REGRESSION_SCENARIOS,
   describeTell,
   type RegressionTell,
+  type ResolvedScenarioSet,
+  resolveScenarios,
   scenarioVerdict,
+  validateScenarioSet,
 } from '@/lib/eval/regression-scenarios'
 import { countEmoji } from '@/lib/ai/emoji-cadence'
 import { EITHER_OR_QUESTION } from '@/lib/ai/v2/normalize-output'
@@ -92,7 +95,6 @@ import {
   type RegressionSample,
   type RegressionScenario,
   RegressionSampleSchema,
-  RegressionScenarioSchema,
 } from '@/lib/schemas/regression'
 import { createRunLog, readRunLog } from './run-log'
 
@@ -310,12 +312,20 @@ async function runSample(
       outcome.disqualified = `generation failed: ${trace.generation.error}`
       return outcome
     }
-    const assessor =
-      trace.assessor !== null && trace.assessor.ok ? trace.assessor : null
-    if (assessor === null) {
-      outcome.disqualified = 'assessor failed'
+    // Carry the reason. "assessor failed" alone cannot distinguish "the
+    // assessor never ran" from "it errored", and every sample in a run
+    // disqualifying on a bare label is how a wholly unrunnable gate looks
+    // identical to a model being flaky - which is exactly what a suspended
+    // provider account looked like until this line printed the 429.
+    if (trace.assessor === null) {
+      outcome.disqualified = 'assessor did not run'
       return outcome
     }
+    if (!trace.assessor.ok) {
+      outcome.disqualified = `assessor failed: ${trace.assessor.error}`
+      return outcome
+    }
+    const assessor = trace.assessor
     // A gate assertion needs a live semantic check behind it: with Jev down
     // the gate's fail-closed path can match the forbidden policy without a
     // judgment, and the fail-open path passes it vacuously - either way the
@@ -388,56 +398,53 @@ async function runSample(
 }
 
 /**
- * Enabled scenarios from regression_scenarios, or the enabled builtin set.
- * ANY failure - missing table, query error, zero rows, one malformed row -
- * falls back to the FULL enabled builtin set with a warning, never to a
- * partial one: a partially-loaded set silently drops a guard. (Retired
- * scenarios stay in the builtin list disabled, as the record.)
+ * The live scenario set: REGRESSION_SCENARIOS, with `enabled` overlaid from
+ * `regression_scenarios` (migration 077, decision 0011). Definitions are
+ * never read from the database, so a scenario added to the array runs on the
+ * next invocation with no migration and no deploy.
+ *
+ * The code set is validated first and a bad entry EXITS - an offline
+ * boundary fails closed and loudly, before an hour of model calls.
+ *
+ * An unreadable overlay fails OPEN: the code flags stand, with a warning. A
+ * case someone disabled then runs and may print a failure, which is visible;
+ * the other direction drops a guard silently, which is the defect this whole
+ * inversion removes.
  */
 async function loadScenarios(
   supabase: ReturnType<typeof createAdminClient>,
-): Promise<{ scenarios: RegressionScenario[]; source: 'db' | 'builtin' }> {
+): Promise<ResolvedScenarioSet & { overlayRead: 'ok' | 'failed' }> {
+  const problems = validateScenarioSet()
+  if (problems.length > 0) {
+    console.error(
+      `REGRESSION_SCENARIOS is invalid - refusing to run:\n  ${problems.join('\n  ')}`,
+    )
+    process.exit(1)
+  }
+
   const { data, error } = await supabase
     .from('regression_scenarios')
-    .select(
-      'key, lesson, script, target, expect_first_name, no_turn_one_name_ask, expect_reply_contains, forbid_policy_keys, enabled',
-    )
-    .eq('enabled', true)
-    .order('key')
-  if (error || !data || data.length === 0) {
+    .select('key, enabled')
+  if (error) {
     console.warn(
-      `regression_scenarios unreadable or empty (${error?.message ?? 'no rows'}) - running the builtin set (migrations 069/070 applied?)`,
+      `regression_scenarios overlay unreadable (${error.message}) - running the code set with its own enabled flags (migration 077 applied?)`,
     )
-    return {
-      scenarios: BUILTIN_REGRESSION_SCENARIOS.filter((s) => s.enabled),
-      source: 'builtin',
-    }
+    return { ...resolveScenarios([]), overlayRead: 'failed' }
   }
-  const scenarios: RegressionScenario[] = []
-  for (const row of data) {
-    const parsed = RegressionScenarioSchema.safeParse({
-      key: row.key,
-      lesson: row.lesson,
-      script: row.script,
-      target: row.target,
-      expectFirstName: row.expect_first_name,
-      noTurnOneNameAsk: row.no_turn_one_name_ask,
-      expectReplyContains: row.expect_reply_contains,
-      forbidPolicyKeys: row.forbid_policy_keys,
-      enabled: row.enabled,
-    })
-    if (!parsed.success) {
-      console.warn(
-        `regression_scenarios row "${row.key}" failed to parse (${parsed.error.message}) - running the builtin set`,
-      )
-      return {
-        scenarios: BUILTIN_REGRESSION_SCENARIOS.filter((s) => s.enabled),
-        source: 'builtin',
-      }
-    }
-    scenarios.push(parsed.data)
+
+  const resolved = resolveScenarios(data ?? [])
+  if (resolved.orphanKeys.length > 0) {
+    console.warn(
+      `overlay rows with no code definition, NOT running: ${resolved.orphanKeys.join(', ')} - a scenario exists in lib/eval/regression-scenarios.ts or it does not exist (clear the row at /admin/regression)`,
+    )
   }
-  return { scenarios, source: 'db' }
+  const overridden = resolved.scenarios.filter((s) => s.enabledOverridden)
+  if (overridden.length > 0) {
+    console.warn(
+      `enabled overridden from the overlay: ${overridden.map((s) => `${s.key}=${s.enabled}`).join(', ')}`,
+    )
+  }
+  return { ...resolved, overlayRead: 'ok' }
 }
 
 interface AxisMeans {
@@ -593,7 +600,9 @@ async function importRunLog(
   }
 
   const importedKeys = new Set(samplesByScenario.keys())
-  const fullRun = loaded.scenarios.every((s) => importedKeys.has(s.key))
+  const fullRun = loaded.scenarios
+    .filter((s) => s.enabled)
+    .every((s) => importedKeys.has(s.key))
 
   const str = (v: unknown, fallback: string) =>
     typeof v === 'string' ? v : fallback
@@ -703,14 +712,15 @@ async function main(): Promise<void> {
   }
 
   const loaded = await loadScenarios(supabase)
-  const scenarios = loaded.scenarios.filter(
+  const enabled = loaded.scenarios.filter((s) => s.enabled)
+  const scenarios = enabled.filter(
     (s) => scenarioFilter === undefined || scenarioFilter.includes(s.key),
   )
   if (scenarios.length === 0) {
     console.error('scenario filter matched nothing')
     process.exit(1)
   }
-  const filtered = scenarios.length !== loaded.scenarios.length
+  const filtered = scenarios.length !== enabled.length
 
   // One pack load, passed as the override - the attribution set and the
   // model's prompt cannot diverge mid-run or from each other.
@@ -734,7 +744,13 @@ async function main(): Promise<void> {
       samples,
       barMin: BAR_MIN,
       scenarios: scenarios.map((s) => s.key),
-      scenarioSource: loaded.source,
+      // The set is always the code array; the overlay only flips `enabled`.
+      scenarioSource: 'code',
+      overlayRead: loaded.overlayRead,
+      enabledOverrides: loaded.scenarios
+        .filter((s) => s.enabledOverridden)
+        .map((s) => `${s.key}=${s.enabled}`),
+      orphanOverlayRows: loaded.orphanKeys,
       packRows: pack.length,
       promptVersion: V2_PROMPT_VERSION,
       assessorVersion: ASSESSOR_PROMPT_VERSION,

@@ -2109,9 +2109,9 @@ export type Database = {
           expect_reply_contains: string | null
           forbid_policy_keys: Json
           key: string
-          lesson: string
+          lesson: string | null
           no_turn_one_name_ask: boolean
-          script: Json
+          script: Json | null
           target: Json
           updated_at: string
         }
@@ -2122,9 +2122,9 @@ export type Database = {
           expect_reply_contains?: string | null
           forbid_policy_keys?: Json
           key: string
-          lesson: string
+          lesson?: string | null
           no_turn_one_name_ask?: boolean
-          script: Json
+          script?: Json | null
           target?: Json
           updated_at?: string
         }
@@ -2135,9 +2135,9 @@ export type Database = {
           expect_reply_contains?: string | null
           forbid_policy_keys?: Json
           key?: string
-          lesson?: string
+          lesson?: string | null
           no_turn_one_name_ask?: boolean
-          script?: Json
+          script?: Json | null
           target?: Json
           updated_at?: string
         }
