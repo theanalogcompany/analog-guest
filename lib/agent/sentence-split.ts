@@ -42,10 +42,72 @@ import {
 } from './split-message'
 
 /**
- * Probability that a 2–3 sentence body splits into per-sentence bubbles.
- * The future tuning knob — change this constant, nothing else.
+ * Probability that a 2–3 sentence body splits into per-sentence bubbles, for a
+ * venue with no measured voice profile.
  */
 export const SPLIT_PROBABILITY = 0.5
+
+/**
+ * How one venue's replies are cut into messages.
+ *
+ * For a venue with no measured voice profile this is the coin above and
+ * nothing else, which is exactly the behaviour before 2026-10-07.
+ */
+export interface BubbleStyle {
+  /** The coin for a two or three sentence reply that fits in one message. */
+  splitProbability: number
+  /**
+   * No message runs longer than this many words. A reply past it is ALWAYS
+   * split, coin or no coin. Absent: no such rule.
+   */
+  maxBubbleWords?: number
+  /** The most messages one reply is cut into, where the words allow it. */
+  maxBubbles?: number
+  /** Start a split-off message with a capital, as this venue's team does. */
+  capitalise?: boolean
+}
+
+export const DEFAULT_BUBBLE_STYLE: BubbleStyle = {
+  splitProbability: SPLIT_PROBABILITY,
+}
+
+/**
+ * A venue's style from its measured profile (ruled 2026-10-07). Every figure
+ * is the team's own: how often they sent one answer as several messages, the
+ * length nine in ten of their messages stay under, the most messages they
+ * ever sent in one reply, and whether they start a message with a capital.
+ *
+ * THE COIN IS NOT THE SAME QUANTITY AS THE SHARE IT IS SET FROM. The measured
+ * share is of all the team's replies; the coin is only consulted on a short
+ * body the splitter can see two or three sentences in. So short replies go
+ * out split less often than the team's do. Long ones are always split.
+ *
+ * Takes a structural type so this module stays import-free.
+ */
+export function bubbleStyleFor(
+  measured:
+    | {
+        splitShare: number
+        wordsPerBubble: { p90: number }
+        bubblesPerReply: Record<string, number>
+        lowercaseStartShare: number
+      }
+    | undefined,
+): BubbleStyle {
+  if (measured === undefined) return DEFAULT_BUBBLE_STYLE
+  const most = Math.max(
+    MAX_BUBBLES_PER_RESPONSE,
+    ...Object.keys(measured.bubblesPerReply)
+      .map(Number)
+      .filter(Number.isFinite),
+  )
+  return {
+    splitProbability: measured.splitShare,
+    maxBubbleWords: measured.wordsPerBubble.p90,
+    maxBubbles: most,
+    capitalise: measured.lowercaseStartShare <= 0.3,
+  }
+}
 
 /**
  * Tokens that end with a period WITHOUT ending a sentence, lowercased.
@@ -167,11 +229,130 @@ function splitToBubbles(
   text: string,
   rng: () => number,
   maxBubbles: number,
+  style: BubbleStyle,
 ): string[] {
+  if (
+    style.maxBubbleWords !== undefined &&
+    wordsIn(text) > style.maxBubbleWords
+  ) {
+    return packWithin(text, style.maxBubbleWords, style)
+  }
   const sentences = splitIntoSentences(text)
   if (sentences.length < 2 || sentences.length > maxBubbles) return [text]
-  if (rng() < SPLIT_PROBABILITY) return sentences.map(stripTerminalPeriod)
+  if (rng() < style.splitProbability) return sentences.map(stripTerminalPeriod)
   return [text]
+}
+
+function wordsIn(text: string): number {
+  return text.split(/\s+/).filter((w) => w !== '').length
+}
+
+/**
+ * Cut a sentence that is too long for one message at its clause boundaries:
+ * after a comma, semicolon or colon, and before a joining word. Never between
+ * two numbers ("2, 3 tbsp" is one quantity, the comma standing in for a dash).
+ * Each piece keeps its own punctuation, so joining them back gives the
+ * sentence unchanged.
+ */
+function splitIntoClauses(sentence: string): string[] {
+  return sentence
+    .split(/(?<=(?<!\d)[,;:])\s+|\s+(?=(?:and|but|or|so|then|because|which)\s)/)
+    .filter((c) => c.trim() !== '')
+}
+
+/**
+ * A reply too long for one message, cut into messages of at most `maxWords`
+ * (ruled 2026-10-07: no single message longer than nine in ten of the team's
+ * own). NOTHING IS REMOVED OR REWORDED: every word of the reply is in exactly
+ * one message, in order.
+ *
+ *   1. One message per sentence.
+ *   2. A sentence over the limit is cut at its clauses, packed greedily.
+ *   3. A clause over the limit on its own is cut at the word, the last resort.
+ *   4. A scrap of one or two words rides with its neighbour when that fits.
+ *   5. Past the venue's most-ever messages, the two shortest neighbours are
+ *      joined, for as long as a join still fits.
+ *
+ * Then each message loses a dangling comma or its terminal period, the way a
+ * piece sent on its own does (stripTerminalPeriod), and starts with a capital
+ * where the venue's team writes that way.
+ */
+function packWithin(
+  text: string,
+  maxWords: number,
+  style: BubbleStyle,
+): string[] {
+  const pieces: string[] = []
+  // A link ends a sentence without a full stop, so the splitter cannot see
+  // the boundary after one. A capital right after a link is a new sentence.
+  const sentences = splitIntoSentences(text).flatMap((sentence) =>
+    sentence.split(/(?<=https?:\/\/\S+)\s+(?=\p{Lu})/u),
+  )
+  for (const sentence of sentences) {
+    if (wordsIn(sentence) <= maxWords) {
+      pieces.push(sentence)
+      continue
+    }
+    let current = ''
+    for (const clause of splitIntoClauses(sentence)) {
+      const joined = current === '' ? clause : `${current} ${clause}`
+      if (wordsIn(joined) <= maxWords) {
+        current = joined
+        continue
+      }
+      if (current !== '') pieces.push(current)
+      const words = clause.split(/\s+/)
+      while (words.length > maxWords) {
+        pieces.push(words.splice(0, maxWords).join(' '))
+      }
+      current = words.join(' ')
+    }
+    if (current !== '') pieces.push(current)
+  }
+
+  const fits = (a: string, b: string) => wordsIn(a) + wordsIn(b) <= maxWords
+  // A scrap, or a piece with nothing a guest would read as a message (an
+  // emoji on its own), rides with the message before it.
+  const merged: string[] = []
+  for (const piece of pieces) {
+    const previous = merged[merged.length - 1]
+    if (
+      previous !== undefined &&
+      (!hasRenderableContent(piece) ||
+        (wordsIn(piece) <= 2 && fits(previous, piece)))
+    ) {
+      merged[merged.length - 1] = `${previous} ${piece}`
+    } else {
+      merged.push(piece)
+    }
+  }
+  const cap = style.maxBubbles ?? MAX_BUBBLES_PER_RESPONSE
+  while (merged.length > cap) {
+    let best = -1
+    for (let i = 0; i < merged.length - 1; i += 1) {
+      const a = merged[i] as string
+      const b = merged[i + 1] as string
+      if (!fits(a, b)) continue
+      if (
+        best === -1 ||
+        wordsIn(a) + wordsIn(b) <
+          wordsIn(merged[best] as string) + wordsIn(merged[best + 1] as string)
+      ) {
+        best = i
+      }
+    }
+    // Nothing left that fits: more messages beats a message over the limit.
+    if (best === -1) break
+    merged.splice(best, 2, `${merged[best]} ${merged[best + 1]}`)
+  }
+
+  return merged.map((piece) => {
+    const trimmed = stripTerminalPeriod(piece.trim().replace(/[,;:]+$/, ''))
+    // A web address is written lowercase and stays that way.
+    return style.capitalise && !/^[\w-]+\.[a-z]{2,}/.test(trimmed)
+      ? trimmed.replace(/^\p{Ll}/u, (c) => c.toUpperCase())
+      : trimmed
+  })
 }
 
 /**
@@ -257,6 +438,10 @@ export function resolveDispatchBubbles(
   // rather than inherit an answer by staying silent. A fourth dispatch arm
   // added later fails `tsc` until it decides.
   intentionTail: string,
+  // How this venue's replies are cut, from bubbleStyleFor. Required for the
+  // same reason the tail is: a caller has to say which venue it means rather
+  // than inherit the default by staying silent.
+  style: BubbleStyle,
 ): string[] {
   // Stray model-emitted [[BREAK]] markers (and near-misses) are noise now;
   // collapseToSingleMessage strips them and normalizes whitespace, keeping
@@ -284,7 +469,7 @@ export function resolveDispatchBubbles(
     tail.length > 0 && hasRenderableContent(tail) && cleaned.endsWith(tail)
 
   if (!tailIsOwnMessage) {
-    return splitToBubbles(cleaned, rng, MAX_BUBBLES_PER_RESPONSE)
+    return splitToBubbles(cleaned, rng, MAX_BUBBLES_PER_RESPONSE, style)
   }
 
   const answer = cleaned.slice(0, cleaned.length - tail.length).trim()
@@ -306,6 +491,7 @@ export function resolveDispatchBubbles(
     answer,
     rng,
     MAX_BUBBLES_PER_RESPONSE - 1,
+    style,
   ).map(stripTerminalPeriod)
   return [...answerBubbles, stripTerminalPeriod(tail)]
 }

@@ -3,6 +3,7 @@ import type { ReOptIn } from '@/lib/guests/opt-out'
 import type { MessageChannel } from '@/lib/schemas/message-channel'
 import type { EmojiDirective } from './emoji-cadence'
 import type { FurtherHelpOfferReason } from './further-help-offer'
+import type { ReplyLengthRetry } from './reply-length'
 import type {
   ActiveCommitment,
   ArrivalCaptureEmission,
@@ -484,6 +485,16 @@ export type RuntimeContext = {
   // on a followup or proactive turn, where the instruction may itself be to
   // ask something (the scan greeting asks what they got).
   askNothing?: boolean
+  // The median length of this venue's own replies, in words, when its team's
+  // replies have been measured (brand_persona.voiceProfile). It replaces the
+  // hand-written "a warm sentence or two" in the no-questions block. Absent
+  // for a venue with no profile, which keeps that block as written.
+  typicalReplyWords?: number
+  // The exchange before this message in the same conversation: the guest's
+  // last message and what reached them in answer. The length check reads it to
+  // tell a guest digging into a topic from one asking something new
+  // (lib/ai/reply-length.ts). Absent when there was none.
+  previousExchange?: { guest: string; reply: string }
   // TAC-575: true when the one line in `openIntentions` is a REQUIRED
   // question (the definition's `raise: 'always'`), today only "how is it so
   // far?" right after a guest names their order. The serializer swaps the
@@ -903,6 +914,9 @@ export type GenerateMessageResult = {
   // rather than to gate on it. False whenever the directive was 'allowed' or
   // absent — there is nothing to violate in either case.
   emojiDirectiveViolated: boolean
+  // What the length check did this call (lib/ai/reply-length.ts). 'none'
+  // whenever the venue has no measured voice profile.
+  replyLengthRetry: ReplyLengthRetry
 }
 
 export type ClassifyMessageInput = {

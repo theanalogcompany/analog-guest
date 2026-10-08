@@ -27,6 +27,8 @@
     "instagram-smoke": "tsx --env-file=.env.local scripts/instagram-send-smoke.ts",
     "insert-instagram-credential": "tsx --env-file=.env.local scripts/insert-instagram-credential.ts",
     "backfill-instagram-contacts": "tsx --env-file=.env.local scripts/backfill-instagram-contacts.ts",
+    "derive-voice-profile": "tsx --env-file=.env.local scripts/derive-voice-profile.ts",
+    "measure-texting-voice": "tsx --env-file=.env.local scripts/measurement/texting-voice.ts",
     "load-venue-knowledge": "tsx --env-file=.env.local scripts/load-venue-knowledge.ts",
     "ingest-venue-site": "tsx --env-file=.env.local scripts/ingest-venue-site.ts",
     "prepare": "husky",

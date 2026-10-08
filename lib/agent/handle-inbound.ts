@@ -76,7 +76,11 @@ import { renderableIntentions } from './intentions/derive'
 // The dispatch-side split, imported rather than restated: the v1 test draft's
 // bubbles have to be the bubbles dispatch would have produced, and a second
 // copy of that rule is the drift this directory already pays for.
-import { resolveDispatchBubbles, resolveOutboundTail } from './sentence-split'
+import {
+  resolveDispatchBubbles,
+  resolveOutboundTail,
+  DEFAULT_BUBBLE_STYLE,
+} from './sentence-split'
 import {
   recordIntentionEligibility,
   recordIntentionPrompts,
@@ -612,6 +616,7 @@ function buildGenerationFailureGeneration(): GenerateMessageResult {
     dashViolationPersisted: false,
     selfTalkViolationPersisted: false,
     emojiDirectiveViolated: false,
+    replyLengthRetry: 'none',
   }
 }
 
@@ -1867,6 +1872,7 @@ async function runInboundTurn(
               result.body,
               TEST_RUN_SPLIT_RNG,
               '',
+              DEFAULT_BUBBLE_STYLE,
             ),
             body: result.body,
           }
@@ -2716,6 +2722,7 @@ async function runInboundTurn(
           gen.result.body,
           TEST_RUN_SPLIT_RNG,
           tail,
+          DEFAULT_BUBBLE_STYLE,
         ),
         body: gen.result.body,
         intentionQuestion: gen.result.intentionQuestion,

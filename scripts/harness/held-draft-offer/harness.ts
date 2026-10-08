@@ -20,6 +20,7 @@ import {
 import {
   resolveDispatchBubbles,
   resolveOutboundTail,
+  DEFAULT_BUBBLE_STYLE,
 } from '@/lib/agent/sentence-split'
 import {
   appendFurtherHelpOffer,
@@ -50,6 +51,7 @@ const sent = (body: string, offer: string): string[] =>
     body,
     () => 0.99,
     resolveOutboundTail('', '', 0, offer),
+    DEFAULT_BUBBLE_STYLE,
   )
 
 // A reply ending on a link, the case the ruling is about.

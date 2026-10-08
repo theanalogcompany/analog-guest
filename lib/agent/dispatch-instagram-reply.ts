@@ -94,6 +94,7 @@ import {
   resolveDispatchBubbles,
   resolveOutboundTail,
   splitIntoSentences,
+  bubbleStyleFor,
 } from './sentence-split'
 import {
   collapseToSingleMessage,
@@ -533,6 +534,7 @@ export async function dispatchInstagramReply(
     generation.body,
     options.rng ?? Math.random,
     intentionTail,
+    bubbleStyleFor(ctx.venue.brandPersona.voiceProfile),
   )
 
   // Report and card what didn't go out. `sent` messages went out; everything

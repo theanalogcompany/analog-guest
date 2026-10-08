@@ -316,7 +316,7 @@ The live floors, all in `lib/agent/stages.ts`. A number quoted anywhere else may
 | --- | --- |
 | voice pack (`lib/rag/voice-pack.ts`) | static per venue, no similarity; empty pack fails **closed** on inbound (decision 0008) |
 | `KNOWLEDGE_RELEVANCE_FLOOR` 0.3 | knowledge retrieval, degrades **gracefully** |
-| `PROMPT_VERSION` v1.101.0 | bumping it is a repo-wide sweep - `.claude/rules/prompt-versioning.md` |
+| `PROMPT_VERSION` v1.102.0 | bumping it is a repo-wide sweep - `.claude/rules/prompt-versioning.md` |
 
 **20 approval triggers compose; any one queues the draft.** The four post-generation LLM
 checks run **post-send** on inbound (Slack forward on a finding, never a hold) and keep the
@@ -331,6 +331,10 @@ turn (`docs/decisions/0005-inbound-coalescing-settle-window.md`).
 
 `venues.status` gates processing as a **deny-list**, never an allow-list on `active` - the live
 pilot venue is `pending` (`docs/decisions/0002-deny-list-not-allow-list.md`).
+
+How a venue **texts** (length, splitting, emoji, capitals, punctuation) is **measured from
+its team's own replies** and stored as `brand_persona.voiceProfile`, never written by us
+(`docs/decisions/0010-how-a-venue-texts-is-measured.md`). Content rules are still ours.
 
 A getting-to-know-you question always goes out as its **own last message**, guaranteed at
 generation rather than asked for in prose

@@ -122,5 +122,6 @@ export function buildCrisisSafetyResult(): GenerateMessageResult {
     dashViolationPersisted: false,
     selfTalkViolationPersisted: false,
     emojiDirectiveViolated: false,
+    replyLengthRetry: 'none',
   }
 }

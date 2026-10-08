@@ -22,7 +22,11 @@
 import { createHash } from 'node:crypto'
 import { z } from 'zod'
 import { isCanonicalPrimaryTag } from '@/lib/schemas/knowledge-tags'
-import { resolveDispatchBubbles } from '@/lib/agent/sentence-split'
+import {
+  type BubbleStyle,
+  DEFAULT_BUBBLE_STYLE,
+  resolveDispatchBubbles,
+} from '@/lib/agent/sentence-split'
 
 // ── input schema ────────────────────────────────────────────────────────────
 
@@ -537,6 +541,7 @@ export function checkSplitSafety(
     body: string,
     rng: () => number,
     intentionTail: string,
+    style: BubbleStyle,
   ) => string[] = resolveDispatchBubbles,
 ): SplitSafetyFinding[] {
   const findings: SplitSafetyFinding[] = []
@@ -545,7 +550,7 @@ export function checkSplitSafety(
   for (const e of entries) {
     const tokens = e.content.match(domain) ?? []
     if (tokens.length === 0) continue
-    const bubbles = split(e.content, () => 0, '')
+    const bubbles = split(e.content, () => 0, '', DEFAULT_BUBBLE_STYLE)
     for (const token of tokens) {
       // A domain is intact if some single bubble still contains it whole.
       if (!bubbles.some((b) => b.includes(token))) {

@@ -96,7 +96,16 @@ else as stale.
 | `COALESCE_SETTLE_MS` (`coalesce-turn.ts`) | 0 | settle before claiming; zero since the 2026-09 coalesce-window run, kept as the rollback lever |
 | `CLAIM_LEASE_MS` / `MAX_TURN_EXTENSIONS` / `MAX_TURN_RETRIES` | 120 s / 2 / 1 | |
 | `MAX_BUBBLES_PER_RESPONSE` / `INTER_BUBBLE_GAP_MS` (`split-message.ts`) | 3 / 1500 ms | |
-| `SPLIT_PROBABILITY` (`sentence-split.ts`) | 0.5 | the one splitting knob |
+| `SPLIT_PROBABILITY` (`sentence-split.ts`) | 0.5 | the split coin for a venue with no voice profile |
+
+**A venue with a measured voice profile is cut differently** (`bubbleStyleFor`,
+`sentence-split.ts`, decision 0010): the coin is its team's split share, and a reply longer
+than nine in ten of the team's own messages is ALWAYS split, at sentences and then clauses,
+into messages under that limit. That path can send more than `MAX_BUBBLES_PER_RESPONSE`
+messages, up to the most the team ever sent in one reply. Nothing is removed or reworded.
+
+A `voice_corpus` row tagged `inactive` is left out of the pack, like `anti_pattern`: it is
+how an example is switched off without deleting it.
 
 The failure asymmetry is deliberate: voice failure (an unloadable or empty pack) breaks the
 thing we sell, so it fails closed on inbound; knowledge failure just means a less specific

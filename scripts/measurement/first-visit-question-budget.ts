@@ -88,7 +88,10 @@ import {
 } from '@/lib/agent/intentions/definitions'
 import type { PromptedIntentionRow } from '@/lib/agent/intentions/load'
 import { INTENTION_RULES_DEFAULT } from '@/lib/schemas/intention-rules'
-import { resolveDispatchBubbles } from '@/lib/agent/sentence-split'
+import {
+  resolveDispatchBubbles,
+  DEFAULT_BUBBLE_STYLE,
+} from '@/lib/agent/sentence-split'
 import {
   buildAiRuntime,
   computeFirstTouchAfterQrScan,
@@ -598,6 +601,7 @@ async function main(): Promise<void> {
             gen.data.body,
             () => seededFlip(`${conversationId}-t${t}`),
             tail,
+            DEFAULT_BUBBLE_STYLE,
           )
 
           // Production's gate, over the rendered set: what it would record as

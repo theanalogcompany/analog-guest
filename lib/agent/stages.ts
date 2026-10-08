@@ -7,6 +7,7 @@ import {
   captureDashViolationPersisted,
   captureDemoBypassedApprovalGate,
   captureEmojiDirectiveViolated,
+  captureReplyLengthRetry,
   captureMechanicOfferBackstopCaught,
   captureClosedVenueArrivalCaught,
   captureProsePromiseCaught,
@@ -33,6 +34,7 @@ import {
   type VoiceCorpusChunk as AiVoiceCorpusChunk,
 } from '@/lib/ai'
 import { resolveEmojiDirective } from '@/lib/ai/emoji-cadence'
+import { replyLengthProfileOf } from '@/lib/ai/reply-length'
 // TAC-401: imported BY PATH, not from the barrel above.
 import { VERIFY_PROSE_PROMISE_TRUNCATED_ERROR_CODE } from '@/lib/ai/verify-prose-promise'
 // TAC-513: imported BY PATH for the same reason as the line above.
@@ -80,6 +82,7 @@ import {
   KNOWLEDGE_MERGE_RULE,
   mergeKnowledgeMatches,
   type MergeRule,
+  previousExchange,
 } from './retrieval-context'
 import { looksLikeQuestion } from './looks-like-question'
 import {
@@ -1071,6 +1074,20 @@ export async function generateStage(
       category,
       emojiPolicy: ctx.venue.brandPersona.emojiPolicy,
       finalGeneratedBody: r.data.body,
+    })
+  }
+
+  if (r.data.replyLengthRetry !== 'none') {
+    const lengthProfile = replyLengthProfileOf(ctx.venue.brandPersona)
+    await captureReplyLengthRetry({
+      agentRunId: ctx.agentRunId,
+      venueId: ctx.venue.id,
+      guestId: ctx.guest.id,
+      category,
+      outcome: r.data.replyLengthRetry,
+      maxWords: lengthProfile?.maxWords ?? null,
+      typicalWords: lengthProfile?.typicalWords ?? null,
+      attempts: r.data.attempts,
     })
   }
 
@@ -2986,7 +3003,11 @@ export function buildAiRuntime(
   // statement in charge. `?? undefined` because the runtime field is
   // optional, not nullable.
   const emojiDirective =
-    resolveEmojiDirective(ctx.venue.brandPersona.emojiPolicy, rng) ?? undefined
+    resolveEmojiDirective(
+      ctx.venue.brandPersona.emojiPolicy,
+      rng,
+      ctx.venue.brandPersona.voiceProfile?.emojiShareOfReplies,
+    ) ?? undefined
 
   // TAC-332: extracted to the standalone computeFirstTouchAfterQrScan above
   // so handle-inbound.ts can reuse the same signal to gate
@@ -3080,6 +3101,13 @@ export function buildAiRuntime(
       (ctx.firstConversation ||
         ctx.intentionDerivation.quietAfterWarmClose ||
         ctx.visitCheckinHold),
+    typicalReplyWords:
+      ctx.venue.brandPersona.voiceProfile?.replyLength?.typicalWords ??
+      ctx.venue.brandPersona.voiceProfile?.wordsPerReply.median,
+    previousExchange:
+      ctx.currentMessage !== null && ctx.followupTrigger === null
+        ? previousExchange(ctx)
+        : undefined,
     // TAC-572: null on every turn but the one that opted the guest back in.
     reOptIn: ctx.reOptIn ?? undefined,
     // Both derived HERE, from the thread this context actually carries, so a

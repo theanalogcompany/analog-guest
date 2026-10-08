@@ -17,6 +17,13 @@ import {
   decideFurtherHelpOffer,
   type FurtherHelpOfferReason,
 } from './further-help-offer'
+import {
+  checkReplyLength,
+  keepsTheFacts,
+  replyLengthProfileOf,
+  shorterReplyConstraint,
+  type ReplyLengthRetry,
+} from './reply-length'
 import { PROMPT_VERSION } from './prompts/system-template'
 import { matchSelfTalk } from './self-talk-detector'
 import { isTaskDraft } from './task-draft'
@@ -681,7 +688,7 @@ export async function generateMessage(
   let attempts = 0
 
   try {
-    let lastResult: {
+    type ShippedAttempt = {
       body: string
       requiresOperatorApproval: boolean
       approvalReason: string
@@ -701,7 +708,8 @@ export async function generateMessage(
       reportedVisitCorrection: z.infer<
         typeof GeneratedMessageSchema
       >['reportedVisitCorrection']
-    } | null = null
+    }
+    let lastResult: ShippedAttempt | null = null
     const attemptHistory: GenerateMessageAttempt[] = []
     // THE-225, made STICKY by the TAC-509 follow-up (ruled 2026-09-21).
     //
@@ -768,6 +776,20 @@ export async function generateMessage(
     // Order-preserving and deduped, so a link flagged on attempt 1 is still
     // named on attempt 3 alongside anything new attempt 2 invented.
     const unverifiedUrlsSeen: string[] = []
+    // The length check (reply-length.ts). The ceiling is the venue's own,
+    // measured from its team's replies; a venue with no profile has none and
+    // every line below is inert for it.
+    const lengthProfile = replyLengthProfileOf(input.persona)
+    // The first answer that ran long, kept whole so it can still ship if the
+    // retry is no shorter. At most one retry for length in a call.
+    let heldForLength: {
+      result: ShippedAttempt
+      words: number
+      /** The answer alone, for checking the retry kept what it said. */
+      answer: string
+      restore: () => void
+    } | null = null
+    let replyLengthRetry: ReplyLengthRetry = 'none'
 
     for (let i = 0; i < MAX_ATTEMPTS; i++) {
       attempts++
@@ -1054,7 +1076,76 @@ export async function generateMessage(
       // fix. The two checks below still gate the loop.
       const hasSelfTalk = matchSelfTalk(object.body).matched
       const badUrls = findUnverifiedUrls(object.body, allowedUrls)
-      if (!hasSelfTalk && badUrls.length === 0) break
+      const clean = !hasSelfTalk && badUrls.length === 0
+      // Length is read off the answer alone: the getting-to-know-you
+      // question, the review ask and the offer line are separate messages
+      // with their own rules. Only a clean attempt is weighed, so a retry for
+      // length never competes with one the other two checks are forcing.
+      const lengthAnswer = replyBeforeOffer(
+        composeReplyWithIntention(rawObject.body, '').body,
+        offerLine,
+        false,
+      )
+      const length = checkReplyLength(
+        {
+          answer: lengthAnswer,
+          category: input.category,
+          inbound: input.runtime.inboundMessage ?? null,
+          previous: input.runtime.previousExchange ?? null,
+          knowledgeGap: rawObject.knowledgeGap,
+        },
+        lengthProfile,
+      )
+      if (clean && heldForLength !== null) {
+        // This attempt is the retry. The shorter of the two ships, and
+        // nothing is trimmed: a retry that is still long goes out as written.
+        if (length.words >= heldForLength.words) {
+          heldForLength.restore()
+          replyLengthRetry = 'kept_first'
+        } else if (!keepsTheFacts(heldForLength.answer, lengthAnswer)) {
+          // Shorter, but something the first answer said is gone. Ruled
+          // 2026-10-07: no cutting for the sake of cutting.
+          heldForLength.restore()
+          replyLengthRetry = 'kept_first_content'
+        } else {
+          replyLengthRetry =
+            length.verdict === 'too_long' ? 'shorter_still_long' : 'shortened'
+        }
+        break
+      }
+      if (clean && length.verdict !== 'too_long') break
+      if (clean && (lengthProfile === null || i === MAX_ATTEMPTS - 1)) {
+        // Long, and no attempt left to ask again with.
+        replyLengthRetry = 'no_attempt_left'
+        break
+      }
+      if (clean) {
+        const held = {
+          offerReason,
+          askDroppedForCorrection,
+          droppedForTaskDraft,
+          duplicateStripped,
+          droppedForBodyQuestion,
+          reviewAskDropped,
+        }
+        heldForLength = {
+          result: object,
+          words: length.words,
+          answer: lengthAnswer,
+          restore: () => {
+            lastResult = object
+            offerReason = held.offerReason
+            askDroppedForCorrection = held.askDroppedForCorrection
+            droppedForTaskDraft = held.droppedForTaskDraft
+            duplicateStripped = held.duplicateStripped
+            droppedForBodyQuestion = held.droppedForBodyQuestion
+            reviewAskDropped = held.reviewAskDropped
+          },
+        }
+        console.warn(
+          `[ai] generateMessage: answer ran ${length.words} words against this venue's ${lengthProfile?.maxWords}, asking once more`,
+        )
+      }
       // Accumulate, never reset. Both compose (a body can trip more than
       // one at once — the motivating incident tripped two) rather than one
       // winning over the other, and each stays set for the rest of the call.
@@ -1067,10 +1158,25 @@ export async function generateMessage(
       if (unverifiedUrlsSeen.length > 0) {
         feedbackParts.push(unverifiedUrlConstraint(unverifiedUrlsSeen))
       }
+      if (heldForLength !== null && lengthProfile !== null) {
+        feedbackParts.push(shorterReplyConstraint(lengthProfile))
+      }
       // Reaching this line means a check fired this attempt, so feedbackParts
       // is non-empty by construction; the guard is belt only.
       regenFeedback =
         feedbackParts.length > 0 ? feedbackParts.join('\n\n') : null
+    }
+
+    // The loop ran out on an attempt the self-talk or link check rejected,
+    // after a retry for length. The first answer was clean, only long, and is
+    // the better one to ship.
+    if (
+      heldForLength !== null &&
+      replyLengthRetry === 'none' &&
+      lastResult !== heldForLength.result
+    ) {
+      heldForLength.restore()
+      replyLengthRetry = 'kept_first'
     }
 
     if (lastResult === null) {
@@ -1204,6 +1310,11 @@ export async function generateMessage(
         emojiDirectiveViolated:
           input.runtime.emojiDirective === 'none' &&
           containsEmoji(lastResult.body),
+        // What the length check did. 'none' on almost every call, and always
+        // for a venue with no measured profile. Countable for the same reason
+        // as the flags above: it spends a second generation and chooses which
+        // reply the guest gets.
+        replyLengthRetry,
       },
     }
   } catch (e) {

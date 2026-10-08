@@ -242,6 +242,30 @@ export interface EmojiDirectiveViolatedProps {
   finalGeneratedBody: string
 }
 
+// The length check asked for an answer again (lib/ai/reply-length.ts). Fired
+// on every outcome except 'none', so the rate at which a venue's replies run
+// past its own measured length, and how often asking again helps, can be
+// counted rather than inferred.
+export interface ReplyLengthRetryProps {
+  agentRunId: string
+  venueId: string
+  guestId: string
+  category: string
+  outcome: string
+  /** The venue's ceiling and typical length, in words, at the time. */
+  maxWords: number | null
+  typicalWords: number | null
+  attempts: number
+}
+
+export async function captureReplyLengthRetry(
+  props: ReplyLengthRetryProps,
+): Promise<void> {
+  await capturePostHogEvent('reply_length_retry', props.guestId, {
+    ...props,
+  })
+}
+
 export async function captureEmojiDirectiveViolated(
   props: EmojiDirectiveViolatedProps,
 ): Promise<void> {
