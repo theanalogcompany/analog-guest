@@ -26,16 +26,50 @@
 // question auto-send?" is: yes on a venue that hasn't configured its own
 // policy, no on one that has.
 //
-// KNOWN RESIDUAL (deliberately deferred): an offer-shaped interrogative like
-// "want me to make you another?" carries a question mark, no first-person
-// modal, and possibly no commitment emission, so it can pass all four checks.
-// The model should label that `resolving` — it IS resolving — so the model is
-// the primary defense there and these checks are secondary. Closing it means
-// extending FORWARD_COMMITMENT_PATTERNS, which was explicitly deferred until
-// a real body proves the gap, because the last two predicate bugs came from
-// widening patterns without fixtures to measure against.
+// THE OFFER-SHAPED QUESTION (closed 2026-10-07; it had been deferred until a
+// body proved it). "want me to make you another?" carries a question mark, no
+// first-person modal, and possibly no commitment emission, so it passed all
+// four checks: three constructed bodies were run through this function and
+// all three auto-sent ("happy to remake it, when are you back in?" among
+// them). Ruled the same day: a reply that offers to make it right always
+// waits for the owner. Check 5 below holds a "clarifying" turn that names a
+// remedy. It is vocabulary, which complaint-floor.ts rejects for the floor
+// and for good reason: the ways to describe what is being given are
+// unbounded. It is acceptable here, and only here, because of where it sits.
+// This function decides one thing, whether a complaint turn may SKIP review,
+// so a remedy word it does not know leaves the turn exactly where it was
+// before this check, and one it wrongly matches costs a clarifying question
+// a wait. It cannot hold anything that was not already a complaint.
 
 import { matchForwardCommitment } from './complaint-floor'
+
+/**
+ * Words that put a remedy on the table. Matched only on a complaint turn the
+ * model called `clarifying`, where the reply is supposed to ask and propose
+ * nothing. "Was it not fresh?" has to stay a question, so `fresh` counts only
+ * as "a fresh one" or "another fresh".
+ */
+export const REMEDY_PATTERNS: readonly RegExp[] = [
+  /\bre-?ma(?:ke|kes|king|de)\b/i,
+  /\bredo\b/i,
+  /\breplac(?:e|es|ed|ing|ement)\b/i,
+  /\banother\b/i,
+  /\b(?:a|another) fresh\b|\bfresh one\b/i,
+  /\bon (?:us|me|the house)\b/i,
+  /\bmake (?:it|this|that) (?:right|up)\b/i,
+  /\bmake up for\b/i,
+  /\bput (?:it|this|that) right\b/i,
+  /\bmoney back\b/i,
+  /\brefund/i,
+  /\bcredit\b/i,
+  /\bdiscount/i,
+  /\bfree\b/i,
+]
+
+/** True when a reply names a remedy. Pure. */
+export function namesRemedy(body: string): boolean {
+  return REMEDY_PATTERNS.some((p) => p.test(body))
+}
 
 /**
  * What the model says this complaint turn is doing. Required (not optional)
@@ -64,6 +98,7 @@ export interface ComplaintTurnInput {
  *   2. the body actually asks something
  *   3. no first-person forward-commitment grammar (the complaint_commitment_floor predicate)
  *   4. no actionable structured commitment
+ *   5. no remedy named
  *
  * Anything else — including an unrecognized intent — queues.
  */
@@ -88,6 +123,10 @@ export function canAutoSendComplaintTurn(input: ComplaintTurnInput): boolean {
   const type = input.commitment.type
   const description = input.commitment.description?.trim()
   if (type && description) return false
+
+  // 5. A question that offers. "Want me to make you another?" asks and
+  //    proposes in one breath, and the proposing is what the owner approves.
+  if (namesRemedy(input.body)) return false
 
   return true
 }

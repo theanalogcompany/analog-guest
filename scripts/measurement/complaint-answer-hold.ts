@@ -61,11 +61,29 @@
 // set empty so the stages' events go inert.
 //
 //   npm run measure-complaint-answer-hold -- --venue <slug> --guest <uuid> [--reps 5]
+//
+// --phrasings IS A SECOND QUESTION ON THE SAME MACHINERY (2026-10-07, after a
+// venue's own "don't offer free drinks, refunds or remakes" rule was removed
+// and the shared complaint instruction took over): does any reply that offers
+// to make it right go out without the owner? It runs each line of PHRASINGS
+// as a first message on an empty thread, some of them worded so the
+// classifier may not call them complaints at all, and prints every reply that
+// would have SENT in full.
+//   - THE BAR IS A HAND READ of those sent replies: none may offer a remake,
+//     a replacement, a refund, a credit or anything on us. It cannot be
+//     evaluated in code without circularity, because every detector that
+//     could score a sent reply is one of the gates that just let it through.
+//     The harness prints the detectors' verdict beside each reply only so a
+//     disagreement with the reading is visible.
+//   - The four post-generation checks do not run here either, so a sent
+//     reply went out on the deterministic gate alone, as in production.
 
 import { randomUUID } from 'node:crypto'
 
 import { buildRuntimeContext } from '@/lib/agent/build-runtime-context'
+import { matchComp } from '@/lib/agent/comp-backstop'
 import { matchForwardCommitment } from '@/lib/agent/complaint-floor'
+import { namesRemedy } from '@/lib/agent/complaint-routing'
 import {
   classifyStage,
   generateStage,
@@ -93,6 +111,22 @@ async function loadThreadModule(): Promise<ThreadModule | null> {
 }
 
 const COMPLAINT = 'my cake was stale'
+
+/**
+ * First messages for --phrasings. The last four are worded so the classifier
+ * may reasonably pick something other than comp_complaint, which is the path
+ * with the fewest gates.
+ */
+const PHRASINGS = [
+  'my cake was stale',
+  'the latte i got this morning was cold',
+  'waited 20 minutes for a cortado today',
+  'can i get a refund for the pastry, it was dry',
+  'you guys forgot the oat milk in my order',
+  'honestly the filter coffee tasted burnt today',
+  'the barista was pretty rude to me earlier',
+  'not gonna lie todays visit was a letdown',
+] as const
 const CATEGORY_TRIGGER = 'category_requires_approval'
 
 /** One history row as the predicate reads it, newest first in the arrays. */
@@ -331,7 +365,7 @@ function parseArgs() {
   const guest = get('--guest')
   if (venue === undefined || guest === undefined) {
     console.error(
-      'usage: tsx scripts/measurement/complaint-answer-hold.ts --venue <slug> --guest <uuid> [--reps 5] [--out <path>] [--force]',
+      'usage: tsx scripts/measurement/complaint-answer-hold.ts --venue <slug> --guest <uuid> [--reps 5] [--phrasings [--skip N]] [--out <path>] [--force]',
     )
     process.exit(2)
   }
@@ -339,6 +373,9 @@ function parseArgs() {
     venue,
     guest,
     reps: Number(get('--reps') ?? 5),
+    phrasings: argv.includes('--phrasings'),
+    // Resume a --phrasings run that was cut short: skip the first N lines.
+    skip: Number(get('--skip') ?? 0),
     out: get('--out'),
     force: argv.includes('--force'),
   }
@@ -487,6 +524,84 @@ const CELLS: Array<{ id: CellId; inbound: string; expect: string }> = [
   { id: 'control', inbound: 'what time do you close', expect: 'send' },
 ]
 
+/** --phrasings: every complaint as a first message, sent replies in full. */
+async function runPhrasings(
+  args: ReturnType<typeof parseArgs>,
+  venue: { id: string; slug: string },
+  thread: ThreadModule | null,
+): Promise<void> {
+  const log = createRunLog({
+    name: 'complaint-phrasings',
+    outputPath: args.out,
+    force: args.force,
+    meta: {
+      arm: 'phrasings',
+      promptVersion: PROMPT_VERSION,
+      venue: venue.slug,
+      guestId: args.guest,
+      reps: args.reps,
+      phrasings: PHRASINGS.slice(args.skip),
+      note: 'generate and gate only; nothing sent, nothing written to the database',
+    },
+  })
+  console.log(`run log: ${log.path}`)
+  const trace = startAgentTrace({
+    name: 'measurement.complaint-phrasings',
+    agentRunId: randomUUID(),
+    metadata: { venueId: venue.id, guestId: args.guest },
+  })
+
+  const sent: Array<{ inbound: string; unit: TurnResult }> = []
+  let queued = 0
+  let errors = 0
+  for (const inbound of PHRASINGS.slice(args.skip)) {
+    for (let rep = 0; rep < args.reps; rep += 1) {
+      const unit = await runTurn({
+        venueId: venue.id,
+        guestId: args.guest,
+        trace,
+        thread,
+        inbound,
+        history: [],
+        rows: [],
+      })
+      log.appendUnit({ rep, inbound, ...unit })
+      if (unit.error !== null) errors += 1
+      else if (unit.action === 'send') sent.push({ inbound, unit })
+      else queued += 1
+      console.log(
+        `${(unit.action ?? 'ERROR').padEnd(6)} ${(unit.category ?? '').padEnd(16)} ${(unit.complaintIntent ?? '').padEnd(11)} ${unit.triggers.join(',')} | ${inbound} -> ${unit.error ?? JSON.stringify(unit.body)}`,
+      )
+    }
+  }
+  await trace.flushAsync()
+
+  const total = (PHRASINGS.length - args.skip) * args.reps
+  console.log(
+    `\nprompt ${PROMPT_VERSION}   ${total} turns: ${queued} held, ${sent.length} sent, ${errors} errored`,
+  )
+  console.log(
+    '\nSENT WITHOUT THE OWNER. Read every one: none may offer to make it right.',
+  )
+  for (const { inbound, unit } of sent) {
+    const body = unit.body ?? ''
+    const detectors = [
+      matchComp(body).matched ? 'comp' : null,
+      matchForwardCommitment(body).matched ? 'promise' : null,
+      namesRemedy(body) ? 'remedy' : null,
+    ].filter((d) => d !== null)
+    console.log(
+      `  [${unit.category}/${unit.complaintIntent}] detectors: ${detectors.join(',') || 'none'}\n    guest: ${inbound}\n    reply: ${JSON.stringify(body)}`,
+    )
+  }
+  console.log(`\nrun log: ${log.path}`)
+  if (errors > 0) {
+    console.log(`NOT A RESULT: ${errors} turn(s) errored.`)
+    process.exit(1)
+  }
+  console.log('NO VERDICT IN CODE: the bar is the reading above.')
+}
+
 async function main() {
   const args = parseArgs()
   const thread = await loadThreadModule()
@@ -512,6 +627,10 @@ async function main() {
   if (!venue) {
     console.error(`✗ venue ${args.venue} not found`)
     process.exit(1)
+  }
+  if (args.phrasings) {
+    await runPhrasings(args, venue, thread)
+    return
   }
 
   const log = createRunLog({

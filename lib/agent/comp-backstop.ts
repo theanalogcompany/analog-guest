@@ -55,6 +55,22 @@ export const COMP_PATTERNS: readonly RegExp[] = [
   // keeping "no charge for your refill" / "no charge for the round".
   /\bno charge for (?:this|that)\b/i,
   /\bno charge for (?:the|your) (?:order|tab|bill|refill|round|drink|coffee|espresso|latte|cappuccino|americano|tea|pastry|cookie|item|cup|sandwich|snack|one|pour|shot)\b/i,
+  // 2026-10-07: sixteen comp-shaped bodies were run through matchComp and
+  // these are the monetary ones it missed. Each was true of this list's own
+  // rule (it means comp in operator context) and absent from it.
+  /\bmoney back\b/i,
+  // "a credit", "store credit", "credit for it". Never "credit card".
+  /\b(?:a|store) credit\b(?! card)/i,
+  /\bcredit (?:for|toward|towards|on your)\b/i,
+  /\bhalf off\b/i,
+  /\ba discount\b/i,
+  // "a free matcha": the noun list above cannot name every menu item, so any
+  // item after an article counts. The amenities a venue really does give
+  // away are excluded, and "gluten free milk" has no article before "free".
+  /\b(?:a|an|one|another|your) free (?!wi-?fi\b|parking\b|shipping\b|delivery\b|refill policy\b)[a-z]+/i,
+  // "your next one is covered", not "it is covered in chocolate".
+  /\b(?:is|are|will be|'s) covered\b(?! (?:in|with|by)\b)/i,
+  /\bowe you\b/i,
 ]
 
 export type CompMatchResult =
