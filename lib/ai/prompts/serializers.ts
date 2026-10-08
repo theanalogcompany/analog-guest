@@ -672,12 +672,7 @@ export function knowledgeChunksToProse(chunks: KnowledgeCorpusChunk[]): string {
  */
 function formatOpenStatus(
   openState: NonNullable<RuntimeContext['today']>['openState'],
-  // Whether to say when the venue next opens. Not on an acknowledgment: a
-  // guest who wrote "ok" asked nothing, and with the next opening in front of
-  // it the model reached for it ("We're open tomorrow from 7"); with it left
-  // out, three of three replies to "ok" were a word or two. The
-  // CLOSED status and its instruction still render, which is the safety
-  // half: nothing may be confirmed for right now.
+  // Whether to say when the venue next opens. See rendersNextOpening.
   withNextOpening: boolean,
 ): string | null {
   if (!openState) return null
@@ -862,9 +857,44 @@ function formatInquiryFollowup(
   ].join('\n')
 }
 
+/** The guest's message is about coming in, or about when. */
+const ABOUT_COMING_IN =
+  /\b(open|opens|opening|close|closes|closing|closed|hours?|coming|come by|come in|come over|on my way|omw|heading|headed|be there|see you|stop by|swing by|drop by|pop in|visit|tomorrow|today|tonight|tmrw|now|later|soon|morning|afternoon|evening|weekend|what time|when)\b/i
+
+/**
+ * Does `## Right now` say when a closed venue next opens?
+ *
+ * A guest who wrote "ok" asked nothing, and with the next opening in front
+ * of it the model reached for it: "We're open tomorrow from 7" (2026-10-07;
+ * with the line left out, three of three replies to "ok" were a word or two).
+ * So (ruled the same day):
+ *
+ *   small talk, an acknowledgment or casual chatter   never
+ *   a reply to something of ours                      only when the guest's
+ *                                                     message is about coming
+ *                                                     in or timing
+ *   everything else                                   always, as before
+ *
+ * The middle row is what covers "that sounds good", which the classifier
+ * calls an acknowledgment on one run and a reply on the next. The CLOSED
+ * status and its instruction render on every row: this only withholds the
+ * opening time, never the fact that nothing may be confirmed for right now.
+ */
+function rendersNextOpening(
+  category: MessageCategory,
+  inbound: string | undefined,
+): boolean {
+  if (category === 'acknowledgment' || category === 'casual_chatter') {
+    return false
+  }
+  if (category === 'reply') return ABOUT_COMING_IN.test(inbound ?? '')
+  return true
+}
+
 function formatRightNow(
   today: NonNullable<RuntimeContext['today']>,
   category: MessageCategory,
+  inbound: string | undefined,
 ): string {
   // TAC-522: the calendar sits directly under the date so the two date facts
   // are together, and the status line stays last where TAC-301's
@@ -881,7 +911,7 @@ function formatRightNow(
 
   const status = formatOpenStatus(
     today.openState,
-    category !== 'acknowledgment',
+    rendersNextOpening(category, inbound),
   )
   if (status) lines.push(status)
 
@@ -2408,23 +2438,30 @@ function shouldRenderEmojiDirective(
 /**
  * The per-message call on an exclamation mark and a typed smiley, for a venue
  * whose team's rate of each has been measured. Same asymmetry as the emoji
- * block: 'none' is flat, 'allowed' is permission and never a mandate.
+ * block for 'none', which is flat. 'allowed' differs: it asks for the mark,
+ * for the reason given at the wording below.
  */
 function formatMarkDirectives(
   exclamation: EmojiDirective | undefined,
   smiley: EmojiDirective | undefined,
 ): string {
   const lines: string[] = []
+  // 'allowed' ASKS FOR ONE, unlike the emoji block's permission. As
+  // permission the model took it once in eleven turns and once in six
+  // (2026-10-07, two runs, the second after the venue's examples were
+  // rebalanced to carry the team's own marks), against a team that uses an
+  // exclamation mark in a fifth of its messages. The coin already holds the
+  // rate; a turn it lands on has to show the mark or the rate is never met.
   if (exclamation === 'allowed') {
     lines.push(
-      'An exclamation mark is welcome in this message, where you are glad about something. One, and only if it fits.',
+      'Use one exclamation mark in this message, on the line where you are glad about something. One only, and never on bad news.',
     )
   } else if (exclamation === 'none') {
     lines.push('No exclamation mark in this message.')
   }
   if (smiley === 'allowed') {
     lines.push(
-      'A typed smiley, the two characters :) and not an emoji, is welcome on the end of a line in this message if the moment is a warm one. One, and only if it fits.',
+      'End one line of this message with a typed smiley, the two characters :) and not an emoji. One only, and never on bad news.',
     )
   } else if (smiley === 'none') {
     lines.push('No typed smiley in this message.')
@@ -2511,7 +2548,7 @@ export function runtimeToProse(
     blocks.push(formatCritiqueToIncorporate(runtime.critiqueToIncorporate))
   }
   if (runtime.today) {
-    blocks.push(formatRightNow(runtime.today, category))
+    blocks.push(formatRightNow(runtime.today, category, runtime.inboundMessage))
   }
   // TAC-536: immediately after `## Right now`, because both are facts about
   // this moment. The category instruction says "say only what the facts below

@@ -542,6 +542,14 @@ a warm-close anchor, excluded inside `loadWarmCloseCandidates`. Reasons in those
   recognises an earlier offer by its wording, because nothing stored marks one; the header
   says what that costs. Only a reply to the guest can count: a close, a sign-off, a greeting
   or a follow-up never does, decided by the row's category and not by what it says.
+- **Not every message gets a reply** (`pure-close.ts`, ruled 2026-10-07). A bare "ok",
+  "thanks" or emoji after a message of ours is left unanswered at a venue whose own team
+  mostly did the same (`voiceProfile.closes`). Decided in `runInboundTurn` right after the
+  opt-out decision and before retrieval, so nothing is generated and nothing downstream of
+  the turn is armed. Every doubt replies: a `?`, any extra word, an answer to a question of
+  ours, an open commitment, a category other than `acknowledgment`, a venue with no measured
+  habit. Returns `{status: 'silenced', why: 'pure_close'}`; count them with
+  `detail->>'why' = 'pure_close'` or the `inbound_close_not_answered` event.
 - **A welcome is never the conversation's one offer.** `previous-offer.ts` recognises an
   earlier offer by wording, and "let us know what we can help with" reads like one. A reply
   only counts if an offer could have been appended to it at all (`replyCouldCarryOffer`,

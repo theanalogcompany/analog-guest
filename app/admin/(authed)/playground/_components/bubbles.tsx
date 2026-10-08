@@ -389,6 +389,8 @@ const SUBSTITUTE_COPY = {
     'v1 short-circuits this turn: a fixed crisis-safety reply, never generated, and the approval gate never runs.',
   media_only_card:
     'v1 sends no text on this turn - it writes a blank card for the operator.',
+  no_reply_needed:
+    'v1 sends nothing on this turn: a bare close like "ok" or "thanks", at a venue whose own team mostly leaves those unanswered.',
   opt_out_confirmation:
     'v1 records the opt-out and sends its fixed confirmation. Not reproduced here: a test run must not write a TCPA opt-out.',
 } satisfies Record<NonNullable<TestDraft['substitute']>, string>

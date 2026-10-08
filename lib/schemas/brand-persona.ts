@@ -99,6 +99,16 @@ export const VoiceProfileSchema = z.object({
       typicalWords: z.number().int().positive(),
     })
     .optional(),
+  // What the team did when a guest sent a pure close ("ok", "thanks", a lone
+  // emoji) after one of their messages: how many were seen, and the share
+  // left with no reply (lib/agent/pure-close.ts). At or past a half, the agent
+  // sends nothing to such a message either. Absent: every message is answered.
+  closes: z
+    .object({
+      seen: z.number().int().nonnegative(),
+      unansweredShare: ShareSchema,
+    })
+    .optional(),
   /** ISO time the profile was derived. Absent on a hand-built test profile. */
   derivedAt: z.string().optional(),
 })

@@ -678,7 +678,14 @@ export type AgentResult =
   //
   // Only handleInbound produces it in practice. A followup cannot: its
   // disposition is always own_card, having no guest message to judge.
-  | { status: 'silenced' }
+  //
+  // A SECOND PRODUCER since 2026-10-07, marked `why: 'pure_close'`: the guest
+  // sent a bare "ok", "thanks" or emoji after a message of ours, at a venue
+  // whose own team mostly leaves those unanswered (lib/agent/pure-close.ts).
+  // No card is waiting on that path and nothing was generated. It shares this
+  // member because it is the same outcome, a message that needed no answer,
+  // and the same ledger row; `why` is what tells the two apart there.
+  | { status: 'silenced'; why?: 'pure_close' }
   // TAC-469: an Instagram guest's message already had a reply when the agent
   // came to send, usually one staff typed in the Instagram app. Nothing sent,
   // by design (rule 3). Only handleInbound produces it.

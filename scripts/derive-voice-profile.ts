@@ -28,6 +28,7 @@ import {
   collectReplies,
   deriveVoiceProfile,
   exampleCandidates,
+  measureCloses,
   wordCount,
   type ProfileMessage,
 } from './lib/voice-profile'
@@ -97,7 +98,17 @@ async function main(): Promise<void> {
 
   const outbound = messages.filter((m) => m.direction === 'outbound').length
   const { replies, dropped } = collectReplies(messages)
-  const profile = deriveVoiceProfile(replies)
+  const closes = measureCloses(messages)
+  const profile = {
+    ...deriveVoiceProfile(replies),
+    closes: {
+      seen: closes.seen,
+      unansweredShare:
+        closes.seen === 0
+          ? 0
+          : Math.round((closes.unanswered / closes.seen) * 1000) / 1000,
+    },
+  }
 
   console.log(`[voice-profile] ${venueSlug}`)
   console.log(
@@ -150,6 +161,16 @@ async function main(): Promise<void> {
   console.log(
     `    first words: ${profile.openers.map((o) => `${o.word} ${pct(o.share)}`).join(', ')}`,
   )
+
+  console.log(
+    '\n  CLOSES: a bare "ok", "thanks" or emoji after a message of the team\'s',
+  )
+  console.log(
+    `    ${closes.seen} seen, ${closes.unanswered} left with no reply (${pct(profile.closes.unansweredShare)})`,
+  )
+  for (const [kind, k] of Object.entries(closes.byKind)) {
+    console.log(`    ${kind}: ${k.unanswered} of ${k.seen} unanswered`)
+  }
 
   mkdirSync(RUN_LOG_DIR, { recursive: true })
   const stamp = new Date().toISOString().replace(/[:.]/g, '-')

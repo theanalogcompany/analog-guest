@@ -2617,11 +2617,16 @@ import {
 //   emoji coin and rendered in the same last position as `## Marks for this
 //   message`: an exclamation mark, and a typed smiley. The agent used neither
 //   in a whole phone thread at a venue whose team uses one in 20% and 6% of
-//   its messages. MEASURED WEAK: over 39 replies the exclamation coin said
-//   "allowed" on 11 and the model used one on 1; the smiley coin said
-//   "allowed" on 3 and it used one on 1. Neither appeared on a "none" turn.
-//   The block is permission, like the emoji one, and the model mostly
-//   declines it.
+//   its messages.
+//
+//   ON A TURN THE COIN PICKS, THE BLOCK ASKS FOR THE MARK. It began as
+//   permission, like the emoji block, and the model declined it: one use in
+//   11 allowed turns, then one in 6 after the venue's pinned real replies
+//   were rebalanced to carry the team's own marks (9 of 26 messages with an
+//   exclamation mark, 5 with a smiley). With the wording changed to "use
+//   one", six of six forced turns carried both. WHERE THEY LAND IS NOT
+//   VARIED: the exclamation mark was on the opening line in five of six and
+//   the smiley on the last line in five of six.
 //
 //   LINES AN OPERATOR APPROVED render under `### The venue's attitude` for a
 //   venue with a profile, with a heading that says to take their attitude and
@@ -2642,8 +2647,23 @@ import {
 //   acknowledgment all three replies told the guest to come by tomorrow from
 //   seven. So this covers "ok" and does not reliably cover its neighbours.
 //
-//   NOT FIXED: "that sounds good" after a recommendation still gets one more
-//   fact about the drink, three of three.
+//   THE CLOSED VENUE'S "Next open" then went further (ruled the same night):
+//   never on small talk, an acknowledgment or casual chatter; on a `reply`
+//   only when the guest's message is about coming in or timing; unchanged
+//   everywhere else (serializers.ts, rendersNextOpening). After it, none of
+//   nine small-talk replies mentioned the hours.
+//
+//   AND SOME MESSAGES NOW GET NO REPLY AT ALL, decided in code before
+//   anything is generated (lib/agent/pure-close.ts): a bare "ok", "thanks" or
+//   emoji after a message of ours, at a venue whose own team left 60 of 66 of
+//   those unanswered. Not a prompt change; recorded here because it replaces
+//   the reply this prompt used to write to "ok".
+//
+//   NOT FIXED: "what's so special about Indian coffee" still compares it with
+//   coffee from elsewhere, three of three ("in ways you don't get elsewhere",
+//   "the same recognition as Ethiopian or Colombian"), at 44 to 53 words.
+//   "that sounds good" after a recommendation still gets one more fact about
+//   the drink when the classifier calls it a reply.
 //
 //   BASELINE RESET for every turn (R44), and for acknowledgment turns at a
 //   closed venue.

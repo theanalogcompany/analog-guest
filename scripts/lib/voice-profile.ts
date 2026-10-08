@@ -23,6 +23,11 @@
 // is measured, and the script prints how many replies each one removed so the
 // choice can be argued with.
 
+import {
+  isAnsweringUs,
+  pureCloseKind,
+  type PureCloseKind,
+} from '@/lib/agent/pure-close'
 import type { VoiceProfile } from '@/lib/schemas'
 
 /** A longer pause than this between two venue messages starts a new reply. */
@@ -275,4 +280,58 @@ export function exampleCandidates(
     seen.add(key)
     return true
   })
+}
+
+/** A reply this long after a close is the team writing again, not answering it. */
+export const CLOSE_REPLY_WINDOW_MS = 24 * 60 * 60_000
+
+/**
+ * What the team did when a guest sent a pure close after one of their
+ * messages: "ok", "thanks", a lone emoji. Counted with the same two functions
+ * the inbound turn decides with (lib/agent/pure-close.ts), so the share
+ * describes exactly the messages the agent would stay silent on.
+ *
+ * "Unanswered" means no message from the venue before the guest's next one,
+ * or none within CLOSE_REPLY_WINDOW_MS. A reaction is not a message and is
+ * not in the import, so a close the team hearted counts as unanswered.
+ */
+export function measureCloses(messages: readonly ProfileMessage[]): {
+  seen: number
+  unanswered: number
+  byKind: Record<PureCloseKind, { seen: number; unanswered: number }>
+} {
+  const byGuest = new Map<string, ProfileMessage[]>()
+  for (const m of messages) {
+    if (m.body.trim() === '') continue
+    const list = byGuest.get(m.guestId) ?? []
+    list.push(m)
+    byGuest.set(m.guestId, list)
+  }
+  const byKind: Record<PureCloseKind, { seen: number; unanswered: number }> = {
+    ok: { seen: 0, unanswered: 0 },
+    thanks: { seen: 0, unanswered: 0 },
+    emoji_only: { seen: 0, unanswered: 0 },
+  }
+  for (const list of byGuest.values()) {
+    list.sort((a, b) => a.at.getTime() - b.at.getTime())
+    list.forEach((m, i) => {
+      const before = list[i - 1]
+      if (m.direction !== 'inbound' || before?.direction !== 'outbound') return
+      const kind = pureCloseKind(m.body)
+      if (kind === null || isAnsweringUs(before.body)) return
+      const after = list[i + 1]
+      const answered =
+        after !== undefined &&
+        after.direction === 'outbound' &&
+        after.at.getTime() - m.at.getTime() <= CLOSE_REPLY_WINDOW_MS
+      byKind[kind].seen += 1
+      if (!answered) byKind[kind].unanswered += 1
+    })
+  }
+  const kinds = Object.values(byKind)
+  return {
+    seen: kinds.reduce((n, k) => n + k.seen, 0),
+    unanswered: kinds.reduce((n, k) => n + k.unanswered, 0),
+    byKind,
+  }
 }

@@ -86,6 +86,7 @@ import {
 } from '@/lib/ai/reply-length'
 import { buildRuntimeContext } from '@/lib/agent/build-runtime-context'
 import { offeredThisConversation } from '@/lib/agent/previous-offer'
+import { decidePureClose } from '@/lib/agent/pure-close'
 import {
   resolveDispatchBubbles,
   resolveOutboundTail,
@@ -225,6 +226,13 @@ const UNITS: readonly Unit[] = [
   { id: 'hey', inbound: 'hey', history: [], reaction: true },
   { id: 'any-recs', inbound: 'any recs' },
   { id: 'ok', inbound: 'ok', history: AFTER_OAT, reaction: true },
+  { id: 'thanks', inbound: 'thanks', history: AFTER_OAT, reaction: true },
+  {
+    id: 'see-you',
+    inbound: 'see you tomorrow',
+    history: AFTER_REC,
+    reaction: true,
+  },
   { id: 'haha-nice', inbound: 'haha nice', history: AFTER_REC, reaction: true },
   {
     id: 'sounds-good',
@@ -269,7 +277,8 @@ const MARKETING_WIDER =
 
 function detect(answer: string): Record<string, boolean> {
   return {
-    parenthetical: /[()]/.test(answer),
+    // A typed smiley is not a bracket.
+    parenthetical: /[()]/.test(answer.replace(/[:;]-?[()]/g, '')),
     marketing: MARKETING.test(answer),
     marketingWider: MARKETING_WIDER.test(answer),
     pointsToOwnAccount: /@\w+|\b(our|on) (instagram|insta|ig)\b/i.test(answer),
@@ -477,6 +486,7 @@ async function main(): Promise<void> {
       // A leave-one-out run is not a treatment run, and the log has to say so.
       cutFullAnswerSentence: process.env.MEASURE_CUT_FULL_ANSWER === '1',
       cutNextOpening: process.env.MEASURE_CUT_NEXT_OPEN === '1',
+      forcedMarks: process.env.MEASURE_FORCE_MARKS === '1',
       constructed:
         'every thread is constructed. Classified and retrieved once per unit per run.',
     },
@@ -505,6 +515,7 @@ async function main(): Promise<void> {
   let fullerSplit = 0
   let fullerDone = 0
   let longMessages = 0
+  let notAnswered = 0
 
   for (const unit of units) {
     const ctx = unitContext(base, persona, unit, now)
@@ -534,9 +545,50 @@ async function main(): Promise<void> {
       `\n${unit.id} [${category}]${unit.fuller ? ' [needs a fuller answer]' : ''} ${JSON.stringify(unit.inbound)}`,
     )
 
+    // The turn's own first decision: does this message get a reply at all?
+    // Decided with the function the inbound turn calls, before anything is
+    // generated, so a skipped unit costs no generation here either.
+    const newest = ctx.recentMessages.at(-1)
+    const close = decidePureClose({
+      category,
+      crisisSafety: false,
+      body: unit.inbound,
+      hasMedia: false,
+      ourLastMessage:
+        newest !== undefined && newest.direction === 'outbound'
+          ? newest.body
+          : null,
+      hasOpenCommitment: false,
+      teamUnansweredShare: persona.voiceProfile?.closes?.unansweredShare,
+    })
+    if (!close.reply) {
+      notAnswered += 1
+      log.appendUnit({
+        unit: unit.id,
+        failed: false,
+        category,
+        inbound: unit.inbound,
+        notAnswered: true,
+        kind: close.kind,
+      })
+      console.log(`  (no reply: a ${close.kind} close the team leaves alone)`)
+      continue
+    }
+    console.log(`  replies: ${close.why}`)
+
     for (let rep = 0; rep < reps; rep += 1) {
       try {
-        const runtime = buildAiRuntime(ctx)
+        // MEASURE_FORCE_MARKS=1 lands both coins on 'allowed' for every
+        // reply, to read what the wording does on a turn the coin picked
+        // without waiting for one turn in five. Not the shipped rate.
+        const runtime =
+          process.env.MEASURE_FORCE_MARKS === '1'
+            ? {
+                ...buildAiRuntime(ctx),
+                exclamationDirective: 'allowed' as const,
+                smileyDirective: 'allowed' as const,
+              }
+            : buildAiRuntime(ctx)
         const composed = composePrompt({
           category,
           persona,
@@ -776,6 +828,7 @@ async function main(): Promise<void> {
     fullerRetries,
     fullerSplit,
     longMessages,
+    notAnswered,
     tallies,
   }
   console.log(
