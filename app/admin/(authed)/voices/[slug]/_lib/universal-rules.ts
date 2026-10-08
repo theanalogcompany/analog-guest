@@ -320,6 +320,6 @@ export const UNIVERSAL_RULES_DISPLAY: ReadonlyArray<UniversalRule> = [
   {
     id: 'R45',
     summary:
-      "Never talk about the account or number the guest is messaging as if it were somewhere else: no telling them to follow it or check it out, and no handle. Pointing them to what is on it is fine, like the posts on our page for photos or event news. When they ask for something that can't be sent in the chat, like a photo, say so plainly, then describe it or say our page has plenty. Added after a guest asking the venue's Instagram for photos was told to go to the venue's Instagram.",
+      "Never talk about the account or number the guest is messaging as if it were somewhere else: no telling them to follow it or check it out, and no handle. Pointing them to what is on it is fine, like the posts on our page for photos or event news. When they ask for something that can't be sent in the chat, like a photo, say so plainly, then describe it or say it is on our page, and never claim it can be found anywhere the venue's knowledge does not say. Added after a guest asking the venue's Instagram for photos was told to go to the venue's Instagram.",
   },
 ]

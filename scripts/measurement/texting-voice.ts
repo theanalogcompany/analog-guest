@@ -163,6 +163,11 @@ const UNITS: readonly Unit[] = [
     inbound: "What's so special about Indian coffee?",
     demo: true,
   },
+  { id: 'special-drink', inbound: 'why is the Pink Panther so special?' },
+  {
+    id: 'special-filter',
+    inbound: 'what makes your filter coffee different?',
+  },
   { id: 'buy-beans', inbound: 'Where can I buy their beans?', demo: true },
   { id: 'owner', inbound: 'Who owns the cafe?', demo: true },
   { id: 'pictures', inbound: 'Show me pictures of SoFi', demo: true },

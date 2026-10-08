@@ -266,17 +266,40 @@ function wordsIn(text: string): number {
     .filter((w) => /[\p{L}\p{N}]/u.test(w)).length
 }
 
+const JOINING_WORD = /^(?:and|but|or|so|then|because|which)\s/
+
 /**
  * Cut a sentence that is too long for one message at its clause boundaries:
  * after a comma, semicolon or colon, and before a joining word. Never between
  * two numbers ("2, 3 tbsp" is one quantity, the comma standing in for a dash).
  * Each piece keeps its own punctuation, so joining them back gives the
  * sentence unchanged.
+ *
+ * `strong` marks a clause that starts a new part of the sentence: it opens on
+ * a joining word, or follows a semicolon or colon. A bare comma is weak,
+ * because it is also what sits between two adjectives or the items of a list,
+ * and a message that ends "really distinct chocolaty," has been cut in the
+ * middle of a phrase.
  */
-function splitIntoClauses(sentence: string): string[] {
-  return sentence
+function splitIntoClauses(
+  sentence: string,
+): { text: string; strong: boolean }[] {
+  const texts = sentence
     .split(/(?<=(?<!\d)[,;:])\s+|\s+(?=(?:and|but|or|so|then|because|which)\s)/)
     .filter((c) => c.trim() !== '')
+  return texts.map((text, i) => {
+    const previous = i > 0 ? (texts[i - 1] as string) : ''
+    return {
+      text,
+      // "and" and "or" also join two words inside one item ("black pepper and
+      // carom seed"), so they only start a new part after a comma.
+      strong:
+        i > 0 &&
+        (/[;:]$/.test(previous) ||
+          (JOINING_WORD.test(text) &&
+            (!/^(?:and|or)\s/.test(text) || previous.endsWith(',')))),
+    }
+  })
 }
 
 /**
@@ -298,13 +321,16 @@ function splitIntoClauses(sentence: string): string[] {
  * bound other code sizes itself from (MAX_PACKED_BUBBLES); the word limit is
  * a style. At the pilot's figures that is a reply past about 130 words.
  *
+ * SENTENCE BOUNDARIES FIRST (ruled 2026-10-07). A sentence is cut only when
+ * it is itself over the limit, and when joins are needed a cut sentence is
+ * put back together before two sentences are run into each other.
+ *
  * Then each message loses a dangling comma or its terminal period, the way a
- * piece sent on its own does (stripTerminalPeriod), and starts with a capital
- * where the venue's team writes that way. That includes a message cut from
- * the middle of a sentence, because that is what the measurement says: the
- * pilot's team start 98% of their messages with a capital, "And it will be
- * on the site on Sunday" among them. A web address, and a word with a capital
- * inside it, are left as written.
+ * piece sent on its own does (stripTerminalPeriod). A message that starts a
+ * sentence starts with a capital where the venue's team writes that way. The
+ * rest of a sentence cut in two is a continuation and stays lowercase, as it
+ * was written: a capital there reads as a new sentence that is not one. A web
+ * address, and a word with a capital inside it, are left as written.
  */
 function packWithin(
   text: string,
@@ -315,7 +341,12 @@ function packWithin(
   // A limit under one word is not a limit anything can be cut to.
   if (maxWords < 1 || maxMessages < 1) return [text]
 
-  const pieces: string[] = []
+  interface Piece {
+    text: string
+    /** Starts a sentence. False for the rest of a sentence cut in two. */
+    opens: boolean
+  }
+  const pieces: Piece[] = []
   // A link ends a sentence without a full stop, so the splitter cannot see
   // the boundary after one. A capital right after a link is a new sentence.
   const sentences = splitIntoSentences(text).flatMap((sentence) =>
@@ -323,81 +354,118 @@ function packWithin(
   )
   for (const sentence of sentences) {
     if (wordsIn(sentence) <= maxWords) {
-      pieces.push(sentence)
+      pieces.push({ text: sentence, opens: true })
       continue
     }
-    let current = ''
-    const flush = () => {
-      if (current !== '') pieces.push(current)
-      current = ''
+    let current: { text: string; strong: boolean }[] = []
+    let opens = true
+    const textOf = (clauses: { text: string }[]) =>
+      clauses.map((c) => c.text).join(' ')
+    const flush = (clauses: { text: string }[]) => {
+      if (clauses.length === 0) return
+      pieces.push({ text: textOf(clauses), opens })
+      opens = false
     }
     for (const clause of splitIntoClauses(sentence)) {
-      const joined = current === '' ? clause : `${current} ${clause}`
-      if (wordsIn(joined) <= maxWords) {
-        current = joined
+      if (wordsIn(textOf([...current, clause])) <= maxWords) {
+        current.push(clause)
         continue
       }
-      flush()
-      // Cut at the word, counting tokens: a link or an emoji is a token here
-      // even though it is not a word, so the loop always makes progress.
-      const tokens = clause.split(/\s+/)
-      while (tokens.length > maxWords) {
-        current = tokens.splice(0, maxWords).join(' ')
-        flush()
+      // Over the limit. Cut at the last strong boundary in what is held, if
+      // what follows it still fits with this clause; a bare comma is the
+      // fallback, not the first choice.
+      let cut = -1
+      for (let k = current.length - 1; k > 0; k -= 1) {
+        if (
+          (current[k] as { strong: boolean }).strong &&
+          wordsIn(textOf([...current.slice(k), clause])) <= maxWords
+        ) {
+          cut = k
+          break
+        }
       }
-      current = tokens.join(' ')
+      if (cut !== -1) {
+        flush(current.slice(0, cut))
+        current = [...current.slice(cut), clause]
+        continue
+      }
+      flush(current)
+      current = []
+      // A clause over the limit on its own is cut at the word, counting
+      // tokens: a link or an emoji is a token here even though it is not a
+      // word, so the loop always makes progress.
+      const tokens = clause.text.split(/\s+/)
+      while (tokens.length > maxWords) {
+        flush([{ text: tokens.splice(0, maxWords).join(' ') }])
+      }
+      current = [{ text: tokens.join(' '), strong: clause.strong }]
     }
-    flush()
+    flush(current)
   }
 
-  const fits = (a: string, b: string) => wordsIn(a) + wordsIn(b) <= maxWords
+  const size = (p: Piece) => wordsIn(p.text)
+  const fits = (a: Piece, b: Piece) => size(a) + size(b) <= maxWords
+  const join = (a: Piece, b: Piece): Piece => ({
+    text: `${a.text} ${b.text}`,
+    opens: a.opens,
+  })
   // A scrap, or a piece with nothing a guest would read as a message (an
   // emoji on its own, which counts no words and so always fits), rides with
   // the message before it; a scrap that opens the reply rides with the next.
-  const merged: string[] = []
+  const merged: Piece[] = []
   for (const piece of pieces) {
     const previous = merged[merged.length - 1]
     if (
       previous !== undefined &&
-      (!hasRenderableContent(piece) ||
-        (wordsIn(piece) <= 2 && fits(previous, piece)) ||
-        (merged.length === 1 &&
-          wordsIn(previous) <= 2 &&
-          fits(previous, piece)))
+      (!hasRenderableContent(piece.text) ||
+        (size(piece) <= 2 && fits(previous, piece)) ||
+        (merged.length === 1 && size(previous) <= 2 && fits(previous, piece)))
     ) {
-      merged[merged.length - 1] = `${previous} ${piece}`
+      merged[merged.length - 1] = join(previous, piece)
     } else {
       merged.push(piece)
     }
   }
   while (merged.length > maxMessages) {
+    // Which neighbours to join, best first: a pair inside the word limit
+    // beats one past it; then a pair that puts a cut sentence back together
+    // beats one that runs two sentences into each other; then the shortest.
     let best = -1
-    let bestFits = false
-    let bestSize = Infinity
+    let bestRank: [number, number, number] = [0, 0, 0]
     for (let i = 0; i < merged.length - 1; i += 1) {
-      const a = merged[i] as string
-      const b = merged[i + 1] as string
-      const pairFits = fits(a, b)
-      const size = wordsIn(a) + wordsIn(b)
-      // A join inside the word limit always beats one past it.
+      const a = merged[i] as Piece
+      const b = merged[i + 1] as Piece
+      const rank: [number, number, number] = [
+        fits(a, b) ? 0 : 1,
+        b.opens ? 1 : 0,
+        size(a) + size(b),
+      ]
       if (
         best === -1 ||
-        (pairFits && !bestFits) ||
-        (pairFits === bestFits && size < bestSize)
+        rank[0] < bestRank[0] ||
+        (rank[0] === bestRank[0] &&
+          (rank[1] < bestRank[1] ||
+            (rank[1] === bestRank[1] && rank[2] < bestRank[2])))
       ) {
         best = i
-        bestFits = pairFits
-        bestSize = size
+        bestRank = rank
       }
     }
     if (best === -1) break
-    merged.splice(best, 2, `${merged[best]} ${merged[best + 1]}`)
+    merged.splice(
+      best,
+      2,
+      join(merged[best] as Piece, merged[best + 1] as Piece),
+    )
   }
 
   return merged.map((piece) => {
-    const trimmed = stripTerminalPeriod(piece.trim().replace(/[,;:]+$/, ''))
+    const trimmed = stripTerminalPeriod(
+      piece.text.trim().replace(/[,;:]+$/, ''),
+    )
     // A web address, and a word with a capital inside it, stay as written.
     return capitalise &&
+      piece.opens &&
       !/^(https?:\/\/|[\w-]+\.[a-z]{2,}|\p{Ll}[^\s]*\p{Lu})/u.test(trimmed)
       ? trimmed.replace(/^\p{Ll}/u, (c) => c.toUpperCase())
       : trimmed
