@@ -10,7 +10,12 @@ import type { MessageChannel } from '@/lib/schemas/message-channel'
 // SERVER-ONLY, and colocated with the route rather than in `lib/` on purpose:
 // v1 is deleted in phase 6 (lib/relationship/CLAUDE.md), and when it goes this
 // file goes with it. Nothing in `lib/` imports it, so the deletion is this
-// file plus the arm's field on RunResponseBody plus one component.
+// file plus the arm's field on RunResponseBody plus one component - and
+// `scripts/measurement/golden-set.ts`, the second importer, which runs the
+// same arm over a whole question set. The harness imports it rather than
+// reimplementing the materialization for the reason this file already gives
+// below: a second copy of "how v1 gets an inbound row" would drift, and a
+// comparison against a drifted copy proves nothing.
 //
 // Both modes end at the same call - `draftInboundReply`, which runs the real
 // v1 pipeline and writes nothing. They differ only in how v1 gets an inbound
@@ -29,13 +34,30 @@ import type { MessageChannel } from '@/lib/schemas/message-channel'
 // whole point of the arm. Writing the rows means v1's context is built by
 // production's own code path from production's own queries.
 
+/** Parallel sandbox guests per venue, one per concurrency slot. */
+export const SANDBOX_SLOTS = 10
+
 /**
- * The synthetic guest's phone number, per venue.
+ * The synthetic guest's phone number, per venue and per slot.
  *
  * Sits in the 555-01xx fictional range so it is obviously not a real number
  * and could never be dialled, and carries a per-venue suffix because venues
  * are isolated blocks - one shared sandbox guest would put one venue's test
  * conversation into another venue's history.
+ *
+ * THE SLOT DIGIT IS WHAT MAKES THE ARM CONCURRENCY-SAFE.
+ * `materializeTranscript` below DELETES the guest's messages and rewrites
+ * them on every call, so two arms sharing one guest would answer each other's
+ * transcripts - or answer a row the other just deleted. Each slot gets its
+ * own guest, and both the delete and the inserts are already scoped by
+ * `guest_id`, so distinct slots cannot see each other's rows at all. The
+ * playground passes no slot and the harness passes its worker index.
+ *
+ * SLOT 0 IS BYTE-IDENTICAL to the single number this function returned before
+ * slots existed (`+1555010` + 8 digits), so the playground keeps using the
+ * same guest row and the same history it always had. Verify that by reading
+ * the concatenation rather than trusting this sentence: `+155501` + `0` is
+ * `+1555010`.
  *
  * MUST SATISFY E.164, which is what `guests_phone_number_check` enforces
  * (`^\+[1-9]\d{1,14}$`, migration 001): a leading non-zero digit then up to 14
@@ -44,15 +66,16 @@ import type { MessageChannel } from '@/lib/schemas/message-channel'
  * was rejected by that constraint - caught by running a real turn, not by
  * tsc, lint or the build.
  *
- * 15 digits exactly: `1555010` plus an 8-digit suffix, the E.164 ceiling.
+ * 15 digits exactly - the E.164 ceiling - which is why the slot is one digit
+ * taken out of the prefix rather than appended: `155501` + slot + 8.
  */
-function sandboxPhoneNumber(venueId: string): string {
+function sandboxPhoneNumber(venueId: string, slot: number): string {
   // DIGITS ONLY, and padded, so the result is always exactly 8 characters
   // whatever the uuid happens to contain. A collision between two venues on
   // their last 8 digits is harmless: the guest lookup is scoped by venue_id
   // and the table's uniqueness is UNIQUE (venue_id, phone_number).
   const suffix = venueId.replace(/\D/g, '').slice(-8).padStart(8, '0')
-  return `+1555010${suffix}`
+  return `+155501${slot}${suffix}`
 }
 
 /**
@@ -99,8 +122,22 @@ export async function draftV1ForSandbox(input: {
   sessionHistory: readonly HistoryTurn[]
   /** The guest's message(s) this turn. */
   inbound: readonly string[]
+  /**
+   * Concurrency slot, 0 to SANDBOX_SLOTS - 1. Omit for the playground's
+   * single-turn use; a batch caller passes its worker index so two arms in
+   * flight never share a transcript. See sandboxPhoneNumber.
+   */
+  slot?: number
 }): Promise<V1ArmOutcome> {
-  const guest = await ensureSandboxGuest(input.venueId)
+  const slot = input.slot ?? 0
+  if (!Number.isInteger(slot) || slot < 0 || slot >= SANDBOX_SLOTS)
+    return {
+      ok: false,
+      error: `slot must be an integer in 0..${SANDBOX_SLOTS - 1}, got ${String(input.slot)}`,
+      stage: 'sandbox_guest',
+    }
+
+  const guest = await ensureSandboxGuest(input.venueId, slot)
   if (!guest.ok)
     return { ok: false, error: guest.error, stage: 'sandbox_guest' }
 
@@ -130,13 +167,21 @@ export async function draftV1ForSandbox(input: {
  * `ensureSyntheticGuest` in scripts/onboarding/run-test-scenarios.ts: a
  * collision means this function is about to write a test transcript into a
  * real person's history, and the transcript writer below would then DELETE
- * their messages.
+ * their messages. THAT GUARD IS WHAT MAKES TEN SLOTS AS SAFE AS ONE - it runs
+ * per slot, so nine new numbers get the same refusal the first one always had.
+ *
+ * `first_name` is identical for every slot on purpose. Nothing on the inbound
+ * reply path reads `guests.first_name` today (the prompt's guest block comes
+ * from `guests.context`), but if something ever does, every slot must render
+ * the same - a per-slot label would quietly make the slots non-interchangeable
+ * and a batch comparison would be measuring the label.
  */
 async function ensureSandboxGuest(
   venueId: string,
+  slot: number,
 ): Promise<{ ok: true; guestId: string } | { ok: false; error: string }> {
   const supabase = createAdminClient()
-  const phone = sandboxPhoneNumber(venueId)
+  const phone = sandboxPhoneNumber(venueId, slot)
 
   const existing = await supabase
     .from('guests')

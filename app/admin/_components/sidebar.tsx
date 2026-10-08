@@ -23,6 +23,9 @@ import {
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
+  SidebarMenuSub,
+  SidebarMenuSubButton,
+  SidebarMenuSubItem,
   SidebarRail,
 } from '@/components/ui/sidebar'
 import { isNavItemActive, NAV_GROUPS } from './nav-items'
@@ -43,7 +46,7 @@ const NAV_ICONS: Record<string, LucideIcon> = {
   '/admin/voices': AudioLines,
   '/admin/venues': Store,
   '/admin/playground': FlaskConical,
-  '/admin/regression': ShieldCheck,
+  '/admin/tests': ShieldCheck,
   '/admin/tunables': SlidersHorizontal,
   '/admin/intentions': Target,
   '/admin/health': Activity,
@@ -87,6 +90,25 @@ export function Sidebar() {
                         <span>{item.label}</span>
                       </Link>
                     </SidebarMenuButton>
+                    {/* Children (Tests -> Golden set, Regression). Hidden in
+                        the collapsed icon rail, where there is no room for a
+                        label and a sub-item has no icon of its own. */}
+                    {item.children && item.children.length > 0 ? (
+                      <SidebarMenuSub className="group-data-[collapsible=icon]:hidden">
+                        {item.children.map((child) => (
+                          <SidebarMenuSubItem key={child.href}>
+                            <SidebarMenuSubButton
+                              asChild
+                              isActive={isNavItemActive(child.href, pathname)}
+                            >
+                              <Link href={child.href}>
+                                <span>{child.label}</span>
+                              </Link>
+                            </SidebarMenuSubButton>
+                          </SidebarMenuSubItem>
+                        ))}
+                      </SidebarMenuSub>
+                    ) : null}
                   </SidebarMenuItem>
                 )
               })}

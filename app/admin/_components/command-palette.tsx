@@ -18,12 +18,14 @@ import {
   CommandList,
 } from '@/components/ui/command'
 import { Button } from '@/components/ui/button'
-import { NAV_GROUPS } from './nav-items'
+import { NAV_GROUPS_FLAT } from './nav-items'
 
 // ⌘K / Ctrl+K command palette for jumping between Command Center surfaces
 // (TAC-306). The one intentional new interaction in the shell reskin —
 // everything else stays behavior-identical. Targets come from the shared
-// NAV_GROUPS so the palette can never drift from the sidebar.
+// NAV_GROUPS_FLAT so the palette can never drift from the sidebar - FLAT
+// because a nested child ("Golden set" under Tests) renders indented in the
+// sidebar but has to be its own jump target here, or ⌘K could not reach it.
 //
 // Shape: a provider holds the open state, owns the global key listener, and
 // renders the dialog once; the top bar's ⌘K button opens it via the
@@ -83,7 +85,7 @@ export function CommandPaletteProvider({ children }: { children: ReactNode }) {
         <CommandInput placeholder="Jump to a surface…" />
         <CommandList>
           <CommandEmpty>No surface found.</CommandEmpty>
-          {NAV_GROUPS.map((group) => (
+          {NAV_GROUPS_FLAT.map((group) => (
             <CommandGroup key={group.section} heading={group.section}>
               {group.items.map((item) => (
                 <CommandItem
