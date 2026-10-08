@@ -1,10 +1,23 @@
-// The builtin regression scenario set and the one verdict definition.
+// The regression scenario set, the overlay resolution, and the one verdict
+// definition.
 //
-// Scenarios live in `regression_scenarios` (migration 069) so humans can
-// inspect, add and disable them from /admin/regression; this module is the
-// seed those rows started from and the fallback when the table is missing
-// (migration unapplied) or unreadable. The harness warns whenever it falls
-// back - a silent fallback would let a disabled scenario keep running.
+// REGRESSION_SCENARIOS below IS the set. A scenario's definition - script,
+// bars, ceilings, lesson - lives here and nowhere else, so adding a test
+// case is an edit to this array, reviewed in the PR that changes the
+// template, with no SQL and no migration (decision 0011, migration 077).
+//
+// `regression_scenarios` in Postgres is an OVERLAY carrying one field,
+// `enabled`, so a case can be silenced from /admin/regression without a
+// deploy. `resolveScenarios` is the only place that merge happens; the
+// harness and the admin loader both call it, so the two surfaces cannot
+// disagree about which scenarios are live.
+//
+// It used to be the other way round - the table held definitions and this
+// array was a fallback - and a scenario added here alone was inert, silently,
+// because the fallback fires on an unreadable or empty table and never on a
+// merely incomplete one. Two false greens in two days came from that
+// (migrations 071 and 072 headers hold the measurements). The inversion is
+// what makes a code-only scenario impossible to lose.
 //
 // `scenarioVerdict` is shared between the harness (which computes and stores
 // verdicts) and anything re-deriving them, so two surfaces cannot disagree
@@ -12,12 +25,14 @@
 // changelog has a scenario here; a new lesson ships with a new scenario in
 // the same change (.claude/rules/v2-template-regression.md).
 //
-// Pure module: type-only imports, no SDK init, importable by path from
-// scripts and app code alike.
+// Pure module: no SDK init and no DB client, importable by path from scripts
+// and app code alike. The one value import is the Zod schema, which pulls in
+// nothing but zod.
 
-import type {
-  RegressionSample,
-  RegressionScenario,
+import {
+  type RegressionSample,
+  type RegressionScenario,
+  RegressionScenarioSchema,
 } from '@/lib/schemas/regression'
 
 /**
@@ -62,7 +77,13 @@ export function describeTell(tell: string): string {
     : tell
 }
 
-export const BUILTIN_REGRESSION_SCENARIOS: RegressionScenario[] = [
+/**
+ * Every regression scenario, in author order. THE source of truth: nothing
+ * reads a definition from the database. A retired scenario stays here with
+ * `enabled: false` rather than being deleted - it is the record of a lesson
+ * that was once measured, and its key still appears in stored run verdicts.
+ */
+export const REGRESSION_SCENARIOS: RegressionScenario[] = [
   {
     key: 'bare-hey',
     lesson:
@@ -76,6 +97,7 @@ export const BUILTIN_REGRESSION_SCENARIOS: RegressionScenario[] = [
     noTurnOneNameAsk: true,
     expectReplyContains: null,
     forbidPolicyKeys: [],
+    expectPolicyKeys: [],
     enabled: true,
   },
   {
@@ -88,6 +110,7 @@ export const BUILTIN_REGRESSION_SCENARIOS: RegressionScenario[] = [
     noTurnOneNameAsk: true,
     expectReplyContains: null,
     forbidPolicyKeys: [],
+    expectPolicyKeys: [],
     enabled: true,
   },
   {
@@ -103,6 +126,7 @@ export const BUILTIN_REGRESSION_SCENARIOS: RegressionScenario[] = [
     noTurnOneNameAsk: false,
     expectReplyContains: null,
     forbidPolicyKeys: [],
+    expectPolicyKeys: [],
     enabled: true,
   },
   {
@@ -115,6 +139,7 @@ export const BUILTIN_REGRESSION_SCENARIOS: RegressionScenario[] = [
     noTurnOneNameAsk: false,
     expectReplyContains: null,
     forbidPolicyKeys: [],
+    expectPolicyKeys: [],
     enabled: true,
   },
   {
@@ -127,6 +152,7 @@ export const BUILTIN_REGRESSION_SCENARIOS: RegressionScenario[] = [
     noTurnOneNameAsk: false,
     expectReplyContains: null,
     forbidPolicyKeys: [],
+    expectPolicyKeys: [],
     enabled: true,
   },
   {
@@ -139,6 +165,7 @@ export const BUILTIN_REGRESSION_SCENARIOS: RegressionScenario[] = [
     noTurnOneNameAsk: false,
     expectReplyContains: 'lemils.com',
     forbidPolicyKeys: ['unverified_link', 'comp_leak'],
+    expectPolicyKeys: [],
     enabled: true,
   },
   // ── knowledge retrieval, added 2026-10-06 with the lemils.com site ingest ──
@@ -159,18 +186,20 @@ export const BUILTIN_REGRESSION_SCENARIOS: RegressionScenario[] = [
     noTurnOneNameAsk: false,
     expectReplyContains: 'password',
     forbidPolicyKeys: [],
+    expectPolicyKeys: [],
     enabled: true,
   },
   {
     key: 'knowledge-pastries',
     lesson:
-      'Pre-ingest this retrieved "what Malenad tastes like" for a pastry question. "Butter and Rose" is the Foster City micro-bakery and appears in exactly one entry, so the bar cannot be met by a plausible guess. This fact was also one of the 11 lost when voicenote transcripts stopped being knowledge, and it is now sourced from the venue site instead (lib/rag/knowledge-source-roles.ts).',
+      'Pre-ingest this retrieved "what Malenad tastes like" for a pastry question. "Butter and Rose" is the Foster City micro-bakery and appears in exactly one entry, so the bar cannot be met by a plausible guess. This fact was also one of the 11 lost when voicenote transcripts stopped being knowledge, and it is now sourced from the venue site instead (lib/rag/knowledge-source-roles.ts). MEASURED on v2.10.0 against a quorum of BAR_MIN=2: this bar hit 4/6 and 3/6 across two n=6 runs, and "Foster City" (the same entry\'s other unguessable token) 5/6 - all passing, so the bar was kept as pre-registered. This is the LOOSEST of the five knowledge bars and the one to watch. Recorded because a single sample reads it as a failure: the agent commonly answers with the full pastry list and "a micro-baker in Foster City" without naming the bakery, and the two tokens are complementary rather than nested (one run named the bakery and not the town). One such sample is not a bar failure.',
     script: ['what pastries do you have?'],
     target: [],
     expectFirstName: null,
     noTurnOneNameAsk: false,
     expectReplyContains: 'Butter and Rose',
     forbidPolicyKeys: [],
+    expectPolicyKeys: [],
     enabled: true,
   },
   {
@@ -183,6 +212,7 @@ export const BUILTIN_REGRESSION_SCENARIOS: RegressionScenario[] = [
     noTurnOneNameAsk: false,
     expectReplyContains: 'Straus',
     forbidPolicyKeys: [],
+    expectPolicyKeys: [],
     enabled: true,
   },
   {
@@ -195,6 +225,7 @@ export const BUILTIN_REGRESSION_SCENARIOS: RegressionScenario[] = [
     noTurnOneNameAsk: false,
     expectReplyContains: '1330 Polk',
     forbidPolicyKeys: [],
+    expectPolicyKeys: [],
     enabled: true,
   },
   {
@@ -207,6 +238,7 @@ export const BUILTIN_REGRESSION_SCENARIOS: RegressionScenario[] = [
     noTurnOneNameAsk: false,
     expectReplyContains: 'outside food',
     forbidPolicyKeys: [],
+    expectPolicyKeys: [],
     enabled: true,
   },
   {
@@ -219,18 +251,20 @@ export const BUILTIN_REGRESSION_SCENARIOS: RegressionScenario[] = [
     noTurnOneNameAsk: true,
     expectReplyContains: 'SoFi',
     forbidPolicyKeys: [],
+    expectPolicyKeys: [],
     enabled: true,
   },
   {
     key: 'buyout-inquiry',
     lesson:
-      'The guest is already on Instagram, so Instagram is never the answer to "where do I take this" (template v2.12.0). Caught live on Le Mil\'s: "best way to get the details sorted is through Instagram, @lemilscoffee", sent to a guest in the Instagram inbox. TWO causes, and the tell guards the one that outranks the other. The frame had carried SMS framing in three phrases since v2.0.0, so the model did not know where it was; that is fixed in copy. But the sentence itself came from a knowledge row - the ONLY buyout chunk retrieval returned for this exact script (rank 3 of 4, similarity 0.450, the others seating/laptops/landlord) - and knowledge renders in tier 1, after the frame, where it wins. That row was rewritten in place; its sibling saying "ask here" ranked below 30 on every buyout phrasing and could not have rescued it. The pricing bar is what keeps this from passing vacuously: a reply that never engages the buyout has not been tested, and "depends" is the fact all three surviving rows agree on.',
+      'The guest is already on Instagram, so Instagram is never the answer to "where do I take this" (template v2.12.0). Caught live on Le Mil\'s: "best way to get the details sorted is through Instagram, @lemilscoffee", sent to a guest in the Instagram inbox. TWO causes, and the tell guards the one that outranks the other. The frame had carried SMS framing in three phrases since v2.0.0, so the model did not know where it was; that is fixed in copy. But the sentence itself came from a knowledge row - the ONLY buyout chunk retrieval returned for this exact script (rank 3 of 4, similarity 0.450, the others seating/laptops/landlord) - and knowledge renders in tier 1, after the frame, where it wins. That row was rewritten in place; its sibling saying "ask here" ranked below 30 on every buyout phrasing and could not have rescued it. RECALIBRATED 2026-10-08: the non-vacuity guard was `expectReplyContains: "depends"`, the pricing fact all three surviving knowledge rows agree on, and it failed 0/6 on two consecutive runs while the behaviour was RIGHT. The six replies were byte-identical - "yes, we do buyouts. what\'s the occasion and roughly how many people are you thinking?" - with no off-channel breach and the gate matching private_event_inquiry_requires_approval 6/6, so the draft was correctly held for approval. Confirming the buyout and asking for occasion and headcount before quoting is better hosting than reciting "it depends", and a generic word is exactly what the knowledge-* bars forbid: it can be paraphrased away by a correct reply and produced by an agreeable one. A bar that fails on correct behaviour is the mirror of a false green - it teaches everyone to wave the gate through. The guard is now the GATE MATCH, a discrete tag the policy registry owns: this turn must be recognised as a private-event inquiry and routed for approval. The off-channel ceiling is unchanged and remains what this scenario exists to protect.',
     script: ['can i rent out your space'],
     target: [],
     expectFirstName: null,
     noTurnOneNameAsk: true,
-    expectReplyContains: 'depends',
+    expectReplyContains: null,
     forbidPolicyKeys: [],
+    expectPolicyKeys: ['private_event_inquiry_requires_approval'],
     enabled: true,
   },
   {
@@ -243,9 +277,91 @@ export const BUILTIN_REGRESSION_SCENARIOS: RegressionScenario[] = [
     noTurnOneNameAsk: true,
     expectReplyContains: null,
     forbidPolicyKeys: [],
+    expectPolicyKeys: [],
     enabled: false,
   },
 ]
+
+/** An overlay row: the only two columns `regression_scenarios` still owns. */
+export interface ScenarioOverlayRow {
+  key: string
+  enabled: boolean
+}
+
+export interface ResolvedScenario extends RegressionScenario {
+  /** True when an overlay row set `enabled`, rather than the code default. */
+  enabledOverridden: boolean
+}
+
+export interface ResolvedScenarioSet {
+  /** Every code scenario, in author order, with `enabled` resolved. */
+  scenarios: ResolvedScenario[]
+  /**
+   * Overlay keys with no code definition. These do NOT run - the set is the
+   * code array - and they are surfaced so an orphan row cannot sit in the
+   * table looking like a guard. Reachable only by a hand-edit in Studio or
+   * by deleting a scenario from the array without clearing its row.
+   */
+  orphanKeys: string[]
+}
+
+/**
+ * Merge the code set with the overlay. The ONE definition of which scenarios
+ * are live, called by both the harness and /admin/regression so the page and
+ * the run cannot disagree.
+ *
+ * An overlay row's `enabled` wins over the code flag - that is the whole
+ * point of the table, a no-deploy lever for silencing a case. Nothing else
+ * about a row is read.
+ */
+export function resolveScenarios(
+  overlay: readonly ScenarioOverlayRow[],
+  scenarios: readonly RegressionScenario[] = REGRESSION_SCENARIOS,
+): ResolvedScenarioSet {
+  const overlayByKey = new Map(overlay.map((row) => [row.key, row]))
+  const codeKeys = new Set(scenarios.map((s) => s.key))
+  return {
+    scenarios: scenarios.map((scenario) => {
+      const row = overlayByKey.get(scenario.key)
+      return {
+        ...scenario,
+        enabled: row?.enabled ?? scenario.enabled,
+        enabledOverridden:
+          row !== undefined && row.enabled !== scenario.enabled,
+      }
+    }),
+    orphanKeys: overlay
+      .map((row) => row.key)
+      .filter((key) => !codeKeys.has(key)),
+  }
+}
+
+/**
+ * Does the code set satisfy its own schema? The array is a hand-edited
+ * literal, so `tsc` checks its shape but not a key with a capital letter, an
+ * empty script, or a nine-turn script. Offline boundary, so this fails
+ * CLOSED and loudly at the caller: better than discovering it after an hour
+ * of model calls. Returns one message per bad scenario, empty when clean.
+ */
+export function validateScenarioSet(
+  scenarios: readonly RegressionScenario[] = REGRESSION_SCENARIOS,
+): string[] {
+  const problems: string[] = []
+  const seen = new Set<string>()
+  for (const scenario of scenarios) {
+    const parsed = RegressionScenarioSchema.strict().safeParse(scenario)
+    if (!parsed.success) {
+      problems.push(
+        `${scenario.key}: ${parsed.error.issues
+          .map((i) => `${i.path.join('.')} ${i.message}`)
+          .join('; ')}`,
+      )
+    }
+    if (seen.has(scenario.key)) problems.push(`${scenario.key}: duplicate key`)
+    seen.add(scenario.key)
+  }
+  return problems
+}
 
 /**
  * The one verdict definition. Order is the severity order: a sample that
@@ -260,11 +376,19 @@ export function scenarioVerdict(
     | 'noTurnOneNameAsk'
     | 'expectReplyContains'
     | 'forbidPolicyKeys'
+    | 'expectPolicyKeys'
   >,
   samples: RegressionSample[],
   barMin: number,
 ): string {
   const total = samples.length
+  // Zero samples is not a pass. Every bar below is "fewer than quorum fails",
+  // and with total 0 the quorum collapses to 0, so an empty set satisfied
+  // every one of them and returned PASS - a verdict computed from nothing.
+  // A failure is never a zero, and neither is an absence (scripts/CLAUDE.md
+  // #5/#6).
+  if (total === 0) return 'NO SAMPLES (nothing ran - not a pass)'
+
   const disqualified = samples.filter((s) => s.disqualified !== null)
   if (disqualified.length > 0)
     return `DISQUALIFIED (${disqualified.length}/${total} samples failed)`
@@ -304,6 +428,17 @@ export function scenarioVerdict(
     const quorum = Math.min(barMin, total)
     if (pursuing < quorum)
       return `BAR FAILED (pursuit ${pursuing}/${total}, need ${quorum})`
+  }
+
+  if (scenario.expectPolicyKeys.length > 0) {
+    const matching = samples.filter((s) =>
+      s.turns.some((t) =>
+        t.gateMatched.some((k) => scenario.expectPolicyKeys.includes(k)),
+      ),
+    ).length
+    const quorum = Math.min(barMin, total)
+    if (matching < quorum)
+      return `BAR FAILED (gate matched none of [${scenario.expectPolicyKeys.join(', ')}] in ${total - matching}/${total}, need ${quorum})`
   }
 
   // The vacuity guard for gate assertions: a forbidden policy that never had

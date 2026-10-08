@@ -1,10 +1,14 @@
 // Zod schemas for the regression tables' JSONB fields (migration 069).
-// Read regression_scenarios.script/target and regression_run_units.* through
-// these, never raw SQL paths. NOT LLM-output schemas - .min()/.max() are fine.
+// Read regression_run_units.* through these, never raw SQL paths. NOT
+// LLM-output schemas - .min()/.max() are fine.
 //
-// Admin writes validate strictly (the admin write boundary is stricter than
-// the live read boundary); the harness read degrades to the builtin set in
-// lib/eval/regression-scenarios.ts when a row fails to parse.
+// RegressionScenarioSchema no longer parses database rows: scenario
+// definitions are a code literal in lib/eval/regression-scenarios.ts, and
+// `regression_scenarios` is an enabled-only overlay (migration 077, decision
+// 0011). It stays here as the shape `RegressionScenario` is inferred from,
+// and `validateScenarioSet` runs it over that array at harness startup to
+// catch what tsc cannot - a bad key, an empty script, a ninth turn. Do not
+// go looking for a row parse; there is deliberately none.
 
 import { z } from 'zod'
 
@@ -33,6 +37,16 @@ export const RegressionScenarioSchema = z.object({
   expectReplyContains: z.string().nullable().default(null),
   /** Ceiling: the policy gate must not match any of these policy keys. */
   forbidPolicyKeys: z.array(z.string().min(1)).default([]),
+  /**
+   * Bar: the policy gate must match at least one of these keys on some turn.
+   * The mirror of forbidPolicyKeys, and the non-vacuity guard to prefer over
+   * expectReplyContains whenever the thing under test is "was this turn
+   * recognised as X" rather than "did the reply contain a specific fact".
+   * A gate key is a discrete tag the policy registry owns, so unlike a word
+   * it cannot be paraphrased away by a correct reply or produced by a model
+   * being agreeable (scripts/CLAUDE.md #7).
+   */
+  expectPolicyKeys: z.array(z.string().min(1)).default([]),
   enabled: z.boolean().default(true),
 })
 export type RegressionScenario = z.infer<typeof RegressionScenarioSchema>

@@ -5,11 +5,12 @@ import { RunCard } from './_components/run-card'
 import { ScenarioList } from './_components/scenario-list'
 
 // /admin/regression - the v2 template's test cases and their results.
-// Scenarios are regression_scenarios rows (add/disable/remove here); runs
-// come from the measure-template-regression harness, which stores verdicts
-// once (scenarioVerdict) - this page renders stored verdicts, never
-// re-derives them. Auth is gated by the (authed) layout; the write routes
-// under api/ carry their own gate.
+// Scenarios are REGRESSION_SCENARIOS in lib/eval/regression-scenarios.ts
+// (decision 0011); this page shows them and owns one write, the enabled
+// overlay. Runs come from the measure-template-regression harness, which
+// stores verdicts once (scenarioVerdict) - this page renders stored
+// verdicts, never re-derives them. Auth is gated by the (authed) layout;
+// the write route under api/ carries its own gate.
 
 export const dynamic = 'force-dynamic'
 
@@ -40,9 +41,14 @@ export default async function RegressionPage() {
         </h2>
         <ScenarioList scenarios={data.scenarios} />
         <p className="text-xs text-muted-foreground">
-          Each scenario guards a measured lesson from the template changelog.
-          Disable is the default retirement (the harness skips disabled rows);
-          delete is explicit and keeps past run results readable. A new template
+          Each scenario guards a measured lesson from the template changelog,
+          and lives in{' '}
+          <code className="rounded bg-muted px-1">
+            lib/eval/regression-scenarios.ts
+          </code>
+          . Adding one is a PR against that array - no migration, no SQL. This
+          page owns the enabled flag only: disable to silence a case without a
+          deploy, clear the override to hand it back to the code. A new template
           lesson ships with a new scenario
           (.claude/rules/v2-template-regression.md).
         </p>
