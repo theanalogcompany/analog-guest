@@ -61,7 +61,7 @@
     "@langfuse/core": "^5.11.1",
     "@langfuse/otel": "^5.11.1",
     "@langfuse/tracing": "^5.11.1",
-    "@supabase/ssr": "^0.10.2",
+    "@supabase/ssr": "^0.12.7",
     "@supabase/supabase-js": "^2.104.1",
     "@vercel/functions": "^3.4.4",
     "@vercel/otel": "^2.1.3",
