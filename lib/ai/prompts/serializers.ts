@@ -578,7 +578,7 @@ export function ragChunksToProse(
   // lowercase with an emoji on the end, and shown bare they pull the model
   // back to exactly that.
   const isApproved = (c: VoiceCorpusChunk) =>
-    hasVoiceProfile && (c.sourceType as string) === 'operator_edit'
+    hasVoiceProfile && c.sourceType === 'operator_edit'
   const real = chunks.filter(isReal)
   const approved = chunks.filter(isApproved)
   const rest = chunks.filter((c) => !isReal(c) && !isApproved(c))
@@ -674,8 +674,8 @@ function formatOpenStatus(
   openState: NonNullable<RuntimeContext['today']>['openState'],
   // Whether to say when the venue next opens. Not on an acknowledgment: a
   // guest who wrote "ok" asked nothing, and with the next opening in front of
-  // it the model reached for it ("We're open tomorrow from 7", four of six
-  // closed-venue replies; none of six with it left out, same run). The
+  // it the model reached for it ("We're open tomorrow from 7"); with it left
+  // out, three of three replies to "ok" were a word or two. The
   // CLOSED status and its instruction still render, which is the safety
   // half: nothing may be confirmed for right now.
   withNextOpening: boolean,
@@ -2394,6 +2394,17 @@ function formatReviewAsk(reviewAsk: { url: string; label: string }): string {
  * a `frequent` venue it was reaching roughly three decline drafts in four.
  * Narrower again, so it can still only reduce emoji.
  */
+function shouldRenderEmojiDirective(
+  category: MessageCategory,
+  isOperatorDecline: boolean,
+): boolean {
+  return (
+    category !== 'opt_out' &&
+    category !== 'comp_complaint' &&
+    !isOperatorDecline
+  )
+}
+
 /**
  * The per-message call on an exclamation mark and a typed smiley, for a venue
  * whose team's rate of each has been measured. Same asymmetry as the emoji
@@ -2419,17 +2430,6 @@ function formatMarkDirectives(
     lines.push('No typed smiley in this message.')
   }
   return `## Marks for this message\n${lines.join('\n')}`
-}
-
-function shouldRenderEmojiDirective(
-  category: MessageCategory,
-  isOperatorDecline: boolean,
-): boolean {
-  return (
-    category !== 'opt_out' &&
-    category !== 'comp_complaint' &&
-    !isOperatorDecline
-  )
 }
 
 /**

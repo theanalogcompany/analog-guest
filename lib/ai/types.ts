@@ -74,6 +74,7 @@ export type VoiceCorpusSourceType =
   | 'manual_entry'
   | 'training_response'
   | 'past_message'
+  | 'operator_edit'
 
 export type VoiceCorpusChunk = {
   id: string

@@ -161,4 +161,4 @@ export const REAL_REPLIES_HEADING =
  * capitalization and emoji follow the profile, not them").
  */
 export const APPROVED_LINES_HEADING =
-  'Lines the venue approved, kept for their attitude: the dry aside, the opinion said straight, the turn of phrase. Take that from them. Do not take how they are typed: they are in lowercase and end on an emoji, and this venue does neither. Capitals, punctuation and emoji follow "## How the team writes". Never reuse one of these lines as it stands.'
+  'Lines the venue approved, kept for their attitude: the dry aside, the opinion said straight, the turn of phrase. Take that from them. Do not take how they are typed: capitals, punctuation and emoji follow "## How the team writes", whatever these lines do. Never reuse one of these lines as it stands.'

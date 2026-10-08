@@ -2617,9 +2617,11 @@ import {
 //   emoji coin and rendered in the same last position as `## Marks for this
 //   message`: an exclamation mark, and a typed smiley. The agent used neither
 //   in a whole phone thread at a venue whose team uses one in 20% and 6% of
-//   its messages. MEASURED WEAK: on 39 replies the model took the permission
-//   once each. The block is permission, like the emoji one, and the model
-//   mostly declines it.
+//   its messages. MEASURED WEAK: over 39 replies the exclamation coin said
+//   "allowed" on 11 and the model used one on 1; the smiley coin said
+//   "allowed" on 3 and it used one on 1. Neither appeared on a "none" turn.
+//   The block is permission, like the emoji one, and the model mostly
+//   declines it.
 //
 //   LINES AN OPERATOR APPROVED render under `### The venue's attitude` for a
 //   venue with a profile, with a heading that says to take their attitude and
@@ -2628,9 +2630,17 @@ import {
 //   `## No questions this turn` DROPS ITS LAST SENTENCE on an acknowledgment
 //   or small-talk turn for a venue with a profile, and `## Right now` no
 //   longer says when a closed venue next opens on an acknowledgment turn, for
-//   every venue. Both by leave-one-out: "ok" was answered with the opening
-//   hours, one of three and four of six with each line present, none with it
-//   removed. The CLOSED status and its instruction still render.
+//   every venue. Both by leave-one-out on "ok", three runs an arm: with the
+//   first line present one reply of three volunteered the opening hours, and
+//   none without it; with "Next open" cut, "ok" came back as "Great.",
+//   "Sounds good." and "Ok :)". The CLOSED status and its instruction still
+//   render.
+//
+//   THE GATE IS THE CATEGORY, AND THE CATEGORY MOVES. "that sounds good" was
+//   classified `acknowledgment` in one run and `reply` in the next. As a
+//   `reply` it still renders "Next open", and in the run where it was an
+//   acknowledgment all three replies told the guest to come by tomorrow from
+//   seven. So this covers "ok" and does not reliably cover its neighbours.
 //
 //   NOT FIXED: "that sounds good" after a recommendation still gets one more
 //   fact about the drink, three of three.

@@ -13,10 +13,11 @@
 // computeGuestState, which persists a guest_states row on a recognition-band
 // change. The row count is printed before and after.
 //
-// EVERY UNIT IS A FIRST CONVERSATION: a guest who said hello, got a welcome,
-// and now asks one thing. That is the thread the owner tested on, and the turn
-// that renders `## No questions this turn`. An established guest's turn does
-// not carry that block and is not measured here.
+// EVERY UNIT IS A FIRST CONVERSATION, which is the thread the owner tested on
+// and the turn that renders `## No questions this turn`. Most are a hello, a
+// welcome, then one question. `hey` is the hello itself, with nothing before
+// it, and the reaction units ("ok", "haha nice") follow an answered question.
+// An established guest's turn does not carry that block and is not measured.
 //
 // TWO ARMS.
 //
@@ -156,9 +157,16 @@ interface Unit {
   fuller?: true
   /** What came before this message. Default: the hello and the welcome. */
   history?: readonly Line[]
+  /**
+   * Not a question: a hello, a reaction, an acknowledgment. Kept out of the
+   * simple-question median, which was fixed on question units only and which
+   * a one-word reply to "ok" would otherwise flatter.
+   */
+  reaction?: true
 }
 
-type Line = readonly ['in' | 'out', string]
+/** Direction, text and, for a line of ours, the category it was sent under. */
+type Line = readonly ['in' | 'out', string, MessageCategory?]
 
 /**
  * A hello and the welcome it got. The welcome is the one the agent sent on
@@ -168,19 +176,23 @@ type Line = readonly ['in' | 'out', string]
  */
 const GREETING: readonly Line[] = [
   ['in', 'hey'],
-  ['out', 'Hey, welcome. Let us know what we can help with'],
+  ['out', 'Hey, welcome. Let us know what we can help with', 'casual_chatter'],
 ]
 
 /** A question answered, for the turns that react to an answer. */
 const AFTER_OAT: readonly Line[] = [
   ...GREETING,
   ['in', 'do you have oat milk'],
-  ['out', 'Yeah, we do'],
+  ['out', 'Yeah, we do', 'new_question'],
 ]
 const AFTER_REC: readonly Line[] = [
   ...GREETING,
   ['in', 'any recs'],
-  ['out', 'The SoFi is our house drink and a great place to start'],
+  [
+    'out',
+    'The SoFi is our house drink and a great place to start',
+    'recommendation_request',
+  ],
 ]
 
 const UNITS: readonly Unit[] = [
@@ -210,12 +222,22 @@ const UNITS: readonly Unit[] = [
   { id: 'catering', inbound: 'do you do catering?' },
   { id: 'pastries', inbound: 'what pastries do you have?' },
   { id: 'price', inbound: 'how much is a filter coffee?' },
-  { id: 'hey', inbound: 'hey', history: [] },
+  { id: 'hey', inbound: 'hey', history: [], reaction: true },
   { id: 'any-recs', inbound: 'any recs' },
-  { id: 'ok', inbound: 'ok', history: AFTER_OAT },
-  { id: 'haha-nice', inbound: 'haha nice', history: AFTER_REC },
-  { id: 'sounds-good', inbound: 'that sounds good', history: AFTER_REC },
-  { id: 'excited', inbound: 'excited to try it', history: AFTER_REC },
+  { id: 'ok', inbound: 'ok', history: AFTER_OAT, reaction: true },
+  { id: 'haha-nice', inbound: 'haha nice', history: AFTER_REC, reaction: true },
+  {
+    id: 'sounds-good',
+    inbound: 'that sounds good',
+    history: AFTER_REC,
+    reaction: true,
+  },
+  {
+    id: 'excited',
+    inbound: 'excited to try it',
+    history: AFTER_REC,
+    reaction: true,
+  },
   {
     id: 'brew',
     inbound: 'how do I brew with the brass filter?',
@@ -279,14 +301,13 @@ function unitContext(
 ): RuntimeContext {
   const firstContact = new Date(now.getTime() - 20 * 60_000)
   const history = unit.history ?? GREETING
-  const recentMessages = history.map(([dir, body], i) => ({
+  const recentMessages = history.map(([dir, body, sentAs], i) => ({
     direction: dir === 'in' ? 'inbound' : 'outbound',
     body,
     createdAt: new Date(now.getTime() - (history.length - i) * 60_000),
     delivery: 'delivered',
-    // The welcome is stored as small talk, as production stores it; every
-    // other line of ours here answers a question.
-    category: dir === 'in' ? null : i === 1 ? 'casual_chatter' : 'new_question',
+    // Each line of ours carries the category production stored it under.
+    category: dir === 'in' ? null : (sentAs ?? 'new_question'),
   })) as RecentMessage[]
   return {
     ...base,
@@ -453,13 +474,24 @@ async function main(): Promise<void> {
       emojiPolicy: persona.emojiPolicy,
       voiceExamples: ragChunks.length,
       realReplies: realReplies.length,
+      // A leave-one-out run is not a treatment run, and the log has to say so.
+      cutFullAnswerSentence: process.env.MEASURE_CUT_FULL_ANSWER === '1',
+      cutNextOpening: process.env.MEASURE_CUT_NEXT_OPEN === '1',
       constructed:
-        'every thread is constructed: a hello, a welcome, then the question. Classified and retrieved once per unit per run.',
+        'every thread is constructed. Classified and retrieved once per unit per run.',
     },
   })
   console.log(
     `[texting-voice] arm=${armName} prompt=${PROMPT_VERSION} venue=${venueSlug} reps=${reps} examples=${ragChunks.length} (${realReplies.length} real replies) length check=${lengthProfile ? `past ${lengthProfile.maxWords} words` : 'none'} split coin=${bubbleStyle.splitProbability} message limit=${bubbleStyle.maxBubbleWords ?? 'none'}`,
   )
+  if (
+    process.env.MEASURE_CUT_FULL_ANSWER === '1' ||
+    process.env.MEASURE_CUT_NEXT_OPEN === '1'
+  ) {
+    console.log(
+      '[texting-voice] LEAVE-ONE-OUT RUN: a prompt line is cut. Not the shipped prompt.',
+    )
+  }
   console.log(`[texting-voice] run log: ${log.path}`)
 
   const cache = { read: 0, write: 0, uncached: 0, calls: 0 }
@@ -533,7 +565,9 @@ async function main(): Promise<void> {
         if (process.env.MEASURE_CUT_NEXT_OPEN === '1') {
           const next = user.replace(/ Next open [^.]*\./, '')
           if (next === user) {
-            throw new Error('no "Next open" line: is the venue open right now?')
+            throw new Error(
+              'no "Next open" line in this prompt: the venue is open, or the turn is an acknowledgment, where it no longer renders',
+            )
           }
           user = next
         }
@@ -653,7 +687,7 @@ async function main(): Promise<void> {
         if (unit.fuller) {
           fullerDone += 1
           if (answerBubbles > 1) fullerSplit += 1
-        } else {
+        } else if (!unit.reaction) {
           simpleWords.push(words)
         }
         // The bar on message length: no single message of the answer runs

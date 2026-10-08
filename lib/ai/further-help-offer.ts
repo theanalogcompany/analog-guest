@@ -107,10 +107,11 @@ function sendsLink(body: string): boolean {
  * with no link was never a reply an offer could have been appended to.
  *
  * `body` is the whole reply, offer line included, so the length test is
- * generous by the length of that line. It misses one case: a recommendation
- * made outside a `recommendation_request` turn, in a short reply with no
- * link. That reply's offer is then not counted, and the guest may get a
- * second one.
+ * generous by the length of that line. It misses two cases, and in both the
+ * cost is a second offer in one conversation: a recommendation made outside a
+ * `recommendation_request` turn, in a short reply with no link; and a short
+ * reply where the model, or an operator editing it, wrote offer wording into
+ * the answer itself ("Yeah, we do. Let us know if you need anything else").
  */
 export function replyCouldCarryOffer(
   body: string,
