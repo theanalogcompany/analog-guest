@@ -9,6 +9,7 @@
     "build:worktree": "set -a && . \"$(dirname \"$(git rev-parse --path-format=absolute --git-common-dir)\")/.env.local\" && set +a && next build",
     "start": "next start",
     "lint": "eslint",
+    "measure-answer-to-our-question": "tsx --env-file=.env.local scripts/measurement/answer-to-our-question.ts",
     "measure-complaint-answer-hold": "tsx --env-file=.env.local scripts/measurement/complaint-answer-hold.ts",
     "measure-complaint-followup": "tsx --env-file=.env.local scripts/measurement/complaint-followup.ts",
     "measure-scan-visits": "tsx --env-file=.env.local scripts/measurement/scan-visits-before-after.ts",

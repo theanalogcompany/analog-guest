@@ -50,6 +50,19 @@ import { checkTypesafeEnv } from './typesafe-env'
 
 export const JEV_CLASSIFICATION_ENABLED = true
 
+// jev-v1.5.0: a short answer to our own question is read as that answer.
+// "how do i brew your beans" got a reply that left the guest a choice of bean,
+// the guest wrote "budan", and the category came back new_question 0.30
+// against unknown 0.29: a confidence of 0.24, under the 0.3 floor, so the turn
+// ran as `unknown` and was held (phone test, 2026-10-07; "the karak chai" two
+// days earlier was the same shape). The conversation WAS being read: with
+// `recent_conversation` removed the same message is unknown at 0.50, and "what's
+// your name?" / "jaipal" goes from reply 0.72 to unknown 0.57. What was missing
+// is a rule for the tie, which the last two sentences of CATEGORY_INSTRUCTIONS
+// now give. Wording approved 2026-10-07; the Haiku prompt carries the same
+// sentence under PROMPT_VERSION v1.104.0. Check:
+// `npm run measure-answer-to-our-question`, whose control cell is the same
+// word with no conversation in front of it.
 // jev-v1.4.0 (TAC-386): a `follow_up_worthy` noul. This arm had returned
 // `followUpWorthy: false` unconditionally since it went live on 2026-09-29, 40
 // minutes after the inquiry follow-up shipped, so `inquiry_followups` never
@@ -96,7 +109,7 @@ export const JEV_CLASSIFICATION_ENABLED = true
 // the prefer-true-on-ambiguity asymmetry. v1.0.0 scored an ambiguous "I want
 // to end it soon" at p(yes)=0.06 - it read "end it" as ending the
 // conversation - and the fixture eval's zero-false-negative ceiling caught it.
-export const CLASSIFY_JEV_PROMPT_VERSION = 'jev-v1.4.0'
+export const CLASSIFY_JEV_PROMPT_VERSION = 'jev-v1.5.0'
 
 export const TYPESAFE_SYSTEMONE_URL = 'https://api.typesafe.ai/v1/systemone'
 export const JEV_MODEL = 'jev-latest'
@@ -199,7 +212,9 @@ const CATEGORY_INSTRUCTIONS =
   'When a message could fit multiple categories, prefer the more specific one. ' +
   'A guest ordering from the menu or asking whether something is available is new_question, not mechanic_request. ' +
   'If the message looks like a response to an event invite or perk offer, choose reply (or event_question / perk_inquiry if the guest is asking ABOUT an event or perk). ' +
-  'If a first contact looks like an opening pleasantry, choose casual_chatter or new_question depending on what the guest is saying.'
+  'If a first contact looks like an opening pleasantry, choose casual_chatter or new_question depending on what the guest is saying. ' +
+  "When the venue's last message in `recent_conversation` asked the guest something or left them a choice, and `inbound_message` is a short answer to it (a name, an item, yes or no, a day), read it as that answer: new_question when it continues a question the guest had asked, reply otherwise. " +
+  "A short answer to the venue's own question is never unknown."
 
 const CRISIS_INSTRUCTIONS =
   'Does `inbound_message` express either (a) self-harm or suicidal ideation - the guest indicates they may hurt themselves, wants to die, does not see the point of continuing, or similar - or (b) an immediate medical emergency or physical danger, such as a severe allergic reaction, difficulty breathing, chest pain, choking, or an injury in progress? ' +
@@ -308,6 +323,16 @@ function isClassifierCategory(value: string): value is ClassifierCategory {
   return (CLASSIFIER_CATEGORIES as readonly string[]).includes(value)
 }
 
+/** The second-highest scored category, or undefined when only one was scored. */
+function runnerUpOf(
+  choice: string,
+  probabilities: Record<string, number>,
+): [string, number] | undefined {
+  return Object.entries(probabilities)
+    .filter(([category]) => category !== choice)
+    .sort((a, b) => b[1] - a[1])[0]
+}
+
 /** `jev-1.13.0: category=reply(0.87), runner-up new_question(0.11); ...` */
 function serializeReasoning(
   model: string,
@@ -318,9 +343,7 @@ function serializeReasoning(
   praise: number,
   followUpWorthy: number,
 ): string {
-  const runnerUp = Object.entries(probabilities)
-    .filter(([category]) => category !== choice)
-    .sort((a, b) => b[1] - a[1])[0]
+  const runnerUp = runnerUpOf(choice, probabilities)
   const runnerUpText = runnerUp
     ? `, runner-up ${runnerUp[0]}(${runnerUp[1].toFixed(2)})`
     : ''
@@ -454,11 +477,15 @@ export async function classifyMessageViaJev(
     }
   }
 
+  const runnerUp = runnerUpOf(category.choice, category.probabilities)?.[0]
   return {
     ok: true,
     data: {
       category: category.choice,
       classifierConfidence: category.confidence,
+      ...(runnerUp !== undefined && isClassifierCategory(runnerUp)
+        ? { runnerUpCategory: runnerUp }
+        : {}),
       reasoning: serializeReasoning(
         parsed.data.model,
         category.choice,

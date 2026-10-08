@@ -123,6 +123,7 @@ import {
   shouldRetrieveKnowledge,
 } from './stages'
 import { runPostSendChecks } from './post-send-checks'
+import { answerQuery } from './answer-to-our-question'
 import { buildContextQuery, reachedGuest } from './retrieval-context'
 import {
   buildCorpusContent,
@@ -2636,6 +2637,9 @@ async function runInboundTurn(
         // the context window is filtering everything out.
         armCount: contextQueryLength > 0 ? 2 : 1,
         contextQueryLength,
+        // Non-zero when the first arm searched with our question in front of
+        // a short answer instead of the bare message.
+        answerQueryLength: contextQueryLength > 0 ? answerQuery(ctx).length : 0,
       })
       // TAC-547: two arms — the guest's message alone, and a contextual query
       // carrying the last turns that reached them — merged into one slate. A

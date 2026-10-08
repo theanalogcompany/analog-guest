@@ -71,6 +71,7 @@ import { isFloorCategory, matchForwardCommitment } from './complaint-floor'
 import { canAutoSendComplaintTurn } from './complaint-routing'
 import { deriveKnownGuest } from './known-guest'
 import { offeredThisConversation, previousReplyOffered } from './previous-offer'
+import { answerQuery, resolveAnswerTie } from './answer-to-our-question'
 import { resolveComplaintThreadCategory } from './complaint-thread'
 import { REPORTED_ORDER_WINDOW_DAYS } from './extract-reported-order'
 import { INTENTION_DEFINITION_BY_KEY } from './intentions/definitions'
@@ -710,8 +711,27 @@ export async function classifyStage(
 
   // 3-tier routing: < 0.3 → `unknown` (holding ack); 0.3..0.7 → classifier's
   // pick + observation event; >= 0.7 → classifier's pick + silent.
-  const autoRoutedToUnknown =
+  //
+  // One exception under the floor: a classifier torn over a short answer to
+  // something we said knows what the message is, and the turn keeps out of
+  // `unknown` (answer-to-our-question.ts, decision 1).
+  const belowFloor =
     r.data.classifierConfidence < CLASSIFICATION_CONFIDENCE_REROUTE_THRESHOLD
+  const answerTie = belowFloor
+    ? resolveAnswerTie(ctx, r.data.category, r.data.runnerUpCategory)
+    : null
+  const autoRoutedToUnknown = belowFloor && answerTie === null
+  if (answerTie !== null) {
+    // Counted, because a rule that changes routing and cannot be counted is
+    // how a backstop gets believed without evidence. Carries no guest content.
+    console.warn('[agent] classification answer tie kept out of unknown', {
+      event: 'classification_answer_tie',
+      venueId: ctx.venue.id,
+      category: r.data.category,
+      runnerUpCategory: r.data.runnerUpCategory,
+      classifierConfidence: r.data.classifierConfidence,
+    })
+  }
 
   if (r.data.classifierConfidence < CLASSIFICATION_CONFIDENCE_LOW_THRESHOLD) {
     await captureClassificationLowConfidence({
@@ -731,7 +751,9 @@ export async function classifyStage(
   // whatever the classifier made of the answer (complaint-thread.ts). Applied
   // AFTER the confidence reroute, so a low-confidence answer that would have
   // shipped a holding ack as `unknown` is held as the complaint it belongs to.
-  const classifierCategory = autoRoutedToUnknown ? 'unknown' : r.data.category
+  const classifierCategory = autoRoutedToUnknown
+    ? 'unknown'
+    : (answerTie ?? r.data.category)
   const thread = resolveComplaintThreadCategory({
     classifierCategory,
     crisisSafety: r.data.crisisSafety,
@@ -958,8 +980,12 @@ export async function retrieveKnowledgeWithContextStage(
   const contextQuery = buildContextQuery(ctx, options?.turns ?? CONTEXT_TURNS)
   if (contextQuery === '') return retrieveKnowledgeStage(ctx, category, query)
 
+  // A short answer to a question of ours searches with the question in front
+  // of it rather than as a bare word (answer-to-our-question.ts, decision 2).
+  // '' on every other turn, where the first arm is the message as before.
+  const directQuery = answerQuery(ctx) || query
   const settled = await Promise.allSettled([
-    retrieveKnowledgeStage(ctx, category, query),
+    retrieveKnowledgeStage(ctx, category, directQuery),
     retrieveKnowledgeStage(ctx, category, contextQuery),
   ])
   const arms = settled.map((s) => (s.status === 'fulfilled' ? s.value : []))

@@ -976,6 +976,12 @@ export type ClassifyMessageResult = {
   classifierConfidence: number
   reasoning: string
   promptVersion: string
+  // The category the classifier scored second, when it reports one. Only the
+  // Jev arm does; the Haiku fallback returns one category and nothing behind
+  // it. One reader: lib/agent/answer-to-our-question.ts, which uses it to tell
+  // a classifier torn between two names for an answer from one that does not
+  // know what the message is.
+  runnerUpCategory?: MessageCategory
   // Model id and token usage for this call, so the orchestrator can put them on
   // the Langfuse `classify` generation in Langfuse's NATIVE usage fields.
   //

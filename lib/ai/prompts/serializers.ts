@@ -1878,7 +1878,7 @@ export function firstTouchOpenerFor(channel: MessageChannel | null): string {
  * so it does not render on a first-conversation turn where nothing is open. That
  * turn carries no bubble either, so "never two questions" still holds. Since
  * TAC-575 those turns are the common case (nothing is open on a guest's first
- * reply), so NO_QUESTION_RESTRAINT below carries the same instruction as a
+ * reply), so `## No questions this turn` below carries the same instruction as a
  * block of its own on exactly the turns this one cannot reach.
  *
  * NO QUOTED QUESTION, deliberately and unlike most rules here. A worked example
@@ -1891,7 +1891,7 @@ const FIRST_CONVERSATION_RESTRAINT = [
   'them nothing: no question of your own, however natural one would be',
   'here. The only question this turn is the one listed above, and only if a',
   'line above fits.',
-  // v1.95.0: the same exception NO_QUESTION_RESTRAINT carries, for the same
+  // v1.95.0: the same exception `## No questions this turn` carries, for the same
   // reason. Not measured on this path, which needs an open intention.
   'Inviting a guest who has only said hello to say what they need is not a',
   'question of your own, and is welcome.',
@@ -1918,29 +1918,87 @@ const FIRST_CONVERSATION_RESTRAINT = [
  * question (TAC-573's check on a visit the guest takes back is one), and an
  * absolute ban rendered after them would win on proximity.
  */
-const NO_QUESTION_RESTRAINT_HEAD = [
-  '## No questions this turn',
-  '',
+const NO_QUESTION_HEADING = ['## No questions this turn', ''] as const
+
+const NO_QUESTION_BAN = [
   'Answer what they wrote and leave it there. The reply asks them nothing:',
   'no question of your own, however natural one would be here. The one',
   'exception is a question another block in this prompt tells you to ask.',
+] as const
+
+/**
+ * v1.104.0: the ban on a turn where the guest ASKED something, which is the
+ * only turn where "which one do you mean?" can be the right reply.
+ *
+ * "how do i brew your beans" came back as "Depends on which beans" followed by
+ * an answer for two of them (phone test, 2026-10-07). R30 says to ask when a
+ * message could go two ways; this block renders last and said to ask nothing;
+ * the hedge that then answers everything satisfies both.
+ *
+ * FOUND BY LEAVE-ONE-OUT, then inside the block. On the real thread, with the
+ * whole block removed 10 of 10 replies were one clean question, against 4 of
+ * 10 with it. Sentence by sentence, eight runs each: without "Answer what they
+ * wrote and leave it there" 5 of 8, without the full-answer sentence 5 of 8,
+ * without "The reply asks them nothing: no question of your own" 8 of 8. So
+ * it is that sentence, and nothing added AFTER it wins: an exception appended
+ * to the block scored 4 of 10 placed mid-block (the wording first approved)
+ * and 4 of 10 placed last, and scoping the ban to "nothing about themselves"
+ * while keeping its words scored 5 of 10. What works is saying which question
+ * is allowed BEFORE saying no others are: 9 of 10 here.
+ *
+ * WHY ONLY WHERE THE GUEST ASKED. The same wording on a guest who had only
+ * said what they ordered asked "How was it?" in 2 of 10, against 0 of 6 for
+ * the sentence above, so every other turn keeps that sentence byte for byte.
+ * On the turns that do get this one, 20 of 20 ordinary questions (the menu,
+ * the hours) were answered with nothing asked back.
+ *
+ * Check: `npm run measure-answer-to-our-question`, the brew-exact cell and
+ * the four no-question cells.
+ */
+const WHICH_ONE_BAN = [
+  'Answer what they wrote and leave it there. The only question this reply may',
+  'put to them is which thing they mean, when what they asked could be about',
+  'several things you have: ask that and send only that, without answering for',
+  'each one first. Ask nothing else, however natural it would be here: nothing',
+  'about them, what they got, their day or their plans. The one other',
+  'exception is a question another block in this prompt tells you to ask.',
+] as const
+
+/** The categories in which the guest is asking the venue something. */
+const GUEST_IS_ASKING: readonly MessageCategory[] = [
+  'new_question',
+  'recommendation_request',
+  'event_question',
+  'personal_history_question',
+  'perk_inquiry',
+  'mechanic_request',
+]
+
+const NO_QUESTION_INVITATION = [
   // v1.95.0. Without this sentence a guest who writes only "hi" on a first
   // conversation gets a welcome and nothing to answer: the greeting rule's
   // invitation lost to this block 6 times in 10, and with the block removed
   // it won 9 in 10.
   'Inviting a guest who has only said hello to say what they need is not a',
   'question of your own, and is welcome.',
-  // v1.96.0, wording approved 2026-10-07. Question pacing made this block
-  // render on most first-conversation turns that ask for something, and a
-  // menu request came back as the bare link 7 times in 10. "Leave it there"
-  // reads as "say as little as possible" without this.
 ] as const
 
-const NO_QUESTION_RESTRAINT = [
-  ...NO_QUESTION_RESTRAINT_HEAD,
+function noQuestionHead(category: MessageCategory): string[] {
+  return [
+    ...NO_QUESTION_HEADING,
+    ...(GUEST_IS_ASKING.includes(category) ? WHICH_ONE_BAN : NO_QUESTION_BAN),
+    ...NO_QUESTION_INVITATION,
+  ]
+}
+
+// v1.96.0, wording approved 2026-10-07. Question pacing made this block
+// render on most first-conversation turns that ask for something, and a
+// menu request came back as the bare link 7 times in 10. "Leave it there"
+// reads as "say as little as possible" without this.
+const WARM_SENTENCE_OR_TWO = [
   'Asking nothing is not the same as saying little: the reply is still a warm',
   'sentence or two in your usual voice, never a bare link or a one-word answer.',
-].join('\n')
+] as const
 
 /**
  * The same block for a venue whose reply length has been measured: "a warm
@@ -1958,14 +2016,13 @@ function noQuestionRestraintFor(
   typicalReplyWords: number | undefined,
   category: MessageCategory,
 ): string {
-  if (typicalReplyWords === undefined) return NO_QUESTION_RESTRAINT
+  const head = noQuestionHead(category)
+  if (typicalReplyWords === undefined)
+    return [...head, ...WARM_SENTENCE_OR_TWO].join('\n')
   if (category === 'acknowledgment' || category === 'casual_chatter') {
-    return NO_QUESTION_RESTRAINT_HEAD.join('\n')
+    return head.join('\n')
   }
-  return [
-    ...NO_QUESTION_RESTRAINT_HEAD,
-    fullAnswerSentence(typicalReplyWords),
-  ].join('\n')
+  return [...head, fullAnswerSentence(typicalReplyWords)].join('\n')
 }
 
 /**

@@ -245,7 +245,7 @@ export const UNIVERSAL_RULES_DISPLAY: ReadonlyArray<UniversalRule> = [
   {
     id: 'R30',
     summary:
-      "If a guest's message is unclear, ask what they mean rather than guess or answer with something generic. Separate from the classifier's own 'unknown' routing, which keeps its own holding response.",
+      "If a guest's message is unclear, ask what they mean rather than guess or answer with something generic. When a question could be about several things, either ask which one and send only that, or answer for the usual one and say which: never both. Separate from the classifier's own 'unknown' routing, which keeps its own holding response.",
   },
   {
     id: 'R31',
