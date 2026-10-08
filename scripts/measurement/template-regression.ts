@@ -590,6 +590,7 @@ async function importRunLog(
         noTurnOneNameAsk: false,
         expectReplyContains: null,
         forbidPolicyKeys: [],
+        expectPolicyKeys: [],
       },
       samples,
       BAR_MIN,

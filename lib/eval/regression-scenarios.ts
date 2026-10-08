@@ -97,6 +97,7 @@ export const REGRESSION_SCENARIOS: RegressionScenario[] = [
     noTurnOneNameAsk: true,
     expectReplyContains: null,
     forbidPolicyKeys: [],
+    expectPolicyKeys: [],
     enabled: true,
   },
   {
@@ -109,6 +110,7 @@ export const REGRESSION_SCENARIOS: RegressionScenario[] = [
     noTurnOneNameAsk: true,
     expectReplyContains: null,
     forbidPolicyKeys: [],
+    expectPolicyKeys: [],
     enabled: true,
   },
   {
@@ -124,6 +126,7 @@ export const REGRESSION_SCENARIOS: RegressionScenario[] = [
     noTurnOneNameAsk: false,
     expectReplyContains: null,
     forbidPolicyKeys: [],
+    expectPolicyKeys: [],
     enabled: true,
   },
   {
@@ -136,6 +139,7 @@ export const REGRESSION_SCENARIOS: RegressionScenario[] = [
     noTurnOneNameAsk: false,
     expectReplyContains: null,
     forbidPolicyKeys: [],
+    expectPolicyKeys: [],
     enabled: true,
   },
   {
@@ -148,6 +152,7 @@ export const REGRESSION_SCENARIOS: RegressionScenario[] = [
     noTurnOneNameAsk: false,
     expectReplyContains: null,
     forbidPolicyKeys: [],
+    expectPolicyKeys: [],
     enabled: true,
   },
   {
@@ -160,6 +165,7 @@ export const REGRESSION_SCENARIOS: RegressionScenario[] = [
     noTurnOneNameAsk: false,
     expectReplyContains: 'lemils.com',
     forbidPolicyKeys: ['unverified_link', 'comp_leak'],
+    expectPolicyKeys: [],
     enabled: true,
   },
   // ── knowledge retrieval, added 2026-10-06 with the lemils.com site ingest ──
@@ -180,6 +186,7 @@ export const REGRESSION_SCENARIOS: RegressionScenario[] = [
     noTurnOneNameAsk: false,
     expectReplyContains: 'password',
     forbidPolicyKeys: [],
+    expectPolicyKeys: [],
     enabled: true,
   },
   {
@@ -192,6 +199,7 @@ export const REGRESSION_SCENARIOS: RegressionScenario[] = [
     noTurnOneNameAsk: false,
     expectReplyContains: 'Butter and Rose',
     forbidPolicyKeys: [],
+    expectPolicyKeys: [],
     enabled: true,
   },
   {
@@ -204,6 +212,7 @@ export const REGRESSION_SCENARIOS: RegressionScenario[] = [
     noTurnOneNameAsk: false,
     expectReplyContains: 'Straus',
     forbidPolicyKeys: [],
+    expectPolicyKeys: [],
     enabled: true,
   },
   {
@@ -216,6 +225,7 @@ export const REGRESSION_SCENARIOS: RegressionScenario[] = [
     noTurnOneNameAsk: false,
     expectReplyContains: '1330 Polk',
     forbidPolicyKeys: [],
+    expectPolicyKeys: [],
     enabled: true,
   },
   {
@@ -228,6 +238,7 @@ export const REGRESSION_SCENARIOS: RegressionScenario[] = [
     noTurnOneNameAsk: false,
     expectReplyContains: 'outside food',
     forbidPolicyKeys: [],
+    expectPolicyKeys: [],
     enabled: true,
   },
   {
@@ -240,18 +251,20 @@ export const REGRESSION_SCENARIOS: RegressionScenario[] = [
     noTurnOneNameAsk: true,
     expectReplyContains: 'SoFi',
     forbidPolicyKeys: [],
+    expectPolicyKeys: [],
     enabled: true,
   },
   {
     key: 'buyout-inquiry',
     lesson:
-      'The guest is already on Instagram, so Instagram is never the answer to "where do I take this" (template v2.12.0). Caught live on Le Mil\'s: "best way to get the details sorted is through Instagram, @lemilscoffee", sent to a guest in the Instagram inbox. TWO causes, and the tell guards the one that outranks the other. The frame had carried SMS framing in three phrases since v2.0.0, so the model did not know where it was; that is fixed in copy. But the sentence itself came from a knowledge row - the ONLY buyout chunk retrieval returned for this exact script (rank 3 of 4, similarity 0.450, the others seating/laptops/landlord) - and knowledge renders in tier 1, after the frame, where it wins. That row was rewritten in place; its sibling saying "ask here" ranked below 30 on every buyout phrasing and could not have rescued it. The pricing bar is what keeps this from passing vacuously: a reply that never engages the buyout has not been tested, and "depends" is the fact all three surviving rows agree on.',
+      'The guest is already on Instagram, so Instagram is never the answer to "where do I take this" (template v2.12.0). Caught live on Le Mil\'s: "best way to get the details sorted is through Instagram, @lemilscoffee", sent to a guest in the Instagram inbox. TWO causes, and the tell guards the one that outranks the other. The frame had carried SMS framing in three phrases since v2.0.0, so the model did not know where it was; that is fixed in copy. But the sentence itself came from a knowledge row - the ONLY buyout chunk retrieval returned for this exact script (rank 3 of 4, similarity 0.450, the others seating/laptops/landlord) - and knowledge renders in tier 1, after the frame, where it wins. That row was rewritten in place; its sibling saying "ask here" ranked below 30 on every buyout phrasing and could not have rescued it. RECALIBRATED 2026-10-08: the non-vacuity guard was `expectReplyContains: "depends"`, the pricing fact all three surviving knowledge rows agree on, and it failed 0/6 on two consecutive runs while the behaviour was RIGHT. The six replies were byte-identical - "yes, we do buyouts. what\'s the occasion and roughly how many people are you thinking?" - with no off-channel breach and the gate matching private_event_inquiry_requires_approval 6/6, so the draft was correctly held for approval. Confirming the buyout and asking for occasion and headcount before quoting is better hosting than reciting "it depends", and a generic word is exactly what the knowledge-* bars forbid: it can be paraphrased away by a correct reply and produced by an agreeable one. A bar that fails on correct behaviour is the mirror of a false green - it teaches everyone to wave the gate through. The guard is now the GATE MATCH, a discrete tag the policy registry owns: this turn must be recognised as a private-event inquiry and routed for approval. The off-channel ceiling is unchanged and remains what this scenario exists to protect.',
     script: ['can i rent out your space'],
     target: [],
     expectFirstName: null,
     noTurnOneNameAsk: true,
-    expectReplyContains: 'depends',
+    expectReplyContains: null,
     forbidPolicyKeys: [],
+    expectPolicyKeys: ['private_event_inquiry_requires_approval'],
     enabled: true,
   },
   {
@@ -264,6 +277,7 @@ export const REGRESSION_SCENARIOS: RegressionScenario[] = [
     noTurnOneNameAsk: true,
     expectReplyContains: null,
     forbidPolicyKeys: [],
+    expectPolicyKeys: [],
     enabled: false,
   },
 ]
@@ -362,11 +376,19 @@ export function scenarioVerdict(
     | 'noTurnOneNameAsk'
     | 'expectReplyContains'
     | 'forbidPolicyKeys'
+    | 'expectPolicyKeys'
   >,
   samples: RegressionSample[],
   barMin: number,
 ): string {
   const total = samples.length
+  // Zero samples is not a pass. Every bar below is "fewer than quorum fails",
+  // and with total 0 the quorum collapses to 0, so an empty set satisfied
+  // every one of them and returned PASS - a verdict computed from nothing.
+  // A failure is never a zero, and neither is an absence (scripts/CLAUDE.md
+  // #5/#6).
+  if (total === 0) return 'NO SAMPLES (nothing ran - not a pass)'
+
   const disqualified = samples.filter((s) => s.disqualified !== null)
   if (disqualified.length > 0)
     return `DISQUALIFIED (${disqualified.length}/${total} samples failed)`
@@ -406,6 +428,17 @@ export function scenarioVerdict(
     const quorum = Math.min(barMin, total)
     if (pursuing < quorum)
       return `BAR FAILED (pursuit ${pursuing}/${total}, need ${quorum})`
+  }
+
+  if (scenario.expectPolicyKeys.length > 0) {
+    const matching = samples.filter((s) =>
+      s.turns.some((t) =>
+        t.gateMatched.some((k) => scenario.expectPolicyKeys.includes(k)),
+      ),
+    ).length
+    const quorum = Math.min(barMin, total)
+    if (matching < quorum)
+      return `BAR FAILED (gate matched none of [${scenario.expectPolicyKeys.join(', ')}] in ${total - matching}/${total}, need ${quorum})`
   }
 
   // The vacuity guard for gate assertions: a forbidden policy that never had

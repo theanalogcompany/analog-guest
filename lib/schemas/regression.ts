@@ -37,6 +37,16 @@ export const RegressionScenarioSchema = z.object({
   expectReplyContains: z.string().nullable().default(null),
   /** Ceiling: the policy gate must not match any of these policy keys. */
   forbidPolicyKeys: z.array(z.string().min(1)).default([]),
+  /**
+   * Bar: the policy gate must match at least one of these keys on some turn.
+   * The mirror of forbidPolicyKeys, and the non-vacuity guard to prefer over
+   * expectReplyContains whenever the thing under test is "was this turn
+   * recognised as X" rather than "did the reply contain a specific fact".
+   * A gate key is a discrete tag the policy registry owns, so unlike a word
+   * it cannot be paraphrased away by a correct reply or produced by a model
+   * being agreeable (scripts/CLAUDE.md #7).
+   */
+  expectPolicyKeys: z.array(z.string().min(1)).default([]),
   enabled: z.boolean().default(true),
 })
 export type RegressionScenario = z.infer<typeof RegressionScenarioSchema>

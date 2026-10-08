@@ -127,6 +127,11 @@ export function ScenarioList({ scenarios }: { scenarios: ScenarioListItem[] }) {
                         {s.forbidPolicyKeys.join(', ')}
                       </span>
                     ) : null}
+                    {s.expectPolicyKeys.length > 0 ? (
+                      <span>
+                        bar: gate must match {s.expectPolicyKeys.join(' or ')}
+                      </span>
+                    ) : null}
                     <span>
                       ceilings: emoji · dash · assistant register · two
                       questions
