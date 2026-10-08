@@ -292,3 +292,33 @@ function selectByRank(
   }
   return out
 }
+
+/** How far back previousExchange looks for the last thing we said. */
+const PREVIOUS_EXCHANGE_TURNS = 8
+
+/**
+ * The exchange before the message being answered: the guest's last message
+ * and what reached them in answer, joined when it went out as several. Same
+ * window and same "reached the guest" rule as the retrieval context above,
+ * for the same reason: a held draft is not something the guest read.
+ *
+ * Read by the length check (lib/ai/reply-length.ts) to tell a guest digging
+ * into a topic from one asking something new. Undefined when the guest's
+ * newest earlier message got no answer, or there is nothing in the window.
+ */
+export function previousExchange(
+  ctx: RuntimeContext,
+): { guest: string; reply: string } | undefined {
+  const turns = contextTurns(ctx, PREVIOUS_EXCHANGE_TURNS)
+  let end = turns.length
+  while (end > 0 && turns[end - 1]?.direction === 'outbound') end -= 1
+  // Nothing of ours at the end of the thread, or nothing of theirs before it.
+  if (end === turns.length || end === 0) return undefined
+  return {
+    guest: (turns[end - 1] as RecentMessage).body,
+    reply: turns
+      .slice(end)
+      .map((m) => m.body)
+      .join(' '),
+  }
+}

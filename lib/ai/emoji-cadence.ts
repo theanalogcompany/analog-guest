@@ -132,8 +132,14 @@ export type EmojiDirective = 'none' | 'allowed'
 export function resolveEmojiDirective(
   policy: BrandPersona['emojiPolicy'],
   rng: () => number,
+  // The share of the team's own replies that carry an emoji, when the venue
+  // has a measured voice profile (ruled 2026-10-07). It replaces the policy's
+  // probability outright, so every message gets a directive: at a measured 0
+  // that is 'none' every time, and the three-word policy is not consulted.
+  // The realised rate still sits below it, because 'allowed' is permission.
+  measuredShare?: number,
 ): EmojiDirective | null {
-  const probability = EMOJI_PROBABILITY[policy]
+  const probability = measuredShare ?? EMOJI_PROBABILITY[policy]
   // Read as: a null-probability policy must not consume the rng. A caller
   // threading one rng through several decisions would otherwise have its
   // sequence shifted by a venue's emoji setting, which is a spooky coupling

@@ -312,4 +312,14 @@ export const UNIVERSAL_RULES_DISPLAY: ReadonlyArray<UniversalRule> = [
     summary:
       "When a guest corrects something they themselves told you, like saying it was a different place, the slip is theirs and a small one. Take it lightly and move on in one short line, with no apology and no calling it the venue's mistake. Separate from a guest questioning something the agent said, where an error is owned. A guest who only says they have never been in still gets the one gentle check first.",
   },
+  {
+    id: 'R44',
+    summary:
+      'Answer what the guest asked first, then make one point and stop: one detail at most, and everything else waits until they ask. No definition or second name for something in brackets. Nothing that sells, like how rare or special something is, an award, or a comparison with other places. One product, or two when they are choosing; the whole range only when they ask what you have. Says nothing about length or style, which come from how the venue\'s own team texts. Added after "what\'s filter coffee?" got a 56-word definition.',
+  },
+  {
+    id: 'R45',
+    summary:
+      "Never talk about the account or number the guest is messaging as if it were somewhere else: no telling them to follow it or check it out, and no handle. Pointing them to what is on it is fine, like the posts on our page for photos or event news. When they ask for something that can't be sent in the chat, like a photo, say so plainly, then describe it or say it is on our page, and never claim it can be found anywhere the venue's knowledge does not say. Added after a guest asking the venue's Instagram for photos was told to go to the venue's Instagram.",
+  },
 ]

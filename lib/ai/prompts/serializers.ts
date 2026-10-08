@@ -17,6 +17,11 @@ import {
   type ChannelSubstitution,
   copyVariantFor,
 } from './channel-variants'
+import {
+  fullAnswerSentence,
+  REAL_REPLIES_HEADING,
+  voiceProfileToProse,
+} from './voice-profile'
 import type {
   FollowupContext,
   FollowupReason,
@@ -219,10 +224,17 @@ export function personaToProse(
   sections.push(
     `## Formality\n${persona.formality} — ${formalityGuidanceFor(persona.formality, channel)}`,
   )
-  sections.push(`## Length\n${persona.lengthGuide}`)
-  sections.push(
-    `## Emojis\n${persona.emojiPolicy} — ${EMOJI_GUIDANCE[persona.emojiPolicy]}`,
-  )
+  // A venue whose team's replies have been measured gets its own numbers
+  // here, in place of the two hand-written fields (./voice-profile.ts).
+  if (persona.voiceProfile) {
+    const measured = voiceProfileToProse(persona.voiceProfile)
+    sections.push(measured.length, measured.emojis, measured.writing)
+  } else {
+    sections.push(`## Length\n${persona.lengthGuide}`)
+    sections.push(
+      `## Emojis\n${persona.emojiPolicy} — ${EMOJI_GUIDANCE[persona.emojiPolicy]}`,
+    )
+  }
 
   if (persona.signaturePhrases.length > 0) {
     sections.push(
@@ -535,18 +547,41 @@ export function formatVenueLinks(rawLinks: unknown): string {
   ].join('\n')
 }
 
-export function ragChunksToProse(chunks: VoiceCorpusChunk[]): string {
+export function ragChunksToProse(
+  chunks: VoiceCorpusChunk[],
+  // Whether the venue has a measured voice profile. `past_message` is an old
+  // source type an operator can also add by hand, so the rows alone do not
+  // say "the team's real replies, approved as examples of how they text".
+  // The profile does: both are applied together. Without one, every row
+  // renders in the one list, in the order it always had.
+  hasVoiceProfile: boolean,
+): string {
   if (chunks.length === 0) return ''
 
-  const blocks = chunks.map((c) => {
+  const render = (c: VoiceCorpusChunk) => {
     const quoted = c.text
       .split('\n')
       .map((l) => `> ${l}`)
       .join('\n')
     return `[${c.sourceType}]\n${quoted}`
-  })
-
-  return `## Examples of how the venue actually communicates\n${blocks.join('\n\n')}`
+  }
+  // The team's own past replies (the Instagram history import) sit under
+  // their own heading, after everything else: they are the examples chosen
+  // for how they are written, and later reads as closer. A venue with none
+  // renders exactly the block it always did.
+  const isReal = (c: VoiceCorpusChunk) =>
+    hasVoiceProfile && c.sourceType === 'past_message'
+  const real = chunks.filter(isReal)
+  const rest = chunks.filter((c) => !isReal(c))
+  const sections = [
+    `## Examples of how the venue actually communicates${rest.length > 0 ? `\n${rest.map(render).join('\n\n')}` : ''}`,
+  ]
+  if (real.length > 0) {
+    sections.push(
+      `### How the team actually texts\n${REAL_REPLIES_HEADING}\n\n${real.map(render).join('\n\n')}`,
+    )
+  }
+  return sections.join('\n\n')
 }
 
 // Render retrieved knowledge_corpus chunks as a `## Venue knowledge` block.
@@ -1825,7 +1860,7 @@ const FIRST_CONVERSATION_RESTRAINT = [
  * question (TAC-573's check on a visit the guest takes back is one), and an
  * absolute ban rendered after them would win on proximity.
  */
-const NO_QUESTION_RESTRAINT = [
+const NO_QUESTION_RESTRAINT_HEAD = [
   '## No questions this turn',
   '',
   'Answer what they wrote and leave it there. The reply asks them nothing:',
@@ -1841,9 +1876,26 @@ const NO_QUESTION_RESTRAINT = [
   // render on most first-conversation turns that ask for something, and a
   // menu request came back as the bare link 7 times in 10. "Leave it there"
   // reads as "say as little as possible" without this.
+] as const
+
+const NO_QUESTION_RESTRAINT = [
+  ...NO_QUESTION_RESTRAINT_HEAD,
   'Asking nothing is not the same as saying little: the reply is still a warm',
   'sentence or two in your usual voice, never a bare link or a one-word answer.',
 ].join('\n')
+
+/**
+ * The same block for a venue whose reply length has been measured: "a warm
+ * sentence or two" is a length of ours, so the venue's own takes its place
+ * (ruled 2026-10-07). Everything above that sentence is shared.
+ */
+function noQuestionRestraintFor(typicalReplyWords: number | undefined): string {
+  if (typicalReplyWords === undefined) return NO_QUESTION_RESTRAINT
+  return [
+    ...NO_QUESTION_RESTRAINT_HEAD,
+    fullAnswerSentence(typicalReplyWords),
+  ].join('\n')
+}
 
 /**
  * TAC-575: the paragraph under a REQUIRED intention, in place of the ordinary
@@ -2554,7 +2606,7 @@ export function runtimeToProse(
     // The review-ask block carries its own "no other question", and the two
     // suppressed categories are apology and opt-out turns, which this is not
     // for.
-    blocks.push(NO_QUESTION_RESTRAINT)
+    blocks.push(noQuestionRestraintFor(runtime.typicalReplyWords))
   }
 
   // The review-ask block occupies the same last-content-slot position the

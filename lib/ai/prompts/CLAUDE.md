@@ -29,7 +29,7 @@ open goal. Those belong to the universal layer.
 
 ## Universal voice rules
 
-Currently R1 through R43 in `SYSTEM_TEMPLATE`. **Check the file for the count and never
+Currently R1 through R45 in `SYSTEM_TEMPLATE`. **Check the file for the count and never
 trust a number quoted elsewhere, including this sentence.**
 
 Numbering is **positional and append-only.** Never insert mid-list and never reuse a
@@ -57,6 +57,16 @@ double-classified.
   what it is shown, so a dash in an example costs a regen attempt.
 - A quoted example is the thing a model reproduces verbatim. Omit it when templated
   phrasing is itself the defect.
+
+## A venue's measured voice profile
+
+`voice-profile.ts` renders `brand_persona.voiceProfile` (decision 0010). For a venue that
+has one, `## Length` and `## Emojis` carry its team's numbers instead of `lengthGuide` and
+`emojiPolicy`, `## How the team writes` follows, the last sentence of `## No questions this
+turn` asks for the venue's usual length, and the team's real replies (`past_message` rows)
+sit under their own heading after the other examples. **Do not write a length or style line
+for a venue that has a profile**: the numbers are theirs and only the sentences around them
+are ours. Split rate and common openers are deliberately not in the prompt.
 
 ## Channel copy
 

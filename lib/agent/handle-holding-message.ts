@@ -660,5 +660,6 @@ function buildFallbackGeneration(): GenerateMessageResult {
     dashViolationPersisted: false,
     selfTalkViolationPersisted: false,
     emojiDirectiveViolated: false,
+    replyLengthRetry: 'none',
   }
 }

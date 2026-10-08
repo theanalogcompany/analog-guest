@@ -34,7 +34,7 @@ decision rather than silent drift. A **required** boolean or string is free.
 `correctsPendingReply`, `followUpWorthy`, `praisedExperience`. None is `.optional()`, which
 is what makes the compiler name every site synthesizing a `Classification`.
 
-`PROMPT_VERSION` (`prompts/system-template.ts`, currently v1.101.0) covers the
+`PROMPT_VERSION` (`prompts/system-template.ts`, currently v1.102.0) covers the
 classify/generate contract. Every other module here carries its own, and they are
 deliberately not linked:
 
@@ -134,6 +134,16 @@ than check outcomes:
 line apart from the reply, and `decideFurtherHelpOffer` (`further-help-offer.ts`) appends it
 only when the finished reply sent a link, made a recommendation or explained something. The
 reason rides on `furtherHelpOfferReason`.
+
+**The length check is a fourth reason to ask again, and a backstop** (`reply-length.ts`,
+decision 0010). On a simple question, an answer past the venue's own ceiling (its team's
+p90, from `brand_persona.voiceProfile`) is asked for once more in fewer words. The retry
+ships only if it is shorter and `keepsTheFacts` (every number, link and named thing, a
+floor rather than every fact); otherwise the first answer ships. It never
+fires when `needsFullerAnswer` says the guest needs more (a how-to, an event or catering
+inquiry, several questions, a follow-up on the same topic), and never for a venue with no
+profile. The outcome rides on `replyLengthRetry` and the `reply_length_retry` event. This is
+the one place the loop does NOT return the last attempt.
 
 `intentionQuestion` is a bare REQUIRED string, which costs zero against Anthropic's
 24-optional cap. `body` remains the complete reply, so every backstop still reads the

@@ -71,6 +71,15 @@ reads it.
   omitted; the verification pass finds it independently, so the two cannot silently disagree
   about what was dropped and why.
 
+## Deriving a venue's voice profile
+
+`npm run derive-voice-profile -- --venue <slug>` measures how a venue's team texts from the
+Instagram history import and prints the numbers (decision 0010). Read-only; `--examples`
+also prints candidate replies for a person to approve line by line. Nothing is stored by the
+script: the profile and the approved examples are applied by hand, to every venue that
+shares the voice. What counts as a reply and what is dropped as canned:
+`scripts/lib/voice-profile.ts`.
+
 ## Measurement harness convention
 
 A harness answers a question about live behaviour via many expensive model calls. **Its

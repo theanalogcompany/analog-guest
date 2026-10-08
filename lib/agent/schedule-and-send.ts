@@ -34,7 +34,11 @@ import {
   type PendingRowsBySlot,
 } from './pending-slots'
 import { heldDraftBody } from './held-draft-body'
-import { resolveDispatchBubbles, resolveOutboundTail } from './sentence-split'
+import {
+  resolveDispatchBubbles,
+  resolveOutboundTail,
+  bubbleStyleFor,
+} from './sentence-split'
 import { INTER_BUBBLE_GAP_MS } from './split-message'
 import type { RuntimeContext } from './types'
 
@@ -498,6 +502,7 @@ export async function scheduleAndSend(
       options.renderedIntentions?.length ?? 0,
       generation.furtherHelpOffer,
     ),
+    bubbleStyleFor(ctx.venue.brandPersona.voiceProfile),
   )
   if (bubbles.length === 0) {
     // Body was empty, whitespace-only, or nothing but delimiters. Nothing has

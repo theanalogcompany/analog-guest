@@ -23,6 +23,12 @@
  * model on the exact wording the tag exists to ban. Zero exist in production
  * today — the filter is defensive, and cheap.
  *
+ * `inactive`-tagged entries are excluded too, and that one is used: it is how
+ * an entry is switched off without deleting it (ruled 2026-10-07, when a
+ * venue's imported real replies replaced the operator-approved examples that
+ * had taught the agent to write in lowercase with an emoji on the end). The
+ * row, its history and its embedding stay; it just stops rendering.
+ *
  * Fail direction is the CALLER's decision (stages.ts throws on inbound,
  * proceeds on followups); this module only reports `{ok: false}` on a DB
  * failure and never throws.
@@ -55,7 +61,9 @@ export function selectVoicePack(
   charBudget: number = VOICE_PACK_CHAR_BUDGET,
 ): VoiceCorpusChunk[] {
   const ordered = rows
-    .filter((r) => !r.tags.includes('anti_pattern'))
+    .filter(
+      (r) => !r.tags.includes('anti_pattern') && !r.tags.includes('inactive'),
+    )
     .sort((a, b) => {
       const aEdit = a.source_type === 'operator_edit' ? 1 : 0
       const bEdit = b.source_type === 'operator_edit' ? 1 : 0

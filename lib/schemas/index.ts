@@ -4,6 +4,8 @@ export {
   type BrandPersona,
   type VoiceAntiPattern,
   VoiceAntiPatternSchema,
+  type VoiceProfile,
+  VoiceProfileSchema,
 } from './brand-persona'
 export {
   getReviewedVia,
