@@ -93,6 +93,37 @@ function sendsLink(body: string): boolean {
   return extractUrls(body).length > 0 || BARE_DOMAIN.test(body)
 }
 
+/**
+ * Could a reply of ours have carried an offer at all? The same three facts the
+ * decision below appends one on, read off a reply that has already gone out:
+ * it sent a link, the turn was a recommendation, or it ran long enough to
+ * count as an explanation.
+ *
+ * Read by lib/agent/previous-offer.ts, which recognises an earlier offer by
+ * its wording because nothing stored marks one. Without this, a welcome that
+ * invites the guest to say what they need ("let us know what we can help
+ * with") read as the conversation's one offer, and the menu link sent next
+ * went out without its line (phone test, 2026-10-07). A nine-word greeting
+ * with no link was never a reply an offer could have been appended to.
+ *
+ * `body` is the whole reply, offer line included, so the length test is
+ * generous by the length of that line. It misses two cases, and in both the
+ * cost is a second offer in one conversation: a recommendation made outside a
+ * `recommendation_request` turn, in a short reply with no link; and a short
+ * reply where the model, or an operator editing it, wrote offer wording into
+ * the answer itself ("Yeah, we do. Let us know if you need anything else").
+ */
+export function replyCouldCarryOffer(
+  body: string,
+  category: MessageCategory,
+): boolean {
+  return (
+    sendsLink(body) ||
+    category === 'recommendation_request' ||
+    wordCount(body) >= EXPLAINED_WORDS
+  )
+}
+
 /** The reply with its links taken out, so a `?` in a query string is not a question. */
 function proseOf(body: string): string {
   return extractUrls(body).reduce((text, url) => text.replace(url, ' '), body)

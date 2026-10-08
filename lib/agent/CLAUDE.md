@@ -542,6 +542,21 @@ a warm-close anchor, excluded inside `loadWarmCloseCandidates`. Reasons in those
   recognises an earlier offer by its wording, because nothing stored marks one; the header
   says what that costs. Only a reply to the guest can count: a close, a sign-off, a greeting
   or a follow-up never does, decided by the row's category and not by what it says.
+- **Not every message gets a reply** (`pure-close.ts`, ruled 2026-10-07). A bare "ok" or
+  "thanks" after a message of ours is left unanswered at a venue whose own team mostly did
+  the same (`voiceProfile.closes`). Decided in `runInboundTurn` right after the opt-out
+  decision and before retrieval, so nothing is generated. Every doubt replies: a `?`, any
+  extra word, "yes" or "sure", an answer to a question or offer of ours, an open commitment,
+  praise, a category other than `acknowledgment`, a venue with no measured habit.
+  **It also stands down in a guest's first conversation and on a day with a visit
+  check-in**, because the warm close and the check-back fire only when OUR message is the
+  newest in the thread, and a silenced close would cancel them. Lifting that means teaching
+  both timers to see past a silenced close. Returns `{status: 'silenced', why: 'pure_close'}`; count them with
+  `detail->>'why' = 'pure_close'` or the `inbound_close_not_answered` event.
+- **A welcome is never the conversation's one offer.** `previous-offer.ts` recognises an
+  earlier offer by wording, and "let us know what we can help with" reads like one. A reply
+  only counts if an offer could have been appended to it at all (`replyCouldCarryOffer`,
+  `lib/ai/further-help-offer.ts`): it sent a link, was a recommendation, or ran long.
 - **A draft held for an operator never carries the offer-more-help line** (`held-draft-body.ts`,
   ruled 2026-10-07). An approved draft is one message, so nothing would send the line as its
   own. The other two tails are still folded in. `scripts/harness/held-draft-offer` checks it.

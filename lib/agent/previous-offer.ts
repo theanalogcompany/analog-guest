@@ -34,6 +34,7 @@
 // way an offer is worded. Knowing exactly would take a marker on the row,
 // which is a column on `messages`.
 
+import { replyCouldCarryOffer } from '@/lib/ai/further-help-offer'
 import { reachedGuest } from './retrieval-context'
 import type { MessageCategory, RecentMessage } from '@/lib/ai/types'
 
@@ -73,7 +74,13 @@ function couldCarryOffer(
 ): boolean {
   if (m.direction !== 'outbound' || !reachedGuest(m)) return false
   if (m.category == null) return uncategorised === 'counts'
-  return (OFFER_REPLY_CATEGORIES as ReadonlySet<string>).has(m.category)
+  if (!(OFFER_REPLY_CATEGORIES as ReadonlySet<string>).has(m.category)) {
+    return false
+  }
+  // And it has to be a reply an offer is ever appended to. A welcome that
+  // invites the guest to say what they need is worded like an offer and is
+  // not one (replyCouldCarryOffer has the phone thread this came from).
+  return replyCouldCarryOffer(m.body, m.category as MessageCategory)
 }
 
 /** A model may write either apostrophe; the lists below use the plain one. */

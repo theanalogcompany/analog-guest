@@ -78,7 +78,8 @@ Instagram history import and prints the numbers (decision 0010). Read-only; `--e
 also prints candidate replies for a person to approve line by line. Nothing is stored by the
 script: the profile and the approved examples are applied by hand, to every venue that
 shares the voice. What counts as a reply and what is dropped as canned:
-`scripts/lib/voice-profile.ts`.
+`scripts/lib/voice-profile.ts`. It also counts how often the team left a pure close
+unanswered, with the same two functions the inbound turn decides with.
 
 ## Measurement harness convention
 

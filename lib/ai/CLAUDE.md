@@ -34,7 +34,7 @@ decision rather than silent drift. A **required** boolean or string is free.
 `correctsPendingReply`, `followUpWorthy`, `praisedExperience`. None is `.optional()`, which
 is what makes the compiler name every site synthesizing a `Classification`.
 
-`PROMPT_VERSION` (`prompts/system-template.ts`, currently v1.102.0) covers the
+`PROMPT_VERSION` (`prompts/system-template.ts`, currently v1.103.0) covers the
 classify/generate contract. Every other module here carries its own, and they are
 deliberately not linked:
 
@@ -123,7 +123,8 @@ Two transformations DO run at the `replaceDashes` seam, and both are normalizati
 than check outcomes:
 
 - `replaceDashes` substitutes dashes for the punctuation the constraint text asks for
-  anyway. It REFUSES a substitution that would empty a non-empty body.
+  anyway. A dash between two numbers is a range and becomes "to" ("2 to 3 tbsp"), as does
+  an unspaced one between two words ("Monday to Friday"); hyphens are never touched. It REFUSES a substitution that would empty a non-empty body.
 - `composeReplyWithIntention` (TAC-554) joins `body` and `intentionQuestion` into the one
   complete reply, and strips a question the model duplicated at the end of the answer. That
   strip is the only place model text is REMOVED; it only ever removes a trailing duplicate,

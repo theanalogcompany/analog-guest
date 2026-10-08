@@ -13,10 +13,11 @@
 // computeGuestState, which persists a guest_states row on a recognition-band
 // change. The row count is printed before and after.
 //
-// EVERY UNIT IS A FIRST CONVERSATION: a guest who said hello, got a welcome,
-// and now asks one thing. That is the thread the owner tested on, and the turn
-// that renders `## No questions this turn`. An established guest's turn does
-// not carry that block and is not measured here.
+// EVERY UNIT IS A FIRST CONVERSATION, which is the thread the owner tested on
+// and the turn that renders `## No questions this turn`. Most are a hello, a
+// welcome, then one question. `hey` is the hello itself, with nothing before
+// it, and the reaction units ("ok", "haha nice") follow an answered question.
+// An established guest's turn does not carry that block and is not measured.
 //
 // TWO ARMS.
 //
@@ -84,7 +85,12 @@ import {
   shorterReplyConstraint,
 } from '@/lib/ai/reply-length'
 import { buildRuntimeContext } from '@/lib/agent/build-runtime-context'
-import { offeredThisConversation } from '@/lib/agent/previous-offer'
+import { looksLikeQuestion } from '@/lib/agent/looks-like-question'
+import {
+  offeredThisConversation,
+  previousReplyOffered,
+} from '@/lib/agent/previous-offer'
+import { decidePureClose } from '@/lib/agent/pure-close'
 import {
   resolveDispatchBubbles,
   resolveOutboundTail,
@@ -154,7 +160,45 @@ interface Unit {
   demo?: true
   /** A guest who needs a fuller answer: complete beats short here. */
   fuller?: true
+  /** What came before this message. Default: the hello and the welcome. */
+  history?: readonly Line[]
+  /**
+   * Not a question: a hello, a reaction, an acknowledgment. Kept out of the
+   * simple-question median, which was fixed on question units only and which
+   * a one-word reply to "ok" would otherwise flatter.
+   */
+  reaction?: true
 }
+
+/** Direction, text and, for a line of ours, the category it was sent under. */
+type Line = readonly ['in' | 'out', string, MessageCategory?]
+
+/**
+ * A hello and the welcome it got. The welcome is the one the agent sent on
+ * the 2026-10-07 phone test, kept verbatim because it is worded like an offer
+ * of more help: the menu link sent next went out without its offer line until
+ * a welcome stopped counting as one.
+ */
+const GREETING: readonly Line[] = [
+  ['in', 'hey'],
+  ['out', 'Hey, welcome. Let us know what we can help with', 'casual_chatter'],
+]
+
+/** A question answered, for the turns that react to an answer. */
+const AFTER_OAT: readonly Line[] = [
+  ...GREETING,
+  ['in', 'do you have oat milk'],
+  ['out', 'Yeah, we do', 'new_question'],
+]
+const AFTER_REC: readonly Line[] = [
+  ...GREETING,
+  ['in', 'any recs'],
+  [
+    'out',
+    'The SoFi is our house drink and a great place to start',
+    'recommendation_request',
+  ],
+]
 
 const UNITS: readonly Unit[] = [
   { id: 'filter', inbound: 'Whats filter coffee?', demo: true },
@@ -183,6 +227,29 @@ const UNITS: readonly Unit[] = [
   { id: 'catering', inbound: 'do you do catering?' },
   { id: 'pastries', inbound: 'what pastries do you have?' },
   { id: 'price', inbound: 'how much is a filter coffee?' },
+  { id: 'hey', inbound: 'hey', history: [], reaction: true },
+  { id: 'any-recs', inbound: 'any recs' },
+  { id: 'ok', inbound: 'ok', history: AFTER_OAT, reaction: true },
+  { id: 'thanks', inbound: 'thanks', history: AFTER_OAT, reaction: true },
+  {
+    id: 'see-you',
+    inbound: 'see you tomorrow',
+    history: AFTER_REC,
+    reaction: true,
+  },
+  { id: 'haha-nice', inbound: 'haha nice', history: AFTER_REC, reaction: true },
+  {
+    id: 'sounds-good',
+    inbound: 'that sounds good',
+    history: AFTER_REC,
+    reaction: true,
+  },
+  {
+    id: 'excited',
+    inbound: 'excited to try it',
+    history: AFTER_REC,
+    reaction: true,
+  },
   {
     id: 'brew',
     inbound: 'how do I brew with the brass filter?',
@@ -200,12 +267,6 @@ const UNITS: readonly Unit[] = [
   },
 ]
 
-/** The hello and the welcome the owner's thread opened with. */
-const GREETING: readonly (readonly ['in' | 'out', string])[] = [
-  ['in', "Hi Le Mil's!"],
-  ['out', "hey! welcome to Le Mil's 👋 what can we help you with?"],
-]
-
 // ---------------------------------------------------------------------------
 // Detectors. Every body is printed to be read; these only count.
 // ---------------------------------------------------------------------------
@@ -220,7 +281,8 @@ const MARKETING_WIDER =
 
 function detect(answer: string): Record<string, boolean> {
   return {
-    parenthetical: /[()]/.test(answer),
+    // A typed smiley is not a bracket.
+    parenthetical: /[()]/.test(answer.replace(/[:;]-?[()]/g, '')),
     marketing: MARKETING.test(answer),
     marketingWider: MARKETING_WIDER.test(answer),
     pointsToOwnAccount: /@\w+|\b(our|on) (instagram|insta|ig)\b/i.test(answer),
@@ -251,12 +313,14 @@ function unitContext(
   now: Date,
 ): RuntimeContext {
   const firstContact = new Date(now.getTime() - 20 * 60_000)
-  const recentMessages = GREETING.map(([dir, body], i) => ({
+  const history = unit.history ?? GREETING
+  const recentMessages = history.map(([dir, body, sentAs], i) => ({
     direction: dir === 'in' ? 'inbound' : 'outbound',
     body,
-    createdAt: new Date(now.getTime() - (GREETING.length - i) * 60_000),
+    createdAt: new Date(now.getTime() - (history.length - i) * 60_000),
     delivery: 'delivered',
-    category: dir === 'out' ? 'casual_chatter' : null,
+    // Each line of ours carries the category production stored it under.
+    category: dir === 'in' ? null : (sentAs ?? 'new_question'),
   })) as RecentMessage[]
   return {
     ...base,
@@ -423,13 +487,30 @@ async function main(): Promise<void> {
       emojiPolicy: persona.emojiPolicy,
       voiceExamples: ragChunks.length,
       realReplies: realReplies.length,
+      // A leave-one-out run is not a treatment run, and the log has to say so.
+      cutFullAnswerSentence: process.env.MEASURE_CUT_FULL_ANSWER === '1',
+      cutNextOpening: process.env.MEASURE_CUT_NEXT_OPEN === '1',
+      forcedMarks: process.env.MEASURE_FORCE_MARKS === '1',
       constructed:
-        'every thread is constructed: a hello, a welcome, then the question. Classified and retrieved once per unit per run.',
+        'every thread is constructed. Classified and retrieved once per unit per run.',
     },
   })
   console.log(
     `[texting-voice] arm=${armName} prompt=${PROMPT_VERSION} venue=${venueSlug} reps=${reps} examples=${ragChunks.length} (${realReplies.length} real replies) length check=${lengthProfile ? `past ${lengthProfile.maxWords} words` : 'none'} split coin=${bubbleStyle.splitProbability} message limit=${bubbleStyle.maxBubbleWords ?? 'none'}`,
   )
+  if (
+    process.env.MEASURE_CUT_FULL_ANSWER === '1' ||
+    process.env.MEASURE_CUT_NEXT_OPEN === '1'
+  ) {
+    console.log(
+      '[texting-voice] LEAVE-ONE-OUT RUN: a prompt line is cut. Not the shipped prompt.',
+    )
+  }
+  if (process.env.MEASURE_FORCE_MARKS === '1') {
+    console.log(
+      '[texting-voice] FORCED MARKS: both coins land on "allowed" every reply. Not the shipped rate.',
+    )
+  }
   console.log(`[texting-voice] run log: ${log.path}`)
 
   const cache = { read: 0, write: 0, uncached: 0, calls: 0 }
@@ -443,6 +524,7 @@ async function main(): Promise<void> {
   let fullerSplit = 0
   let fullerDone = 0
   let longMessages = 0
+  let notAnswered = 0
 
   for (const unit of units) {
     const ctx = unitContext(base, persona, unit, now)
@@ -472,9 +554,65 @@ async function main(): Promise<void> {
       `\n${unit.id} [${category}]${unit.fuller ? ' [needs a fuller answer]' : ''} ${JSON.stringify(unit.inbound)}`,
     )
 
+    // The turn's own first decision: does this message get a reply at all?
+    // Decided with the function the inbound turn calls, before anything is
+    // generated, so a skipped unit costs no generation here either.
+    const newest = ctx.recentMessages.at(-1)
+    const ourLast =
+      newest !== undefined && newest.direction === 'outbound'
+        ? newest.body
+        : null
+    const close = decidePureClose({
+      category,
+      crisisSafety: false,
+      praisedExperience: false,
+      body: unit.inbound,
+      hasMedia: false,
+      ourLastMessage: ourLast,
+      ourLastMessageAskedOrOffered:
+        ourLast !== null &&
+        (looksLikeQuestion(ourLast) ||
+          previousReplyOffered(
+            ctx.recentMessages,
+            now,
+            ctx.conversationWindowMs,
+          )),
+      hasOpenCommitment: false,
+      hasVisitCheckinToday: false,
+      // Every unit here is a first conversation, where a close is answered
+      // so the warm close still has our reply to fire from. MEASURE_ESTABLISHED
+      // reads the decision as it is for a guest past their first conversation.
+      firstConversation: process.env.MEASURE_ESTABLISHED !== '1',
+      teamHabit: persona.voiceProfile?.closes,
+    })
+    if (!close.reply) {
+      notAnswered += 1
+      log.appendUnit({
+        unit: unit.id,
+        failed: false,
+        category,
+        inbound: unit.inbound,
+        notAnswered: true,
+        kind: close.kind,
+      })
+      console.log(`  (no reply: a ${close.kind} close the team leaves alone)`)
+      continue
+    }
+    console.log(`  replies: ${close.why}`)
+
     for (let rep = 0; rep < reps; rep += 1) {
       try {
-        const runtime = buildAiRuntime(ctx)
+        // MEASURE_FORCE_MARKS=1 lands both coins on 'allowed' for every
+        // reply, to read what the wording does on a turn the coin picked
+        // without waiting for one turn in five. Not the shipped rate.
+        const runtime =
+          process.env.MEASURE_FORCE_MARKS === '1'
+            ? {
+                ...buildAiRuntime(ctx),
+                exclamationDirective: 'allowed' as const,
+                smileyDirective: 'allowed' as const,
+              }
+            : buildAiRuntime(ctx)
         const composed = composePrompt({
           category,
           persona,
@@ -486,7 +624,29 @@ async function main(): Promise<void> {
         })
         let prefix = composed.cacheableSystemPrefix
         const suffix = composed.volatileSystemSuffix
-        const user = composed.userPrompt
+        let user = composed.userPrompt
+        if (process.env.MEASURE_CUT_FULL_ANSWER === '1') {
+          const next = user.replace(
+            /\s*Asking nothing is not the same as saying little:[^.]*\./,
+            '',
+          )
+          if (next === user) {
+            throw new Error('the full-answer sentence was not in this prompt')
+          }
+          user = next
+        }
+        // Leave-one-out: the closed venue's "Next open <day> at <time>." in
+        // `## Right now`, to see whether a turn with nothing to answer is
+        // reaching for it.
+        if (process.env.MEASURE_CUT_NEXT_OPEN === '1') {
+          const next = user.replace(/ Next open [^.]*\./, '')
+          if (next === user) {
+            throw new Error(
+              'no "Next open" line in this prompt: the venue is open, or the turn is small talk or a reply not about timing, where it no longer renders',
+            )
+          }
+          user = next
+        }
         if (isControl) {
           for (const cut of CONTROL_CUTS) {
             const next = prefix.replace(cut.text, '')
@@ -603,7 +763,7 @@ async function main(): Promise<void> {
         if (unit.fuller) {
           fullerDone += 1
           if (answerBubbles > 1) fullerSplit += 1
-        } else {
+        } else if (!unit.reaction) {
           simpleWords.push(words)
         }
         // The bar on message length: no single message of the answer runs
@@ -623,6 +783,15 @@ async function main(): Promise<void> {
         }
         if (object.knowledgeGap) {
           tallies.knowledgeGap = (tallies.knowledgeGap ?? 0) + 1
+        }
+        if (reply.includes('!')) {
+          tallies.exclamation = (tallies.exclamation ?? 0) + 1
+        }
+        if (/[:;]-?\)/.test(reply)) {
+          tallies.smiley = (tallies.smiley ?? 0) + 1
+        }
+        if (/\d, \d/.test(reply)) {
+          tallies.brokenRange = (tallies.brokenRange ?? 0) + 1
         }
         if (/^\p{Ll}/u.test(beforeOffer.trim())) {
           tallies.startsLowercase = (tallies.startsLowercase ?? 0) + 1
@@ -644,6 +813,8 @@ async function main(): Promise<void> {
           offerReason: offer.reason,
           knowledgeGap: object.knowledgeGap,
           emojiDirective: runtime.emojiDirective ?? null,
+          exclamationDirective: runtime.exclamationDirective ?? null,
+          smileyDirective: runtime.smileyDirective ?? null,
           lengthVerdict: first.verdict,
           retryOutcome,
           fullerReason: first.fuller,
@@ -681,6 +852,7 @@ async function main(): Promise<void> {
     fullerRetries,
     fullerSplit,
     longMessages,
+    notAnswered,
     tallies,
   }
   console.log(

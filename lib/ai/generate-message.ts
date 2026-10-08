@@ -122,6 +122,42 @@ const DASH_REGEX = /[—–]/
  *      `dashViolationPersisted` fires, which is exactly the backstop that
  *      flag exists to be.
  */
+/** What may sit between a number and the dash of a range: a time or a percent. */
+const RANGE_UNIT = String.raw`(?:\s?(?:a\.?m\.?|p\.?m\.?)|%)?`
+
+/**
+ * One stretch of prose between links.
+ *
+ * A RANGE IS NOT A CLAUSE BREAK (phone test, 2026-10-07: "2, 3 tbsp" and
+ * "10, 15 minutes" reached a guest). Three shapes are read as a range and
+ * become "to"; everything else is a clause break and becomes a comma, as
+ * before. The shapes are narrow on purpose, because the wrong way round is
+ * worse: "we close at 11 — 2 of us are here" must not become "11 to 2".
+ *
+ *   number, dash, number, no spaces     "2–3 tbsp", "7am–3pm", "$6.50–$6.75"
+ *   number, spaced EN dash, number      "7:00 AM – 3:00 PM", how hours are
+ *                                       stored and so how the model writes them
+ *   Capitalised word, en dash, Capital  "Monday–Friday"
+ *
+ * A spaced em dash between two numbers stays a clause break. A run of three
+ * or more numbers joined by dashes is a phone number or a date, not a range,
+ * and gets plain hyphens. Hyphens were never touched here and still are not.
+ */
+function replaceDashesInProse(segment: string): string {
+  return segment
+    .replace(/\d+(?:[—–]\d+){2,}/g, (run) => run.replace(/[—–]/g, '-'))
+    .replace(
+      new RegExp(String.raw`(\d${RANGE_UNIT})[—–](?=\$?\d)`, 'gi'),
+      '$1 to ',
+    )
+    .replace(
+      new RegExp(String.raw`(\d${RANGE_UNIT}) – (?=\$?\d)`, 'gi'),
+      '$1 to ',
+    )
+    .replace(/(\p{Lu}\p{L}+)–(?=\p{Lu})/gu, '$1 to ')
+    .replace(/\s*[—–]\s*/g, ', ')
+}
+
 export function replaceDashes(body: string): string {
   // Split on URL tokens and substitute only in the gaps between them. Reuses
   // url-detector's pattern rather than inventing a second one — two URL
@@ -131,7 +167,7 @@ export function replaceDashes(body: string): string {
     .split(URL_TOKEN_SPLITTER)
     .map((segment, i) =>
       // Odd indices are the captured URL tokens; leave them verbatim.
-      i % 2 === 1 ? segment : segment.replace(/\s*[—–]\s*/g, ', '),
+      i % 2 === 1 ? segment : replaceDashesInProse(segment),
     )
     .join('')
     .replace(/,\s*,/g, ',')

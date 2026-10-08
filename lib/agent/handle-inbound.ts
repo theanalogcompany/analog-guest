@@ -72,6 +72,9 @@ import {
   markReviewAsked,
 } from './review-ask'
 import { scheduleInquiryFollowup } from './schedule-inquiry-followup'
+import { looksLikeQuestion } from './looks-like-question'
+import { previousReplyOffered } from './previous-offer'
+import { decidePureClose } from './pure-close'
 import { renderableIntentions } from './intentions/derive'
 // The dispatch-side split, imported rather than restated: the v1 test draft's
 // bubbles have to be the bubbles dispatch would have produced, and a second
@@ -120,7 +123,7 @@ import {
   shouldRetrieveKnowledge,
 } from './stages'
 import { runPostSendChecks } from './post-send-checks'
-import { buildContextQuery } from './retrieval-context'
+import { buildContextQuery, reachedGuest } from './retrieval-context'
 import {
   buildCorpusContent,
   buildGenerateAttemptContent,
@@ -945,7 +948,11 @@ export interface TestDraft {
    * is lying about one of them.
    */
   substitute:
-    'crisis_safety' | 'media_only_card' | 'opt_out_confirmation' | null
+    | 'crisis_safety'
+    | 'media_only_card'
+    | 'opt_out_confirmation'
+    | 'no_reply_needed'
+    | null
 }
 
 /**
@@ -2006,6 +2013,88 @@ async function runInboundTurn(
       })
       retrieveSpan.end({ output: { discarded: 'guest_opted_out' } })
       return { status: 'guest_opted_out' }
+    }
+
+    // NOT EVERY MESSAGE NEEDS A REPLY (ruled 2026-10-07). A bare "ok",
+    // "thanks" or thumbs up after a message of ours, at a venue whose own team
+    // mostly left those unanswered, gets nothing: no reply, no card, no
+    // follow-up. Every doubt replies as normal; lib/agent/pure-close.ts has
+    // the list of doubts, and why a first conversation and a visit check-in
+    // are on it.
+    //
+    // HERE, for three reasons. After classification, because the category is
+    // half the test. After the opt-out decision, which has its own silence
+    // and its own record to make. And before retrieval, generation and
+    // everything that schedules something off this turn, so a skipped message
+    // costs one classifier call and arms no follow-up or check-back.
+    if (optOutDecision.action === 'none') {
+      const newest = ctx.recentMessages.at(-1)
+      // Ours, read by the guest, and part of this conversation: a wave nine
+      // days after our last message is a hello, not a close.
+      const ourLast =
+        newest !== undefined &&
+        newest.direction === 'outbound' &&
+        reachedGuest(newest) &&
+        inbound.message.receivedAt.getTime() - newest.createdAt.getTime() <=
+          ctx.conversationWindowMs
+          ? newest.body
+          : null
+      const close = decidePureClose({
+        category: ctx.classification.category,
+        crisisSafety: ctx.classification.crisisSafety,
+        praisedExperience: ctx.classification.praisedExperience,
+        body: inbound.message.body,
+        hasMedia: ctx.inboundMedia != null,
+        ourLastMessage: ourLast,
+        ourLastMessageAskedOrOffered:
+          ourLast !== null &&
+          (looksLikeQuestion(ourLast) ||
+            previousReplyOffered(
+              ctx.recentMessages,
+              inbound.message.receivedAt,
+              ctx.conversationWindowMs,
+            )),
+        hasOpenCommitment: ctx.activeCommitments.length > 0,
+        hasVisitCheckinToday: ctx.visitCheckin !== null,
+        firstConversation: ctx.firstConversation,
+        teamHabit: ctx.venue.brandPersona.voiceProfile?.closes,
+      })
+      if (!close.reply) {
+        if (testSink !== undefined) {
+          testSink.draft = emptyTestDraft(ctx, 'no_reply_needed')
+          retrieveSpan.end({ output: { discarded: 'test_run_pure_close' } })
+          return { status: 'refused', reason: 'test_run' }
+        }
+        console.log(
+          '[agent] inbound not answered: a close that needs no reply',
+          {
+            agentRunId,
+            guestId: ctx.guest.id,
+            kind: close.kind,
+          },
+        )
+        // Counted, not only logged: a guest who got silence is the outcome
+        // that has to be findable when someone asks why nothing was sent.
+        await capturePostHogEvent('inbound_close_not_answered', agentRunId, {
+          agentRunId,
+          venueId: ctx.venue.id,
+          guestId: ctx.guest.id,
+          kind: close.kind,
+          teamUnansweredShare:
+            ctx.venue.brandPersona.voiceProfile?.closes?.unansweredShare ??
+            null,
+        })
+        trace.update({
+          output: {
+            status: 'silenced',
+            why: 'pure_close',
+            kind: close.kind,
+            category: ctx.classification.category,
+          },
+        })
+        retrieveSpan.end({ output: { discarded: 'pure_close' } })
+        return { status: 'silenced', why: 'pure_close' }
+      }
     }
     if (optOutDecision.action === 'record') {
       // A test run records no opt-out and sends no confirmation. Replaying a

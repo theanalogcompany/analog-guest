@@ -315,7 +315,7 @@ export const UNIVERSAL_RULES_DISPLAY: ReadonlyArray<UniversalRule> = [
   {
     id: 'R44',
     summary:
-      'Answer what the guest asked first, then make one point and stop: one detail at most, and everything else waits until they ask. No definition or second name for something in brackets. Nothing that sells, like how rare or special something is, an award, or a comparison with other places. One product, or two when they are choosing; the whole range only when they ask what you have. Says nothing about length or style, which come from how the venue\'s own team texts. Added after "what\'s filter coffee?" got a 56-word definition.',
+      'Answer what the guest asked first, then make one point and stop: one detail at most, and everything else waits until they ask. No definition or second name for something in brackets. Nothing that sells, like how rare or special something is, an award, or a comparison with other places. One product, or two when they are choosing; the whole range only when they ask what you have. One point limits information, not warmth: a short opinion, a playful aside or a warm reaction is welcome on top. Says nothing about length or style, which come from how the venue\'s own team texts. Added after "what\'s filter coffee?" got a 56-word definition.',
   },
   {
     id: 'R45',

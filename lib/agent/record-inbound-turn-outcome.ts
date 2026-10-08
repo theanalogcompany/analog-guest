@@ -184,11 +184,18 @@ const LEDGER_DERIVERS: LedgerDerivers = {
   // TAC-397, mapped when the rebase made `tsc` refuse to compile without it —
   // the total map firing on a real merge. A decision,
   // not a failure: the guest said "haha" and already holds a pending card.
-  silenced: () => ({
+  //
+  // `detail.why` marks the second producer, a pure close the venue's team
+  // would not have answered either. Vocabulary only, and it is what lets the
+  // skips be counted apart from the card case:
+  //
+  //   select count(*) from inbound_turn_outcomes
+  //   where outcome = 'silenced' and detail->>'why' = 'pure_close'
+  silenced: (r) => ({
     outcome: 'silenced',
     reason: null,
     outboundMessageId: null,
-    detail: {},
+    detail: r.why === undefined ? {} : { why: r.why },
   }),
   // TAC-529. `not_run` is the right outcome: the agent was never invoked for
   // this turn — the gate sits before context build, so nothing classified,

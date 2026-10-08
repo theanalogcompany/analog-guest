@@ -18,6 +18,7 @@ import {
   copyVariantFor,
 } from './channel-variants'
 import {
+  APPROVED_LINES_HEADING,
   fullAnswerSentence,
   REAL_REPLIES_HEADING,
   voiceProfileToProse,
@@ -571,11 +572,24 @@ export function ragChunksToProse(
   // renders exactly the block it always did.
   const isReal = (c: VoiceCorpusChunk) =>
     hasVoiceProfile && c.sourceType === 'past_message'
+  // Lines an operator approved or corrected. For a venue with a profile they
+  // are kept for what they say and how they say it, and NOT for how they are
+  // typed: they were written before the team's own habits were measured, in
+  // lowercase with an emoji on the end, and shown bare they pull the model
+  // back to exactly that.
+  const isApproved = (c: VoiceCorpusChunk) =>
+    hasVoiceProfile && c.sourceType === 'operator_edit'
   const real = chunks.filter(isReal)
-  const rest = chunks.filter((c) => !isReal(c))
+  const approved = chunks.filter(isApproved)
+  const rest = chunks.filter((c) => !isReal(c) && !isApproved(c))
   const sections = [
     `## Examples of how the venue actually communicates${rest.length > 0 ? `\n${rest.map(render).join('\n\n')}` : ''}`,
   ]
+  if (approved.length > 0) {
+    sections.push(
+      `### The venue's attitude\n${APPROVED_LINES_HEADING}\n\n${approved.map(render).join('\n\n')}`,
+    )
+  }
   if (real.length > 0) {
     sections.push(
       `### How the team actually texts\n${REAL_REPLIES_HEADING}\n\n${real.map(render).join('\n\n')}`,
@@ -658,6 +672,8 @@ export function knowledgeChunksToProse(chunks: KnowledgeCorpusChunk[]): string {
  */
 function formatOpenStatus(
   openState: NonNullable<RuntimeContext['today']>['openState'],
+  // Whether to say when the venue next opens. See rendersNextOpening.
+  withNextOpening: boolean,
 ): string | null {
   if (!openState) return null
 
@@ -676,9 +692,10 @@ function formatOpenStatus(
     // another one on us"), which is an entirely ordinary thing to say at 8pm
     // about a drink from that morning. What this line exists to stop is a
     // confirmation for RIGHT NOW, not a future invitation.
-    const next = openState.opensAt
-      ? ` Next open ${openState.opensAt.day} at ${openState.opensAt.time}.`
-      : ''
+    const next =
+      withNextOpening && openState.opensAt
+        ? ` Next open ${openState.opensAt.day} at ${openState.opensAt.time}.`
+        : ''
     return `- Status: CLOSED right now.${next} Do not tell the guest to come by now, and do not confirm anything for right now.`
   }
 
@@ -840,7 +857,45 @@ function formatInquiryFollowup(
   ].join('\n')
 }
 
-function formatRightNow(today: NonNullable<RuntimeContext['today']>): string {
+/** The guest's message is about coming in, or about when. */
+const ABOUT_COMING_IN =
+  /\b(open|opens|opening|close|closes|closing|closed|hours?|coming|come by|come in|come over|on my way|omw|heading|headed|be there|see you|stop by|swing by|drop by|pop in|visit|tomorrow|today|tonight|tmrw|now|later|soon|morning|afternoon|evening|weekend|what time|when)\b/i
+
+/**
+ * Does `## Right now` say when a closed venue next opens?
+ *
+ * A guest who wrote "ok" asked nothing, and with the next opening in front
+ * of it the model reached for it: "We're open tomorrow from 7" (2026-10-07;
+ * with the line left out, three of three replies to "ok" were a word or two).
+ * So (ruled the same day):
+ *
+ *   small talk, an acknowledgment or casual chatter   never
+ *   a reply to something of ours                      only when the guest's
+ *                                                     message is about coming
+ *                                                     in or timing
+ *   everything else                                   always, as before
+ *
+ * The middle row is what covers "that sounds good", which the classifier
+ * calls an acknowledgment on one run and a reply on the next. The CLOSED
+ * status and its instruction render on every row: this only withholds the
+ * opening time, never the fact that nothing may be confirmed for right now.
+ */
+function rendersNextOpening(
+  category: MessageCategory,
+  inbound: string | undefined,
+): boolean {
+  if (category === 'acknowledgment' || category === 'casual_chatter') {
+    return false
+  }
+  if (category === 'reply') return ABOUT_COMING_IN.test(inbound ?? '')
+  return true
+}
+
+function formatRightNow(
+  today: NonNullable<RuntimeContext['today']>,
+  category: MessageCategory,
+  inbound: string | undefined,
+): string {
   // TAC-522: the calendar sits directly under the date so the two date facts
   // are together, and the status line stays last where TAC-301's
   // "do not tell the guest to come by now" copy is easiest to see.
@@ -854,7 +909,10 @@ function formatRightNow(today: NonNullable<RuntimeContext['today']>): string {
     `- Time at venue: ${today.venueLocalTime} (${today.venueTimezone})`,
   ]
 
-  const status = formatOpenStatus(today.openState)
+  const status = formatOpenStatus(
+    today.openState,
+    rendersNextOpening(category, inbound),
+  )
   if (status) lines.push(status)
 
   return lines.join('\n')
@@ -1888,9 +1946,22 @@ const NO_QUESTION_RESTRAINT = [
  * The same block for a venue whose reply length has been measured: "a warm
  * sentence or two" is a length of ours, so the venue's own takes its place
  * (ruled 2026-10-07). Everything above that sentence is shared.
+ *
+ * NOT ON A TURN WITH NOTHING TO ANSWER. The sentence exists for a guest who
+ * asked for something and got a bare link. On an acknowledgment or small
+ * talk it asks for "a real answer, about 12 words" to a guest who said "ok",
+ * and the model found one: it repeated what it had just said, or volunteered
+ * the opening hours (one of three with the sentence, none of three without,
+ * same run). There the block ends at "is welcome".
  */
-function noQuestionRestraintFor(typicalReplyWords: number | undefined): string {
+function noQuestionRestraintFor(
+  typicalReplyWords: number | undefined,
+  category: MessageCategory,
+): string {
   if (typicalReplyWords === undefined) return NO_QUESTION_RESTRAINT
+  if (category === 'acknowledgment' || category === 'casual_chatter') {
+    return NO_QUESTION_RESTRAINT_HEAD.join('\n')
+  }
   return [
     ...NO_QUESTION_RESTRAINT_HEAD,
     fullAnswerSentence(typicalReplyWords),
@@ -2365,6 +2436,40 @@ function shouldRenderEmojiDirective(
 }
 
 /**
+ * The per-message call on an exclamation mark and a typed smiley, for a venue
+ * whose team's rate of each has been measured. Same asymmetry as the emoji
+ * block for 'none', which is flat. 'allowed' differs: it asks for the mark,
+ * for the reason given at the wording below.
+ */
+function formatMarkDirectives(
+  exclamation: EmojiDirective | undefined,
+  smiley: EmojiDirective | undefined,
+): string {
+  const lines: string[] = []
+  // 'allowed' ASKS FOR ONE, unlike the emoji block's permission. As
+  // permission the model took it once in eleven turns and once in six
+  // (2026-10-07, two runs, the second after the venue's examples were
+  // rebalanced to carry the team's own marks), against a team that uses an
+  // exclamation mark in a fifth of its messages. The coin already holds the
+  // rate; a turn it lands on has to show the mark or the rate is never met.
+  if (exclamation === 'allowed') {
+    lines.push(
+      'Use one exclamation mark in this message, on the line where you are glad about something. One only, and never on bad news.',
+    )
+  } else if (exclamation === 'none') {
+    lines.push('No exclamation mark in this message.')
+  }
+  if (smiley === 'allowed') {
+    lines.push(
+      'End one line of this message with a typed smiley, the two characters :) and not an emoji. One only, and never on bad news.',
+    )
+  } else if (smiley === 'none') {
+    lines.push('No typed smiley in this message.')
+  }
+  return `## Marks for this message\n${lines.join('\n')}`
+}
+
+/**
  * TAC-362: the per-message emoji call, rendered as the last BLOCK of the
  * user prompt — ahead of the runtime-facts tail (guest name, the inbound
  * line, guest relationship), so it is the last INSTRUCTION the model reads,
@@ -2443,7 +2548,7 @@ export function runtimeToProse(
     blocks.push(formatCritiqueToIncorporate(runtime.critiqueToIncorporate))
   }
   if (runtime.today) {
-    blocks.push(formatRightNow(runtime.today))
+    blocks.push(formatRightNow(runtime.today, category, runtime.inboundMessage))
   }
   // TAC-536: immediately after `## Right now`, because both are facts about
   // this moment. The category instruction says "say only what the facts below
@@ -2606,7 +2711,7 @@ export function runtimeToProse(
     // The review-ask block carries its own "no other question", and the two
     // suppressed categories are apology and opt-out turns, which this is not
     // for.
-    blocks.push(noQuestionRestraintFor(runtime.typicalReplyWords))
+    blocks.push(noQuestionRestraintFor(runtime.typicalReplyWords, category))
   }
 
   // The review-ask block occupies the same last-content-slot position the
@@ -2667,6 +2772,19 @@ export function runtimeToProse(
     shouldRenderEmojiDirective(category, runtime.isOperatorDecline === true)
   ) {
     blocks.push(formatEmojiDirective(runtime.emojiDirective))
+  }
+  // The venue's other two measured marks, in the same last position and under
+  // the same gate: an apology and an opt-out are not the place for either.
+  if (
+    (runtime.exclamationDirective || runtime.smileyDirective) &&
+    shouldRenderEmojiDirective(category, runtime.isOperatorDecline === true)
+  ) {
+    blocks.push(
+      formatMarkDirectives(
+        runtime.exclamationDirective,
+        runtime.smileyDirective,
+      ),
+    )
   }
 
   const lines: string[] = []

@@ -64,7 +64,15 @@ double-classified.
 has one, `## Length` and `## Emojis` carry its team's numbers instead of `lengthGuide` and
 `emojiPolicy`, `## How the team writes` follows, the last sentence of `## No questions this
 turn` asks for the venue's usual length, and the team's real replies (`past_message` rows)
-sit under their own heading after the other examples. **Do not write a length or style line
+sit under their own heading after the other examples, and lines an operator approved sit
+under `### The venue's attitude`, kept for what they say and not how they are typed. The
+emoji coin has two siblings for such a venue, an exclamation mark and a typed smiley,
+rendered last as `## Marks for this message`. Unlike the emoji block, an "allowed" turn there
+asks for the mark: as permission the model used it once in six to eleven turns.
+
+`## Right now` says when a closed venue next opens on a question, never on small talk, and
+on a `reply` only when the guest's message is about coming in or timing
+(`rendersNextOpening`). The CLOSED status and its instruction always render. **Do not write a length or style line
 for a venue that has a profile**: the numbers are theirs and only the sentences around them
 are ours. Split rate and common openers are deliberately not in the prompt.
 

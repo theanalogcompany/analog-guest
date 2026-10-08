@@ -148,6 +148,24 @@ export function resolveEmojiDirective(
   return rng() < probability ? 'allowed' : 'none'
 }
 
+/**
+ * The same coin for a mark the venue's team uses at a measured rate: an
+ * exclamation mark, a typed smiley (ruled 2026-10-07). Without it the model
+ * used neither, ever, at a venue whose team uses one in a fifth of its
+ * messages, and the replies read flat.
+ *
+ * `'allowed'` is permission, exactly as for emoji, so the realised rate sits
+ * below the share. Undefined share means the venue has no measured profile:
+ * no coin is flipped, the rng is not consumed, and no block renders.
+ */
+export function resolveMarkDirective(
+  measuredShare: number | undefined,
+  rng: () => number,
+): EmojiDirective | undefined {
+  if (measuredShare === undefined) return undefined
+  return rng() < measuredShare ? 'allowed' : 'none'
+}
+
 // Emoji detection. Deliberately ONE definition shared with the TAC-347
 // deterministic voice grader (scripts/onboarding/grade-voice-deterministic.ts),
 // which imported its own block-range regex until this module existed — same

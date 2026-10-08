@@ -17,7 +17,10 @@ When a venue has a profile:
 - The emoji coin, the split coin, the per-message word limit and the length check's ceiling
   all read the same profile.
 - A set of the team's real replies, approved line by line, sits under its own heading in the
-  voice examples.
+  voice examples. The set is chosen to carry the team's marks at about their own rate, not
+  only their information: a set of plain facts taught the agent to sound like a notice.
+- A bare "ok" or "thanks" gets no reply where the team's own history says they left those
+  alone (`voiceProfile.closes`, `lib/agent/pure-close.ts`).
 
 A venue with no profile behaves exactly as before: its `past_message` rows, which an
 operator can also add by hand, stay in the ordinary list of examples. We still write CONTENT rules for every

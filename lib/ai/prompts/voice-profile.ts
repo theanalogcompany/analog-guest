@@ -95,17 +95,20 @@ function writingSection(profile: VoiceProfile): string {
     )
   }
 
+  // Both of these have a per-message coin flipped from the same share
+  // (lib/ai/emoji-cadence.ts), so the standing text reports the habit and
+  // hands the call to the block, as the emoji section does.
   const bang = profile.marks.exclamation
   lines.push(
     bang < RARE
-      ? `They almost never use an exclamation mark (${pct(bang)} of their messages). Leave it out.`
-      : `${pct(bang)} of their messages have an exclamation mark. Use one about that often, not more.`,
+      ? `They almost never use an exclamation mark (${pct(bang)} of their messages).`
+      : `${pct(bang)} of their messages have an exclamation mark, when they are glad about something. Whether this message carries one is decided for you in "## Marks for this message".`,
   )
 
   const smiley = profile.smileyShareOfBubbles
   if (smiley >= RARE) {
     lines.push(
-      `${pct(smiley)} of their messages have a typed smiley, like :) on the end of a line. That is theirs, and it is not an emoji: use one about that often.`,
+      `${pct(smiley)} of their messages have a typed smiley, the two characters :) on the end of a line. That is theirs, and it is not an emoji. Whether this message carries one is decided in the same block.`,
     )
   }
 
@@ -151,3 +154,11 @@ export function fullAnswerSentence(typicalWords: number): string {
  */
 export const REAL_REPLIES_HEADING =
   'Real replies the team sent to guests. Take the length, the rhythm and the plainness from these. Never reuse a line from them: those words were for that guest, and yours are new each time.'
+
+/**
+ * The heading over the lines an operator approved, for a venue with a
+ * profile (ruled 2026-10-07: "use only their wording and attitude;
+ * capitalization and emoji follow the profile, not them").
+ */
+export const APPROVED_LINES_HEADING =
+  'Lines the venue approved, kept for their attitude: the dry aside, the opinion said straight, the turn of phrase. Take that from them. Do not take how they are typed: capitals, punctuation and emoji follow "## How the team writes", whatever these lines do. Never reuse one of these lines as it stands.'
