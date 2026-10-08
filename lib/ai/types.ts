@@ -461,6 +461,12 @@ export type RuntimeContext = {
   // construction rather than by the type. buildAiRuntime sets it for every
   // policy that varies.
   emojiDirective?: EmojiDirective
+  // The same per-message call for two marks a venue's team uses at a measured
+  // rate (brand_persona.voiceProfile): an exclamation mark, and a typed smiley
+  // like ":)". Flipped in lib/agent beside the emoji coin and rendered in the
+  // same last block. Absent for a venue with no profile.
+  exclamationDirective?: EmojiDirective
+  smileyDirective?: EmojiDirective
   // TAC-324: true only when this is a qr_scan guest's first-ever inbound,
   // inside the R1 carve-out's freshness window. Lets the R1 exception in
   // SYSTEM_TEMPLATE have a real, narrow condition — the model has no other

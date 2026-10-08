@@ -33,7 +33,10 @@ import {
   verifyProsePromise,
   type VoiceCorpusChunk as AiVoiceCorpusChunk,
 } from '@/lib/ai'
-import { resolveEmojiDirective } from '@/lib/ai/emoji-cadence'
+import {
+  resolveEmojiDirective,
+  resolveMarkDirective,
+} from '@/lib/ai/emoji-cadence'
 import { replyLengthProfileOf } from '@/lib/ai/reply-length'
 // TAC-401: imported BY PATH, not from the barrel above.
 import { VERIFY_PROSE_PROMISE_TRUNCATED_ERROR_CODE } from '@/lib/ai/verify-prose-promise'
@@ -3013,6 +3016,18 @@ export function buildAiRuntime(
       rng,
       ctx.venue.brandPersona.voiceProfile?.emojiShareOfReplies,
     ) ?? undefined
+  // The team's own rate of exclamation marks and typed smileys, as two more
+  // coins. Flipped after the emoji coin, so a venue with no profile consumes
+  // the rng exactly as it did before.
+  const voiceProfile = ctx.venue.brandPersona.voiceProfile
+  const exclamationDirective = resolveMarkDirective(
+    voiceProfile?.marks.exclamation,
+    rng,
+  )
+  const smileyDirective = resolveMarkDirective(
+    voiceProfile?.smileyShareOfBubbles,
+    rng,
+  )
 
   // TAC-332: extracted to the standalone computeFirstTouchAfterQrScan above
   // so handle-inbound.ts can reuse the same signal to gate
@@ -3201,6 +3216,8 @@ export function buildAiRuntime(
     // TAC-362: this message's emoji call. undefined for the policies that
     // don't vary (never, sparingly) — the serializer then renders no block.
     emojiDirective,
+    exclamationDirective,
+    smileyDirective,
     // TAC-308: the outstanding knowledge-gap question. Rendered as
     // `## Unanswered question` immediately before the unsent-drafts block
     // (the history itself is chat turns, not a block).

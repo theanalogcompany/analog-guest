@@ -154,7 +154,34 @@ interface Unit {
   demo?: true
   /** A guest who needs a fuller answer: complete beats short here. */
   fuller?: true
+  /** What came before this message. Default: the hello and the welcome. */
+  history?: readonly Line[]
 }
+
+type Line = readonly ['in' | 'out', string]
+
+/**
+ * A hello and the welcome it got. The welcome is the one the agent sent on
+ * the 2026-10-07 phone test, kept verbatim because it is worded like an offer
+ * of more help: the menu link sent next went out without its offer line until
+ * a welcome stopped counting as one.
+ */
+const GREETING: readonly Line[] = [
+  ['in', 'hey'],
+  ['out', 'Hey, welcome. Let us know what we can help with'],
+]
+
+/** A question answered, for the turns that react to an answer. */
+const AFTER_OAT: readonly Line[] = [
+  ...GREETING,
+  ['in', 'do you have oat milk'],
+  ['out', 'Yeah, we do'],
+]
+const AFTER_REC: readonly Line[] = [
+  ...GREETING,
+  ['in', 'any recs'],
+  ['out', 'The SoFi is our house drink and a great place to start'],
+]
 
 const UNITS: readonly Unit[] = [
   { id: 'filter', inbound: 'Whats filter coffee?', demo: true },
@@ -183,6 +210,12 @@ const UNITS: readonly Unit[] = [
   { id: 'catering', inbound: 'do you do catering?' },
   { id: 'pastries', inbound: 'what pastries do you have?' },
   { id: 'price', inbound: 'how much is a filter coffee?' },
+  { id: 'hey', inbound: 'hey', history: [] },
+  { id: 'any-recs', inbound: 'any recs' },
+  { id: 'ok', inbound: 'ok', history: AFTER_OAT },
+  { id: 'haha-nice', inbound: 'haha nice', history: AFTER_REC },
+  { id: 'sounds-good', inbound: 'that sounds good', history: AFTER_REC },
+  { id: 'excited', inbound: 'excited to try it', history: AFTER_REC },
   {
     id: 'brew',
     inbound: 'how do I brew with the brass filter?',
@@ -198,12 +231,6 @@ const UNITS: readonly Unit[] = [
     inbound: 'do you have oat milk? and is there parking nearby?',
     fuller: true,
   },
-]
-
-/** The hello and the welcome the owner's thread opened with. */
-const GREETING: readonly (readonly ['in' | 'out', string])[] = [
-  ['in', "Hi Le Mil's!"],
-  ['out', "hey! welcome to Le Mil's 👋 what can we help you with?"],
 ]
 
 // ---------------------------------------------------------------------------
@@ -251,12 +278,15 @@ function unitContext(
   now: Date,
 ): RuntimeContext {
   const firstContact = new Date(now.getTime() - 20 * 60_000)
-  const recentMessages = GREETING.map(([dir, body], i) => ({
+  const history = unit.history ?? GREETING
+  const recentMessages = history.map(([dir, body], i) => ({
     direction: dir === 'in' ? 'inbound' : 'outbound',
     body,
-    createdAt: new Date(now.getTime() - (GREETING.length - i) * 60_000),
+    createdAt: new Date(now.getTime() - (history.length - i) * 60_000),
     delivery: 'delivered',
-    category: dir === 'out' ? 'casual_chatter' : null,
+    // The welcome is stored as small talk, as production stores it; every
+    // other line of ours here answers a question.
+    category: dir === 'in' ? null : i === 1 ? 'casual_chatter' : 'new_question',
   })) as RecentMessage[]
   return {
     ...base,
@@ -486,7 +516,27 @@ async function main(): Promise<void> {
         })
         let prefix = composed.cacheableSystemPrefix
         const suffix = composed.volatileSystemSuffix
-        const user = composed.userPrompt
+        let user = composed.userPrompt
+        if (process.env.MEASURE_CUT_FULL_ANSWER === '1') {
+          const next = user.replace(
+            /\s*Asking nothing is not the same as saying little:[^.]*\./,
+            '',
+          )
+          if (next === user) {
+            throw new Error('the full-answer sentence was not in this prompt')
+          }
+          user = next
+        }
+        // Leave-one-out: the closed venue's "Next open <day> at <time>." in
+        // `## Right now`, to see whether a turn with nothing to answer is
+        // reaching for it.
+        if (process.env.MEASURE_CUT_NEXT_OPEN === '1') {
+          const next = user.replace(/ Next open [^.]*\./, '')
+          if (next === user) {
+            throw new Error('no "Next open" line: is the venue open right now?')
+          }
+          user = next
+        }
         if (isControl) {
           for (const cut of CONTROL_CUTS) {
             const next = prefix.replace(cut.text, '')
@@ -624,6 +674,15 @@ async function main(): Promise<void> {
         if (object.knowledgeGap) {
           tallies.knowledgeGap = (tallies.knowledgeGap ?? 0) + 1
         }
+        if (reply.includes('!')) {
+          tallies.exclamation = (tallies.exclamation ?? 0) + 1
+        }
+        if (/[:;]-?\)/.test(reply)) {
+          tallies.smiley = (tallies.smiley ?? 0) + 1
+        }
+        if (/\d, \d/.test(reply)) {
+          tallies.brokenRange = (tallies.brokenRange ?? 0) + 1
+        }
         if (/^\p{Ll}/u.test(beforeOffer.trim())) {
           tallies.startsLowercase = (tallies.startsLowercase ?? 0) + 1
         }
@@ -644,6 +703,8 @@ async function main(): Promise<void> {
           offerReason: offer.reason,
           knowledgeGap: object.knowledgeGap,
           emojiDirective: runtime.emojiDirective ?? null,
+          exclamationDirective: runtime.exclamationDirective ?? null,
+          smileyDirective: runtime.smileyDirective ?? null,
           lengthVerdict: first.verdict,
           retryOutcome,
           fullerReason: first.fuller,

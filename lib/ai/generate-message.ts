@@ -131,7 +131,20 @@ export function replaceDashes(body: string): string {
     .split(URL_TOKEN_SPLITTER)
     .map((segment, i) =>
       // Odd indices are the captured URL tokens; leave them verbatim.
-      i % 2 === 1 ? segment : segment.replace(/\s*[—–]\s*/g, ', '),
+      i % 2 === 1
+        ? segment
+        : segment
+            // A RANGE IS NOT A CLAUSE BREAK (phone test, 2026-10-07: "2, 3
+            // tbsp", "10, 15 minutes"). A dash between two numbers, with or
+            // without a unit or am/pm after the first, reads "to"; so does an
+            // unspaced one between two words ("Monday–Friday"). Hyphens were
+            // never touched by this function and still are not.
+            .replace(
+              /(\d(?:\s?(?:[ap]\.?m\.?|%|[a-z]{1,4}))?)\s*[—–]\s*(?=\$?\d)/gi,
+              '$1 to ',
+            )
+            .replace(/(\p{L})–(?=\p{L})/gu, '$1 to ')
+            .replace(/\s*[—–]\s*/g, ', '),
     )
     .join('')
     .replace(/,\s*,/g, ',')
