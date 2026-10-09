@@ -10,7 +10,7 @@ import { GoldenV1Schema, GoldenV2Schema } from '@/lib/schemas/golden'
 import { requireTestsAdmin } from '../../../_lib/require-tests-admin'
 
 // GET /admin/tests/golden/api/export?runId=<uuid> - one run as a CSV
-// attachment, for reading the 31 answers in a spreadsheet.
+// attachment, for reading the answers side by side in a spreadsheet.
 //
 // Lives at /admin/{surface}/api/{thing} and NOT /api/admin/...: the host gate
 // in root middleware.ts 404s anything not starting with /admin on the admin
@@ -82,6 +82,22 @@ export async function GET(request: Request): Promise<NextResponse> {
         question_key: row.question_key,
         group: question?.group ?? 'orphan',
         question: question?.question ?? '(question no longer in the set)',
+        // The input, beside the answers. An orphan key has no code definition
+        // left, so its transcript is genuinely unknown rather than empty -
+        // said so, never rendered as a cold open it may not have been.
+        history:
+          question === null
+            ? '(unknown - question no longer in the set)'
+            : (question.history ?? [])
+                .map(
+                  (t) => `${t.role === 'user' ? 'guest' : 'venue'}: ${t.text}`,
+                )
+                .join('\n'),
+        inbound:
+          question === null
+            ? ''
+            : (question.messages ?? [question.question]).join('\n'),
+        media: question?.mediaUrls?.join('\n') ?? '',
         v1_reply:
           v1Data === null
             ? 'UNREADABLE stored column'

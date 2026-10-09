@@ -286,6 +286,7 @@ export type Database = {
       }
       golden_runs: {
         Row: {
+          clock_injected: boolean
           finished_at: string | null
           full_run: boolean
           git_dirty: boolean
@@ -300,6 +301,7 @@ export type Database = {
           venue_open_state: string
         }
         Insert: {
+          clock_injected?: boolean
           finished_at?: string | null
           full_run: boolean
           git_dirty?: boolean
@@ -314,6 +316,7 @@ export type Database = {
           venue_open_state: string
         }
         Update: {
+          clock_injected?: boolean
           finished_at?: string | null
           full_run?: boolean
           git_dirty?: boolean

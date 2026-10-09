@@ -27,7 +27,8 @@
 // rewrite the schema is a far worse exposure than the inconvenience it saves.
 
 import { execFileSync } from 'node:child_process'
-import { readFileSync } from 'node:fs'
+import { copyFileSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
   claimedObjects,
@@ -247,12 +248,47 @@ async function main(): Promise<void> {
     return
   }
   console.log('\nregenerating db/types.ts ...')
+  // NOT `npm run db:types`, and that is the whole point of this block.
+  //
+  // That script is `supabase gen types ... > db/types.ts`, and the shell
+  // TRUNCATES the target before the CLI runs. So any failure of the CLI -
+  // most easily a missing SUPABASE_ACCESS_TOKEN, which is exactly the state a
+  // fresh worktree is in - leaves db/types.ts as an empty file and reports
+  // only a non-zero exit. Observed 2026-10-08: it cut 3050 lines to 1, and
+  // the next `tsc` blamed a parse error in a generated file. Catching the
+  // exit code is not enough, because by then the damage is done.
+  //
+  // So: generate to a temp file, sanity-check it has content, and only then
+  // move it into place. A failed regeneration now leaves the committed file
+  // exactly as it was.
+  const tmp = join(tmpdir(), `analog-db-types-${process.pid}.ts`)
   try {
-    execFileSync('npm', ['run', 'db:types'], { stdio: 'inherit' })
-  } catch {
+    const generated = execFileSync(
+      'npx',
+      [
+        'supabase',
+        'gen',
+        'types',
+        'typescript',
+        `--project-id=${ref.ref}`,
+        '--schema=public',
+      ],
+      { encoding: 'utf8', maxBuffer: 32 * 1024 * 1024 },
+    )
+    // A plausible db/types.ts is thousands of lines. Anything tiny is the CLI
+    // having failed quietly, which is the case that destroyed the file.
+    if (generated.split('\n').length < 100)
+      throw new Error(
+        `generated only ${generated.split('\n').length} lines - refusing to overwrite db/types.ts`,
+      )
+    writeFileSync(tmp, generated)
+    copyFileSync(tmp, 'db/types.ts')
+    unlinkSync(tmp)
+  } catch (e) {
     console.error(
-      '\ndb:types failed. The migration IS applied - rerun `npm run db:types` ' +
-        'separately.\n',
+      `\ndb:types regeneration failed: ${e instanceof Error ? e.message : String(e)}` +
+        `\nThe migration IS applied and db/types.ts is UNCHANGED - rerun the types step` +
+        `\nseparately once the CLI can authenticate.\n`,
     )
     process.exit(1)
   }

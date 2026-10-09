@@ -10,11 +10,23 @@
 // already loaded, so the serializer is testable on its own and the one
 // definition of what a golden-set CSV contains.
 
-/** Column order, and the header row. */
+/**
+ * Column order, and the header row.
+ *
+ * `history` and `inbound` sit LEFT of the two replies on purpose: they are
+ * what the engines were given, and an answer read without them is not
+ * interpretable. "no record on my end, I only know what you tell me" is
+ * correct or a miss depending entirely on whether the transcript mentions an
+ * order. `inbound` is also the only honest record of a burst - `question` is
+ * a display label there, while the engines were handed several messages.
+ */
 export const GOLDEN_CSV_COLUMNS = [
   'question_key',
   'group',
   'question',
+  'history',
+  'inbound',
+  'media',
   'v1_reply',
   'v2_reply',
   'v1_category',

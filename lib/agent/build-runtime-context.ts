@@ -153,12 +153,25 @@ export async function buildRuntimeContext(input: {
    * always had.
    */
   testRun?: boolean
+  /**
+   * Override the clock for this turn. Omit on every production path.
+   *
+   * Lands on `RuntimeContext.now`, which is where the reasoning lives -
+   * including the trap that this alone is half the job, because the turn's
+   * other clock comes from the message row's own timestamp.
+   */
+  now?: Date
 }): Promise<RuntimeContext> {
   const testRun = input.testRun === true
   const supabase = createAdminClient()
-  const computedAt = new Date()
+  // ONE timestamp for this whole function, injectable at the top. Everything
+  // time-derived below reads it rather than calling the clock again, so two
+  // values computed moments apart can never straddle a minute boundary and
+  // disagree - and so an injected clock moves all of them together instead of
+  // some.
+  const computedAt = input.now ?? new Date()
   const historyCutoffIso = new Date(
-    Date.now() - MAX_HISTORY_DAYS * MS_PER_DAY,
+    computedAt.getTime() - MAX_HISTORY_DAYS * MS_PER_DAY,
   ).toISOString()
 
   // Exclude the current inbound row (it's already in the table by the time the
@@ -1182,7 +1195,7 @@ export async function buildRuntimeContext(input: {
       createdVia: guest.createdVia,
       createdAt: guest.createdAt,
     })
-    const todayKey = venueLocalDayKey(venue.timezone, new Date())
+    const todayKey = venueLocalDayKey(venue.timezone, computedAt)
     const scannedOnAnEarlierDay =
       scanDayKeys !== null &&
       [...scanDayKeys].some((dayKey) => dayKey !== todayKey)
@@ -1219,6 +1232,7 @@ export async function buildRuntimeContext(input: {
     currentMessage: input.currentMessage ?? null,
     followupTrigger: input.followupTrigger ?? null,
     testRun,
+    now: computedAt,
     scanArrival,
     conversationChannel: channelResolution.channel,
     recentMessages,

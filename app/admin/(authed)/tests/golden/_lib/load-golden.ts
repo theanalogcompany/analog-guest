@@ -12,7 +12,7 @@
 
 import { cache } from 'react'
 import { createAdminClient } from '@/lib/db/admin'
-import { GOLDEN_QUESTIONS } from '@/lib/eval/golden-set'
+import { GOLDEN_QUESTIONS, RUNNABLE_DRIVERS } from '@/lib/eval/golden-set'
 import {
   GoldenV1Schema,
   GoldenV2Schema,
@@ -42,6 +42,13 @@ export interface GoldenRunView {
   v1PromptVersion: string
   v2PromptVersion: string
   venueOpenState: string
+  /**
+   * The run was taken with `--at=`, so `venueOpenState` describes the clock
+   * the prompt was handed rather than the clock the venue was on. Rendered,
+   * because an injected `open` and a measured `open` are not the same
+   * evidence and the column cannot tell them apart on its own.
+   */
+  clockInjected: boolean
   questionsTotal: number
   fullRun: boolean
   startedAt: string
@@ -57,17 +64,56 @@ export interface CommitGroup {
   runs: GoldenRunView[]
 }
 
+/** A scenario in the set that the harness cannot run, and why. */
+export interface GoldenGap {
+  key: string
+  question: string
+  driver: string
+  reason: string
+}
+
 export interface GoldenPageData {
   /** Set when the tables are unreadable - almost always "apply migration 078". */
   degraded: string | null
+  /** Every scenario in the set, runnable or not. */
   questionCount: number
+  /** The most a run can cover. */
+  runnableCount: number
+  /**
+   * Scenarios in the set with no automated path. RENDERED, never omitted: a
+   * page showing 58 of 66 without saying so reads as complete coverage, which
+   * is the false-absolute-claim failure the admin loaders are warned about.
+   */
+  gaps: GoldenGap[]
   groups: CommitGroup[]
   hasMoreRuns: boolean
+}
+
+/**
+ * Read off the code array, so the page's gap list is the harness's own.
+ *
+ * The complement of `runnableGoldenQuestions`, and it has to stay the exact
+ * complement: a scenario in neither list would vanish from the page while
+ * still being in the set.
+ */
+function goldenGaps(): GoldenGap[] {
+  return GOLDEN_QUESTIONS.filter(
+    (q) =>
+      !RUNNABLE_DRIVERS.includes(q.driver ?? 'inbound') ||
+      q.notAutomated !== undefined,
+  ).map((q) => ({
+    key: q.key,
+    question: q.question,
+    driver: q.driver ?? 'inbound',
+    reason: q.notAutomated ?? '',
+  }))
 }
 
 export const loadGoldenPage = cache(async (): Promise<GoldenPageData> => {
   const supabase = createAdminClient()
   const byKey = new Map(GOLDEN_QUESTIONS.map((q) => [q.key, q]))
+  const gaps = goldenGaps()
+  const runnableCount = GOLDEN_QUESTIONS.length - gaps.length
 
   // Newest-first window + LIMIT+1 so the page can state the cap honestly:
   // comparing rows.length to the cap cannot tell exactly-N from more-than-N,
@@ -75,7 +121,7 @@ export const loadGoldenPage = cache(async (): Promise<GoldenPageData> => {
   const runsResult = await supabase
     .from('golden_runs')
     .select(
-      'id, git_sha, git_subject, git_dirty, v1_prompt_version, v2_prompt_version, venue_open_state, questions_total, full_run, started_at, finished_at, venues(name)',
+      'id, git_sha, git_subject, git_dirty, v1_prompt_version, v2_prompt_version, venue_open_state, clock_injected, questions_total, full_run, started_at, finished_at, venues(name)',
     )
     .order('started_at', { ascending: false })
     .limit(RUNS_LIMIT + 1)
@@ -83,6 +129,8 @@ export const loadGoldenPage = cache(async (): Promise<GoldenPageData> => {
     return {
       degraded: `golden_runs unreadable (${runsResult.error.message}) - has migration 078 been applied?`,
       questionCount: GOLDEN_QUESTIONS.length,
+      runnableCount,
+      gaps,
       groups: [],
       hasMoreRuns: false,
     }
@@ -139,6 +187,7 @@ export const loadGoldenPage = cache(async (): Promise<GoldenPageData> => {
     v1PromptVersion: row.v1_prompt_version,
     v2PromptVersion: row.v2_prompt_version,
     venueOpenState: row.venue_open_state,
+    clockInjected: row.clock_injected,
     questionsTotal: row.questions_total,
     fullRun: row.full_run,
     startedAt: row.started_at,
@@ -171,6 +220,8 @@ export const loadGoldenPage = cache(async (): Promise<GoldenPageData> => {
   return {
     degraded: null,
     questionCount: GOLDEN_QUESTIONS.length,
+    runnableCount,
+    gaps,
     groups,
     hasMoreRuns,
   }

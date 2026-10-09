@@ -417,6 +417,25 @@ export interface RuntimeContext {
    */
   testRun: boolean
   /**
+   * THE ONE CLOCK for this turn. Every time-derived value downstream reads
+   * this rather than calling `new Date()` for itself.
+   *
+   * Production leaves it alone and gets the real clock. The golden set's
+   * harness injects it so a run taken at 11pm can ask the questions a guest
+   * asks at 10:30am - the prompt carries an open/closed line, so a run after
+   * close hedges through every scenario and is not comparable with one taken
+   * mid-service.
+   *
+   * IT IS NOT ENOUGH ON ITS OWN, and that is worth knowing before using it. A
+   * turn has a second clock: the message's own `receivedAt`, which anchors
+   * the recognition snapshot and every elapsed-time predicate. Moving this
+   * one and leaving the rows where they are tells the model it is 10:30am
+   * about a message stamped 11pm - a message from twelve hours in the
+   * future. Any caller injecting this must also write its rows to match
+   * (`materializeTranscript` in the playground's v1 arm does).
+   */
+  now: Date
+  /**
    * TAC-536: the two facts a scan greeting may state, or null on every other
    * turn. Computed in build-runtime-context.ts and mapped straight through by
    * buildAiRuntime; see the AI-side field for why both axes are carried rather

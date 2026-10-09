@@ -19,7 +19,16 @@ import { capturePostHogEvent, fireRedAlert } from './alerts'
 import { buildRuntimeContext } from './build-runtime-context'
 import type { CommitmentIdentity, SlotDropReason } from './pending-slots'
 import { dispatchReply } from './dispatch-reply'
-import { undeliveredAgentResult } from './handle-inbound'
+import {
+  undeliveredAgentResult,
+  TEST_RUN_SPLIT_RNG,
+  type TestDraft,
+} from './handle-inbound'
+import {
+  bubbleStyleFor,
+  resolveDispatchBubbles,
+  resolveOutboundTail,
+} from './sentence-split'
 import { persistOrRegenQueuedDraft, scheduleAndSend } from './schedule-and-send'
 import { bodyContainsReviewLink } from './review-ask'
 import { NEVER_SPLIT_RNG } from './warm-close'
@@ -302,6 +311,84 @@ function triggerToCategory(
  * in finally; followup callers must invoke this inside a `waitUntil` window
  * so the flush completes.
  */
+/**
+ * The sink a follow-up test run fills instead of sending.
+ *
+ * Same `TestDraft` as the inbound test path, imported rather than mirrored:
+ * the golden set renders both in one column, so a second near-identical
+ * shape would be two answers to "what did v1 say" that could drift apart.
+ *
+ * An out-param for the same reason the inbound one is - `handleFollowup`
+ * returns `AgentResult`, which the ledger's derivers are total over, and a
+ * new member for a value that is never written would mean widening that
+ * vocabulary for a row that by definition never exists.
+ */
+export interface FollowupTestSink {
+  draft: TestDraft | null
+  /**
+   * Pretend the turn ran at this instant. Omit for the real clock. On the
+   * sink rather than its own parameter, for the reason the inbound sink's
+   * own `now` gives: a clock override is only safe on a run that sends
+   * nothing.
+   */
+  now?: Date
+}
+
+/**
+ * Draft what a follow-up WOULD say, send nothing, write nothing.
+ *
+ * The follow-up half of `draftInboundReply`, and it stops in the same place:
+ * after generation, before the approval policy. The golden set reads the two
+ * side by side, so an arm that ran further than its neighbour would show up
+ * as a difference between the drivers rather than what it is.
+ *
+ * It needs a REAL GUEST with a real history, because a follow-up is a reply
+ * to a relationship rather than to a message - there is nothing to
+ * materialize from the trigger alone. Callers pass the sandbox guest they
+ * already wrote a transcript for.
+ *
+ * `{ok:false}` on any stage failure with the stage named, mirroring the
+ * inbound path: "v1 errored here" and "v1 had nothing to say" are different
+ * findings and a comparison surface must not render them alike.
+ */
+export async function draftFollowupReply(input: {
+  venueId: string
+  guestId: string
+  trigger: FollowupTrigger
+  now?: Date
+}): Promise<
+  { ok: true; data: TestDraft } | { ok: false; error: string; stage: string }
+> {
+  const sink: FollowupTestSink = { draft: null, now: input.now }
+  try {
+    const result = await handleFollowup({
+      venueId: input.venueId,
+      guestId: input.guestId,
+      trigger: input.trigger,
+      testSink: sink,
+    })
+    if (sink.draft !== null) return { ok: true, data: sink.draft }
+    // No draft and no throw: the pipeline took an early exit before
+    // generating. Name the exit AND carry its own error, because a column
+    // reading only "refused" says which stage stopped and nothing about why.
+    return {
+      ok: false,
+      error:
+        result.status === 'failed'
+          ? result.error
+          : `v1 produced no follow-up on this trigger: the pipeline exited as '${result.status}'` +
+            (result.status === 'refused' ? ` (${result.reason})` : ''),
+      stage: result.status === 'failed' ? result.stage : result.status,
+    }
+  } catch (e) {
+    return {
+      ok: false,
+      error: e instanceof Error ? e.message : String(e),
+      stage: 'unexpected',
+    }
+  }
+}
+
 export async function handleFollowup(input: {
   venueId: string
   guestId: string
@@ -324,8 +411,20 @@ export async function handleFollowup(input: {
    * every existing caller is unchanged.
    */
   agentRunId?: string
+  /**
+   * Non-null makes this a TEST RUN: generate the draft into the sink, send
+   * nothing, write nothing, return before the approval policy. Only
+   * `draftFollowupReply` passes it; every production caller leaves it
+   * undefined.
+   *
+   * Unlike handle-inbound's equivalent this needs no `if (!testRun)` gates,
+   * because nothing on this path writes before the generation - see the
+   * test exit for the check that keeps that true.
+   */
+  testSink?: FollowupTestSink
 }): Promise<AgentResult> {
   const agentRunId = input.agentRunId ?? randomUUID()
+  const testSink = input.testSink
   const start = Date.now()
   const trace = startAgentTrace({
     name: 'agent.followup',
@@ -363,6 +462,12 @@ export async function handleFollowup(input: {
         venueId: input.venueId,
         followupTrigger: input.trigger,
         trace,
+        // Sets ctx.testRun, which scheduleAndSend throws on - the backstop
+        // that catches a future branch falling through to dispatch - and
+        // suppresses the recognition-band write this function would
+        // otherwise make.
+        testRun: testSink !== undefined,
+        now: testSink?.now,
       })
       // TAC-244: inbound-XOR-outbound invariant. handleFollowup is the
       // outbound entry point; currentMessage MUST be null and followupTrigger
@@ -684,6 +789,69 @@ export async function handleFollowup(input: {
       agentRunId,
       attempts: gen.result.attempts,
     })
+
+    // THE TEST EXIT. Everything below this line writes or sends; everything
+    // above it reads. That is why the exit is HERE and not later, and it is
+    // checkable rather than asserted: the first write on this path is
+    // `updateGuestContext` immediately below, and `buildRuntimeContext`
+    // already suppressed its own single write via `testRun`.
+    //
+    // No `if (!testRun)` gates are needed anywhere in this function as a
+    // result. If a future change moves a write ABOVE this point, it needs a
+    // gate and this comment is wrong - which is the thing to check when
+    // adding one, not after.
+    //
+    // It stops where `draftInboundReply` stops, deliberately: before the four
+    // post-generation checks and the approval policy. The golden set puts the
+    // two side by side, and an arm that ran the gate beside one that did not
+    // would read as a difference between the drivers.
+    if (testSink !== undefined) {
+      // FOURTH resolveOutboundTail CALL SITE, after scheduleAndSend,
+      // dispatchInstagramReply and handle-inbound's own test exit. It must
+      // pass what the followup's real send passes - which is
+      // `renderedIntentions: 0`, because handleFollowup's scheduleAndSend
+      // call omits that option entirely. `tsc` catches a missing argument and
+      // cannot catch two of the same type swapped, so check this against the
+      // send path rather than against the signature.
+      const tail = resolveOutboundTail(
+        gen.result.reviewAsk,
+        gen.result.intentionQuestion,
+        0,
+        gen.result.furtherHelpOffer,
+      )
+      testSink.draft = {
+        bubbles: resolveDispatchBubbles(
+          gen.result.body,
+          TEST_RUN_SPLIT_RNG,
+          tail,
+          // `bubbleStyleFor`, NOT `replyBubbleStyleFor`, and the difference
+          // is a decision rather than an oversight. One-sentence-per-message
+          // was ruled for replies to a guest (2026-10-08) and is asked for
+          // with `everySentence` on the dispatch call that answers one; a
+          // follow-up is proactive and keeps the coin, so its
+          // `scheduleAndSend` call omits that option. Both helpers take the
+          // same argument type, so `tsc` would accept the wrong one -
+          // check it against the send path above, never against the
+          // signature.
+          bubbleStyleFor(ctx.venue.brandPersona.voiceProfile),
+        ),
+        body: gen.result.body,
+        intentionQuestion: gen.result.intentionQuestion,
+        category,
+        recognitionState: ctx.recognition.state,
+        promptVersion: gen.result.promptVersion,
+        splitCoinPinned: true,
+        substitute: null,
+        // Straight from the generation, the way the inbound exit takes them.
+        // Not defaulted to 'none'/null: that would report every follow-up as
+        // having needed no parenthetical retry, which is a claim rather than
+        // a reading.
+        parentheticalRetry: gen.result.parentheticalRetry,
+        parentheticalBefore: gen.result.parentheticalBefore,
+      }
+      trace.update({ output: { status: 'refused', reason: 'test_run' } })
+      return { status: 'refused', reason: 'test_run' }
+    }
 
     // TAC-296: capture what the agent UNDERSTOOD into guests.context. On
     // the followup path there's no inbound, so contextUpdate is expected to

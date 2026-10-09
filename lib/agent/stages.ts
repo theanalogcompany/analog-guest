@@ -3084,8 +3084,10 @@ export function buildAiRuntime(
   // One `now` for everything time-derived in this mapper, so the rendered
   // clock and the open/closed verdict can't straddle a minute boundary and
   // disagree — same single-timestamp discipline as the recognition snapshot's
-  // `computedAt`.
-  const now = new Date()
+  // `computedAt`. It now IS that timestamp: `ctx.now` is set once in
+  // buildRuntimeContext, so this mapper and the recognition snapshot cannot
+  // disagree either, and a harness injecting a clock moves both.
+  const now = ctx.now
   const firstTouchAfterQrScan = computeFirstTouchAfterQrScan(ctx, now)
 
   return {
@@ -3281,7 +3283,10 @@ export function buildAiRuntime(
       ctx.followupTrigger,
       ctx.recentVisits,
       ctx.guest.lastVisitAt,
-      new Date(),
+      // `ctx.now`, not a fresh clock: this block renders elapsed time beside
+      // the `## Right now` clock above, and two reads a few lines apart is
+      // how they drift.
+      ctx.now,
     ),
     // v1.24.0: the crux of warm-but-gated complaint handling. True only when
     // category routing guarantees this draft reaches an operator before the
