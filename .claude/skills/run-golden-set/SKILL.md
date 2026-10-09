@@ -1,6 +1,6 @@
 ---
 name: run-golden-set
-description: Run the golden set - the 66 scenarios a guest actually sends - through the v1 and v2 agent engines side by side, and read the two answers next to each other at /admin/tests/golden. Use when someone asks "what does v2 say to these", wants a before/after on a prompt change, or wants the two engines compared on real guest messages.
+description: Run the golden set - the scenarios a guest actually sends - through the v1 and v2 agent engines side by side, and read the two answers next to each other at /admin/tests/golden. Use when someone asks "what does v2 say to these", wants a before/after on a prompt change, or wants the two engines compared on real guest messages.
 ---
 
 # Run the golden set
@@ -8,9 +8,11 @@ description: Run the golden set - the 66 scenarios a guest actually sends - thro
 Two commands and a URL:
 
 ```bash
-npm run measure-golden-set          # a few minutes at the default concurrency
+npm run measure-golden-set -- --at=10:30     # a few minutes at the default concurrency
 open https://admin.theanalog.company/admin/tests/golden
 ```
+
+`--at=10:30` asks the questions as if it were mid-morning on the venue's own clock. Use it unless you are deliberately measuring the real hour - see below for why, and for what it costs.
 
 The page shows `question | v1 answer | v2 answer`, grouped by the commit the run was made at,
 with an **Export CSV** button per run.
@@ -48,18 +50,36 @@ v2 emits `messages[]` directly. Part of any gap you see is this harness.
 the four post-generation checks, so a v1 answer on this page is a *draft*, not a prediction of
 what a guest would have received. `v2_gate` is recorded for v2 alone and is never a comparison.
 
+**`not run` is not an error.** v2 has no media input and no proactive path, so the harness
+declines to ask it on those scenarios rather than feeding it a turn it was never built for -
+answering a different turn from v1's and showing it side by side would be the worse lie. Those
+columns say "not run" in grey; a real failure says "ERROR at <stage>" in red. The summary line
+counts them separately (`v2 not run: 2 proactive, 2 media`). Never report a `not_run` as v2
+failing.
+
 **An empty v1 column is not always silence.** `v1_substitute` carries the four cases where v1
 would have sent something other than a generation - `crisis_safety`, `media_only_card`,
 `opt_out_confirmation`, and `no_reply_needed` (a bare "ok"/"thanks" at a venue whose own team
 mostly left those alone gets no reply at all, by design). The page labels each. `v1_error` is
 the different thing: the arm broke. Check which one you are looking at before reporting a gap.
 
-## Run it during the venue's open hours
+## The hour matters, so pick it on purpose
 
 The prompt carries an open/closed line, so a run after close hedges through every scenario and
-is **not comparable** with one taken mid-morning. The harness warns and keeps going; the state
-is stamped on the run row and shown on the page, so a mismatched pair is detectable after the
-fact - but you have still spent the run.
+is **not comparable** with one taken mid-morning. Two ways to handle that:
+
+- **`--at=10:30`** - run as if it were 10:30 on the venue's clock. Accepts `HH:MM` for today
+  or `YYYY-MM-DDTHH:MM`. Both of the turn's clocks move together: the prompt is told the hour
+  AND the sandbox rows are stamped to match, so the model is never reading a message from
+  twelve hours in the future.
+- **Run during opening hours** and leave the flag off.
+
+**An injected `open` is not a measured `open`.** The run is stamped `clock_injected` and the
+page says so. It tells you what the agent says at 10:30; it is not evidence that the agent
+handles real open hours correctly in the wild, because the clock was handed to it rather than
+read. For that, run unflagged during service.
+
+The harness warns on both - an injected clock and a closed venue - and keeps going.
 
 It also **writes to production `messages`**: the v1 arm materializes each scenario's history
 and inbound against a per-venue, per-slot `is_test_synthetic` guest and deletes them on the
@@ -79,15 +99,26 @@ to the same one.
 A filtered run is stored with `full_run = false` and the page says so. Do not compare a
 filtered run against a full one as if the missing scenarios had passed.
 
-## 58 of 66 run, deliberately
+## 62 of 67 run, deliberately
 
-Eight scenarios have a `driver` other than `inbound`: four proactive follow-ups, two sticker
-taps, a media-only turn, a held-draft expiry. Each is a real production path whose **only entry
-point sends**, so there is no reply to read without new test-mode plumbing in `lib/agent/` -
-runtime work, not a harness change. Only `runInboundTurn` has a test sink.
+Five scenarios cannot run, for two different reasons, and the distinction matters when you
+decide whether to fix one:
 
-They stay in the set, and both the harness and the page name them. A run that quietly covered
-58 and said "58 scenarios" would read as complete coverage to anyone who did not go counting.
+| scenario | blocked by |
+| --- | --- |
+| 2 follow-ups (`inquiry_followup`, `visit_checkback`) | the FIXTURE. Both triggers are Instagram-only and the sandbox guest is text-only. `resolveConversationChannel` reads the guest's identifiers, not the row's channel, so no flag fixes it - it needs an Instagram sandbox guest. |
+| 2 sticker taps | the DRIVER. A scan row is not a message; `instagram-scan-greeting.ts` only sends. |
+| 1 held-draft expiry | the DRIVER. Time-triggered, with no generation in it at all. |
+
+Do not confuse the two. A driver gap needs a test sink in `lib/agent/`; a fixture gap needs a
+new synthetic guest. Each scenario carries its own `notAutomated` saying which, and the page
+and the harness both list them.
+
+They stay in the set rather than being deleted, because a run that quietly covered 62 and said
+"62 scenarios" would read as complete coverage to anyone who did not go counting.
+
+**Inbound and proactive both run.** `runInboundTurn` and `handleFollowup` each have a test
+sink now, so a proactive scenario drafts what the venue would say unprompted.
 
 ## Reading the output
 
@@ -95,9 +126,10 @@ Three places, in order of how much you will use them:
 
 1. **`/admin/tests/golden`** - the surface. Commit-grouped, linked to the sha, Export CSV per
    run. This is what you send a colleague.
-2. **The CSV** - 17 columns, Excel-safe UTF-8 (the BOM is why a curly apostrophe does not come
-   out as mojibake). Good for sorting by group or diffing two runs in a spreadsheet. `history`
-   and `inbound` sit left of the two replies, because that is what the engines were given.
+2. **The CSV** - 18 columns, Excel-safe UTF-8 (the BOM is why a curly apostrophe does not come
+   out as mojibake). Good for sorting by group or diffing two runs in a spreadsheet.
+   `history`, `inbound` and `media` sit left of the two replies, because that is what the
+   engines were given.
 3. **The JSONL run log** - the actual record, path printed at the start of the run. If the DB
    write fails, this still has everything; the harness says so rather than losing the run.
 
@@ -124,6 +156,18 @@ established for regression scenarios). Fields:
 }
 ```
 
+**An attachment** is `mediaUrls`, written as its own bodyless message after the text. With
+`messages: []` that is the whole turn (media-only, raises a blank operator card); with text
+in `messages` it is the photo-last case that generates. No model looks at the image -
+`mediaKindFromUrls` reads the file extension and nothing else, and resolves **one kind per
+message**, so a photo plus a voice memo is just `'photo'`. v2 is skipped on these.
+
+**A proactive scenario** sets `driver: 'proactive'` and `followupTrigger`, and needs
+`history` - a follow-up answers a relationship, and with an empty thread there is nothing to
+follow up on. Name the trigger the scenario rides **in production**, not the nearest one that
+happens to run; four triggers are Instagram-only and the validator refuses them outright
+rather than letting a run store a `refused` column that reads as a finding about the agent.
+
 **History is authored, never seeded.** A scenario that needs a past order carries it as
 something the guest actually *said*, so both arms read the same facts off the same transcript.
 No visit count, profile or memory is declared to either arm - declaring visits to v2 while v1
@@ -146,7 +190,8 @@ to a typo in the array is the failure being prevented.
 
 ## Before you report anything
 
-- Was the venue **open**? If not, say so in the same sentence as the finding.
+- Was the venue **open**, and was the clock **injected**? Both belong in the same sentence as
+  the finding. An injected `open` does not support a claim about real opening hours.
 - Was the tree **dirty**? Then the sha does not reproduce it.
 - Was it a **partial** run? Then say which scenarios ran.
 - Did any arm **error**? A failed arm is not a result (`scripts/CLAUDE.md`, rule 5). Count it

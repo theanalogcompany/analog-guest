@@ -106,8 +106,26 @@ async function runQuestion(
   // uses. `allSettled`: an arm that throws costs its own column and nothing
   // else, because "v1 errored on this question" is a finding worth keeping
   // next to v2's answer.
-  const v1Started = Date.now()
-  const v2Started = Date.now()
+  // STOPPED WHEN THE ARM ITSELF SETTLES, not after the barrier below.
+  //
+  // The first version read `Date.now() - started` after `allSettled`, which
+  // only resolves once BOTH arms are done - so v1's figure was really
+  // max(v1, v2). It was believable (medians 59.3s and 60.0s) and provably
+  // wrong: the two arms' maxima came out byte-identical at 69736ms, and v1
+  // alone times at ~8s on a scenario run on its own. A timing column nobody
+  // can contradict is not evidence.
+  const started = Date.now()
+  const elapsed = (): number => Date.now() - started
+  let v1Ms = 0
+  let v2Ms = 0
+  const stopV1 = <T>(v: T): T => {
+    v1Ms = elapsed()
+    return v
+  }
+  const stopV2 = <T>(v: T): T => {
+    v2Ms = elapsed()
+    return v
+  }
   // The turn's messages, and the conversation before it. BOTH ARMS GET THE
   // SAME TWO VALUES: v1 materializes the history as `messages` rows so its
   // context is built by production's own queries, v2 gets it as
@@ -174,11 +192,11 @@ async function runQuestion(
               daysSinceLastContact: null,
             },
           },
-        }),
+        }).then(stopV2),
     // Two arms, picked by what sets the scenario off. A proactive scenario
     // has no inbound at all - the transcript is the whole input and the
     // trigger says what the venue is reaching out about.
-    question.driver === 'proactive' && question.followupTrigger !== undefined
+    (question.driver === 'proactive' && question.followupTrigger !== undefined
       ? draftV1FollowupForSandbox({
           venueId,
           sessionHistory: history,
@@ -201,7 +219,8 @@ async function runQuestion(
           // Moves the prompt clock AND stamps the materialized rows, so the
           // two halves of v1's turn cannot disagree about when this happened.
           now,
-        }),
+        })
+    ).then(stopV1),
   ])
 
   let v1: GoldenV1
@@ -214,7 +233,7 @@ async function runQuestion(
         v1Settled.reason instanceof Error
           ? v1Settled.reason.message
           : String(v1Settled.reason),
-      durationMs: Date.now() - v1Started,
+      durationMs: v1Ms,
     }
   } else if (!v1Settled.value.ok) {
     v1 = {
@@ -222,7 +241,7 @@ async function runQuestion(
       kind: 'error',
       stage: v1Settled.value.stage,
       error: v1Settled.value.error,
-      durationMs: Date.now() - v1Started,
+      durationMs: v1Ms,
     }
   } else {
     const draft = v1Settled.value.data
@@ -233,7 +252,7 @@ async function runQuestion(
       recognitionState: draft.recognitionState,
       substitute: draft.substitute,
       promptVersion: draft.promptVersion,
-      durationMs: Date.now() - v1Started,
+      durationMs: v1Ms,
     }
   }
 
@@ -249,7 +268,7 @@ async function runQuestion(
         v2Settled.reason instanceof Error
           ? v2Settled.reason.message
           : String(v2Settled.reason),
-      durationMs: Date.now() - v2Started,
+      durationMs: v2Ms,
     }
   } else if (v2Settled.value === null) {
     // Unreachable: `v2Skip !== null` is the only way the thunk resolves null
@@ -272,14 +291,18 @@ async function runQuestion(
           gateVerdict: trace.gate?.verdict ?? null,
           gateMatched: (trace.gate?.matched ?? []).map((m) => m.policyKey),
           promptVersion: V2_PROMPT_VERSION,
-          durationMs: trace.totalDurationMs,
+          // The HARNESS's stopwatch, not `trace.totalDurationMs`. Both
+          // columns have to measure the same boundary or the pair is not a
+          // comparison: v1's figure covers its sandbox setup too, and
+          // runTurn's own total does not.
+          durationMs: v2Ms,
         }
       : {
           ok: false,
           kind: 'error',
           stage: 'generation',
           error: trace.generation.error,
-          durationMs: trace.totalDurationMs,
+          durationMs: v2Ms,
         }
   }
 
