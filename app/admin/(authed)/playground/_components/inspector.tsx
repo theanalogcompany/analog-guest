@@ -10,6 +10,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import { evaluationRan } from '@/lib/relationship/evaluation-ran'
 import type { TurnOverrides, TurnTrace } from '@/lib/relationship/run-turn'
 import type { GraphStateOption, PlaygroundTurn } from '../_lib/types'
 import { GateSection, VerdictBadge } from './gate-section'
@@ -390,7 +391,7 @@ function TraceInspector({
         <InspectorSection
           title="Assessor"
           badge={
-            assessor !== null && !assessor.ok ? (
+            evaluationRan(assessor) && !assessor.ok ? (
               <span className="text-[11px] text-destructive">failed</span>
             ) : undefined
           }
@@ -422,19 +423,19 @@ function TraceInspector({
                 </span>
               </KeyValue>
             )}
-            {trace.judge !== null && trace.judge.ok && (
+            {evaluationRan(trace.judge) && trace.judge.ok && (
               <KeyValue label="judge">
                 <span className="tabular-nums">{trace.judge.durationMs}ms</span>
               </KeyValue>
             )}
-            {trace.actualJudge !== null && trace.actualJudge.ok && (
+            {evaluationRan(trace.actualJudge) && trace.actualJudge.ok && (
               <KeyValue label="judge (actual reply)">
                 <span className="tabular-nums">
                   {trace.actualJudge.durationMs}ms
                 </span>
               </KeyValue>
             )}
-            {trace.assessor !== null && trace.assessor.ok && (
+            {evaluationRan(trace.assessor) && trace.assessor.ok && (
               <KeyValue label="assessor">
                 <span className="tabular-nums">
                   {trace.assessor.durationMs}ms
@@ -564,6 +565,17 @@ function AssessorSection({
     return (
       <p className="text-xs italic text-ink-faint">
         The assessor did not run (generation failed upstream).
+      </p>
+    )
+  }
+  // Declined, not failed, and NOT the same as the null above. No
+  // `nextSession` was produced, so a chained conversation would carry nothing
+  // forward - worth saying outright rather than rendering an empty section.
+  if (!evaluationRan(assessor)) {
+    return (
+      <p className="text-xs italic text-ink-faint">
+        The assessor was skipped for this turn, so there is no next session:
+        nothing learned here carries into a following turn.
       </p>
     )
   }

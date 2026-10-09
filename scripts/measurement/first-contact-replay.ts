@@ -31,6 +31,7 @@
  */
 
 import { createAdminClient } from '@/lib/db/admin'
+import { evaluationRan } from '@/lib/relationship/evaluation-ran'
 import { runTurn, type PlaygroundSession } from '@/lib/relationship/run-turn'
 import type { HistoryTurn } from '@/lib/ai/v2/compose'
 import { EMPTY_MEMORY, EMPTY_PROFILE } from '@/lib/relationship/profile'
@@ -127,9 +128,12 @@ async function main(): Promise<void> {
         break
       }
       const reply = trace.generation.output.messages
-      const judge = trace.judge !== null && trace.judge.ok ? trace.judge : null
+      const judge =
+        evaluationRan(trace.judge) && trace.judge.ok ? trace.judge : null
       const assessor =
-        trace.assessor !== null && trace.assessor.ok ? trace.assessor : null
+        evaluationRan(trace.assessor) && trace.assessor.ok
+          ? trace.assessor
+          : null
       if (judge === null || assessor === null) {
         disqualified = `turn ${t + 1}: ${judge === null ? 'judge' : 'assessor'} failed`
         break

@@ -172,6 +172,18 @@ async function runQuestion(
           inbound,
           sessionHistory: history,
           now,
+          // No judge, no assessor. This set is read by a person and has no
+          // grader, so their scores are never displayed - and the gate is
+          // independent of them (decideDispatch reads the semantic check and
+          // the inbound-detected situations, never the assessor), so
+          // `messages`, `stateKey` and `gateVerdict` are unchanged.
+          //
+          // SAFE HERE BECAUSE NOTHING CHAINS. The assessor's `nextSession` is
+          // what carries profile and memory into a following turn; every
+          // scenario here is one turn against authored history and starts
+          // from EMPTY_PROFILE, so there is no next turn to starve. A
+          // multi-turn scenario would have to drop this flag.
+          skipEvaluation: true,
           // No profile, no memory, and ZERO VISITS even on a scenario whose
           // history implies past ones. That is deliberate parity: the v1 arm's
           // synthetic guest has no `transactions` rows, so declaring visits here

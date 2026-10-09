@@ -1,6 +1,7 @@
 'use client'
 
 import type { JudgeOutput } from '@/lib/eval/judge'
+import { evaluationRan } from '@/lib/relationship/evaluation-ran'
 import type { TurnTrace } from '@/lib/relationship/run-turn'
 import { KeyValue } from './inspector-section'
 
@@ -71,6 +72,8 @@ function ScoreChip({
 export function JudgeSummaryBadge({ judge }: { judge: TurnTrace['judge'] }) {
   if (judge === null)
     return <span className="text-[11px] text-ink-faint">not run</span>
+  if (!evaluationRan(judge))
+    return <span className="text-[11px] text-ink-faint">skipped</span>
   if (!judge.ok)
     return <span className="text-[11px] text-destructive">failed</span>
   return (
@@ -153,14 +156,23 @@ export function JudgeSection({
       </p>
     )
   }
+  if (!evaluationRan(judge)) {
+    return (
+      <p className="text-xs italic text-ink-faint">
+        The judge was skipped for this turn - the caller asked not to pay for
+        it. Nothing here failed.
+      </p>
+    )
+  }
   if (!judge.ok) {
     return <p className="text-xs text-destructive">{judge.error}</p>
   }
 
-  const prevAxes =
-    previousJudge !== null && previousJudge !== undefined && previousJudge.ok
-      ? previousJudge.result.axes
-      : null
+  // A local, because the guard narrows the expression it is given and not
+  // the parameter - `evaluationRan(previousJudge ?? null)` type-checks and
+  // narrows nothing.
+  const prev = previousJudge ?? null
+  const prevAxes = evaluationRan(prev) && prev.ok ? prev.result.axes : null
 
   return (
     <div className="flex flex-col gap-3">
@@ -175,7 +187,9 @@ export function JudgeSection({
           <p className="text-[11px] uppercase tracking-wider text-ink-faint">
             What production actually sent, judged against the same notes
           </p>
-          {actualJudge.ok ? (
+          {!evaluationRan(actualJudge) ? (
+            <p className="text-xs italic text-ink-faint">skipped</p>
+          ) : actualJudge.ok ? (
             <AxisRows axes={actualJudge.result.axes} prevAxes={null} />
           ) : (
             <p className="text-xs text-destructive">{actualJudge.error}</p>

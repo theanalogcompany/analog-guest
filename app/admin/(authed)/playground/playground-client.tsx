@@ -1,6 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { evaluationRan } from '@/lib/relationship/evaluation-ran'
 import type {
   PlaygroundSession,
   TurnOverrides,
@@ -240,8 +241,12 @@ export function PlaygroundClient({ venues }: { venues: VenueListRow[] }) {
         // Sandbox: adopt the assessor's next session so the chat carries
         // profile, memory and state forward turn over turn.
         if (result.ok && turnMode === 'sandbox') {
+          // `evaluationRan` and not a bare null check: a skipped assessor
+          // produces no nextSession, and carrying the previous one forward
+          // unchanged would silently make the chat forget this turn. The
+          // playground never skips, so this is a guard rather than a branch.
           const assessor = result.data.trace.assessor
-          if (assessor !== null && assessor.ok) {
+          if (evaluationRan(assessor) && assessor.ok) {
             setSession(assessor.nextSession)
           }
         }

@@ -88,6 +88,7 @@
  */
 
 import { createAdminClient } from '@/lib/db/admin'
+import { evaluationRan } from '@/lib/relationship/evaluation-ran'
 import {
   runTurn,
   type PlaygroundSession,
@@ -237,7 +238,7 @@ async function runSample(
       return outcome
     }
     const assessor =
-      trace.assessor !== null && trace.assessor.ok ? trace.assessor : null
+      evaluationRan(trace.assessor) && trace.assessor.ok ? trace.assessor : null
     if (assessor === null) {
       outcome.disqualified = 'assessor failed'
       return outcome

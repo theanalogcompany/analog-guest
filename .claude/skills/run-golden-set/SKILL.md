@@ -8,7 +8,7 @@ description: Run the golden set - the scenarios a guest actually sends - through
 Two commands and a URL:
 
 ```bash
-npm run measure-golden-set -- --at=10:30     # a few minutes at the default concurrency
+npm run measure-golden-set -- --at=10:30     # ~1 min for the full set
 open https://admin.theanalog.company/admin/tests/golden
 ```
 
@@ -95,6 +95,13 @@ npm run measure-golden-set -- --concurrency=4              # default 8, capped a
 Concurrency is capped by sandbox slots, not by rate limits: each in-flight v1 arm needs its own
 synthetic guest, and a worker holds its slot for the whole run so two scenarios can never write
 to the same one.
+
+**The set runs v2 with `skipEvaluation`**, so no judge and no assessor - neither is displayed
+here, and the gate is independent of both. It took the full run from ~4.3 min to ~55s. The one
+thing it gives up is the assessor's `nextSession`, the profile and memory a *following* turn
+would be given, which this set has no use for because every scenario is a single turn against
+authored history. **A multi-turn scenario would have to drop that flag**, or its later turns
+would be answering a stranger.
 
 A filtered run is stored with `full_run = false` and the page says so. Do not compare a
 filtered run against a full one as if the missing scenarios had passed.
