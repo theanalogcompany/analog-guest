@@ -70,6 +70,29 @@ export const JUDGE_PROMPT_VERSION = 'judge-v1.3.0'
 // the prose.
 export const JUDGE_MAX_OUTPUT_TOKENS = 4_000
 
+/**
+ * THE JUDGE IS OFF (owner-ruled 2026-10-08). Flip to `true` to turn it back
+ * on; there is no env var and deliberately so, because a switch this
+ * consequential should be visible in the diff rather than in someone's shell.
+ *
+ * Why: the Kimi org it runs on is suspended for balance, so every call 429s
+ * after 5 attempts. The judge only observes - it never gates a send - so a
+ * dead judge costs nothing but five wasted round trips and a red panel per
+ * turn. The assessor, which DECIDES, moved back to Anthropic in
+ * assessor-v1.4.0 rather than being switched off; this constant is the
+ * cheaper answer for the half that only watches.
+ *
+ * A DISABLED JUDGE IS `{skipped: true}` ON THE TRACE, never `{ok: false}`.
+ * "We did not look" and "we looked and the call failed" are different facts
+ * and the playground renders them differently (grey against red), per the
+ * three-state rule in .claude/rules/errors-as-values.md. `run-turn.ts` folds
+ * this into the same branch as `skipEvaluation` for that reason.
+ *
+ * `scripts/measurement/judge-variance.ts` REFUSES to run while this is false
+ * rather than reporting zero variance over zero judgments.
+ */
+export const JUDGE_ENABLED = false
+
 export const JUDGE_AXES = [
   'recognition',
   'reading_the_guest',

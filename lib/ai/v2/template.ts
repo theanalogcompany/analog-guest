@@ -160,48 +160,180 @@
 // with a tier-1 knowledge row, which is the losing position. Supplying correct
 // knowledge is the instrument. `off-channel-redirect` in the regression
 // harness is the tell that would say otherwise.
-export const V2_PROMPT_VERSION = 'v2.12.0-draft'
+//
+// NO VERSION BUMP, 2026-10-08: the prompt cache was repaired, and the fix is
+// BYTE-IDENTICAL to the model. `V2_VENUE_SECTIONS` split into
+// `V2_HOUSE_SECTIONS` + `V2_KNOWLEDGE_SECTION`, which concatenate back to
+// exactly the old string (the leading blank line on the knowledge constant is
+// what guarantees it, and `cold-latte-cache-probe.ts` asserts the two arms are
+// byte-identical before it reports a single number). Same text, same order,
+// only the block boundary and the breakpoint moved - so there is nothing for a
+// new version to key, and bumping would be the false signal
+// .claude/rules/prompt-versioning.md warns about.
+//
+// WHAT WAS BROKEN. `# What you know` is retrieved per turn (run-turn.ts
+// queries with the inbound) and it sat at the END of the cached venue block,
+// so ~150 volatile tokens invalidated ~6,100 static ones on every single turn.
+// generate.ts's own header asserted "both system blocks are stable per venue",
+// which is what kept anyone from looking. Measured on Le Mil's, cold:
+// write 6,326 then write 6,267, reuse 0. After: write 6,133 then reuse 6,133.
+// Knowledge was confirmed to differ between the two turns (637 against 435
+// chars), so this is a property of the layout, not of one unlucky pair.
+//
+// Block 1 also lost its breakpoint. At ~590 tokens it is under Anthropic's
+// 1024-token minimum cacheable prefix, so the breakpoint it carried could
+// never have produced an entry - a guard with no true positives in its
+// lifetime.
+//
+// THE BRIEF STAYS A USER TURN. Moving it into a system block was tried the
+// same day and reverted; `V2_GUEST_STATE` below has the two measurements that
+// killed it.
+//
+// v2.13.0 (owner-ruled 2026-10-09): the frame is reorganized into named
+// sections - Who you are, Texting style, Extra Notes, Intention, Rules - and
+// `# What you know` moves out of the system blocks into HOUSE NOTES. The
+// owner wrote this copy; what follows is the record of what it overrides, so
+// the next person reads a decision rather than a regression.
+//
+// THREE MEASURED LESSONS ARE DELIBERATELY REVERSED. Each was raised with the
+// owner against its evidence and reaffirmed. A FOURTH was tried and reverted
+// on the measurement, which is recorded first because it is the only
+// true-positive v2.7.0's lesson has ever had:
+//
+//  0. "No emoji, ever" -> "Use emojis sparingly" -> BACK TO THE PROHIBITION,
+//     same day, owner-ruled on the number. v2.7.0 had recorded that the
+//     standing-prohibition form produced 0 emoji across 240 responses
+//     (TAC-362) while FREQUENCY WORDING MEASURED AS NO CONTROL AT ALL. The
+//     softer sentence shipped for one regression run and produced 83 EMOJI
+//     ACROSS 11 OF 13 SCENARIOS at n=6 - "hey! welcome to Le Mil's 😊 what can
+//     I do for you?" on a stranger's first message. Not sparing: near every
+//     reply. The lesson now has a measurement on both sides of it.
+//     IF EMOJI EVER COME BACK, the instrument is per-policy rendering plus the
+//     emoji-cadence coin (lib/ai/emoji-cadence.ts, `resolveEmojiDirective`,
+//     carried over from v1), never a sentence here. Note the standing
+//     contradiction that motivated the attempt is still live and unresolved:
+//     Le Mil's own voice pack is full of emoji and sits LATER in the prompt,
+//     where proximity lets it out-rank this line.
+// ALSO IN THIS BUMP: `Never the phrase "full stop".` in # Texting style
+// (owner-ruled 2026-10-09). A pure model tic - the phrase appears in no
+// template, in no voice_corpus or knowledge_corpus row AT ANY VENUE, and in
+// no outbound message this product has ever sent, so nothing later in the
+// prompt is arguing for it and the fix was never a data fix.
+//
+// THIS LINE IS NOT THE MECHANISM, AND DOES NOT WORK ON ITS OWN - MEASURED.
+// It shipped alone first, on the reasoning that a flat ban on one literal
+// token is the form that works here (the emoji and em-dash lines). It is not.
+// A paired ablation over 8 complaint turns - this one sentence present vs.
+// deleted from system block 1, everything else byte-identical - read 1/8 with
+// the ban and the SAME 1/8 without it, the same input breaching in both arms.
+// A ban-stripped sweep over 16 emphatic-grievance turns put the base rate at
+// 1/16, all of it one input ("waited 25 minutes for a drip coffee"). So the
+// single occasion the line had to fire, it did not.
+//
+// The mechanism is `stripFullStop` at the generation seam
+// (lib/ai/v2/normalize-output.ts), owner-ruled the same day. The sentence
+// stays here for the reason replaceDashesWithPeriod keeps its voice line - a
+// substitution and its constraint text must agree - and for nothing else. Do
+// not cite it as evidence that a prohibition works, and do not delete the
+// stripper on the strength of it.
+//
+// `full-stop` in the regression tells now counts STRIPPER MISSES, not model
+// behaviour: a hit there means a shape stripFullStop does not catch.
+//
+//  1. The opt-out hard line is CUT ("a guest who asks to stop hearing from you
+//     gets a brief, warm confirmation and nothing else"). The gate exempts
+//     `opt_out_request` from queueing (POLICY_EXEMPT_SITUATIONS, gate.ts), so
+//     that reply auto-sends with no operator and now with no instruction on
+//     how to write it. Contained only because v2 has no production caller yet
+//     (nothing passes `dispatch: live`); it stops being contained at phase 6.
+//  2. "Never re-ask what they just told you" is CUT, with the rest of the
+//     HOUSE NOTES explainer. That sentence is v2.3.0, added because the agent
+//     re-asked the guest's name on the very turn they gave it.
+//  3. The pursuit clause is CUT ("the house notes tell you what you are still
+//     curious about; a good first exchange usually ends with you knowing one
+//     more of those things than you did"). `# Intention` replaces it. Pursuit
+//     bars in the regression harness are what would show the cost.
+//
+// `@lemilscoffee` was in the owner's draft and is NOT here: venue_info carries
+// no Instagram handle, and this constant is the GLOBAL default row (venue
+// NULL), so a literal handle would put one venue's account in every venue's
+// prompt. Same reason `{venue_name}` stays a placeholder. It needs a
+// venue_info field first.
+export const V2_PROMPT_VERSION = 'v2.13.0-draft'
 
-/** Tier 0: stable across every venue. Cache breakpoint after. */
-export const V2_FRAME = `You are the maitre d' of {venue_name}, and this is your Instagram inbox - guests message you here, you message back.
+/** Block 1: ROLE. Static across every venue bar the two placeholders. */
+export const V2_FRAME = `# Who you are
+You are the virtual maitre d' of {venue_name}, not a service desk, and this is your Instagram inbox.
 
-You are a real presence of the house: its memory, its taste, its hospitality. You speak as the venue{speaker_clause}. You write the way a person messages - short, warm, specific, never corporate. No emoji, ever. Never an em or en dash (— –): where one would land, end the sentence and start a new one. You have opinions about the menu and you share them plainly. You are never salesy and never servile.
+You are a real presence of the house: its memory, its taste, its hospitality. You speak as the venue{speaker_clause}.
 
+# Texting style
+You write the way a person messages - short, warm, specific, never corporate. No emoji, ever. Never the phrase "full stop". Never an em or en dash (— –): where one would land, end the sentence and start a new one. You have opinions about the menu and you share them plainly. You are never salesy and never servile. Mimic how you sound section to tune your voice.
+
+# Extra Notes
 Guests sometimes share a name with an AI assistant ("Claude", "Alexa"). It is still simply their name - never a reference to you.
 
-You are a host, not a service desk. A guest who messages you gets met with interest in THEM - what they got, what they thought, their name. The house notes tell you what you are still curious about; a good first exchange usually ends with you knowing one more of those things than you did.
+# Intention
+You have genuine interest in the guests, their needs and want to help them achieve their intentions and make them feel recognized and remembered.
 
-A context note inside the conversation (marked HOUSE NOTES) is your own private knowledge arriving at your elbow: where this relationship stands, what you know about this guest, what you have asked before and how it went. It is not the guest speaking and the guest never sees it. Let it shape your reply without ever reciting it. The notes were written BEFORE the guest's latest message - when that message answers something the notes still list as unknown, the message wins. Never re-ask what they just told you.
-
-# Hard lines
-
-These are the few things that are never yours to decide:
+# Rules
 
 - Never state or imply anything about this guest - visits, orders, preferences, history - that HOUSE NOTES or the conversation does not confirm. If you do not know, you do not know.
 - You never run a loyalty program. No points, rewards, tiers, earning, or counting visits toward anything.
 - Anything you give or promise - something free, a discount, holding or reserving anything, cancelling or changing an arrangement - exists only if you declare it in \`actions\`. Never commit to any of it in prose alone.
-- A guest who asks to stop hearing from you gets a brief, warm confirmation and nothing else - no persuasion, no questions.
 - Only share links that appear in your knowledge. Never invent or adjust one.
 - One question per reply at most. You are never conducting an interview - if they deflected something once, let it rest.`
 
-/** Tier 1 wrapper: the venue's own material renders inside these headings. Cache breakpoint after. */
-export const V2_VENUE_SECTIONS = `# The house
+/**
+ * Block 2: the venue's own material. Changes only when an owner edits it, so
+ * this is THE LAST STABLE THING IN THE PROMPT AND THE CACHE BREAKPOINT GOES
+ * AFTER IT.
+ *
+ * NOTHING PER-TURN MAY BE ADDED HERE. `# What you know` lived at the end of
+ * this block until 2026-10-08 and cost the entire cache while every comment
+ * in the file called the block stable. It is retrieval, so it now renders in
+ * HOUSE NOTES below.
+ */
+export const V2_HOUSE_SECTIONS = `# Information about the business you are presenting.
 
 {venue_profile}
 
 # How you sound
 
-{voice_pack}
-
-# What you know
-
-{knowledge}`
+{voice_pack}`
 
 /**
- * Tier 3: the situation brief, injected as the second-to-last user turn.
- * The guest's own message(s) follow it verbatim as the real final turns.
+ * EVERYTHING VOLATILE, as the LAST SYSTEM BLOCK (owner-ruled 2026-10-09).
+ * Retrieval and guest state both live here, which is what keeps blocks 1 and
+ * 2 stable enough to cache.
+ *
+ * WHAT ITS POSITION COSTS, recorded because it was measured and traded away
+ * rather than overlooked. System blocks always precede messages, so a
+ * volatile system block sits in front of the transcript and no breakpoint
+ * after the transcript can ever hit. For part of 2026-10-09 this was a USER
+ * TURN behind the transcript and the transcript carried its own breakpoint,
+ * measured reading 6,016 tokens on turn 3 of a conversation. That is worth
+ * p50 241 and max 555 at Le Mil's, against a ~6,000-token prefix that caches
+ * either way.
+ *
+ * The behavioural argument for the user-turn position is RETIRED, not
+ * forgotten: second-to-last is the most-proximate slot in the prompt and the
+ * lever v2.4.0 and v2.11.0 both pulled, and moving this block ahead of the
+ * transcript put `bare-hey` at pursuit 0/6 where the previous layout passed,
+ * n=6. The owner ruled that reply acceptable on 2026-10-09, which is what
+ * freed the position. If pursuit is ever wanted back, this block moving
+ * behind the transcript is the first thing to try.
+ *
+ * `## What you know` LEADS, so retrieval sits furthest from the guest's
+ * message of anything in here. It is the one section that is not about this
+ * guest, and proximity is authority: a knowledge row has already out-ranked a
+ * tier-0 frame line once (v2.12.0's off-channel redirect). `off-channel-
+ * redirect` in the regression harness is the tell if that comes back.
  */
-export const V2_SITUATION_BRIEF = `HOUSE NOTES (yours alone - the guest never sees this)
+export const V2_GUEST_STATE = `HOUSE NOTES (yours alone - the guest never sees this)
+
+## What you know
+{knowledge}
 
 ## Where this relationship stands
 {state_line}

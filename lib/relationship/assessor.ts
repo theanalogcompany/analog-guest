@@ -1,6 +1,6 @@
+import { generateObject, NoObjectGeneratedError } from 'ai'
 import { z } from 'zod'
-import { JUDGE_MODEL_ID } from '@/lib/ai/client'
-import { generateKimiObject } from '@/lib/ai/kimi-client'
+import { getAssessorModel } from '@/lib/ai/client'
 import type { AIResult } from '@/lib/ai/types'
 import { openMoves, type GuestProfile, type InteractionMemory } from './profile'
 import type { RelationshipGraph } from './schema'
@@ -35,14 +35,64 @@ import { frontier, requiresAssessor, validateAssessorPick } from './state'
 // And every verdict stays bounded by code regardless: validateAssessorPick
 // still refuses any state outside the hard-predicate frontier, so a worse
 // assessor can fail to promote but can never promote illegally.
-export const ASSESSOR_PROMPT_VERSION = 'assessor-v1.3.0'
-// Raised from 1200 with the Kimi swap, and NOT as a guess: at 1200 the
-// assessor truncated on turn 2 of both smoke scenarios, 2/2. kimi-k3 is a
-// reasoning model and spends output budget on reasoning_content before the
-// JSON, so a budget measured against Anthropic does not transfer. This is the
-// "re-measure the output-token distribution when the shape changes" rule in
-// lib/ai/CLAUDE.md, with the model rather than the schema as the change.
+// v1.4.0 (owner-ruled 2026-10-08): BACK onto Anthropic, and the judge stays
+// on Kimi. v1.3.0's independence argument belongs to the judge alone - the
+// assessor scores nothing, so it bought none of it and paid both of Kimi's
+// costs. The forcing event: the Kimi org went suspended for balance, so every
+// assessor call 429s after 5 attempts, and because the playground's chat
+// carries the PREVIOUS session forward when an assessment fails
+// (playground-client.tsx), a sandbox conversation silently ran every turn with
+// an empty profile and an empty interaction memory - the brief asserting "You
+// have not asked or offered anything yet" above a transcript where we plainly
+// had. Again no prompt text changed, only the model, so rows across this line
+// are not comparable either. temperature is back to 0.2 for idempotency.
+export const ASSESSOR_PROMPT_VERSION = 'assessor-v1.4.0'
+// 4000 is kept from the Kimi swap as HEADROOM, not as a measurement that
+// transfers: Anthropic spends no budget on reasoning_content, so the binding
+// distribution is the pre-v1.3.0 one that fit inside 1200. An unreached cap
+// costs nothing (output tokens are billed as produced), and `reasoning` is
+// unbounded and declared first, which is the shape lib/ai/CLAUDE.md says to
+// leave headroom for.
 export const ASSESSOR_MAX_OUTPUT_TOKENS = 4_000
+
+/**
+ * Truncation reported as its own code, so a caller can tell an assessment it
+ * could not READ from a call that never landed - the verifier-family rule in
+ * lib/ai/CLAUDE.md. Detected off the SDK's own finishReason, never by
+ * pattern-matching provider message text.
+ */
+export const ASSESSOR_TRUNCATED_ERROR_CODE = 'assessor_truncated'
+
+/**
+ * THE ASSESSOR IS OFF (owner-ruled 2026-10-09). Flip to `true` to turn it back
+ * on; no env var, same reasoning as `JUDGE_ENABLED` - a switch this
+ * consequential belongs in the diff.
+ *
+ * IT COSTS MORE THAN THE JUDGE DID, because the judge only observes and this
+ * one DECIDES. Three things stop working, and all three are silent:
+ *
+ * 1. NO `nextSession`. The assessor is what turns this turn's exchange into
+ *    the profile and interaction memory the NEXT turn is handed, so a chained
+ *    conversation - the playground sandbox, `template-regression`,
+ *    `first-contact-replay`, `turn-one-move` - forgets everything between
+ *    turns. Every turn's brief reads "Nothing on file yet" and "You have not
+ *    asked or offered anything yet" above a transcript that plainly shows
+ *    otherwise. THIS IS THE CONDITION THAT PRODUCED THE COLD-LATTE RE-ASK on
+ *    2026-10-08, when the Kimi account was suspended and every assessment
+ *    429'd: the agent asked "what did you get, and were you here today?" one
+ *    message after the guest had answered both.
+ * 2. NO STATE TRANSITIONS. `validatedStateKey` is never proposed, so a guest
+ *    stays in whatever state the deterministic predicates put them in.
+ * 3. NO MOVE TAGS. `pursued` in the regression harness is the assessor's
+ *    `moveKey`, and `expectFirstName` is its profile write, so every scenario
+ *    carrying `target` or `expectFirstName` becomes UNMEASURABLE rather than
+ *    passing or failing. `template-regression` refuses to start rather than
+ *    report those as failures.
+ *
+ * A disabled assessor is `{skipped: true}` on the trace, never `{ok: false}`:
+ * "we did not look" is not "we looked and it broke".
+ */
+export const ASSESSOR_ENABLED = false
 
 // reasoning FIRST: structured output generates fields in declaration order,
 // and a verdict declared before the analysis is produced before the analysis
@@ -145,22 +195,18 @@ export async function runAssessor(
         .map((e) => e.note),
     )}\n\nThe exchange:\n${input.transcript}`
 
-  const result = await generateKimiObject({
-    model: JUDGE_MODEL_ID,
-    system,
-    user,
-    schema: AssessorOutputSchema,
-    schemaName: 'assessment',
-    maxOutputTokens: ASSESSOR_MAX_OUTPUT_TOKENS,
-    // NO TEMPERATURE: kimi-k3 rejects anything but 1. This ran at 0.2 for
-    // idempotency, so assessment variance rises by construction - and unlike
-    // the judge, the assessor DECIDES things (state transitions, profile
-    // writes, and the pursuit and first_name bars in the regression gate).
-  })
-
   try {
-    if (!result.ok) throw new Error(result.error)
-    const object = result.data
+    const { object } = await generateObject({
+      model: getAssessorModel(),
+      schema: AssessorOutputSchema,
+      system,
+      prompt: user,
+      maxOutputTokens: ASSESSOR_MAX_OUTPUT_TOKENS,
+      // 0.2, as it ran before the Kimi detour: the assessor is analytical and
+      // wants to be idempotent, and its move tags feed the regression gate's
+      // pursuit bar (lib/ai/CLAUDE.md's "0.2-0.3 for anything analytical").
+      temperature: 0.2,
+    })
 
     const pick = object.statePick.trim()
     let validatedStateKey: string | null = null
@@ -180,10 +226,12 @@ export async function runAssessor(
       },
     }
   } catch (e) {
+    const truncated =
+      NoObjectGeneratedError.isInstance(e) && e.finishReason === 'length'
     return {
       ok: false,
       error: `assessor failed: ${e instanceof Error ? e.message : String(e)}`,
-      errorCode: 'assessor_failed',
+      errorCode: truncated ? ASSESSOR_TRUNCATED_ERROR_CODE : 'assessor_failed',
     }
   }
 }

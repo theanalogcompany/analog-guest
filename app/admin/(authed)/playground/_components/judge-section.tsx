@@ -159,7 +159,8 @@ export function JudgeSection({
   if (!evaluationRan(judge)) {
     return (
       <p className="text-xs italic text-ink-faint">
-        The judge was skipped for this turn - the caller asked not to pay for
+        The judge was skipped for this turn - either it is switched off
+        (JUDGE_ENABLED in lib/eval/judge.ts) or the caller asked not to pay for
         it. Nothing here failed.
       </p>
     )

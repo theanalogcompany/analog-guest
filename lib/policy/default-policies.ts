@@ -197,17 +197,37 @@ const DEFAULT_POLICIES_INPUT = {
     // bare domain in prose is not a link (venue corpora themselves say "on
     // venue.com"), and a schemeless link is the same destination as its
     // https:// form.
+    //
+    // THE VENUE'S OWN SITE IS TRUSTED AT ANY PATH (owner-ruled 2026-10-09).
+    // `venueOwnDomainWildcard` appends one `https://<own-domain>/*` entry,
+    // derived from `venue_info.contact.website`, and the criteria below read
+    // `/*` as "any path here". Everything else still has to match exactly.
+    //
+    // WHY IT CHANGED, and why only the own domain. The regression harness
+    // caught the cost of path-exact matching on the venue's own site: a
+    // knowledge row says products are at
+    // `https://lemils.com/collections/all-products`, retrieval returns it for
+    // "can i buy your coffee online?", the model quotes it correctly - and
+    // the allowlist carried `/collections/all` but not `/collections/all-
+    // products`, so the draft queued 6/6. Every guest asking that question
+    // got a held card instead of an answer. Curating a link list to
+    // path-exactness against a whole storefront is not a thing anyone can
+    // keep up.
+    // A third-party domain gets no wildcard, because the risk the check
+    // exists for is sending a guest somewhere the venue does not control, and
+    // an eventbrite.com or google.com wildcard is exactly that. The own
+    // domain cannot be that: the worst case is a 404 on the venue's own site.
     {
       key: 'unverified_link',
       label: 'Contains a link that was not provided by the venue',
       detection: {
         kind: 'semantic',
         instructions:
-          'Does `draft_messages` contain a link - a URL with a scheme (https://...) or a domain with a path (venue.com/some-page) - that does not appear in `provided_links`?',
+          'Does `draft_messages` contain a link - a URL with a scheme (https://...) or a domain with a path (venue.com/some-page) - that is not permitted by `provided_links`?',
         criteria: {
-          true: 'The text contains a link whose destination is not listed in `provided_links`. A different path or slug on a listed domain is still an unlisted link.',
+          true: 'The text contains a link whose destination is not permitted by `provided_links`. On a domain listed WITHOUT a trailing /*, a different path or slug is still an unlisted link.',
           false:
-            'Every link in the text appears in `provided_links` (a missing https:// prefix or a single trailing slash is the same link). A bare domain with no path mentioned in prose ("order on venue.com") is not a link, and an email address is not a link.',
+            'Every link in the text is permitted by `provided_links`. An entry ending in `/*` permits ANY path on that domain, in EITHER form - both `https://venue.com/anything/at/all` and `venue.com/anything/at/all` are permitted when `https://venue.com/*` is listed. Otherwise the link must appear in the list (a missing https:// prefix or a single trailing slash is the same link). A bare domain with no path mentioned in prose ("order on venue.com") is not a link, and an email address is not a link.',
         },
         threshold: 0.5,
       },

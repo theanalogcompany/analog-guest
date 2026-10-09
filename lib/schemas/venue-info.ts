@@ -331,6 +331,41 @@ export function parseVenueLinks(raw: unknown): VenueLink[] {
 }
 
 /**
+ * One extra allowlist entry permitting ANY path on the venue's own site, as
+ * `https://<host>/*`, derived from `contact.website`. Null when no website is
+ * stored or it will not parse.
+ *
+ * Owner-ruled 2026-10-09, and it is the ONE derived entry on an otherwise
+ * curated list. The reason it is not just another curated row: path-exact
+ * curation against a live storefront cannot be kept up. Measured - a knowledge
+ * row pointed at `lemils.com/collections/all-products`, retrieval returned it
+ * for "can i buy your coffee online?", the model quoted it correctly, and the
+ * allowlist carried `/collections/all` but not `/collections/all-products`, so
+ * the draft queued 6 of 6 samples. Every guest asking that question got a held
+ * card instead of an answer.
+ *
+ * ONLY THE OWN DOMAIN, never a third party. The risk `unverified_link` exists
+ * for is sending a guest somewhere the venue does not control; a wildcard on
+ * eventbrite.com or google.com would be exactly that. The worst case on the
+ * venue's own domain is a 404 on their own site.
+ *
+ * The HOST is taken from the parsed URL, so a stored website with a path or a
+ * query contributes its origin and nothing more. `www.` is NOT stripped: it is
+ * a different host, and guessing which form the venue uses is how an allowlist
+ * silently widens.
+ */
+export function venueOwnDomainWildcard(website: unknown): string | null {
+  if (typeof website !== 'string' || website.trim().length === 0) return null
+  try {
+    const url = new URL(website.trim())
+    if (url.protocol !== 'https:' && url.protocol !== 'http:') return null
+    return `${url.protocol}//${url.host}/*`
+  } catch {
+    return null
+  }
+}
+
+/**
  * The venue's review link, if one is curated: the first entry marked
  * `kind: 'review'`. More than one is a Studio editing mistake; the first wins
  * deterministically and the duplicate is logged rather than guessed between.

@@ -74,7 +74,10 @@ import { runTurn, type PlaygroundSession } from '@/lib/relationship/run-turn'
 import type { HistoryTurn } from '@/lib/ai/v2/compose'
 import { EMPTY_MEMORY, EMPTY_PROFILE } from '@/lib/relationship/profile'
 import { V2_PROMPT_VERSION } from '@/lib/ai/v2/template'
-import { ASSESSOR_PROMPT_VERSION } from '@/lib/relationship/assessor'
+import {
+  ASSESSOR_ENABLED,
+  ASSESSOR_PROMPT_VERSION,
+} from '@/lib/relationship/assessor'
 import { JUDGE_AXES, JUDGE_PROMPT_VERSION } from '@/lib/eval/judge'
 import {
   scoreQuestionSubstance,
@@ -99,6 +102,18 @@ import {
 } from '@/lib/schemas/regression'
 import { createRunLog, readRunLog } from './run-log'
 
+// 3, owner-ruled 2026-10-09, on the grounds that generation runs at
+// temperature 0 (V2_GENERATE_TEMPERATURE) so a single-turn reply barely moves.
+//
+// KNOWN LIMIT, measured the same day: two n=6 runs over a BYTE-IDENTICAL
+// prompt still disagreed on two scenarios - `bare-hey` and `hi-then-good`,
+// both crossing the pursuit bar in opposite directions. Generation is not
+// where that variance enters; the assessor is (temperature 0.2), and it
+// compounds across a multi-turn scenario because each turn's brief is built
+// from the last turn's assessment. `now` moves too. So a MULTI-TURN scenario
+// at n=3 is noisier than the generation temperature suggests, and a pursuit
+// bar of 2-of-N sits close enough to that noise to flip. Pass `--samples=6`
+// when a verdict has to hold.
 const DEFAULT_SAMPLES = 3
 // 80% of what the account's Anthropic rate limits support. Measured off the
 // anthropic-ratelimit-* response headers for claude-sonnet-4-6 (2026-10-05):
@@ -131,6 +146,10 @@ const REGISTER_PATTERNS: Array<{ tell: RegressionTell; pattern: RegExp }> = [
     pattern:
       /\b(?:through|via|over)\s+(?:our\s+)?instagram\b|\bdm\s+(?:us|me)\b/i,
   },
+  // Word-boundaried, so "a full stopover" and the British name for a period
+  // ("ends with a full stop") do not trip it. The tic is the standalone
+  // emphatic tag, and in guest-facing copy there is no other use.
+  { tell: 'full-stop', pattern: /\bfull\s+stop\b/i },
 ]
 // Spaced en dash only: "3–5pm" must survive (normalize-output.ts).
 const DASH_PATTERN = /—|\s–\s/
@@ -318,15 +337,28 @@ async function runSample(
     // disqualifying on a bare label is how a wholly unrunnable gate looks
     // identical to a model being flaky - which is exactly what a suspended
     // provider account looked like until this line printed the 429.
+    // A DELIBERATELY disabled assessor is not a disqualification. The guard
+    // in main() has already refused any scenario whose bars need one, so a
+    // sample reaching here with ASSESSOR_ENABLED false is measuring only
+    // text-based ceilings and gate assertions, all of which still work.
+    // Disqualifying it would report a switch we threw as a failure, and a
+    // run of nothing but disqualifications is indistinguishable from a
+    // broken provider - which is what the next branch exists to tell apart.
     if (!evaluationRan(trace.assessor)) {
-      outcome.disqualified = 'assessor did not run'
-      return outcome
-    }
-    if (!trace.assessor.ok) {
+      if (ASSESSOR_ENABLED) {
+        outcome.disqualified = 'assessor did not run'
+        return outcome
+      }
+    } else if (!trace.assessor.ok) {
       outcome.disqualified = `assessor failed: ${trace.assessor.error}`
       return outcome
     }
-    const assessor = trace.assessor
+    // null ONLY when the assessor is switched off; the branches above have
+    // already returned on every failure mode. Move tags and `nextSession`
+    // both come from here, so with it null the sample pursues nothing and
+    // chains nothing - which is why main() refuses any scenario that bars on
+    // either.
+    const assessor = evaluationRan(trace.assessor) ? trace.assessor : null
     // A gate assertion needs a live semantic check behind it: with Jev down
     // the gate's fail-closed path can match the forbidden policy without a
     // judgment, and the fail-open path passes it vacuously - either way the
@@ -355,7 +387,7 @@ async function runSample(
     }
 
     const reply = trace.generation.output.messages
-    const tagged = assessor.result.output.memoryEntries
+    const tagged = (assessor?.ok ? assessor.result.output.memoryEntries : [])
       .map((e) => e.moveKey.trim())
       .filter((k) => k.length > 0)
     const gateMatched =
@@ -392,7 +424,9 @@ async function runSample(
       { role: 'user' as const, text: inbound },
       ...reply.map((text) => ({ role: 'assistant' as const, text })),
     ]
-    session = assessor.nextSession
+    // Unchanged when the assessor is off: the next turn is handed the same
+    // empty profile and memory this one got.
+    if (assessor?.ok) session = assessor.nextSession
   }
   outcome.firstName = session.profile.fields.first_name ?? null
   return outcome
@@ -715,6 +749,13 @@ async function main(): Promise<void> {
 
   const loaded = await loadScenarios(supabase)
   const enabled = loaded.scenarios.filter((s) => s.enabled)
+
+  // Two of the bars are the ASSESSOR's output, not the reply's: `target`
+  // reads its moveKey tags and `expectFirstName` reads its profile write.
+  // With the assessor off they cannot be judged at all - and a harness that
+  // reported them as DISQUALIFIED would be calling a switch we threw a
+  // failure. Refuse, name the scenarios, and let the operator choose
+  // (scripts/CLAUDE.md #6: a skipped run is not a result).
   const scenarios = enabled.filter(
     (s) => scenarioFilter === undefined || scenarioFilter.includes(s.key),
   )
@@ -722,7 +763,56 @@ async function main(): Promise<void> {
     console.error('scenario filter matched nothing')
     process.exit(1)
   }
+  // A requested key that is disabled or misspelled used to vanish without a
+  // word: a 9-key filter printed "8/8 scenarios passed" and nothing said
+  // which key went or why. That is the silent cap the run-log convention
+  // exists to prevent - a dropped scenario reads as a covered one. Says it
+  // out loud and distinguishes the two causes, because they have different
+  // fixes (flip `enabled`, vs. fix the typo).
+  if (scenarioFilter !== undefined) {
+    const known = new Set(loaded.scenarios.map((s) => s.key))
+    const ran = new Set(scenarios.map((s) => s.key))
+    for (const key of scenarioFilter) {
+      if (ran.has(key)) continue
+      console.warn(
+        known.has(key)
+          ? `requested scenario "${key}" is DISABLED and was not run`
+          : `requested scenario "${key}" does not exist and was not run`,
+      )
+    }
+  }
   const filtered = scenarios.length !== enabled.length
+
+  // Checked against the FILTERED set, not the enabled set: the bars that need
+  // the assessor are per scenario, so a run over scenarios that carry none of
+  // them is perfectly measurable with the assessor off. Checking `enabled`
+  // here refused `-- bare-domain-link`, which needs no assessor at all.
+  if (!ASSESSOR_ENABLED) {
+    const assessorBound = scenarios.filter(
+      (s) => s.target.length > 0 || s.expectFirstName !== null,
+    )
+    if (assessorBound.length > 0) {
+      console.error(
+        `ASSESSOR_ENABLED is false (lib/relationship/assessor.ts), so pursuit and first_name bars cannot be measured.\n` +
+          `${assessorBound.length} of ${enabled.length} enabled scenarios depend on them:\n` +
+          assessorBound
+            .map(
+              (s) =>
+                `  ${s.key} (${[
+                  s.target.length > 0 ? `target: ${s.target.join(', ')}` : null,
+                  s.expectFirstName !== null
+                    ? `expectFirstName: ${s.expectFirstName}`
+                    : null,
+                ]
+                  .filter(Boolean)
+                  .join('; ')})`,
+            )
+            .join('\n') +
+          `\n\nTurn the assessor back on, disable those scenarios in lib/eval/regression-scenarios.ts, or filter to the ones that do not need it.`,
+      )
+      process.exit(1)
+    }
+  }
 
   // One pack load, passed as the override - the attribution set and the
   // model's prompt cannot diverge mid-run or from each other.
