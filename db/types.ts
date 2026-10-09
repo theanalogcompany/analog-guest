@@ -252,6 +252,94 @@ export type Database = {
           },
         ]
       }
+      golden_run_units: {
+        Row: {
+          id: string
+          question_key: string
+          run_id: string
+          v1: Json
+          v2: Json
+        }
+        Insert: {
+          id?: string
+          question_key: string
+          run_id: string
+          v1: Json
+          v2: Json
+        }
+        Update: {
+          id?: string
+          question_key?: string
+          run_id?: string
+          v1?: Json
+          v2?: Json
+        }
+        Relationships: [
+          {
+            foreignKeyName: "golden_run_units_run_id_fkey"
+            columns: ["run_id"]
+            isOneToOne: false
+            referencedRelation: "golden_runs"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      golden_runs: {
+        Row: {
+          clock_injected: boolean
+          finished_at: string | null
+          full_run: boolean
+          git_dirty: boolean
+          git_sha: string | null
+          git_subject: string | null
+          id: string
+          questions_total: number
+          started_at: string
+          v1_prompt_version: string
+          v2_prompt_version: string
+          venue_id: string
+          venue_open_state: string
+        }
+        Insert: {
+          clock_injected?: boolean
+          finished_at?: string | null
+          full_run: boolean
+          git_dirty?: boolean
+          git_sha?: string | null
+          git_subject?: string | null
+          id?: string
+          questions_total: number
+          started_at?: string
+          v1_prompt_version: string
+          v2_prompt_version: string
+          venue_id: string
+          venue_open_state: string
+        }
+        Update: {
+          clock_injected?: boolean
+          finished_at?: string | null
+          full_run?: boolean
+          git_dirty?: boolean
+          git_sha?: string | null
+          git_subject?: string | null
+          id?: string
+          questions_total?: number
+          started_at?: string
+          v1_prompt_version?: string
+          v2_prompt_version?: string
+          venue_id?: string
+          venue_open_state?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "golden_runs_venue_id_fkey"
+            columns: ["venue_id"]
+            isOneToOne: false
+            referencedRelation: "venues"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       guest_card_fingerprints: {
         Row: {
           card_fingerprint: string

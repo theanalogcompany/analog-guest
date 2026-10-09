@@ -69,6 +69,7 @@
 import { execFileSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
 import { createAdminClient } from '@/lib/db/admin'
+import { evaluationRan } from '@/lib/relationship/evaluation-ran'
 import { runTurn, type PlaygroundSession } from '@/lib/relationship/run-turn'
 import type { HistoryTurn } from '@/lib/ai/v2/compose'
 import { EMPTY_MEMORY, EMPTY_PROFILE } from '@/lib/relationship/profile'
@@ -317,7 +318,7 @@ async function runSample(
     // disqualifying on a bare label is how a wholly unrunnable gate looks
     // identical to a model being flaky - which is exactly what a suspended
     // provider account looked like until this line printed the 429.
-    if (trace.assessor === null) {
+    if (!evaluationRan(trace.assessor)) {
       outcome.disqualified = 'assessor did not run'
       return outcome
     }
@@ -375,14 +376,14 @@ async function runSample(
       outcome.turnOneNameAsk = true
     if (tagged.some((k) => target.has(k))) outcome.pursued = true
 
-    if (trace.judge !== null && trace.judge.ok) {
+    if (evaluationRan(trace.judge) && trace.judge.ok) {
       const scores: Record<string, number> = {}
       for (const axis of JUDGE_AXES) {
         const judgment = trace.judge.result.axes[axis]
         if (judgment.tested) scores[axis] = judgment.score
       }
       outcome.judgeScores.push(scores)
-    } else if (trace.judge !== null) {
+    } else if (evaluationRan(trace.judge)) {
       outcome.judgeFailures += 1
     }
 

@@ -4,9 +4,9 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "dev:worktree": "set -a && . \"$(dirname \"$(git rev-parse --path-format=absolute --git-common-dir)\")/.env.local\" && set +a && node scripts/dev-worktree.mjs",
+    "dev:worktree": "node scripts/ensure-node-modules.mjs && set -a && . \"$(dirname \"$(git rev-parse --path-format=absolute --git-common-dir)\")/.env.local\" && set +a && node scripts/dev-worktree.mjs",
     "build": "next build",
-    "build:worktree": "set -a && . \"$(dirname \"$(git rev-parse --path-format=absolute --git-common-dir)\")/.env.local\" && set +a && next build",
+    "build:worktree": "node scripts/ensure-node-modules.mjs && set -a && . \"$(dirname \"$(git rev-parse --path-format=absolute --git-common-dir)\")/.env.local\" && set +a && next build",
     "start": "next start",
     "lint": "eslint",
     "measure-answer-to-our-question": "tsx --env-file=.env.local scripts/measurement/answer-to-our-question.ts",
@@ -16,6 +16,7 @@
     "measure-inquiry-followup": "tsx --env-file=.env.local scripts/measurement/inquiry-followup.ts",
     "measure-follow-up-worthy": "tsx --env-file=.env.local scripts/measurement/follow-up-worthy.ts",
     "db:types": "npx supabase gen types typescript --project-id fudibprfkhvfdjesvbzl --schema public > db/types.ts",
+    "db:apply": "tsx --env-file=\"$(dirname \"$(git rev-parse --path-format=absolute --git-common-dir)\")/.env.local\" scripts/apply-migration.ts",
     "send-test": "tsx --env-file=.env.local scripts/send-test-message.ts",
     "extract-venue-spec": "tsx --env-file=.env.local scripts/extract-venue-spec.ts",
     "extract-test-scenarios": "tsx --env-file=.env.local scripts/extract-test-scenarios.ts",
@@ -53,7 +54,8 @@
     "langfuse-smoke": "tsx --env-file=.env.local scripts/measurement/langfuse-v5-smoke.ts",
     "measure-usual-order-recognition": "tsx --env-file=.env.local scripts/measurement/usual-order-recognition.ts",
     "measure-complaint-split": "tsx --env-file=.env.local scripts/measurement/complaint-resolution-split.ts",
-    "measure-phone-test-fixes": "tsx --env-file=.env.local scripts/measurement/phone-test-fixes.ts"
+    "measure-phone-test-fixes": "tsx --env-file=.env.local scripts/measurement/phone-test-fixes.ts",
+    "measure-golden-set": "tsx --env-file=\"$(dirname \"$(git rev-parse --path-format=absolute --git-common-dir)\")/.env.local\" scripts/measurement/golden-set.ts"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^3.0.71",

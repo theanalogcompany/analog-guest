@@ -268,8 +268,27 @@ character-exact. The Contract is the single source of truth.
 
 ## Migrations
 
-`db/migrations/`, hand-written, numbered. **The operator applies them in Supabase Studio**,
-then runs `npm run db:types`. Nothing in this repo runs a migration.
+`db/migrations/`, hand-written, numbered.
+
+**A purely additive migration is applied by `npm run db:apply -- <NNN_name.sql>`**, which
+classifies every statement, refuses the file unless all of them are additive, applies it,
+proves in `information_schema` that the objects it claimed actually exist, and regenerates
+`db/types.ts`. Additive means: new tables, new columns, indexes and constraints on a table
+the same file creates, seed `INSERT`s, `COMMENT ON`, `GRANT`, a new function, and
+`set local lock_timeout`. Nothing else.
+
+**Everything else is still the operator in Supabase Studio**, then `npm run db:types`. Every
+`DROP`, `RENAME`, `TRUNCATE`, `DELETE`, `UPDATE`, `ALTER COLUMN`, `SET NOT NULL`,
+`CREATE OR REPLACE`, `REVOKE`, any RLS or policy statement, an index or constraint on a live
+table, and **anything naming a high-stakes table - additivity does not lift that hard stop**.
+The tool refuses all of it by name; a refusal is a handoff, never something to work around.
+
+**The classifier is the entire guard, so treat it as load-bearing.** `SUPABASE_ACCESS_TOKEN`
+connects as `postgres` and would accept `drop table messages`; Supabase has no narrower
+credential. It fails closed on any statement it cannot classify and over-refuses on purpose -
+a false refusal costs one hand-apply, a false acceptance costs the database. Its true-positive
+history: over all 77 migrations in this repo it accepts 7 and refuses 70, including migration
+077 (`alter column ... drop not null`) and every file naming `messages`.
 
 **Backwards-incompatible - deploy the code FIRST, then apply.** A `DROP COLUMN`,
 `RENAME COLUMN`, `DROP FUNCTION`, `SET NOT NULL`, or a tightened `CHECK`. The reverse order
@@ -282,6 +301,9 @@ the route answers 200 and the guest's message is lost with no retry.
 
 **Purely additive with no new reader - order does not matter.**
 
+**`db:apply` changes who runs the SQL, never when.** The three rules above are about a
+deployed reader meeting a schema, which is not a question about who typed the statement.
+
 Everything else, including the high-stakes list and the SQL patterns: `db/migrations/CLAUDE.md`.
 
 ## Commands
@@ -290,8 +312,8 @@ Everything else, including the high-stakes list and the SQL patterns: `db/migrat
 | --- | --- |
 | `npx tsc --noEmit` | typecheck. Run it directly, **never through a pipe** - `$?` after a pipe reports the pipe and has misread a failing typecheck as clean |
 | `npm run lint` | eslint. `-- --fix` for the auto-fixable |
-| `npm run build` | Next.js build |
-| `npm run dev:worktree` | **the only way to start a dev server here**, never bare `next dev`. Browse the `<checkout>.localhost` URL it prints - several checkouts run servers at once, so a bare port does not tell you which branch answered |
+| `npm run build` | Next.js build. **In a worktree use `npm run build:worktree`** - it loads the main checkout's env and installs this checkout's own `node_modules` on first use (~973MB, once). A worktree cannot build without them: `turbopack.root` is pinned to the checkout so resolution never walks up, and a symlink to the main checkout's copy is rejected outright |
+| `npm run dev:worktree` | **the only way to start a dev server here**, never bare `next dev`. Browse the `<checkout>.localhost` URL it prints - several checkouts run servers at once, so a bare port does not tell you which branch answered. Installs `node_modules` on first use, same as `build:worktree` |
 | `npm run db:types` | regenerate `db/types.ts` after a migration |
 | `npm run seed-venue -- <slug>` | ingest a 06-spec. First-write-only; `--force` rewrites config stores only |
 | `npm run run-test-scenarios -- <slug>` | the scenario harness. **Run during the venue's open hours** |
@@ -345,7 +367,11 @@ generation rather than asked for in prose
 One line per purpose. Defaults and behaviour live with the code that reads them.
 
 **LLM** `ANTHROPIC_API_KEY` · **Jev classification** `JEV_API_KEY` · **Embeddings** `VOYAGE_API_KEY` · **DB** `SUPABASE_SECRET_KEY`,
-`NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` · **Sendblue**
+`NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` · **Migrations and
+codegen, LOCAL ONLY** `SUPABASE_ACCESS_TOKEN` (`db:apply`, `db:types`; connects as
+`postgres`, so it **must never be set on Vercel** - no deployed code reads it, and a
+production function holding a key that can rewrite the schema is worse than any convenience
+it buys) · **Sendblue**
 `SENDBLUE_API_KEY_ID`, `SENDBLUE_API_SECRET_KEY`, `SENDBLUE_SIGNING_SECRET` · **Instagram**
 `META_VERIFY_TOKEN`, `INSTAGRAM_APP_SECRET`, `INSTAGRAM_APP_ID`, `INSTAGRAM_ACCESS_TOKEN`,
 `INSTAGRAM_TOKEN_ENC_KEY`, `INSTAGRAM_OAUTH_REDIRECT_URL` · **APNs** `APNS_AUTH_KEY` (PEM

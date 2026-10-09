@@ -1,6 +1,8 @@
 import { randomUUID } from 'node:crypto'
 import { createAdminClient } from '@/lib/db/admin'
 import { draftInboundReply, type TestDraft } from '@/lib/agent/handle-inbound'
+import { draftFollowupReply } from '@/lib/agent/handle-followup'
+import type { FollowupTrigger } from '@/lib/agent/types'
 import type { HistoryTurn } from '@/lib/ai/v2/compose'
 import type { MessageChannel } from '@/lib/schemas/message-channel'
 
@@ -10,7 +12,12 @@ import type { MessageChannel } from '@/lib/schemas/message-channel'
 // SERVER-ONLY, and colocated with the route rather than in `lib/` on purpose:
 // v1 is deleted in phase 6 (lib/relationship/CLAUDE.md), and when it goes this
 // file goes with it. Nothing in `lib/` imports it, so the deletion is this
-// file plus the arm's field on RunResponseBody plus one component.
+// file plus the arm's field on RunResponseBody plus one component - and
+// `scripts/measurement/golden-set.ts`, the second importer, which runs the
+// same arm over a whole question set. The harness imports it rather than
+// reimplementing the materialization for the reason this file already gives
+// below: a second copy of "how v1 gets an inbound row" would drift, and a
+// comparison against a drifted copy proves nothing.
 //
 // Both modes end at the same call - `draftInboundReply`, which runs the real
 // v1 pipeline and writes nothing. They differ only in how v1 gets an inbound
@@ -29,13 +36,30 @@ import type { MessageChannel } from '@/lib/schemas/message-channel'
 // whole point of the arm. Writing the rows means v1's context is built by
 // production's own code path from production's own queries.
 
+/** Parallel sandbox guests per venue, one per concurrency slot. */
+export const SANDBOX_SLOTS = 10
+
 /**
- * The synthetic guest's phone number, per venue.
+ * The synthetic guest's phone number, per venue and per slot.
  *
  * Sits in the 555-01xx fictional range so it is obviously not a real number
  * and could never be dialled, and carries a per-venue suffix because venues
  * are isolated blocks - one shared sandbox guest would put one venue's test
  * conversation into another venue's history.
+ *
+ * THE SLOT DIGIT IS WHAT MAKES THE ARM CONCURRENCY-SAFE.
+ * `materializeTranscript` below DELETES the guest's messages and rewrites
+ * them on every call, so two arms sharing one guest would answer each other's
+ * transcripts - or answer a row the other just deleted. Each slot gets its
+ * own guest, and both the delete and the inserts are already scoped by
+ * `guest_id`, so distinct slots cannot see each other's rows at all. The
+ * playground passes no slot and the harness passes its worker index.
+ *
+ * SLOT 0 IS BYTE-IDENTICAL to the single number this function returned before
+ * slots existed (`+1555010` + 8 digits), so the playground keeps using the
+ * same guest row and the same history it always had. Verify that by reading
+ * the concatenation rather than trusting this sentence: `+155501` + `0` is
+ * `+1555010`.
  *
  * MUST SATISFY E.164, which is what `guests_phone_number_check` enforces
  * (`^\+[1-9]\d{1,14}$`, migration 001): a leading non-zero digit then up to 14
@@ -44,15 +68,16 @@ import type { MessageChannel } from '@/lib/schemas/message-channel'
  * was rejected by that constraint - caught by running a real turn, not by
  * tsc, lint or the build.
  *
- * 15 digits exactly: `1555010` plus an 8-digit suffix, the E.164 ceiling.
+ * 15 digits exactly - the E.164 ceiling - which is why the slot is one digit
+ * taken out of the prefix rather than appended: `155501` + slot + 8.
  */
-function sandboxPhoneNumber(venueId: string): string {
+function sandboxPhoneNumber(venueId: string, slot: number): string {
   // DIGITS ONLY, and padded, so the result is always exactly 8 characters
   // whatever the uuid happens to contain. A collision between two venues on
   // their last 8 digits is harmless: the guest lookup is scoped by venue_id
   // and the table's uniqueness is UNIQUE (venue_id, phone_number).
   const suffix = venueId.replace(/\D/g, '').slice(-8).padStart(8, '0')
-  return `+1555010${suffix}`
+  return `+155501${slot}${suffix}`
 }
 
 /**
@@ -99,8 +124,42 @@ export async function draftV1ForSandbox(input: {
   sessionHistory: readonly HistoryTurn[]
   /** The guest's message(s) this turn. */
   inbound: readonly string[]
+  /**
+   * Concurrency slot, 0 to SANDBOX_SLOTS - 1. Omit for the playground's
+   * single-turn use; a batch caller passes its worker index so two arms in
+   * flight never share a transcript. See sandboxPhoneNumber.
+   */
+  slot?: number
+  /**
+   * Attachment links on this turn's last message. Omit for text only.
+   * Written as their own bodyless row - see `materializeTranscript`.
+   */
+  mediaUrls?: readonly string[]
+  /** The channel the transcript is written on. Defaults to text. */
+  channel?: MessageChannel
+  /**
+   * Run the turn as if it were this instant. Omit for the real clock.
+   *
+   * BOTH CLOCKS MOVE TOGETHER HERE, which is the whole reason this lives on
+   * the arm rather than on `draftInboundReply` alone: the transcript below is
+   * stamped relative to this instant AND the prompt is told it. Passing it to
+   * one and not the other would have the model reading a message from twelve
+   * hours in the future.
+   *
+   * The golden set uses it so a run taken after close can still ask the
+   * questions a guest asks mid-service.
+   */
+  now?: Date
 }): Promise<V1ArmOutcome> {
-  const guest = await ensureSandboxGuest(input.venueId)
+  const slot = input.slot ?? 0
+  if (!Number.isInteger(slot) || slot < 0 || slot >= SANDBOX_SLOTS)
+    return {
+      ok: false,
+      error: `slot must be an integer in 0..${SANDBOX_SLOTS - 1}, got ${String(input.slot)}`,
+      stage: 'sandbox_guest',
+    }
+
+  const guest = await ensureSandboxGuest(input.venueId, slot)
   if (!guest.ok)
     return { ok: false, error: guest.error, stage: 'sandbox_guest' }
 
@@ -109,11 +168,82 @@ export async function draftV1ForSandbox(input: {
     guestId: guest.guestId,
     sessionHistory: input.sessionHistory,
     inbound: input.inbound,
+    mediaUrls: input.mediaUrls,
+    channel: input.channel,
+    now: input.now,
   })
   if (!materialized.ok)
     return { ok: false, error: materialized.error, stage: 'sandbox_transcript' }
 
-  return draftInboundReply(materialized.inboundMessageId)
+  // The SAME instant to both halves. See the `now` field above.
+  return draftInboundReply(materialized.inboundMessageId, input.now)
+}
+
+/**
+ * What v1 would SAY UNPROMPTED - a follow-up, drafted against a sandbox
+ * transcript, sent nowhere.
+ *
+ * The proactive sibling of `draftV1ForSandbox`, and it exists because a
+ * follow-up answers a relationship rather than a message: there is no inbound
+ * to materialize from, so the transcript IS the input and the trigger says
+ * what the venue is reaching out about.
+ *
+ * The transcript's CHANNEL is load-bearing here in a way it never is on the
+ * inbound arm. `resolveConversationChannel` takes the last inbound row's own
+ * channel when there is no current message, and four of the twelve triggers
+ * are refused by name on a text conversation - so a scenario riding one of
+ * those must be written as Instagram or it never reaches generation.
+ */
+export async function draftV1FollowupForSandbox(input: {
+  venueId: string
+  sessionHistory: readonly HistoryTurn[]
+  trigger: FollowupTrigger
+  channel?: MessageChannel
+  slot?: number
+  now?: Date
+}): Promise<V1ArmOutcome> {
+  const slot = input.slot ?? 0
+  if (!Number.isInteger(slot) || slot < 0 || slot >= SANDBOX_SLOTS)
+    return {
+      ok: false,
+      error: `slot must be an integer in 0..${SANDBOX_SLOTS - 1}, got ${String(input.slot)}`,
+      stage: 'sandbox_guest',
+    }
+  // A follow-up with no transcript is a follow-up to nothing: the trigger
+  // says "check back on what happened", and with an empty thread there is no
+  // what. Refused here rather than generating something hollow.
+  if (input.sessionHistory.length === 0)
+    return {
+      ok: false,
+      error:
+        'a proactive scenario needs history - a follow-up answers a relationship, and there is nothing to follow up on',
+      stage: 'sandbox_transcript',
+    }
+
+  const guest = await ensureSandboxGuest(input.venueId, slot)
+  if (!guest.ok)
+    return { ok: false, error: guest.error, stage: 'sandbox_guest' }
+
+  const materialized = await materializeTranscript({
+    venueId: input.venueId,
+    guestId: guest.guestId,
+    sessionHistory: input.sessionHistory,
+    // No inbound: that is what makes this the outbound flow. handleFollowup
+    // asserts `currentMessage === null`, so passing one would trip its own
+    // inbound-XOR-outbound invariant.
+    inbound: [],
+    channel: input.channel,
+    now: input.now,
+  })
+  if (!materialized.ok)
+    return { ok: false, error: materialized.error, stage: 'sandbox_transcript' }
+
+  return draftFollowupReply({
+    venueId: input.venueId,
+    guestId: guest.guestId,
+    trigger: input.trigger,
+    now: input.now,
+  })
 }
 
 /**
@@ -130,13 +260,21 @@ export async function draftV1ForSandbox(input: {
  * `ensureSyntheticGuest` in scripts/onboarding/run-test-scenarios.ts: a
  * collision means this function is about to write a test transcript into a
  * real person's history, and the transcript writer below would then DELETE
- * their messages.
+ * their messages. THAT GUARD IS WHAT MAKES TEN SLOTS AS SAFE AS ONE - it runs
+ * per slot, so nine new numbers get the same refusal the first one always had.
+ *
+ * `first_name` is identical for every slot on purpose. Nothing on the inbound
+ * reply path reads `guests.first_name` today (the prompt's guest block comes
+ * from `guests.context`), but if something ever does, every slot must render
+ * the same - a per-slot label would quietly make the slots non-interchangeable
+ * and a batch comparison would be measuring the label.
  */
 async function ensureSandboxGuest(
   venueId: string,
+  slot: number,
 ): Promise<{ ok: true; guestId: string } | { ok: false; error: string }> {
   const supabase = createAdminClient()
-  const phone = sandboxPhoneNumber(venueId)
+  const phone = sandboxPhoneNumber(venueId, slot)
 
   const existing = await supabase
     .from('guests')
@@ -181,20 +319,44 @@ async function ensureSandboxGuest(
  * Replace the synthetic guest's messages with this chat, newest row being the
  * inbound v1 should answer. Returns that row's id.
  *
- * Timestamps are spaced a minute apart ending at now, so history ordering and
- * the conversation-window predicates (`conversationWindowMs`, which decides
- * whether this is still one conversation) read it as a live exchange rather
- * than as rows that all arrived in the same millisecond.
+ * Timestamps are spaced a minute apart ending at `now`, so history ordering
+ * and the conversation-window predicates (`conversationWindowMs`, which
+ * decides whether this is still one conversation) read it as a live exchange
+ * rather than as rows that all arrived in the same millisecond.
  */
 async function materializeTranscript(input: {
   venueId: string
   guestId: string
   sessionHistory: readonly HistoryTurn[]
   inbound: readonly string[]
+  /**
+   * Attachment links for this turn, written as their own bodyless inbound
+   * row. Omit for a text-only turn.
+   */
+  mediaUrls?: readonly string[]
+  /**
+   * The instant the newest row lands on. Omit for the real clock.
+   *
+   * These rows then claim an arrival time they did not have, which is only
+   * acceptable because of what they are: synthetic rows on an
+   * `is_test_synthetic` guest, deleted by the next call to this function.
+   * The alternative - real timestamps under an injected prompt clock - puts
+   * two clocks in one turn and is the thing this parameter exists to avoid.
+   */
+  now?: Date
+  /**
+   * What channel these rows were exchanged on. Defaults to text.
+   *
+   * On a turn with no inbound it decides `ctx.conversationChannel`, which is
+   * what four of the twelve follow-up triggers are gated on - so for the
+   * proactive arm this is not cosmetic.
+   */
+  channel?: MessageChannel
 }): Promise<
   { ok: true; inboundMessageId: string } | { ok: false; error: string }
 > {
   const supabase = createAdminClient()
+  const channel = input.channel ?? SANDBOX_CHANNEL
 
   // GUARDED DELETE. Scoped to venue AND guest, and the guest was just
   // confirmed `is_test_synthetic` by the only caller. The second predicate is
@@ -221,14 +383,38 @@ async function materializeTranscript(input: {
       // transcript is one the operator has already seen go out.
       status: t.role === 'user' ? ('received' as const) : ('sent' as const),
       body: t.text,
+      mediaUrls: [] as readonly string[],
     })),
     ...input.inbound.map((body) => ({
       direction: 'inbound' as const,
       status: 'received' as const,
       body,
+      mediaUrls: [] as readonly string[],
     })),
+    // ITS OWN ROW, with an empty body, because that is what both webhooks
+    // store for an attachment: `body = ''` plus the links. Folding the links
+    // onto the last text row instead would produce a message shape production
+    // never writes, and `inbound-media.ts` branches on exactly this
+    // distinction - a turn WITH text is answered and gets no card, a turn
+    // with none raises one.
+    ...(input.mediaUrls === undefined
+      ? []
+      : [
+          {
+            direction: 'inbound' as const,
+            status: 'received' as const,
+            body: '',
+            mediaUrls: input.mediaUrls,
+          },
+        ]),
   ]
-  const base = Date.now() - rows.length * MINUTE_MS
+  // The newest row lands one MINUTE_MS short of `now`, so the turn's anchor
+  // and the prompt's clock are the same instant to within a minute whether or
+  // not a clock was injected. The anchor is this row's `created_at`:
+  // handle-inbound's loader reads `receivedAt: new Date(data.created_at)`,
+  // and `messages` has no `received_at` column (that one is on
+  // `pos_tap_events`), so this single value moves both.
+  const base = (input.now?.getTime() ?? Date.now()) - rows.length * MINUTE_MS
   const inserted = await supabase
     .from('messages')
     .insert(
@@ -238,6 +424,7 @@ async function materializeTranscript(input: {
         direction: r.direction,
         status: r.status,
         body: r.body,
+        media_urls: [...r.mediaUrls],
         // REQUIRED by loadInbound, which throws on a row without one
         // ("message <id> has no provider_message_id"). Nullable in the schema,
         // so only running a real turn surfaces it. Prefixed and uuid-suffixed
@@ -248,7 +435,7 @@ async function materializeTranscript(input: {
         // wrote 'sms' - rejected by the database at runtime, invisible to
         // tsc. Annotating against MessageChannel moves that class of mistake
         // to compile time.
-        channel: SANDBOX_CHANNEL,
+        channel,
         created_at: new Date(base + i * MINUTE_MS).toISOString(),
       })),
     )

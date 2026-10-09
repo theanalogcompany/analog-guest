@@ -979,6 +979,25 @@ export interface TestDraft {
  */
 interface TestRunSink {
   draft: TestDraft | null
+  /**
+   * Pretend the turn is running at this instant. Omit for the real clock.
+   *
+   * ON THE SINK DELIBERATELY, rather than as its own parameter: a clock
+   * override is only ever safe on a run that sends nothing, and putting it
+   * here makes that structural - you cannot move the clock without also
+   * being a test run. A production path shifting every elapsed-time
+   * computation by twelve hours is not a mistake worth leaving reachable.
+   *
+   * The golden set uses it so a run taken at 11pm can ask what a guest asks
+   * mid-service: the prompt carries an open/closed line, so a run after
+   * close hedges through every scenario.
+   *
+   * HALF THE JOB ON ITS OWN. The turn's other clock is the message row's
+   * `receivedAt`, which anchors recognition and every elapsed-time
+   * predicate. A caller setting this must write its rows to match, or the
+   * model is told it is 10:30am about a message stamped 11pm.
+   */
+  now?: Date
 }
 
 /**
@@ -989,8 +1008,13 @@ interface TestRunSink {
  * manufactures the multi-bubble shape v2 produces, so a bubble-count
  * difference in the playground is always real rather than a coin this side
  * happened to win. See resolveDispatchBubbles for the rule.
+ *
+ * Exported so the follow-up test path pins the SAME coin. Two copies would
+ * be two answers to "was the split rolled", and a golden-set column mixing
+ * them would show a bubble-count difference between the drivers that is
+ * nothing but the constant.
  */
-const TEST_RUN_SPLIT_RNG = (): number => 0.99
+export const TEST_RUN_SPLIT_RNG = (): number => 0.99
 
 /**
  * The intentions this turn actually rendered, from a context whose
@@ -1078,6 +1102,14 @@ function emptyTestDraft(
  */
 export async function draftInboundReply(
   inboundMessageId: string,
+  /**
+   * Pretend the turn ran at this instant. Omit for the real clock.
+   *
+   * The caller is responsible for the rows: the message this drafts against
+   * must be stamped to match, or the prompt's clock and the turn's anchor
+   * disagree. See `TestRunSink.now`.
+   */
+  now?: Date,
 ): Promise<
   { ok: true; data: TestDraft } | { ok: false; error: string; stage: string }
 > {
@@ -1085,7 +1117,7 @@ export async function draftInboundReply(
   // Coalescing OFF and its deps unused: the test path skips the claim
   // entirely. `newInboundTurnState(false, 0)` is the no-coalescing shape.
   const turn = newInboundTurnState(false, 0)
-  const sink: TestRunSink = { draft: null }
+  const sink: TestRunSink = { draft: null, now }
   try {
     const result = await runInboundTurn(
       inboundMessageId,
@@ -1673,6 +1705,9 @@ async function runInboundTurn(
         // Suppresses the recognition-band write and sets ctx.testRun, which
         // is what scheduleAndSend refuses on.
         testRun,
+        // Undefined on every production path, so `buildRuntimeContext`
+        // falls through to the real clock exactly as before.
+        now: testSink?.now,
       })
       // TAC-244: inbound-XOR-outbound invariant. handleInbound is the inbound
       // entry point; currentMessage MUST be set and followupTrigger MUST be

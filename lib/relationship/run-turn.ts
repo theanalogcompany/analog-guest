@@ -124,6 +124,28 @@ export interface RunTurnInput {
    */
   dispatch?: { mode: 'dry_run' } | { mode: 'live'; agentRunId: string }
   now?: Date
+  /**
+   * Skip the two judges and the assessor. Off by default, so every existing
+   * caller is unchanged.
+   *
+   * WHAT IT COSTS, which decides whether you may use it: no `nextSession`.
+   * The assessor is what turns this turn's conversation into the profile and
+   * memory the NEXT turn is given, so a caller that chains turns - the
+   * playground, `template-regression`, `first-contact-replay`,
+   * `turn-one-move` - must never set this. A conversation run with it on
+   * forgets everything between turns and the later replies are answering a
+   * stranger.
+   *
+   * WHAT IT DOES NOT COST: the gate. `decideDispatch` reads the semantic
+   * check and the inbound-detected situations, never the assessor (the
+   * comment at that call says so), so `gate.verdict`, `output.messages` and
+   * the resolved state key are byte-identical either way. That is what makes
+   * this safe for a single-turn comparison harness like the golden set, whose
+   * scenarios carry authored history and never feed a reply back in.
+   *
+   * The semantic check still runs. It is the gate's input, not an evaluation.
+   */
+  skipEvaluation?: boolean
 }
 
 export interface TurnTrace {
@@ -201,15 +223,32 @@ export interface TurnTrace {
     | { ok: false; error: string }
   semantic: (SemanticCheckOutcome & { durationMs: number }) | null
   gate: GateDecision | null
+  /**
+   * `{skipped: true}` is NOT `null`. Null already means "generation failed, so
+   * no judge ran"; a skip is a caller who asked not to pay for one. Collapsing
+   * them would make "we did not look" indistinguishable from "there was
+   * nothing to look at", which is the three-state rule in
+   * `.claude/rules/errors-as-values.md`.
+   */
   judge:
     | { ok: true; result: JudgeResult; durationMs: number }
     | { ok: false; error: string }
+    | { skipped: true }
     | null
   /** The judge over input.actualReply (what production sent); null when none was given. */
   actualJudge:
     | { ok: true; result: JudgeResult; durationMs: number }
     | { ok: false; error: string }
+    | { skipped: true }
     | null
+  /**
+   * `{skipped: true}` means NO `nextSession` WAS PRODUCED, which is the one
+   * consequence of skipping that bites. A chained caller feeds `nextSession`
+   * into the following turn as its profile and memory, so a conversation run
+   * with the assessor off loses everything learned between turns. The
+   * playground and three harnesses do exactly that - hence a distinct state
+   * rather than a null they might read as "no updates this turn".
+   */
   assessor:
     | {
         ok: true
@@ -218,6 +257,7 @@ export interface TurnTrace {
         durationMs: number
       }
     | { ok: false; error: string }
+    | { skipped: true }
     | null
   totalDurationMs: number
 }
@@ -229,6 +269,7 @@ export async function runTurn(input: RunTurnInput): Promise<TurnTrace> {
   const started = Date.now()
   const supabase = createAdminClient()
   const o = input.overrides ?? {}
+  const skipEvaluation = input.skipEvaluation === true
 
   // ---- Load the graph (active row, else default; malformed falls back). ----
   const graphRow = await supabase
@@ -558,16 +599,22 @@ export async function runTurn(input: RunTurnInput): Promise<TurnTrace> {
           DEFAULT_POLICY_SET,
         ),
       ),
+      // The three a caller may decline. They sit in the same `Promise.all`
+      // as the semantic check rather than after it, so when they DO run the
+      // turn costs max() and not sum - skipping them removes the slowest
+      // member of that max, which is the whole point.
       timed(
-        judgeResponse({
-          replyMessages: output.messages,
-          transcript,
-          situationBrief: briefText,
-          venueName,
-        }),
+        skipEvaluation
+          ? Promise.resolve(null)
+          : judgeResponse({
+              replyMessages: output.messages,
+              transcript,
+              situationBrief: briefText,
+              venueName,
+            }),
       ),
       timed(
-        actualReply !== null && actualTranscript !== null
+        !skipEvaluation && actualReply !== null && actualTranscript !== null
           ? judgeResponse({
               replyMessages: actualReply,
               transcript: actualTranscript,
@@ -577,15 +624,17 @@ export async function runTurn(input: RunTurnInput): Promise<TurnTrace> {
           : Promise.resolve(null),
       ),
       timed(
-        runAssessor({
-          graph,
-          facts,
-          currentStateKey: stateKey,
-          profile,
-          memory,
-          transcript,
-          now,
-        }),
+        skipEvaluation
+          ? Promise.resolve(null)
+          : runAssessor({
+              graph,
+              facts,
+              currentStateKey: stateKey,
+              profile,
+              memory,
+              transcript,
+              now,
+            }),
       ),
     ])
   const semantic = semanticTimed.value
@@ -622,7 +671,9 @@ export async function runTurn(input: RunTurnInput): Promise<TurnTrace> {
   }
 
   let assessorTrace: TurnTrace['assessor']
-  if (assessed.ok) {
+  if (skipEvaluation || assessed === null) {
+    assessorTrace = { skipped: true }
+  } else if (assessed.ok) {
     const applied = applyAssessment(profile, memory, assessed.data.output, now)
     assessorTrace = {
       ok: true,
@@ -650,15 +701,23 @@ export async function runTurn(input: RunTurnInput): Promise<TurnTrace> {
     },
     semantic: { ...semantic, durationMs: semanticTimed.durationMs },
     gate,
-    judge: judged.ok
-      ? {
-          ok: true,
-          result: judged.data,
-          durationMs: judgedTimed.durationMs,
-        }
-      : { ok: false, error: judged.error },
-    actualJudge:
-      actualJudged === null
+    judge: skipEvaluation
+      ? { skipped: true }
+      : judged === null
+        ? null
+        : judged.ok
+          ? {
+              ok: true,
+              result: judged.data,
+              durationMs: judgedTimed.durationMs,
+            }
+          : { ok: false, error: judged.error },
+    // Skipped beats "no actual reply was given": a caller who declined the
+    // judges never supplied one either, and reporting null here would say
+    // the absence was the caller's input rather than their choice.
+    actualJudge: skipEvaluation
+      ? { skipped: true }
+      : actualJudged === null
         ? null
         : actualJudged.ok
           ? {
