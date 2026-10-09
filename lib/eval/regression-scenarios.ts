@@ -51,6 +51,7 @@ export type RegressionTell =
   | 'two-questions'
   | 'either-or'
   | 'off-channel-redirect'
+  | 'full-stop'
 
 export const REGRESSION_TELL_DESCRIPTIONS = {
   emoji:
@@ -66,6 +67,8 @@ export const REGRESSION_TELL_DESCRIPTIONS = {
     'question stacking - two SUBSTANTIVE questions in one bubble, or three-plus across the reply. A social check-in is not a substantive question (owner-ruled 2026-10-06 on "Alex, nice to meet you. how was this morning? what did you get?" - technically two, meaningfully one). Substantive-vs-phatic is a Jev judgment, not a pattern match: clause extraction stays deterministic, the classification is semantic (lib/eval/question-substance.ts). Rhetorical tags ("right?") are not questions, and one body question plus the own-bubble getting-to-know-you question is the decision-0007 shape and fine (owner-ruled 2026-10-05; v2.8.0 lesson)',
   'off-channel-redirect':
     'sent the guest to Instagram for something askable right here - the guest IS on Instagram (template v2.12.0). Deliberately narrow: only the preposition-led redirect forms ("through Instagram", "via Instagram", "DM us") and never the bare "on Instagram", which is how a legitimate announcement reads ("the date is posted on our Instagram"). An under-counting tell leaves a breach unseen; an over-counting one fails a correct reply, and the announcement form is the common case',
+  'full-stop':
+    'the emphatic "full stop" tag in a guest-facing reply ("25 minutes is too long, full stop") - a pure model tic, appearing in no template, no voice_corpus or knowledge_corpus row at any venue, and no message this product has ever sent. stripFullStop removes it at the generation seam, so a hit here means the strip missed a shape, NOT that the model misbehaved (owner-ruled 2026-10-09). The # Texting style line banning the phrase was measured and does nothing on its own - 1/8 with it and the same 1/8 without it in a paired ablation - so do not read a clean run here as that line working',
   'either-or':
     'hedged either/or question ("anything catch your eye, or want a nudge in a direction?") - an AI tell, a question asking permission for its own alternative. The normalizer strips the ", or ...?" tail at the generation seam, so a hit here means the strip missed (owner-ruled 2026-10-05)',
 } satisfies Record<RegressionTell, string>

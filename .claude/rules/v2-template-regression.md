@@ -11,8 +11,16 @@ Every measured lesson in `lib/ai/v2/template.ts`'s changelog exists as a scenari
 The comments are the record; the harness is the enforcement.
 A template or seed-graph copy change that bumps `V2_PROMPT_VERSION` is not done until:
 
-1. `npm run measure-template-regression -- --samples=6` has run on the new version
-   (n=3 is for iteration only - round 5 of turn-one-move was falsified at n=3).
+1. `npm run measure-template-regression` has run on the new version.
+   n=3 is the default, owner-ruled 2026-10-09: generation is at temperature 0, so a
+   single-turn reply barely moves.
+   **A multi-turn scenario still moves, and the ruling does not change that** - the assessor
+   runs at 0.2 and each turn's brief is built from the last turn's assessment, so the variance
+   compounds. Two n=6 runs over a byte-identical prompt disagreed on `bare-hey` and
+   `hi-then-good`, both crossing the 2-of-N pursuit bar in opposite directions (2026-10-09).
+   Use `--samples=6` when a verdict has to hold, and say which n produced any number you
+   report. Round 5 of turn-one-move was falsified at n=3, back when generation ran at the
+   provider default.
 2. The numbers - scenario verdicts, breaches with attributions, judge-axis means - are in
    the PR body. The run log path alone is not a report.
 3. Any CEILING breach is either fixed or explicitly ruled on by the owner in the PR.

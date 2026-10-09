@@ -30,20 +30,47 @@ It is pure and import-free so the playground's `'use client'` bubbles can read i
 `MS_PER_CHAR` is calibrated so that at 43 characters, a typical bubble, it reproduces v1's flat `INTER_BUBBLE_GAP_MS`; the floor and the cap are choices and say so at the constant.
 The playground reveal is **presentation only** - `replyBubblesOf` stays the one definition of a turn's reply, and nothing paced reaches the transcript, a save, or the inspector.
 
-## The prompt: volatility tiers decide placement
+## The prompt: volatility ascending, one cache breakpoint
 
-Cache is prefix-based, so **anything that changes per turn sits after everything that does not**.
-Never move a volatile section earlier: guest data in the system prompt would invalidate the cached conversation history every turn.
+The cache is prefix-keyed, so **one volatile section poisons everything in front of it**.
 
-| tier | content | placement |
-| --- | --- | --- |
-| 0 | template frame, hard lines | system, cache breakpoint |
-| 1 | venue profile, voice, knowledge | system, cache breakpoint |
-| 2 | conversation history | real alternating chat turns, append-only |
-| 3 | situation brief: state mission, guest profile, interaction memory, open moves | one injected context turn, second-to-last |
+| block | content | volatility | cached |
+| --- | --- | --- | --- |
+| system 1 ROLE | who you are, texting style, intention, rules | static | no (too short to cache) |
+| system 2 THE HOUSE | venue profile, voice pack | per venue | **yes, breakpoint** |
+| system 3 HOUSE NOTES | retrieved knowledge, state mission, guest profile, interaction memory, open moves | per turn | no |
+| turns | the transcript, then the guest's message(s), verbatim, never wrapped | per turn | no |
 
-The guest's own messages are the final user turns, verbatim, never wrapped.
-Sections are a registry (key, tier, source, pipeline, render, version); adding one is a registry entry, not template surgery.
+**The transcript is not cached, and that is the price of block 3's position** (owner-ruled
+2026-10-09). System blocks always precede messages, so a volatile system block sits in front
+of the transcript and no breakpoint after it can hit. For part of 2026-10-09 HOUSE NOTES was
+a user turn behind the transcript, which did cache - measured reading 6,016 on turn 3. Worth
+p50 241 tokens, max 555, at Le Mil's. Moving HOUSE NOTES back behind the transcript is what
+reopens it, and `V2_GUEST_STATE`'s header carries the behavioural side of the same trade.
+
+**Nothing per-turn may move into system blocks 1 or 2.** `# What you know` sat at the end of
+block 2 until 2026-10-08, where ~150 volatile tokens invalidated ~6,100 static ones every
+turn while `generate.ts` asserted "both system blocks are stable per venue". Measured cold on
+Le Mil's, two turns of one conversation: write 6,326 then write 6,267, reuse **0**. After the
+split: write 6,133 then reuse **6,133**. The split is byte-identical to the model, so it
+carries no `V2_PROMPT_VERSION` bump.
+
+**Block 1 carries no breakpoint.** At ~590 tokens it is under Anthropic's 1024-token minimum
+cacheable prefix, so the breakpoint it used to carry could never have produced an entry.
+
+**Retrieval sits after the venue sections**, where proximity ranks it above them - the
+v2.12.0 off-channel-redirect failure mode, which `off-channel-redirect` in the regression
+harness is the tell for. It leads block 3 so it is at least the furthest thing in that block
+from the guest's message.
+
+**`renderVenueProfile` takes `now`, and that is safe for block 2**: the only reader is
+`renderRightNow`, which filters dated `currentContext` notes. No live open/closed line, so
+the block changes when a note's window opens or closes and not otherwise. Adding any
+clock-derived line to the venue profile would silently break the cache.
+
+`composePrompt` returns the rendered brief as `guestState`. **Never recover it by indexing
+`turns`** - `turns[history.length]` was how two callers found it, and that expression
+silently returns the guest's own message the moment the layout moves.
 
 ## State derivation
 

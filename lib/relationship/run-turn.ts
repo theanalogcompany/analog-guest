@@ -1,17 +1,30 @@
+import { GENERATION_MODEL_ID } from '@/lib/ai/client'
 import { createAdminClient } from '@/lib/db/admin'
+import { startAgentTrace, toAgentUsage } from '@/lib/observability'
 import { loadVoicePack } from '@/lib/rag/voice-pack'
 import { retrieveKnowledgeContext } from '@/lib/rag/retrieve'
-import { parseVenueLinks } from '@/lib/schemas/venue-info'
+import {
+  parseVenueLinks,
+  venueOwnDomainWildcard,
+} from '@/lib/schemas/venue-info'
 import { DELIVERED_OUTBOUND_STATUSES } from '@/lib/agent/group-responses'
 import {
   composePrompt,
   type ComposedPrompt,
   type HistoryTurn,
 } from '@/lib/ai/v2/compose'
-import { generateV2Reply } from '@/lib/ai/v2/generate'
+import {
+  cacheHitRate,
+  generateV2Reply,
+  type V2Usage,
+} from '@/lib/ai/v2/generate'
 import { renderVenueProfile } from '@/lib/ai/v2/venue-profile'
 import { declaredActionTypes, type GenerationOutput } from '@/lib/ai/v2/actions'
-import { judgeResponse, type JudgeResult } from '@/lib/eval/judge'
+import {
+  JUDGE_ENABLED,
+  judgeResponse,
+  type JudgeResult,
+} from '@/lib/eval/judge'
 import { DEFAULT_POLICY_SET } from '@/lib/policy/default-policies'
 import { decideDispatch, type GateDecision } from '@/lib/policy/gate'
 import { fireGateNotifications } from '@/lib/policy/notify'
@@ -23,7 +36,12 @@ import {
   runSemanticCheck,
   type SemanticCheckOutcome,
 } from '@/lib/policy/semantic-check'
-import { applyAssessment, runAssessor, type AssessorResult } from './assessor'
+import {
+  applyAssessment,
+  ASSESSOR_ENABLED,
+  runAssessor,
+  type AssessorResult,
+} from './assessor'
 import { DEFAULT_RELATIONSHIP_GRAPH } from './default-graph'
 import {
   EMPTY_MEMORY,
@@ -218,7 +236,14 @@ export interface TurnTrace {
         ok: true
         output: GenerationOutput
         durationMs: number
-        usage: { inputTokens?: number; outputTokens?: number }
+        usage: V2Usage
+        /**
+         * Cache READ over total input, 0 to 1, null when nothing was
+         * reported. On the trace rather than left for a reader to derive,
+         * because `usage.inputTokens` already includes both cache buckets and
+         * every hand-rolled derivation of this number gets that wrong.
+         */
+        cacheHitRate: number | null
       }
     | { ok: false; error: string }
   semantic: (SemanticCheckOutcome & { durationMs: number }) | null
@@ -270,6 +295,17 @@ export async function runTurn(input: RunTurnInput): Promise<TurnTrace> {
   const supabase = createAdminClient()
   const o = input.overrides ?? {}
   const skipEvaluation = input.skipEvaluation === true
+  // The judges are off globally while JUDGE_ENABLED is false (lib/eval/judge.ts
+  // has the ruling). It folds into the caller's own decline rather than
+  // sitting beside it, so both surface on the trace as `{skipped: true}` -
+  // "we did not look", which is what both of them are. The ASSESSOR is
+  // deliberately not folded in: it decides state, profile and memory, and a
+  // turn that skips it produces no `nextSession`.
+  const skipJudges = skipEvaluation || !JUDGE_ENABLED
+  // Same shape as the judges, and the consequence is bigger: no assessor means
+  // no `nextSession`, so a chained caller carries nothing between turns.
+  // `ASSESSOR_ENABLED` in assessor.ts lists what that breaks.
+  const skipAssessor = skipEvaluation || !ASSESSOR_ENABLED
 
   // ---- Load the graph (active row, else default; malformed falls back). ----
   const graphRow = await supabase
@@ -335,14 +371,31 @@ export async function runTurn(input: RunTurnInput): Promise<TurnTrace> {
   // turn's retrieval missed the chunk. lib/ai/url-detector.ts states the
   // rule; `unverified_link` in default-policies.ts asks Jev the matching
   // question.
+  //
+  // ONE ENTRY IS DERIVED, owner-ruled 2026-10-09: `https://<own-host>/*` from
+  // `contact.website`, permitting any path on the venue's own site. That is
+  // not a loosening of the "curated, never derived" rule above, which is
+  // about never reading an allowlist out of RETRIEVED TEXT - this comes from
+  // a stored field a human typed. `venueOwnDomainWildcard` says why only the
+  // own domain gets one, and the `/*` form is read by `unverified_link`'s
+  // criteria in default-policies.ts; the two have to move together.
   const venueInfo = configRow.data?.venue_info
-  const providedLinks = parseVenueLinks(
+  const venueInfoObject =
     venueInfo !== null &&
-      typeof venueInfo === 'object' &&
-      !Array.isArray(venueInfo)
-      ? venueInfo.links
+    typeof venueInfo === 'object' &&
+    !Array.isArray(venueInfo)
+      ? (venueInfo as Record<string, unknown>)
+      : undefined
+  const contact = venueInfoObject?.contact
+  const ownDomainWildcard = venueOwnDomainWildcard(
+    contact !== null && typeof contact === 'object' && !Array.isArray(contact)
+      ? (contact as Record<string, unknown>).website
       : undefined,
-  ).map((l) => l.url)
+  )
+  const providedLinks = [
+    ...parseVenueLinks(venueInfoObject?.links).map((l) => l.url),
+    ...(ownDomainWildcard === null ? [] : [ownDomainWildcard]),
+  ]
 
   let voicePackText = o.voicePackText
   if (voicePackText === undefined) {
@@ -566,7 +619,7 @@ export async function runTurn(input: RunTurnInput): Promise<TurnTrace> {
     ...input.inbound.map((m) => `GUEST: ${m}`),
     ...output.messages.map((m) => `VENUE (this reply): ${m}`),
   ].join('\n')
-  const briefText = composed.turns[history.length]?.text ?? ''
+  const briefText = composed.guestState
 
   // Same history, same inbound, same brief - the two judgments differ in
   // nothing but the reply under judgment, so their scores are comparable.
@@ -604,7 +657,7 @@ export async function runTurn(input: RunTurnInput): Promise<TurnTrace> {
       // turn costs max() and not sum - skipping them removes the slowest
       // member of that max, which is the whole point.
       timed(
-        skipEvaluation
+        skipJudges
           ? Promise.resolve(null)
           : judgeResponse({
               replyMessages: output.messages,
@@ -614,7 +667,7 @@ export async function runTurn(input: RunTurnInput): Promise<TurnTrace> {
             }),
       ),
       timed(
-        !skipEvaluation && actualReply !== null && actualTranscript !== null
+        !skipJudges && actualReply !== null && actualTranscript !== null
           ? judgeResponse({
               replyMessages: actualReply,
               transcript: actualTranscript,
@@ -624,7 +677,7 @@ export async function runTurn(input: RunTurnInput): Promise<TurnTrace> {
           : Promise.resolve(null),
       ),
       timed(
-        skipEvaluation
+        skipAssessor
           ? Promise.resolve(null)
           : runAssessor({
               graph,
@@ -659,6 +712,47 @@ export async function runTurn(input: RunTurnInput): Promise<TurnTrace> {
   // "Notify-only hits", so the decision is inspectable without the side
   // effect. A sandbox guest has no guestId to attribute an event to, which is
   // a second reason the same branch cannot fire on a playground turn.
+  // Langfuse, on the SAME `live` seam as the notifications below. v2's
+  // generation is the only call in this pipeline whose cost moves with the
+  // prompt layout, and the prompt cache is the thing that moves it: the
+  // layout broke on 2026-10-08 and cost ~6,000 tokens a turn for days with
+  // nothing anywhere to say so. `input_cached_tokens` and
+  // `input_cache_creation` ride `toAgentUsage` (which owns the disjointness
+  // arithmetic - `usage.inputTokens` is NOT uncached input), and
+  // `cache_hit_rate` goes on metadata as a RATE, because the counts alone
+  // cannot answer "is the cache working" without knowing the prompt size, and
+  // prompt size moves every time a section is added.
+  //
+  // DRY-RUN EMITS NOTHING, deliberately: a measurement harness runs hundreds
+  // of samples and would bury real traffic. That is also why this is not yet
+  // visible anywhere - v2 has no `live` caller until phase 6. The playground
+  // reads `trace.generation.cacheHitRate` instead, which is the same number
+  // from the same place.
+  if (input.dispatch?.mode === 'live') {
+    const turnTrace = startAgentTrace({
+      name: 'v2.turn',
+      agentRunId: input.dispatch.agentRunId,
+      metadata: {
+        venueId: input.venueId,
+        stateKey,
+        promptVersion: composed.promptVersion,
+      },
+    })
+    // `generation()`, never `span()`: Langfuse prices only GENERATION
+    // observations, so a model call recorded as a plain span reports $0
+    // whatever usage it carries. `model` is required for the same reason.
+    turnTrace.generation('v2.generate').end({
+      model: GENERATION_MODEL_ID,
+      metadata: {
+        cache_hit_rate: cacheHitRate(generated.data.usage),
+        promptCharCount: composed.promptCharCount,
+        systemBlocks: composed.system.length,
+      },
+      usage: toAgentUsage(generated.data.usage),
+    })
+    await turnTrace.flushAsync()
+  }
+
   if (input.dispatch?.mode === 'live' && input.guestId !== null) {
     await fireGateNotifications(gate, {
       agentRunId: input.dispatch.agentRunId,
@@ -671,7 +765,7 @@ export async function runTurn(input: RunTurnInput): Promise<TurnTrace> {
   }
 
   let assessorTrace: TurnTrace['assessor']
-  if (skipEvaluation || assessed === null) {
+  if (skipAssessor || assessed === null) {
     assessorTrace = { skipped: true }
   } else if (assessed.ok) {
     const applied = applyAssessment(profile, memory, assessed.data.output, now)
@@ -698,10 +792,11 @@ export async function runTurn(input: RunTurnInput): Promise<TurnTrace> {
       output,
       durationMs: generated.data.durationMs,
       usage: generated.data.usage,
+      cacheHitRate: cacheHitRate(generated.data.usage),
     },
     semantic: { ...semantic, durationMs: semanticTimed.durationMs },
     gate,
-    judge: skipEvaluation
+    judge: skipJudges
       ? { skipped: true }
       : judged === null
         ? null
@@ -715,7 +810,7 @@ export async function runTurn(input: RunTurnInput): Promise<TurnTrace> {
     // Skipped beats "no actual reply was given": a caller who declined the
     // judges never supplied one either, and reporting null here would say
     // the absence was the caller's input rather than their choice.
-    actualJudge: skipEvaluation
+    actualJudge: skipJudges
       ? { skipped: true }
       : actualJudged === null
         ? null

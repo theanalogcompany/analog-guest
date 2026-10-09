@@ -31,6 +31,7 @@ import {
 } from '@/lib/relationship/profile'
 import {
   JUDGE_AXES,
+  JUDGE_ENABLED,
   JUDGE_PROMPT_VERSION,
   judgeResponse,
 } from '@/lib/eval/judge'
@@ -106,7 +107,7 @@ function buildBrief(history: HistoryTurn[], inbound: string): string {
     ),
     inboundMessages: [inbound],
   })
-  const brief = composed.turns[history.length]?.text ?? ''
+  const brief = composed.guestState
   if (brief.length === 0) throw new Error('brief rendered empty')
   return brief
 }
@@ -122,6 +123,14 @@ function transcript(c: VarianceCase): string {
 }
 
 async function main(): Promise<void> {
+  // Refuse rather than produce a clean-looking run over nothing: this harness
+  // is the variance GATE, and "spread 0 across 0 judgments" would print as a
+  // pass. A disabled judge is a handoff, not a condition to work around.
+  if (!JUDGE_ENABLED)
+    throw new Error(
+      'JUDGE_ENABLED is false (lib/eval/judge.ts) - the judge is switched off, so there is no variance to measure. Flip it back on first.',
+    )
+
   const log = createRunLog({
     name: 'judge-variance',
     meta: {

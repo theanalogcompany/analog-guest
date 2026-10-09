@@ -297,7 +297,7 @@ function TraceInspector({
             {trace.composed.system.map((block, i) => (
               <div key={i} className="flex flex-col gap-1">
                 <EditLabel>
-                  system block {i + 1}
+                  system block {i + 1} · {block.label}
                   {block.cacheBreakpoint ? ' · cache breakpoint' : ''}
                 </EditLabel>
                 <MonoBlock text={block.text} />
@@ -307,6 +307,7 @@ function TraceInspector({
               <div key={i} className="flex flex-col gap-1">
                 <EditLabel>
                   turn {i + 1} · {t.role}
+                  {t.cacheBreakpoint ? ' · cache breakpoint' : ''}
                 </EditLabel>
                 <MonoBlock text={t.text} />
               </div>
@@ -347,6 +348,24 @@ function TraceInspector({
               <KeyValue label="tokens">
                 in {generation.usage.inputTokens ?? '?'} · out{' '}
                 {generation.usage.outputTokens ?? '?'}
+              </KeyValue>
+              {/* `in` above INCLUDES both cache buckets, so these are a share
+                  of it rather than extra on top - the trap documented at
+                  AgentUsage. 0% on a first turn is correct, not a fault. */}
+              <KeyValue label="prompt cache">
+                {generation.cacheHitRate === null ? (
+                  'not reported'
+                ) : (
+                  <span className="tabular-nums">
+                    {(generation.cacheHitRate * 100).toFixed(1)}% read
+                    {generation.usage.cachedInputTokens
+                      ? ` (${generation.usage.cachedInputTokens} tok)`
+                      : ''}
+                    {generation.usage.inputTokenDetails?.cacheWriteTokens
+                      ? ` · ${generation.usage.inputTokenDetails.cacheWriteTokens} written`
+                      : ''}
+                  </span>
+                )}
               </KeyValue>
               <KeyValue label="duration">
                 <span className="tabular-nums">{generation.durationMs}ms</span>
