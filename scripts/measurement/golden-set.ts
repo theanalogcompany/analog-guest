@@ -4,6 +4,7 @@
  *
  *   npm run measure-golden-set
  *   npm run measure-golden-set -- --questions=hours,oat-milk --concurrency=4
+ *   npm run measure-golden-set -- --skip-v1
  *
  * NO GRADER, NO JUDGE, NO PASS/FAIL (owner-ruled 2026-10-08). The output is
  * `question | v1 | v2` for a human to read at /admin/tests/golden, and the
@@ -48,6 +49,18 @@
  *     carries an open/closed line, so a run after close hedges through every
  *     scenario in it. The state is in the run header and on the page.
  *
+ * `--skip-v1` ASKS v2 ALONE, and is the one flag that changes what a column
+ * MEANS rather than which scenarios run. Every v1 column comes back
+ * `not_run`, which the page greys out exactly as it does v2's media and
+ * proactive gaps, and the run writes nothing to production `messages` because
+ * the v1 arm is what materializes those rows. Two consequences:
+ *   - A SKIPPED RUN IS NOT A COMPARISON. Nothing on that run's page or export
+ *     may be read as v1 vs v2; it answers "what does v2 say", alone.
+ *   - `golden_runs.v1_prompt_version` is still stamped, because the column is
+ *     `not null` (migration 078) and the version describes the code at this
+ *     sha rather than what ran. The per-unit `not_run` labels are what carry
+ *     "v1 did not answer here" - the header is not evidence either way.
+ *
  * IT WRITES TO PRODUCTION `messages`. The v1 arm materializes each scenario's
  * history and inbound as rows against a per-venue, per-slot
  * `is_test_synthetic` guest and deletes them on the next call - pre-existing
@@ -62,6 +75,7 @@ import {
   draftV1ForSandbox,
   draftV1FollowupForSandbox,
   SANDBOX_SLOTS,
+  type V1ArmOutcome,
 } from '@/app/admin/(authed)/playground/api/run/v1-arm'
 import { PROMPT_VERSION } from '@/lib/ai/prompts/system-template'
 import { V2_PROMPT_VERSION } from '@/lib/ai/v2/template'
@@ -100,6 +114,8 @@ async function runQuestion(
   slot: number,
   /** The one clock for this turn - real, or injected by `--at`. */
   now: Date,
+  /** `--skip-v1`: ask v2 alone, and record v1 as not run rather than broken. */
+  skipV1: boolean,
 ): Promise<Unit> {
   // The two arms are independent given the same inbound, so this is
   // max(v1, v2) rather than the sum - the same reasoning the playground route
@@ -162,6 +178,63 @@ async function runQuestion(
     v2SkipReason === null
       ? null
       : { ok: false, kind: 'not_run', ...v2SkipReason, durationMs: 0 }
+  // `--skip-v1`, declined the same way v2's two gaps are: `not_run`, with the
+  // reason in the column. It is the harness being told not to ask, never the
+  // engine failing - so the page greys it rather than printing ERROR, and the
+  // summary's error count stays 0.
+  //
+  // The reason this flag exists is the v1 arm's side effects, not its cost:
+  // it materializes every scenario's history and inbound into production
+  // `messages` against the synthetic guests, and a reader who only wants v2's
+  // answers should not have to churn a couple of hundred rows to get them.
+  const v1Skip: GoldenV1 | null = skipV1
+    ? {
+        ok: false,
+        kind: 'not_run',
+        stage: 'skipped',
+        error:
+          '--skip-v1: the v1 arm was not run, so this run is not a comparison',
+        durationMs: 0,
+      }
+    : null
+
+  // The v1 arm, named and annotated rather than inlined below. Two arms,
+  // picked by what sets the scenario off: a proactive scenario has no inbound
+  // at all - the transcript is the whole input and the trigger says what the
+  // venue is reaching out about - and `--skip-v1` runs neither.
+  //
+  // The annotation is load-bearing: a three-branch conditional inside
+  // `Promise.allSettled`'s tuple inferred the element as `{}`, so every read
+  // of `v1Settled.value` below failed to compile.
+  const v1Arm: Promise<V1ArmOutcome | null> =
+    v1Skip !== null
+      ? Promise.resolve(null)
+      : question.driver === 'proactive' &&
+          question.followupTrigger !== undefined
+        ? draftV1FollowupForSandbox({
+            venueId,
+            sessionHistory: history,
+            // `triggeredAt` is the run's clock, not a fresh one: with `--at`
+            // it is what makes "we are following up the next morning" true
+            // rather than something the prompt is told while the trigger says
+            // otherwise.
+            trigger: { reason: question.followupTrigger, triggeredAt: now },
+            channel: question.channel,
+            slot,
+            now,
+          })
+        : draftV1ForSandbox({
+            venueId,
+            sessionHistory: history,
+            inbound,
+            slot,
+            mediaUrls: question.mediaUrls,
+            channel: question.channel,
+            // Moves the prompt clock AND stamps the materialized rows, so the
+            // two halves of v1's turn cannot disagree about when this
+            // happened.
+            now,
+          })
 
   const [v2Settled, v1Settled] = await Promise.allSettled([
     v2Skip !== null
@@ -205,38 +278,13 @@ async function runQuestion(
             },
           },
         }).then(stopV2),
-    // Two arms, picked by what sets the scenario off. A proactive scenario
-    // has no inbound at all - the transcript is the whole input and the
-    // trigger says what the venue is reaching out about.
-    (question.driver === 'proactive' && question.followupTrigger !== undefined
-      ? draftV1FollowupForSandbox({
-          venueId,
-          sessionHistory: history,
-          // `triggeredAt` is the run's clock, not a fresh one: with `--at` it
-          // is what makes "we are following up the next morning" true rather
-          // than something the prompt is told while the trigger says
-          // otherwise.
-          trigger: { reason: question.followupTrigger, triggeredAt: now },
-          channel: question.channel,
-          slot,
-          now,
-        })
-      : draftV1ForSandbox({
-          venueId,
-          sessionHistory: history,
-          inbound,
-          slot,
-          mediaUrls: question.mediaUrls,
-          channel: question.channel,
-          // Moves the prompt clock AND stamps the materialized rows, so the
-          // two halves of v1's turn cannot disagree about when this happened.
-          now,
-        })
-    ).then(stopV1),
+    v1Arm.then(stopV1),
   ])
 
   let v1: GoldenV1
-  if (v1Settled.status === 'rejected') {
+  if (v1Skip !== null) {
+    v1 = v1Skip
+  } else if (v1Settled.status === 'rejected') {
     v1 = {
       ok: false,
       kind: 'error',
@@ -246,6 +294,18 @@ async function runQuestion(
           ? v1Settled.reason.message
           : String(v1Settled.reason),
       durationMs: v1Ms,
+    }
+  } else if (v1Settled.value === null) {
+    // Unreachable: `v1Skip !== null` is the only way this thunk resolves null
+    // and it is handled above. Named rather than cast, for the same reason
+    // v2's twin below is - a future second skip reason fails here instead of
+    // rendering as a successful empty v1.
+    v1 = {
+      ok: false,
+      kind: 'error',
+      stage: 'harness',
+      error: 'v1 resolved null with no recorded skip reason',
+      durationMs: 0,
     }
   } else if (!v1Settled.value.ok) {
     v1 = {
@@ -477,6 +537,18 @@ async function main(): Promise<void> {
       `--concurrency=${requested} capped to ${SANDBOX_SLOTS}: one in-flight v1 arm needs its own sandbox guest and there are ${SANDBOX_SLOTS} slots`,
     )
 
+  // `--skip-v1`: v2 alone. The cap above stays in place even though slots stop
+  // being the binding constraint without the v1 arm - trading a known limit
+  // for untested rate-limit exposure is not what this flag is for.
+  const skipV1 = flags.includes('--skip-v1')
+  if (skipV1)
+    console.warn(
+      `\nV1 ARM SKIPPED (--skip-v1). Nothing is written to production \`messages\`, and every` +
+        `\nv1 column is stored as "not run" rather than as a reply or an error. THIS RUN IS NOT` +
+        `\nA COMPARISON: nothing on the page may be read as v1 vs v2. \`v1_prompt_version\` is` +
+        `\nstill stamped, because it describes the code at this sha and not what ran.\n`,
+    )
+
   // The non-inbound drivers are reported rather than silently dropped: a run
   // that covered 58 of 66 and said "58 questions" would read as the whole
   // set to anyone who did not go counting.
@@ -627,18 +699,23 @@ async function main(): Promise<void> {
       questions: questions.length,
       fullRun,
       concurrency,
+      // In the record, so the JSONL cannot be read later as v1 having broken
+      // on every scenario in the run.
+      v1Skipped: skipV1,
       gitDirty,
       gitSubject,
     },
   })
   console.log(`\nrun log: ${log.path}`)
   console.log(
-    `${questions.length} questions, ${concurrency} at a time, ${venue.name} (${openState})\n`,
+    `${questions.length} questions, ${concurrency} at a time, ${venue.name} (${openState})` +
+      (skipV1 ? ', v2 arm only' : '') +
+      '\n',
   )
 
   const startedAt = new Date().toISOString()
   const units = await withSlots(questions, concurrency, async (q, slot) => {
-    const unit = await runQuestion(venue.id, q, slot, now)
+    const unit = await runQuestion(venue.id, q, slot, now, skipV1)
     // Checkpoint per unit: the expensive half is the model calls, and losing
     // them to a late throw in the cheap half is the specific failure the
     // run-log convention exists for.
@@ -679,8 +756,13 @@ async function main(): Promise<void> {
   const skipSummary = [...skippedByStage]
     .map(([stage, n]) => `${n} ${stage}`)
     .join(', ')
+  // "v1 errors: 0" is true of a skipped arm and reads as v1 having passed, so
+  // the skipped case says what actually happened instead of printing a count
+  // of failures nothing could have produced.
   console.log(
-    `\n${units.length} questions run. v1 errors: ${v1Failures}, v2 errors: ${v2Failures}` +
+    `\n${units.length} questions run. ` +
+      (skipV1 ? 'v1 not run (--skip-v1)' : `v1 errors: ${v1Failures}`) +
+      `, v2 errors: ${v2Failures}` +
       (skipSummary.length > 0 ? `, v2 not run: ${skipSummary}` : '') +
       '.',
   )
