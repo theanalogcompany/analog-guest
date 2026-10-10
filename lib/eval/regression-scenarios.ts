@@ -195,12 +195,12 @@ export const REGRESSION_SCENARIOS: RegressionScenario[] = [
   {
     key: 'knowledge-pastries',
     lesson:
-      'Pre-ingest this retrieved "what Malenad tastes like" for a pastry question. "Butter and Rose" is the Foster City micro-bakery and appears in exactly one entry, so the bar cannot be met by a plausible guess. This fact was also one of the 11 lost when voicenote transcripts stopped being knowledge, and it is now sourced from the venue site instead (lib/rag/knowledge-source-roles.ts). MEASURED on v2.10.0 against a quorum of BAR_MIN=2: this bar hit 4/6 and 3/6 across two n=6 runs, and "Foster City" (the same entry\'s other unguessable token) 5/6 - all passing, so the bar was kept as pre-registered. This is the LOOSEST of the five knowledge bars and the one to watch. Recorded because a single sample reads it as a failure: the agent commonly answers with the full pastry list and "a micro-baker in Foster City" without naming the bakery, and the two tokens are complementary rather than nested (one run named the bakery and not the town). One such sample is not a bar failure.',
+      'NO BAR (owner-ruled 2026-10-09). Runs for the bodies and the ceilings only: the text tells and the gate assertions still apply, nothing asserts on content. It WAS `expectReplyContains: "Butter and Rose"`, and the reason that bar is gone is worth keeping, because removing a bar after it fails is otherwise how a harness stops being evidence. The bar tested RETRIEVAL, not supplier credit: every pastry name, price and dietary flag lives in `venue_info.menu`, which is in system block 2 on every turn, so the bakery was the one token in a pastry answer that only a retrieved row could supply. It was already the loosest of the five knowledge bars - 4/6 and 3/6 across two n=6 runs on v2.10.0 - and the v2.15.0 length clause ("usually 12 to 22 words") took it to 0/3, along with "Foster City", the same entry\'s other unguessable token. The replies were read and judged FINE: all seven pastries, which ones sell out, and a question, in 33 words. Naming an unasked-for micro-bakery in Foster City is the same unprompted specificity the length clause exists to remove. So the bar\'s premise - that a correct answer would naturally name the bakery - stopped holding the moment the frame started asking for 12 to 22 words, and for this question no token both proves retrieval and belongs in a tight answer. The retrieval canary this gave up is NOT replaced: knowledge-wifi, knowledge-milk, knowledge-cafe-address and knowledge-outside-food still carry theirs. A scenario asking "who makes your pastries?" would restore it, where the bakery is the literal answer.',
     script: ['what pastries do you have?'],
     target: [],
     expectFirstName: null,
     noTurnOneNameAsk: false,
-    expectReplyContains: 'Butter and Rose',
+    expectReplyContains: null,
     forbidPolicyKeys: [],
     expectPolicyKeys: [],
     enabled: true,

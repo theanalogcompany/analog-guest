@@ -6,6 +6,23 @@ paths:
 
 # A V2_PROMPT_VERSION bump ships with a regression run
 
+**THE HARNESS CURRENTLY JUDGES NOTHING.** `OWNER_JUDGES_ANSWERS` in
+`scripts/measurement/template-regression.ts` is `true` (owner-ruled 2026-10-09), so a run
+generates and prints every reply, counts the text tells, prints the gate verdicts, and
+emits **no** PASS/FAIL and no "N/M passed".
+`regression_runs.verdicts` records `NOT JUDGED` rather than a verdict nobody computed - a
+green row on `/admin/regression` for an unjudged run would be a false green.
+
+The bars are **not** deleted: they stay in `REGRESSION_SCENARIOS`, and flipping that one
+constant restores all of them. That is why it is a switch and not an edit. Read the rest of
+this file as what applies when it goes back to `false`.
+
+**What this costs, so nobody rediscovers it:** nothing automated catches a regression now.
+The `Use emojis sparingly` arm produced 83 emoji across 11 of 13 scenarios and was caught by
+these bars in a single run. While the switch is on, that class of defect reaches a person
+only if a person reads every body. A disqualified sample still fails the run, because "the
+harness did not work" is not a judgment about an answer.
+
 Every measured lesson in `lib/ai/v2/template.ts`'s changelog exists as a scenario in
 `REGRESSION_SCENARIOS` in `lib/eval/regression-scenarios.ts`.
 The comments are the record; the harness is the enforcement.

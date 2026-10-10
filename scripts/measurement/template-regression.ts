@@ -125,6 +125,33 @@ const DEFAULT_SAMPLES = 3
 const DEFAULT_CONCURRENCY = 64
 const BAR_MIN = 2
 
+/**
+ * The owner reads the answers; the harness asserts nothing about them
+ * (owner-ruled 2026-10-09).
+ *
+ * WHAT IT SUPPRESSES: the per-scenario PASS/FAIL verdict and the
+ * "N/M scenarios passed" claim. Bars are NOT deleted from
+ * `REGRESSION_SCENARIOS` - flipping this back restores every one, which is
+ * the whole reason it is a switch rather than an edit. The scenarios and
+ * their recorded lessons are months of measurement and must survive a change
+ * of who does the judging.
+ *
+ * WHAT STILL RUNS, because none of it is a judgment about answer quality:
+ * every reply is generated and printed, text tells are counted and printed
+ * with their voice-pack attribution, gate verdicts and matched policy keys
+ * are printed, and a DISQUALIFIED sample still fails the run - "the harness
+ * did not work" is not the owner's call to make (scripts/CLAUDE.md #5, #6).
+ *
+ * WHAT IT COSTS, stated plainly: nothing automated now catches a regression.
+ * The emoji arm that produced 83 breaches across 11 of 13 scenarios was
+ * caught by these bars in one run. While this is true, that class of defect
+ * reaches a human only if a human reads every body.
+ */
+const OWNER_JUDGES_ANSWERS = true
+
+/** Written to `regression_runs.verdicts` instead of a verdict nobody computed. */
+const NOT_JUDGED = 'NOT JUDGED (owner reads the bodies)'
+
 // Patterns with an optional slot (scripts/CLAUDE.md #7): an exact-phrase
 // list under-counts whichever arm is not echoing a script. `tell` is typed
 // RegressionTell so a new pattern cannot ship without a human-readable
@@ -942,6 +969,20 @@ async function main(): Promise<void> {
       })
     }
 
+    // OWNER_JUDGES_ANSWERS: compute nothing, claim nothing. The bars stay in
+    // the scenario definitions, so flipping the constant back restores every
+    // one of them - what is suppressed is the VERDICT, not the knowledge.
+    //
+    // NOT_JUDGED rather than PASS, and `scenariosPassed` deliberately left at
+    // 0: `regression_runs.verdicts` is what /admin/regression renders, and
+    // writing PASS for a scenario nothing evaluated would put a green row on
+    // that page for a run that judged nothing. A false green is worse than a
+    // blank.
+    if (OWNER_JUDGES_ANSWERS) {
+      verdicts[scenario.key] = NOT_JUDGED
+      console.log(`  -> ${NOT_JUDGED}\n`)
+      continue
+    }
     const verdict = scenarioVerdict(scenario, outcomes, BAR_MIN)
     verdicts[scenario.key] = verdict
     if (verdict === 'PASS') scenariosPassed += 1
@@ -1005,6 +1046,26 @@ async function main(): Promise<void> {
         `regression_run_units write failed: ${unitsInsert.error.message} - the JSONL run log is the record`,
       )
     }
+  }
+
+  if (OWNER_JUDGES_ANSWERS) {
+    // Count what actually happened rather than claiming a verdict. A
+    // disqualification still decides the exit code: a run where the harness
+    // itself failed must not look like a clean one just because nobody was
+    // scoring (scripts/CLAUDE.md #5/#6).
+    const disqualified = unitRows.filter((u) => u.unit.disqualified !== null)
+    const breaches = unitRows.reduce((n, u) => n + u.unit.breaches.length, 0)
+    console.log(
+      `\n${scenarios.length} scenarios run on ${V2_PROMPT_VERSION}, ${unitRows.length} samples. NOTHING WAS JUDGED - read the bodies above.` +
+        `\n  disqualified samples: ${disqualified.length}` +
+        `\n  text-tell breaches (printed above, not a verdict): ${breaches}` +
+        (filtered ? '\n  FILTERED RUN - not every scenario ran.' : ''),
+    )
+    for (const u of disqualified)
+      console.log(
+        `  DISQUALIFIED ${u.scenario_key} s${u.sample}: ${String(u.unit.disqualified)}`,
+      )
+    process.exit(disqualified.length === 0 ? 0 : 1)
   }
 
   const allPassed = scenariosPassed === scenarios.length
