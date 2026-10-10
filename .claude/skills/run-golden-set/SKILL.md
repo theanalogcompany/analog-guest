@@ -90,6 +90,7 @@ next call. A full run churns a couple of hundred rows across up to 10 synthetic 
 ```bash
 npm run measure-golden-set -- --questions=hours,oat-milk   # iterate cheap; stored as partial
 npm run measure-golden-set -- --concurrency=4              # default 8, capped at SANDBOX_SLOTS=10
+npm run measure-golden-set -- --skip-v1                    # v2 alone, no production `messages` writes
 ```
 
 Concurrency is capped by sandbox slots, not by rate limits: each in-flight v1 arm needs its own
@@ -105,6 +106,14 @@ would be answering a stranger.
 
 A filtered run is stored with `full_run = false` and the page says so. Do not compare a
 filtered run against a full one as if the missing scenarios had passed.
+
+**`--skip-v1` is the one flag that changes what a column means.** It asks v2 alone, so every
+v1 column stores `not_run` and the page greys it the same way it greys v2's media and
+proactive gaps - and because the v1 arm is what materializes the synthetic rows, the run
+writes **nothing** to production `messages`. Two things follow: a skipped run is **not a
+comparison**, so nothing on its page or export may be read as v1 vs v2; and the run header
+still shows a v1 prompt version, because that column is `not null` and describes the code at
+the sha rather than what ran. Read the per-unit grey labels, not the header.
 
 ## 62 of 67 run, deliberately
 
