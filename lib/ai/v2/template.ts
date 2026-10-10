@@ -189,6 +189,43 @@
 // same day and reverted; `V2_GUEST_STATE` below has the two measurements that
 // killed it.
 //
+// v2.17.0 (owner-ruled 2026-10-10): `# Texting style` asks for digits.
+// Owner-written, one sentence:
+//
+//   Write numbers as digits, so 25 and not twenty-five.
+//
+// It sits directly after the em-dash instruction, with the rest of the
+// orthography, and before the opinions sentence.
+//
+// NO NORMALIZER, and this one is not close. The three strippers in
+// normalize-output.ts each act on a token with a SAFE substitution; word to
+// digit has none - "one of our regulars", "no one", "a couple" are the common
+// case, and a list narrow enough to be safe (hyphenated twenty-one through
+// ninety-nine) is the case the model gets right anyway. The v1 bracket check
+// is explicitly not a precedent for rewriting guest-facing text (lib/ai/
+// CLAUDE.md).
+//
+// EXPECTED TO BE THE WORKING FORM, for whatever that prior is worth: this is a
+// standing rule over a literal token class, which is what v2.7.0 measured as
+// effective (0 emoji across 240 responses) as against the frequency and
+// quantity wording that measured as no control at all. Note the counter-case
+// in this same section - the "full stop" ban is also a literal ban and did
+// nothing - but that phrase had a 1/16 base rate, so it never had an occasion
+// to fire. A spelled-out number does not have that problem.
+//
+// IT PUSHES ON THE COLON COLLISION v2.16.0 RECORDED. Hours are stored as
+// "7:00 AM - 3:00 PM" at every venue, so "what time do you open" is already
+// the turn where the colon ban and the venue's own data disagree; asking for
+// digits makes "7:00" the likelier draft. "we open at 7" satisfies both lines
+// and is the better text, and nothing enforces it in either direction.
+//
+// HOW A VENUE WRITES NUMBERS IS ORTHOGRAPHY, which decision 0010 puts in the
+// class measured from the team's own replies rather than written by us. It is
+// shipped as our copy because `voiceProfile` measures no numeral share, so
+// this overrides nothing that exists. The standing limit applies, same as the
+// emoji and dash lines - the voice pack sits LATER in the composed prompt, so
+// a team that spells numbers out out-ranks this.
+//
 // v2.16.0 (owner-ruled 2026-10-09): `# Texting style` names the punctuation
 // set. Two sentences, owner-written:
 //
@@ -352,7 +389,7 @@
 // NULL), so a literal handle would put one venue's account in every venue's
 // prompt. Same reason `{venue_name}` stays a placeholder. It needs a
 // venue_info field first.
-export const V2_PROMPT_VERSION = 'v2.16.0-draft'
+export const V2_PROMPT_VERSION = 'v2.17.0-draft'
 
 /** Block 1: ROLE. Static across every venue bar the three placeholders. */
 export const V2_FRAME = `# Who you are
@@ -361,7 +398,7 @@ You are the virtual maitre d' of {venue_name}, not a service desk, and this is y
 You are a real presence of the house: its memory, its taste, its hospitality. You speak as the venue{speaker_clause}.
 
 # Texting style
-You write the way a person messages - short, warm, specific, never corporate. No emoji, ever.{length_clause} Never the phrase "full stop". Punctuation is commas, periods, question marks, and line breaks only. No colons, semicolons, em dashes, parentheses, or bullet points. Where an em or en dash would land, end the sentence and start a new one. You have opinions about the menu and you share them plainly. You are never salesy and never servile. Mimic how you sound section to tune your voice.
+You write the way a person messages - short, warm, specific, never corporate. No emoji, ever.{length_clause} Never the phrase "full stop". Punctuation is commas, periods, question marks, and line breaks only. No colons, semicolons, em dashes, parentheses, or bullet points. Where an em or en dash would land, end the sentence and start a new one. Write numbers as digits, so 25 and not twenty-five. You have opinions about the menu and you share them plainly. You are never salesy and never servile. Mimic how you sound section to tune your voice.
 
 # Extra Notes
 Guests sometimes share a name with an AI assistant ("Claude", "Alexa"). It is still simply their name - never a reference to you.
