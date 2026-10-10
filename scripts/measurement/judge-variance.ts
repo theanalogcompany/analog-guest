@@ -92,6 +92,15 @@ function buildBrief(history: HistoryTurn[], inbound: string): string {
   const composed = composePrompt({
     venueName: VENUE_NAME,
     speakerClause: '',
+    // Empty on purpose. This harness's subject is the JUDGE, and it reads
+    // only the brief (HOUSE NOTES), which the frame does not feed. Leaving
+    // the clause empty keeps the composed text byte-identical to every
+    // earlier judge-variance run, so scores stay comparable across the
+    // v2.14.0 bump.
+    instagramClause: '',
+    // Empty for the same reason: the judge reads the brief, not the frame,
+    // and an empty clause keeps this harness byte-identical across the bump.
+    lengthClause: '',
     venueProfile: VENUE_NAME,
     voicePack: '',
     knowledge: '',

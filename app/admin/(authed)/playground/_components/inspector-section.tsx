@@ -2,6 +2,7 @@
 
 import { useState, type ReactNode } from 'react'
 import { ChevronRight } from 'lucide-react'
+import { CopyButton } from '@/app/admin/_components/copy-button'
 
 // Collapsible section chrome for the inspector rail. Local to the playground
 // rather than SectionShell: the inspector stacks ten-plus sections in a
@@ -42,12 +43,36 @@ export function InspectorSection({
   )
 }
 
-/** Monospace block for exact prompt text. Preserves whitespace verbatim. */
+/**
+ * Monospace block for exact prompt text. Preserves whitespace verbatim, and
+ * carries a copy button because reading a composed block is only half of what
+ * anyone does with it - the other half is pasting it somewhere to diff.
+ *
+ * A BUTTON, not a click-anywhere block. Clicking the `<pre>` itself would
+ * fight text selection, and selecting one paragraph out of a 17,000-character
+ * venue block is worth keeping.
+ *
+ * Copies `text`, never the '(empty)' placeholder, and the button is hidden
+ * outright when there is nothing to copy - a copy button that puts the string
+ * "(empty)" on the clipboard is worse than no button.
+ */
 export function MonoBlock({ text }: { text: string }) {
   return (
-    <pre className="whitespace-pre-wrap break-words rounded-[2px] border border-stone-light/60 bg-parchment/40 p-2 font-mono text-[11px] leading-[1.5] text-ink">
-      {text.length > 0 ? text : '(empty)'}
-    </pre>
+    <div className="group relative">
+      <pre className="whitespace-pre-wrap break-words rounded-[2px] border border-stone-light/60 bg-parchment/40 p-2 pr-14 font-mono text-[11px] leading-[1.5] text-ink">
+        {text.length > 0 ? text : '(empty)'}
+      </pre>
+      {/* Hidden when there is nothing to copy: a button that puts the literal
+          string "(empty)" on the clipboard is worse than no button. Focusable
+          always and revealed on focus as well as hover, because a control that
+          exists only on hover is unreachable by keyboard. */}
+      {text.length > 0 && (
+        <CopyButton
+          text={text}
+          className="absolute right-1 top-1 opacity-0 focus-visible:opacity-100 group-hover:opacity-100"
+        />
+      )}
+    </div>
   )
 }
 

@@ -66,6 +66,26 @@ export interface ComposeInput {
   venueName: string
   /** '' for venue-voice framing; ', in {name}\'s voice' etc. once speaker framing lands. */
   speakerClause: string
+  /**
+   * ', @handle' naming the venue's OWN Instagram account, or '' when no
+   * account is connected. The model could not previously tell which account's
+   * inbox it was answering in: it knew the handle only as a retrieved fact
+   * (knowledge_corpus, gated on the guest asking about social), so it sent a
+   * guest who asked for farm photos off to "our Instagram" while that guest
+   * was sitting in exactly that inbox.
+   *
+   * Sourced from `instagram_credentials.instagram_username`, which is the
+   * account the venue actually connected by OAuth - not an operator-typed
+   * field that could drift from the real inbox.
+   */
+  instagramClause: string
+  /**
+   * ' Your replies are usually 12 to 22 words. Over 40 is rare and needs a
+   * reason.' for a venue with a measured voice profile, '' for one without.
+   * Built by `replyLengthClause` from `brand_persona.voiceProfile`, never
+   * written as a literal - see that function for why.
+   */
+  lengthClause: string
   venueProfile: string
   voicePack: string
   knowledge: string
@@ -124,6 +144,8 @@ export function composePrompt(input: ComposeInput): ComposedPrompt {
   const frame = fill(V2_FRAME, {
     venue_name: input.venueName,
     speaker_clause: input.speakerClause,
+    instagram_clause: input.instagramClause,
+    length_clause: input.lengthClause,
   })
   const houseSections = fill(V2_HOUSE_SECTIONS, {
     venue_profile: input.venueProfile,
