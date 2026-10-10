@@ -189,6 +189,63 @@
 // same day and reverted; `V2_GUEST_STATE` below has the two measurements that
 // killed it.
 //
+// v2.15.0 (owner-ruled 2026-10-09): `# Texting style` states how long this
+// venue's replies usually run, via a fourth placeholder, `{length_clause}`.
+// For Le Mil's it renders:
+//
+//   Your replies are usually 12 to 22 words. Over 40 is rare and needs a reason.
+//
+// THE NUMBERS ARE NOT OURS. They are `wordsPerReply` median, p75 and p90 out
+// of `brand_persona.voiceProfile`, measured from 691 of the team's own
+// replies across 306 guests - decision 0010. The owner's draft said "8-25
+// words, over 40", which was 40 exactly (reply p90) but mixed units on the
+// band: 8 is the BUBBLE median and 25 sits near the reply p75 of 22. This
+// venue's splitShare is 1.0, so reply and bubble lengths genuinely differ
+// (12-22-40 against 8-13-22) and the sentence says "your replies". Derived
+// per reply, ruled 2026-10-09. The draft's en dash also went: the clause
+// three sentences later bans en dashes.
+//
+// WHY IT MIGHT DO NOTHING, stated before the measurement rather than after:
+// v2.7.0 found standing prohibitions work on literal tokens while FREQUENCY
+// AND QUANTITY wording measured as no control at all, and this is that class.
+// The honest expectation is that it is weak. What makes it worth shipping
+// anyway is that it is the first copy in this frame whose compliance is
+// countable from the venue's own data: `countReplyWords` against p90 is a
+// bar, not an opinion. `over-ceiling` in the regression tells is the count.
+//
+// It is NOT a substitute for porting v1's length check (reply-length.ts),
+// which retries once and ships the retry only if it is shorter and kept the
+// facts. A prompt line has no retry and no keepsTheFacts floor.
+//
+// v2.14.0 (owner-ruled 2026-10-09): the frame names the venue's OWN Instagram
+// handle - `this is your Instagram inbox, @lemilscoffee` - via a third
+// placeholder, `{instagram_clause}`, built exactly like `{speaker_clause}`.
+//
+// THE MODEL DID NOT KNOW WHICH ACCOUNT IT WAS. It had the handle only as a
+// retrieved fact (a knowledge_corpus row, gated on the guest asking about
+// social), so asked for farm photos it answered "the best place to look is
+// our Instagram. @lemilscoffee is where Himanshu and Milana share that side
+// of things" - to a guest already in that inbox. Measured in a 29-question
+// sweep, 2026-10-09. The frame already said "this is your Instagram inbox"
+// and the handle already existed; nothing joined them.
+//
+// SOURCED FROM `instagram_credentials.instagram_username`, the account the
+// venue connected by OAuth - NOT a venue_info field. A hand-typed handle can
+// drift from the real inbox, and the whole point of the clause is to say
+// which inbox this is. `is_active` and `deauthorized_at` are both checked: a
+// disconnected account is not this inbox. The read fails OPEN to '', which
+// renders the frame byte-identically to v2.13.0, so a venue with no connected
+// account is unaffected and no turn is ever held over it.
+//
+// NO RULE SHIPPED WITH IT (owner-ruled). The obvious companion - "never send
+// the guest to your own Instagram, they are already there" - was proposed and
+// declined in favour of giving the model the fact and nothing else. If the
+// redirect survives, that is the next arm, and `off-channel-redirect` in the
+// regression harness is the tell. Note that tell did NOT fire on the sweep
+// reply above: it matches only preposition-led forms ("through Instagram",
+// "via Instagram", "DM us") and deliberately not the bare "our Instagram",
+// so it under-counts this exact shape.
+//
 // v2.13.0 (owner-ruled 2026-10-09): the frame is reorganized into named
 // sections - Who you are, Texting style, Extra Notes, Intention, Rules - and
 // `# What you know` moves out of the system blocks into HOUSE NOTES. The
@@ -259,16 +316,16 @@
 // NULL), so a literal handle would put one venue's account in every venue's
 // prompt. Same reason `{venue_name}` stays a placeholder. It needs a
 // venue_info field first.
-export const V2_PROMPT_VERSION = 'v2.13.0-draft'
+export const V2_PROMPT_VERSION = 'v2.15.0-draft'
 
-/** Block 1: ROLE. Static across every venue bar the two placeholders. */
+/** Block 1: ROLE. Static across every venue bar the three placeholders. */
 export const V2_FRAME = `# Who you are
-You are the virtual maitre d' of {venue_name}, not a service desk, and this is your Instagram inbox.
+You are the virtual maitre d' of {venue_name}, not a service desk, and this is your Instagram inbox{instagram_clause}.
 
 You are a real presence of the house: its memory, its taste, its hospitality. You speak as the venue{speaker_clause}.
 
 # Texting style
-You write the way a person messages - short, warm, specific, never corporate. No emoji, ever. Never the phrase "full stop". Never an em or en dash (— –): where one would land, end the sentence and start a new one. You have opinions about the menu and you share them plainly. You are never salesy and never servile. Mimic how you sound section to tune your voice.
+You write the way a person messages - short, warm, specific, never corporate. No emoji, ever.{length_clause} Never the phrase "full stop". Never an em or en dash (— –): where one would land, end the sentence and start a new one. You have opinions about the menu and you share them plainly. You are never salesy and never servile. Mimic how you sound section to tune your voice.
 
 # Extra Notes
 Guests sometimes share a name with an AI assistant ("Claude", "Alexa"). It is still simply their name - never a reference to you.

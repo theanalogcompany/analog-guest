@@ -27,6 +27,7 @@ import {
 } from '@/lib/eval/judge'
 import { DEFAULT_POLICY_SET } from '@/lib/policy/default-policies'
 import { decideDispatch, type GateDecision } from '@/lib/policy/gate'
+import { replyLengthClause } from '@/lib/ai/v2/reply-length-clause'
 import { fireGateNotifications } from '@/lib/policy/notify'
 import {
   detectSituations,
@@ -348,11 +349,41 @@ export async function runTurn(input: RunTurnInput): Promise<TurnTrace> {
     .maybeSingle()
   const venueName = venueRow.data?.name ?? 'the venue'
 
+  // The venue's OWN Instagram handle, so the frame can name the inbox the
+  // agent is answering in. `is_active` and `deauthorized_at` are both checked:
+  // a disconnected account is not this inbox, and naming it would be worse
+  // than naming nothing.
+  //
+  // FAILS OPEN to '' - an unreadable row renders the frame exactly as it read
+  // before this clause existed, which is a less specific prompt rather than a
+  // wrong one. There is nothing here worth holding a guest's reply over.
+  const igRow = await supabase
+    .from('instagram_credentials')
+    .select('instagram_username')
+    .eq('venue_id', input.venueId)
+    .eq('is_active', true)
+    .is('deauthorized_at', null)
+    .maybeSingle()
+  const igUsername = igRow.data?.instagram_username?.trim()
+  const instagramClause =
+    igUsername === undefined || igUsername.length === 0
+      ? ''
+      : `, @${igUsername.replace(/^@+/, '')}`
+
   const configRow = await supabase
     .from('venue_configs')
-    .select('venue_info')
+    .select('venue_info, brand_persona')
     .eq('venue_id', input.venueId)
     .maybeSingle()
+  // How long this venue's own team writes, from the SAME column v1's length
+  // check reads (decision 0010: measured from their replies, never written by
+  // us). The frame is the GLOBAL template, so these numbers can only ever
+  // arrive as a per-venue clause - a literal here would put one venue's
+  // measurements in every venue's prompt.
+  //
+  // FAILS OPEN to '': a venue with no measured profile gets the frame exactly
+  // as it read before this clause, never a number we invented for it.
+  const lengthClause = replyLengthClause(configRow.data?.brand_persona)
   // lib/ai/v2/venue-profile.ts renders this; it throws on a malformed row,
   // same as v1's buildRuntimeContext. The "section registry" named in
   // lib/relationship/CLAUDE.md does not exist in code yet, so this is a
@@ -533,6 +564,8 @@ export async function runTurn(input: RunTurnInput): Promise<TurnTrace> {
   const composed = composePrompt({
     venueName,
     speakerClause: '',
+    instagramClause,
+    lengthClause,
     venueProfile: sections.venueProfile,
     voicePack: sections.voicePack,
     knowledge: sections.knowledge,

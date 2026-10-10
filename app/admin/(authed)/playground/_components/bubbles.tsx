@@ -8,6 +8,7 @@ import type { TestDraft } from '@/lib/agent/handle-inbound'
 // the client bundle. The judge's axis list is declared locally for exactly the
 // opposite reason - judge.ts drags the AI SDK in. Check before copying this.
 import { V2_PROMPT_VERSION } from '@/lib/ai/v2/template'
+import { CopyButton } from '@/app/admin/_components/copy-button'
 import { replyBubblesOf } from '../_lib/history'
 import type { PlaygroundTurn } from '../_lib/types'
 
@@ -27,16 +28,30 @@ const VENUE_BUBBLE: React.CSSProperties = {
   color: '#FFFFFF',
 }
 
+// Copy sits BESIDE a bubble, never inside it and never on its own click.
+// The venue bubble is already a <button> that drives the inspector, so a
+// nested button would be invalid HTML, and making the bubble's own click copy
+// would clobber the clipboard every time someone clicks through turns to
+// inspect them. Outboard on the inside edge: left of the right-aligned venue
+// bubbles, right of the left-aligned guest ones, so it never covers text.
+const COPY_CHROME =
+  'shrink-0 opacity-0 transition-opacity focus-visible:opacity-100 group-hover/bubble:opacity-100'
+
 export function GuestBubbles({ texts }: { texts: string[] }) {
   return (
     <div className="flex flex-col items-start gap-0.5">
       {texts.map((text, i) => (
         <div
           key={i}
-          className="max-w-[75%] whitespace-pre-wrap break-words rounded-[18px] rounded-bl-[4px] px-3 py-1.5 text-[14px] leading-[1.3]"
-          style={GUEST_BUBBLE}
+          className="group/bubble flex max-w-[85%] items-center gap-1"
         >
-          {text}
+          <div
+            className="min-w-0 whitespace-pre-wrap break-words rounded-[18px] rounded-bl-[4px] px-3 py-1.5 text-[14px] leading-[1.3]"
+            style={GUEST_BUBBLE}
+          >
+            {text}
+          </div>
+          <CopyButton text={text} className={COPY_CHROME} />
         </div>
       ))}
     </div>
@@ -185,20 +200,25 @@ function RevealedReply({
   return (
     <div className="flex flex-col items-end gap-0.5">
       {bubbles.slice(0, revealed).map((text, i) => (
-        <button
+        <div
           key={i}
-          type="button"
-          onClick={onSelect}
-          aria-pressed={selected}
-          className={`max-w-[75%] cursor-pointer whitespace-pre-wrap break-words rounded-[18px] rounded-br-[4px] px-3 py-1.5 text-left text-[14px] leading-[1.3] ${
-            selected
-              ? 'ring-2 ring-clay/40 ring-offset-2 ring-offset-paper'
-              : ''
-          }`}
-          style={VENUE_BUBBLE}
+          className="group/bubble flex max-w-[85%] flex-row-reverse items-center gap-1"
         >
-          {text}
-        </button>
+          <button
+            type="button"
+            onClick={onSelect}
+            aria-pressed={selected}
+            className={`min-w-0 cursor-pointer whitespace-pre-wrap break-words rounded-[18px] rounded-br-[4px] px-3 py-1.5 text-left text-[14px] leading-[1.3] ${
+              selected
+                ? 'ring-2 ring-clay/40 ring-offset-2 ring-offset-paper'
+                : ''
+            }`}
+            style={VENUE_BUBBLE}
+          >
+            {text}
+          </button>
+          <CopyButton text={text} className={COPY_CHROME} />
+        </div>
       ))}
       {!done && <TypingDots />}
       {done && verdict && verdict !== 'send' && (
