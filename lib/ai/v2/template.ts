@@ -189,6 +189,42 @@
 // same day and reverted; `V2_GUEST_STATE` below has the two measurements that
 // killed it.
 //
+// v2.16.0 (owner-ruled 2026-10-09): `# Texting style` names the punctuation
+// set. Two sentences, owner-written:
+//
+//   Punctuation is commas, periods, question marks, and line breaks only.
+//   No colons, semicolons, em dashes, parentheses, or bullet points.
+//
+// ONE WORD IS NOT THE OWNER'S. The draft read "Punctuation:", which puts the
+// banned character inside the rule banning it; `voice-profile.ts` states the
+// principle ("the model echoes what it is shown") and this frame has honoured
+// it for the em dash since v2.6.0. "Punctuation is" is the whole change.
+//
+// THE OLD EM-DASH SENTENCE WAS REWRITTEN RATHER THAN KEPT. It read
+// `Never an em or en dash (— –): where one would land, end the sentence and
+// start a new one` - a colon and a parenthetical, i.e. two of the five things
+// the new line forbids, in the sentence immediately before it. The ban moves
+// into the new list and the surviving half keeps only the instruction
+// ("Where an em or en dash would land, end the sentence and start a new one"),
+// which is what replaceDashesWithPeriod needs to agree with.
+//
+// EN DASHES ARE NOT IN THE OWNER'S LIST and are still banned, by that
+// surviving clause. Do not read the list as the complete set.
+//
+// COLONS COLLIDE WITH HOURS, unresolved by this copy. Every venue stores
+// hours as a colon-bearing string ("7:00 AM - 3:00 PM" at Le Mil's, same
+// shape at all four venues), so "what time do you open" is the turn where the
+// model must choose between the ban and echoing its own data. "we open at 7"
+// is the better text anyway; this is flagged because nothing enforces either
+// answer and a time is the one colon a person does text.
+//
+// NO NORMALIZER, deliberately. The three strippers in normalize-output.ts all
+// act on tokens with a safe substitution; a colon has none - deleting one from
+// "7:30" changes a fact, and the v1 bracket check (parenthetical.ts) was ruled
+// on knowing it drops facts and is explicitly not a precedent (lib/ai/
+// CLAUDE.md). If the ban measures as weak, per-character strippers are the
+// wrong next step.
+//
 // v2.15.0 (owner-ruled 2026-10-09): `# Texting style` states how long this
 // venue's replies usually run, via a fourth placeholder, `{length_clause}`.
 // For Le Mil's it renders:
@@ -316,7 +352,7 @@
 // NULL), so a literal handle would put one venue's account in every venue's
 // prompt. Same reason `{venue_name}` stays a placeholder. It needs a
 // venue_info field first.
-export const V2_PROMPT_VERSION = 'v2.15.0-draft'
+export const V2_PROMPT_VERSION = 'v2.16.0-draft'
 
 /** Block 1: ROLE. Static across every venue bar the three placeholders. */
 export const V2_FRAME = `# Who you are
@@ -325,7 +361,7 @@ You are the virtual maitre d' of {venue_name}, not a service desk, and this is y
 You are a real presence of the house: its memory, its taste, its hospitality. You speak as the venue{speaker_clause}.
 
 # Texting style
-You write the way a person messages - short, warm, specific, never corporate. No emoji, ever.{length_clause} Never the phrase "full stop". Never an em or en dash (— –): where one would land, end the sentence and start a new one. You have opinions about the menu and you share them plainly. You are never salesy and never servile. Mimic how you sound section to tune your voice.
+You write the way a person messages - short, warm, specific, never corporate. No emoji, ever.{length_clause} Never the phrase "full stop". Punctuation is commas, periods, question marks, and line breaks only. No colons, semicolons, em dashes, parentheses, or bullet points. Where an em or en dash would land, end the sentence and start a new one. You have opinions about the menu and you share them plainly. You are never salesy and never servile. Mimic how you sound section to tune your voice.
 
 # Extra Notes
 Guests sometimes share a name with an AI assistant ("Claude", "Alexa"). It is still simply their name - never a reference to you.
