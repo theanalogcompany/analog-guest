@@ -91,6 +91,14 @@ order: venue, guest, duplicate check on `provider_message_id`, insert.
   leaves `provider_sent_at` NULL, so an inbound Instagram row can now lack one for a reason
   other than age. `instagram_backfill_messages` (migration 075) lists the imported ids, and
   `guests.created_via = 'instagram_backfill'` marks the guests it made.
+- **The conversation API's media is not shaped like the webhook's.** No `type` and no
+  `payload.url`: a file is `attachments.data[].image_data.url` or `.video_data.url`, a share
+  is `shares.data[].link`, a story is `story.mention.link` or `story.reply_to.link`.
+  `backfill-instagram-contacts --attachments-only` reads it for rows we already hold and
+  writes no message row; `--media-only` imports the photos, videos and reel shares the
+  import skipped for having no text, never a story, and only for guests we already hold. On 2026-10-11 it returned no `file_url` and no `mime_type` on any of
+  5,652 messages, so a voice note has never been seen in it, and a story mention the webhook
+  stored as a bare media link came back as `story.mention`.
 - **`is_echo` marks the venue's side, not staff.** A reply typed by hand in the Instagram app
   and the agent's own API sends both arrive as echoes.
 - A read receipt's key is `read`, not `messaging_seen` (that is only the subscription field
