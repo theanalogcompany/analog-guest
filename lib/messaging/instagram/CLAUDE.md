@@ -72,6 +72,14 @@ replies to (`message.reply_to.story`) is an attachment row of its own kind and i
 `video` nor `story_mention` has been seen in a real delivery; all three follow Meta's
 documentation, and `scripts/harness/inbound-attachments/` marks them.
 
+**A story mention is described and still never stored** (TAC-584). The agent's turn fetches
+the story once, through the same host allowlist and size cap re-host uses, shows it to a
+model, and drops the bytes; the row keeps `link_only`, no `storage_path`, and gains a text
+`description`. A story video sits in one temp file for the length of the ffmpeg call
+(`lib/messaging/attachments/frames.ts`). No real story link had been fetched by this code
+when it merged: three `story_mention` rows existed in production, all on
+`lookaside.fbsbx.com`, which the allowlist accepts.
+
 **A message with nothing to show is saved, not dropped.** `is_unsupported`, or attachments
 with no text and no link in any of them, is a `message` event with `unsupported: true` and a
 row with `unsupported_content`. It used to be `unhandled` and the guest heard nothing.

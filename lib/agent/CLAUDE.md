@@ -280,6 +280,32 @@ can't see it on our end", and two rewordings changed which false thing it said. 
 third. `media-context.ts` has the rule, the three places its wording was read wide, and why
 a failed read holds.
 
+**A photo, video, GIF or story mention is looked at before the turn drafts** (TAC-584).
+`describeTurnMedia` runs the describe step (`lib/messaging/attachments/describe.ts`) over the
+message being answered, or the media-only message beside it, and puts what it learned on
+`ctx.inboundDescribedMedia` and `ctx.inboundImages`. Then:
+
+- **A turn with no text gets a draft on its card** when its media was described
+  (`persistMediaOnlyDraft`), composed as `casual_chatter` with no classifier call, and shown
+  the picture. It is **always a card and no gate decides it**: the path writes the card
+  itself, as the blank card's path does, under `media_context`. `media_only_inbound` still
+  means an empty draft. Any failure there falls back to the blank card.
+- **A turn with text** is drafted and held as before; its `[guest also sent ...]` line carries
+  the description. The describe step is started before classification and awaited just before
+  generation, so the crisis short-circuit never waits on a vision call.
+- **Nothing is described** on a test run, for a message Meta could not hand us, or on an
+  opt-out turn's reply (the description is dropped: that reply always sends).
+- **A visit is recorded** when the media clearly shows the venue (`record-media-visit.ts`),
+  whatever becomes of the draft. `approximate`, one per guest per day, never a second row
+  beside a receipt or a self-report. A visit with no nameable drink does not close
+  `understand_order`.
+- **Which drinks a reply may name and which go on the visit are one function**
+  (`nameableItems`, `lib/schemas/attachment-description.ts`). Do not add a second reader that
+  decides it another way.
+
+The behavioural check for all of this is pre-registered on TAC-584 and had not been run when
+it merged: it needs test images from the owner (`scripts/measurement/media-describe.ts`).
+
 ## Venue status
 
 `isVenueProcessingHalted` from `lib/venues/status.ts` is the only behavioural reader of

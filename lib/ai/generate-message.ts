@@ -839,6 +839,9 @@ export async function generateMessage(
     // guest with a list or a definition in brackets is asked for once more;
     // whatever ships is cleaned after the loop. Off on a proactive generation.
     const checksParentheticals = input.runtime.inboundMessage != null
+    // TAC-584: the same images on every attempt. A regeneration is asked to
+    // rewrite a reply to the same picture.
+    const inboundImages = input.inboundImages ?? []
     let parentheticalAsked = false
     // The attempt that was asked about, and every attempt in order, so the
     // outcome can say whether what shipped came before or after the ask.
@@ -904,7 +907,23 @@ export async function generateMessage(
           },
           { role: 'system', content: volatileSystemBlock },
           ...historyTurns,
-          { role: 'user', content: userPromptForAttempt },
+          {
+            role: 'user',
+            // TAC-584: the guest's picture goes ahead of the prompt that
+            // says what to do about it. A turn with no picture sends the
+            // plain string it always sent.
+            content:
+              inboundImages.length > 0
+                ? [
+                    ...inboundImages.map((image) => ({
+                      type: 'image' as const,
+                      image: image.bytes,
+                      mediaType: image.mediaType,
+                    })),
+                    { type: 'text' as const, text: userPromptForAttempt },
+                  ]
+                : userPromptForAttempt,
+          },
         ],
         schema: GeneratedMessageSchema,
         maxOutputTokens: MAX_OUTPUT_TOKENS,

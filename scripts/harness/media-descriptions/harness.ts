@@ -29,6 +29,11 @@ import {
   isItemlessMediaVisit,
   planMediaVisit,
 } from '@/lib/agent/record-media-visit'
+import {
+  type TurnMediaRows,
+  mediaAlongsideText,
+  mediaMessageIdsForTurn,
+} from '@/lib/agent/inbound-media'
 import { buildMediaHistory } from '@/lib/agent/media-history'
 import type { InboundDescribedMedia } from '@/lib/ai/types'
 import {
@@ -248,6 +253,7 @@ function standIn(
       seen.notesLoads += 1
       return ['a note']
     },
+    loadVenueName: async () => 'Stand-in Cafe',
     describe: async () => {
       seen.describeCalls += 1
       return {
@@ -275,7 +281,7 @@ function standIn(
   return { deps, seen }
 }
 
-const VENUE = { id: 'venue-1', name: 'Stand-in Cafe', menuItemNames: MENU }
+const VENUE = { id: 'venue-1', menuItemNames: MENU }
 
 // The stand-ins never touch the client, so nothing is asked of it.
 const NO_CLIENT = null as unknown as Parameters<
@@ -1023,6 +1029,75 @@ function wordingChecks(): Check[] {
   return out
 }
 
+// --- lib/agent/inbound-media.ts: which messages a turn describes -------------
+
+function turnChecks(): Check[] {
+  const at = (seconds: number) => new Date(1_760_202_753_000 + seconds * 1000)
+  const PHOTO = 'https://lookaside.fbsbx.com/ig_messaging_cdn/?asset_id=1'
+  const text = {
+    id: 'text',
+    body: 'is this yours?',
+    mediaUrls: [],
+    createdAt: at(5),
+  }
+  const photo = { id: 'photo', body: '', mediaUrls: [PHOTO], createdAt: at(0) }
+  const rows = (
+    outbound: TurnMediaRows['outbound'] = [],
+    inbound: TurnMediaRows['inbound'] = [text, photo],
+  ): TurnMediaRows => ({ inbound, outbound })
+
+  const captioned = { ...text, mediaUrls: [PHOTO] }
+  return [
+    [
+      'turn: a message with its own media describes itself',
+      mediaMessageIdsForTurn(captioned, rows([], [captioned])).join() ===
+        'text',
+      mediaMessageIdsForTurn(captioned, rows([], [captioned])),
+    ],
+    [
+      'turn: text describes the unanswered photo beside it',
+      mediaMessageIdsForTurn(text, rows()).join() === 'photo',
+      mediaMessageIdsForTurn(text, rows()),
+    ],
+    [
+      'turn: a photo something was already sent after is not described again',
+      mediaMessageIdsForTurn(
+        text,
+        rows([{ replyToMessageId: null, createdAt: at(2) }]),
+      ).length === 0,
+      null,
+    ],
+    [
+      "turn: a photo outside the companion window is not this turn's",
+      mediaMessageIdsForTurn(
+        text,
+        rows([], [text, { ...photo, createdAt: at(-600) }]),
+      ).length === 0,
+      null,
+    ],
+    [
+      'turn: text with no media anywhere describes nothing',
+      mediaMessageIdsForTurn(text, rows([], [text])).length === 0,
+      null,
+    ],
+    [
+      'turn: what is described is exactly what the prompt mentions',
+      // The two readers share one rule. A turn that mentions media describes
+      // a message, and a turn that mentions none describes none.
+      [
+        rows(),
+        rows([{ replyToMessageId: null, createdAt: at(2) }]),
+        rows([], [text]),
+      ].every(
+        (r) =>
+          (mediaAlongsideText(text, r) !== null) ===
+          mediaMessageIdsForTurn(text, r).length > 0,
+      ),
+      null,
+    ],
+  ]
+}
+
 // --- lib/messaging/attachments/frames.ts: the pure half ----------------------
 
 const frameChecks: Check[] = [
@@ -1084,6 +1159,7 @@ async function main(): Promise<void> {
     ...ruleChecks,
     ...visitChecks(),
     ...wordingChecks(),
+    ...turnChecks(),
     ...frameChecks,
   ]
   let failed = 0

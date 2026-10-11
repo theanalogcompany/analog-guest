@@ -13,8 +13,9 @@
 //     also sent a photo. (Since the 2026-10-11 ruling that draft is held for
 //     an operator and never auto-sent: lib/agent/media-context.ts. Whether a
 //     reply is held is that file's question, not this one's.)
-//   - A blank card only for a turn with no text at all. The owner answers by
-//     hand.
+//   - A card only for a turn with no text at all. Blank, for the owner to
+//     answer by hand, until TAC-584: now it carries a draft when the media
+//     could be described, and is blank when it could not. Held either way.
 //   - The photo-last case must not fail.
 //
 // WHAT "THE TURN" MEANS HERE. Coalescing has no burst membership: a turn is
@@ -38,8 +39,13 @@
 //                exists to remove.
 //
 // WHAT THIS CANNOT DO.
-//   - It cannot see the media. No model looks at the image. (The operator app
-//     can be sent it since TAC-582, through the thread endpoints.)
+//   - It cannot see the media, and decides nothing from what is in it. Since
+//     TAC-584 a model does look at a photo, video, GIF or story mention
+//     (lib/messaging/attachments/describe.ts), and a media-only turn whose
+//     media was described gets a draft on its card instead of a blank one
+//     (persistMediaOnlyDraft in handle-inbound.ts). The three-way resolution
+//     below is unchanged by that: it still answers only "is this media a turn
+//     of its own", from the rows.
 //   - From the LINKS alone it cannot tell a photo from a GIF on Instagram:
 //     Meta's CDN links carry no file extension, so a message with no
 //     attachment row reads as 'unknown' and the agent is told "a photo or
@@ -287,8 +293,19 @@ export function mediaAlongsideText(
       attachmentKinds: self.attachmentKinds ?? current.attachmentKinds,
     })
   }
+  const beside = mediaOnlyMessageBeside(current, rows)
+  return beside === undefined ? null : mediaKindOf(beside)
+}
+
+// The media-only message this turn's text belongs with, by the loose rule
+// mediaAlongsideText's docstring gives: within the companion window on either
+// side, with nothing sent or queued after it. The newest, when there are two.
+function mediaOnlyMessageBeside(
+  current: Pick<TurnInboundRow, 'id' | 'createdAt'>,
+  rows: TurnMediaRows,
+): TurnInboundRow | undefined {
   const currentMs = current.createdAt.getTime()
-  const beside = rows.inbound
+  return rows.inbound
     .filter(
       (row) =>
         row.id !== current.id &&
@@ -302,7 +319,25 @@ export function mediaAlongsideText(
         ),
     )
     .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())[0]
-  return beside === undefined ? null : mediaKindOf(beside)
+}
+
+/**
+ * TAC-584: the messages whose attachments this turn is answering, which is
+ * what the describe step is run over. Pure.
+ *
+ * The same two sources mediaAlongsideText reads, by the same rule, so the
+ * media the prompt mentions and the media that gets described are one set:
+ * the answered message itself when it carries media, otherwise the media-only
+ * message beside it. A turn with neither returns nothing, and nothing is
+ * described.
+ */
+export function mediaMessageIdsForTurn(
+  current: Pick<TurnInboundRow, 'id' | 'mediaUrls' | 'createdAt'>,
+  rows: TurnMediaRows,
+): string[] {
+  if (current.mediaUrls.length > 0) return [current.id]
+  const beside = mediaOnlyMessageBeside(current, rows)
+  return beside === undefined ? [] : [beside.id]
 }
 
 /**

@@ -201,6 +201,8 @@ export type DescribeDeps = {
     isVideo: boolean,
   ) => Promise<FramesResult>
   loadAppearanceNotes: (venueId: string) => Promise<string[]>
+  /** The venue's own name, so its sign or its cup can be recognised. */
+  loadVenueName: (venueId: string) => Promise<string | null>
   describe: (
     input: DescribeAttachmentInput,
   ) => Promise<AIResult<DescribeAttachmentResult>>
@@ -280,6 +282,15 @@ function defaultDeps(supabase: AdminSupabaseClient): DescribeDeps {
       }
       return notes.data
     },
+    async loadVenueName(venueId) {
+      const { data, error } = await supabase
+        .from('venues')
+        .select('name')
+        .eq('id', venueId)
+        .maybeSingle()
+      // Unread, the call runs without it: the notes are what name a drink.
+      return error || data === null ? null : data.name
+    },
     describe: describeAttachment,
     async save(attachmentId, description, meta) {
       const { error } = await supabase
@@ -301,7 +312,7 @@ function defaultDeps(supabase: AdminSupabaseClient): DescribeDeps {
 export type DescribeMessageAttachmentsInput = {
   /** The message the turn answers, and any media-only message paired with it. */
   messageIds: readonly string[]
-  venue: { id: string; name: string | null; menuItemNames: readonly string[] }
+  venue: { id: string; menuItemNames: readonly string[] }
   guestId: string
   trace?: AgentTrace
   deps?: Partial<DescribeDeps>
@@ -377,7 +388,8 @@ export async function describeMessageAttachments(
     }
 
     const results: DescribedAttachment[] = []
-    let notes: string[] | null = null
+    // Read once, and only when something is about to be described.
+    let venue: { notes: string[]; name: string | null } | null = null
     let described = 0
     for (const target of targets) {
       const plan = planDescribe(target)
@@ -431,19 +443,25 @@ export async function describeMessageAttachments(
         continue
       }
 
-      notes ??= await deps.loadAppearanceNotes(input.venue.id)
+      if (venue === null) {
+        const [notes, name] = await Promise.all([
+          deps.loadAppearanceNotes(input.venue.id),
+          deps.loadVenueName(input.venue.id),
+        ])
+        venue = { notes, name }
+      }
       const span = input.trace?.generation('describe_attachment', {
         attachmentId: target.id,
         kind: mediaKind,
         frames: framed.frames.length,
-        appearanceNotes: notes.length,
+        appearanceNotes: venue.notes.length,
       })
       const call = await deps.describe({
         frames: framed.frames,
         kind: mediaKind,
-        venueName: input.venue.name,
+        venueName: venue.name,
         menuItemNames: input.venue.menuItemNames,
-        appearanceNotes: notes,
+        appearanceNotes: venue.notes,
       })
       if (!call.ok) {
         span?.end({ level: 'ERROR', statusMessage: call.error })

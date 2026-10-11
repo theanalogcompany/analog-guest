@@ -10,6 +10,15 @@
 // for an operator, never auto-sent, whenever media is part of what it is
 // answering.
 //
+// TAC-584: THE AGENT CAN NOW BE TOLD WHAT A PHOTO SHOWS, AND THE HOLD STAYS.
+// A described attachment's line carries its description, and on the turn that
+// answers it the model is shown the picture. The owner's ruling on that ticket
+// is the same one: every media reply is held, at first. So this rule is
+// unchanged, and handle-inbound also sets the flag directly on any turn it
+// described media for, so the hold does not depend on this rule and the
+// describe step continuing to pick out the same turns. A turn with no text
+// never reaches this rule at all: its card is written by its own path.
+//
 // THE RULE, as ruled. Hold when either:
 //   (a) the inbound being answered has text AND attachments, or
 //   (b) it is text, and the guest's most recent earlier inbound was media-only

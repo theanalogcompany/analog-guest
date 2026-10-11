@@ -657,6 +657,13 @@ export type GenerateMessageInput = {
   // unknown and gets the Instagram wording, which is false on neither channel.
   // Set from RuntimeContext.conversationChannel (lib/agent) by both callers.
   channel: MessageChannel | null
+  // TAC-584: the guest's picture, shown to the model on the turn that answers
+  // it. The first image content any call in this repo sends. Present only
+  // when the describe step looked at the media THIS run and could make it
+  // out; `runtime.inboundDescribedMedia` carries the rules for replying to it.
+  // Never part of the system or user prompt strings, so it is in no trace and
+  // no recorded prompt: for a story these bytes are held nowhere else.
+  inboundImages?: InboundImage[]
 }
 
 // TAC-296: agent-emitted patch for guests.context, threaded onto every

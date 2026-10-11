@@ -1113,6 +1113,9 @@ export async function generateStage(
     // TAC-495: picks the channel copy. Every path that generates goes through
     // here or the Voices regen, which passes the same field.
     channel: ctx.conversationChannel,
+    // TAC-584: the picture this turn answers, when the describe step made
+    // one this run. Undefined on every other turn.
+    inboundImages: ctx.inboundImages,
   })
   if (!r.ok) return { status: 'failed', error: r.error, errorCode: r.errorCode }
 

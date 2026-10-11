@@ -13,6 +13,9 @@ import {
   captureReviewAskSent,
 } from '@/lib/analytics/posthog'
 import { createAdminClient } from '@/lib/db/admin'
+import type { InboundDescribedMedia, InboundImage } from '@/lib/ai/types'
+import { describeMessageAttachments } from '@/lib/messaging/attachments/describe'
+import { nameableItems } from '@/lib/schemas/attachment-description'
 import { isEmptyContextUpdate, updateGuestContext } from '@/lib/guests/context'
 import {
   clearOptOut,
@@ -25,7 +28,11 @@ import {
   sendDraftFlaggedPush,
   shouldSendDraftFlaggedPush,
 } from '@/lib/notifications/send'
-import { startAgentTrace, toAgentUsage } from '@/lib/observability'
+import {
+  type AgentTrace,
+  startAgentTrace,
+  toAgentUsage,
+} from '@/lib/observability'
 import { resolveCancellation } from '@/lib/schemas/guest-commitment'
 import { parseMessageChannel } from '@/lib/schemas/message-channel'
 import { capturePostHogEvent, fireRedAlert } from './alerts'
@@ -58,12 +65,14 @@ import {
   recordedOrderForThisVisit,
 } from './extract-reported-order'
 import { retractReportedVisits } from './retract-reported-visit'
+import { recordMediaVisit } from './record-media-visit'
 import {
   MEDIA_ONLY_SETTLE_MS,
   MEDIA_ONLY_SETTLE_POLL_MS,
   isMediaOnly,
   loadTurnMediaRows,
   mediaAlongsideText,
+  mediaMessageIdsForTurn,
   repliesToStory,
   resolveMediaOnlyTurn,
 } from './inbound-media'
@@ -123,6 +132,7 @@ import {
   KNOWLEDGE_GAP_WINDOW_MS,
   mayAutoSendAfterClassification,
   retrieveCorpusStage,
+  retrieveKnowledgeStage,
   retrieveKnowledgeWithContextStage,
   shouldRetrieveKnowledge,
 } from './stages'
@@ -565,6 +575,284 @@ async function persistMediaOnlyCard(
       category: 'unknown',
       inboundBody: null,
       generatedBody: '',
+    })
+    pushOperatorCard(ctx, persisted.outboundMessageId, reviewReason)
+    return {
+      status: 'queued',
+      outboundMessageId: persisted.outboundMessageId,
+      triggers: [reviewReason],
+      primaryTrigger: reviewReason,
+    }
+  } catch (e) {
+    // persistOrRegenQueuedDraft already fired a red alert.
+    return {
+      status: 'failed',
+      stage: 'persist',
+      error: e instanceof Error ? e.message : String(e),
+    }
+  }
+}
+
+/**
+ * The most images the generator is shown on one turn. A video is four frames,
+ * so this is two clips, or a clip and four photos.
+ */
+const MAX_INBOUND_IMAGES = 8
+
+/**
+ * What a media-only draft is composed as. Nothing was classified (there are
+ * no words to classify), and `composePrompt` needs a category for its
+ * instructions. A photo with no text is small talk, not a question, a
+ * complaint or a request. An EXISTING category on purpose: a new one would be
+ * a migration on `messages`.
+ *
+ * The card's own `category` stays null, as on the blank card: this is what
+ * the prompt was composed as, not a claim that anything classified the turn.
+ */
+const MEDIA_ONLY_DRAFT_CATEGORY = 'casual_chatter' as const
+
+/**
+ * TAC-584: look at what the guest sent on this turn, before anything is
+ * drafted, and put what was learned on the context.
+ *
+ * AWAITED, because a draft written from a description needs it to exist. The
+ * describe step waits for re-host and makes one vision call per attachment
+ * (lib/messaging/attachments/describe.ts has the rules and the limits), so
+ * this adds seconds to a turn. Every turn it runs on ends as a held card, so
+ * the guest is not waiting on it.
+ *
+ * WHAT IT SETS.
+ *   ctx.inboundDescribedMedia  one entry per attachment the model looked at:
+ *                              what it shows (null when too unclear) and the
+ *                              drinks a reply may name.
+ *   ctx.inboundImages          the pictures themselves, for the generator, in
+ *                              memory only. None for an unclear one: with
+ *                              nothing reliable to say about it, the model is
+ *                              given nothing to guess from.
+ * Both are left unset when nothing was described, and the turn then runs
+ * exactly as it did before descriptions existed.
+ *
+ * THE VISIT IS RECORDED HERE, whatever becomes of the draft: a story that
+ * shows the venue is evidence the guest was there even if generation fails a
+ * moment later. In waitUntil, because nothing downstream reads it this turn.
+ *
+ * Never throws: describeMessageAttachments and recordMediaVisit both return
+ * on every path.
+ */
+async function describeTurnMedia(
+  ctx: RuntimeContext,
+  messageIds: readonly string[],
+  trace: AgentTrace,
+): Promise<void> {
+  const menuItems = ctx.venue.venueInfo.menu.items
+  const menuItemNames = menuItems.map((item) => item.name)
+  const described = await describeMessageAttachments(createAdminClient(), {
+    messageIds,
+    venue: { id: ctx.venue.id, menuItemNames },
+    guestId: ctx.guest.id,
+    trace,
+  })
+
+  const media: InboundDescribedMedia[] = []
+  const images: InboundImage[] = []
+  for (const item of described) {
+    if (item.meta === null || item.meta.outcome !== 'described') continue
+    const clear = item.meta.legibility === 'clear' && item.description !== null
+    media.push({
+      word: item.mediaKind,
+      description: clear ? item.description : null,
+      nameableItems: clear ? nameableItems(item.meta, menuItemNames) : [],
+    })
+    if (clear) images.push(...item.frames)
+  }
+  if (media.length > 0) {
+    ctx.inboundDescribedMedia = media
+    ctx.inboundImages = images.slice(0, MAX_INBOUND_IMAGES)
+  }
+  console.log('[agent] inbound media described', {
+    agentRunId: ctx.agentRunId,
+    attachments: described.length,
+    described: media.length,
+    unclear: media.filter((m) => m.description === null).length,
+    images: Math.min(images.length, MAX_INBOUND_IMAGES),
+  })
+
+  // One visit per message, keyed to it (record-media-visit.ts).
+  const receivedAt = ctx.currentMessage?.receivedAt ?? ctx.now
+  for (const messageId of new Set(described.map((item) => item.messageId))) {
+    waitUntil(
+      recordMediaVisit({
+        venue: {
+          id: ctx.venue.id,
+          timezone: ctx.venue.timezone,
+          menuItems,
+        },
+        guestId: ctx.guest.id,
+        messageId,
+        receivedAt,
+        evidence: described
+          .filter((item) => item.messageId === messageId)
+          .map((item) => ({
+            attachmentId: item.attachmentId,
+            meta: item.meta,
+          })),
+      }).then((outcome) => {
+        if (outcome.kind === 'no_evidence') return
+        const log = outcome.kind === 'failed' ? console.warn : console.log
+        log('[agent] media visit', {
+          agentRunId: ctx.agentRunId,
+          guestId: ctx.guest.id,
+          messageId,
+          ...outcome,
+        })
+      }),
+    )
+  }
+}
+
+/**
+ * TAC-584: a turn with media and no text, whose media was described, gets a
+ * DRAFT on its card instead of a blank one.
+ *
+ * ALWAYS A CARD, AND NO GATE DECIDES IT. Every media reply is held for an
+ * operator (owner ruling 2026-10-11, restated on TAC-584). The turns that
+ * have text reach that through the approval gate's `media_context` trigger.
+ * This one does not go through the gate at all: like persistMediaOnlyCard
+ * beside it, the path writes the card itself, so there is no branch on which
+ * this reply is sent. `media_context` is the reason on the card because it is
+ * the reason that is true of it, and because `media_only_inbound` means "an
+ * empty draft" to the operator app, which this is not.
+ *
+ * WHY IT IS NOT THE MAIN PIPELINE WITH A PRETEND CLASSIFICATION. Everything
+ * between classification and dispatch reads the guest's words or the category
+ * a classifier gave them: the opt-out rule, the pure-close silence, order
+ * capture, the visit check-in, the four post-generation checks, the pending
+ * question. None of it has anything to read here, and a made-up category
+ * would be read by all of it as real.
+ *
+ * WHAT IS DELIBERATELY OFF for this draft:
+ *   - the getting-to-know-you question and the review invitation. Recording
+ *     that one was asked is the main path's job, and a question asked and not
+ *     recorded is asked again.
+ *   - knowledge retrieval, unless the picture unmistakably shows a drink, in
+ *     which case that drink's name is the query. With no name there is
+ *     nothing to search for and the knowledge block is left out.
+ *
+ * ANY FAILURE FALLS BACK TO THE BLANK CARD, which is what this turn was
+ * before: the voice pack would not load, generation failed twice. The guest
+ * sent something and a human must still see it.
+ *
+ * Never throws.
+ */
+async function persistMediaOnlyDraft(
+  ctx: RuntimeContext,
+  agentRunId: string,
+  trace: AgentTrace,
+): Promise<AgentResult> {
+  const blankInstead = (why: string, error?: string): Promise<AgentResult> => {
+    console.warn('[agent] media-only draft not written; blank card instead', {
+      agentRunId,
+      why,
+      error,
+    })
+    return persistMediaOnlyCard(ctx, agentRunId, MEDIA_ONLY_REVIEW_REASON)
+  }
+
+  try {
+    ctx.corpus = await retrieveCorpusStage(ctx)
+  } catch (e) {
+    return blankInstead(
+      'voice_pack',
+      e instanceof Error ? e.message : String(e),
+    )
+  }
+
+  const named = [
+    ...new Set(
+      (ctx.inboundDescribedMedia ?? []).flatMap((m) => m.nameableItems),
+    ),
+  ]
+  ctx.knowledgeCorpus =
+    named.length > 0
+      ? await retrieveKnowledgeStage(
+          ctx,
+          MEDIA_ONLY_DRAFT_CATEGORY,
+          named.join(', '),
+        )
+      : null
+  ctx.openIntentions = []
+  ctx.reviewAsk = null
+  ctx.mediaContext = true
+
+  const generateSpan = trace.generation('generate', {
+    category: MEDIA_ONLY_DRAFT_CATEGORY,
+    mediaOnly: true,
+    images: ctx.inboundImages?.length ?? 0,
+  })
+  let gen = await generateStage(ctx, MEDIA_ONLY_DRAFT_CATEGORY)
+  // One retry, and none on truncation, as on the main path.
+  if (gen.status === 'failed' && gen.errorCode !== AI_ERROR_TRUNCATED) {
+    gen = await generateStage(ctx, MEDIA_ONLY_DRAFT_CATEGORY)
+  }
+  if (gen.status === 'failed') {
+    generateSpan.end({ level: 'ERROR', statusMessage: gen.error })
+    return blankInstead('generation', gen.error)
+  }
+  generateSpan.end({
+    output: {
+      attempts: gen.result.attempts,
+      promptVersion: gen.result.promptVersion,
+      cacheReadTokens: gen.result.cacheReadTokens,
+      cacheWriteTokens: gen.result.cacheWriteTokens,
+      bodyLength: gen.result.body.length,
+    },
+    // The prompts are strings and the picture is not in them, so this content
+    // never carries an image, whatever the capture setting.
+    content: trace.captureContent
+      ? buildGenerateContent(gen.result)
+      : undefined,
+    model: gen.result.modelId,
+    usage: toAgentUsage(gen.result.usage ?? {}),
+  })
+
+  const reviewReason = APPROVAL_TRIGGERS.MEDIA_CONTEXT
+  try {
+    const persisted = await persistOrRegenQueuedDraft(
+      ctx,
+      gen.result,
+      reviewReason,
+      null,
+      { conversationDisposition: 'own_card', reviewTriggers: [reviewReason] },
+    )
+    if (persisted.outboundMessageId === null) {
+      // Unreachable: `own_card` never silences. Handled as the blank card
+      // handles it.
+      return {
+        status: 'failed',
+        stage: 'persist',
+        error: 'media-only draft came back with no id',
+      }
+    }
+    console.log('[agent] media-only inbound drafted and held', {
+      agentRunId,
+      outboundMessageId: persisted.outboundMessageId,
+    })
+    await captureDraftQueued({
+      agentRunId,
+      venueId: ctx.venue.id,
+      guestId: ctx.guest.id,
+      triggers: [reviewReason],
+      primaryTrigger: reviewReason,
+      modelRequiresApproval: gen.result.requiresOperatorApproval,
+      modelApprovalReason: gen.result.approvalReason,
+      compRegexMatchedPattern: null,
+      hasPreviousPending: false,
+      slot: 'conversation',
+      otherSlotOccupied: false,
+      kind: 'inbound',
+      category: MEDIA_ONLY_DRAFT_CATEGORY,
+      inboundBody: null,
+      generatedBody: gen.result.body,
     })
     pushOperatorCard(ctx, persisted.outboundMessageId, reviewReason)
     return {
@@ -1800,9 +2088,63 @@ async function runInboundTurn(
       return { status: 'failed', stage: 'context_build', error: errMsg }
     }
 
-    // TAC-574: no text anywhere in this turn, so there is nothing to classify
-    // and nothing to generate. The owner gets a blank card. Before retrieval
-    // and classification, so neither runs on an empty body.
+    // A failed read costs the acknowledgement, never the reply.
+    const mediaRows = await turnMediaRows
+
+    let describingMedia: Promise<void> | null = null
+    // TAC-584: look at what the guest sent, before anything is drafted.
+    // Here, after the context is built (the describe step needs the venue's
+    // menu) and before the media-only branch below, which is where a
+    // description turns a blank card into a draft.
+    //
+    // WHICH MESSAGES. A turn with no text is answering its own media. A turn
+    // with text is answering the media on that message or the media-only
+    // message beside it, by the rule the `[guest also sent ...]` line uses
+    // (mediaMessageIdsForTurn), so what is described and what the prompt
+    // mentions are one set. When the rows could not be read the turn's own
+    // message is still described if it carries media.
+    //
+    // NOT ON A TEST RUN, which writes nothing and makes no call it does not
+    // report: a playground replay of a photo behaves as it did. NOT FOR A
+    // MESSAGE META COULD NOT HAND US, which has nothing to look at.
+    if (!testRun && !inbound.unsupported) {
+      const self = {
+        id: inbound.message.id,
+        mediaUrls: inbound.mediaUrls,
+        createdAt: inbound.message.receivedAt,
+      }
+      const describeIds = mediaOnlyTurn
+        ? [inbound.message.id]
+        : mediaRows.ok
+          ? mediaMessageIdsForTurn(self, mediaRows.data)
+          : inbound.mediaUrls.length > 0
+            ? [inbound.message.id]
+            : []
+      if (describeIds.length > 0) {
+        describingMedia = describeTurnMedia(ctx, describeIds, trace)
+        if (mediaOnlyTurn) {
+          await describingMedia
+        } else {
+          // A turn with text does NOT wait here. Classification and the
+          // crisis short-circuit come next, and the describe step is seconds
+          // long: a guest in crisis who attached a photo must not wait on a
+          // vision call for a reply that never reads it. It is awaited just
+          // before generation, the first thing that does. waitUntil keeps it
+          // alive on the paths that return before then, so the visit is still
+          // recorded; it never rejects.
+          waitUntil(describingMedia)
+        }
+      }
+    }
+
+    // TAC-574: no text anywhere in this turn, so there is nothing to
+    // classify. Before retrieval and classification, so neither runs on an
+    // empty body.
+    //
+    // TAC-584: when the describe step looked at the media, the card carries a
+    // draft that answers it (persistMediaOnlyDraft). Otherwise the owner gets
+    // the blank card, exactly as before: nothing was described, the describe
+    // step failed, or the message is one Meta could not hand us.
     if (mediaOnlyTurn) {
       // A test run writes no card. It reports that v1 would have answered
       // with a blank card and no text, which is a real answer and a different
@@ -1811,17 +2153,18 @@ async function runInboundTurn(
         testSink.draft = emptyTestDraft(ctx, 'media_only_card')
         return { status: 'refused', reason: 'test_run' }
       }
-      const carded = await persistMediaOnlyCard(
-        ctx,
-        agentRunId,
-        blankCardReason,
-      )
-      trace.update({ output: { status: carded.status, mediaOnly: true } })
+      const drafted =
+        blankCardReason === MEDIA_ONLY_REVIEW_REASON &&
+        (ctx.inboundDescribedMedia?.length ?? 0) > 0
+      const carded = drafted
+        ? await persistMediaOnlyDraft(ctx, agentRunId, trace)
+        : await persistMediaOnlyCard(ctx, agentRunId, blankCardReason)
+      trace.update({
+        output: { status: carded.status, mediaOnly: true, drafted },
+      })
       return carded
     }
     // A turn with text: tell the agent what arrived beside it, if anything.
-    // A failed read costs the acknowledgement, never the reply.
-    const mediaRows = await turnMediaRows
     if (mediaRows.ok) {
       ctx.inboundMedia = mediaAlongsideText(
         {
@@ -2785,6 +3128,30 @@ async function runInboundTurn(
       })
     } else {
       ctx.knowledgeCorpus = []
+    }
+
+    // TAC-584: the describe step started before classification is awaited
+    // HERE, the last point before a prompt is built from what it learned.
+    //
+    // A reply written with a description of the guest's media, or the picture
+    // itself, is held whatever decideMediaContextHold made of the thread.
+    // Every case that reaches here already holds by that rule (the media is
+    // on this message, or is unanswered beside it); this states the guarantee
+    // where the description is, so it does not depend on the two rules
+    // continuing to agree.
+    //
+    // EXCEPT ON AN OPT-OUT TURN, which is the one category the hold exempts
+    // (a compliance reply always sends). That reply is not written about the
+    // picture, so it is not given one: the description and the image are
+    // dropped and the turn's prompt is the one it has always had.
+    if (describingMedia !== null) {
+      await describingMedia
+      if (ctx.classification.category === 'opt_out') {
+        ctx.inboundDescribedMedia = undefined
+        ctx.inboundImages = undefined
+      } else if ((ctx.inboundDescribedMedia?.length ?? 0) > 0) {
+        ctx.mediaContext = true
+      }
     }
 
     // Generate
