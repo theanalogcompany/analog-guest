@@ -7,6 +7,13 @@
 //   npm run backfill-instagram-contacts -- --venue <slug> --confirm
 //   npm run backfill-instagram-contacts -- --venue <slug> --rollback --dry-run
 //   npm run backfill-instagram-contacts -- --venue <slug> --rollback --confirm
+//   npm run backfill-instagram-contacts -- --venue <slug> --attachments-only --dry-run
+//   npm run backfill-instagram-contacts -- --venue <slug> --attachments-only --confirm [--limit <n>]
+//
+// --attachments-only (TAC-582) IS A DIFFERENT RUN, described above
+// runAttachmentsOnly: it writes `message_attachments` rows for messages we
+// already hold and never a guest or a message. Everything from here to the
+// imports is about the import itself.
 //
 // WHAT IT WRITES, and nothing else:
 //
@@ -66,6 +73,11 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 
 import type { Database } from '@/db/types'
 import { createAdminClient } from '@/lib/db/admin'
+import { rehostAttachment } from '@/lib/messaging/attachments/rehost'
+import {
+  insertMessageAttachments,
+  loadPendingAttachmentsForMessage,
+} from '@/lib/messaging/attachments/store'
 import { resolveInstagramAccessToken } from '@/lib/messaging/instagram/credentials-store'
 import {
   fetchConversationPage,
@@ -73,6 +85,7 @@ import {
   isGraphRateLimited,
   type ConversationMessage,
   type ConversationPage,
+  type InstagramConversation,
 } from '@/lib/messaging/instagram/fetch-conversations'
 import {
   isTokenRejected,
@@ -83,11 +96,17 @@ import { fetchConnectedAccount } from '@/lib/messaging/instagram/oauth-exchange'
 import { GUEST_STATES } from '@/lib/recognition/types'
 import { parseFollowupRules } from '@/lib/schemas'
 import {
+  controlCheck,
+  createAttachmentsPlanner,
+  type StoredInstagramRow,
+} from './lib/backfill-instagram-attachments'
+import {
   INSTAGRAM_BACKFILL_CREATED_VIA,
   backfillArgsError,
   emptyConversationSkips,
   emptyMessageSkips,
   identifierChecks,
+  messageDirection,
   parseBackfillArgs,
   perkUnlockCouldFire,
   planConversation,
@@ -116,7 +135,7 @@ const ID_CHUNK = 10
 const ROW_PAGE = 1000
 
 const USAGE =
-  'usage: npm run backfill-instagram-contacts -- --venue <slug> (--dry-run | --confirm) [--rollback [--include-guests-with-live-messages]]'
+  'usage: npm run backfill-instagram-contacts -- --venue <slug> (--dry-run | --confirm) [--rollback [--include-guests-with-live-messages] | --attachments-only [--limit <n>]]'
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
@@ -316,6 +335,81 @@ async function loadStoredByMid(
   return stored
 }
 
+/**
+ * Every page of the token's conversations, in Meta's order. A Graph failure
+ * that survives callGraph's retries stops the run: a partial read would print
+ * counts that look like the whole account.
+ */
+async function* conversationPages(
+  token: string,
+  withMedia: boolean,
+): AsyncGenerator<ConversationPage> {
+  const cursorsSeen = new Set<string>()
+  let cursor: string | null = null
+  for (;;) {
+    const after: string | null = cursor
+    const page: GraphResult<ConversationPage> = await callGraph(() =>
+      fetchConversationPage(token, fetch, after, withMedia),
+    )
+    if (!page.ok)
+      die(
+        `could not list conversations: ${describeFailure(page.failure)}. Nothing was written by this pass; run it again.`,
+      )
+    yield page.value
+
+    cursor = page.value.nextCursor
+    if (cursor === null) return
+    if (cursorsSeen.has(cursor))
+      die(
+        'Meta returned the same paging cursor twice. Stopping rather than loop; nothing was written by this pass.',
+      )
+    cursorsSeen.add(cursor)
+  }
+}
+
+/**
+ * A conversation's messages, with each one Meta listed as a bare id fetched
+ * on its own. A message Meta refuses by id comes back as it was listed, still
+ * `needsDetail`: that is its documented answer for one past a conversation's
+ * newest 20, and the only per-message outcome there is.
+ */
+async function withDetails(
+  conversation: InstagramConversation,
+  token: string,
+  withMedia: boolean,
+  onFetch: () => void,
+): Promise<ConversationMessage[]> {
+  const messages: ConversationMessage[] = []
+  for (const message of conversation.messages) {
+    if (!message.needsDetail) {
+      messages.push(message)
+      continue
+    }
+    onFetch()
+    const detail = await callGraph(() =>
+      fetchMessageDetail(message.id, token, fetch, withMedia),
+    )
+    if (detail.ok) {
+      messages.push(detail.value)
+      continue
+    }
+    // Only Meta refusing THIS message is a per-message outcome. A dead
+    // socket, a throttle that outlasted the backoff or a rejected token
+    // would land every remaining message in the same bucket and the run
+    // would print a short read as a complete one.
+    const refusedThisMessage =
+      detail.failure.reason === 'graph_error' &&
+      !isGraphRateLimited(detail.failure) &&
+      !isTokenRejected(detail.failure)
+    if (!refusedThisMessage)
+      die(
+        `could not read a message: ${describeFailure(detail.failure)}. Nothing was written by this pass; run it again.`,
+      )
+    messages.push(message)
+  }
+  return messages
+}
+
 type PlannedConversation = {
   /** The guest's Instagram-scoped id. Held in memory, never printed. */
   igsid: string
@@ -383,25 +477,14 @@ async function collect(
     directionDisagreed: 0,
   }
 
-  const cursorsSeen = new Set<string>()
-  let cursor: string | null = null
-  for (;;) {
-    const after: string | null = cursor
-    const page: GraphResult<ConversationPage> = await callGraph(() =>
-      fetchConversationPage(token, fetch, after),
-    )
-    if (!page.ok)
-      die(
-        `could not list conversations: ${describeFailure(page.failure)}. Nothing was written by this pass; run it again.`,
-      )
-
+  for await (const page of conversationPages(token, false)) {
     // Meta's own count of what the page held, so a conversation the parser
     // could not read is a counted skip rather than one that was never seen.
-    out.conversationsSeen += page.value.rawCount
+    out.conversationsSeen += page.rawCount
     out.conversationSkips.unreadable +=
-      page.value.rawCount - page.value.conversations.length
+      page.rawCount - page.conversations.length
 
-    for (const conversation of page.value.conversations) {
+    for (const conversation of page.conversations) {
       if (conversation.unreadableParticipants > 0) {
         out.conversationSkips.unreadable += 1
         continue
@@ -420,34 +503,9 @@ async function collect(
         conversation.messages.length + conversation.unreadableMessages
       out.messageSkips.unreadable += conversation.unreadableMessages
 
-      const messages: ConversationMessage[] = []
-      for (const message of conversation.messages) {
-        if (!message.needsDetail) {
-          messages.push(message)
-          continue
-        }
+      const messages = await withDetails(conversation, token, false, () => {
         out.detailFetches += 1
-        const detail = await callGraph(() =>
-          fetchMessageDetail(message.id, token, fetch),
-        )
-        if (detail.ok) {
-          messages.push(detail.value)
-          continue
-        }
-        // Only Meta refusing THIS message is a per-message outcome. A dead
-        // socket, a throttle that outlasted the backoff or a rejected token
-        // would land every remaining message in the same bucket and the run
-        // would print a short import as a complete one.
-        const refusedThisMessage =
-          detail.failure.reason === 'graph_error' &&
-          !isGraphRateLimited(detail.failure) &&
-          !isTokenRejected(detail.failure)
-        if (!refusedThisMessage)
-          die(
-            `could not read a message: ${describeFailure(detail.failure)}. Nothing was written by this pass; run it again.`,
-          )
-        messages.push(message)
-      }
+      })
 
       const { data: guestRow, error: guestError } = await supabase
         .from('guests')
@@ -519,14 +577,6 @@ async function collect(
         plan,
       })
     }
-
-    cursor = page.value.nextCursor
-    if (cursor === null) break
-    if (cursorsSeen.has(cursor))
-      die(
-        'Meta returned the same paging cursor twice. Stopping rather than loop; nothing was written by this pass.',
-      )
-    cursorsSeen.add(cursor)
   }
   return out
 }
@@ -735,17 +785,17 @@ async function perkUnlockPreflight(
   return couldFire
 }
 
-async function runImport(
+/**
+ * The venue's token, and proof that it is this venue's: the one mistake that
+ * would read another account's conversations as this venue's.
+ */
+async function resolveVenueToken(
   supabase: AdminSupabaseClient,
   venue: Venue,
-  args: BackfillArgs,
-): Promise<void> {
-  const mode = args.confirm ? 'CONFIRM' : 'DRY RUN'
-  const runId = randomUUID()
-  console.log(
-    `Instagram history import | venue=${venue.slug} | ${mode} | run=${runId}`,
-  )
-
+): Promise<{
+  token: string
+  account: { userId: string; username: string | null }
+}> {
   const resolved = await resolveInstagramAccessToken(supabase, venue.id)
   if (!resolved.ok)
     die(`could not resolve the venue's token: ${resolved.error}`)
@@ -770,6 +820,21 @@ async function runImport(
       "the token belongs to a different Instagram account than venues.instagram_account_id. Refusing: its conversations are not this venue's.",
     )
   console.log("    belongs to the venue's Instagram account: yes")
+  return { token, account: account.value }
+}
+
+async function runImport(
+  supabase: AdminSupabaseClient,
+  venue: Venue,
+  args: BackfillArgs,
+): Promise<void> {
+  const mode = args.confirm ? 'CONFIRM' : 'DRY RUN'
+  const runId = randomUUID()
+  console.log(
+    `Instagram history import | venue=${venue.slug} | ${mode} | run=${runId}`,
+  )
+
+  const { token, account } = await resolveVenueToken(supabase, venue)
 
   const ledger = await ledgerAvailable(supabase)
   if (!ledger.available) {
@@ -816,7 +881,7 @@ async function runImport(
     supabase,
     venue,
     token,
-    account.value,
+    account,
     ledger.available,
     new Date(),
   )
@@ -1113,6 +1178,393 @@ async function runRollback(
   console.log('\n✓ ROLLBACK: done.')
 }
 
+/**
+ * Every Instagram row this venue holds under one of Meta's message ids, keyed
+ * by that id, with what the plan needs to know about each.
+ */
+async function loadStoredInstagramRows(
+  supabase: AdminSupabaseClient,
+  venue: Venue,
+  hasLedger: boolean,
+): Promise<Map<string, StoredInstagramRow>> {
+  const rows = await loadAll(
+    (from, to) =>
+      supabase
+        .from('messages')
+        .select('id, guest_id, direction, provider_message_id')
+        .eq('venue_id', venue.id)
+        .eq('channel', 'instagram')
+        .not('provider_message_id', 'is', null)
+        .order('id')
+        .range(from, to),
+    "the venue's Instagram messages",
+  )
+  const ledger = hasLedger
+    ? await loadAll(
+        (from, to) =>
+          supabase
+            .from('instagram_backfill_messages')
+            .select('message_id')
+            .eq('venue_id', venue.id)
+            .order('message_id')
+            .range(from, to),
+        'the import ledger',
+      )
+    : []
+  const imported = new Set(ledger.map((row) => row.message_id))
+
+  const attachments = await loadAll(
+    (from, to) =>
+      supabase
+        .from('message_attachments')
+        .select('message_id, kind')
+        .eq('venue_id', venue.id)
+        .order('id')
+        .range(from, to),
+    "the venue's attachment rows",
+  )
+  const kindsByMessage = new Map<string, string[]>()
+  for (const row of attachments) {
+    const kinds = kindsByMessage.get(row.message_id)
+    if (kinds) kinds.push(row.kind)
+    else kindsByMessage.set(row.message_id, [row.kind])
+  }
+
+  // A tombstoned scoped id is a person who asked Meta to have their data
+  // erased (delete-venue-data.ts). Their message rows are kept, redacted, and
+  // nothing of theirs is fetched back onto them.
+  const erased = await loadAll(
+    (from, to) =>
+      supabase
+        .from('guests')
+        .select('id')
+        .eq('venue_id', venue.id)
+        .like('instagram_scoped_id', 'deleted:%')
+        .order('id')
+        .range(from, to),
+    'erased guests',
+  )
+  const erasedGuests = new Set(erased.map((row) => row.id))
+
+  const byMid = new Map<string, StoredInstagramRow>()
+  for (const row of rows) {
+    if (row.provider_message_id === null) continue
+    byMid.set(row.provider_message_id, {
+      id: row.id,
+      guestId: row.guest_id,
+      direction: row.direction,
+      imported: imported.has(row.id),
+      storedKinds: kindsByMessage.get(row.id) ?? [],
+      guestErased: erasedGuests.has(row.guest_id),
+    })
+  }
+  return byMid
+}
+
+/**
+ * TAC-582: --attachments-only. Go back to Meta for the media on messages we
+ * ALREADY hold, and write `message_attachments` rows for them.
+ *
+ * WHAT IT WRITES, and nothing else: `message_attachments` rows, through the
+ * webhook's own writer (lib/messaging/attachments/store.ts), and the copies
+ * of their files in the private bucket (rehost.ts). NEVER a guest, never a
+ * message, and no column on `messages`: not `media_urls`, not
+ * `unsupported_content`, and not the `updated_at` touch the webhook makes to
+ * wake an open thread, because nobody is watching these rows load.
+ *
+ * LIST-DRIVEN, NOT ONE REQUEST A ROW. Meta gives details for a conversation's
+ * 20 most recent messages and answers anything older as if it were deleted.
+ * This Graph client drops Meta's error message, so asking by id could not
+ * tell "too old" from "that field is not allowed", and a broken request would
+ * print as every row being too old. Listing the conversations returns exactly
+ * the set Meta will describe; a row of ours that is in no listing is counted
+ * `too_old` and no request is made for it.
+ *
+ * A DRY RUN DOWNLOADS NOTHING and writes nothing. --confirm copies each file
+ * straight after its row is written, in the same pass, because Meta's links
+ * are signed and expire.
+ *
+ * EVERY FAILED COPY POSTS TO SLACK (captureGuestMediaDegraded). That is the
+ * webhook's alert and it is not muted here; --limit is how a first run is
+ * kept small.
+ *
+ * RESUME IS A RERUN: a message that already has attachment rows is skipped.
+ *
+ * WHAT IT PRINTS: counts, verdicts and the NAMES of the fields Meta returned.
+ * Never a handle, a scoped id, a message id of Meta's, a link or any text.
+ */
+async function runAttachmentsOnly(
+  supabase: AdminSupabaseClient,
+  venue: Venue,
+  args: BackfillArgs,
+): Promise<void> {
+  const mode = args.confirm ? 'CONFIRM' : 'DRY RUN'
+  console.log(
+    `Instagram attachments backfill | venue=${venue.slug} | ${mode}${args.limit !== undefined ? ` | limit=${args.limit}` : ''}`,
+  )
+
+  const { token, account } = await resolveVenueToken(supabase, venue)
+
+  const ledger = await ledgerAvailable(supabase)
+  if (!ledger.available)
+    console.log(
+      '\n· The import ledger is not readable, so every row is reported as live rather than imported.',
+    )
+
+  const rowsByMid = await loadStoredInstagramRows(
+    supabase,
+    venue,
+    ledger.available,
+  )
+  // Counted by the database on its own, so the paged read above has something
+  // that can disagree with it.
+  const expected = await supabase
+    .from('messages')
+    .select('id', { count: 'exact', head: true })
+    .eq('venue_id', venue.id)
+    .eq('channel', 'instagram')
+    .not('provider_message_id', 'is', null)
+  if (expected.error)
+    die(`could not count the venue's messages: ${expected.error.message}`)
+
+  console.log('\nReading conversations from Meta…')
+  const planner = createAttachmentsPlanner(rowsByMid)
+  const conversationSkips = emptyConversationSkips()
+  let conversationsSeen = 0
+  let conversationsRead = 0
+  let messagesSeen = 0
+  let unreadableMessages = 0
+  let detailFetches = 0
+  let truncatedConversations = 0
+  for await (const page of conversationPages(token, true)) {
+    conversationsSeen += page.rawCount
+    conversationSkips.unreadable += page.rawCount - page.conversations.length
+    for (const conversation of page.conversations) {
+      if (conversation.unreadableParticipants > 0) {
+        conversationSkips.unreadable += 1
+        continue
+      }
+      const sides = resolveConversationSides(conversation, account)
+      if (!sides.ok) {
+        conversationSkips[sides.reason] += 1
+        continue
+      }
+      conversationsRead += 1
+      if (conversation.hasMoreMessages) truncatedConversations += 1
+      messagesSeen +=
+        conversation.messages.length + conversation.unreadableMessages
+      unreadableMessages += conversation.unreadableMessages
+      const messages = await withDetails(conversation, token, true, () => {
+        detailFetches += 1
+      })
+      for (const message of messages)
+        planner.add(message, messageDirection(message, sides))
+    }
+  }
+  const plan = planner.finish()
+
+  const origin = plan.rowsByOrigin
+  console.log(
+    `\nPlan (${graphCalls} Graph calls, ${rateLimitWaits} throttled):`,
+  )
+  console.log(
+    `    conversations at Meta: ${conversationsSeen} (${conversationsRead} one-to-one and read)`,
+  )
+  printCounts('not read', conversationSkips, '      ')
+  console.log(
+    `      Meta says hold more messages than it listed: ${truncatedConversations}`,
+  )
+  console.log(
+    `    messages checked (our rows with a Meta id): ${rowsByMid.size}`,
+  )
+  console.log(
+    `      imported: ${origin.importedInbound} inbound, ${origin.importedOutbound} outbound`,
+  )
+  console.log(
+    `      live (webhook): ${origin.liveInbound} inbound, ${origin.liveOutbound} outbound`,
+  )
+  printCounts('outcome', plan.rowOutcomes, '      ')
+  console.log(
+    `    attachments found on our rows: ${sum(plan.foundByKind)} on ${plan.toWrite.length} message(s)`,
+  )
+  printCounts('by kind', plan.foundByKind, '      ')
+  printCounts(
+    'by what --confirm would do',
+    {
+      'copy into our storage (pending)': plan.foundByStatus.pending,
+      'keep the link, nothing to copy (link_only)':
+        plan.foundByStatus.link_only,
+      'serve the giphy link as it is (ready)': plan.foundByStatus.ready,
+      'no link came back (failed, no_link)': plan.foundByStatus.failed,
+    },
+    '      ',
+  )
+  printCounts('messages by direction', plan.toWriteByDirection, '      ')
+  console.log(
+    `    our rows Meta flags is_unsupported (reported only): ${plan.unsupportedOnOurRows}`,
+  )
+
+  const metaOnly = plan.metaOnly
+  console.log(
+    `\nMedia at Meta with NO row of ours (the import skipped messages with no text):`,
+  )
+  console.log(
+    `    messages: ${metaOnly.messagesWithMedia} (${metaOnly.bySender.inbound} from guests, ${metaOnly.bySender.outbound} from the venue, ${metaOnly.bySender.unknown} from neither)`,
+  )
+  console.log(
+    `      with text as well: ${metaOnly.withText}; flagged is_unsupported and nothing else: ${metaOnly.unsupportedOnly}`,
+  )
+  printCounts('attachments by kind', metaOnly.attachmentsByKind, '      ')
+  console.log(
+    `    (text-only messages at Meta with no row of ours: ${metaOnly.messagesWithoutMedia}; not readable by id: ${metaOnly.detailUnavailable})`,
+  )
+
+  console.log(
+    '\nWhere the links point, every attachment Meta listed (host names only):',
+  )
+  printCounts('kind and host', plan.linkHosts)
+  console.log(
+    `\nFields Meta returned under attachments / shares / story (names only): ${plan.keyPaths.length === 0 ? 'none' : ''}`,
+  )
+  for (const path of plan.keyPaths) console.log(`    ${path}`)
+
+  // Totals counted separately have to agree: our rows against the database's
+  // own count and against the outcomes, and Meta's messages against where
+  // each one went.
+  const rowsAccounted = sum(plan.rowOutcomes)
+  const metaAccounted =
+    plan.matched +
+    plan.duplicateIds +
+    metaOnly.messagesWithMedia +
+    metaOnly.messagesWithoutMedia +
+    metaOnly.detailUnavailable +
+    unreadableMessages
+  const reconciled =
+    rowsByMid.size === (expected.count ?? -1) &&
+    rowsAccounted === rowsByMid.size &&
+    metaAccounted === messagesSeen
+  console.log(
+    reconciled
+      ? `\n    ✓ every row of ours (${rowsByMid.size}) and every message Meta listed (${messagesSeen}) is accounted for above`
+      : `\n    ✗ RECONCILIATION FAILED: rows read ${rowsByMid.size}, counted by the database ${expected.count ?? 'unknown'}, accounted ${rowsAccounted}; Meta messages accounted ${metaAccounted} of ${messagesSeen} listed`,
+  )
+  console.log(
+    `    (messages fetched one at a time: ${detailFetches}; the same Meta id listed twice: ${plan.duplicateIds})`,
+  )
+
+  const control = controlCheck(plan.control)
+  const mark =
+    control.verdict === 'PASS' ? '✓' : control.verdict === 'FAIL' ? '✗' : '·'
+  console.log(
+    `\nControl (media the webhook already stored must come back):\n    ${mark} ${control.verdict} — ${control.detail}`,
+  )
+
+  const blockers: string[] = []
+  if (!reconciled) blockers.push('the counts do not reconcile')
+  if (control.verdict === 'FAIL') blockers.push('the control FAILED')
+
+  const toWrite =
+    args.limit !== undefined ? plan.toWrite.slice(0, args.limit) : plan.toWrite
+  if (args.dryRun) {
+    console.log(
+      blockers.length > 0
+        ? `\n✗ DRY RUN: --confirm would REFUSE (${blockers.join('; ')}).`
+        : `\n${control.verdict === 'INCONCLUSIVE' ? '·' : '✓'} DRY RUN: nothing was written or downloaded. --confirm would write attachments for ${toWrite.length} of ${plan.toWrite.length} message(s)${control.verdict === 'INCONCLUSIVE' ? ', with the control INCONCLUSIVE' : ''}.`,
+    )
+    process.exit(blockers.length > 0 ? 1 : 0)
+  }
+  if (blockers.length > 0)
+    die(`refusing to write: ${blockers.join('; ')}. Nothing was written.`)
+
+  console.log(`\nWriting ${toWrite.length} of ${plan.toWrite.length}…`)
+  const written = {
+    messages: 0,
+    attachmentRows: 0,
+    alreadyHadRows: 0,
+    insertFailed: 0,
+  }
+  const copies: Record<string, number> = {}
+  for (const item of toWrite) {
+    // Read again at the moment of the write: an earlier run, or the live
+    // webhook, may have written this message's rows since the plan was read.
+    const existing = await supabase
+      .from('message_attachments')
+      .select('id', { count: 'exact', head: true })
+      .eq('message_id', item.messageId)
+    if (existing.error) {
+      console.error(
+        `✗ an attachment re-check failed: ${existing.error.message}`,
+      )
+      written.insertFailed += 1
+      continue
+    }
+    if ((existing.count ?? 0) > 0) {
+      written.alreadyHadRows += 1
+      continue
+    }
+    const stored = await insertMessageAttachments(supabase, {
+      messageId: item.messageId,
+      venueId: venue.id,
+      guestId: item.guestId,
+      attachments: item.attachments,
+    })
+    if (!stored.ok) {
+      console.error(`✗ an attachment insert failed: ${stored.error}`)
+      written.insertFailed += 1
+      continue
+    }
+    written.messages += 1
+    written.attachmentRows += stored.data.inserted
+    if (stored.data.pending === 0) continue
+
+    const pending = await loadPendingAttachmentsForMessage(
+      supabase,
+      item.messageId,
+    )
+    if (!pending.ok) {
+      // The rows are written and still pending, so
+      // `npm run rehost-pending-attachments` can pick them up.
+      console.error(`✗ could not load rows to copy: ${pending.error}`)
+      copies.left_pending = (copies.left_pending ?? 0) + stored.data.pending
+      continue
+    }
+    for (const attachment of pending.data) {
+      const outcome = await rehostAttachment(supabase, attachment)
+      const key =
+        outcome.status === 'failed'
+          ? `failed: ${outcome.reason}`
+          : outcome.status
+      copies[key] = (copies[key] ?? 0) + 1
+    }
+  }
+
+  console.log('\nWritten:')
+  console.log(
+    `    messages given attachment rows: ${written.messages} (planned ${toWrite.length})`,
+  )
+  console.log(`    attachment rows: ${written.attachmentRows}`)
+  console.log(
+    `    messages that had rows by the time of the write: ${written.alreadyHadRows}`,
+  )
+  console.log(`    messages failed: ${written.insertFailed}`)
+  printCounts('files copied into our storage', copies)
+
+  const copyFailures = Object.entries(copies)
+    .filter(([key]) => key !== 'ready' && key !== 'skipped')
+    .reduce((total, [, count]) => total + count, 0)
+  const clean =
+    written.messages === toWrite.length &&
+    written.insertFailed === 0 &&
+    copyFailures === 0
+  const remaining = plan.toWrite.length - toWrite.length
+  console.log(
+    clean
+      ? `\n✓ CONFIRM: written exactly as planned.${remaining > 0 ? ` ${remaining} message(s) left for the next run.` : ''}`
+      : `\n· CONFIRM: written, but not exactly as planned (see above). A failed copy keeps its row and its link; a rerun skips messages that already have rows.`,
+  )
+  process.exit(clean ? 0 : 3)
+}
+
 async function main(): Promise<void> {
   const args = parseBackfillArgs(process.argv.slice(2))
   const problem = backfillArgsError(args)
@@ -1124,6 +1576,7 @@ async function main(): Promise<void> {
   const supabase = createAdminClient()
   const venue = await loadVenue(supabase, args.venue ?? '')
   if (args.rollback) await runRollback(supabase, venue, args)
+  else if (args.attachmentsOnly) await runAttachmentsOnly(supabase, venue, args)
   else await runImport(supabase, venue, args)
 }
 

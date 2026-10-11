@@ -8,6 +8,14 @@
 //                           One message, for a conversation whose nested
 //                           messages came back as bare ids.
 //
+// Both take `withMedia` (TAC-582), which adds `attachments`, `shares`, `story`
+// and `is_unsupported` to the message fields. The import never asks for them;
+// its --attachments-only mode does. META DOES NOT DOCUMENT THESE FOUR on the
+// Instagram Login path. The shapes read below are the Messenger Platform's
+// Message node, so every message also reports the KEY NAMES it carried
+// (`media.keyPaths`, names only, never a value), and the mode's dry run prints
+// them. That list is what can disagree with this parser.
+//
 // GET ONLY. Nothing here can send, and nothing here imports the send modules:
 // the import's rule is that it never writes to Instagram, and the cheapest way
 // to keep that true is for its only Graph module to have no POST in it.
@@ -42,6 +50,7 @@ export const INSTAGRAM_CONVERSATIONS_TIMEOUT_MS = 30_000
 export const INSTAGRAM_CONVERSATIONS_PAGE_SIZE = 20
 
 const MESSAGE_FIELDS = 'id,created_time,from,message'
+const MESSAGE_MEDIA_FIELDS = `${MESSAGE_FIELDS},attachments,shares,story,is_unsupported`
 
 /**
  * Meta's throttling codes: 4 (app), 17 (user), 32 (page), 613 (custom), and
@@ -60,6 +69,35 @@ export type ConversationParticipant = {
   username: string | null
 }
 
+/** One file on a message: a photo, a video, a voice note, a document. */
+export type GraphMediaFile = {
+  /** Which of Meta's three places the link was read from, or null for none. */
+  source: 'image_data' | 'video_data' | 'file_url' | null
+  /** A signed CDN link. Held in memory and stored; never printed. */
+  url: string | null
+  mimeType: string | null
+}
+
+export type GraphMediaShare = { link: string | null; name: string | null }
+
+/**
+ * What a message carried besides text, as Meta's conversation API shapes it.
+ * This is NOT the webhook's shape (`attachments[].type` + `payload.url`), so
+ * nothing here names a kind: scripts/lib/backfill-instagram-attachments.ts
+ * decides that.
+ */
+export type GraphMessageMedia = {
+  files: GraphMediaFile[]
+  shares: GraphMediaShare[]
+  /** `story.mention.link`: the guest's own story, mentioning the venue. */
+  storyMention: { link: string | null } | null
+  /** `story.reply_to.link`: the venue's story this message answers. */
+  storyReply: { link: string | null } | null
+  unsupported: boolean
+  /** Key names under the four media fields, e.g. `attachments[].image_data.url`. */
+  keyPaths: string[]
+}
+
 export type ConversationMessage = {
   id: string
   /** Meta's own time for the message, or null when it could not be read. */
@@ -70,6 +108,8 @@ export type ConversationMessage = {
   text: string | null
   /** True when only the id came back and the rest has to be fetched by id. */
   needsDetail: boolean
+  /** Empty unless the request asked for the media fields (`withMedia`). */
+  media: GraphMessageMedia
 }
 
 export type InstagramConversation = {
@@ -114,6 +154,89 @@ function parseParticipant(value: unknown): ConversationParticipant | null {
   return { id, username: stringOrNull(value.username) }
 }
 
+// The same bounds parse-events.ts puts on a key name it reports: a name comes
+// from Meta's JSON, so it is only ever printed when it looks like a field name.
+const KEY_NAME = /^[a-z][a-z0-9_]{0,39}$/
+const KEY_PATH_DEPTH = 3
+
+function collectKeyPaths(
+  value: unknown,
+  prefix: string,
+  depth: number,
+  into: Set<string>,
+): void {
+  if (Array.isArray(value)) {
+    for (const item of value) collectKeyPaths(item, `${prefix}[]`, depth, into)
+    return
+  }
+  if (!isRecord(value)) {
+    into.add(prefix)
+    return
+  }
+  if (depth === 0) {
+    into.add(`${prefix}.{…}`)
+    return
+  }
+  for (const key of Object.keys(value)) {
+    const name = KEY_NAME.test(key) ? key : '(unprintable)'
+    collectKeyPaths(value[key], `${prefix}.${name}`, depth - 1, into)
+  }
+}
+
+function linkOf(value: unknown): { link: string | null } | null {
+  return isRecord(value) ? { link: stringOrNull(value.link) } : null
+}
+
+function parseMediaFile(value: unknown): GraphMediaFile | null {
+  if (!isRecord(value)) return null
+  const mimeType = stringOrNull(value.mime_type)
+  for (const source of ['image_data', 'video_data'] as const) {
+    const data = value[source]
+    if (isRecord(data)) return { source, url: stringOrNull(data.url), mimeType }
+  }
+  const fileUrl = stringOrNull(value.file_url)
+  return {
+    source: fileUrl === null ? null : 'file_url',
+    url: fileUrl,
+    mimeType,
+  }
+}
+
+/** Exported for the mode's own checks. Reads nothing but the four media fields. */
+export function parseMessageMedia(
+  value: Record<string, unknown>,
+): GraphMessageMedia {
+  const keyPaths = new Set<string>()
+  for (const field of ['attachments', 'shares', 'story'] as const) {
+    if (value[field] !== undefined)
+      collectKeyPaths(value[field], field, KEY_PATH_DEPTH, keyPaths)
+  }
+  if (value.is_unsupported !== undefined) keyPaths.add('is_unsupported')
+
+  const files: GraphMediaFile[] = []
+  for (const raw of listOf(value.attachments)) {
+    const file = parseMediaFile(raw)
+    if (file !== null) files.push(file)
+  }
+  const shares: GraphMediaShare[] = []
+  for (const raw of listOf(value.shares)) {
+    if (isRecord(raw))
+      shares.push({
+        link: stringOrNull(raw.link),
+        name: stringOrNull(raw.name),
+      })
+  }
+  const story = isRecord(value.story) ? value.story : null
+  return {
+    files,
+    shares,
+    storyMention: story ? linkOf(story.mention) : null,
+    storyReply: story ? linkOf(story.reply_to) : null,
+    unsupported: value.is_unsupported === true,
+    keyPaths: [...keyPaths].sort(),
+  }
+}
+
 export function parseConversationMessage(
   value: unknown,
 ): ConversationMessage | null {
@@ -136,6 +259,7 @@ export function parseConversationMessage(
     // A bare `{ id }` is the shape an unexpanded edge returns. A message that
     // has a time or a sender was expanded, whatever else it lacks.
     needsDetail: createdAt === null && fromId === null,
+    media: parseMessageMedia(value),
   }
 }
 
@@ -181,8 +305,9 @@ export async function fetchConversationPage(
   token: string,
   fetchImpl: FetchLike,
   after: string | null,
+  withMedia = false,
 ): Promise<GraphResult<ConversationPage>> {
-  const fields = `id,updated_time,participants,messages{${MESSAGE_FIELDS}}`
+  const fields = `id,updated_time,participants,messages{${withMedia ? MESSAGE_MEDIA_FIELDS : MESSAGE_FIELDS}}`
   const query = [
     'platform=instagram',
     `limit=${INSTAGRAM_CONVERSATIONS_PAGE_SIZE}`,
@@ -239,10 +364,11 @@ export async function fetchMessageDetail(
   messageId: string,
   token: string,
   fetchImpl: FetchLike,
+  withMedia = false,
 ): Promise<GraphResult<ConversationMessage>> {
   const result = await graphRequest(
     'GET',
-    `/${encodeURIComponent(messageId)}?fields=${encodeURIComponent(MESSAGE_FIELDS)}`,
+    `/${encodeURIComponent(messageId)}?fields=${encodeURIComponent(withMedia ? MESSAGE_MEDIA_FIELDS : MESSAGE_FIELDS)}`,
     token,
     fetchImpl,
     { timeoutMs: INSTAGRAM_CONVERSATIONS_TIMEOUT_MS },
