@@ -25,6 +25,7 @@ import {
 } from '@/lib/guests/opt-out'
 import { sendCommitmentArrivalPush } from '@/lib/notifications/send-commitment-push'
 import {
+  type PushMedia,
   sendDraftFlaggedPush,
   shouldSendDraftFlaggedPush,
 } from '@/lib/notifications/send'
@@ -484,6 +485,7 @@ async function persistGenerationFailureCard(
           guestQuestion: ctx.currentMessage?.body ?? null,
           guestCategory: ctx.classification?.category ?? null,
           guestIsCrisis: ctx.classification?.crisisSafety ?? false,
+          media: null,
         }).catch(() => {}),
       )
     }
@@ -535,6 +537,8 @@ async function persistMediaOnlyCard(
   // them is the same card: no draft, no category, its own slot.
   reviewReason:
     typeof MEDIA_ONLY_REVIEW_REASON | typeof UNSUPPORTED_REVIEW_REASON,
+  // TAC-584: a story mention's push is the reshare nudge even on a blank card.
+  pushMedia: PushMedia | null = null,
 ): Promise<AgentResult> {
   try {
     const persisted = await persistOrRegenQueuedDraft(
@@ -576,7 +580,7 @@ async function persistMediaOnlyCard(
       inboundBody: null,
       generatedBody: '',
     })
-    pushOperatorCard(ctx, persisted.outboundMessageId, reviewReason)
+    pushOperatorCard(ctx, persisted.outboundMessageId, reviewReason, pushMedia)
     return {
       status: 'queued',
       outboundMessageId: persisted.outboundMessageId,
@@ -748,6 +752,9 @@ async function persistMediaOnlyDraft(
   ctx: RuntimeContext,
   agentRunId: string,
   trace: AgentTrace,
+  // What the push says for this card when it carries a draft: the reshare
+  // nudge for a story, otherwise "sent an attachment / Draft ready to review".
+  pushMedia: PushMedia,
 ): Promise<AgentResult> {
   const blankInstead = (why: string, error?: string): Promise<AgentResult> => {
     console.warn('[agent] media-only draft not written; blank card instead', {
@@ -755,7 +762,14 @@ async function persistMediaOnlyDraft(
       why,
       error,
     })
-    return persistMediaOnlyCard(ctx, agentRunId, MEDIA_ONLY_REVIEW_REASON)
+    // The blank card's own push copy, unless this is a story: that nudge
+    // does not depend on there being a draft.
+    return persistMediaOnlyCard(
+      ctx,
+      agentRunId,
+      MEDIA_ONLY_REVIEW_REASON,
+      pushMedia.kind === 'story_mention' ? pushMedia : null,
+    )
   }
 
   try {
@@ -854,7 +868,7 @@ async function persistMediaOnlyDraft(
       inboundBody: null,
       generatedBody: gen.result.body,
     })
-    pushOperatorCard(ctx, persisted.outboundMessageId, reviewReason)
+    pushOperatorCard(ctx, persisted.outboundMessageId, reviewReason, pushMedia)
     return {
       status: 'queued',
       outboundMessageId: persisted.outboundMessageId,
@@ -938,11 +952,40 @@ function pushSendFailureCard(ctx: RuntimeContext, cardId: string): void {
   pushOperatorCard(ctx, cardId, INSTAGRAM_SEND_FAILED_REVIEW_REASON)
 }
 
+/**
+ * TAC-584: the push for a story the guest tagged the venue in.
+ *
+ * The handle is read HERE, at push time, and not taken from the context: a
+ * guest's first-ever message starts their profile fetch beside this turn
+ * (the Instagram webhook's refresh), so the handle is often written while the
+ * turn is describing the story. A failed or empty read is null, and the push
+ * then uses its handle-less wording. Never throws, and the handle is never
+ * logged.
+ */
+async function loadStoryMentionPush(guestId: string): Promise<PushMedia> {
+  try {
+    const { data } = await createAdminClient()
+      .from('guests')
+      .select('instagram_username')
+      .eq('id', guestId)
+      .maybeSingle()
+    return {
+      kind: 'story_mention',
+      instagramUsername: data?.instagram_username ?? null,
+    }
+  } catch {
+    return { kind: 'story_mention', instagramUsername: null }
+  }
+}
+
 /** The push for a card a path wrote itself, outside the approval gate. */
 function pushOperatorCard(
   ctx: RuntimeContext,
   cardId: string,
   reviewReason: string,
+  // TAC-584: set for a card raised by a guest's media whose review reason
+  // alone would word the push wrongly (lib/notifications/send.ts, PushMedia).
+  media: PushMedia | null = null,
 ): void {
   if (!shouldSendDraftFlaggedPush(reviewReason)) return
   waitUntil(
@@ -961,6 +1004,7 @@ function pushOperatorCard(
       // category gate alone would have quoted it onto every operator's lock
       // screen.
       guestIsCrisis: ctx.classification?.crisisSafety ?? false,
+      media,
     }).catch(() => {}),
   )
 }
@@ -2092,6 +2136,11 @@ async function runInboundTurn(
     const mediaRows = await turnMediaRows
 
     let describingMedia: Promise<void> | null = null
+    // Whether the media this turn answers is a story the guest tagged the
+    // venue in. Read off the attachment rows, so it does not depend on the
+    // describe step having worked: it decides the operator's push, which is
+    // the nudge to reshare (TAC-584).
+    let turnHasStoryMention = false
     // TAC-584: look at what the guest sent, before anything is drafted.
     // Here, after the context is built (the describe step needs the venue's
     // menu) and before the media-only branch below, which is where a
@@ -2120,6 +2169,13 @@ async function runInboundTurn(
           : inbound.mediaUrls.length > 0
             ? [inbound.message.id]
             : []
+      turnHasStoryMention =
+        mediaRows.ok &&
+        mediaRows.data.inbound.some(
+          (row) =>
+            describeIds.includes(row.id) &&
+            (row.attachmentKinds ?? []).includes('story_mention'),
+        )
       if (describeIds.length > 0) {
         describingMedia = describeTurnMedia(ctx, describeIds, trace)
         if (mediaOnlyTurn) {
@@ -2156,9 +2212,22 @@ async function runInboundTurn(
       const drafted =
         blankCardReason === MEDIA_ONLY_REVIEW_REASON &&
         (ctx.inboundDescribedMedia?.length ?? 0) > 0
+      const storyPush = turnHasStoryMention
+        ? await loadStoryMentionPush(ctx.guest.id)
+        : null
       const carded = drafted
-        ? await persistMediaOnlyDraft(ctx, agentRunId, trace)
-        : await persistMediaOnlyCard(ctx, agentRunId, blankCardReason)
+        ? await persistMediaOnlyDraft(
+            ctx,
+            agentRunId,
+            trace,
+            storyPush ?? { kind: 'media_only_draft' },
+          )
+        : await persistMediaOnlyCard(
+            ctx,
+            agentRunId,
+            blankCardReason,
+            storyPush,
+          )
       trace.update({
         output: { status: carded.status, mediaOnly: true, drafted },
       })
@@ -3890,6 +3959,16 @@ async function runInboundTurn(
         // fire; previous_pending_held skips) and is `never throws` so the
         // .catch is defensive belt-and-braces.
         if (shouldSendDraftFlaggedPush(approval.primaryTrigger)) {
+          // TAC-584: a guest who tagged the venue in a story and then typed
+          // something lands here, not on the media-only path. The push is
+          // still the reshare nudge, EXCEPT for a complaint or a crisis turn,
+          // whose own push wording says the more urgent thing.
+          const storyPush =
+            turnHasStoryMention &&
+            ctx.classification.category !== 'comp_complaint' &&
+            !ctx.classification.crisisSafety
+              ? await loadStoryMentionPush(ctx.guest.id)
+              : null
           waitUntil(
             sendDraftFlaggedPush({
               agentRunId,
@@ -3901,6 +3980,7 @@ async function runInboundTurn(
               guestQuestion: ctx.currentMessage?.body ?? null,
               guestCategory: ctx.classification?.category ?? null,
               guestIsCrisis: ctx.classification?.crisisSafety ?? false,
+              media: storyPush,
             }).catch((e) => {
               console.error('apns: sendDraftFlaggedPush threw unexpectedly', {
                 agentRunId,

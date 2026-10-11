@@ -17,6 +17,8 @@
 //   - every line the model reads for a described attachment is the wording
 //     approved on TAC-584's plan (2026-10-11), character for character, and
 //     an attachment with no usable description keeps the line it had.
+//   - a story mention's push is the reshare nudge, and a handle that is not
+//     shaped like a handle is never put on a lock screen.
 //   - one photo visit per guest per day, never a second row beside a receipt
 //     or a self-report for the same day, and a visit with no drink in it does
 //     not count as having heard the order.
@@ -64,6 +66,11 @@ import {
   passThroughImage,
 } from '@/lib/messaging/attachments/frames'
 import type { MenuItem } from '@/lib/schemas'
+import {
+  buildDraftFlaggedPushBody,
+  buildPushTitle,
+  buildStoryMentionBody,
+} from '@/lib/notifications/send'
 import {
   type AttachmentDescriptionMeta,
   type DescribedMeta,
@@ -1098,6 +1105,93 @@ function turnChecks(): Check[] {
   ]
 }
 
+// --- lib/notifications/send.ts: the push for a card raised by media ----------
+
+function pushChecks(): Check[] {
+  const base = {
+    guestQuestion: null,
+    guestCategory: null,
+    guestIsCrisis: false,
+  } as const
+  const story = (instagramUsername: string | null) =>
+    ({ kind: 'story_mention', instagramUsername }) as const
+  const out: Check[] = []
+  const same = (name: string, got: string, want: string): void => {
+    out.push([name, got === want, got])
+  }
+
+  same(
+    'push: a story mention names the handle',
+    buildStoryMentionBody('maya.eats_sf'),
+    '@maya.eats_sf tagged you in their story. Reshare?',
+  )
+  same(
+    'push: a handle stored with its @ is not doubled',
+    buildStoryMentionBody('@maya'),
+    '@maya tagged you in their story. Reshare?',
+  )
+  same(
+    'push: no handle on file yet',
+    buildStoryMentionBody(null),
+    'Tagged you in their story. Reshare?',
+  )
+  for (const bad of ['', 'two words', 'a'.repeat(31), 'drop\ntable', 'x<y>']) {
+    same(
+      `push: ${JSON.stringify(bad.slice(0, 12))} is not a handle and is not rendered`,
+      buildStoryMentionBody(bad),
+      'Tagged you in their story. Reshare?',
+    )
+  }
+
+  same(
+    'push: a story mention on a card with a draft',
+    buildDraftFlaggedPushBody({
+      ...base,
+      primaryTrigger: 'media_context',
+      media: story('maya'),
+    }),
+    '@maya tagged you in their story. Reshare?',
+  )
+  same(
+    'push: a story mention on a blank card reads the same',
+    buildDraftFlaggedPushBody({
+      ...base,
+      primaryTrigger: 'media_only_inbound',
+      media: story('maya'),
+    }),
+    '@maya tagged you in their story. Reshare?',
+  )
+  same(
+    'push: a story mention title',
+    buildPushTitle(null, 'media_context', null, story('maya')),
+    'A guest: tagged you in their story',
+  )
+  same(
+    'push: a photo with no text and a draft says so, and does not say "reply by hand"',
+    `${buildPushTitle('Maya', 'media_context', null, { kind: 'media_only_draft' })} | ${buildDraftFlaggedPushBody(
+      {
+        ...base,
+        primaryTrigger: 'media_context',
+        media: { kind: 'media_only_draft' },
+      },
+    )}`,
+    'Maya: sent an attachment | Draft ready to review',
+  )
+  same(
+    'push: the blank media card is unchanged',
+    `${buildPushTitle('Maya', 'media_only_inbound', null)} | ${buildDraftFlaggedPushBody(
+      { ...base, primaryTrigger: 'media_only_inbound', media: null },
+    )}`,
+    'Maya: sent an attachment | Sent an attachment. Reply by hand.',
+  )
+  same(
+    'push: text beside a photo is unchanged',
+    buildPushTitle('Maya', 'media_context', 'new_question'),
+    'Maya: replied after sending an attachment',
+  )
+  return out
+}
+
 // --- lib/messaging/attachments/frames.ts: the pure half ----------------------
 
 const frameChecks: Check[] = [
@@ -1160,6 +1254,7 @@ async function main(): Promise<void> {
     ...visitChecks(),
     ...wordingChecks(),
     ...turnChecks(),
+    ...pushChecks(),
     ...frameChecks,
   ]
   let failed = 0
