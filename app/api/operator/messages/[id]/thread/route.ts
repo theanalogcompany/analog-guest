@@ -28,7 +28,7 @@ import { NextResponse } from 'next/server'
 
 import { AuthError, verifyOperatorRequest } from '@/lib/auth'
 import { logger } from '@/lib/observability/logger'
-import { loadGuestThread } from '@/lib/operator'
+import { loadGuestThread, threadOptionsFromRequest } from '@/lib/operator'
 
 // Canonical UUID regex: app/api/operator/messages/[id]/approve/route.ts:19.
 // Inlined rather than imported to avoid coupling route handlers; extract
@@ -63,6 +63,8 @@ export async function GET(
   const result = await loadGuestThread({
     messageId,
     venueScope: operator.venueScope,
+    // TAC-582: see the guests/:guestId/thread route. Same flag, same meaning.
+    options: threadOptionsFromRequest(request),
   })
 
   if (!result.ok) {

@@ -25,7 +25,9 @@ export {
   type LoadGuestThreadInput,
   type LoadGuestThreadResult,
   type LoadGuestThreadSuccess,
+  type ThreadOptions,
   loadGuestThread,
+  threadOptionsFromRequest,
 } from './thread'
 
 export {
