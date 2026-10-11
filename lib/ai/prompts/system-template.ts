@@ -2731,9 +2731,14 @@ import {
 //   A photo, a voice note, a GIF, a video, a reel or a story a guest sent used
 //   to be absent from history entirely: the history query skips a message
 //   with no text, and nothing recorded what an attachment was. Each now reads
-//   as one bracketed line ("[guest sent a photo]", "[guest shared a reel:
-//   '<caption>']"), worded in prompts/attachment-lines.ts and approved
-//   verbatim by the owner on 2026-10-11.
+//   as one bracketed line, worded in prompts/attachment-lines.ts and
+//   approved verbatim by the owner on 2026-10-11:
+//
+//     [guest sent a photo. It arrived fine, but you can't see it. Don't
+//     describe it, guess what's in it, or say it didn't come through.]
+//
+//   with the opening and the verb matched to the kind (hear a voice note,
+//   watch a video, open a share, see the story).
 //
 //   WHERE THEY APPEAR: in the generator's history turns (a media-only message
 //   is a `user` turn of its own; one sent with text is the line above that
@@ -2741,20 +2746,25 @@ import {
 //   transcript recorded on the trace. Guest messages only. What the venue
 //   sent is never worded this way.
 //
-//   ON THE TURN BEING ANSWERED, two small changes to `[guest also sent ...]`,
-//   whose instruction is untouched. Its kind now comes from the message's
-//   attachment rows when it has them, so a voice note sent beside a text
-//   reads "[guest also sent a voice note]" where it read "a photo or GIF"
+//   ON THE TURN BEING ANSWERED, `[guest also sent ...]` changes three ways.
+//   It is now the same sentence, inside the bracket, with "also" in it; it
+//   replaces "[guest also sent a photo] You cannot see it. You can say you
+//   got it, but do not describe it or react to what is in it." Its kind comes
+//   from the message's attachment rows when it has them, so a voice note
+//   sent beside a text reads "a voice note" where it read "a photo or GIF"
 //   (Instagram's links carry no file extension, and the extension was all
 //   that line had). And a message that answers one of the venue's stories
-//   has "[guest is replying to your story]" above "The guest just sent".
-//   A photo the first line already announces is left out of that turn's
-//   history so it is said once.
+//   has the story-reply line above "The guest just sent". A photo the first
+//   line already announces is left out of that turn's history so it is said
+//   once.
 //
-//   THE HISTORY LINE CARRIES NO "you cannot see it" INSTRUCTION. Whether a
-//   later reply describes or reacts to media it was only told about is the
-//   check pre-registered on TAC-582 (0 of 20 across two venues, with a
-//   control arm that omits the line).
+//   WHY THE SENTENCE IS INSIDE THE BRACKET. The first wording was the bare
+//   marker, "[guest sent a photo]". Measured on TAC-582 (20 generations, two
+//   venues, a control arm with no line), no reply described a photo it had
+//   not seen, and 5 of 20 told the guest the photo "didn't come through":
+//   the model knew a photo existed, had nothing to look at, and invented a
+//   reason. The sentence gives it the reason. The numbers for this wording
+//   are on the ticket.
 //
 //   BASELINE RESET only for a conversation with guest media in its window.
 //   Every other first-attempt prompt is byte-identical to v1.105.0: a message

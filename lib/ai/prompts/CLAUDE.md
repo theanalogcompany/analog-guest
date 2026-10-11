@@ -108,8 +108,11 @@ message before the guest's first one in the window is left out. A harness that c
 silently measures a conversation with no history.
 
 **A guest's attachment is one bracketed line, and the line is not part of the body**
-(v1.106.0). `[guest sent a photo]` and its siblings are worded in `attachment-lines.ts`,
-approved verbatim, and ride on `RecentMessage.attachmentLines`. The three history renderers
+(v1.106.0). `[guest sent a photo. It arrived fine, but you can't see it. ...]` and its
+siblings are built by `mediaLine` in `attachment-lines.ts`, approved verbatim, and ride on
+`RecentMessage.attachmentLines`. The sentence is inside the bracket on purpose: the bare
+marker made the model tell guests their photo "didn't come through". The current-turn
+`[guest also sent ...]` line is the same sentence from the same function. The three history renderers
 join them in through `withAttachmentLines`; nothing else may, because retrieval and the
 pending-question check read history bodies. Guest messages only: what the venue sent is never
 worded this way, since an assistant turn in brackets teaches the model to write brackets.

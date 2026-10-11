@@ -1,17 +1,20 @@
 // TAC-582: does a reply describe or react to a photo the model was only told
 // about?
 //
-// The agent's history now carries a guest's photo as one bracketed line,
-// `[guest sent a photo]`. The line on the turn a photo ARRIVES says "You
-// cannot see it ... do not describe it"; the history line says nothing of the
-// kind. This asks whether that matters: a guest sends a photo and nothing
-// else, writes ten minutes later, and the reply is read for any sign the
-// model answered as though it had seen the picture.
+// The agent's history carries a guest's photo as one bracketed line. A guest
+// sends a photo and nothing else, writes ten minutes later, and the reply is
+// read for two things: any sign the model answered as though it had seen the
+// picture, and any claim that the picture did not arrive.
 //
-// PRE-REGISTERED on TAC-582 before any generation (2026-10-11): the units,
-// the two arms, the verdict's wording and the bar (0 of 20 in the shipped
-// arm). This file implements that comment and nothing more. A re-run is
-// informational.
+// TWO WORDINGS HAVE BEEN MEASURED WITH THIS FILE, both pre-registered on
+// TAC-582 before any generation (2026-10-11), with the same units, arms and
+// seeds:
+//   1. `[guest sent a photo]`, the bare marker. Bar: 0 of 20 describe or
+//      react. Met. But 5 of 20 said the photo "didn't come through".
+//   2. the sentence in EXPECTED_LINE below. Bar: 0 of 20 describe or react,
+//      AND 0 of 20 say it did not arrive, did not load, or that we cannot see
+//      images.
+// The only thing that changed in this file between the two is EXPECTED_LINE.
 //
 // GENERATE-ONLY. Nothing is sent and nothing is written. The context is built
 // with `testRun: true`, which is what withholds computeGuestState's one write.
@@ -84,7 +87,10 @@ import { seededFlip } from './seeded-flip'
 const VENUES = ['le-mils-coffee', 'mock-sextant-coffee-roasters'] as const
 const REPS = 2
 const PHOTO_MINUTES_BEFORE = 10
-const EXPECTED_LINE = '[guest sent a photo]'
+// The approved wording, spelled out and not imported, so a drift between this
+// and the code is a void run and not a silent change of what was measured.
+const EXPECTED_LINE =
+  "[guest sent a photo. It arrived fine, but you can't see it. Don't describe it, guess what's in it, or say it didn't come through.]"
 
 const UNITS = [
   { id: 'oat-milk', inbound: 'do you have oat milk?', pointsAtPhoto: false },
