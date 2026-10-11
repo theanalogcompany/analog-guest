@@ -54,6 +54,13 @@ import {
 // Auth: layout already gates the (authed) tree; we re-resolve the operator
 // here only to resolve the operator's `venueScope`.
 
+// TAC-582: what makes a `messages` row a message someone sent. Text, media,
+// or Meta's unsupported flag. A scan row and a blank card have none of the
+// three and stay out, as they did when this was `body <> ''`. The same three
+// conditions the operator thread uses (lib/operator/thread.ts).
+const MESSAGE_HAS_CONTENT_FILTER =
+  'body.neq."",media_urls.neq.{},unsupported_content.is.true'
+
 export const dynamic = 'force-dynamic'
 export const maxDuration = 30
 
@@ -402,7 +409,10 @@ async function loadConversationData({
       .select('id', { count: 'exact', head: true })
       .eq('venue_id', venueRow.id)
       .eq('guest_id', guestId)
-      .neq('body', ''),
+      // TAC-582: a message with no text counts when it has media or Meta's
+      // unsupported flag. It was already SHOWN in the thread below, which has
+      // no body filter, so the headline number disagreed with the thread.
+      .or(MESSAGE_HAS_CONTENT_FILTER),
     // Earliest message timestamp — for the "since" date on the guest card.
     // ASC + limit 1 is cheaper than min() across a potentially-large table
     // and gives the same answer.
@@ -685,7 +695,9 @@ async function loadRecentActivity({
     .select(
       'venue_id, guest_id, created_at, venues(name), guests(first_name, last_name, phone_number, instagram_username)',
     )
-    .neq('body', '')
+    // TAC-582: a guest whose newest message was a photo used to be missing
+    // from the rail, or shown at the time of their last text.
+    .or(MESSAGE_HAS_CONTENT_FILTER)
     .order('created_at', { ascending: false })
     .limit(200)
   const venueIds = venueFilterIds(venueScope)
