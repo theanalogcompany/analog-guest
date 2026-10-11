@@ -3178,6 +3178,13 @@ export function buildAiRuntime(
     inboundMessage: ctx.currentMessage?.body,
     inboundMedia: ctx.inboundMedia ?? undefined,
     inboundStoryReply: ctx.inboundStoryReply === true ? true : undefined,
+    // TAC-584: what this turn's media shows. Absent, not empty, when there is
+    // none, so a turn without described media builds the runtime it always did.
+    inboundDescribedMedia:
+      ctx.inboundDescribedMedia !== undefined &&
+      ctx.inboundDescribedMedia.length > 0
+        ? ctx.inboundDescribedMedia
+        : undefined,
     perkBeingUnlocked,
     additionalContext,
     operatorInstruction,

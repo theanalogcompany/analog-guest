@@ -31,6 +31,32 @@
 // check all read history bodies, and a bracketed line in one of those would
 // become a search query or an "answer".
 //
+// TAC-584: ONCE AN ATTACHMENT HAS BEEN DESCRIBED, THE LINE SAYS WHAT IT SHOWS.
+// A photo, video, GIF or story mention the describe step could make out
+// (lib/messaging/attachments/describe.ts) stops being "you can't see it" and
+// becomes its description. Two shapes, both approved verbatim on TAC-584's
+// plan (2026-10-11):
+//   in history    "[guest sent a photo: <description>]". The bare shape is
+//                 safe here where the bare marker was not: the defect the
+//                 second wording fixed was a model that knew a photo existed
+//                 and had nothing to look at. Now it has the description.
+//                 ONLY ON A HELD TURN: the history is built without
+//                 descriptions, and lib/agent/media-history.ts swaps this
+//                 wording in once the reply is known to be held.
+//   on the turn   describedMediaLine, which also carries the three rules for
+//   being         replying to a picture: which drinks may be named, nothing
+//   answered      about any person, nothing the description does not say.
+// An attachment with no description, or one too unclear to make out, keeps
+// the line it has always had, so every conversation without described media
+// renders byte for byte as it did.
+//
+// THE DESCRIPTION IS A MODEL'S SENTENCE ABOUT A GUEST'S PICTURE. It arrives
+// here already flattened, stripped of brackets and quotes, and cut short
+// (cleanDescription, lib/schemas/attachment-description.ts), for the reason a
+// reel's caption is. This file does not clean it again and never builds a
+// line from an uncleaned one: HistoryAttachment.description is documented as
+// the cleaned form and both writers take it from usableDescription.
+//
 // A REEL'S CAPTION IS SOMEONE ELSE'S TEXT. It was written by whoever posted
 // the reel, not by the guest and not by us, and it is about to sit inside the
 // prompt. So it is flattened to one line, stripped of the characters that
@@ -38,7 +64,7 @@
 // about keeping the line's shape, which is the only thing wording can do; it
 // is not a claim that a caption cannot carry an instruction.
 
-import type { RecentMessage } from '@/lib/ai/types'
+import type { DescribedMediaWord, RecentMessage } from '@/lib/ai/types'
 import {
   type AttachmentKind,
   isReelProviderType,
@@ -118,10 +144,127 @@ export type HistoryAttachment = {
   kind: AttachmentKind
   providerType: string | null
   title: string | null
+  /**
+   * TAC-584: what the attachment shows, already cleaned for a prompt, when the
+   * describe step produced something usable. Absent or null otherwise, and
+   * the line is then the one this kind has always had.
+   */
+  description?: string | null
+}
+
+const DESCRIBED_WORD_BY_KIND = {
+  image: 'photo',
+  video: 'video',
+  gif: 'gif',
+  story_mention: 'story',
+} as const satisfies Partial<Record<AttachmentKind, DescribedMediaWord>>
+
+/** The kinds a description can exist for. Nothing else is ever described. */
+function describedWordFor(kind: AttachmentKind): DescribedMediaWord | null {
+  return kind in DESCRIBED_WORD_BY_KIND
+    ? DESCRIBED_WORD_BY_KIND[kind as keyof typeof DESCRIBED_WORD_BY_KIND]
+    : null
+}
+
+// "tagged", where the undescribed line says "mentioned": the ticket's wording
+// for a story the agent has been told about.
+const DESCRIBED_HISTORY_LEADS = {
+  photo: 'guest sent a photo',
+  video: 'guest sent a video',
+  gif: 'guest sent a GIF',
+  story: 'guest tagged you in their story',
+} as const satisfies Record<DescribedMediaWord, string>
+
+/** `[guest sent a photo: two iced drinks on a table]`. History only. */
+export function describedHistoryLine(
+  word: DescribedMediaWord,
+  description: string,
+): string {
+  return `[${DESCRIBED_HISTORY_LEADS[word]}: ${description}]`
+}
+
+// What happened, on the turn that answers it. A story has one lead whether or
+// not words came with it: a story tag carries none.
+const DESCRIBED_TURN_LEADS = {
+  photo: ['guest sent a photo with no text', 'guest also sent a photo'],
+  video: ['guest sent a video with no text', 'guest also sent a video'],
+  gif: ['guest sent a GIF with no text', 'guest also sent a GIF'],
+  story: ['guest tagged you in their story', 'guest tagged you in their story'],
+} as const satisfies Record<DescribedMediaWord, readonly [string, string]>
+
+function describedTurnLead(word: DescribedMediaWord, hasText: boolean): string {
+  return DESCRIBED_TURN_LEADS[word][hasText ? 1 : 0]
+}
+
+function namingClause(items: readonly string[]): string {
+  return items.length > 0
+    ? `You may name ${joinNames(items)} and no other menu item`
+    : "You can't tell which menu items these are, so name none and keep to what it looks like"
+}
+
+// "A", "A and B", "A, B and C". Menu names carry their own punctuation
+// ("SoFi – Classic"), so nothing here adds quotes around them.
+function joinNames(items: readonly string[]): string {
+  if (items.length <= 1) return items[0] ?? ''
+  return `${items.slice(0, -1).join(', ')} and ${items[items.length - 1]}`
+}
+
+export type DescribedTurnMedia = {
+  word: DescribedMediaWord
+  /** The turn has words from the guest as well as this. */
+  hasText: boolean
+  /** Cleaned for a prompt. */
+  description: string
+  /** The menu items the reply may name: nameableItems, and nothing else. */
+  nameableItems: readonly string[]
+}
+
+/**
+ * The line for a described attachment on the turn that answers it.
+ *
+ * ONE SENTENCE SHAPE, as mediaLine is, and for the same reason: the rules sit
+ * inside the bracket with the thing they are about, in the last position
+ * before the model writes (later beats earlier in the composed prompt). They
+ * are here and not in the universal rules because they apply to a turn with a
+ * described picture and to no other, and a universal rule would be read on
+ * every turn.
+ *
+ * Every prohibition names what to do instead ("keep to what it looks like",
+ * "reply only to the drinks, the food or the space").
+ *
+ * "Don't assume the day, time or occasion" was added by the owner on
+ * 2026-10-11, after the smoke run: a draft answered a screenshot of a pizza
+ * with "a good Friday night plan", on a Sunday. A picture says what is in it
+ * and not when it was taken or why.
+ */
+export function describedMediaLine(media: DescribedTurnMedia): string {
+  return `[${describedTurnLead(media.word, media.hasText)}. It shows: ${media.description}. ${namingClause(media.nameableItems)}. Reply only to the drinks, the food or the space in it. Say nothing about any person in it, and nothing the description does not say. Don't assume the day, time or occasion.]`
+}
+
+/**
+ * For media sent with no text that the describe step looked at and could not
+ * make out. The tail is mediaLine's own, so the three things the model must
+ * not do about a picture it has nothing to say about are worded once.
+ *
+ * Only for a turn with no text. Beside text, an unclear picture keeps the
+ * "[guest also sent a photo. ...you can't see it...]" line it always had.
+ */
+export function unclearMediaLine(word: DescribedMediaWord): string {
+  return `[${describedTurnLead(word, false)}. It arrived fine, but it is too unclear to make out. Thank them for sending it. Don't describe it, guess what's in it, or say it didn't come through.]`
 }
 
 /** The one line for one attachment. */
 export function attachmentHistoryLine(attachment: HistoryAttachment): string {
+  // TAC-584: described, so the line is what it shows.
+  const word = describedWordFor(attachment.kind)
+  if (
+    word !== null &&
+    attachment.description !== undefined &&
+    attachment.description !== null &&
+    attachment.description !== ''
+  ) {
+    return describedHistoryLine(word, attachment.description)
+  }
   if (attachment.kind !== 'share') return HISTORY_LINES[attachment.kind]
   if (!isReelProviderType(attachment.providerType)) {
     return mediaLine('guest shared a post', 'open it')

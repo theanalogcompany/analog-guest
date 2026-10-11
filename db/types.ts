@@ -1452,6 +1452,9 @@ export type Database = {
         Row: {
           byte_size: number | null
           created_at: string
+          described_at: string | null
+          description: string | null
+          description_meta: Json | null
           failure_reason: string | null
           guest_id: string
           id: string
@@ -1471,6 +1474,9 @@ export type Database = {
         Insert: {
           byte_size?: number | null
           created_at?: string
+          described_at?: string | null
+          description?: string | null
+          description_meta?: Json | null
           failure_reason?: string | null
           guest_id: string
           id?: string
@@ -1490,6 +1496,9 @@ export type Database = {
         Update: {
           byte_size?: number | null
           created_at?: string
+          described_at?: string | null
+          description?: string | null
+          description_meta?: Json | null
           failure_reason?: string | null
           guest_id?: string
           id?: string
@@ -2495,6 +2504,7 @@ export type Database = {
           is_test: boolean
           messaging_phone_number: string | null
           name: string
+          record_media_visits: boolean
           slug: string
           status: string
           timezone: string
@@ -2509,6 +2519,7 @@ export type Database = {
           is_test?: boolean
           messaging_phone_number?: string | null
           name: string
+          record_media_visits?: boolean
           slug: string
           status?: string
           timezone?: string
@@ -2523,6 +2534,7 @@ export type Database = {
           is_test?: boolean
           messaging_phone_number?: string | null
           name?: string
+          record_media_visits?: boolean
           slug?: string
           status?: string
           timezone?: string

@@ -280,6 +280,45 @@ can't see it on our end", and two rewordings changed which false thing it said. 
 third. `media-context.ts` has the rule, the three places its wording was read wide, and why
 a failed read holds.
 
+**A photo, video, GIF or story mention is looked at before the turn drafts** (TAC-584).
+`describeTurnMedia` runs the describe step (`lib/messaging/attachments/describe.ts`) over the
+message being answered, or the media-only message beside it, and puts what it learned on
+`ctx.inboundDescribedMedia`, in words. **The picture never leaves the describe step**
+(owner-ruled 2026-10-11): the generator is given the description and nothing else. Then:
+
+- **A turn with no text gets a draft on its card** when its media was described
+  (`persistMediaOnlyDraft`), composed as `casual_chatter` with no classifier call. It is
+  **always a card and no gate decides it**: the path writes the card
+  itself, as the blank card's path does, under `media_context`. `media_only_inbound` still
+  means an empty draft. Any failure there falls back to the blank card.
+- **A turn with text** is drafted and held as before; its `[guest also sent ...]` line carries
+  the description. The describe step is started before classification and awaited just before
+  generation, so the crisis short-circuit never waits on a vision call.
+- **A description is in a prompt only when the reply is held.** That covers history too: once
+  the venue has answered a photo, the guest's next message can auto-send, so it reads the old
+  "you can't see it" line and not the description (`withDescribedHistory`,
+  `media-history.ts`). Follow-ups and holding messages never read one. Accepted by the owner
+  on 2026-10-11; widening it is a ruling, not a refactor.
+- **Nothing is described** on a test run, for a message Meta could not hand us, or on an
+  opt-out turn's reply (the description is dropped: that reply always sends).
+- **A visit is decided** when the media clearly shows the venue (`record-media-visit.ts`),
+  whatever becomes of the draft, and **written only where the venue's
+  `record_media_visits` is true**. It is false everywhere (owner-ruled 2026-10-11): in that
+  shadow mode the decision goes on the attachment's `description_meta.visit` and into one
+  `media_visit_decision` log line, and no `transactions` row or `last_visit_at` change is
+  made. When on: `approximate`, one per guest per day, never a second row beside a receipt or
+  a self-report. A visit with no nameable drink does not close `understand_order`.
+- **A venue with no appearance notes names no drink.** The describe step drops the model's
+  items when the venue has none (`describe.ts`), which is every venue until notes are loaded.
+- **Which drinks a reply may name and which go on the visit are one function**
+  (`nameableItems`, `lib/schemas/attachment-description.ts`). Do not add a second reader that
+  decides it another way.
+
+None of this was measured, by ruling: the 30-image check pre-registered on TAC-584 was dropped
+on 2026-10-11 because every media reply is held. `scripts/measurement/media-describe.ts` is a
+smoke run over a venue's existing media, not a measurement. Do not read a held draft's quality
+as licence to auto-send one.
+
 ## Venue status
 
 `isVenueProcessingHalted` from `lib/venues/status.ts` is the only behavioural reader of

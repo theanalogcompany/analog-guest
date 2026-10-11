@@ -51,6 +51,7 @@ import {
   venueMessagingNumberRequired,
 } from './conversation-channel'
 import { extractRecentVisits } from './extract-recent-visits'
+import { isItemlessMediaVisit } from './record-media-visit'
 import { loadLastInboundChannel } from './last-inbound-channel'
 import { groupIntoResponses } from './group-responses'
 import { loadMediaHistory } from './media-history'
@@ -599,6 +600,8 @@ export async function buildRuntimeContext(input: {
         ? {
             ...row,
             attachmentLines: mediaHistory.linesByMessageId.get(row.id),
+            describedAttachmentLines:
+              mediaHistory.describedLinesByMessageId.get(row.id),
           }
         : row,
     ),
@@ -733,7 +736,12 @@ export async function buildRuntimeContext(input: {
     // than issuing another: the RAW row count, before extractRecentVisits's
     // parse-projection, since we heard it even if raw_data is unparseable.
     const recordedVisitCount = liveVisitRows.length
-    const hasQualifyingTransaction = recordedVisitCount > 0
+    // TAC-584: a visit seen in a photo that names no drink is a visit and is
+    // NOT an order. It still counts above (they were here), and it must not
+    // close "what did you get?", which is what this fact decides.
+    const hasQualifyingTransaction = liveVisitRows.some(
+      (row) => !isItemlessMediaVisit(row),
+    )
 
     // TAC-436 ruling 3: arms understand_order off the EARLIEST confirmed visit,
     // from either source, rather than off QR enrollment alone.

@@ -56,6 +56,7 @@
     "measure-complaint-split": "tsx --env-file=.env.local scripts/measurement/complaint-resolution-split.ts",
     "measure-phone-test-fixes": "tsx --env-file=.env.local scripts/measurement/phone-test-fixes.ts",
     "measure-media-history-reaction": "tsx --env-file=\"$(dirname \"$(git rev-parse --path-format=absolute --git-common-dir)\")/.env.local\" scripts/measurement/media-history-reaction.ts",
+    "measure-media-describe": "tsx --env-file=\"$(dirname \"$(git rev-parse --path-format=absolute --git-common-dir)\")/.env.local\" scripts/measurement/media-describe.ts",
     "rehost-pending-attachments": "tsx --env-file=\"$(dirname \"$(git rev-parse --path-format=absolute --git-common-dir)\")/.env.local\" scripts/rehost-pending-attachments.ts",
     "measure-golden-set": "tsx --env-file=\"$(dirname \"$(git rev-parse --path-format=absolute --git-common-dir)\")/.env.local\" scripts/measurement/golden-set.ts"
   },
@@ -77,6 +78,7 @@
     "csv-parse": "^6.2.1",
     "date-fns": "^4.1.0",
     "date-fns-tz": "^3.2.0",
+    "ffmpeg-static": "^5.3.0",
     "googleapis": "^171.4.0",
     "jose": "^6.2.3",
     "lucide-react": "^1.47.0",

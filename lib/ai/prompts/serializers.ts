@@ -15,7 +15,9 @@ import type { EmojiDirective } from '../emoji-cadence'
 import {
   type MediaVerb,
   STORY_REPLY_HISTORY_LINE,
+  describedMediaLine,
   mediaLine,
+  unclearMediaLine,
   withAttachmentLines,
 } from './attachment-lines'
 import {
@@ -32,6 +34,7 @@ import {
 import type {
   FollowupContext,
   FollowupReason,
+  InboundDescribedMedia,
   InboundMediaKind,
   KnowledgeCorpusChunk,
   MessageCategory,
@@ -2605,6 +2608,37 @@ export function formatInboundMediaLine(kind: InboundMediaKind): string {
 }
 
 /**
+ * TAC-584: the lines for this turn's described attachments, in the order they
+ * were sent.
+ *
+ * Beside text, only an attachment with a description gets a line here; the
+ * caller keeps the older "you can't see it" line when none has one. With no
+ * text, an attachment that was looked at and could not be made out gets its
+ * own line, because on that turn it is all there is to answer.
+ */
+export function formatDescribedMediaLines(
+  media: readonly InboundDescribedMedia[],
+  hasText: boolean,
+): string[] {
+  const lines: string[] = []
+  for (const item of media) {
+    if (item.description !== null) {
+      lines.push(
+        describedMediaLine({
+          word: item.word,
+          hasText,
+          description: item.description,
+          nameableItems: item.nameableItems,
+        }),
+      )
+    } else if (!hasText) {
+      lines.push(unclearMediaLine(item.word))
+    }
+  }
+  return lines
+}
+
+/**
  * `channel` picks the channel copy (today, only the first-visit opener's). It
  * defaults to null, the unknown channel, which gets the copy that asserts no
  * phone number: absence is the safe direction, which is what licenses a
@@ -2874,13 +2908,24 @@ export function runtimeToProse(
   // handleFollowup) enforces mutual exclusion between inbound flow
   // (inboundMessage set) and outbound flow (perkBeingUnlocked or
   // eventBeingInvited set). Type-system enforcement is TAC-243 backlog.
+  const describedMedia = runtime.inboundDescribedMedia ?? []
   if (runtime.inboundMessage) {
     // TAC-582: above the words it gives the context for, as in the history.
     if (runtime.inboundStoryReply) lines.push(STORY_REPLY_HISTORY_LINE)
     lines.push(`The guest just sent: "${runtime.inboundMessage}"`)
-    if (runtime.inboundMedia) {
+    // TAC-584: a described attachment's line says what it shows, and takes
+    // the place of "you can't see it". One too unclear to make out says
+    // nothing new beside text, so it falls through to the line below.
+    const describedLines = formatDescribedMediaLines(describedMedia, true)
+    if (describedLines.length > 0) {
+      lines.push(...describedLines)
+    } else if (runtime.inboundMedia) {
       lines.push(formatInboundMediaLine(runtime.inboundMedia))
     }
+  } else if (describedMedia.length > 0) {
+    // TAC-584: media and no words. These lines are everything the guest sent,
+    // so they stand where "The guest just sent" does.
+    lines.push(...formatDescribedMediaLines(describedMedia, false))
   }
   // TAC-324: R1 carve-out signal. This is the ONLY place createdVia/timing
   // surfaces in the prompt — without this line the model has no way to know

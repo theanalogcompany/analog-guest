@@ -138,6 +138,13 @@ export type RecentMessage = {
   // of `body`, deliberately: lib/ai/prompts/attachment-lines.ts has why. A
   // message whose body is '' and that has lines is a media-only message.
   attachmentLines?: string[]
+  // TAC-584: the same lines with each described attachment's line saying what
+  // it shows. Present only when at least one differs. NO RENDERER READS THIS.
+  // It is swapped into `attachmentLines` by the orchestrator, and only on a
+  // turn whose reply is held for an operator (lib/agent/media-history.ts,
+  // withDescribedHistory): a description must never be in the prompt of a
+  // reply that can auto-send.
+  describedAttachmentLines?: string[]
 }
 
 // One transaction projected for the agent prompt (TAC-234). Replaces the
@@ -203,6 +210,31 @@ export type FollowupContext = {
 export type InboundMediaKind =
   'photo' | 'gif' | 'video' | 'voice_note' | 'other' | 'unknown'
 
+/**
+ * TAC-584: what a described attachment is called in a prompt line. `story` is
+ * a story the guest tagged the venue in. Only these four are ever described
+ * (lib/messaging/attachments/describe.ts).
+ */
+export type DescribedMediaWord = 'photo' | 'video' | 'gif' | 'story'
+
+/**
+ * TAC-584: one attachment on the turn being answered that the describe step
+ * has looked at. lib/agent/handle-inbound.ts builds it; the serializer words
+ * it (lib/ai/prompts/attachment-lines.ts).
+ *
+ * THE GENERATOR GETS THIS AND NEVER THE PICTURE (owner ruling 2026-10-11).
+ * The picture stays inside the describe step. A smoke run that showed the
+ * generator both had one draft in three use a detail the description did not
+ * carry, which is the describe step's rules being walked round.
+ */
+export type InboundDescribedMedia = {
+  word: DescribedMediaWord
+  /** Cleaned for a prompt. Null when it was looked at and is too unclear to make out. */
+  description: string | null
+  /** The menu items the reply may name. Empty when none is unmistakable. */
+  nameableItems: string[]
+}
+
 export type RuntimeContext = {
   guestName?: string
   inboundMessage?: string
@@ -215,6 +247,11 @@ export type RuntimeContext = {
   // stories. Rendered as one bracketed line above "The guest just sent", the
   // same line the history uses. Absent on every other turn.
   inboundStoryReply?: boolean
+  // TAC-584: the attachments on this turn that have been described. When any
+  // has a description, its line replaces the "you can't see it" line above.
+  // On a turn with NO text (`inboundMessage` is then the empty string) these
+  // lines are the whole of what the guest sent. Absent on every other turn.
+  inboundDescribedMedia?: InboundDescribedMedia[]
   perkBeingUnlocked?: {
     name: string
     qualification: string

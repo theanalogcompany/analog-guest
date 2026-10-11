@@ -34,19 +34,41 @@ decision rather than silent drift. A **required** boolean or string is free.
 `correctsPendingReply`, `followUpWorthy`, `praisedExperience`. None is `.optional()`, which
 is what makes the compiler name every site synthesizing a `Classification`.
 
-`PROMPT_VERSION` (`prompts/system-template.ts`, currently v1.106.0) covers the
+`PROMPT_VERSION` (`prompts/system-template.ts`, currently v1.107.0) covers the
 classify/generate contract. Every other module here carries its own, and they are
 deliberately not linked:
 
 `VERIFY_PROSE_PROMISE_PROMPT_VERSION` · `VERIFY_MECHANIC_OFFER_PROMPT_VERSION` · `VERIFY_CANCELLATION_CLAIM_PROMPT_VERSION` ·
 `VERIFY_CLOSED_VENUE_ARRIVAL_PROMPT_VERSION` · `EXTRACT_REPORTED_ORDER_PROMPT_VERSION` ·
-`CLASSIFY_INTENTION_PROMPTS_PROMPT_VERSION`
+`CLASSIFY_INTENTION_PROMPTS_PROMPT_VERSION` · `DESCRIBE_ATTACHMENT_PROMPT_VERSION`
 
 A change to one of those never touches the classify/generate contract, so bumping
 `PROMPT_VERSION` alongside it would be a false signal.
 
 **Bumping `PROMPT_VERSION` is a repo-wide sweep.** See `.claude/rules/prompt-versioning.md` -
 it loads automatically when you touch a prompt.
+
+## Image content (TAC-584)
+
+One call sends a picture, and it is the only one: `describeAttachment`
+(`describe-attachment.ts`), which looks at one guest attachment and reports what is in it.
+**`generateMessage` is never shown a picture** (owner-ruled 2026-10-11). It was first built to
+be, and in a smoke run a draft used a detail its description did not carry: the picture was a
+way round the describe step. The generator reads the description line and nothing else.
+
+- **A picture is never part of a prompt string**, so it is in no trace and no recorded
+  prompt. For a story it is held nowhere but the function's memory: Meta forbids keeping one.
+  Do not add image bytes to a span's content.
+- **`describeAttachment` is the gate on naming and on visits**, which is why it is the
+  generation model and not the classifier's. It reports; `nameableItems` and `evidencesVisit`
+  (`lib/schemas/attachment-description.ts`) decide.
+- **The model may call a drink `unmistakable` only against the venue's appearance notes**
+  (knowledge rows tagged `appearance`, read by `lib/rag/appearance-entries.ts`). That is
+  wording, and nothing has measured whether the model keeps to it: the check that would have
+  (a no-notes arm and a swapped-notes arm) was dropped by ruling on TAC-584. What IS enforced
+  is the empty case: with no notes, `describe.ts` drops every item the model returns.
+- Images go through `lib/messaging/attachments/frames.ts` first (one scaled JPEG per photo,
+  four frames per video). Never hand a raw download to a model call.
 
 ## The verifier family
 

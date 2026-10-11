@@ -29,6 +29,14 @@
 // what makes "text behaves exactly as today" true by construction, with no
 // reader to re-check. isFirstContactNeutral below is the condition, named.
 //
+// TAC-584: A DESCRIBED ATTACHMENT'S LINE CAN SAY WHAT IT SHOWS, ON A HELD
+// TURN. The rows read here carry `description` and `description_meta`
+// (migration 081). buildMediaHistory words every message twice: without
+// descriptions, which is what the context is built with and what every
+// prompt gets by default, and with them, carried beside it. withDescribedHistory
+// has the rule for when the second is used. This file still decides nothing
+// about wording: lib/ai/prompts/attachment-lines.ts does.
+//
 // FAILS SOFT, to no lines. This is context on top of a turn that works without
 // it. A read that fails is logged and the turn runs as it did before TAC-582.
 //
@@ -43,6 +51,7 @@ import {
 import { captureGuestMediaDegraded } from '@/lib/analytics/posthog'
 import { createAdminClient } from '@/lib/db/admin'
 import { isAttachmentKind } from '@/lib/messaging/attachments/kind'
+import { usableDescription } from '@/lib/schemas/attachment-description'
 
 import { MEDIA_COMPANION_WINDOW_MS } from './inbound-media'
 
@@ -53,12 +62,47 @@ const MAX_ATTACHMENT_ROWS = 500
 
 export interface MediaHistory {
   linesByMessageId: Map<string, string[]>
+  /**
+   * TAC-584: for a message with at least one described attachment, its lines
+   * with the descriptions in. Kept beside `linesByMessageId`, never merged
+   * into it: see withDescribedHistory.
+   */
+  describedLinesByMessageId: Map<string, string[]>
   mediaOnlyInbounds: RecentMessage[]
 }
 
 export const EMPTY_MEDIA_HISTORY: MediaHistory = {
   linesByMessageId: new Map(),
+  describedLinesByMessageId: new Map(),
   mediaOnlyInbounds: [],
+}
+
+function sameLines(a: readonly string[], b: readonly string[]): boolean {
+  return a.length === b.length && a.every((line, i) => line === b[i])
+}
+
+/**
+ * TAC-584: the history with every described attachment's line saying what it
+ * shows. Pure.
+ *
+ * A DESCRIPTION IS IN A PROMPT ONLY WHEN THE REPLY IS HELD. Every media reply
+ * is held for an operator (owner ruling 2026-10-11), and the hold is decided
+ * per turn (media-context.ts): once the venue has answered a photo, the
+ * guest's next message is an ordinary turn and can auto-send. If the photo's
+ * description sat in that turn's history, a reply written from it would go
+ * out with nobody reading it. So the history is built WITHOUT descriptions,
+ * exactly as it was before they existed, and handle-inbound calls this only
+ * after it knows the turn is held. The owner accepted that on 2026-10-11:
+ * an unheld later turn does not read a description.
+ */
+export function withDescribedHistory(
+  messages: readonly RecentMessage[],
+): RecentMessage[] {
+  return messages.map((message) =>
+    message.describedAttachmentLines === undefined
+      ? message
+      : { ...message, attachmentLines: message.describedAttachmentLines },
+  )
 }
 
 export interface LoadMediaHistoryInput {
@@ -87,6 +131,11 @@ export interface AttachmentHistoryRow {
   kind: string
   provider_type: string | null
   title: string | null
+  // TAC-584: what the describe step wrote, when it has run. Optional so a
+  // row built by hand, or by a caller older than the columns, reads as not
+  // described.
+  description?: string | null
+  description_meta?: unknown
 }
 
 /**
@@ -105,22 +154,43 @@ export function buildMediaHistory(
       kind: isAttachmentKind(row.kind) ? row.kind : 'unknown',
       providerType: row.provider_type,
       title: row.title,
+      // TAC-584: only a description a prompt may carry. Never described,
+      // skipped, and too-unclear-to-make-out all come back null here, and the
+      // line is then the one it has always been.
+      description:
+        usableDescription({
+          description: row.description ?? null,
+          descriptionMeta: row.description_meta ?? null,
+        })?.description ?? null,
     }
     const list = attachmentsByMessage.get(row.message_id)
     if (list) list.push(attachment)
     else attachmentsByMessage.set(row.message_id, [attachment])
   }
 
+  // Two wordings of the same attachments: as if nothing had been described,
+  // which is what every prompt gets, and with descriptions, which only a held
+  // turn is given (withDescribedHistory).
+  const undescribed = (attachments: readonly HistoryAttachment[]) =>
+    attachments.map((attachment) => ({ ...attachment, description: null }))
+
   const linesByMessageId = new Map<string, string[]>()
+  const describedLinesByMessageId = new Map<string, string[]>()
   for (const [messageId, attachments] of attachmentsByMessage) {
-    linesByMessageId.set(
-      messageId,
-      historyAttachmentLines({
-        unsupported: false,
-        hasMedia: true,
-        attachments,
-      }),
-    )
+    const lines = historyAttachmentLines({
+      unsupported: false,
+      hasMedia: true,
+      attachments: undescribed(attachments),
+    })
+    linesByMessageId.set(messageId, lines)
+    const described = historyAttachmentLines({
+      unsupported: false,
+      hasMedia: true,
+      attachments,
+    })
+    if (!sameLines(lines, described)) {
+      describedLinesByMessageId.set(messageId, described)
+    }
   }
 
   const mediaOnlyInbounds: RecentMessage[] = []
@@ -128,21 +198,25 @@ export function buildMediaHistory(
     const attachmentLines = historyAttachmentLines({
       unsupported: row.unsupported_content === true,
       hasMedia: (row.media_urls ?? []).length > 0,
-      attachments: attachmentsByMessage.get(row.id) ?? [],
+      attachments: undescribed(attachmentsByMessage.get(row.id) ?? []),
     })
     if (attachmentLines.length === 0) continue
+    const describedAttachmentLines = describedLinesByMessageId.get(row.id)
     mediaOnlyInbounds.push({
       direction: 'inbound',
       body: '',
       createdAt: new Date(row.created_at),
       delivery: 'delivered',
       attachmentLines,
+      ...(describedAttachmentLines !== undefined
+        ? { describedAttachmentLines }
+        : {}),
     })
   }
   mediaOnlyInbounds.sort(
     (a, b) => a.createdAt.getTime() - b.createdAt.getTime(),
   )
-  return { linesByMessageId, mediaOnlyInbounds }
+  return { linesByMessageId, describedLinesByMessageId, mediaOnlyInbounds }
 }
 
 // A turn that ran without the guest's media in its history looks, from the
@@ -193,7 +267,9 @@ export async function loadMediaHistory(
     // can hold 180 rows, and that many uuids is a URL PostgREST may refuse.
     const attachmentsQuery = supabase
       .from('message_attachments')
-      .select('message_id, kind, provider_type, title')
+      .select(
+        'message_id, kind, provider_type, title, description, description_meta',
+      )
       .eq('venue_id', input.venueId)
       .eq('guest_id', input.guestId)
       .gte('created_at', input.historyCutoffIso)

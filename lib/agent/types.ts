@@ -6,7 +6,7 @@ import type {
   PendingQuestion,
   RecentMessage,
 } from '@/lib/ai'
-import type { InboundMediaKind } from '@/lib/ai/types'
+import type { InboundDescribedMedia, InboundMediaKind } from '@/lib/ai/types'
 import type { AgentTrace } from '@/lib/observability'
 import type { KnowledgeCorpusChunk, VoiceCorpusChunk } from '@/lib/rag'
 import type {
@@ -665,6 +665,11 @@ export interface RuntimeContext {
   // by lib/agent/media-context.ts; handle-inbound.ts is the only writer, so
   // no proactive path can set it. Absent or false on every other turn.
   mediaContext?: boolean
+  // TAC-584: the attachments on this turn that the describe step has looked
+  // at, in words. Set by handle-inbound before generation, on inbound runs
+  // only. The pictures themselves never reach the context: they stay inside
+  // the describe step (owner ruling 2026-10-11).
+  inboundDescribedMedia?: InboundDescribedMedia[]
   corpus: CorpusMatch[] | null
   // Retrieved knowledge_corpus chunks. Populated by retrieveKnowledgeStage
   // when shouldRetrieveKnowledge fires (always for inbound; followups

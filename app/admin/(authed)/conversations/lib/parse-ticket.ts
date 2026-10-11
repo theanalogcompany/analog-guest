@@ -113,7 +113,26 @@ export function formatPosProvider(provider: string | null): string {
       return 'Toast'
     case 'guest_reported':
       return 'Guest-reported'
+    // TAC-584: a visit recorded from a guest's photo, video or story.
+    case 'guest_media':
+      return 'Seen in a photo'
     default:
       return provider
   }
+}
+
+// Which transactions the Command Center may delete (TAC-323, TAC-584). Both
+// are rows the system inferred rather than a venue's own record, so a wrong
+// one needs a way out: 'guest_reported' is read off what a guest typed,
+// 'guest_media' off what a model saw in their photo. A POS receipt and an
+// ongoing self-report are not deletable here.
+//
+// ONE LIST, read by the button and by the route that re-checks it.
+export const DELETABLE_TRANSACTION_SOURCES: readonly string[] = [
+  'guest_reported',
+  'guest_media',
+]
+
+export function isDeletableTransactionSource(source: string | null): boolean {
+  return source !== null && DELETABLE_TRANSACTION_SOURCES.includes(source)
 }

@@ -1285,6 +1285,7 @@ export async function handleFollowup(input: {
               // A followup answers no guest message, so there is no guest turn
               // to have been a crisis. False rather than threaded.
               guestIsCrisis: false,
+              media: null,
             }).catch((e) => {
               console.error('apns: sendDraftFlaggedPush threw unexpectedly', {
                 agentRunId,
