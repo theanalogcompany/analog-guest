@@ -1186,8 +1186,10 @@ function pushChecks(): Check[] {
   )
   same(
     'push: text beside a photo is unchanged',
-    buildPushTitle('Maya', 'media_context', 'new_question'),
-    'Maya: replied after sending an attachment',
+    // A two-letter name: the title is cut to 40 characters by trimming the
+    // NAME, and this reason is 37 on its own.
+    buildPushTitle('Al', 'media_context', 'new_question'),
+    'Al: replied after sending an attachment',
   )
   return out
 }
