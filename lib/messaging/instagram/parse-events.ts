@@ -73,6 +73,13 @@ export type InstagramMessageEvent = EventBase & {
    * is written from.
    */
   attachments: ParsedAttachment[]
+  /**
+   * TAC-582: the guest sent something and there is nothing of it to show.
+   * Either Meta flagged the message `is_unsupported`, or it had no text and
+   * its attachments carried no link. Saved as a row with
+   * `unsupported_content`, where both used to be dropped as `unhandled`.
+   */
+  unsupported: boolean
   referral: InstagramReferral | null
 }
 
@@ -82,6 +89,8 @@ export type InstagramEchoEvent = EventBase & {
   mediaUrls: string[]
   /** TAC-582: as on a message. Staff sending a photo from the app has these too. */
   attachments: ParsedAttachment[]
+  /** TAC-582: as on a message. */
+  unsupported: boolean
 }
 
 // The postback's `payload` (e.g. ICEBREAKER_HOURS) is deliberately not carried:
@@ -147,9 +156,12 @@ export type InstagramUnhandledReason =
   | 'account_mismatch'
   /** The guest unsent a message (`message.is_deleted`). */
   | 'message_deleted'
-  /** Meta could not render the content (`message.is_unsupported`). */
-  | 'message_unsupported'
-  /** A message with neither text nor an attachment URL. */
+  /**
+   * A message with no text, no attachment at all, and no `is_unsupported`
+   * flag: there is nothing to say a guest sent anything. (TAC-582: a message
+   * Meta flags unsupported, or whose attachments have no link, is no longer
+   * unhandled. It is saved, with `unsupported: true`.)
+   */
   | 'message_no_content'
 
 export type InstagramUnhandledEvent = {
@@ -323,13 +335,18 @@ function parseMessage(
     return unhandled('malformed', fieldNames(Object.keys(message)))
   if (message.is_deleted === true)
     return unhandled('message_deleted', fieldNames(Object.keys(message)))
-  if (message.is_unsupported === true) {
-    return unhandled('message_unsupported', fieldNames(Object.keys(message)))
-  }
 
   const text = nonEmptyString(message.text)
   const mediaUrls = attachmentUrls(message)
-  if (text === null && mediaUrls.length === 0) {
+  const attachments = parseAttachments(message)
+  // TAC-582: nothing we can show, and yet the guest sent something. Meta said
+  // so itself (`is_unsupported`), or attachments arrived with no text and no
+  // link in any of them. Either way the message is KEPT, flagged, so the
+  // operator is told and the thread has a row; it used to vanish.
+  const nothingToShow = text === null && mediaUrls.length === 0
+  const unsupported =
+    message.is_unsupported === true || (nothingToShow && attachments.length > 0)
+  if (nothingToShow && !unsupported) {
     return unhandled('message_no_content', fieldNames(Object.keys(message)))
   }
 
@@ -342,7 +359,8 @@ function parseMessage(
       providerSentAt: providerSentAtOf(item),
       text,
       mediaUrls,
-      attachments: parseAttachments(message),
+      attachments,
+      unsupported,
     }
   }
   return {
@@ -353,7 +371,8 @@ function parseMessage(
     providerSentAt: providerSentAtOf(item),
     text,
     mediaUrls,
-    attachments: parseAttachments(message),
+    attachments,
+    unsupported,
     // Inside `message` on an ad referral; beside it, where Meta has put it on
     // other surfaces. Taking either costs nothing, and the ref arrives once.
     referral: parseReferral(message.referral) ?? parseReferral(item.referral),

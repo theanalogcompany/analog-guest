@@ -117,6 +117,7 @@ import {
   generateStage,
   GENERATION_FAILED_REVIEW_REASON,
   MEDIA_ONLY_REVIEW_REASON,
+  UNSUPPORTED_REVIEW_REASON,
   KNOWLEDGE_GAP_WINDOW_MS,
   mayAutoSendAfterClassification,
   retrieveCorpusStage,
@@ -198,6 +199,9 @@ async function loadInbound(messageId: string): Promise<{
   // this file reads it (lib/agent/inbound-media.ts decides what it means) and
   // InboundMessage is constructed at thirty sites that have no media.
   mediaUrls: string[]
+  // TAC-582: `messages.unsupported_content`. The guest sent something and the
+  // row holds nothing of it: Meta flagged it, or its attachments had no link.
+  unsupported: boolean
   guestId: string
   venueId: string
 }> {
@@ -205,7 +209,7 @@ async function loadInbound(messageId: string): Promise<{
   const { data, error } = await supabase
     .from('messages')
     .select(
-      'id, body, media_urls, provider_message_id, created_at, venue_id, guest_id, direction, channel, referral_source',
+      'id, body, media_urls, unsupported_content, provider_message_id, created_at, venue_id, guest_id, direction, channel, referral_source',
     )
     .eq('id', messageId)
     .single()
@@ -237,6 +241,7 @@ async function loadInbound(messageId: string): Promise<{
       referralSource: data.referral_source,
     },
     mediaUrls: data.media_urls ?? [],
+    unsupported: data.unsupported_content === true,
     guestId: data.guest_id,
     venueId: data.venue_id,
   }
@@ -514,12 +519,16 @@ async function persistGenerationFailureCard(
 async function persistMediaOnlyCard(
   ctx: RuntimeContext,
   agentRunId: string,
+  // TAC-582: which of the two blank cards this is. Everything else about
+  // them is the same card: no draft, no category, its own slot.
+  reviewReason:
+    typeof MEDIA_ONLY_REVIEW_REASON | typeof UNSUPPORTED_REVIEW_REASON,
 ): Promise<AgentResult> {
   try {
     const persisted = await persistOrRegenQueuedDraft(
       ctx,
       buildGenerationFailureGeneration(),
-      MEDIA_ONLY_REVIEW_REASON,
+      reviewReason,
       null,
       { blankBody: true, conversationDisposition: 'own_card' },
     )
@@ -540,8 +549,8 @@ async function persistMediaOnlyCard(
       agentRunId,
       venueId: ctx.venue.id,
       guestId: ctx.guest.id,
-      triggers: [MEDIA_ONLY_REVIEW_REASON],
-      primaryTrigger: MEDIA_ONLY_REVIEW_REASON,
+      triggers: [reviewReason],
+      primaryTrigger: reviewReason,
       modelRequiresApproval: false,
       modelApprovalReason: '',
       compRegexMatchedPattern: null,
@@ -555,12 +564,12 @@ async function persistMediaOnlyCard(
       inboundBody: null,
       generatedBody: '',
     })
-    pushOperatorCard(ctx, persisted.outboundMessageId, MEDIA_ONLY_REVIEW_REASON)
+    pushOperatorCard(ctx, persisted.outboundMessageId, reviewReason)
     return {
       status: 'queued',
       outboundMessageId: persisted.outboundMessageId,
-      triggers: [MEDIA_ONLY_REVIEW_REASON],
-      primaryTrigger: MEDIA_ONLY_REVIEW_REASON,
+      triggers: [reviewReason],
+      primaryTrigger: reviewReason,
     }
   } catch (e) {
     // persistOrRegenQueuedDraft already fired a red alert.
@@ -1574,7 +1583,17 @@ async function runInboundTurn(
       around: inbound.message.receivedAt,
     })
     let mediaOnlyTurn = false
-    if (isMediaOnly(inbound.message.body, inbound.mediaUrls)) {
+    // TAC-582: a message Meta could not hand us takes the same road as a
+    // photo with no caption, for the same reason: there is no text in it to
+    // answer. Read off the message the turn ADOPTED, before `inbound` can be
+    // swapped to the text beside it, and kept: it names the card.
+    const blankCardReason = inbound.unsupported
+      ? UNSUPPORTED_REVIEW_REASON
+      : MEDIA_ONLY_REVIEW_REASON
+    if (
+      isMediaOnly(inbound.message.body, inbound.mediaUrls) ||
+      (inbound.unsupported && inbound.message.body.trim() === '')
+    ) {
       const rows = await turnMediaRows
       if (!rows.ok) {
         // Fail toward a human: with no rows to judge, the card is written.
@@ -1790,7 +1809,11 @@ async function runInboundTurn(
         testSink.draft = emptyTestDraft(ctx, 'media_only_card')
         return { status: 'refused', reason: 'test_run' }
       }
-      const carded = await persistMediaOnlyCard(ctx, agentRunId)
+      const carded = await persistMediaOnlyCard(
+        ctx,
+        agentRunId,
+        blankCardReason,
+      )
       trace.update({ output: { status: carded.status, mediaOnly: true } })
       return carded
     }

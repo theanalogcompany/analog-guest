@@ -2725,7 +2725,36 @@ import {
 //   BASELINE RESET for a venue with offer lines only. Every other venue's
 //   first-attempt prompt is byte-identical to v1.104.0.
 //
-export const PROMPT_VERSION = 'v1.105.0'
+// v1.106.0 (TAC-582): what a guest ATTACHED is in the conversation the model
+// reads. No template text changed.
+//
+//   A photo, a voice note, a GIF, a video, a reel or a story a guest sent used
+//   to be absent from history entirely: the history query skips a message
+//   with no text, and nothing recorded what an attachment was. Each now reads
+//   as one bracketed line ("[guest sent a photo]", "[guest shared a reel:
+//   '<caption>']"), worded in prompts/attachment-lines.ts and approved
+//   verbatim by the owner on 2026-10-11.
+//
+//   WHERE THEY APPEAR: in the generator's history turns (a media-only message
+//   is a `user` turn of its own; one sent with text is the line above that
+//   text), in the classifier's `Recent conversation` block, and in the
+//   transcript recorded on the trace. Guest messages only. What the venue
+//   sent is never worded this way.
+//
+//   WHAT DID NOT CHANGE: `[guest also sent a photo]` on the turn the photo
+//   arrives beside text, and its instruction. A photo that line already
+//   announces is left out of that turn's history so it is said once.
+//
+//   THE HISTORY LINE CARRIES NO "you cannot see it" INSTRUCTION. Whether a
+//   later reply describes or reacts to media it was only told about is the
+//   check pre-registered on TAC-582 (0 of 20 across two venues, with a
+//   control arm that omits the line).
+//
+//   BASELINE RESET only for a conversation with guest media in its window.
+//   Every other first-attempt prompt is byte-identical to v1.105.0: a message
+//   with no attachment lines renders through the same code path it did.
+//
+export const PROMPT_VERSION = 'v1.106.0'
 
 export const SYSTEM_TEMPLATE = `You work at a hospitality venue (cafe, bakery, restaurant). You communicate with its guests via iMessage, in whatever voice the venue has configured below — its own collective voice, its owner's, or a named staff member's.
 

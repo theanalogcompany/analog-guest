@@ -108,11 +108,13 @@ import {
   pendingSlotOf,
   type SlotDropReason,
 } from './pending-slots'
+import { historyForPrompt } from './media-history'
 import type {
   Classification,
   CorpusMatch,
   FollowupTrigger,
   KnowledgeMatch,
+  RecentMessage,
   RuntimeContext,
   Visit,
 } from './types'
@@ -499,6 +501,25 @@ export const GENERATION_FAILED_REVIEW_REASON = 'generation_failed'
 export const MEDIA_ONLY_REVIEW_REASON = 'media_only_inbound'
 
 /**
+ * TAC-582: `review_reason` on the blank card written when the guest sent
+ * something Meta could not hand us at all (`message.is_unsupported`), or
+ * attachments with no link in any of them. There is a `messages` row and
+ * nothing in it, so there is nothing to classify, generate or show.
+ *
+ * Its own reason rather than MEDIA_ONLY_REVIEW_REASON because that card's copy
+ * says "an attachment" and, since TAC-582, the app shows it. This one's copy
+ * has to say the opposite: there is nothing to look at.
+ *
+ * NOT a voice note. Instagram sends those as `type: "audio"` with a link, so
+ * they are ordinary attachments and get the media-only card (owner ruling 8,
+ * 2026-10-11).
+ *
+ * Outside KNOWLEDGE_GAP_CARD_REVIEW_REASONS for the reason the media-only one
+ * is: nobody asked a question.
+ */
+export const UNSUPPORTED_REVIEW_REASON = 'unsupported_inbound'
+
+/**
  * Priority order for picking the `primaryTrigger` (the value that lands on
  * messages.review_reason and shows up first in the operator queue UI). NOT
  * the order triggers are evaluated in (that's enumeration order, which
@@ -703,7 +724,10 @@ export async function classifyStage(
     inboundBody: ctx.currentMessage.body,
     persona: ctx.venue.brandPersona,
     venueInfo: ctx.venue.venueInfo,
-    recentMessages: ctx.recentMessages,
+    // TAC-582: with the guest's media-only messages back in their place. The
+    // classifier reads the conversation to judge this message; it decides
+    // nothing about first contact, which still reads ctx.recentMessages.
+    recentMessages: promptHistory(ctx),
     guestState: ctx.recognition.state,
   })
   if (!r.ok) {
@@ -2846,6 +2870,26 @@ export function deriveFollowupContext(
 // it) structurally unable to disagree about what "the opener turn" means.
 // `buildAiRuntime` below calls this with `new Date()`, identical to its
 // prior inline `Date.now()` call — zero behavior change there.
+/**
+ * TAC-582: the history a prompt is built from. One call shape for the two
+ * prompts that read it (the classifier's and the generator's), so they cannot
+ * disagree about whether a photo the guest sent is in the conversation.
+ */
+function promptHistory(ctx: RuntimeContext): RecentMessage[] {
+  return historyForPrompt({
+    recentMessages: ctx.recentMessages,
+    mediaOnlyInbounds: ctx.mediaOnlyInbounds,
+    inboundMediaAnnounced: ctx.inboundMedia !== null,
+    currentMessageAt: ctx.currentMessage?.receivedAt ?? null,
+  })
+}
+
+// TAC-582: `recentMessages.length === 0` below is the first-contact condition
+// and it is UNCHANGED, on purpose. A guest whose only earlier message was a
+// photo or a story mention still has an empty `recentMessages` (those ride on
+// `ctx.mediaOnlyInbounds`), so their first text is still the opener turn.
+// Owner ruling 4, 2026-10-11; scripts/harness/inbound-attachments/ holds the
+// case.
 export function computeFirstTouchAfterQrScan(
   ctx: RuntimeContext,
   now: Date,
@@ -3129,7 +3173,10 @@ export function buildAiRuntime(
             ctx.recentMessages,
             ctx.followupTrigger.triggeredAt,
           )
-        : ctx.recentMessages,
+        : // TAC-582: with the guest's media-only messages back in their place.
+          // The scan greeting above is left as it was: it is deliberately
+          // written without the earlier conversation.
+          promptHistory(ctx),
     mechanics: ctx.mechanics,
     // TAC-234: thread the recent transactions through to the AI module's
     // RuntimeContext. The serializer gates rendering by category (welcome /

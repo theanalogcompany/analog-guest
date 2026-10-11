@@ -252,6 +252,18 @@ A turn with text is answered normally and told `[guest also sent a photo]`; a tu
 text at all becomes a blank operator card (`media_only_inbound`), with no classifier call.
 The rule, its window and its limits are in `inbound-media.ts`'s header.
 
+A message Meta flags `is_unsupported` takes the same road with its own card
+(`unsupported_inbound`, TAC-582). A voice note is **not** one: Instagram sends it as an
+`audio` attachment, so it is media like any other.
+
+**A media-only message is history for the model and is not the guest having written to us**
+(TAC-582, owner-ruled 2026-10-11). `ctx.recentMessages` is unchanged and still holds no
+message without text; those ride beside it on `ctx.mediaOnlyInbounds` and are merged in only
+by `historyForPrompt`, at the two places a prompt is built. So a guest whose only earlier
+message was a photo or a story mention is still on first contact when they first write. Do
+not "simplify" this by adding the rows to `recentMessages`: a dozen readers decide the kind
+of turn from that list, and `media-history.ts`'s header names them.
+
 ## Venue status
 
 `isVenueProcessingHalted` from `lib/venues/status.ts` is the only behavioural reader of

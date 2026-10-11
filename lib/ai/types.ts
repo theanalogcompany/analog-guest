@@ -133,6 +133,11 @@ export type RecentMessage = {
   // a follow-up). Read by lib/agent/previous-offer.ts. Optional because only
   // build-runtime-context has it; a thread built by hand leaves it out.
   category?: string | null
+  // TAC-582: one bracketed line per attachment the guest sent with this
+  // message ("[guest sent a photo]"), already worded. Inbound only. NOT part
+  // of `body`, deliberately: lib/ai/prompts/attachment-lines.ts has why. A
+  // message whose body is '' and that has lines is a media-only message.
+  attachmentLines?: string[]
 }
 
 // One transaction projected for the agent prompt (TAC-234). Replaces the

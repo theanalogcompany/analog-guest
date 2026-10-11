@@ -40,6 +40,10 @@ export interface HistoryRow {
   review_state: string | null
   // Carried through to RecentMessage for lib/agent/previous-offer.ts.
   category?: string | null
+  // TAC-582: the worded lines for what the guest attached to this message.
+  // Set by buildRuntimeContext on inbound rows only; the query does not
+  // select it.
+  attachmentLines?: string[]
 }
 
 /**
@@ -179,6 +183,13 @@ export function groupIntoResponses(
           : deliveries[0]!,
         // Every bubble of one response was sent under one category.
         category: first.category ?? null,
+        // TAC-582: an inbound row is its own group, so the first row's lines
+        // are the message's. Absent rather than [] when there are none, so a
+        // history with no attachments is the object it always was.
+        ...(first.attachmentLines !== undefined &&
+        first.attachmentLines.length > 0
+          ? { attachmentLines: first.attachmentLines }
+          : {}),
       }
     })
     .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime())

@@ -49,6 +49,7 @@ import {
   APPROVAL_TRIGGERS,
   GENERATION_FAILED_REVIEW_REASON,
   MEDIA_ONLY_REVIEW_REASON,
+  UNSUPPORTED_REVIEW_REASON,
   type ApprovalTrigger,
 } from '@/lib/agent/stages'
 import type { MessageCategory } from '@/lib/ai/types'
@@ -99,6 +100,11 @@ const BODY_NO_QUESTION = 'Draft ready to review'
 // no guest words to quote, so the shared fallback above would be false on it.
 // Scoped to that one card by review reason; every other card is unchanged.
 const BODY_MEDIA_ONLY = 'Sent an attachment. Reply by hand.'
+// TAC-582. The same case for the unsupported card: no draft, nothing to
+// quote. This is the card's own sentence, approved verbatim 2026-10-11, and
+// not a new one, because no separate push body was put to the owner.
+const BODY_UNSUPPORTED =
+  "Sent something we can't show. Write your reply by hand."
 
 // Used only for a reason this map does not know. The map is total over every
 // value that can reach a push, so this is reachable only if primaryTrigger
@@ -155,11 +161,14 @@ export const REASON_BY_REVIEW_REASON = {
   [INSTAGRAM_SEND_FAILED_REASON]: "didn't send",
   // TAC-574, approved 2026-10-06.
   [MEDIA_ONLY_REVIEW_REASON]: 'sent an attachment',
+  // TAC-582, approved verbatim 2026-10-11.
+  [UNSUPPORTED_REVIEW_REASON]: "sent something we can't show",
 } as const satisfies Record<
   | ApprovalTrigger
   | typeof GENERATION_FAILED_REVIEW_REASON
   | typeof INSTAGRAM_SEND_FAILED_REASON
-  | typeof MEDIA_ONLY_REVIEW_REASON,
+  | typeof MEDIA_ONLY_REVIEW_REASON
+  | typeof UNSUPPORTED_REVIEW_REASON,
   string
 >
 
@@ -370,11 +379,13 @@ export async function sendDraftFlaggedPush(
   const body =
     input.primaryTrigger === MEDIA_ONLY_REVIEW_REASON
       ? BODY_MEDIA_ONLY
-      : buildPushBody(
-          input.guestQuestion,
-          input.guestCategory,
-          input.guestIsCrisis,
-        )
+      : input.primaryTrigger === UNSUPPORTED_REVIEW_REASON
+        ? BODY_UNSUPPORTED
+        : buildPushBody(
+            input.guestQuestion,
+            input.guestCategory,
+            input.guestIsCrisis,
+          )
 
   for (const recipient of recipients) {
     const badge = await countPendingForOperator(recipient.id)

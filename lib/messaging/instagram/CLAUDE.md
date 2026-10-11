@@ -64,6 +64,18 @@ batches `entry[] x messaging[]`), told apart by the item's own keys. The guest c
 Anything unrecognised becomes an `unhandled` event carrying **key names, never values**, and
 is logged and acknowledged rather than dropped silently.
 
+**An attachment's type is kept, and `media_urls` is still only the links** (TAC-582). Each
+attachment becomes a `message_attachments` row written before the 200; the copy into our own
+storage runs after it, in `waitUntil` (`lib/messaging/attachments/`). The story a guest
+replies to (`message.reply_to.story`) is an attachment row of its own kind and is **not** in
+`media_urls`: it is the venue's story, not something the guest sent. Neither that shape nor
+`video` nor `story_mention` has been seen in a real delivery; all three follow Meta's
+documentation, and `scripts/harness/inbound-attachments/` marks them.
+
+**A message with nothing to show is saved, not dropped.** `is_unsupported`, or attachments
+with no text and no link in any of them, is a `message` event with `unsupported: true` and a
+row with `unsupported_content`. It used to be `unhandled` and the guest heard nothing.
+
 **One temporary exception to "no guest content in logs":** `raw-payload-log.ts` prints the
 whole verified body as one line (`instagram_raw_payload`) while `INSTAGRAM_LOG_RAW_PAYLOADS`
 is exactly `true`. It is off by default and goes away with the media-messages ticket; its

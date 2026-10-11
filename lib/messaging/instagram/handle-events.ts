@@ -388,6 +388,9 @@ function inboundInsert(
     status: 'received',
     body: (isMessage ? event.text : event.title) ?? '',
     media_urls: isMessage ? event.mediaUrls : [],
+    // TAC-582: true or absent, never false. NULL is "nothing unusual", which
+    // is every row written before the column existed.
+    ...(isMessage && event.unsupported ? { unsupported_content: true } : {}),
     provider_message_id: event.mid,
     // Instagram's own time for the guest's action (TAC-479). TAC-469's 24-hour
     // window gate and TAC-486's countdown run from this, never created_at.
@@ -410,6 +413,7 @@ function echoInsert(
     status: 'sent',
     body: event.text ?? '',
     media_urls: event.mediaUrls,
+    ...(event.unsupported ? { unsupported_content: true } : {}),
     provider_message_id: event.mid,
     // Written on echoes too, deliberately (TAC-479), because TAC-469 reads it.
     // An echo is how a reply staff typed in the Instagram app is recorded, and
@@ -506,13 +510,17 @@ async function insertMessage(
  *
  * Called BEFORE the scan's own row is inserted, so it can never count itself.
  *
- * `body <> ''` is the same filter buildRuntimeContext's history query uses,
- * and for the same reason: a scan row and a blank knowledge-gap card both
- * carry an empty body and neither is a conversation. It under-counts a guest
- * whose only message was media with no caption, which reads as "no record".
- * That is the SAFE direction: the no-record branch's copy says only that
- * there is nothing on file and explicitly does not claim a first contact,
- * whereas the other branch tells the model not to introduce itself.
+ * A row counts when it has text, OR media, OR Meta's unsupported flag. A scan
+ * row and a blank knowledge-gap card have none of the three and neither is a
+ * conversation, which is why an empty body alone has never counted.
+ *
+ * TAC-582 (owner ruling, 2026-10-11): a guest whose only message was a photo
+ * or a voice note HAS a record here, and this used to answer "no record" for
+ * them. This is the one place a media-only message counts as prior contact.
+ * It is NOT the agent's first-contact rule, which still ignores media-only
+ * messages (lib/agent/media-history.ts); the two are different questions. This
+ * one picks the scan greeting's wording, where "nothing on file" would be
+ * false for a guest who sent us a photo last week.
  *
  * A failed read is an error, not a false: false chooses a guest-facing
  * instruction, and a read that failed has established nothing.
@@ -527,7 +535,7 @@ async function hadPriorConversation(
     .select('id')
     .eq('venue_id', venueId)
     .eq('guest_id', guestId)
-    .neq('body', '')
+    .or('body.neq."",media_urls.neq.{},unsupported_content.is.true')
     .limit(1)
     .maybeSingle()
   if (error) return { ok: false, failure: fail('message_lookup', error) }

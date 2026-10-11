@@ -85,7 +85,7 @@ cannot see a dash arriving that way.
 
 `messages.review_reason` holds values outside `APPROVAL_TRIGGERS` -
 `operator_decline_initiated`, `crisis_safety_reply`, `generation_failed`,
-`instagram_send_failed`, `media_only_inbound` - stamped by the path that owns them. `ExtraReviewReason` exists so the label map stays exhaustive at compile
+`instagram_send_failed`, `media_only_inbound`, `unsupported_inbound` - stamped by the path that owns them. `ExtraReviewReason` exists so the label map stays exhaustive at compile
 time.
 
 ## Dispatch
@@ -123,6 +123,26 @@ it never-sent in a prompt invites the model to say it again.
 
 `recent_context` deliberately has **no** `body <> ''` filter - a photo-only text is context
 the operator needs. Do not add one.
+
+## Attachments ride a flag (TAC-582)
+
+`?attachments=1` on both thread endpoints and on the conversations list, read by one function
+(`threadOptionsFromRequest`) so it cannot mean two things. Off, each is the response it always
+was plus the always-present empties: `attachments: []`, `unsupported: false`,
+`previewLabel: null`. On, a message with no text is included when it has media or Meta's
+unsupported flag - decided from `messages` columns alone, never a join, so the operator app
+can apply the same test to a live row.
+
+- **A signed link is minted per read**, one hour, and the response says when it ends. Nothing
+  is cached; the app refetches.
+- **The thread's wire shape is its own schema** (`OperatorThreadMessageSchema`). The queue's
+  `recentContext` still uses `ThreadMessageSchema`, built inside an RPC that knows nothing
+  about attachments.
+- **A failed attachment read fails the thread and never the list.** The thread was asked for
+  attachments and would otherwise say there are none; the list is how an operator finds a
+  conversation at all, so it loses its labels instead.
+- The flag comes off when the operator app that renders media has shipped. That is a Contract
+  change on both tickets, not a cleanup.
 
 ---
 

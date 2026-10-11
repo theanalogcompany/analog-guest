@@ -12,6 +12,7 @@ import {
 import type { ReOptIn } from '@/lib/guests/opt-out'
 import type { MessageChannel } from '@/lib/schemas/message-channel'
 import type { EmojiDirective } from '../emoji-cadence'
+import { withAttachmentLines } from './attachment-lines'
 import {
   applyChannelSubstitutions,
   type ChannelSubstitution,
@@ -980,7 +981,8 @@ export const UNSENT_HISTORY_NOTE =
 function formatHistoryLine(m: RecentMessage, now: Date): string {
   const speaker = m.direction === 'inbound' ? 'guest' : 'venue'
   const delta = formatTimeDelta(m.createdAt, now)
-  const body = normalizeHistoryBody(m.body)
+  // TAC-582: a guest's attachments read as bracketed lines ahead of their text.
+  const body = withAttachmentLines(normalizeHistoryBody(m.body), m, ' ')
   const marker = historyDeliveryMarker(m.delivery)
   return marker === null
     ? `[${speaker}, ${delta}] ${body}`
@@ -1035,7 +1037,10 @@ export function splitHistory(messages: readonly RecentMessage[]): SplitHistory {
       undelivered.push(m)
       continue
     }
-    const content = m.body.trim()
+    // TAC-582: a guest message that was only a photo is still a turn. It has
+    // no body and one bracketed line, and skipping it would leave the model
+    // answering a conversation with a hole in it.
+    const content = withAttachmentLines(m.body.trim(), m, '\n')
     if (content === '') continue
     const role = m.direction === 'inbound' ? 'user' : 'assistant'
     if (turns.length === 0 && role === 'assistant') continue

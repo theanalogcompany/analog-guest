@@ -216,12 +216,14 @@ const HANDOFF_RESOLVERS: HandoffResolvers = {
   read: () => ({ kind: 'not_a_turn' }),
   // Split by reason, because two of them ARE guest turns. Note which two:
   // `unhandled_messaging_type` is reactions, edits and handover (see its own
-  // comment in parse-events.ts) and is NOT a message. The guest-content cases
-  // are `message_unsupported` (Meta could not render it — a voice note, a
-  // sticker) and `message_no_content`. Both are messages a guest actually
-  // sent, saved nowhere, answered by nothing; CLAUDE.md notes a STOP sent as a
-  // voice note would have been invisible. Counting them as non-turns would
-  // under-report the denominator in the one case where the guest got silence.
+  // comment in parse-events.ts) and is NOT a message. The guest-content case
+  // is `message_no_content`: a message a guest actually sent, saved nowhere,
+  // answered by nothing. Counting it as a non-turn would under-report the
+  // denominator in the one case where the guest got silence.
+  //
+  // TAC-582: a message Meta flags `is_unsupported` used to be the second such
+  // case. It is saved now, so it arrives here as `persisted` and runs, and the
+  // agent writes the operator a card for it (UNSUPPORTED_REVIEW_REASON).
   unhandled: (outcome) =>
     GUEST_CONTENT_UNHANDLED_REASONS.has(outcome.reason)
       ? { kind: 'record', reason: 'message_unrenderable' }
@@ -235,7 +237,7 @@ const HANDOFF_RESOLVERS: HandoffResolvers = {
  * (`message_deleted`), which needs no reply by the time we see it.
  */
 const GUEST_CONTENT_UNHANDLED_REASONS: ReadonlySet<InstagramUnhandledReason> =
-  new Set(['message_unsupported', 'message_no_content'])
+  new Set(['message_no_content'])
 
 // TAC-536 added 'referral': a scan is a guest action, so a scan we could not
 // file is a lost turn in the same way a lost message is. An echo and a read
