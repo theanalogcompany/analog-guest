@@ -14,9 +14,18 @@
 //   - the drinks a reply may name and the drinks recorded on a visit come
 //     from ONE function, so they cannot differ.
 //   - `unsure` is never a visit, and an unclear picture is never described.
+//   - one photo visit per guest per day, never a second row beside a receipt
+//     or a self-report for the same day, and a visit with no drink in it does
+//     not count as having heard the order.
 //
 // Each section says which file it runs. Sibling of
 // scripts/harness/inbound-attachments/, which covers the rows these read.
+import {
+  type ExistingVisitRow,
+  GUEST_MEDIA_SOURCE,
+  isItemlessMediaVisit,
+  planMediaVisit,
+} from '@/lib/agent/record-media-visit'
 import {
   DESCRIBE_SETTLE_MS,
   DESCRIBE_SETTLE_POLL_MS,
@@ -34,6 +43,7 @@ import {
   parseDurationSeconds,
   passThroughImage,
 } from '@/lib/messaging/attachments/frames'
+import type { MenuItem } from '@/lib/schemas'
 import {
   type AttachmentDescriptionMeta,
   type DescribedMeta,
@@ -555,6 +565,251 @@ const ruleChecks: Check[] = [
   ],
 ]
 
+// --- lib/agent/record-media-visit.ts -----------------------------------------
+
+function menuItem(name: string, price: number): MenuItem {
+  return {
+    name,
+    price,
+    category: 'Signature Drinks',
+    modifiers: [],
+    dietary: [],
+    isOffMenu: false,
+  }
+}
+
+const MENU_ITEMS: MenuItem[] = [
+  menuItem('Pink Panther', 7.5),
+  menuItem('Blossom Tonic', 8),
+  menuItem('Cortado', 5.5),
+]
+
+// 2026-10-11 14:00 in Los Angeles.
+const AT = '2026-10-11T21:00:00.000Z'
+const TZ = 'America/Los_Angeles'
+
+const venueOnly = { attachmentId: 'att-1', meta: describedMeta() }
+const pinkPanther = {
+  attachmentId: 'att-1',
+  meta: describedMeta({
+    items: [{ name: 'Pink Panther', confidence: 'unmistakable' }],
+  }),
+}
+const blossom = {
+  attachmentId: 'att-2',
+  meta: describedMeta({
+    items: [{ name: 'Blossom Tonic', confidence: 'unmistakable' }],
+  }),
+}
+
+function plan(
+  evidence: Parameters<typeof planMediaVisit>[0]['evidence'],
+  existing: ExistingVisitRow[] = [],
+) {
+  return planMediaVisit({
+    messageId: 'msg-1',
+    occurredAtIso: AT,
+    timezone: TZ,
+    evidence,
+    menuItems: MENU_ITEMS,
+    existing,
+  })
+}
+
+function existingRow(overrides: Partial<ExistingVisitRow>): ExistingVisitRow {
+  return {
+    id: 'tx-1',
+    source: GUEST_MEDIA_SOURCE,
+    external_id: 'msg-0',
+    occurred_at: '2026-10-11T18:00:00.000Z',
+    raw_data: { line_items: [{ name: 'Pink Panther', quantity: 1 }] },
+    ...overrides,
+  }
+}
+
+function lineItemNames(rawData: unknown): string[] {
+  const items = (rawData as { line_items?: { name: string }[] }).line_items
+  return (items ?? []).map((item) => item.name)
+}
+
+function visitChecks(): Check[] {
+  const out: Check[] = []
+
+  out.push([
+    'visit: media that is not evidence writes nothing',
+    plan([{ attachmentId: 'a', meta: describedMeta({ showsVenue: 'no' }) }])
+      .action === 'none' &&
+      plan([
+        { attachmentId: 'a', meta: describedMeta({ showsVenue: 'unsure' }) },
+      ]).action === 'none' &&
+      plan([{ attachmentId: 'a', meta: null }]).action === 'none' &&
+      plan([
+        {
+          attachmentId: 'a',
+          meta: { version: 1, outcome: 'skipped', reason: 'no_frames' },
+        },
+      ]).action === 'none',
+    null,
+  ])
+
+  const itemless = plan([venueOnly])
+  out.push([
+    'visit: the venue with no nameable drink is a visit with no items and no amount',
+    itemless.action === 'insert' &&
+      itemless.itemCount === 0 &&
+      itemless.amountCents === null &&
+      lineItemNames(itemless.rawData).length === 0,
+    itemless,
+  ])
+  out.push([
+    'visit: the row carries the venue-local date the one-per-day index reads',
+    itemless.action === 'insert' &&
+      itemless.rawData.venue_local_date === '2026-10-11',
+    itemless.action === 'insert' ? itemless.rawData.venue_local_date : null,
+  ])
+
+  const named = plan([pinkPanther])
+  out.push([
+    'visit: an unmistakable drink is the order, priced from the menu',
+    named.action === 'insert' &&
+      named.itemCount === 1 &&
+      named.amountCents === 750 &&
+      lineItemNames(named.rawData).join() === 'Pink Panther',
+    named,
+  ])
+
+  const possibleOnly = plan([
+    {
+      attachmentId: 'a',
+      meta: describedMeta({
+        items: [{ name: 'Cortado', confidence: 'possible' }],
+      }),
+    },
+  ])
+  out.push([
+    'visit: a "possible" drink is never on the order',
+    possibleOnly.action === 'insert' && possibleOnly.itemCount === 0,
+    possibleOnly,
+  ])
+
+  const two = plan([pinkPanther, blossom])
+  out.push([
+    'visit: two photos on one message are one visit with both drinks',
+    two.action === 'insert' &&
+      lineItemNames(two.rawData).join() === 'Pink Panther,Blossom Tonic' &&
+      two.amountCents === 1550,
+    two,
+  ])
+
+  const drinkOnNonVenuePhoto = plan([
+    venueOnly,
+    {
+      attachmentId: 'att-2',
+      meta: describedMeta({
+        showsVenue: 'unsure',
+        items: [{ name: 'Blossom Tonic', confidence: 'unmistakable' }],
+      }),
+    },
+  ])
+  out.push([
+    'visit: a drink on an attachment that is not itself evidence is not on the order',
+    drinkOnNonVenuePhoto.action === 'insert' &&
+      drinkOnNonVenuePhoto.itemCount === 0,
+    drinkOnNonVenuePhoto,
+  ])
+
+  out.push([
+    'visit: the same message twice writes nothing the second time',
+    JSON.stringify(
+      plan([pinkPanther], [existingRow({ external_id: 'msg-1' })]),
+    ) === JSON.stringify({ action: 'exists', reason: 'same_message' }),
+    plan([pinkPanther], [existingRow({ external_id: 'msg-1' })]),
+  ])
+
+  const secondPhoto = plan([blossom], [existingRow({})])
+  out.push([
+    "visit: a second photo the same day adds its drink to the first photo's row",
+    secondPhoto.action === 'merge' &&
+      secondPhoto.transactionId === 'tx-1' &&
+      secondPhoto.addedItemCount === 1 &&
+      lineItemNames(secondPhoto.rawData).join() ===
+        'Pink Panther,Blossom Tonic',
+    secondPhoto,
+  ])
+
+  const samePhotoAgain = plan([pinkPanther], [existingRow({})])
+  out.push([
+    'visit: a second photo of the same drink the same day changes nothing',
+    samePhotoAgain.action === 'exists' &&
+      samePhotoAgain.reason === 'no_new_items',
+    samePhotoAgain,
+  ])
+
+  const intoSelfReport = plan(
+    [blossom],
+    [existingRow({ source: 'guest_reported_ongoing', external_id: null })],
+  )
+  out.push([
+    "visit: a photo the same day as a typed order joins that order's row",
+    intoSelfReport.action === 'merge' && intoSelfReport.addedItemCount === 1,
+    intoSelfReport,
+  ])
+
+  for (const source of ['square', 'guest_reported', 'manual']) {
+    const beside = plan(
+      [blossom],
+      [existingRow({ source, external_id: 'receipt-1' })],
+    )
+    out.push([
+      `visit: a photo the same day as a ${source} row writes no second row and leaves it alone`,
+      beside.action === 'exists' && beside.reason === 'same_day_other_source',
+      beside,
+    ])
+  }
+
+  const yesterday = plan(
+    [blossom],
+    [existingRow({ occurred_at: '2026-10-10T21:00:00.000Z' })],
+  )
+  out.push([
+    "visit: yesterday's row is a different visit",
+    yesterday.action === 'insert',
+    yesterday,
+  ])
+
+  // 23:30 on the 10th in Los Angeles is already the 11th in UTC.
+  const lateLastNight = plan(
+    [blossom],
+    [existingRow({ occurred_at: '2026-10-11T06:30:00.000Z' })],
+  )
+  out.push([
+    'visit: "the same day" is the venue\'s day, not UTC\'s',
+    lateLastNight.action === 'insert',
+    lateLastNight,
+  ])
+
+  out.push([
+    'order: a photo visit with no drink has not told us the order',
+    isItemlessMediaVisit({
+      source: GUEST_MEDIA_SOURCE,
+      raw_data: { line_items: [] },
+    }) && isItemlessMediaVisit({ source: GUEST_MEDIA_SOURCE, raw_data: null }),
+    null,
+  ])
+  out.push([
+    'order: a photo visit with a drink has, and so has any other source whatever it holds',
+    !isItemlessMediaVisit({
+      source: GUEST_MEDIA_SOURCE,
+      raw_data: { line_items: [{ name: 'Pink Panther', quantity: 1 }] },
+    }) &&
+      !isItemlessMediaVisit({ source: 'square', raw_data: null }) &&
+      !isItemlessMediaVisit({ source: 'guest_reported', raw_data: {} }),
+    null,
+  ])
+
+  return out
+}
+
 // --- lib/messaging/attachments/frames.ts: the pure half ----------------------
 
 const frameChecks: Check[] = [
@@ -614,6 +869,7 @@ async function main(): Promise<void> {
     ...planChecks,
     ...(await orchestrationChecks()),
     ...ruleChecks,
+    ...visitChecks(),
     ...frameChecks,
   ]
   let failed = 0

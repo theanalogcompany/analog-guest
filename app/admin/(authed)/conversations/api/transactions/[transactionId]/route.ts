@@ -4,14 +4,21 @@ import { createAdminClient } from '@/lib/db/admin'
 import { createServerClient } from '@/lib/db/server'
 import { allowsVenue, type VenueScope } from '@/lib/auth/venue-scope'
 
+import { isDeletableTransactionSource } from '../../../lib/parse-ticket'
+
 // DELETE /admin/conversations/api/transactions/[transactionId] — TAC-323.
 //
 // A false-positive order extraction is otherwise unrecoverable: the bad row
 // permanently disarms lib/agent/extract-reported-order.ts's gate condition 2
 // for that guest, so their real order can never be recorded. This is the
 // recovery path — delete only, no editing of items or amounts, and
-// restricted to source='guest_reported' rows (no other source is deletable
-// from this surface). Deleting needs no separate re-arm flag: the extractor
+// restricted to DELETABLE_TRANSACTION_SOURCES (no other source is deletable
+// from this surface).
+//
+// TAC-584 adds 'guest_media', a visit a model read off a guest's photo. A
+// wrong one moves recognition and the guest cannot take it back by text, so
+// this is its only correction path. Deleting it does NOT walk
+// guests.last_visit_at back, which is equally true of a guest_reported row. Deleting needs no separate re-arm flag: the extractor
 // gate reads the transactions table directly, so the row's absence IS the
 // re-arm.
 //
@@ -89,11 +96,11 @@ export async function DELETE(
   if (!allowsVenue(venueScope, transaction.venue_id)) {
     return NextResponse.json({ error: 'venue not allowed' }, { status: 403 })
   }
-  if (transaction.source !== 'guest_reported') {
+  if (!isDeletableTransactionSource(transaction.source)) {
     return NextResponse.json(
       {
         error:
-          'only guest-reported transactions can be deleted from this surface',
+          'only guest-reported and seen-in-a-photo transactions can be deleted from this surface',
       },
       { status: 400 },
     )
