@@ -74,10 +74,16 @@ export type InstagramMessageEvent = EventBase & {
    */
   attachments: ParsedAttachment[]
   /**
-   * TAC-582: the guest sent something and there is nothing of it to show.
-   * Either Meta flagged the message `is_unsupported`, or it had no text and
-   * its attachments carried no link. Saved as a row with
-   * `unsupported_content`, where both used to be dropped as `unhandled`.
+   * TAC-582: the guest sent something with no text and no media link of
+   * their own. Either Meta flagged the message `is_unsupported`, or it had
+   * attachments and none of them put a link in `mediaUrls`. Saved as a row
+   * with `unsupported_content`, where both used to be dropped as `unhandled`.
+   *
+   * That second case includes a reply to a story with no words in it. The
+   * story's link is deliberately not in `mediaUrls`, so without this flag the
+   * row would have an empty body and no media and would be shown nowhere.
+   * Flagged, it is shown and carded. That shape has not been seen in a real
+   * delivery.
    */
   unsupported: boolean
   referral: InstagramReferral | null
@@ -89,7 +95,10 @@ export type InstagramEchoEvent = EventBase & {
   mediaUrls: string[]
   /** TAC-582: as on a message. Staff sending a photo from the app has these too. */
   attachments: ParsedAttachment[]
-  /** TAC-582: as on a message. */
+  /**
+   * Always false. An echo with nothing to show stays `unhandled`, as it was
+   * before TAC-582. The field exists so the two events share a shape.
+   */
   unsupported: boolean
 }
 
@@ -157,10 +166,17 @@ export type InstagramUnhandledReason =
   /** The guest unsent a message (`message.is_deleted`). */
   | 'message_deleted'
   /**
+   * An ECHO Meta could not render (`message.is_unsupported`). Echoes only
+   * since TAC-582: a GUEST's unsupported message is no longer unhandled, it
+   * is saved with `unsupported: true`. The venue's own is left as it was,
+   * because a row for it would be an empty outbound message that reads as a
+   * reply the guest was sent.
+   */
+  | 'message_unsupported'
+  /**
    * A message with no text, no attachment at all, and no `is_unsupported`
-   * flag: there is nothing to say a guest sent anything. (TAC-582: a message
-   * Meta flags unsupported, or whose attachments have no link, is no longer
-   * unhandled. It is saved, with `unsupported: true`.)
+   * flag: there is nothing to say a guest sent anything. Also an echo with
+   * nothing to show, for the reason above.
    */
   | 'message_no_content'
 
@@ -344,6 +360,15 @@ function parseMessage(
   // link in any of them. Either way the message is KEPT, flagged, so the
   // operator is told and the thread has a row; it used to vanish.
   const nothingToShow = text === null && mediaUrls.length === 0
+  // The venue's own side is unchanged by TAC-582: an echo Meta could not
+  // render, or one with nothing in it, is still not saved. Only what a GUEST
+  // sent is worth a row and a card.
+  if (isEcho && message.is_unsupported === true) {
+    return unhandled('message_unsupported', fieldNames(Object.keys(message)))
+  }
+  if (isEcho && nothingToShow) {
+    return unhandled('message_no_content', fieldNames(Object.keys(message)))
+  }
   const unsupported =
     message.is_unsupported === true || (nothingToShow && attachments.length > 0)
   if (nothingToShow && !unsupported) {
@@ -360,7 +385,7 @@ function parseMessage(
       text,
       mediaUrls,
       attachments,
-      unsupported,
+      unsupported: false,
     }
   }
   return {

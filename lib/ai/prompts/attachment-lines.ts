@@ -62,8 +62,12 @@ function cleanShareTitle(title: string | null): string | null {
     .replace(/\s+/g, ' ')
     .trim()
   if (flat === '') return null
-  return flat.length > MAX_SHARE_TITLE_CHARS
-    ? `${flat.slice(0, MAX_SHARE_TITLE_CHARS).trimEnd()}…`
+  // Counted and cut in CODE POINTS. `slice` counts UTF-16 units, and a caption
+  // is mostly emoji: a cut that lands inside one leaves half a character in
+  // the prompt, which the model API can refuse outright (found in review).
+  const points = Array.from(flat)
+  return points.length > MAX_SHARE_TITLE_CHARS
+    ? `${points.slice(0, MAX_SHARE_TITLE_CHARS).join('').trimEnd()}…`
     : flat
 }
 

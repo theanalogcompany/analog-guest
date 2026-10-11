@@ -40,6 +40,7 @@ import {
   type HistoryAttachment,
   historyAttachmentLines,
 } from '@/lib/ai/prompts/attachment-lines'
+import { captureGuestMediaDegraded } from '@/lib/analytics/posthog'
 import { createAdminClient } from '@/lib/db/admin'
 import { isAttachmentKind } from '@/lib/messaging/attachments/kind'
 
@@ -144,6 +145,24 @@ export function buildMediaHistory(
   return { linesByMessageId, mediaOnlyInbounds }
 }
 
+// A turn that ran without the guest's media in its history looks, from the
+// outside, exactly like a turn for a guest who sent none. This is what makes
+// the difference countable.
+function reportHistoryDegraded(
+  input: LoadMediaHistoryInput,
+  error: string,
+): Promise<void> {
+  return captureGuestMediaDegraded({
+    stage: 'history',
+    reason: error,
+    venueId: input.venueId,
+    guestId: input.guestId,
+    messageId: input.currentMessageId ?? null,
+    attachmentId: null,
+    host: null,
+  })
+}
+
 export async function loadMediaHistory(
   supabase: AdminSupabaseClient,
   input: LoadMediaHistoryInput,
@@ -187,18 +206,23 @@ export async function loadMediaHistory(
       attachmentsQuery,
     ])
     if (mediaOnly.error || attachments.error) {
+      const error =
+        mediaOnly.error?.message ?? attachments.error?.message ?? 'unknown'
       console.warn('[agent] media history not loaded; history has no media', {
         guestId: input.guestId,
-        error: mediaOnly.error?.message ?? attachments.error?.message,
+        error,
       })
+      await reportHistoryDegraded(input, error)
       return EMPTY_MEDIA_HISTORY
     }
     return buildMediaHistory(mediaOnly.data ?? [], attachments.data ?? [])
   } catch (e) {
+    const error = e instanceof Error ? e.message : String(e)
     console.warn('[agent] media history read threw; history has no media', {
       guestId: input.guestId,
-      error: e instanceof Error ? e.message : String(e),
+      error,
     })
+    await reportHistoryDegraded(input, error)
     return EMPTY_MEDIA_HISTORY
   }
 }

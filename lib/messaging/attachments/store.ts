@@ -51,6 +51,21 @@ export type MessageAttachment = {
   createdAt: string
 }
 
+/**
+ * What makes a `messages` row something a person sent: text, OR media, OR
+ * Meta's unsupported flag. A PostgREST `.or()` string.
+ *
+ * A scan row, a titleless postback and a blank operator card have none of the
+ * three, which is why an empty body alone has never counted as a message.
+ *
+ * ONE COPY, because four readers must agree on it: the operator thread, the
+ * Command Center's count and rail, and the scan greeting's "any message on
+ * record". It reads `messages` columns only, never a join, so the operator
+ * app can apply the same test to a live row.
+ */
+export const MESSAGE_HAS_CONTENT_FILTER =
+  'body.neq."",media_urls.neq.{},unsupported_content.is.true'
+
 const ATTACHMENT_COLUMNS =
   'id, message_id, venue_id, guest_id, position, kind, status, provider_type, provider_url, storage_path, mime_type, title, link_url, created_at'
 
@@ -169,6 +184,34 @@ export async function loadAttachmentsForMessages(
     .order('position', { ascending: true })
   if (error) return { ok: false, error: error.message }
 
+  return { ok: true, data: (data ?? []).map(toAttachment) }
+}
+
+/** More rows than the newest 200 messages of one guest can carry. */
+const MAX_GUEST_ATTACHMENT_ROWS = 1000
+
+/**
+ * One guest's attachments, newest first, capped.
+ *
+ * What a thread read uses, and NOT loadAttachmentsForMessages: a thread is up
+ * to 200 messages, and 200 uuids in one `.in()` is a URL PostgREST may refuse
+ * (found in review; the agent's history read avoids it the same way). The
+ * caller picks out the messages it is showing.
+ */
+export async function loadAttachmentsForGuest(
+  supabase: AdminSupabaseClient,
+  venueId: string,
+  guestId: string,
+): Promise<AttachmentResult<MessageAttachment[]>> {
+  const { data, error } = await supabase
+    .from('message_attachments')
+    .select(ATTACHMENT_COLUMNS)
+    .eq('venue_id', venueId)
+    .eq('guest_id', guestId)
+    .order('created_at', { ascending: false })
+    .order('position', { ascending: true })
+    .limit(MAX_GUEST_ATTACHMENT_ROWS)
+  if (error) return { ok: false, error: error.message }
   return { ok: true, data: (data ?? []).map(toAttachment) }
 }
 

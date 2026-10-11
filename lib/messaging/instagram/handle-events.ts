@@ -102,7 +102,10 @@ import type { Database } from '@/db/types'
 import type { InstagramScanUnattributedReason } from '@/lib/analytics/posthog'
 // By path, not through @/lib/schemas: TAC-518 shares this predicate with the
 // agent runtime so the two cannot drift.
-import { insertMessageAttachments } from '@/lib/messaging/attachments/store'
+import {
+  MESSAGE_HAS_CONTENT_FILTER,
+  insertMessageAttachments,
+} from '@/lib/messaging/attachments/store'
 import { isScanReferral } from '@/lib/schemas/referral-source'
 
 import {
@@ -184,6 +187,12 @@ export type InstagramEventOutcome =
        * 0 for a postback, a referral, and a message with nothing to copy.
        */
       pendingAttachments: number
+      /**
+       * TAC-582: the message was saved and its attachment rows were not. The
+       * route reports it; this module stays free of analytics, as the import
+       * note at the top says.
+       */
+      attachmentRowsFailed: boolean
       /**
        * TAC-536, `referral` only; NULL for every other kind, which is the
        * convention titlelessPostback and guestCreatedVia already follow here.
@@ -413,7 +422,6 @@ function echoInsert(
     status: 'sent',
     body: event.text ?? '',
     media_urls: event.mediaUrls,
-    ...(event.unsupported ? { unsupported_content: true } : {}),
     provider_message_id: event.mid,
     // Written on echoes too, deliberately (TAC-479), because TAC-469 reads it.
     // An echo is how a reply staff typed in the Instagram app is recorded, and
@@ -464,6 +472,7 @@ async function insertMessage(
   // event: the message is saved and media_urls on it is intact, so the guest's
   // message is not lost, only its attachment rows. Logged with our own ids.
   let pendingAttachments = 0
+  let attachmentRowsFailed = false
   if (event.kind !== 'postback' && event.attachments.length > 0) {
     const stored = await insertMessageAttachments(supabase, {
       messageId: data.id,
@@ -474,6 +483,7 @@ async function insertMessage(
     if (stored.ok) {
       pendingAttachments = stored.data.pending
     } else {
+      attachmentRowsFailed = true
       console.error('instagram webhook: attachment rows not saved', {
         event: 'instagram_attachments_insert_failed',
         venueId,
@@ -500,6 +510,7 @@ async function insertMessage(
       event.kind === 'postback' && (event.title ?? '').trim() === '',
     guestCreatedVia: guest.createdVia,
     pendingAttachments,
+    attachmentRowsFailed,
     // `referral` only; insertReferralMessage is the one writer.
     hadPriorConversation: null,
   }
@@ -535,7 +546,7 @@ async function hadPriorConversation(
     .select('id')
     .eq('venue_id', venueId)
     .eq('guest_id', guestId)
-    .or('body.neq."",media_urls.neq.{},unsupported_content.is.true')
+    .or(MESSAGE_HAS_CONTENT_FILTER)
     .limit(1)
     .maybeSingle()
   if (error) return { ok: false, failure: fail('message_lookup', error) }
@@ -628,6 +639,7 @@ async function insertReferralMessage(
     titlelessPostback: false,
     guestCreatedVia: guest.createdVia,
     pendingAttachments: 0,
+    attachmentRowsFailed: false,
     hadPriorConversation: prior.value,
   }
 }

@@ -3,6 +3,7 @@ import { formatInTimeZone } from 'date-fns-tz'
 import { AuthError, devAuthBypass, verifyAnalogAdminAccess } from '@/lib/auth'
 import { createAdminClient } from '@/lib/db/admin'
 import { createServerClient } from '@/lib/db/server'
+import { MESSAGE_HAS_CONTENT_FILTER } from '@/lib/messaging/attachments/store'
 import { logger } from '@/lib/observability/logger'
 import { type GuestState } from '@/lib/recognition'
 import {
@@ -53,13 +54,6 @@ import {
 //
 // Auth: layout already gates the (authed) tree; we re-resolve the operator
 // here only to resolve the operator's `venueScope`.
-
-// TAC-582: what makes a `messages` row a message someone sent. Text, media,
-// or Meta's unsupported flag. A scan row and a blank card have none of the
-// three and stay out, as they did when this was `body <> ''`. The same three
-// conditions the operator thread uses (lib/operator/thread.ts).
-const MESSAGE_HAS_CONTENT_FILTER =
-  'body.neq."",media_urls.neq.{},unsupported_content.is.true'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 30

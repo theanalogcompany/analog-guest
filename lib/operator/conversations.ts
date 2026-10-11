@@ -3,8 +3,10 @@
 // RPC rows (migration 080 holds the current definition) into the wire shape locked by the Contract in
 // analog-operator's docs/superpowers/specs/2026-09-05-conversations-tab-design.md.
 
+import { captureGuestMediaDegraded } from '@/lib/analytics/posthog'
 import { createAdminClient } from '@/lib/db/admin'
 import {
+  UNKNOWN_PREVIEW_LABEL,
   UNSUPPORTED_PREVIEW_LABEL,
   previewLabelFor,
 } from '@/lib/messaging/attachments/labels'
@@ -141,6 +143,15 @@ async function loadPreviewLabels(
       count: mediaOnlyIds.length,
       error: loaded.error,
     })
+    await captureGuestMediaDegraded({
+      stage: 'preview_labels',
+      reason: loaded.error,
+      venueId: null,
+      guestId: null,
+      messageId: null,
+      attachmentId: null,
+      host: null,
+    })
     return labels
   }
   // Rows come back ordered by message then position, so the first one seen
@@ -149,6 +160,13 @@ async function loadPreviewLabels(
     if (!labels.has(attachment.messageId)) {
       labels.set(attachment.messageId, previewLabelFor(attachment))
     }
+  }
+  // A media-only message with no attachment row behind it: its row write
+  // failed at the webhook. The RPC only returns such a message as the last
+  // one because it HAS media, so it is labelled as the general case and never
+  // left as a blank line in the list.
+  for (const id of mediaOnlyIds) {
+    if (!labels.has(id)) labels.set(id, UNKNOWN_PREVIEW_LABEL)
   }
   return labels
 }

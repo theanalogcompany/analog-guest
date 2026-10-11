@@ -58,6 +58,7 @@ import { createAdminClient } from '@/lib/db/admin'
 // Imported by path, not through a barrel: lib/pos/square/ sets the
 // no-sub-barrel precedent.
 import {
+  captureGuestMediaDegraded,
   captureInstagramCardResolvedExternally,
   captureInstagramScanUnattributed,
   captureScanCodeBound,
@@ -253,6 +254,21 @@ export async function POST(request: Request): Promise<Response> {
       // delivery deadline, and it never throws.
       if (outcome.status === 'persisted' && outcome.pendingAttachments > 0) {
         waitUntil(rehostMessageAttachments(supabase, outcome.messageId))
+      }
+      // The message is saved and its attachment rows are not: the thread will
+      // show it with nothing on it. Reported, because nothing else would say.
+      if (outcome.status === 'persisted' && outcome.attachmentRowsFailed) {
+        waitUntil(
+          captureGuestMediaDegraded({
+            stage: 'attachment_rows',
+            reason: 'insert_failed',
+            venueId: outcome.venueId,
+            guestId: outcome.guestId,
+            messageId: outcome.messageId,
+            attachmentId: null,
+            host: null,
+          }),
+        )
       }
       // TAC-523: a delivery the agent never sees is RECORDED rather than
       // discarded. An agent run records its own outcome at the end of

@@ -17,6 +17,9 @@ import { type AttachmentKind, isReelProviderType } from './kind'
 /** For a message Meta flagged `is_unsupported`. Also the operator card's opening words. */
 export const UNSUPPORTED_PREVIEW_LABEL = "Sent something we can't show"
 
+/** For media nothing more is known about, including a message with no attachment row. */
+export const UNKNOWN_PREVIEW_LABEL = 'Attachment'
+
 const SHARED_REEL_LABEL = 'Shared a reel'
 const SHARED_POST_LABEL = 'Shared a post'
 
@@ -31,8 +34,8 @@ const PREVIEW_LABELS = {
   audio: 'Voice note',
   file: 'File',
   story_mention: 'Story mention',
-  story_reply: 'Attachment',
-  unknown: 'Attachment',
+  story_reply: UNKNOWN_PREVIEW_LABEL,
+  unknown: UNKNOWN_PREVIEW_LABEL,
 } as const satisfies Record<Exclude<AttachmentKind, 'share'>, string>
 
 export type PreviewLabelInput = {

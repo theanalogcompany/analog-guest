@@ -26,11 +26,17 @@
 // WHAT IS REFUSED BEFORE ANY REQUEST IS MADE. The link comes from a verified
 // webhook, but it is still a URL this server is about to fetch:
 //   - anything not https
-//   - a host that is an IP literal or a bare name (no dot): no internal address
-//     is reachable by a public hostname, and nothing a guest sends lives on one
+//   - a host that is an IP literal or a bare name (no dot), with any trailing
+//     dot removed first. This is a filter on the NAME, not on where it
+//     resolves: a public name can still point at an internal address, and
+//     nothing here resolves DNS. It is one layer, beside the two below.
 //   - on Instagram, any host outside Meta's CDNs. An unfamiliar host fails
-//     with `host_not_allowed` and the host is logged, which is how a CDN Meta
-//     adds later shows up as one clear log line, not as a mystery failure.
+//     with `host_not_allowed`, and the failure is reported with the host
+//     (captureGuestMediaDegraded), which is how a CDN Meta adds later is
+//     noticed while the links still work.
+//   - EVERY REDIRECT HOP, before it is followed. Redirects are followed by
+//     hand, at most MAX_REDIRECTS, so a link that bounces somewhere it should
+//     not is refused before that request is made, not after.
 //
 // THE LINK ITSELF IS NEVER LOGGED. Its query string is the signature that
 // makes it work. Logs carry the host and the attachment id.
@@ -44,6 +50,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 
 import type { Database } from '@/db/types'
+import { captureGuestMediaDegraded } from '@/lib/analytics/posthog'
 
 import {
   type AttachmentKind,
@@ -63,6 +70,7 @@ export const GUEST_MEDIA_BUCKET = 'guest-media'
 export const MAX_ATTACHMENT_BYTES = 26_214_400
 
 const DOWNLOAD_TIMEOUT_MS = 60_000
+const MAX_REDIRECTS = 3
 
 export type RehostFailureReason =
   | 'no_link'
@@ -96,7 +104,9 @@ const META_CDN_SUFFIXES: readonly string[] = [
 
 const IPV4_LITERAL = /^\d{1,3}(\.\d{1,3}){3}$/
 
-function isPublicHostname(host: string): boolean {
+function isPublicHostname(rawHost: string): boolean {
+  // `localhost.` is `localhost`: a trailing dot is the DNS root, not a label.
+  const host = rawHost.endsWith('.') ? rawHost.slice(0, -1) : rawHost
   if (!host.includes('.')) return false
   if (host.includes(':') || host.startsWith('[')) return false
   if (IPV4_LITERAL.test(host)) return false
@@ -148,6 +158,20 @@ export function storagePathFor(attachment: {
   return `${attachment.venueId}/${attachment.guestId}/${attachment.messageId}/${attachment.id}`
 }
 
+// What a file is STORED as, which is what the signed link serves it as. The
+// declared type comes from someone else's server; only media types are passed
+// through, so nothing the app is handed can be served as a page or a script.
+// The declared type is still kept on the row (`mime_type`) for the record.
+const SERVED_MEDIA_TYPE = /^(image|audio|video)\/[a-z0-9.+-]+$/
+
+function storedContentType(mimeType: string | null): string {
+  if (mimeType === null || !SERVED_MEDIA_TYPE.test(mimeType)) {
+    return 'application/octet-stream'
+  }
+  // SVG is an image type that can carry script.
+  return mimeType === 'image/svg+xml' ? 'application/octet-stream' : mimeType
+}
+
 type Downloaded =
   | { ok: true; bytes: Uint8Array; mimeType: string | null }
   | { ok: false; reason: RehostFailureReason }
@@ -185,24 +209,38 @@ async function readCapped(response: Response): Promise<Uint8Array | null> {
   return bytes
 }
 
-async function download(
+/** Exported for the harness, which drives it with a stand-in for `fetch`. */
+export async function downloadAttachment(
   url: URL,
   providerType: string | null,
   fetchImpl: typeof fetch,
 ): Promise<Downloaded> {
+  // One deadline for the whole download, redirects and body included.
+  const signal = AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS)
+  let current = url
   let response: Response
-  try {
-    response = await fetchImpl(url, {
-      redirect: 'follow',
-      signal: AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS),
-    })
-  } catch {
-    return { ok: false, reason: 'download_failed' }
-  }
-  // Where the redirects ended is held to the same rule as where they began.
-  if (response.url !== '') {
-    const landed = downloadTargetFor(response.url, providerType)
-    if (!landed.ok) return { ok: false, reason: landed.reason }
+  for (let hop = 0; ; hop++) {
+    try {
+      response = await fetchImpl(current, { redirect: 'manual', signal })
+    } catch {
+      return { ok: false, reason: 'download_failed' }
+    }
+    if (response.status < 300 || response.status >= 400) break
+    // A redirect. Where it points is held to the same rule as where the
+    // download began, BEFORE anything is requested from it.
+    const location = response.headers.get('location')
+    if (location === null || hop >= MAX_REDIRECTS) {
+      return { ok: false, reason: 'download_status' }
+    }
+    let next: string
+    try {
+      next = new URL(location, current).toString()
+    } catch {
+      return { ok: false, reason: 'bad_link' }
+    }
+    const target = downloadTargetFor(next, providerType)
+    if (!target.ok) return { ok: false, reason: target.reason }
+    current = target.url
   }
   if (!response.ok) return { ok: false, reason: 'download_status' }
 
@@ -242,6 +280,17 @@ async function markFailed(
     host,
     ...(error ? { writeError: error.message } : {}),
   })
+  // The loss is permanent once the provider's link expires, so this is the
+  // one degrade here that is also sent to Slack.
+  await captureGuestMediaDegraded({
+    stage: 'rehost',
+    reason,
+    venueId: attachment.venueId,
+    guestId: attachment.guestId,
+    messageId: attachment.messageId,
+    attachmentId: attachment.id,
+    host,
+  })
   return { status: 'failed', attachmentId: attachment.id, reason }
 }
 
@@ -268,7 +317,7 @@ export async function rehostAttachment(
   }
   const host = target.url.hostname
 
-  const downloaded = await download(
+  const downloaded = await downloadAttachment(
     target.url,
     attachment.providerType,
     fetchImpl,
@@ -281,7 +330,7 @@ export async function rehostAttachment(
   const { error: uploadError } = await supabase.storage
     .from(GUEST_MEDIA_BUCKET)
     .upload(path, downloaded.bytes, {
-      contentType: downloaded.mimeType ?? 'application/octet-stream',
+      contentType: storedContentType(downloaded.mimeType),
       // A second run over the same row writes the same bytes to the same path.
       upsert: true,
     })
@@ -327,6 +376,19 @@ export async function rehostAttachment(
     }
   }
   if ((updated ?? []).length === 0) {
+    // Nothing was pending to settle. Either another run settled this row
+    // first, and the file belongs to it, or the row was DELETED while this
+    // was downloading (a data-deletion request racing a re-host). In the
+    // second case the file just uploaded has no row pointing at it and
+    // nothing would ever find it, so it is taken back out.
+    const { data: still } = await supabase
+      .from('message_attachments')
+      .select('id')
+      .eq('id', attachment.id)
+      .maybeSingle()
+    if (still === null) {
+      await supabase.storage.from(GUEST_MEDIA_BUCKET).remove([path])
+    }
     return { status: 'skipped', attachmentId: attachment.id }
   }
 

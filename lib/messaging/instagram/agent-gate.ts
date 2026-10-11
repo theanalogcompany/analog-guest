@@ -223,7 +223,9 @@ const HANDOFF_RESOLVERS: HandoffResolvers = {
   //
   // TAC-582: a message Meta flags `is_unsupported` used to be the second such
   // case. It is saved now, so it arrives here as `persisted` and runs, and the
-  // agent writes the operator a card for it (UNSUPPORTED_REVIEW_REASON).
+  // agent writes the operator a card for it (UNSUPPORTED_REVIEW_REASON). The
+  // reason `message_unsupported` still exists for an ECHO, which is the
+  // venue's side and not a guest turn.
   unhandled: (outcome) =>
     GUEST_CONTENT_UNHANDLED_REASONS.has(outcome.reason)
       ? { kind: 'record', reason: 'message_unrenderable' }

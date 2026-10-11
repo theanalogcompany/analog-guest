@@ -10,6 +10,7 @@ import { waitUntil } from '@vercel/functions'
 // Aliased: this file already has a local `handleInbound` for webhook-payload
 // handling; the agent's handleInbound is the orchestrator we hand off to.
 import { handleInbound as runInboundAgent } from '@/lib/agent'
+import { captureGuestMediaDegraded } from '@/lib/analytics/posthog'
 import { createAdminClient } from '@/lib/db/admin'
 import {
   SENDBLUE_PROVIDER_TYPE,
@@ -262,6 +263,17 @@ async function handleInbound(
         messageId: insertedMessage.id,
         error: stored.error,
       })
+      waitUntil(
+        captureGuestMediaDegraded({
+          stage: 'attachment_rows',
+          reason: stored.error,
+          venueId: venue.id,
+          guestId,
+          messageId: insertedMessage.id,
+          attachmentId: null,
+          host: null,
+        }),
+      )
     } else if (stored.data.pending > 0) {
       // Copied into our own storage after the 200. How long Sendblue keeps a
       // media link is not documented, so it is treated as one that expires.

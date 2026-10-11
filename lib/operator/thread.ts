@@ -49,7 +49,10 @@
 import { DELIVERED_OUTBOUND_STATUSES } from '@/lib/agent/group-responses'
 import { createAdminClient } from '@/lib/db/admin'
 import { serveAttachments } from '@/lib/messaging/attachments/serve'
-import { loadAttachmentsForMessages } from '@/lib/messaging/attachments/store'
+import {
+  MESSAGE_HAS_CONTENT_FILTER,
+  loadAttachmentsForGuest,
+} from '@/lib/messaging/attachments/store'
 import { THREAD_MESSAGE_LIMIT, type OperatorThreadMessage } from '@/lib/schemas'
 import {
   bearerAllowsVenue,
@@ -66,11 +69,8 @@ const REACHED_GUEST_FILTER = `direction.eq.inbound,and(status.in.(${[
 // else with an empty body stays out exactly as before: a reaction, a scan row
 // and a blank card all have neither.
 //
-// It reads `messages` columns only, never a join to message_attachments, so
-// the same three conditions can be applied to a live row by the operator app
-// (TAC-583 counts a row with non-empty media_urls or unsupported_content).
-const SHOWN_WITH_ATTACHMENTS_FILTER =
-  'body.neq."",media_urls.neq.{},unsupported_content.is.true'
+// The filter itself is MESSAGE_HAS_CONTENT_FILTER, shared with every other
+// reader that asks the same question.
 
 export interface ThreadOptions {
   /**
@@ -142,7 +142,7 @@ export async function fetchThreadMessagesForGuest(
     .eq('venue_id', venueId)
     .eq('guest_id', guestId)
   const shown = options.includeAttachments
-    ? base.or(SHOWN_WITH_ATTACHMENTS_FILTER)
+    ? base.or(MESSAGE_HAS_CONTENT_FILTER)
     : base.neq('body', '')
   const { data: rows, error: threadErr } = await shown
     .or(REACHED_GUEST_FILTER)
@@ -155,19 +155,21 @@ export async function fetchThreadMessagesForGuest(
 
   const recentDesc = rows ?? []
 
-  // One query for every attachment in the window, then one signing call.
+  // One query for the guest's attachments, then one signing call for the
+  // ones on a message being shown. By guest, not by a list of 200 ids.
   // A failed read is a failed thread, not a thread with the media quietly
   // missing: the caller asked for attachments and would otherwise be told
   // there are none.
   let attachmentsByMessage: Awaited<ReturnType<typeof serveAttachments>> =
     new Map()
   if (options.includeAttachments) {
-    const loaded = await loadAttachmentsForMessages(
-      supabase,
-      recentDesc.map((r) => r.id),
-    )
+    const loaded = await loadAttachmentsForGuest(supabase, venueId, guestId)
     if (!loaded.ok) return { ok: false, error: loaded.error }
-    attachmentsByMessage = await serveAttachments(supabase, loaded.data)
+    const shown = new Set(recentDesc.map((r) => r.id))
+    attachmentsByMessage = await serveAttachments(
+      supabase,
+      loaded.data.filter((attachment) => shown.has(attachment.messageId)),
+    )
   }
 
   const messages: OperatorThreadMessage[] = []

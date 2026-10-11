@@ -10,6 +10,7 @@
 -- WHAT THIS ADDS.
 --   A. `messages.unsupported_content`: a message Meta flags `is_unsupported`
 --      now gets a row, and this is the only thing that row carries.
+--   B. One more arm on `messages_has_content`. Changes nothing; see block B.
 --   C. `message_attachments`: one row per attachment, with its kind, where it
 --      came from, and where the re-hosted copy lives.
 --   D. A backfill of the media rows that existed on the day (11).

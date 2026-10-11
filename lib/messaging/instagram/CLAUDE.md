@@ -75,6 +75,8 @@ documentation, and `scripts/harness/inbound-attachments/` marks them.
 **A message with nothing to show is saved, not dropped.** `is_unsupported`, or attachments
 with no text and no link in any of them, is a `message` event with `unsupported: true` and a
 row with `unsupported_content`. It used to be `unhandled` and the guest heard nothing.
+Guest messages only: an **echo** with nothing to show is still `unhandled`, because a row for
+it would be an empty outbound message that reads as a reply the guest was sent.
 
 `handle-events.ts` saves them one at a time, each in its own try/catch, following the Sendblue
 order: venue, guest, duplicate check on `provider_message_id`, insert.

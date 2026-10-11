@@ -35,14 +35,18 @@
 //                exists to remove.
 //
 // WHAT THIS CANNOT DO.
-//   - It cannot see the media. No model looks at the image, and the operator
-//     app has no field for it either (a separate ticket, ruled the same day).
-//   - It cannot tell a photo from a GIF on Instagram. `messages` stores only
-//     the links, and Meta's CDN links carry no file extension, so every
-//     Instagram attachment reads as 'unknown' and the agent is told "a photo
-//     or GIF". Storing the attachment type is a migration on `messages`.
-//   - Instagram stickers, voice notes and attachments with no link never get
-//     a `messages` row (parse-events.ts), so they never reach this module.
+//   - It cannot see the media. No model looks at the image. (The operator app
+//     can be sent it since TAC-582, through the thread endpoints.)
+//   - It cannot tell a photo from a GIF on Instagram. It reads only the
+//     links, and Meta's CDN links carry no file extension, so every Instagram
+//     attachment reads as 'unknown' and the agent is told "a photo or GIF" on
+//     the turn it arrives. The type IS stored now (`message_attachments`,
+//     TAC-582) and the conversation history uses it; this module's
+//     current-turn line does not yet.
+//   - An Instagram message with nothing to show (Meta's `is_unsupported`, or
+//     attachments with no link) reaches the agent as a row with
+//     `unsupported_content` and takes the card path beside this one
+//     (handle-inbound.ts). It has no media links, so nothing here sees it.
 //   - A text that arrives after the card was written goes through the
 //     ordinary gate with that card pending: a question gets its own reply or
 //     card, a bare "thanks" is silenced behind it, and a correction

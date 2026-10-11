@@ -49,6 +49,7 @@ import {
   previewLabelFor,
 } from '@/lib/messaging/attachments/labels'
 import {
+  downloadAttachment,
   downloadTargetFor,
   storagePathFor,
 } from '@/lib/messaging/attachments/rehost'
@@ -223,6 +224,11 @@ const linklessNoText = parse(
   withAttachments('mid.linkless.only', [{ type: 'image' }]),
 )
 const nothingAtAll = parse({ mid: 'mid.nothing' })
+const echoUnsupported = parse({ mid: 'mid.echo.u', is_unsupported: true }, true)
+const echoLinkless = parse(
+  withAttachments('mid.echo.l', [{ type: 'image' }]),
+  true,
+)
 
 // --- first contact -----------------------------------------------------------
 // The guest scanned the sign, sent a photo and nothing else, and now writes
@@ -383,6 +389,75 @@ const DELETION_ROWS: FakeRow[] = [
   { id: 'a2', venue_id: 'v', guest_id: 'g2', message_id: 'm2' },
 ]
 
+// --- redirects -----------------------------------------------------------------
+// A stand-in for `fetch` that answers from a table and records what it was
+// asked for, so "refused BEFORE the request" is something that can be seen.
+function fakeFetch(routes: Record<string, Response>) {
+  const asked: string[] = []
+  const impl = ((input: URL | string) => {
+    const url = input.toString()
+    asked.push(url)
+    const response = routes[url]
+    return response === undefined
+      ? Promise.reject(new Error('no route'))
+      : Promise.resolve(response)
+  }) as unknown as typeof fetch
+  return { impl, asked }
+}
+
+function redirectTo(location: string): Response {
+  return new Response(null, { status: 302, headers: { location } })
+}
+
+const CDN_FILE = 'https://scontent.xx.fbcdn.net/v/photo.jpg'
+const INTERNAL = 'https://internal.example.com/secret'
+
+async function redirectChecks(): Promise<Check[]> {
+  const followed = fakeFetch({
+    [PHOTO_URL]: redirectTo(CDN_FILE),
+    [CDN_FILE]: new Response(new Uint8Array([1, 2, 3]), {
+      status: 200,
+      headers: { 'content-type': 'image/jpeg' },
+    }),
+  })
+  const good = await downloadAttachment(
+    new URL(PHOTO_URL),
+    'image',
+    followed.impl,
+  )
+  const bounced = fakeFetch({ [PHOTO_URL]: redirectTo(INTERNAL) })
+  const bad = await downloadAttachment(
+    new URL(PHOTO_URL),
+    'image',
+    bounced.impl,
+  )
+  const looping = fakeFetch({ [PHOTO_URL]: redirectTo(PHOTO_URL) })
+  const loop = await downloadAttachment(
+    new URL(PHOTO_URL),
+    'image',
+    looping.impl,
+  )
+  return [
+    [
+      "a redirect to another of Meta's CDN hosts is followed",
+      good.ok && good.bytes.byteLength === 3 && good.mimeType === 'image/jpeg',
+      JSON.stringify(good.ok ? { bytes: good.bytes.byteLength } : good),
+    ],
+    [
+      'a redirect off the allowed hosts is refused BEFORE it is requested',
+      !bad.ok &&
+        bad.reason === 'host_not_allowed' &&
+        same(bounced.asked, [PHOTO_URL]),
+      JSON.stringify({ bad, asked: bounced.asked }),
+    ],
+    [
+      'a redirect loop stops after three hops',
+      !loop.ok && looping.asked.length === 4,
+      JSON.stringify({ loop, asked: looping.asked.length }),
+    ],
+  ]
+}
+
 async function deletionChecks(): Promise<Check[]> {
   const works = fakeStore(DELETION_ROWS, false)
   const worked = await deleteAttachmentsForGuests(works.client, 'v', [
@@ -498,6 +573,12 @@ const checks: Check[] = [
     'a message with no text, no attachment and no flag is still unhandled',
     nothingAtAll.kind === 'unhandled',
     nothingAtAll.kind,
+  ],
+
+  [
+    "the VENUE's unsupported or empty message is still not saved",
+    echoUnsupported.kind === 'unhandled' && echoLinkless.kind === 'unhandled',
+    JSON.stringify([echoUnsupported.kind, echoLinkless.kind]),
   ],
 
   // --- first contact (owner ruling 4) ---------------------------------------
@@ -671,6 +752,19 @@ const checks: Check[] = [
       title: 'a'.repeat(200),
     }) === `[guest shared a reel: '${'a'.repeat(80)}…']`,
     'not cut',
+  ],
+  [
+    'a caption is cut between characters, never through an emoji',
+    attachmentHistoryLine({
+      kind: 'share',
+      providerType: 'ig_reel',
+      title: `${'a'.repeat(79)}😂😂`,
+    }) === `[guest shared a reel: '${'a'.repeat(79)}😂…']`,
+    attachmentHistoryLine({
+      kind: 'share',
+      providerType: 'ig_reel',
+      title: `${'a'.repeat(79)}😂😂`,
+    }),
   ],
   [
     "the venue's own media is never worded for the model",
@@ -857,6 +951,7 @@ const checks: Check[] = [
       'https://[::1]/a.jpg',
       'https://metadata.internal/a.jpg',
       'not a url',
+      'https://localhost./a.jpg',
     ] as const
   ).map((url): Check => [
     `a Sendblue link to ${url} is refused`,
@@ -874,7 +969,11 @@ const checks: Check[] = [
 ]
 
 async function main(): Promise<void> {
-  const all = [...checks, ...(await deletionChecks())]
+  const all = [
+    ...checks,
+    ...(await redirectChecks()),
+    ...(await deletionChecks()),
+  ]
   let failed = 0
   for (const [name, ok, detail] of all) {
     if (!ok) failed += 1

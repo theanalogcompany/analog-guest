@@ -26,6 +26,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 
 import type { Database } from '@/db/types'
+import { captureGuestMediaDegraded } from '@/lib/analytics/posthog'
 import type {
   THREAD_ATTACHMENT_KINDS,
   THREAD_ATTACHMENT_STATUSES,
@@ -146,6 +147,15 @@ async function signStoragePaths(
       event: 'guest_media_sign_failed',
       count: paths.length,
       error: error.message,
+    })
+    await captureGuestMediaDegraded({
+      stage: 'signing',
+      reason: error.message,
+      venueId: null,
+      guestId: null,
+      messageId: null,
+      attachmentId: null,
+      host: null,
     })
     return signed
   }
