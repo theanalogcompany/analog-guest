@@ -250,6 +250,9 @@ the `demo_bypassed_approval_gate` event, which relays to Slack only when
 
 A turn with text is answered normally and told `[guest also sent a photo]`; a turn with no
 text at all becomes a blank operator card (`media_only_inbound`), with no classifier call.
+The kind in that line comes from the message's `message_attachments` rows when it has them
+(`mediaKindOf`), and from the link's file extension only when it has none: Instagram's links
+have no extension, so the extension alone called a voice note "a photo or GIF".
 The rule, its window and its limits are in `inbound-media.ts`'s header.
 
 A message Meta flags `is_unsupported` takes the same road with its own card

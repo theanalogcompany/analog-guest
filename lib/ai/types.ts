@@ -191,13 +191,17 @@ export type FollowupContext = {
 }
 
 /**
- * TAC-574: what a guest sent beside their text, as far as the stored links can
- * say. 'unknown' is a link with no file extension, which is every Instagram
- * attachment, and renders as "a photo or GIF". 'other' is an extension nothing
- * recognizes (a voice memo, a PDF) and renders as "an attachment".
+ * TAC-574: what a guest sent beside their text.
+ *
+ * TAC-582: read off the message's attachment rows when it has them, which is
+ * what says a voice note is a voice note. The stored links are the fallback
+ * for a message with no rows: there, 'unknown' is a link with no file
+ * extension (every Instagram link) and renders as "a photo or GIF", and
+ * 'other' is an extension nothing recognizes and renders as "an attachment".
  * lib/agent/inbound-media.ts decides it; the serializer renders it.
  */
-export type InboundMediaKind = 'photo' | 'gif' | 'video' | 'other' | 'unknown'
+export type InboundMediaKind =
+  'photo' | 'gif' | 'video' | 'voice_note' | 'other' | 'unknown'
 
 export type RuntimeContext = {
   guestName?: string
@@ -207,6 +211,10 @@ export type RuntimeContext = {
   // Absent on every other turn, at zero token cost. The model never sees the
   // media itself, and the line says so.
   inboundMedia?: InboundMediaKind
+  // TAC-582: the message being answered is a reply to one of the venue's
+  // stories. Rendered as one bracketed line above "The guest just sent", the
+  // same line the history uses. Absent on every other turn.
+  inboundStoryReply?: boolean
   perkBeingUnlocked?: {
     name: string
     qualification: string

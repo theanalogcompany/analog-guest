@@ -656,6 +656,10 @@ export interface RuntimeContext {
   // it), so no proactive path can render the line. buildAiRuntime maps it onto
   // the AI runtime. Null on a turn with no media, which is nearly all of them.
   inboundMedia: InboundMediaKind | null
+  // TAC-582: the message this turn answers is a reply to one of the venue's
+  // stories. Same writer and same lifetime as inboundMedia above. Optional
+  // because a context built by hand has none.
+  inboundStoryReply?: boolean
   corpus: CorpusMatch[] | null
   // Retrieved knowledge_corpus chunks. Populated by retrieveKnowledgeStage
   // when shouldRetrieveKnowledge fires (always for inbound; followups

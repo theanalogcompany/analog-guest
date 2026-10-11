@@ -64,6 +64,7 @@ import {
   isMediaOnly,
   loadTurnMediaRows,
   mediaAlongsideText,
+  repliesToStory,
   resolveMediaOnlyTurn,
 } from './inbound-media'
 import {
@@ -1828,6 +1829,11 @@ async function runInboundTurn(
           mediaUrls: inbound.mediaUrls,
           createdAt: inbound.message.receivedAt,
         },
+        mediaRows.data,
+      )
+      // TAC-582: and whether those words are an answer to the venue's story.
+      ctx.inboundStoryReply = repliesToStory(
+        { id: inbound.message.id },
         mediaRows.data,
       )
     } else {

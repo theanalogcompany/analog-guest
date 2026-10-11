@@ -2741,9 +2741,15 @@ import {
 //   transcript recorded on the trace. Guest messages only. What the venue
 //   sent is never worded this way.
 //
-//   WHAT DID NOT CHANGE: `[guest also sent a photo]` on the turn the photo
-//   arrives beside text, and its instruction. A photo that line already
-//   announces is left out of that turn's history so it is said once.
+//   ON THE TURN BEING ANSWERED, two small changes to `[guest also sent ...]`,
+//   whose instruction is untouched. Its kind now comes from the message's
+//   attachment rows when it has them, so a voice note sent beside a text
+//   reads "[guest also sent a voice note]" where it read "a photo or GIF"
+//   (Instagram's links carry no file extension, and the extension was all
+//   that line had). And a message that answers one of the venue's stories
+//   has "[guest is replying to your story]" above "The guest just sent".
+//   A photo the first line already announces is left out of that turn's
+//   history so it is said once.
 //
 //   THE HISTORY LINE CARRIES NO "you cannot see it" INSTRUCTION. Whether a
 //   later reply describes or reacts to media it was only told about is the

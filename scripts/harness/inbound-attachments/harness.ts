@@ -26,6 +26,11 @@
 //   - every line the model and the operator read is the approved wording,
 //     character for character.
 import {
+  mediaAlongsideText,
+  mediaKindOf,
+  repliesToStory,
+} from '@/lib/agent/inbound-media'
+import {
   buildMediaHistory,
   historyForPrompt,
   isFirstContactNeutral,
@@ -41,6 +46,7 @@ import {
 } from '@/lib/ai/prompts/attachment-lines'
 import {
   formatConversationTranscript,
+  formatInboundMediaLine,
   splitHistory,
 } from '@/lib/ai/prompts/serializers'
 import { deleteAttachmentsForGuests } from '@/lib/messaging/attachments/delete'
@@ -325,6 +331,113 @@ const SENDBLUE_PHOTO =
 const SENDBLUE_VOICE =
   'https://storage.googleapis.com/inbound-file-store/abc.caf'
 const SENDBLUE_BARE = 'https://storage.googleapis.com/inbound-file-store/abc'
+
+// --- the turn being answered ----------------------------------------------------
+// One Instagram message: "listen to this" with a voice note on it. The link
+// is Meta's, with no file extension, which is why the extension alone used to
+// call it "a photo or GIF".
+const VOICE_WITH_TEXT = {
+  id: 'vt-1',
+  body: 'listen to this',
+  mediaUrls: [VOICE_URL],
+  createdAt: TEXT_AT,
+}
+const voiceRows = {
+  inbound: [{ ...VOICE_WITH_TEXT, attachmentKinds: ['audio' as const] }],
+  outbound: [],
+}
+const voiceKind = mediaAlongsideText(VOICE_WITH_TEXT, voiceRows)
+const voiceKindNoRows = mediaAlongsideText(VOICE_WITH_TEXT, {
+  inbound: [{ ...VOICE_WITH_TEXT, attachmentKinds: [] }],
+  outbound: [],
+})
+const voiceBeside = mediaAlongsideText(
+  {
+    id: 't-2',
+    body: 'did that come through',
+    mediaUrls: [],
+    createdAt: TEXT_AT,
+  },
+  {
+    inbound: [
+      {
+        id: 'v-2',
+        body: '',
+        mediaUrls: [VOICE_URL],
+        createdAt: new Date(TEXT_AT.getTime() - 20_000),
+        attachmentKinds: ['audio' as const],
+      },
+    ],
+    outbound: [],
+  },
+)
+
+const turnChecks: Check[] = [
+  [
+    'text + voice note in one message: the line says a voice note',
+    voiceKind === 'voice_note' &&
+      formatInboundMediaLine('voice_note').startsWith(
+        '[guest also sent a voice note] You cannot see it.',
+      ),
+    `${String(voiceKind)} / ${formatInboundMediaLine('voice_note')}`,
+  ],
+  [
+    'CONTROL: the same message with no attachment row still reads off its link',
+    voiceKindNoRows === 'unknown',
+    String(voiceKindNoRows),
+  ],
+  [
+    'a voice note sent just before the text is named the same way',
+    voiceBeside === 'voice_note',
+    String(voiceBeside),
+  ],
+  ...(
+    [
+      [['image'], 'photo'],
+      [['gif'], 'gif'],
+      [['video'], 'video'],
+      [['file'], 'other'],
+      [['share'], 'other'],
+      [['story_mention'], 'other'],
+      [['story_reply', 'image'], 'photo'],
+      [['unknown'], 'unknown'],
+    ] as const
+  ).map(([attachmentKinds, expected]): Check => {
+    const got = mediaKindOf({
+      mediaUrls: [PHOTO_URL],
+      attachmentKinds: [...attachmentKinds],
+    })
+    return [
+      `attachment row ${attachmentKinds.join('+')} is announced as ${expected}`,
+      got === expected,
+      got,
+    ]
+  }),
+  [
+    'a Sendblue photo with no attachment row is still read off its extension',
+    mediaKindOf({ mediaUrls: [SENDBLUE_PHOTO] }) === 'photo',
+    mediaKindOf({ mediaUrls: [SENDBLUE_PHOTO] }),
+  ],
+  [
+    'a message with a story_reply row is a reply to a story, and others are not',
+    repliesToStory(
+      { id: 'sr' },
+      {
+        inbound: [
+          {
+            id: 'sr',
+            body: 'love this',
+            mediaUrls: [],
+            createdAt: TEXT_AT,
+            attachmentKinds: ['story_reply'],
+          },
+        ],
+        outbound: [],
+      },
+    ) && !repliesToStory({ id: 'vt-1' }, voiceRows),
+    'predicate disagrees',
+  ],
+]
 
 // --- deletion ------------------------------------------------------------------
 // A stand-in for the two things deleteAttachmentsForGuests talks to: the
@@ -971,6 +1084,7 @@ const checks: Check[] = [
 async function main(): Promise<void> {
   const all = [
     ...checks,
+    ...turnChecks,
     ...(await redirectChecks()),
     ...(await deletionChecks()),
   ]

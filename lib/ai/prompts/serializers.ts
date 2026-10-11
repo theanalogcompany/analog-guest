@@ -12,7 +12,10 @@ import {
 import type { ReOptIn } from '@/lib/guests/opt-out'
 import type { MessageChannel } from '@/lib/schemas/message-channel'
 import type { EmojiDirective } from '../emoji-cadence'
-import { withAttachmentLines } from './attachment-lines'
+import {
+  STORY_REPLY_HISTORY_LINE,
+  withAttachmentLines,
+} from './attachment-lines'
 import {
   applyChannelSubstitutions,
   type ChannelSubstitution,
@@ -2582,6 +2585,8 @@ const INBOUND_MEDIA_LABELS = {
   photo: 'a photo',
   gif: 'a GIF',
   video: 'a video',
+  // TAC-582: only reachable from an attachment row, which is what says so.
+  voice_note: 'a voice note',
   other: 'an attachment',
   unknown: 'a photo or GIF',
 } as const satisfies Record<InboundMediaKind, string>
@@ -2861,6 +2866,8 @@ export function runtimeToProse(
   // (inboundMessage set) and outbound flow (perkBeingUnlocked or
   // eventBeingInvited set). Type-system enforcement is TAC-243 backlog.
   if (runtime.inboundMessage) {
+    // TAC-582: above the words it gives the context for, as in the history.
+    if (runtime.inboundStoryReply) lines.push(STORY_REPLY_HISTORY_LINE)
     lines.push(`The guest just sent: "${runtime.inboundMessage}"`)
     if (runtime.inboundMedia) {
       lines.push(formatInboundMediaLine(runtime.inboundMedia))

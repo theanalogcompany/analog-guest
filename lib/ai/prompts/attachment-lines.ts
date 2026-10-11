@@ -40,6 +40,12 @@ export const UNSUPPORTED_HISTORY_LINE =
 /** For media with no attachment row behind it: a row older than the table, or a failed write. */
 export const UNKNOWN_ATTACHMENT_HISTORY_LINE = '[guest sent an attachment]'
 
+/**
+ * For a message that answers one of the venue's stories. Its own constant
+ * because the turn being answered renders it too, above the guest's words.
+ */
+export const STORY_REPLY_HISTORY_LINE = '[guest is replying to your story]'
+
 const MAX_SHARE_TITLE_CHARS = 80
 
 // `share` is absent on purpose: it is one kind and three lines (a reel with a
@@ -51,7 +57,7 @@ const HISTORY_LINES = {
   video: '[guest sent a video]',
   file: '[guest sent a file]',
   story_mention: '[guest mentioned you in their story]',
-  story_reply: '[guest is replying to your story]',
+  story_reply: STORY_REPLY_HISTORY_LINE,
   unknown: UNKNOWN_ATTACHMENT_HISTORY_LINE,
 } as const satisfies Record<Exclude<AttachmentKind, 'share'>, string>
 

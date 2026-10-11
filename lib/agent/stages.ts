@@ -3138,6 +3138,7 @@ export function buildAiRuntime(
     guestName: ctx.guest.firstName ?? undefined,
     inboundMessage: ctx.currentMessage?.body,
     inboundMedia: ctx.inboundMedia ?? undefined,
+    inboundStoryReply: ctx.inboundStoryReply === true ? true : undefined,
     perkBeingUnlocked,
     additionalContext,
     operatorInstruction,
