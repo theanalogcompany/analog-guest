@@ -44,6 +44,14 @@
 //   - otherwise a row is inserted, and migration 081's partial unique index
 //     is the backstop if two photos race.
 //
+// IT SHIPS IN SHADOW MODE (owner ruling 2026-10-11). Whether a picture is
+// evidence of a visit is a model's call, and nobody has yet read a week of
+// those calls. So unless the venue's `record_media_visits` is true
+// (migration 081, false everywhere at merge), the decision is computed,
+// stored on the attachment (`description_meta.visit`) and logged, and nothing
+// is written to `transactions` or to `guests.last_visit_at`. Everything below
+// about the row describes what is written once a venue is switched on.
+//
 // A VISIT WITH NO ITEMS IS A VISIT, AND IS NOT AN ORDER. It counts toward
 // recognition. It must not close "what did you get?": isItemlessMediaVisit is
 // what build-runtime-context uses to keep that intention open.
@@ -63,6 +71,8 @@ import { logger } from '@/lib/observability/logger'
 import type { MenuItem } from '@/lib/schemas'
 import {
   type AttachmentDescriptionMeta,
+  type RecordedVisitDecision,
+  type VisitDecision,
   evidencesVisit,
   nameableItems,
 } from '@/lib/schemas/attachment-description'
@@ -258,8 +268,13 @@ export function isItemlessMediaVisit(row: {
   )
 }
 
+/** Whether a decision is acted on, or only recorded. */
+export type MediaVisitMode = 'shadow' | 'live'
+
 export type RecordMediaVisitOutcome =
   | { kind: 'no_evidence' }
+  /** Decided and recorded on the attachment, and NOT written: the venue's setting is off. */
+  | { kind: 'shadow'; decision: VisitDecision; items: string[] }
   | { kind: 'already_recorded'; reason: string }
   | { kind: 'recorded'; transactionId: string; itemCount: number }
   | { kind: 'merged'; transactionId: string; addedItemCount: number }
@@ -275,26 +290,58 @@ export interface RecordMediaVisitInput {
   evidence: readonly MediaVisitEvidence[]
 }
 
-/**
- * Record the visit this message's media is evidence of, if it is. Never
- * throws.
- */
-export async function recordMediaVisit(
-  input: RecordMediaVisitInput,
-): Promise<RecordMediaVisitOutcome> {
-  try {
-    // Decided before any read: most media is not a visit.
-    const anyEvidence = input.evidence.some(
-      ({ meta }) =>
-        meta !== null && meta.outcome === 'described' && evidencesVisit(meta),
-    )
-    if (!anyEvidence) return { kind: 'no_evidence' }
+type GuestVisitCache = {
+  last_visit_at: string | null
+  last_visit_precision: string | null
+}
 
-    const supabase = createAdminClient()
-    const occurredAtIso = input.receivedAt.toISOString()
-    const at = input.receivedAt.getTime()
-    const [existing, guest] = await Promise.all([
-      supabase
+type InsertResult =
+  { ok: true; id: string } | { ok: false; code?: string; error: string }
+
+/** Everything this file reaches outside itself, so the harness can stand in for it. */
+export type MediaVisitDeps = {
+  /** The venue's `record_media_visits`. A failed read is `shadow`. */
+  loadMode: (venueId: string) => Promise<MediaVisitMode>
+  loadExisting: (input: RecordMediaVisitInput) => Promise<ExistingVisitRow[]>
+  loadGuestCache: (guestId: string) => Promise<GuestVisitCache | null>
+  /** Put the decision on each evidencing attachment's `description_meta`. */
+  saveDecision: (
+    evidence: readonly MediaVisitEvidence[],
+    decision: RecordedVisitDecision,
+  ) => Promise<void>
+  insert: (
+    input: RecordMediaVisitInput,
+    plan: Extract<MediaVisitPlan, { action: 'insert' }>,
+    occurredAtIso: string,
+  ) => Promise<InsertResult>
+  merge: (plan: Extract<MediaVisitPlan, { action: 'merge' }>) => Promise<void>
+  advanceLastVisit: (
+    input: RecordMediaVisitInput,
+    cache: GuestVisitCache | null,
+    occurredAtIso: string,
+  ) => Promise<void>
+  log: (fields: Record<string, unknown>) => void
+}
+
+function defaultDeps(): MediaVisitDeps {
+  // Made on first use, not here: a caller that replaces every dependency (the
+  // harness) must not need a database to construct the ones it never calls.
+  let client: ReturnType<typeof createAdminClient> | null = null
+  const db = () => (client ??= createAdminClient())
+  return {
+    async loadMode(venueId) {
+      // Its own query, on purpose: see migration 081's header. A column that
+      // is not there yet, or any other failure, reads as off.
+      const { data, error } = await db()
+        .from('venues')
+        .select('record_media_visits')
+        .eq('id', venueId)
+        .maybeSingle()
+      return !error && data?.record_media_visits === true ? 'live' : 'shadow'
+    },
+    async loadExisting(input) {
+      const at = input.receivedAt.getTime()
+      const { data, error } = await db()
         .from('transactions')
         .select('id, source, external_id, occurred_at, raw_data')
         .eq('venue_id', input.venue.id)
@@ -303,32 +350,58 @@ export async function recordMediaVisit(
         .gte('occurred_at', new Date(at - SAME_DAY_LOOKAROUND_MS).toISOString())
         .lte('occurred_at', new Date(at + SAME_DAY_LOOKAROUND_MS).toISOString())
         .order('occurred_at', { ascending: false })
-        .limit(50),
-      supabase
+        .limit(50)
+      if (error) throw new Error(error.message)
+      return data ?? []
+    },
+    async loadGuestCache(guestId) {
+      const { data, error } = await db()
         .from('guests')
         .select('last_visit_at, last_visit_precision')
-        .eq('id', input.guestId)
-        .maybeSingle(),
-    ])
-    if (existing.error) return { kind: 'failed', error: existing.error.message }
-    if (guest.error) return { kind: 'failed', error: guest.error.message }
-
-    const plan = planMediaVisit({
-      messageId: input.messageId,
-      occurredAtIso,
-      timezone: input.venue.timezone,
-      evidence: input.evidence,
-      menuItems: input.venue.menuItems,
-      existing: existing.data ?? [],
-    })
-
-    if (plan.action === 'none') return { kind: 'no_evidence' }
-    if (plan.action === 'exists') {
-      return { kind: 'already_recorded', reason: plan.reason }
-    }
-
-    if (plan.action === 'merge') {
-      const { error } = await supabase
+        .eq('id', guestId)
+        .maybeSingle()
+      if (error) throw new Error(error.message)
+      return data
+    },
+    async saveDecision(evidence, decision) {
+      for (const { attachmentId, meta } of evidence) {
+        if (meta === null || meta.outcome !== 'described') continue
+        const { error } = await db()
+          .from('message_attachments')
+          .update({ description_meta: toJson({ ...meta, visit: decision }) })
+          .eq('id', attachmentId)
+        if (error) throw new Error(error.message)
+      }
+    },
+    async insert(input, plan, occurredAtIso) {
+      const { data, error } = await db()
+        .from('transactions')
+        .insert({
+          venue_id: input.venue.id,
+          guest_id: input.guestId,
+          source: GUEST_MEDIA_SOURCE,
+          amount_cents: plan.amountCents,
+          item_count: plan.itemCount,
+          occurred_at: occurredAtIso,
+          occurred_at_precision: 'approximate',
+          external_id: input.messageId,
+          matched_at: null,
+          match_method: null,
+          raw_data: plan.rawData,
+        })
+        .select('id')
+        .single()
+      if (error || !data) {
+        return {
+          ok: false,
+          code: error?.code,
+          error: error?.message ?? 'insert returned no row',
+        }
+      }
+      return { ok: true, id: data.id }
+    },
+    async merge(plan) {
+      const { error } = await db()
         .from('transactions')
         .update({
           raw_data: plan.rawData,
@@ -336,7 +409,105 @@ export async function recordMediaVisit(
           amount_cents: plan.amountCents,
         })
         .eq('id', plan.transactionId)
-      if (error) return { kind: 'failed', error: error.message }
+      if (error) throw new Error(error.message)
+    },
+    advanceLastVisit: (input, cache, occurredAtIso) =>
+      advanceLastVisit(
+        db(),
+        input.guestId,
+        cache?.last_visit_at ?? null,
+        cache?.last_visit_precision ?? null,
+        occurredAtIso,
+        'approximate',
+        input.venue.timezone,
+      ),
+    log: (fields) => logger.info('[agent] media visit decision', fields),
+  }
+}
+
+function hasEvidence(evidence: readonly MediaVisitEvidence[]): boolean {
+  return evidence.some(
+    ({ meta }) =>
+      meta !== null && meta.outcome === 'described' && evidencesVisit(meta),
+  )
+}
+
+/**
+ * Decide the visit this message's media is evidence of, record the decision,
+ * and write the visit only where the venue's setting says to. Never throws.
+ *
+ * SHADOW BY DEFAULT (owner ruling 2026-10-11). Unless the venue's
+ * `record_media_visits` is true, this computes exactly what it would write,
+ * puts that on each evidencing attachment's `description_meta.visit`, emits
+ * one structured log line, and stops. No `transactions` row, no change to
+ * `guests.last_visit_at`. The decision is the same code path either way
+ * (planMediaVisit), so what is reviewed in shadow is what will run live.
+ */
+export async function recordMediaVisit(
+  input: RecordMediaVisitInput,
+  overrides: Partial<MediaVisitDeps> = {},
+): Promise<RecordMediaVisitOutcome> {
+  try {
+    // Decided before any read: most media is not a visit.
+    if (!hasEvidence(input.evidence)) return { kind: 'no_evidence' }
+
+    const deps: MediaVisitDeps = { ...defaultDeps(), ...overrides }
+    const occurredAtIso = input.receivedAt.toISOString()
+    const [mode, existing, cache] = await Promise.all([
+      deps.loadMode(input.venue.id),
+      deps.loadExisting(input),
+      deps.loadGuestCache(input.guestId),
+    ])
+
+    const plan = planMediaVisit({
+      messageId: input.messageId,
+      occurredAtIso,
+      timezone: input.venue.timezone,
+      evidence: input.evidence,
+      menuItems: input.venue.menuItems,
+      existing,
+    })
+    if (plan.action === 'none') return { kind: 'no_evidence' }
+
+    const items = mediaVisitItems(input.evidence, input.venue.menuItems).map(
+      (item) => item.name,
+    )
+    const decision: RecordedVisitDecision = {
+      mode,
+      decision: plan.action,
+      ...(plan.action === 'exists' ? { reason: plan.reason } : {}),
+      items,
+      decidedAt: new Date().toISOString(),
+    }
+    deps.log({
+      event: 'media_visit_decision',
+      mode,
+      decision: plan.action,
+      reason: plan.action === 'exists' ? plan.reason : null,
+      venueId: input.venue.id,
+      guestId: input.guestId,
+      messageId: input.messageId,
+      attachmentIds: input.evidence.map((e) => e.attachmentId),
+      items,
+      occurredAt: occurredAtIso,
+    })
+    // The record of the decision is the point of shadow mode, so a failure
+    // to write it is reported; it does not stop a live visit being written.
+    await deps.saveDecision(input.evidence, decision).catch((e: unknown) => {
+      logger.warn('[agent] media visit decision not saved on the attachment', {
+        messageId: input.messageId,
+        error: e instanceof Error ? e.message : String(e),
+      })
+    })
+
+    if (mode === 'shadow') {
+      return { kind: 'shadow', decision: plan.action, items }
+    }
+    if (plan.action === 'exists') {
+      return { kind: 'already_recorded', reason: plan.reason }
+    }
+    if (plan.action === 'merge') {
+      await deps.merge(plan)
       return {
         kind: 'merged',
         transactionId: plan.transactionId,
@@ -344,46 +515,18 @@ export async function recordMediaVisit(
       }
     }
 
-    const { data: inserted, error: insertError } = await supabase
-      .from('transactions')
-      .insert({
-        venue_id: input.venue.id,
-        guest_id: input.guestId,
-        source: GUEST_MEDIA_SOURCE,
-        amount_cents: plan.amountCents,
-        item_count: plan.itemCount,
-        occurred_at: occurredAtIso,
-        occurred_at_precision: 'approximate',
-        external_id: input.messageId,
-        matched_at: null,
-        match_method: null,
-        raw_data: plan.rawData,
-      })
-      .select('id')
-      .single()
-    if (insertError || !inserted) {
+    const inserted = await deps.insert(input, plan, occurredAtIso)
+    if (!inserted.ok) {
       // 23505: this message's row, or another photo's row for the same day,
       // landed first. Either way the day's visit is on record; the items a
       // racing photo would have added are the cost, as on the self-report
       // path (migration 047's header accepts the same race).
-      if (insertError?.code === '23505') {
+      if (inserted.code === '23505') {
         return { kind: 'already_recorded', reason: 'lost_race' }
       }
-      return {
-        kind: 'failed',
-        error: insertError?.message ?? 'insert returned no row',
-      }
+      return { kind: 'failed', error: inserted.error }
     }
-
-    await advanceLastVisit(
-      supabase,
-      input.guestId,
-      guest.data?.last_visit_at ?? null,
-      guest.data?.last_visit_precision ?? null,
-      occurredAtIso,
-      'approximate',
-      input.venue.timezone,
-    )
+    await deps.advanceLastVisit(input, cache, occurredAtIso)
     return {
       kind: 'recorded',
       transactionId: inserted.id,

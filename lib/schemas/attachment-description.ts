@@ -67,6 +67,29 @@ const describedItemSchema = z.object({
   confidence: z.enum(ITEM_CONFIDENCE),
 })
 
+/**
+ * What record-media-visit.ts decided for the message this attachment is on.
+ *
+ * `shadow` means the decision was computed and NOTHING was written to
+ * `transactions`: the venue's `record_media_visits` is off (migration 081).
+ * It is recorded here so a week of decisions can be read before the setting
+ * is turned on. `live` means the row was written, or would have been but for
+ * what `decision` says.
+ */
+export const VISIT_DECISIONS = ['insert', 'merge', 'exists', 'none'] as const
+export type VisitDecision = (typeof VISIT_DECISIONS)[number]
+
+const visitDecisionSchema = z.object({
+  mode: z.enum(['shadow', 'live']),
+  decision: z.enum(VISIT_DECISIONS),
+  /** Why nothing new would be written, when `decision` is `exists`. */
+  reason: z.string().optional(),
+  /** The drinks the visit would carry. Empty for a visit with no nameable drink. */
+  items: z.array(z.string()),
+  decidedAt: z.string(),
+})
+export type RecordedVisitDecision = z.infer<typeof visitDecisionSchema>
+
 const describedMetaSchema = z.object({
   version: z.literal(DESCRIPTION_META_VERSION),
   outcome: z.literal('described'),
@@ -83,6 +106,14 @@ const describedMetaSchema = z.object({
    * `stored` for everything read from our own bucket.
    */
   source: z.enum(['stored', 'transient']),
+  /**
+   * How many appearance notes the venue had when this was described. Zero
+   * means nothing could be named, by rule: describe.ts empties `items` when
+   * there are no notes, whatever the model returned.
+   */
+  appearanceNotes: z.number(),
+  /** Written after the describe, by the visit step. Absent until it has run. */
+  visit: visitDecisionSchema.optional(),
 })
 
 const skippedMetaSchema = z.object({

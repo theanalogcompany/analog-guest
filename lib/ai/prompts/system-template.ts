@@ -2814,10 +2814,15 @@ import {
 //   unclear to make out. Thank them for sending it. Don't describe it, guess
 //   what's in it, or say it didn't come through.]", and is not shown.
 //
-//   NOT MEASURED AT MERGE. The behavioural check for this wording is
-//   pre-registered on TAC-584 and needs test images the owner supplies
-//   (scripts/measurement/media-describe.ts). Every reply this wording can
-//   produce is held for an operator until it has been run.
+//   NOT MEASURED, BY RULING. A 30-image behavioural check was pre-registered
+//   on TAC-584's plan and the owner ruled on 2026-10-11 to ship without it:
+//   every reply this wording can produce is held for an operator, so draft
+//   quality is read by hand on real cards. What was run is a smoke
+//   (scripts/measurement/media-describe.ts) over the test venue's own media:
+//   three photos, one describe and one draft each. Nothing in it is a rate.
+//   It did show the thing the plan warned of: one of the three drafts used a
+//   detail from the picture that its description did not carry. Nothing here
+//   is evidence that this wording may auto-send.
 //
 //   BASELINE RESET only for a conversation with DESCRIBED media in its
 //   window. An attachment with no description renders v1.106.0's line through

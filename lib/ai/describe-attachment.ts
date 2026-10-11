@@ -24,9 +24,12 @@
 // THE NAMES COME FROM THE NOTES, NOT FROM THE MODEL. A model asked "which of
 // these menu items is this" will answer, from what such a drink usually looks
 // like anywhere. The prompt allows `unmistakable` only against a note's own
-// distinguishing features, and the measurement harness
-// (scripts/measurement/media-describe.ts) has two control arms that exist to
-// catch it ignoring that: one with no notes, one with two notes swapped.
+// distinguishing features. THAT IS WORDING AND IT HAS NOT BEEN MEASURED: the
+// check that would catch the model ignoring it (one arm with no notes, one
+// with two notes swapped) was pre-registered on TAC-584 and dropped by ruling
+// before it ran. The one case that is enforced is in the caller: a venue with
+// no notes has every returned item dropped. Before trusting a name from a
+// venue that HAS notes to do more than sit on a held card, run that check.
 //
 // PEOPLE ARE NEVER DESCRIBED (the ticket's rule). The model reports only
 // whether any are present.
@@ -35,6 +38,11 @@
 // handwritten note is content. The prompt says so; that is wording, not a
 // guarantee, and the description is also stripped and cut before it reaches
 // another prompt (cleanDescription).
+//
+// TWENTY WORDS, NOT THIRTY. The first smoke run (2026-10-11, the test venue's
+// own photos) asked for thirty and got sentences long enough that
+// cleanDescription's 200-character cut landed mid-phrase on two of three.
+// The cut is the backstop; the prompt is what keeps it from firing.
 //
 // Its own version constant, like every non-generate call. PROMPT_VERSION
 // covers classify and generate only.
@@ -102,7 +110,7 @@ export interface DescribeAttachmentResult {
 export const DESCRIBE_ATTACHMENT_SYSTEM_PROMPT = `You look at something a guest sent to a cafe, bakery or restaurant and report what is in it. A program reads your answer. The guest never sees it.
 
 description
-One sentence, at most 30 words, about the drinks, the food and the place: colours, cups, foam, garnish, what is on the table, what kind of room it is. Say what you see, not what you think it is called. Do not use a menu item's name in the description.
+One short sentence, at most 20 words, about the drinks, the food and the place: colours, cups, foam, garnish, what is on the table, what kind of room it is. Say what you see, not what you think it is called. Do not use a menu item's name in the description. If the picture shows no drink, food or place, say in a few words what kind of picture it is.
 
 People
 Never mention a person, a face, a body, clothing, age, gender, or anything about how someone looks. If any person is in the picture, set peoplePresent to true and describe only the drinks, food and place around them. A cup in someone's hand is "a cup held up".

@@ -636,9 +636,11 @@ const MEDIA_ONLY_DRAFT_CATEGORY = 'casual_chatter' as const
  * Both are left unset when nothing was described, and the turn then runs
  * exactly as it did before descriptions existed.
  *
- * THE VISIT IS RECORDED HERE, whatever becomes of the draft: a story that
+ * THE VISIT IS DECIDED HERE, whatever becomes of the draft: a story that
  * shows the venue is evidence the guest was there even if generation fails a
- * moment later. In waitUntil, because nothing downstream reads it this turn.
+ * moment later. Decided, and written only where the venue's setting says so
+ * (record-media-visit.ts: it ships in shadow mode everywhere). In waitUntil,
+ * because nothing downstream reads it this turn.
  *
  * Never throws: describeMessageAttachments and recordMediaVisit both return
  * on every path.

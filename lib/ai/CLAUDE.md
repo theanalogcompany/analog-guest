@@ -62,9 +62,10 @@ and `generateMessage`, which is shown the same picture on the turn that answers 
   generation model and not the classifier's. It reports; `nameableItems` and `evidencesVisit`
   (`lib/schemas/attachment-description.ts`) decide.
 - **The model may call a drink `unmistakable` only against the venue's appearance notes**
-  (knowledge rows tagged `appearance`, read by `lib/rag/appearance-entries.ts`). The
-  measurement harness has a no-notes arm and a swapped-notes arm that exist to catch it
-  naming from its own idea of what a drink looks like.
+  (knowledge rows tagged `appearance`, read by `lib/rag/appearance-entries.ts`). That is
+  wording, and nothing has measured whether the model keeps to it: the check that would have
+  (a no-notes arm and a swapped-notes arm) was dropped by ruling on TAC-584. What IS enforced
+  is the empty case: with no notes, `describe.ts` drops every item the model returns.
 - Images go through `lib/messaging/attachments/frames.ts` first (one scaled JPEG per photo,
   four frames per video). Never hand a raw download to a model call.
 

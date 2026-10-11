@@ -76,9 +76,10 @@ documentation, and `scripts/harness/inbound-attachments/` marks them.
 the story once, through the same host allowlist and size cap re-host uses, shows it to a
 model, and drops the bytes; the row keeps `link_only`, no `storage_path`, and gains a text
 `description`. A story video sits in one temp file for the length of the ffmpeg call
-(`lib/messaging/attachments/frames.ts`). No real story link had been fetched by this code
-when it merged: three `story_mention` rows existed in production, all on
-`lookaside.fbsbx.com`, which the allowlist accepts.
+(`lib/messaging/attachments/frames.ts`). Real story links answer without credentials
+(checked 2026-10-11: `image/jpeg` and `video/mp4` from `lookaside.fbsbx.com`, which the
+allowlist accepts). A story the guest has removed answers 404, and its row is then settled
+as skipped. No story had been described by a model when this merged.
 
 **A message with nothing to show is saved, not dropped.** `is_unsupported`, or attachments
 with no text and no link in any of them, is a `message` event with `unsupported: true` and a

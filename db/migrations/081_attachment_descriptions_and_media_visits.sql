@@ -10,6 +10,8 @@
 --   A. Three columns on `message_attachments` for the describe step.
 --   B. One more value on `transactions_source_check`: 'guest_media'.
 --   C. A partial unique index: one such visit per guest per venue-local day.
+--   D. `venues.record_media_visits`, default false: whether B is written at
+--      all. See "SHADOW MODE" below.
 --
 -- A. THE COLUMNS, AND WHO READS EACH.
 --   description       one sentence about the drinks, food or space. Written
@@ -53,13 +55,34 @@
 -- loud direction. A row whose guest was deleted (guest_id set null) is
 -- outside the index, as NULL guest_ids are everywhere else here.
 --
+-- D. SHADOW MODE (owner ruling 2026-10-11, on TAC-584). Whether a picture is
+-- evidence of a visit is a model's call, and a visit moves recognition. So
+-- the decision is computed and recorded for every described attachment
+-- (`description_meta.visit`, and one structured log line), and NO transactions
+-- row is written unless this venue's `record_media_visits` is true. It ships
+-- false everywhere. The owner turns it on per venue after reading a week of
+-- decisions:
+--   update venues set record_media_visits = true where slug = '<venue>';
+-- B and C ship now so that turning it on needs no second migration, and a
+-- 'guest_media' value nothing writes costs nothing (db/migrations/CLAUDE.md).
+--
+-- THE FLAG'S ONE READER is lib/agent/record-media-visit.ts, with its own
+-- query. It is deliberately NOT added to the venue select in
+-- build-runtime-context.ts: that select runs on every turn, and a column it
+-- names that does not exist yet fails every turn. A failed read of the flag
+-- is read as false.
+--
+-- NOT NULL DEFAULT false, like `hold_all_outbound` (migration 031): a
+-- constant default is a metadata-only change, and no CHECK sits on it.
+--
 -- APPLY IN STUDIO, BEFORE THE CODE MERGES. `db:apply` refuses this file: a
 -- constraint drop and an index on a live table. Every statement is additive
 -- or a loosening and the deployed code is indifferent to all of it, so it can
 -- be applied at any point before merge. Apply outside the pilot venue's
 -- opening hours: it briefly locks `message_attachments`, which the Instagram
--- webhook inserts into before its 200, and the lock timeout turns a busy
--- table into a clean failure rather than a stalled delivery.
+-- webhook inserts into before its 200, and `venues`, which every inbound
+-- reads; the lock timeout turns a busy table into a clean failure rather than
+-- a stalled delivery.
 --
 -- LIVE CHECK, 2026-10-11, read-only, relayed by the owner before this was
 -- written:
@@ -72,9 +95,8 @@
 --     and conname = 'transactions_source_check';
 --
 -- NO db/types.ts CHANGE FOR B OR C. `transactions.source` is typed `string`
--- and an index is not in the generated types. A is hand-patched in the same
--- commit; the next `npm run db:types` overwrites the patch with the same
--- columns.
+-- and an index is not in the generated types. A and D are hand-patched; the
+-- next `npm run db:types` overwrites the patch with the same columns.
 --
 -- ROLLBACK. Runnable as-is once uncommented, and only before the code that
 -- writes these is deployed. The CHECK step ABORTS if any 'guest_media' row
@@ -87,6 +109,9 @@
 --
 --   lock table message_attachments in access exclusive mode;
 --   lock table transactions in access exclusive mode;
+--   lock table venues in access exclusive mode;
+--
+--   alter table venues drop column record_media_visits;
 --
 --   drop index if exists idx_transactions_one_guest_media_per_guest_day;
 --
@@ -116,6 +141,7 @@ set local lock_timeout = '5s';
 
 lock table message_attachments in access exclusive mode;
 lock table transactions in access exclusive mode;
+lock table venues in access exclusive mode;
 
 -- A. What the describe step writes. Nullable, no defaults.
 alter table message_attachments add column description text;
@@ -144,6 +170,10 @@ create unique index idx_transactions_one_guest_media_per_guest_day
     (coalesce(raw_data ->> 'venue_local_date', ''))
   )
   where source = 'guest_media';
+
+-- D. Whether B is written for this venue. Off everywhere until turned on.
+alter table venues
+  add column record_media_visits boolean not null default false;
 
 notify pgrst, 'reload schema';
 

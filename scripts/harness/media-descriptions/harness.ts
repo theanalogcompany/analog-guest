@@ -19,6 +19,12 @@
 //     an attachment with no usable description keeps the line it had.
 //   - a story mention's push is the reshare nudge, and a handle that is not
 //     shaped like a handle is never put on a lock screen.
+//   - SHADOW MODE WRITES NOTHING. With the venue's setting off, a visit is
+//     decided, stored on the attachment and logged, and no transactions row
+//     and no last-visit change is made. Turning it on is the only thing that
+//     changes that.
+//   - a venue with no appearance notes names no drink, whatever the model
+//     returned.
 //   - one photo visit per guest per day, never a second row beside a receipt
 //     or a self-report for the same day, and a visit with no drink in it does
 //     not count as having heard the order.
@@ -28,8 +34,10 @@
 import {
   type ExistingVisitRow,
   GUEST_MEDIA_SOURCE,
+  type MediaVisitDeps,
   isItemlessMediaVisit,
   planMediaVisit,
+  recordMediaVisit,
 } from '@/lib/agent/record-media-visit'
 import {
   type TurnMediaRows,
@@ -115,6 +123,7 @@ function describedMeta(overrides: Partial<DescribedMeta> = {}): DescribedMeta {
     items: [],
     frames: 1,
     source: 'stored',
+    appearanceNotes: 3,
     ...overrides,
   }
 }
@@ -471,6 +480,26 @@ async function orchestrationChecks(): Promise<Check[]> {
     many.seen.describeCalls === MAX_DESCRIBED_PER_TURN &&
       many.seen.notesLoads === 1,
     many.seen,
+  ])
+
+  const noNotes = await run([target({})], {
+    loadAppearanceNotes: async () => [],
+  })
+  const noNotesMeta = noNotes.seen.saves[0]?.meta
+  out.push([
+    'describe: with no appearance notes the model\'s "unmistakable" drink is dropped before it is stored',
+    noNotesMeta?.outcome === 'described' &&
+      noNotesMeta.items.length === 0 &&
+      noNotesMeta.appearanceNotes === 0 &&
+      nameableItems(noNotesMeta, MENU).length === 0,
+    noNotesMeta,
+  ])
+  const withNotesMeta = photo.seen.saves[0]?.meta
+  out.push([
+    'describe: with notes the same answer keeps its drink (the control for the check above)',
+    withNotesMeta?.outcome === 'described' &&
+      nameableItems(withNotesMeta, MENU).join() === 'Pink Panther',
+    withNotesMeta,
   ])
 
   const threw = await run([target({})], {
@@ -835,6 +864,167 @@ function visitChecks(): Check[] {
     null,
   ])
 
+  return out
+}
+
+// --- lib/agent/record-media-visit.ts: shadow and live ------------------------
+
+type VisitSeen = {
+  inserts: number
+  merges: number
+  lastVisitWrites: number
+  decisions: { mode: string; decision: string; items: string[] }[]
+  logs: Record<string, unknown>[]
+}
+
+function visitStandIn(
+  mode: 'shadow' | 'live',
+  existing: ExistingVisitRow[] = [],
+  overrides: Partial<MediaVisitDeps> = {},
+): { deps: MediaVisitDeps; seen: VisitSeen } {
+  const seen: VisitSeen = {
+    inserts: 0,
+    merges: 0,
+    lastVisitWrites: 0,
+    decisions: [],
+    logs: [],
+  }
+  const deps: MediaVisitDeps = {
+    loadMode: async () => mode,
+    loadExisting: async () => existing,
+    loadGuestCache: async () => null,
+    saveDecision: async (_evidence, decision) => {
+      seen.decisions.push(decision)
+    },
+    insert: async () => {
+      seen.inserts += 1
+      return { ok: true, id: 'tx-new' }
+    },
+    merge: async () => {
+      seen.merges += 1
+    },
+    advanceLastVisit: async () => {
+      seen.lastVisitWrites += 1
+    },
+    log: (fields) => {
+      seen.logs.push(fields)
+    },
+    ...overrides,
+  }
+  return { deps, seen }
+}
+
+async function shadowChecks(): Promise<Check[]> {
+  const out: Check[] = []
+  const input = (
+    evidence: Parameters<typeof planMediaVisit>[0]['evidence'],
+  ) => ({
+    venue: { id: 'venue-1', timezone: TZ, menuItems: MENU_ITEMS },
+    guestId: 'guest-1',
+    messageId: 'msg-1',
+    receivedAt: new Date(AT),
+    evidence,
+  })
+
+  const shadow = visitStandIn('shadow')
+  const shadowOutcome = await recordMediaVisit(
+    input([pinkPanther]),
+    shadow.deps,
+  )
+  out.push([
+    'shadow: a visit is decided and NOTHING is written to transactions or last-visit',
+    shadowOutcome.kind === 'shadow' &&
+      shadowOutcome.decision === 'insert' &&
+      shadow.seen.inserts === 0 &&
+      shadow.seen.merges === 0 &&
+      shadow.seen.lastVisitWrites === 0,
+    { shadowOutcome, seen: shadow.seen },
+  ])
+  out.push([
+    'shadow: the decision is stored on the attachment, marked shadow, with the drink it would carry',
+    shadow.seen.decisions.length === 1 &&
+      shadow.seen.decisions[0].mode === 'shadow' &&
+      shadow.seen.decisions[0].decision === 'insert' &&
+      shadow.seen.decisions[0].items.join() === 'Pink Panther',
+    shadow.seen.decisions,
+  ])
+  out.push([
+    'shadow: one structured log line carries the decision',
+    shadow.seen.logs.length === 1 &&
+      shadow.seen.logs[0].event === 'media_visit_decision' &&
+      shadow.seen.logs[0].mode === 'shadow' &&
+      shadow.seen.logs[0].messageId === 'msg-1',
+    shadow.seen.logs,
+  ])
+
+  const shadowMerge = visitStandIn('shadow', [existingRow({})])
+  const shadowMergeOutcome = await recordMediaVisit(
+    input([blossom]),
+    shadowMerge.deps,
+  )
+  out.push([
+    'shadow: a decision that would add to an existing row does not touch it either',
+    shadowMergeOutcome.kind === 'shadow' &&
+      shadowMergeOutcome.decision === 'merge' &&
+      shadowMerge.seen.merges === 0,
+    { shadowMergeOutcome, seen: shadowMerge.seen },
+  ])
+
+  const live = visitStandIn('live')
+  const liveOutcome = await recordMediaVisit(input([pinkPanther]), live.deps)
+  out.push([
+    'live: the same decision writes the row and moves last-visit (the control for shadow)',
+    liveOutcome.kind === 'recorded' &&
+      live.seen.inserts === 1 &&
+      live.seen.lastVisitWrites === 1 &&
+      live.seen.decisions[0]?.mode === 'live',
+    { liveOutcome, seen: live.seen },
+  ])
+
+  const unread = visitStandIn('shadow', [], {
+    loadMode: async () => {
+      throw new Error('column does not exist')
+    },
+  })
+  const unreadOutcome = await recordMediaVisit(
+    input([pinkPanther]),
+    unread.deps,
+  )
+  out.push([
+    'shadow: a setting that cannot be read writes nothing',
+    unreadOutcome.kind === 'failed' && unread.seen.inserts === 0,
+    { unreadOutcome, seen: unread.seen },
+  ])
+
+  const noEvidence = visitStandIn('live')
+  const noEvidenceOutcome = await recordMediaVisit(
+    input([
+      { attachmentId: 'a', meta: describedMeta({ showsVenue: 'unsure' }) },
+    ]),
+    noEvidence.deps,
+  )
+  out.push([
+    'live: media that is not evidence writes nothing and decides nothing',
+    noEvidenceOutcome.kind === 'no_evidence' &&
+      noEvidence.seen.inserts === 0 &&
+      noEvidence.seen.decisions.length === 0,
+    { noEvidenceOutcome, seen: noEvidence.seen },
+  ])
+
+  const unsaved = visitStandIn('live', [], {
+    saveDecision: async () => {
+      throw new Error('boom')
+    },
+  })
+  const unsavedOutcome = await recordMediaVisit(
+    input([pinkPanther]),
+    unsaved.deps,
+  )
+  out.push([
+    'live: failing to store the decision does not stop the visit being written',
+    unsavedOutcome.kind === 'recorded' && unsaved.seen.inserts === 1,
+    { unsavedOutcome, seen: unsaved.seen },
+  ])
   return out
 }
 
@@ -1254,6 +1444,7 @@ async function main(): Promise<void> {
     ...(await orchestrationChecks()),
     ...ruleChecks,
     ...visitChecks(),
+    ...(await shadowChecks()),
     ...wordingChecks(),
     ...turnChecks(),
     ...pushChecks(),

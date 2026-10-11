@@ -1,70 +1,50 @@
-// TAC-584: does the agent describe a guest's picture, name only what is
-// unmistakable, leave people out, and record a visit only for the venue? The
-// half that spends model calls. The scoring is media-describe-score.ts.
+// TAC-584: describe the media a venue has already been sent, and draft a reply
+// to each, once. A smoke run, not a measurement.
 //
-// THE CHECK IS PRE-REGISTERED on the ticket's plan (2026-10-11): the images,
-// the arms, the counts and the seven bars were fixed before any generation.
-// A re-run is informational. Read that plan before reading a result.
+// WHY THIS IS NOT THE PRE-REGISTERED CHECK. The plan on TAC-584 pre-registered
+// a 30-image behavioural check with seven zero-ceiling bars and two control
+// arms. The owner ruled on 2026-10-11 to ship without it: every media reply is
+// held for an operator, so draft quality is read by hand on real cards. That
+// check was written and never run; it is in this branch's history (commit
+// c443065) if it is wanted later. What replaced it is this: run the real
+// pipeline over the real media one test venue holds, and read what comes out.
 //
-// IT NEEDS IMAGES THIS REPO DOES NOT HOLD. The repo is public, so no image is
-// committed. fixtures/media-describe-manifest.json lists thirty and what each
-// should show; the files go in measurement-runs/media-describe-images/
-// (gitignored) and each one's truth is labelled BY A PERSON before any model
-// call. This script refuses to start, and calls nothing, while any image is
-// missing, unlabelled, or does not hash to what its label was written for.
+// WHAT IT PROVES, AND WHAT IT DOES NOT. It proves the plumbing end to end
+// against production's own rows: that a stored photo, GIF and video can be
+// read from the bucket and turned into frames, that a story link can be
+// fetched transiently, that a model call accepts a picture in the shape this
+// repo sends it, and that a prompt composed for a turn with no text is one
+// the generator answers. It is one describe and one draft per attachment, so
+// it says NOTHING about how often a description is wrong, a drink is misnamed
+// or a person is commented on. A count from this run is an anecdote.
 //
-// WHAT IT RUNS.
-//   Stage 1, describe  every image 5 times with the venue's appearance notes
-//                      (the main arm, 150 calls), and two controls that exist
-//                      so the main arm has something to disagree with:
-//                        no_notes  sets A, B and the two look-alikes in D,
-//                                  with the notes left out. A model that
-//                                  still calls a drink unmistakable is naming
-//                                  from its own idea of the drink.
-//                        swapped   the single-drink images in set A, with the
-//                                  two distinctive drinks' notes exchanged.
-//                                  The names should follow the notes.
-//   Stage 2, drafts    one describe result per image, fixed, then three
-//                      drafts in each of two arms:
-//                        image        the description AND the picture, which
-//                                     is what production sends
-//                        description  the description alone. The plan's
-//                                     pushback: the picture gives the
-//                                     generator a way round the describe
-//                                     step's rules, and this arm is what says
-//                                     whether it uses it.
-//                      plus a history arm: ten descriptions as an earlier
-//                      line, then the guest asking what to get next time.
-//   Stage 3, visits    no calls. The visit decision is a pure function of
-//                      stage 1's output and is scored with it.
+// IT USES THE PRODUCTION DESCRIBE STEP, NOT A COPY. describeMessageAttachments
+// is called with three of its dependencies replaced: the row read (so it does
+// not select columns migration 081 adds, and this runs before that migration
+// is applied), the save and the degrade report (both no-ops). Everything else
+// is the code a turn runs: the wait, the kinds that are skipped, the story's
+// transient fetch, ffmpeg, the vision call, and the rule that a venue with no
+// appearance notes names nothing.
 //
-// NOTHING IS SENT OR WRITTEN. Every guest thread is constructed, with the
-// real guest's commitments, context, mechanics and intentions cleared (a
-// leaked open comp reached a ruling on TAC-575). The describe step's own
-// writes are not exercised: this calls describeAttachment directly.
+// NOTHING IS WRITTEN AND NOTHING IS SENT. No description is saved, no visit
+// row, no card. The visit decision is computed with the pure rule and
+// printed. Every guest thread is constructed, with the real guest's
+// commitments, context, mechanics and intentions cleared.
 //
-// IT IS GENERATE-ONLY, SO IT BYPASSES what generateMessage does after the
-// call: the regeneration loop and the dash, length and bracket checks. It
-// measures what the prompt produces, which is the thing under test.
+// THE PICTURES GO TO THE MODEL PROVIDER, as they will in production. Run it
+// only against a venue whose media is ours to send: the default is the test
+// venue.
 //
-// RUN IT DURING THE VENUE'S OPEN HOURS, like run-test-scenarios: the prompt
-// carries the venue's open state.
-//
-//   npm run measure-media-describe -- --hash    fill in sha256 from the files
-//   MEASURE_DRY=1 npm run measure-media-describe   check everything, call nothing
-//   npm run measure-media-describe -- --smoke   one describe and one draft on
-//                                               a generated test pattern, to
-//                                               prove the plumbing. Scores
-//                                               nothing and is not the check.
-//   npm run measure-media-describe              the check
-import { createHash, randomUUID } from 'node:crypto'
-import { existsSync, readFileSync, writeFileSync } from 'node:fs'
+//   npm run measure-media-describe -- --list             what it would describe; no model call
+//   npm run measure-media-describe                       le-mils-coffee-test
+//   npm run measure-media-describe -- --venue <slug>
+import { randomUUID } from 'node:crypto'
+import { mkdirSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 
 import { generateObject } from 'ai'
 
 import { buildRuntimeContext } from '@/lib/agent/build-runtime-context'
-import { buildMediaHistory } from '@/lib/agent/media-history'
 import {
   buildAiRuntime,
   classifyStage,
@@ -75,12 +55,7 @@ import {
 import type { RuntimeContext } from '@/lib/agent/types'
 import { getGenerationModel } from '@/lib/ai/client'
 import { composePrompt } from '@/lib/ai/compose-prompt'
-import {
-  DESCRIBE_ATTACHMENT_PROMPT_VERSION,
-  type DescribeAttachmentResult,
-  type DescribedMediaKind,
-  describeAttachment,
-} from '@/lib/ai/describe-attachment'
+import { DESCRIBE_ATTACHMENT_PROMPT_VERSION } from '@/lib/ai/describe-attachment'
 import {
   GeneratedMessageSchema,
   MAX_OUTPUT_TOKENS,
@@ -94,129 +69,32 @@ import type {
 } from '@/lib/ai/types'
 import { createAdminClient } from '@/lib/db/admin'
 import {
-  type Frame,
-  ffmpegBinaryPath,
-  imageToFrame,
-  videoToFrames,
-} from '@/lib/messaging/attachments/frames'
+  type DescribeTarget,
+  describeMessageAttachments,
+  planDescribe,
+} from '@/lib/messaging/attachments/describe'
+import type { Frame } from '@/lib/messaging/attachments/frames'
+import {
+  isAttachmentKind,
+  isAttachmentStatus,
+} from '@/lib/messaging/attachments/kind'
 import { startAgentTrace } from '@/lib/observability/langfuse'
 import { loadAppearanceEntries } from '@/lib/rag/appearance-entries'
 import {
-  cleanDescription,
+  evidencesVisit,
   nameableItems,
 } from '@/lib/schemas/attachment-description'
 import { toParsedGuestContext } from '@/lib/schemas/guest-context'
 
-import {
-  type DescribeUnit,
-  type DraftUnit,
-  type ImageTruth,
-  evaluate,
-} from './media-describe-score'
-import { createRunLog } from './run-log'
+import { RUN_LOG_DIR, createRunLog } from './run-log'
 import { seededFlip } from './seeded-flip'
 
-const MANIFEST_PATH = path.join(
-  'scripts',
-  'measurement',
-  'fixtures',
-  'media-describe-manifest.json',
-)
-const DEFAULT_IMAGES_DIR = path.join(
-  'measurement-runs',
-  'media-describe-images',
-)
-
-const MAIN_REPS = 5
-const CONTROL_REPS = 5
-const DRAFT_REPS = 3
-const HISTORY_IMAGES = 10
-const HISTORY_REPS = 2
-const HISTORY_INBOUND = 'what should I get next time?'
+const DEFAULT_VENUE = 'le-mils-coffee-test'
+/** The most messages described in one run. Newest first. */
+const MAX_MESSAGES = 12
 // What production composes a media-only draft as (handle-inbound.ts,
-// MEDIA_ONLY_DRAFT_CATEGORY). Spelled out, so a change there is a void run
-// here and not a silent change of what was measured.
+// MEDIA_ONLY_DRAFT_CATEGORY). Spelled out, so a change there shows up here.
 const DRAFT_CATEGORY: MessageCategory = 'casual_chatter'
-
-type ManifestImage = {
-  id: string
-  set: string
-  file: string
-  shoot: string
-  sha256: string | null
-  labelled: boolean
-  truth: Omit<ImageTruth, 'id' | 'set'> & { isVenue: boolean | null }
-}
-type Manifest = {
-  venueSlug: string
-  swapPair: [string, string]
-  images: ManifestImage[]
-}
-
-function sha256(file: string): string {
-  return createHash('sha256').update(readFileSync(file)).digest('hex')
-}
-
-function loadManifest(): Manifest {
-  return JSON.parse(readFileSync(MANIFEST_PATH, 'utf8')) as Manifest
-}
-
-/** Every reason the manifest is not ready. Empty means it is. */
-function manifestProblems(manifest: Manifest, dir: string): string[] {
-  const problems: string[] = []
-  for (const image of manifest.images) {
-    const file = path.join(dir, image.file)
-    if (!existsSync(file)) {
-      problems.push(`${image.id}: no file at ${file}`)
-      continue
-    }
-    if (!image.labelled) problems.push(`${image.id}: not labelled`)
-    if (image.truth.isVenue === null) {
-      problems.push(`${image.id}: truth.isVenue is not set`)
-    }
-    if (image.sha256 === null) {
-      problems.push(`${image.id}: no sha256 (run with --hash)`)
-    } else if (image.sha256 !== sha256(file)) {
-      problems.push(
-        `${image.id}: the file is not the one its label was written for (hash differs)`,
-      )
-    }
-  }
-  return problems
-}
-
-function mediaKindOf(image: ManifestImage): DescribedMediaKind {
-  if (/\.(mp4|mov|m4v|webm)$/i.test(image.file)) return 'video'
-  return image.set === 'H' ? 'story' : 'photo'
-}
-
-async function framesOf(file: string): Promise<Frame[]> {
-  const bytes = new Uint8Array(readFileSync(file))
-  const isVideo = /\.(mp4|mov|m4v|webm)$/i.test(file)
-  const mime = isVideo
-    ? 'video/mp4'
-    : /\.png$/i.test(file)
-      ? 'image/png'
-      : /\.gif$/i.test(file)
-        ? 'image/gif'
-        : /\.webp$/i.test(file)
-          ? 'image/webp'
-          : 'image/jpeg'
-  const result = isVideo
-    ? await videoToFrames(bytes)
-    : await imageToFrame(bytes, mime)
-  if (!result.ok) throw new Error(`no frames from ${file}: ${result.error}`)
-  return result.frames
-}
-
-/** The two distinctive drinks' names exchanged in every note that has one. */
-function swapNotes(notes: readonly string[], pair: [string, string]): string[] {
-  const [a, b] = pair
-  const hold = '\u0000swap\u0000'
-  return notes.map((note) =>
-    note.split(a).join(hold).split(b).join(a).split(hold).join(b),
-  )
-}
 
 type BaseCtx = Awaited<ReturnType<typeof buildRuntimeContext>>
 
@@ -290,24 +168,6 @@ function coinFor(seed: string): () => number {
   }
 }
 
-function toDescribeUnit(
-  image: string,
-  arm: DescribeUnit['arm'],
-  rep: number,
-  data: DescribeAttachmentResult,
-): DescribeUnit {
-  return {
-    image,
-    arm,
-    rep,
-    description: data.description,
-    legibility: data.legibility,
-    showsVenue: data.showsVenue,
-    peoplePresent: data.peoplePresent,
-    items: data.items,
-  }
-}
-
 async function generateDraft(
   composed: ReturnType<typeof composePrompt>,
   images: readonly Frame[],
@@ -342,97 +202,6 @@ async function generateDraft(
     maxOutputTokens: MAX_OUTPUT_TOKENS,
   })
   return object.body
-}
-
-async function smoke(): Promise<void> {
-  // A generated test pattern, so this needs no image from anyone. It proves
-  // three things the harness under scripts/harness/ cannot: that ffmpeg
-  // runs, that a model call accepts an image part in the shape this repo
-  // sends it, and that a prompt composed for a turn with no text is one the
-  // generator answers. It says nothing about what a model makes of a drink.
-  const binary = ffmpegBinaryPath()
-  if (binary === null) throw new Error('ffmpeg-static resolved to no binary')
-  const { execFileSync } = await import('node:child_process')
-  const png = execFileSync(
-    binary,
-    [
-      '-hide_banner',
-      '-loglevel',
-      'error',
-      '-f',
-      'lavfi',
-      '-i',
-      'testsrc=size=1280x720:rate=1',
-      '-frames:v',
-      '1',
-      '-f',
-      'image2pipe',
-      '-vcodec',
-      'png',
-      'pipe:1',
-    ],
-    { maxBuffer: 20_000_000 },
-  )
-  const framed = await imageToFrame(new Uint8Array(png), 'image/png')
-  if (!framed.ok) throw new Error(`smoke: no frame (${framed.error})`)
-  console.log(
-    `[smoke] ffmpeg ok: 1 frame, ${framed.frames[0].bytes.byteLength} bytes, ${framed.frames[0].mediaType}`,
-  )
-
-  const described = await describeAttachment({
-    frames: framed.frames,
-    kind: 'photo',
-    venueName: 'Smoke Test Cafe',
-    menuItemNames: ['Cortado', 'Latte'],
-    appearanceNotes: [],
-  })
-  if (!described.ok)
-    throw new Error(`smoke: describe failed: ${described.error}`)
-  console.log('[smoke] describe ok:', {
-    description: described.data.description,
-    legibility: described.data.legibility,
-    showsVenue: described.data.showsVenue,
-    peoplePresent: described.data.peoplePresent,
-    items: described.data.items,
-    model: described.data.modelId,
-    usage: described.data.usage,
-  })
-
-  const db = createAdminClient()
-  const manifest = loadManifest()
-  const now = new Date()
-  const { venue, guestId } = await venueAndGuest(db, manifest.venueSlug)
-  const base = await baseContext(venue.id, guestId, now)
-  const corpus = await retrieveCorpusStage(base)
-  const ctx = constructedContext(base, now, {
-    corpus,
-    inboundDescribedMedia: [
-      {
-        word: 'photo',
-        description: cleanDescription(described.data.description),
-        nameableItems: [],
-      },
-    ],
-  })
-  const composed = composePrompt({
-    category: DRAFT_CATEGORY,
-    persona: ctx.venue.brandPersona,
-    venueInfo: ctx.venue.venueInfo,
-    ragChunks: toRagChunks(corpus),
-    runtime: buildAiRuntime(ctx, coinFor('smoke')),
-    channel: 'instagram',
-  })
-  const lastLines = composed.userPrompt
-    .split('\n')
-    .filter((l) => l.startsWith('['))
-  console.log('[smoke] the line the model reads:\n  ' + lastLines.join('\n  '))
-  const body = await generateDraft(composed, framed.frames)
-  console.log(
-    `[smoke] draft with an image part ok:\n  ${body.replace(/\n/g, '\n  ')}`,
-  )
-  console.log(
-    '\nSMOKE ONLY. Two model calls on a test pattern. This is not the behavioural check and scores nothing.',
-  )
 }
 
 type Db = ReturnType<typeof createAdminClient>
@@ -505,390 +274,259 @@ function toKnowledgeChunks(
   }))
 }
 
+type SmokeRow = DescribeTarget & {
+  body: string
+  createdAt: string
+  guestId: string
+}
+
+/** The venue's guest attachments, newest first, without migration 081's columns. */
+async function loadRows(db: Db, venueId: string): Promise<SmokeRow[]> {
+  const { data, error } = await db
+    .from('message_attachments')
+    .select(
+      'id, message_id, guest_id, kind, status, provider_type, provider_url, storage_path, mime_type, created_at, messages!inner(direction, body)',
+    )
+    .eq('venue_id', venueId)
+    .eq('messages.direction', 'inbound')
+    .order('created_at', { ascending: false })
+    .limit(80)
+  if (error) throw new Error(`attachments: ${error.message}`)
+  return (data ?? []).map((row) => ({
+    id: row.id,
+    messageId: row.message_id,
+    kind: isAttachmentKind(row.kind) ? row.kind : 'unknown',
+    status: isAttachmentStatus(row.status) ? row.status : 'failed',
+    providerType: row.provider_type,
+    providerUrl: row.provider_url,
+    storagePath: row.storage_path,
+    mimeType: row.mime_type,
+    // Never described: the columns do not exist until migration 081.
+    description: null,
+    descriptionMeta: null,
+    describedAt: null,
+    body: row.messages.body,
+    createdAt: row.created_at,
+    guestId: row.guest_id,
+  }))
+}
+
 async function main(): Promise<void> {
-  const args = new Set(process.argv.slice(2))
-  if (args.has('--smoke')) return smoke()
+  const argv = process.argv.slice(2)
+  const venueSlug = argv.includes('--venue')
+    ? (argv[argv.indexOf('--venue') + 1] ?? DEFAULT_VENUE)
+    : DEFAULT_VENUE
+  const listOnly = argv.includes('--list')
 
-  const dir = process.env.MEDIA_DESCRIBE_DIR ?? DEFAULT_IMAGES_DIR
-  const manifest = loadManifest()
-
-  if (args.has('--hash')) {
-    // No model call, no database. Reads the files and pins each label to one.
-    let filled = 0
-    for (const image of manifest.images) {
-      const file = path.join(dir, image.file)
-      if (!existsSync(file)) {
-        console.log(`  ${image.id}: no file at ${file}`)
-        continue
-      }
-      image.sha256 = sha256(file)
-      filled += 1
-    }
-    const raw = JSON.parse(readFileSync(MANIFEST_PATH, 'utf8')) as Record<
-      string,
-      unknown
-    >
-    writeFileSync(
-      MANIFEST_PATH,
-      `${JSON.stringify({ ...raw, images: manifest.images }, null, 2)}\n`,
-    )
-    console.log(`hashed ${filled} of ${manifest.images.length} images`)
-    return
-  }
-
-  const problems = manifestProblems(manifest, dir)
-  if (problems.length > 0) {
-    console.log(
-      `NOT RUN. ${problems.length} problem(s) with the test images. No model was called.\n`,
-    )
-    for (const problem of problems) console.log(`  ${problem}`)
-    process.exitCode = 1
-    return
-  }
-
-  const dry = process.env.MEASURE_DRY === '1'
   const db = createAdminClient()
   const now = new Date()
-  const { venue, guestId } = await venueAndGuest(db, manifest.venueSlug)
-  const base = await baseContext(venue.id, guestId, now)
-  const menuNames = base.venue.venueInfo.menu.items.map((item) => item.name)
-  const { data: venueRow } = await db
-    .from('venues')
-    .select('name')
-    .eq('id', venue.id)
-    .maybeSingle()
-  const venueName = venueRow?.name ?? null
-
-  const loadedNotes = await loadAppearanceEntries(db, venue.id)
-  if (!loadedNotes.ok) throw new Error(`appearance notes: ${loadedNotes.error}`)
-  const notes = loadedNotes.data
-  if (notes.length === 0) {
-    console.log(
-      `NOT RUN. ${manifest.venueSlug} has no appearance notes (knowledge rows tagged "appearance"). The main arm would be the no-notes control. No model was called.`,
-    )
-    process.exitCode = 1
-    return
-  }
-  // Convention 9: say up front when an arm cannot differ from its control.
-  const swappedNotes = swapNotes(notes, manifest.swapPair)
-  if (JSON.stringify(swappedNotes) === JSON.stringify(notes)) {
-    console.log(
-      `NOT RUN. Swapping "${manifest.swapPair[0]}" and "${manifest.swapPair[1]}" changes nothing in the notes, so the swapped arm would be the main arm. No model was called.`,
-    )
-    process.exitCode = 1
-    return
-  }
-  for (const image of manifest.images) {
-    for (const name of image.truth.itemsPresent) {
-      if (!menuNames.includes(name)) {
-        throw new Error(
-          `${image.id}: "${name}" is not on ${manifest.venueSlug}'s live menu. Labels use the menu's own spelling.`,
-        )
-      }
-    }
-  }
-
-  const truths: ImageTruth[] = manifest.images.map((image) => ({
-    id: image.id,
-    set: image.set,
-    ...image.truth,
-    isVenue: image.truth.isVenue === true,
-  }))
-  const controlNoNotes = manifest.images.filter(
-    (image) =>
-      image.set === 'A' || image.set === 'B' || ['d2', 'd3'].includes(image.id),
-  )
-  const controlSwapped = manifest.images.filter(
-    (image) => image.set === 'A' && image.truth.expectNamed.length === 1,
-  )
-  const describeCalls =
-    manifest.images.length * MAIN_REPS +
-    controlNoNotes.length * CONTROL_REPS +
-    controlSwapped.length * CONTROL_REPS
-  const draftCalls =
-    manifest.images.length * DRAFT_REPS * 2 + HISTORY_IMAGES * HISTORY_REPS
+  const { venue } = await venueAndGuest(db, venueSlug)
+  const rows = await loadRows(db, venue.id)
+  const messageIds = [...new Set(rows.map((row) => row.messageId))]
 
   console.log(
-    `[media-describe] venue=${manifest.venueSlug} prompt=${PROMPT_VERSION} describe=${DESCRIBE_ATTACHMENT_PROMPT_VERSION} notes=${notes.length} menu=${menuNames.length}`,
+    `[media-smoke] venue=${venueSlug} prompt=${PROMPT_VERSION} describe=${DESCRIBE_ATTACHMENT_PROMPT_VERSION}`,
   )
   console.log(
-    `[media-describe] planned: ${describeCalls} describe calls, ${draftCalls} generations${dry ? '  DRY (no model calls)' : ''}`,
+    `[media-smoke] ${rows.length} guest attachments on ${messageIds.length} messages\n`,
   )
-  if (dry) {
+  for (const row of rows) {
+    const plan = planDescribe(row)
     console.log(
-      'DRY: images present, labelled and hashed; notes loaded; the swapped arm differs from the main arm. No model was called.',
+      `  ${row.createdAt.slice(0, 16)}  ${row.kind.padEnd(13)} ${row.status.padEnd(9)} ${
+        plan.action === 'describe' ? `describe (${plan.source})` : plan.action
+      }${row.body.trim() !== '' ? '  +text' : ''}  ${row.id.slice(0, 8)}`,
     )
+  }
+  const describable = messageIds
+    .filter((id) =>
+      rows.some(
+        (row) =>
+          row.messageId === id && planDescribe(row).action === 'describe',
+      ),
+    )
+    .slice(0, MAX_MESSAGES)
+  console.log(
+    `\n[media-smoke] ${describable.length} message(s) have something to describe`,
+  )
+  if (listOnly) {
+    console.log('LIST ONLY. No model was called.')
     return
   }
+  if (describable.length === 0) return
 
-  const log = createRunLog({
-    name: 'media-describe',
-    meta: {
-      arm: 'describe:main+no_notes+swapped; drafts:image+description+history',
-      promptVersion: PROMPT_VERSION,
-      describePromptVersion: DESCRIBE_ATTACHMENT_PROMPT_VERSION,
-      venue: manifest.venueSlug,
-      appearanceNotes: notes.length,
-      swapPair: manifest.swapPair,
-      images: manifest.images.map((image) => `${image.id}:${image.sha256}`),
-      reps: { MAIN_REPS, CONTROL_REPS, DRAFT_REPS, HISTORY_REPS },
-      draftCategory: DRAFT_CATEGORY,
-    },
-  })
-  console.log(`[media-describe] run log: ${log.path}`)
-
-  // --- stage 1 ---------------------------------------------------------------
-  const describes: DescribeUnit[] = []
-  const frames = new Map<string, Frame[]>()
-  const firstMain = new Map<string, DescribeAttachmentResult>()
-  const arms: {
-    arm: DescribeUnit['arm']
-    images: ManifestImage[]
-    notes: string[]
-    reps: number
-  }[] = [
-    { arm: 'main', images: manifest.images, notes, reps: MAIN_REPS },
-    { arm: 'no_notes', images: controlNoNotes, notes: [], reps: CONTROL_REPS },
-    {
-      arm: 'swapped',
-      images: controlSwapped,
-      notes: swappedNotes,
-      reps: CONTROL_REPS,
-    },
-  ]
-  for (const { arm, images, notes: armNotes, reps } of arms) {
-    for (const image of images) {
-      if (!frames.has(image.id)) {
-        frames.set(image.id, await framesOf(path.join(dir, image.file)))
-      }
-      for (let rep = 1; rep <= reps; rep += 1) {
-        const result = await describeAttachment({
-          frames: frames.get(image.id) ?? [],
-          kind: mediaKindOf(image),
-          venueName,
-          menuItemNames: menuNames,
-          appearanceNotes: armNotes,
-        })
-        const unit: DescribeUnit = result.ok
-          ? toDescribeUnit(image.id, arm, rep, result.data)
-          : { image: image.id, arm, rep, error: result.error }
-        if (result.ok && arm === 'main' && rep === 1) {
-          firstMain.set(image.id, result.data)
-        }
-        describes.push(unit)
-        log.appendUnit({ stage: 'describe', set: image.set, ...unit })
-        console.log(
-          `[describe ${image.id}/${arm}/${rep}] ${
-            result.ok
-              ? `${result.data.legibility} venue=${result.data.showsVenue} people=${result.data.peoplePresent} items=${JSON.stringify(result.data.items)}\n    ${result.data.description}`
-              : `FAILED: ${result.error}`
-          }`,
-        )
-      }
-    }
+  // The guest who sent the media, so the conversation's channel resolves as
+  // it did for them. Everything else of theirs is cleared below.
+  const firstGuestId = rows.find((row) =>
+    describable.includes(row.messageId),
+  )?.guestId
+  if (firstGuestId === undefined) return
+  const baseByGuest = new Map<string, Awaited<ReturnType<typeof baseContext>>>()
+  const baseFor = async (guestId: string) => {
+    const cached = baseByGuest.get(guestId)
+    if (cached !== undefined) return cached
+    const built = await baseContext(venue.id, guestId, now)
+    baseByGuest.set(guestId, built)
+    return built
   }
-
-  // --- stage 2 ---------------------------------------------------------------
-  const drafts: DraftUnit[] = []
+  const base = await baseFor(firstGuestId)
+  const menuItems = base.venue.venueInfo.menu.items
+  const menuNames = menuItems.map((item) => item.name)
+  const notes = await loadAppearanceEntries(db, venue.id)
+  console.log(
+    `[media-smoke] menu items: ${menuNames.length}; appearance notes: ${notes.ok ? notes.data.length : `unreadable (${notes.error})`}` +
+      (notes.ok && notes.data.length === 0
+        ? '. With none, no drink can be named: the describe step drops every item.'
+        : ''),
+  )
   const corpus = await retrieveCorpusStage(base)
   const ragChunks = toRagChunks(corpus)
-  for (const image of manifest.images) {
-    const described = firstMain.get(image.id)
-    // Its describe failed: already a void cell in stage 1.
-    if (described === undefined) continue
-    const clear = described.legibility === 'clear'
-    const allowed = clear
-      ? nameableItems(
-          { items: described.items, legibility: described.legibility },
-          menuNames,
-        )
-      : []
-    const media: InboundDescribedMedia = {
-      word: mediaKindOf(image),
-      description: clear ? cleanDescription(described.description) : null,
-      nameableItems: allowed,
-    }
-    const ctx = constructedContext(base, now, {
-      corpus,
-      inboundDescribedMedia: [media],
-    })
-    // What persistMediaOnlyDraft does: search on the named drinks, or not at
-    // all.
-    const knowledge =
-      allowed.length > 0
-        ? toKnowledgeChunks(
-            await retrieveKnowledgeStage(
-              ctx,
-              DRAFT_CATEGORY,
-              allowed.join(', '),
-            ),
-          )
-        : undefined
-    // ONE composed prompt for both arms, so they cannot differ in anything
-    // but the picture. Convention 9 by construction, not by comparison.
-    const composed = composePrompt({
-      category: DRAFT_CATEGORY,
-      persona: ctx.venue.brandPersona,
-      venueInfo: ctx.venue.venueInfo,
-      ragChunks,
-      knowledgeChunks: knowledge,
-      runtime: buildAiRuntime(ctx, coinFor(image.id)),
-      channel: 'instagram',
-    })
-    // Production shows no picture for an unclear one, so the `image` arm of
-    // an unclear image is the `description` arm. Said, not hidden.
-    const shown = clear ? (frames.get(image.id) ?? []) : []
-    for (const arm of ['image', 'description'] as const) {
-      for (let rep = 1; rep <= DRAFT_REPS; rep += 1) {
-        const unit: DraftUnit = {
-          image: image.id,
-          arm,
-          rep,
-          allowedItems: allowed,
-          unclear: !clear,
-        }
-        try {
-          unit.body = await generateDraft(
-            composed,
-            arm === 'image' ? shown : [],
-          )
-        } catch (e) {
-          unit.error = e instanceof Error ? e.message : String(e)
-        }
-        drafts.push(unit)
-        log.appendUnit({
-          stage: 'draft',
-          set: image.set,
-          picturesShown: arm === 'image' ? shown.length : 0,
-          ...unit,
-        })
-        console.log(
-          `\n[draft ${image.id}/${arm}/${rep}] set ${image.set}${clear ? '' : ' (unclear)'} allowed=${JSON.stringify(allowed)}\n  ${(unit.body ?? `FAILED: ${unit.error}`).replace(/\n/g, '\n  ')}`,
-        )
-      }
-    }
-  }
 
-  // The history arm: a described picture as an earlier line, then a question.
-  const historyImages = manifest.images
-    .filter((image) => firstMain.get(image.id)?.legibility === 'clear')
-    .slice(0, HISTORY_IMAGES)
-  for (const image of historyImages) {
-    const described = firstMain.get(image.id)
-    if (described === undefined) continue
-    const photoAt = new Date(now.getTime() - 10 * 60_000)
-    const media = buildMediaHistory(
-      [
-        {
-          id: 'photo',
-          created_at: photoAt.toISOString(),
-          media_urls: [
-            'https://lookaside.fbsbx.com/ig_messaging_cdn/?asset_id=1',
-          ],
-          unsupported_content: null,
+  const log = createRunLog({
+    name: 'media-smoke',
+    meta: {
+      arm: 'smoke: one describe and one draft per attachment',
+      promptVersion: PROMPT_VERSION,
+      describePromptVersion: DESCRIBE_ATTACHMENT_PROMPT_VERSION,
+      venue: venueSlug,
+      appearanceNotes: notes.ok ? notes.data.length : null,
+      messages: describable.length,
+    },
+  })
+  const summary: string[] = []
+
+  for (const messageId of describable) {
+    const own = rows.filter((row) => row.messageId === messageId)
+    const body = own[0]?.body ?? ''
+    const guestId = own[0]?.guestId ?? firstGuestId
+    const guestBase = await baseFor(guestId)
+    // The production describe step, reading these rows, saving nothing.
+    const described = await describeMessageAttachments(db, {
+      messageIds: [messageId],
+      venue: { id: venue.id, menuItemNames: menuNames },
+      guestId,
+      deps: {
+        loadTargets: async () => own,
+        save: async () => {},
+        report: async (props) => {
+          console.log(
+            `  [not described] ${props.attachmentId?.slice(0, 8)}: ${props.reason}`,
+          )
         },
-      ],
-      [
-        {
-          message_id: 'photo',
-          kind: mediaKindOf(image) === 'video' ? 'video' : 'image',
-          provider_type: 'image',
-          title: null,
-          description: described.description,
-          description_meta: {
-            version: 1,
-            outcome: 'described',
-            promptVersion: described.promptVersion,
-            model: described.modelId ?? 'unknown',
-            legibility: described.legibility,
-            showsVenue: described.showsVenue,
-            peoplePresent: described.peoplePresent,
-            items: described.items,
-            frames: 1,
-            source: 'stored',
-          },
-        },
-      ],
-    )
-    const ctx = constructedContext(base, now, {
+      },
+    })
+
+    const media: InboundDescribedMedia[] = []
+    const images: Frame[] = []
+    for (const item of described) {
+      if (item.meta === null || item.meta.outcome !== 'described') {
+        const why =
+          item.meta?.outcome === 'skipped' ? item.meta.reason : 'no result'
+        summary.push(
+          `- **${item.mediaKind}** \`${item.attachmentId.slice(0, 8)}\`: not described (${why}).`,
+        )
+        log.appendUnit({
+          messageId,
+          attachmentId: item.attachmentId,
+          skipped: why,
+        })
+        continue
+      }
+      const clear =
+        item.meta.legibility === 'clear' && item.description !== null
+      const allowed = clear ? nameableItems(item.meta, menuNames) : []
+      media.push({
+        word: item.mediaKind,
+        description: clear ? item.description : null,
+        nameableItems: allowed,
+      })
+      if (clear) images.push(...item.frames)
+      const visit = evidencesVisit(item.meta)
+      const line =
+        `- **${item.mediaKind}** \`${item.attachmentId.slice(0, 8)}\`` +
+        ` (${item.meta.frames} frame${item.meta.frames === 1 ? '' : 's'}, ${item.meta.source})\n` +
+        `  - description: ${item.description ?? '(none)'}\n` +
+        `  - legibility \`${item.meta.legibility}\`, shows the venue \`${item.meta.showsVenue}\`, people present \`${item.meta.peoplePresent}\`\n` +
+        `  - drinks nameable: ${allowed.length > 0 ? allowed.join(', ') : 'none'}\n` +
+        `  - visit decision: ${visit ? 'would record (shadow: nothing written)' : 'none'}`
+      summary.push(line)
+      console.log(`\n${line}`)
+      log.appendUnit({
+        messageId,
+        attachmentId: item.attachmentId,
+        kind: item.mediaKind,
+        description: item.description,
+        meta: item.meta,
+        nameable: allowed,
+        visit,
+      })
+    }
+    if (media.length === 0) continue
+
+    const ctx = constructedContext(guestBase, now, {
       corpus,
-      mediaOnlyInbounds: media.mediaOnlyInbounds,
-      mediaContext: true,
+      inboundDescribedMedia: media,
     })
     ctx.currentMessage = {
       ...(ctx.currentMessage as NonNullable<RuntimeContext['currentMessage']>),
-      body: HISTORY_INBOUND,
+      body,
     }
-    const category = (await classifyStage(ctx)).category
+    // A message with words is classified and searched as production does it;
+    // one with none is composed as the media-only draft path composes it.
+    const hasText = body.trim() !== ''
+    const category = hasText
+      ? (await classifyStage(ctx)).category
+      : DRAFT_CATEGORY
+    const named = [...new Set(media.flatMap((m) => m.nameableItems))]
+    const knowledge = hasText
+      ? toKnowledgeChunks(
+          await retrieveKnowledgeWithContextStage(ctx, category, body),
+        )
+      : named.length > 0
+        ? toKnowledgeChunks(
+            await retrieveKnowledgeStage(ctx, DRAFT_CATEGORY, named.join(', ')),
+          )
+        : undefined
     const composed = composePrompt({
       category,
       persona: ctx.venue.brandPersona,
       venueInfo: ctx.venue.venueInfo,
       ragChunks,
-      knowledgeChunks: toKnowledgeChunks(
-        await retrieveKnowledgeWithContextStage(ctx, category, HISTORY_INBOUND),
-      ),
-      runtime: buildAiRuntime(ctx, coinFor(`${image.id}/history`)),
+      knowledgeChunks: knowledge,
+      runtime: buildAiRuntime(ctx, coinFor(messageId)),
       channel: 'instagram',
     })
-    // A harness that calls generateObject itself must send historyTurns, or
-    // it measures a conversation with no history. This arm IS the history,
-    // so its absence voids it.
-    if (!JSON.stringify(composed.historyTurns).includes('[guest ')) {
-      throw new Error(
-        `VOID ${image.id}/history: the described line is not in the history turns`,
-      )
-    }
-    for (let rep = 1; rep <= HISTORY_REPS; rep += 1) {
-      // The history line names nothing, so the reply is free to name any menu
-      // item it recommends: recommending a drink is not misnaming a picture.
-      const unit: DraftUnit = {
-        image: image.id,
-        arm: 'history',
-        rep,
-        allowedItems: menuNames,
-        unclear: false,
-      }
-      try {
-        unit.body = await generateDraft(composed, [])
-      } catch (e) {
-        unit.error = e instanceof Error ? e.message : String(e)
-      }
-      drafts.push(unit)
-      log.appendUnit({ stage: 'draft', set: image.set, category, ...unit })
-      console.log(
-        `\n[draft ${image.id}/history/${rep}] (${category}) "${HISTORY_INBOUND}"\n  ${(unit.body ?? `FAILED: ${unit.error}`).replace(/\n/g, '\n  ')}`,
-      )
+    const mediaLines = composed.userPrompt
+      .split('\n')
+      .filter((l) => l.startsWith('[guest '))
+    try {
+      const draft = await generateDraft(composed, images.slice(0, 8))
+      const block =
+        `  - the line the model read: \`${mediaLines.join(' ')}\`\n` +
+        (hasText
+          ? `  - the guest also wrote: "${body}" (classified \`${category}\`)\n`
+          : '') +
+        `  - **draft** (${images.length} picture${images.length === 1 ? '' : 's'} shown): ${draft.replace(/\n+/g, ' / ')}`
+      summary.push(block)
+      console.log(block)
+      log.appendUnit({ messageId, category, mediaLines, draft })
+    } catch (e) {
+      const error = e instanceof Error ? e.message : String(e)
+      summary.push(`  - **draft FAILED**: ${error}`)
+      console.log(`  draft FAILED: ${error}`)
+      log.appendUnit({ messageId, category, error })
     }
   }
 
-  // --- the verdict, in code --------------------------------------------------
-  const result = evaluate({ truths, describes, drafts, menuNames })
-  console.log('\n================ BARS (every ceiling is 0) ================')
-  for (const bar of result.bars) {
-    console.log(
-      `${bar.met ? 'MET   ' : 'BREACH'} ${bar.id}. ${bar.name}: ${bar.breaches.length} of ${bar.countedOver}`,
-    )
-    for (const breach of bar.breaches) console.log(`         ${breach}`)
-  }
-  console.log('\n================ REPORTED, NOT A BAR ================')
-  for (const line of result.report) console.log(line)
-  log.appendUnit({ stage: 'verdict', ...result })
-
-  if (result.voidCells.length > 0) {
-    console.log(
-      `\nVOID: ${result.voidCells.length} call(s) failed (${result.voidCells.slice(0, 8).join(', ')}${result.voidCells.length > 8 ? ', ...' : ''}). A failed call is not a result. Do not read a count from this run.`,
-    )
-    process.exitCode = 1
-    return
-  }
-  const breached = result.bars.filter((bar) => !bar.met)
+  mkdirSync(RUN_LOG_DIR, { recursive: true })
+  const out = path.join(RUN_LOG_DIR, `media-smoke-${venueSlug}-summary.md`)
+  writeFileSync(out, `${summary.join('\n')}\n`)
   console.log(
-    breached.length > 0
-      ? `\nNOT MET: ${breached.map((bar) => bar.id).join(', ')}.`
-      : '\nNo breach found by the detectors. Bars 3, 5, 6 and 7 read free text: the bar is not met until every set E and set F body above has been read by hand.',
+    `\n[media-smoke] run log: ${log.path}\n[media-smoke] summary: ${out}`,
   )
-  if (breached.length > 0) process.exitCode = 1
+  console.log(
+    'SMOKE ONLY. One describe and one draft per attachment. Nothing was saved, sent or recorded, and nothing here is a rate.',
+  )
 }
 
 main().catch((e) => {

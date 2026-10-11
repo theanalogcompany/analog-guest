@@ -295,16 +295,23 @@ message being answered, or the media-only message beside it, and puts what it le
   generation, so the crisis short-circuit never waits on a vision call.
 - **Nothing is described** on a test run, for a message Meta could not hand us, or on an
   opt-out turn's reply (the description is dropped: that reply always sends).
-- **A visit is recorded** when the media clearly shows the venue (`record-media-visit.ts`),
-  whatever becomes of the draft. `approximate`, one per guest per day, never a second row
-  beside a receipt or a self-report. A visit with no nameable drink does not close
-  `understand_order`.
+- **A visit is decided** when the media clearly shows the venue (`record-media-visit.ts`),
+  whatever becomes of the draft, and **written only where the venue's
+  `record_media_visits` is true**. It is false everywhere (owner-ruled 2026-10-11): in that
+  shadow mode the decision goes on the attachment's `description_meta.visit` and into one
+  `media_visit_decision` log line, and no `transactions` row or `last_visit_at` change is
+  made. When on: `approximate`, one per guest per day, never a second row beside a receipt or
+  a self-report. A visit with no nameable drink does not close `understand_order`.
+- **A venue with no appearance notes names no drink.** The describe step drops the model's
+  items when the venue has none (`describe.ts`), which is every venue until notes are loaded.
 - **Which drinks a reply may name and which go on the visit are one function**
   (`nameableItems`, `lib/schemas/attachment-description.ts`). Do not add a second reader that
   decides it another way.
 
-The behavioural check for all of this is pre-registered on TAC-584 and had not been run when
-it merged: it needs test images from the owner (`scripts/measurement/media-describe.ts`).
+None of this was measured, by ruling: the 30-image check pre-registered on TAC-584 was dropped
+on 2026-10-11 because every media reply is held. `scripts/measurement/media-describe.ts` is a
+smoke run over a venue's existing media, not a measurement. Do not read a held draft's quality
+as licence to auto-send one.
 
 ## Venue status
 

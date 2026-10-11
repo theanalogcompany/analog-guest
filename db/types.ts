@@ -2504,6 +2504,7 @@ export type Database = {
           is_test: boolean
           messaging_phone_number: string | null
           name: string
+          record_media_visits: boolean
           slug: string
           status: string
           timezone: string
@@ -2518,6 +2519,7 @@ export type Database = {
           is_test?: boolean
           messaging_phone_number?: string | null
           name: string
+          record_media_visits?: boolean
           slug: string
           status?: string
           timezone?: string
@@ -2532,6 +2534,7 @@ export type Database = {
           is_test?: boolean
           messaging_phone_number?: string | null
           name?: string
+          record_media_visits?: boolean
           slug?: string
           status?: string
           timezone?: string

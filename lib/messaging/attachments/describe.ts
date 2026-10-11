@@ -32,6 +32,12 @@
 //   anything else       never: a voice note, a file, a shared reel or post,
 //                       and the venue's own story a guest replied to.
 //
+// A VENUE WITH NO APPEARANCE NOTES NAMES NOTHING. The model may call a drink
+// unmistakable only against a note the venue wrote about how it looks
+// (lib/rag/appearance-entries.ts). With no notes there is nothing to match
+// against, so the items the model returns are dropped here before they are
+// stored, and neither a reply nor a visit can carry a drink's name.
+//
 // EACH ROW IS SETTLED ONCE. `described_at` is written with the description,
 // or with a skip reason when the attachment can NEVER be described (a type
 // nothing can read, a story link that is already dead). A failure that might
@@ -478,9 +484,15 @@ export async function describeMessageAttachments(
         legibility: call.data.legibility,
         showsVenue: call.data.showsVenue,
         peoplePresent: call.data.peoplePresent,
-        items: call.data.items,
+        // NO NOTES, NO NAMES. The prompt already says nothing can be
+        // unmistakable without an appearance note, and that is wording. This
+        // is the guarantee: a venue with no notes names no drink, whatever
+        // the model returned. It is how a venue starts, and how every venue
+        // behaved on the day this shipped.
+        items: venue.notes.length > 0 ? call.data.items : [],
         frames: framed.frames.length,
         source: plan.source,
+        appearanceNotes: venue.notes.length,
       }
       // THE PICTURE NEVER GOES TO THE TRACE, whatever the capture setting:
       // for a story that would be keeping it. The sentence does.
