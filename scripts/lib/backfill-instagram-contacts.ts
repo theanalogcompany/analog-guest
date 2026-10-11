@@ -51,6 +51,12 @@ export type BackfillArgs = {
   mediaOnly: boolean
   /** With --attachments-only or --media-only: write at most this many messages. */
   limit?: number
+  /**
+   * With --rollback: delete only the messages one run wrote, by the run id
+   * that run printed, and no guest. How a --media-only run is undone without
+   * taking the whole history import with it.
+   */
+  run?: string
   unrecognised: string[]
 }
 
@@ -76,6 +82,7 @@ export function parseBackfillArgs(argv: readonly string[]): BackfillArgs {
     else if (arg === '--media-only') out.mediaOnly = true
     // NaN for anything that is not a number, which backfillArgsError refuses.
     else if (arg === '--limit') out.limit = Number(argv[++i])
+    else if (arg === '--run') out.run = argv[++i] ?? ''
     else out.unrecognised.push(arg)
   }
   return out
@@ -99,6 +106,15 @@ export function backfillArgsError(args: BackfillArgs): string | null {
     return '--media-only cannot be combined with --rollback: the rollback already deletes every message the import wrote, media-only ones included'
   if (args.mediaOnly && args.attachmentsOnly)
     return 'pass --attachments-only or --media-only, not both: one writes onto rows we hold, the other writes new rows'
+  if (args.run !== undefined && !args.rollback)
+    return '--run only applies to --rollback'
+  if (
+    args.run !== undefined &&
+    !/^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/.test(args.run)
+  )
+    return '--run takes the run id a --confirm printed'
+  if (args.run !== undefined && args.includeGuestsWithLiveMessages)
+    return '--run deletes no guest, so --include-guests-with-live-messages does not apply to it'
   if (args.limit !== undefined && !args.attachmentsOnly && !args.mediaOnly)
     return '--limit only applies to --attachments-only and --media-only'
   if (

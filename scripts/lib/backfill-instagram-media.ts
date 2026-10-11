@@ -25,6 +25,12 @@
 //                       outside it is what makes "no card, no change to what
 //                       the model reads" true by construction, not by review.
 //                       It also covers the import's own 24-hour rule.
+//   a guest with nothing on record
+//                       A guest whose only rows are counter scans has no
+//                       message that counts as one (hadPriorConversation in
+//                       lib/messaging/instagram/handle-events.ts, which has no
+//                       date bound). Giving them a photo would change the
+//                       wording of their next scan greeting.
 //   after_live          The import's second rule, unchanged: nothing dated at
 //                       or after a guest's oldest live message.
 //   a message with text The import's business, not this mode's: it has a body,
@@ -55,7 +61,12 @@ import type {
   PlannedMessage,
 } from './backfill-instagram-contacts'
 
-/** The agent's history window and the media hold's lookback, in days. */
+/**
+ * The agent's history window (MAX_HISTORY_DAYS, build-runtime-context.ts) and
+ * the media hold's lookback (media-context.ts), in days. A third copy of the
+ * number, because this file constructs no client and those two modules do;
+ * the entry script refuses to run if this is ever the smaller.
+ */
 export const MEDIA_ONLY_HOLD_BACK_DAYS = 14
 const MS_PER_DAY = 24 * 60 * 60 * 1000
 
@@ -94,6 +105,8 @@ export type MediaSkipReason =
   | 'unknown_sender'
   /** The other participant is not a guest of ours. */
   | 'no_guest_row'
+  /** A guest of ours with no message on record yet: scans only. */
+  | 'guest_has_no_messages'
   | 'inside_14_days'
   | 'after_live'
 
@@ -114,6 +127,7 @@ export function emptyMediaSkips(): Record<MediaSkipReason, number> {
     no_timestamp: 0,
     unknown_sender: 0,
     no_guest_row: 0,
+    guest_has_no_messages: 0,
     inside_14_days: 0,
     after_live: 0,
   } satisfies Record<MediaSkipReason, number>
@@ -143,6 +157,11 @@ export type MediaMessageInput = {
   alreadyStored: boolean
   /** The conversation's other participant is a guest of ours, not erased. */
   hasGuest: boolean
+  /**
+   * The guest has a message on record today (text, media or unsupported).
+   * Read only for a message that got as far as needing it; pass true before.
+   */
+  guestHasMessages: boolean
   /** This guest's oldest message the import did not write, or null. */
   oldestLiveMessageAt: Date | null
   now: Date
@@ -151,9 +170,11 @@ export type MediaMessageInput = {
 /**
  * Pure. What this mode does with one message Meta listed.
  *
- * WHAT THE MESSAGE IS comes first, before anything about the guest or the
- * date, so that the counts of what was left out (story mentions above all)
- * cover every conversation and not only the guests we hold.
+ * WHAT THE MESSAGE IS comes before anything about the guest or the date, so
+ * the counts of what was left out cover every conversation and not only the
+ * guests we hold. `already_stored` is the one thing ahead of it, so a story
+ * mention the live webhook stored is NOT in `story_mention` here; the entry
+ * script counts mentions per person on its own, before this is called.
  */
 export function decideMediaMessage(
   input: MediaMessageInput,
@@ -196,6 +217,7 @@ export function decideMediaMessage(
   if (message.createdAt === null) return skip('no_timestamp', true)
   if (input.direction === null) return skip('unknown_sender', true)
   if (!input.hasGuest) return skip('no_guest_row', true)
+  if (!input.guestHasMessages) return skip('guest_has_no_messages', true)
   if (
     input.now.getTime() - message.createdAt.getTime() <
     MEDIA_ONLY_HOLD_BACK_DAYS * MS_PER_DAY

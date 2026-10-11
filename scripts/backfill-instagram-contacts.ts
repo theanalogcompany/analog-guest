@@ -76,6 +76,7 @@ import { randomUUID } from 'node:crypto'
 import type { SupabaseClient } from '@supabase/supabase-js'
 
 import type { Database } from '@/db/types'
+import { MAX_HISTORY_DAYS } from '@/lib/agent/build-runtime-context'
 import { createAdminClient } from '@/lib/db/admin'
 import type { ParsedAttachment } from '@/lib/messaging/attachments/kind'
 import { deleteAttachmentsForGuests } from '@/lib/messaging/attachments/delete'
@@ -85,6 +86,7 @@ import {
   storagePathFor,
 } from '@/lib/messaging/attachments/rehost'
 import {
+  MESSAGE_HAS_CONTENT_FILTER,
   insertMessageAttachments,
   loadPendingAttachmentsForMessage,
 } from '@/lib/messaging/attachments/store'
@@ -158,7 +160,7 @@ const ID_CHUNK = 10
 const ROW_PAGE = 1000
 
 const USAGE =
-  'usage: npm run backfill-instagram-contacts -- --venue <slug> (--dry-run | --confirm) [--rollback [--include-guests-with-live-messages] | (--attachments-only | --media-only) [--limit <n>]]'
+  'usage: npm run backfill-instagram-contacts -- --venue <slug> (--dry-run | --confirm) [--rollback [--include-guests-with-live-messages | --run <id>] | (--attachments-only | --media-only) [--limit <n>]]'
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
@@ -1087,29 +1089,38 @@ async function runRollback(
       `the import ledger is not readable (${ledger.error}), so there is nothing to roll back by`,
     )
 
-  const ledgerRows = await loadAll(
-    (from, to) =>
-      supabase
-        .from('instagram_backfill_messages')
-        .select('message_id')
-        .eq('venue_id', venue.id)
-        .order('message_id')
-        .range(from, to),
-    'the import ledger',
-  )
+  const run = args.run
+  const ledgerRows = await loadAll((from, to) => {
+    const all = supabase
+      .from('instagram_backfill_messages')
+      .select('message_id')
+      .eq('venue_id', venue.id)
+    return (run === undefined ? all : all.eq('run_id', run))
+      .order('message_id')
+      .range(from, to)
+  }, 'the import ledger')
   const messageIds = ledgerRows.map((row) => row.message_id)
+  if (run !== undefined)
+    console.log(
+      `\n    ONE RUN ONLY (${run}): its messages and their files. No guest is deleted.`,
+    )
 
-  const guests = await loadAll(
-    (from, to) =>
-      supabase
-        .from('guests')
-        .select('id')
-        .eq('venue_id', venue.id)
-        .eq('created_via', INSTAGRAM_BACKFILL_CREATED_VIA)
-        .order('id')
-        .range(from, to),
-    'imported guests',
-  )
+  // One run's rollback deletes no guest: a run that created guests is the
+  // history import itself, and that is what a bare --rollback is for.
+  const guests =
+    run !== undefined
+      ? []
+      : await loadAll(
+          (from, to) =>
+            supabase
+              .from('guests')
+              .select('id')
+              .eq('venue_id', venue.id)
+              .eq('created_via', INSTAGRAM_BACKFILL_CREATED_VIA)
+              .order('id')
+              .range(from, to),
+          'imported guests',
+        )
 
   const ledgered = new Set(messageIds)
   const guestsWithLive: string[] = []
@@ -1141,6 +1152,20 @@ async function runRollback(
   )
 
   if (args.dryRun) {
+    let attachmentRows = 0
+    for (const ids of chunk(messageIds, 100)) {
+      const counted = await supabase
+        .from('message_attachments')
+        .select('id', { count: 'exact', head: true })
+        .eq('venue_id', venue.id)
+        .in('message_id', ids)
+      if (counted.error)
+        die(`could not count attachment rows: ${counted.error.message}`)
+      attachmentRows += counted.count ?? 0
+    }
+    console.log(
+      `    attachment rows on those messages, whose files go first: ${attachmentRows}`,
+    )
     console.log(
       `\n· DRY RUN: nothing was deleted. --confirm would delete ${messageIds.length} message(s) and ${guestsToDelete.length} guest(s).`,
     )
@@ -1236,7 +1261,9 @@ async function runRollback(
       }
     }
     // The same order for a guest: deleting one cascades to every attachment
-    // row they have, a live message's included.
+    // row they have, a live message's included. If the guest delete below then
+    // fails, their live messages are left without attachments until the
+    // rollback is run again and deletes them too.
     const media = await deleteAttachmentsForGuests(supabase, venue.id, [
       guestId,
     ])
@@ -1732,6 +1759,26 @@ async function runAttachmentsOnly(
   process.exit(clean ? 0 : 3)
 }
 
+/**
+ * Whether this guest has a message on record: the scan greeting's own
+ * question (hadPriorConversation, handle-events.ts), asked the same way.
+ */
+async function hasMessageOnRecord(
+  supabase: AdminSupabaseClient,
+  venue: Venue,
+  guestId: string,
+): Promise<boolean> {
+  const { data, error } = await supabase
+    .from('messages')
+    .select('id')
+    .eq('venue_id', venue.id)
+    .eq('guest_id', guestId)
+    .or(MESSAGE_HAS_CONTENT_FILTER)
+    .limit(1)
+  if (error) die(`could not read a guest's messages: ${error.message}`)
+  return (data ?? []).length > 0
+}
+
 /** Whether a guest row is still the person it was, read at the moment of a write. */
 async function guestStillWritable(
   supabase: AdminSupabaseClient,
@@ -1788,6 +1835,17 @@ type MediaGuestPlan = {
  *              REFUSES TO WRITE while any affected guest's state could move
  *              (scoreBounds). Its recent-conversation gate reads derived last
  *              inbound, and can only ever suppress.
+ *   the scan greeting   words itself by whether the guest has any message on
+ *              record, with no date bound; a guest with none is skipped.
+ *   the v2 relationship engine (lib/relationship/run-turn.ts)   reads the
+ *              newest row of any kind as "days since last contact" and the
+ *              inbound count as the reply count. Both move for a guest whose
+ *              newest row becomes an imported one, on that guest's next real
+ *              turn. Counted in the dry run; not guarded.
+ *
+ * TO UNDO ONE RUN: `--rollback --run <the run id --confirm printed>` deletes
+ * that run's messages, files first, and no guest. A bare --rollback deletes
+ * the whole history import.
  *
  * ACCEPTED (ruled 2026-10-11): the guest's lifetime reply count rises by one
  * per imported guest message, so the reply-count gates on getting-to-know-you
@@ -1806,6 +1864,11 @@ async function runMediaOnly(
   console.log(
     `Instagram media-only import | venue=${venue.slug} | ${mode}${args.limit !== undefined ? ` | limit=${args.limit}` : ''} | run=${runId}`,
   )
+
+  if (MEDIA_ONLY_HOLD_BACK_DAYS < MAX_HISTORY_DAYS)
+    die(
+      `this mode holds back ${MEDIA_ONLY_HOLD_BACK_DAYS} days and the agent's history window is now ${MAX_HISTORY_DAYS}: an imported row could reach a prompt. Raise MEDIA_ONLY_HOLD_BACK_DAYS.`,
+    )
 
   const { token, account } = await resolveVenueToken(supabase, venue)
 
@@ -1851,6 +1914,7 @@ async function runMediaOnly(
   let messagesDecided = 0
   let unreadableMessages = 0
   let groupThreadMessages = 0
+  let storyMentionMessages = 0
   let toImport = 0
 
   for await (const page of conversationPages(token, true)) {
@@ -1879,10 +1943,25 @@ async function runMediaOnly(
       // Read only for a guest who has something this mode could import: it is
       // two queries a guest, and most conversations have nothing in scope.
       let liveFrom: Date | null | undefined
+      let guestHasMessages = true
       const forGuest: PlannedMediaMessage[] = []
       for (const message of messages) {
         const direction = messageDirection(message, sides)
         controlPlanner.add(message, direction)
+        // Counted for the person who posted it, whoever they are to us and
+        // whatever happens to the message below: one the live webhook already
+        // stored is a mention all the same.
+        if (message.media.storyMention !== null) {
+          storyMentionMessages += 1
+          if (direction === 'inbound') {
+            const entry = storyMentions.get(sides.guest.id) ?? {
+              count: 0,
+              hasGuest: guestId !== null,
+            }
+            entry.count += 1
+            storyMentions.set(sides.guest.id, entry)
+          }
+        }
         const base = {
           message,
           direction,
@@ -1892,18 +1971,26 @@ async function runMediaOnly(
         }
         let decision = decideMediaMessage({
           ...base,
+          guestHasMessages: true,
           oldestLiveMessageAt: null,
         })
         if (decision.import && guestId !== null) {
-          if (liveFrom === undefined)
+          if (liveFrom === undefined) {
             liveFrom = await oldestLiveMessageAt(
               supabase,
               venue.id,
               guestId,
               await ledgerIdsForGuest(supabase, guestId),
             )
+            guestHasMessages = await hasMessageOnRecord(
+              supabase,
+              venue,
+              guestId,
+            )
+          }
           decision = decideMediaMessage({
             ...base,
+            guestHasMessages,
             oldestLiveMessageAt: liveFrom,
           })
         }
@@ -1921,15 +2008,6 @@ async function runMediaOnly(
         if (decision.inScope)
           for (const attachment of decision.attachments)
             heldBackByKind[attachment.kind] += 1
-        // Counted for the person who posted it, whoever they are to us.
-        if (decision.reason === 'story_mention' && direction === 'inbound') {
-          const entry = storyMentions.get(sides.guest.id) ?? {
-            count: 0,
-            hasGuest: guestId !== null,
-          }
-          entry.count += 1
-          storyMentions.set(sides.guest.id, entry)
-        }
       }
       if (guestId !== null && forGuest.length > 0) {
         forGuest.sort((a, b) => a.at.getTime() - b.at.getTime())
@@ -1971,7 +2049,7 @@ async function runMediaOnly(
     (entry) => entry.hasGuest,
   )
   console.log(
-    `\nStory mentions by the person who posted them (not imported; ${mentionTotal} from ${storyMentions.size} people; the other ${skips.story_mention - mentionTotal} of ${skips.story_mention} came from the venue's side of the conversation):`,
+    `\nStory mentions by the person who posted them (not imported; ${mentionTotal} from ${storyMentions.size} people; the other ${storyMentionMessages - mentionTotal} of ${storyMentionMessages} came from the venue's side of the conversation; ${storyMentionMessages - skips.story_mention} of them we already hold a row for):`,
   )
   console.log(
     `    people who are guests of ours: ${mentionersWithGuest.length}, with ${mentionersWithGuest.reduce((total, entry) => total + entry.count, 0)} mention(s)`,
@@ -2174,8 +2252,8 @@ async function runMediaOnly(
   const remaining = flat.length - toWrite.length
   console.log(
     clean
-      ? `\n✓ CONFIRM: written exactly as planned.${remaining > 0 ? ` ${remaining} message(s) left for the next run.` : ''} Run ${runId}.`
-      : `\n· CONFIRM: written, but not exactly as planned (see above). Every message is keyed on Meta's id, so a rerun cannot double one. Run ${runId}.`,
+      ? `\n✓ CONFIRM: written exactly as planned.${remaining > 0 ? ` ${remaining} message(s) left for the next run.` : ''} Run ${runId}. To undo this run alone: --rollback --run ${runId}`
+      : `\n· CONFIRM: written, but not exactly as planned (see above). Every message is keyed on Meta's id, so a rerun cannot double one. Run ${runId}. To undo this run alone: --rollback --run ${runId}`,
   )
   process.exit(clean ? 0 : 3)
 }
