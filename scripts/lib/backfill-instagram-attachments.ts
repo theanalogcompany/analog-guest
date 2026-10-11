@@ -402,7 +402,11 @@ export function createAttachmentsPlanner(
       plan.rowOutcomes.no_attachments += 1
       return
     }
-    if (message.media.files.some((file) => file.source === null)) {
+    if (
+      message.media.files.some(
+        (file) => file.source === null || file.source === 'generic_template',
+      )
+    ) {
       plan.rowOutcomes.unread_shape += 1
       return
     }

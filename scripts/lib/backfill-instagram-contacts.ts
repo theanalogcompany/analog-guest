@@ -44,7 +44,12 @@ export type BackfillArgs = {
   includeGuestsWithLiveMessages: boolean
   /** TAC-582: attachments for rows we already hold. Never a message row. */
   attachmentsOnly: boolean
-  /** With --attachments-only: write at most this many messages' attachments. */
+  /**
+   * TAC-582: the photos, videos and reel shares the import skipped for having
+   * no text, as new message rows with attachment rows.
+   */
+  mediaOnly: boolean
+  /** With --attachments-only or --media-only: write at most this many messages. */
   limit?: number
   unrecognised: string[]
 }
@@ -56,6 +61,7 @@ export function parseBackfillArgs(argv: readonly string[]): BackfillArgs {
     rollback: false,
     includeGuestsWithLiveMessages: false,
     attachmentsOnly: false,
+    mediaOnly: false,
     unrecognised: [],
   }
   for (let i = 0; i < argv.length; i += 1) {
@@ -67,6 +73,7 @@ export function parseBackfillArgs(argv: readonly string[]): BackfillArgs {
     else if (arg === '--include-guests-with-live-messages')
       out.includeGuestsWithLiveMessages = true
     else if (arg === '--attachments-only') out.attachmentsOnly = true
+    else if (arg === '--media-only') out.mediaOnly = true
     // NaN for anything that is not a number, which backfillArgsError refuses.
     else if (arg === '--limit') out.limit = Number(argv[++i])
     else out.unrecognised.push(arg)
@@ -88,8 +95,12 @@ export function backfillArgsError(args: BackfillArgs): string | null {
     return '--include-guests-with-live-messages only applies to --rollback'
   if (args.attachmentsOnly && args.rollback)
     return '--attachments-only cannot be combined with --rollback: the rollback deletes what the import wrote, and attachment rows go with their message'
-  if (args.limit !== undefined && !args.attachmentsOnly)
-    return '--limit only applies to --attachments-only'
+  if (args.mediaOnly && args.rollback)
+    return '--media-only cannot be combined with --rollback: the rollback already deletes every message the import wrote, media-only ones included'
+  if (args.mediaOnly && args.attachmentsOnly)
+    return 'pass --attachments-only or --media-only, not both: one writes onto rows we hold, the other writes new rows'
+  if (args.limit !== undefined && !args.attachmentsOnly && !args.mediaOnly)
+    return '--limit only applies to --attachments-only and --media-only'
   if (
     args.limit !== undefined &&
     (!Number.isInteger(args.limit) || args.limit <= 0)
@@ -233,8 +244,11 @@ export function messageDirection(
 export type PlannedMessage = {
   mid: string
   direction: MessageDirection
+  /** Empty for a message that was only media (--media-only). */
   body: string
   at: Date
+  /** The links `messages.media_urls` is written with. Absent for a text message. */
+  mediaUrls?: string[]
 }
 
 export type ConversationPlan = {

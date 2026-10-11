@@ -71,8 +71,12 @@ export type ConversationParticipant = {
 
 /** One file on a message: a photo, a video, a voice note, a document. */
 export type GraphMediaFile = {
-  /** Which of Meta's three places the link was read from, or null for none. */
-  source: 'image_data' | 'video_data' | 'file_url' | null
+  /**
+   * Which of Meta's three places the link was read from. `generic_template`
+   * is a card the venue's own tooling sent (a title and buttons, no file);
+   * null is a shape this parser does not know.
+   */
+  source: 'image_data' | 'video_data' | 'file_url' | 'generic_template' | null
   /** A signed CDN link. Held in memory and stored; never printed. */
   url: string | null
   mimeType: string | null
@@ -194,6 +198,8 @@ function parseMediaFile(value: unknown): GraphMediaFile | null {
     const data = value[source]
     if (isRecord(data)) return { source, url: stringOrNull(data.url), mimeType }
   }
+  if (isRecord(value.generic_template))
+    return { source: 'generic_template', url: null, mimeType }
   const fileUrl = stringOrNull(value.file_url)
   return {
     source: fileUrl === null ? null : 'file_url',
