@@ -15,6 +15,7 @@ import {
   SENDBLUE_PROVIDER_TYPE,
   kindFromUrlExtension,
 } from '@/lib/messaging/attachments/kind'
+import { rehostMessageAttachments } from '@/lib/messaging/attachments/rehost'
 import { insertMessageAttachments } from '@/lib/messaging/attachments/store'
 import {
   SendblueWebhookPayloadSchema,
@@ -261,6 +262,10 @@ async function handleInbound(
         messageId: insertedMessage.id,
         error: stored.error,
       })
+    } else if (stored.data.pending > 0) {
+      // Copied into our own storage after the 200. How long Sendblue keeps a
+      // media link is not documented, so it is treated as one that expires.
+      waitUntil(rehostMessageAttachments(supabase, insertedMessage.id))
     }
   }
 

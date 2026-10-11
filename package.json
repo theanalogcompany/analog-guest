@@ -55,6 +55,7 @@
     "measure-usual-order-recognition": "tsx --env-file=.env.local scripts/measurement/usual-order-recognition.ts",
     "measure-complaint-split": "tsx --env-file=.env.local scripts/measurement/complaint-resolution-split.ts",
     "measure-phone-test-fixes": "tsx --env-file=.env.local scripts/measurement/phone-test-fixes.ts",
+    "rehost-pending-attachments": "tsx --env-file=\"$(dirname \"$(git rev-parse --path-format=absolute --git-common-dir)\")/.env.local\" scripts/rehost-pending-attachments.ts",
     "measure-golden-set": "tsx --env-file=\"$(dirname \"$(git rev-parse --path-format=absolute --git-common-dir)\")/.env.local\" scripts/measurement/golden-set.ts"
   },
   "dependencies": {
