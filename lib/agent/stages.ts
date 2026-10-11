@@ -1910,7 +1910,7 @@ export type ApprovalDecision =
  * we can already tell will not send, so the correction is rare rather than
  * routine.
  *
- * The two conditions mirror the gate, and each names the trigger it mirrors
+ * The conditions mirror the gate, and each names the trigger it mirrors
  * so a reader can check them against it:
  *
  *   - the category's own policy       -> trigger 8, category_requires_approval

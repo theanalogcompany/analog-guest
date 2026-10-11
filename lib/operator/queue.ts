@@ -313,9 +313,16 @@ const REVIEW_REASON_LABELS: Record<
   hold_all_outbound: "You're holding everything here right now.",
   // TAC-582, copy approved verbatim 2026-10-11. The draft was written by an
   // agent that was told a photo or attachment exists and cannot see it, so
-  // the operator, who can, reads it first. True on both cases the trigger
-  // fires for: media on the message being answered, and media sent just
-  // before it that nobody has replied to.
+  // the operator, who can, reads it first. True on the two cases the rule
+  // names: media on the message being answered, and media the guest sent
+  // that nobody has replied to.
+  //
+  // NOT TRUE ON A THIRD: when the thread could not be read, the reply is held
+  // without knowing whether there was any media, and the card still says
+  // this. Holding on a failed read is the owner's ruling (2026-10-11); that
+  // the sentence is then untrue was raised with him in review and has no
+  // ruling of its own yet. The reason is on the `guest_media_degraded`
+  // event, not on the card.
   media_context:
     'Replying after a photo or attachment. Check the draft before sending.',
   // TAC-361, the defect this ticket was opened on. The old copy read

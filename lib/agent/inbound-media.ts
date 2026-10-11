@@ -9,9 +9,12 @@
 // and the question was never answered either.
 //
 // THE RULING (2026-10-06), which is what every branch here implements:
-//   - A turn with any text is answered normally and gets NO card. The agent is
-//     told the guest also sent a photo so it can acknowledge it.
-//   - A card only for a turn with no text at all. The owner answers by hand.
+//   - A turn with any text is DRAFTED normally. The agent is told the guest
+//     also sent a photo. (Since the 2026-10-11 ruling that draft is held for
+//     an operator and never auto-sent: lib/agent/media-context.ts. Whether a
+//     reply is held is that file's question, not this one's.)
+//   - A blank card only for a turn with no text at all. The owner answers by
+//     hand.
 //   - The photo-last case must not fail.
 //
 // WHAT "THE TURN" MEANS HERE. Coalescing has no burst membership: a turn is
@@ -37,21 +40,22 @@
 // WHAT THIS CANNOT DO.
 //   - It cannot see the media. No model looks at the image. (The operator app
 //     can be sent it since TAC-582, through the thread endpoints.)
-//   - It cannot tell a photo from a GIF on Instagram. It reads only the
-//     links, and Meta's CDN links carry no file extension, so every Instagram
-//     attachment reads as 'unknown' and the agent is told "a photo or GIF" on
-//     the turn it arrives. The type IS stored now (`message_attachments`,
-//     TAC-582) and the conversation history uses it; this module's
-//     current-turn line does not yet.
+//   - From the LINKS alone it cannot tell a photo from a GIF on Instagram:
+//     Meta's CDN links carry no file extension, so a message with no
+//     attachment row reads as 'unknown' and the agent is told "a photo or
+//     GIF". A message that has rows is read off them instead (mediaKindOf,
+//     TAC-582), which is every Instagram message saved since that table
+//     existed.
 //   - An Instagram message with nothing to show (Meta's `is_unsupported`, or
 //     attachments with no link) reaches the agent as a row with
 //     `unsupported_content` and takes the card path beside this one
 //     (handle-inbound.ts). It has no media links, so nothing here sees it.
 //   - A text that arrives after the card was written goes through the
-//     ordinary gate with that card pending: a question gets its own reply or
-//     card, a bare "thanks" is silenced behind it, and a correction
-//     regenerates it (resolveConversationDisposition). The wait before
-//     carding exists to make that rare, not impossible.
+//     ordinary gate with that card pending: a question gets its own card
+//     (always a card now, never a reply: the media_context hold), a bare
+//     "thanks" is silenced behind it, and a correction regenerates it
+//     (resolveConversationDisposition). The wait before carding exists to
+//     make that rare, not impossible.
 
 import { createAdminClient } from '@/lib/db/admin'
 import type { InboundMediaKind } from '@/lib/ai/types'

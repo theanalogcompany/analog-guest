@@ -24,10 +24,17 @@
 //   (b) is read as "there is a media-only or unsupported message from the
 //   guest that no outbound has reached them since", not only "the message
 //   immediately before this one". They differ on photo, "hi", "is this one of
-//   yours?": the reply to "hi" is held and so reaches nobody, and the
-//   narrowest reading would then let the reply to the question auto-send,
-//   about the same photo. Unanswered media stays in view until somebody
-//   answers.
+//   yours?": nothing reaches the guest for "hi" (it is held, or silenced
+//   behind the photo's own card), and the narrowest reading would then let
+//   the reply to the question auto-send, about the same photo. Unanswered
+//   media stays in view until somebody answers.
+//
+// WHAT IT DOES NOT COVER, known and left for a ruling (found in review): an
+// earlier message with text AND a photo, or a text reply to a story, is not
+// "media-only", so once its own reply is held as a card, a follow-up text is
+// NOT held by this rule and can auto-send about the same photo. Widening the
+// walk to any unanswered inbound with media would close it and would hold
+// more.
 //
 //   A photo that arrives just AFTER the text it belongs to (one burst, the
 //   turn answers the text) is neither clause to the letter and is held: it is
@@ -55,6 +62,8 @@ const LOOKBACK_DAYS = 14
 const MS_PER_DAY = 24 * 60 * 60 * 1000
 // Newest first, and the walk stops at the first outbound that reached the
 // guest, so this only has to cover the stretch since the venue last spoke.
+// When it does NOT cover that stretch (a full page with no such outbound in
+// it), the answer is not known and the loader says so: see below.
 const MAX_ROWS = 100
 
 export interface MediaContextRow {
@@ -163,6 +172,14 @@ export async function loadMediaContextRows(input: {
           row.review_state !== 'pending',
         createdAt: new Date(row.created_at),
       })
+    }
+    // A full page with nothing in it that reached the guest: the stretch
+    // since the venue last spoke runs past what was read, and an unanswered
+    // photo could be on the far side of it. That is "not known", and falling
+    // off the end of the walk would read it as "not held" (found in review).
+    if (rows.length >= MAX_ROWS && !rows.some((row) => row.reachedGuest)) {
+      await reportLookupFailed(input, 'row_cap_reached')
+      return null
     }
     return rows
   } catch (e) {

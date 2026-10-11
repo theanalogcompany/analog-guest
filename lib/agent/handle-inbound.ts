@@ -1584,14 +1584,6 @@ async function runInboundTurn(
       guestId: inbound.guestId,
       around: inbound.message.receivedAt,
     })
-    // TAC-582: the rows the media_context hold is decided from. Started here
-    // for the same reason as the read above, and awaited only on a turn that
-    // has text to answer. Never rejects; null means it could not be read.
-    const mediaContextRows = loadMediaContextRows({
-      venueId: inbound.venueId,
-      guestId: inbound.guestId,
-      now: new Date(),
-    })
     let mediaOnlyTurn = false
     // TAC-582: a message Meta could not hand us takes the same road as a
     // photo with no caption, for the same reason: there is no text in it to
@@ -1868,7 +1860,18 @@ async function runInboundTurn(
       currentMessageId: inbound.message.id,
       currentHasAttachments:
         inbound.mediaUrls.length > 0 || ownAttachmentRows.length > 0,
-      rows: await mediaContextRows,
+      // Read HERE, after the context is built, and not earlier alongside it.
+      // The prompt's media history is read inside that build; a photo that
+      // landed between an earlier read and the build would be in the prompt
+      // and missing from these rows, and the reply would auto-send (found in
+      // review). Reading last means anything the prompt can mention, this
+      // can see. It costs one query's latency on a text turn. Never rejects;
+      // null means it could not be read, which holds.
+      rows: await loadMediaContextRows({
+        venueId: inbound.venueId,
+        guestId: inbound.guestId,
+        now: new Date(),
+      }),
     })
     ctx.mediaContext = mediaContext.hold
     if (mediaContext.hold) {
