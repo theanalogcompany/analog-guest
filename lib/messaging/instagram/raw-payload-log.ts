@@ -1,9 +1,12 @@
 // TEMPORARY. Remove with the media-messages ticket (inbound guest media:
 // images, GIFs, video, voice notes, stickers, Instagram shares), once one real
-// payload of each attachment kind has been read. Removal is this file, its one
-// call in app/api/webhooks/instagram/route.ts, scripts/harness/instagram-raw-payload/,
-// the INSTAGRAM_LOG_RAW_PAYLOADS entry in .env.local.example and the note in
-// this directory's CLAUDE.md.
+// payload of each attachment kind has been read. Removal is:
+//   - this file and scripts/harness/instagram-raw-payload/
+//   - its one call in app/api/webhooks/instagram/route.ts, and the "unless
+//     the temporary capture..." clause in the comment just above that call
+//   - the same clause in summarize-payload.ts's header
+//   - the INSTAGRAM_LOG_RAW_PAYLOADS entry in .env.local.example
+//   - the note in this directory's CLAUDE.md
 //
 // WHY IT EXISTS. The route's `instagram_event` line is shape only
 // (summarize-payload.ts), and parse-events.ts keeps an attachment's
@@ -24,7 +27,10 @@
 //
 // WHAT IS NOT. Any http(s) URL is kept whole, including its query string. The
 // attachment link is the thing being captured, and its signature is in the
-// query, so a URL is never matched against the value shapes below.
+// query, so a URL is never matched against the value shapes below. Every
+// shape is anchored at the start today, so none of them could match a URL
+// anyway; the explicit check is what keeps that true if someone adds one that
+// is not.
 
 const FLAG_ON = 'true'
 
@@ -42,7 +48,8 @@ const SECRET_VALUE_SHAPES: readonly RegExp[] = [
   /^(IG[A-Z]{2}|EAA)[A-Za-z0-9_-]{40,}$/,
   // A JWT: three base64url segments, the first a JSON header.
   /^eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/,
-  /^Bearer\s+\S+$/i,
+  // Case-sensitive: a guest can write "bearer bonds".
+  /^Bearer\s+\S+$/,
 ]
 
 function isUrl(value: string): boolean {
@@ -58,7 +65,8 @@ function redact(value: unknown): unknown {
   }
   if (Array.isArray(value)) return value.map(redact)
   if (typeof value === 'object' && value !== null) {
-    const out: Record<string, unknown> = {}
+    // No prototype, so a `__proto__` key in the body is kept as a key.
+    const out: Record<string, unknown> = Object.create(null)
     for (const [key, child] of Object.entries(value)) {
       out[key] = SECRET_KEY.test(key) ? REDACTED : redact(child)
     }

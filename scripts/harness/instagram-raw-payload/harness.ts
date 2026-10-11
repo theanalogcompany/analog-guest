@@ -7,6 +7,11 @@
 // Meta's media links carry their signature in the query string, so a
 // redaction rule written against "anything signature-shaped" removes the one
 // value the capture exists to read, and the line still looks complete.
+//
+// What that check can and cannot catch: every value shape is anchored at the
+// start today, so removing the URL guard ALONE changes nothing and this still
+// passes. It fails when a shape is loosened to match mid-string with the guard
+// gone, which is the mistake the guard is there for.
 import {
   INSTAGRAM_RAW_PAYLOAD_EVENT,
   instagramRawPayloadLine,
@@ -41,7 +46,12 @@ const delivery = {
           // Meta adds later.
           access_token: 'short-and-not-token-shaped',
           debug: { nested: { deeper: { xHubSignature: 'anything' } } },
-          forwarded: [ACCESS_TOKEN, HUB_SIGNATURE, 'plain text stays'],
+          forwarded: [
+            ACCESS_TOKEN,
+            HUB_SIGNATURE,
+            'plain text stays',
+            'bearer bonds',
+          ],
         },
       ],
     },
@@ -118,6 +128,7 @@ const checks: Check[] = [
   [
     'ordinary strings beside them are untouched',
     text.includes('"plain text stays"') &&
+      text.includes('"bearer bonds"') &&
       text.includes('"is this the new one?"'),
     'plain text was altered',
   ],

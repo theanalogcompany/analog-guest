@@ -1,6 +1,7 @@
 // Non-PII shape summary of an Instagram webhook payload. Since TAC-458 removed
 // the raw-body capture, this is the ONLY thing the route logs about a payload,
-// so this file is what holds "no secrets, no guest content in log output".
+// so this file is what holds "no secrets, no guest content in log output",
+// unless the temporary capture in raw-payload-log.ts is switched on.
 //
 // Deliberately excluded, and each for its own reason:
 //   - message text / attachments / reactions — guest content, the PII
