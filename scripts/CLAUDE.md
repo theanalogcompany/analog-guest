@@ -81,6 +81,15 @@ shares the voice. What counts as a reply and what is dropped as canned:
 `scripts/lib/voice-profile.ts`. It also counts how often the team left a pure close
 unanswered, with the same two functions the inbound turn decides with.
 
+## Recovering guest media
+
+`npm run rehost-pending-attachments` copies every `message_attachments` row still marked
+`pending` into the `guest-media` bucket (`-- --dry-run` lists them and changes nothing). The
+webhook does this itself inside `waitUntil`; this is the retry for a function that died
+mid-download, and nothing else retries one. **Run it soon after the rows appear**: Instagram's
+links expire, and an expired one settles as `failed`, which is true and not recoverable.
+It reads `.env.local` from the main checkout, so it runs from a worktree.
+
 ## Measurement harness convention
 
 A harness answers a question about live behaviour via many expensive model calls. **Its

@@ -76,11 +76,6 @@ documentation, and `scripts/harness/inbound-attachments/` marks them.
 with no text and no link in any of them, is a `message` event with `unsupported: true` and a
 row with `unsupported_content`. It used to be `unhandled` and the guest heard nothing.
 
-**One temporary exception to "no guest content in logs":** `raw-payload-log.ts` prints the
-whole verified body as one line (`instagram_raw_payload`) while `INSTAGRAM_LOG_RAW_PAYLOADS`
-is exactly `true`. It is off by default and goes away with the media-messages ticket; its
-header lists what to delete.
-
 `handle-events.ts` saves them one at a time, each in its own try/catch, following the Sendblue
 order: venue, guest, duplicate check on `provider_message_id`, insert.
 
