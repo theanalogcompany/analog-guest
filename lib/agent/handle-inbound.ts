@@ -67,6 +67,7 @@ import {
   repliesToStory,
   resolveMediaOnlyTurn,
 } from './inbound-media'
+import { decideMediaContextHold, loadMediaContextRows } from './media-context'
 import {
   bodyContainsReviewLink,
   deriveReviewAsk,
@@ -1089,7 +1090,7 @@ function emptyTestDraft(
  * knowledge relevance floor, and the mirror ran months on stale semantics.
  *
  * WHAT IT STOPS SHORT OF, and why each is safe to skip for a comparison:
- *   - the four post-generation checks and the 20 approval triggers. They
+ *   - the four post-generation checks and the 21 approval triggers. They
  *     decide whether v1 SENDS, never what it says, so they cannot change the
  *     text in the column.
  *   - dispatch, the ledger row, the typing indicator, the guests.context
@@ -1583,6 +1584,14 @@ async function runInboundTurn(
       guestId: inbound.guestId,
       around: inbound.message.receivedAt,
     })
+    // TAC-582: the rows the media_context hold is decided from. Started here
+    // for the same reason as the read above, and awaited only on a turn that
+    // has text to answer. Never rejects; null means it could not be read.
+    const mediaContextRows = loadMediaContextRows({
+      venueId: inbound.venueId,
+      guestId: inbound.guestId,
+      now: new Date(),
+    })
     let mediaOnlyTurn = false
     // TAC-582: a message Meta could not hand us takes the same road as a
     // photo with no caption, for the same reason: there is no text in it to
@@ -1840,6 +1849,32 @@ async function runInboundTurn(
       console.warn('[agent] inbound media read failed, no note rendered', {
         agentRunId,
         error: mediaRows.error,
+      })
+    }
+
+    // TAC-582 (owner ruling 2026-10-11): a reply written around media the
+    // agent cannot see is drafted as usual and HELD for an operator. Decided
+    // here, before classification, from the thread alone; the approval gate
+    // reads the flag (APPROVAL_TRIGGERS.MEDIA_CONTEXT). The rule, and the
+    // measurement behind it, are in lib/agent/media-context.ts.
+    //
+    // "Has attachments" is the message's links, or any attachment row on it:
+    // a reply to a story has a row and no link.
+    const ownAttachmentRows = mediaRows.ok
+      ? (mediaRows.data.inbound.find((row) => row.id === inbound.message.id)
+          ?.attachmentKinds ?? [])
+      : []
+    const mediaContext = decideMediaContextHold({
+      currentMessageId: inbound.message.id,
+      currentHasAttachments:
+        inbound.mediaUrls.length > 0 || ownAttachmentRows.length > 0,
+      rows: await mediaContextRows,
+    })
+    ctx.mediaContext = mediaContext.hold
+    if (mediaContext.hold) {
+      console.log('[agent] reply will be held: written around guest media', {
+        agentRunId,
+        reason: mediaContext.reason,
       })
     }
 
@@ -2864,7 +2899,7 @@ async function runInboundTurn(
     // write or a send - the typing refresh, the guests.context capture, the
     // four checks, the approval gate, dispatch, the ledger.
     //
-    // The draft is complete at this point. The checks and the 20 triggers that
+    // The draft is complete at this point. The checks and the 21 triggers that
     // follow decide whether v1 would SEND this text, never what the text is,
     // so stopping here costs the comparison nothing.
     //

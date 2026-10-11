@@ -311,6 +311,13 @@ const REVIEW_REASON_LABELS: Record<
   // only when nothing more specific co-fired. "right now" because the flag is
   // a switch someone threw and can throw back.
   hold_all_outbound: "You're holding everything here right now.",
+  // TAC-582, copy approved verbatim 2026-10-11. The draft was written by an
+  // agent that was told a photo or attachment exists and cannot see it, so
+  // the operator, who can, reads it first. True on both cases the trigger
+  // fires for: media on the message being answered, and media sent just
+  // before it that nobody has replied to.
+  media_context:
+    'Replying after a photo or attachment. Check the draft before sending.',
   // TAC-361, the defect this ticket was opened on. The old copy read
   // 'Complaint needs your call' — an explicit entry written at v1.24.0 when
   // comp_complaint was the only routed category. TAC-307 generalised the

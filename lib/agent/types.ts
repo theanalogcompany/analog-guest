@@ -660,6 +660,11 @@ export interface RuntimeContext {
   // stories. Same writer and same lifetime as inboundMedia above. Optional
   // because a context built by hand has none.
   inboundStoryReply?: boolean
+  // TAC-582: this reply is being written around media the agent cannot see,
+  // so the approval gate holds it (APPROVAL_TRIGGERS.MEDIA_CONTEXT). Decided
+  // by lib/agent/media-context.ts; handle-inbound.ts is the only writer, so
+  // no proactive path can set it. Absent or false on every other turn.
+  mediaContext?: boolean
   corpus: CorpusMatch[] | null
   // Retrieved knowledge_corpus chunks. Populated by retrieveKnowledgeStage
   // when shouldRetrieveKnowledge fires (always for inbound; followups

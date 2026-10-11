@@ -3086,9 +3086,16 @@ export async function captureScanCodeUnmatched(
  *                      rows.
  *   signing            a thread read could not sign its files; they are
  *                      reported to the app as failed.
+ *   media_context      the read behind the media_context hold failed, so the
+ *                      reply was held without knowing whether it had to be.
  */
 export type GuestMediaDegradedStage =
-  'rehost' | 'attachment_rows' | 'history' | 'preview_labels' | 'signing'
+  | 'rehost'
+  | 'attachment_rows'
+  | 'history'
+  | 'preview_labels'
+  | 'signing'
+  | 'media_context'
 
 export interface GuestMediaDegradedProps {
   stage: GuestMediaDegradedStage

@@ -157,6 +157,8 @@ export const REASON_BY_REVIEW_REASON = {
   // The once-ever Google review ask, queue-first at launch.
   [APPROVAL_TRIGGERS.REVIEW_ASK]: 'review ask, your call',
   [APPROVAL_TRIGGERS.HOLD_ALL_OUTBOUND]: 'needs review',
+  // TAC-582, approved verbatim 2026-10-11.
+  [APPROVAL_TRIGGERS.MEDIA_CONTEXT]: 'replied after sending an attachment',
   [GENERATION_FAILED_REVIEW_REASON]: "couldn't write it",
   [INSTAGRAM_SEND_FAILED_REASON]: "didn't send",
   // TAC-574, approved 2026-10-06.

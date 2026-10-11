@@ -10,6 +10,9 @@ It also holds the wording and the first-contact rule:
   character for character against what was approved on 2026-10-11;
 - **photo first, then text, is still first contact** (owner ruling 4), with a control beside
   it that puts the photo where text goes and shows first contact ending;
+- **the `media_context` hold**: text + photo held, photo then text held, photo then an
+  operator reply then text not held, text only not held, plus the cases the ruling's wording
+  left open (a held card in between does not release it; a failed read holds);
 - a message Meta flags `is_unsupported` is kept as a row, not dropped;
 - data deletion removes a guest's files **before** their rows, and a Storage failure leaves
   the rows in place to retry from. This one runs against a stand-in for the table and the
@@ -17,7 +20,7 @@ It also holds the wording and the first-contact rule:
   whether Storage really deletes a file.
 
 **Run by hand. Not in CI, not an npm script, not a test suite.** Run it when you change
-`lib/messaging/attachments/`, `lib/agent/media-history.ts`,
+`lib/messaging/attachments/`, `lib/agent/media-history.ts`, `lib/agent/media-context.ts`,
 `lib/ai/prompts/attachment-lines.ts`, the history renderers in `lib/ai/prompts/serializers.ts`,
 or the attachment handling in `lib/messaging/instagram/parse-events.ts`.
 
@@ -47,6 +50,11 @@ those is the thing that can still disagree with this file; when one arrives, rep
 fixture with its shape.
 
 ## What it does not cover
+
+- **The approval gate itself.** `decideMediaContextHold` and the trigger's registration are
+  checked here; that `applyApprovalPolicyStage` queues on it was checked once against the
+  real gate, read-only (send without the flag, queue with it, send for an opt-out), and is
+  not re-run by this file because the gate reads the database.
 
 - **Whether a reply describes media it was only told about.** That is a model's behaviour and
   needs generations; it is the check pre-registered on TAC-582, not something this can see.

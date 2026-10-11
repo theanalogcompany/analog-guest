@@ -125,7 +125,7 @@ reply.
 ## Approval gates
 
 `applyApprovalPolicyStage(ctx, generation, mechanicOffer?, prosePromise?, ...)`
-returns `send`, `queue`, `drop`, or `silence`. **Twenty triggers compose; any one
+returns `send`, `queue`, `drop`, or `silence`. **Twenty-one triggers compose; any one
 queues.** The set is `APPROVAL_TRIGGERS`; check it against the constant, never against a
 list in prose.
 
@@ -139,12 +139,15 @@ prose_promise_backstop > prose_cancellation_backstop > unresolved_cancellation_i
 knowledge_gap > comp_regex_backstop > model_flagged >
 closed_venue_arrival_emitted > closed_venue_arrival_backstop > unverified_url >
 self_talk_detected > complaint_commitment_floor > previous_pending_held >
+media_context >
 prose_promise_check_failed > prose_cancellation_check_failed >
 review_ask > category_requires_approval > hold_all_outbound
 ```
 
 The shape of that order: a claim about **this draft** beats an **absence** of information
-about it, which beats **venue-wide policy**.
+about it, which beats **venue-wide policy**. `media_context` is the one claim about the
+**thread**: it sits below everything that names a risk in the draft, and below
+`previous_pending_held` so a card regenerated in place does not push twice.
 
 ### Post-generation checks: post-send on inbound, fail CLOSED on the pre-send paths
 
@@ -266,6 +269,15 @@ by `historyForPrompt`, at the two places a prompt is built. So a guest whose onl
 message was a photo or a story mention is still on first contact when they first write. Do
 not "simplify" this by adding the rows to `recentMessages`: a dozen readers decide the kind
 of turn from that list, and `media-history.ts`'s header names them.
+
+**A reply written around media the agent cannot see is held, never auto-sent**
+(`media_context`, owner-ruled 2026-10-11). It fires when the message being answered carries
+attachments, or when the guest has a media-only or unsupported message that no outbound has
+reached them since. The agent still drafts. This is a hold and not a prompt fix on purpose:
+measured, the model never described a photo it had not seen, and kept telling guests "we
+can't see it on our end", and two rewordings changed which false thing it said. Do not try a
+third. `media-context.ts` has the rule, the three places its wording was read wide, and why
+a failed read holds.
 
 ## Venue status
 

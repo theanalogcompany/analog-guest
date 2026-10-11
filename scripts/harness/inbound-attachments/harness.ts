@@ -31,11 +31,20 @@ import {
   repliesToStory,
 } from '@/lib/agent/inbound-media'
 import {
+  type MediaContextRow,
+  decideMediaContextHold,
+} from '@/lib/agent/media-context'
+import {
   buildMediaHistory,
   historyForPrompt,
   isFirstContactNeutral,
 } from '@/lib/agent/media-history'
-import { computeFirstTouchAfterQrScan } from '@/lib/agent/stages'
+import {
+  APPROVAL_TRIGGERS,
+  PRIMARY_TRIGGER_PRIORITY,
+  computeFirstTouchAfterQrScan,
+  mayAutoSendAfterClassification,
+} from '@/lib/agent/stages'
 import type { RuntimeContext } from '@/lib/agent/types'
 import type { RecentMessage } from '@/lib/ai'
 import {
@@ -463,6 +472,160 @@ const turnChecks: Check[] = [
       },
     ) && !repliesToStory({ id: 'vt-1' }, voiceRows),
     'predicate disagrees',
+  ],
+]
+
+// --- the media_context hold (owner ruling, 2026-10-11) ---------------------------
+// The four cases the ruling names, then the readings the rule's wording left
+// open. Rows are built by hand in the order things happened.
+function at(minutesAgo: number): Date {
+  return new Date(TEXT_AT.getTime() - minutesAgo * 60_000)
+}
+function guestText(id: string, minutesAgo: number): MediaContextRow {
+  return {
+    id,
+    direction: 'inbound',
+    hasText: true,
+    hasMediaOrUnsupported: false,
+    reachedGuest: false,
+    createdAt: at(minutesAgo),
+  }
+}
+function guestMedia(id: string, minutesAgo: number): MediaContextRow {
+  return {
+    ...guestText(id, minutesAgo),
+    hasText: false,
+    hasMediaOrUnsupported: true,
+  }
+}
+function venue(
+  id: string,
+  minutesAgo: number,
+  reachedGuest: boolean,
+): MediaContextRow {
+  return {
+    id,
+    direction: 'outbound',
+    hasText: true,
+    hasMediaOrUnsupported: false,
+    reachedGuest,
+    createdAt: at(minutesAgo),
+  }
+}
+function held(
+  rows: MediaContextRow[] | null,
+  currentHasAttachments = false,
+): string {
+  const decision = decideMediaContextHold({
+    currentMessageId: 'now',
+    currentHasAttachments,
+    rows,
+  })
+  return decision.hold ? `held:${decision.reason}` : 'not held'
+}
+
+const holdChecks: Check[] = (
+  [
+    // The ruling's four.
+    [
+      'text + photo in one message: HELD',
+      held([guestText('now', 0)], true),
+      'held:attachments_on_message',
+    ],
+    [
+      'photo, then text: HELD',
+      held([guestMedia('p', 10), guestText('now', 0)]),
+      'held:unanswered_media',
+    ],
+    [
+      'photo, operator reply, then text: NOT held',
+      held([guestMedia('p', 10), venue('r', 5, true), guestText('now', 0)]),
+      'not held',
+    ],
+    ['text only: NOT held', held([guestText('now', 0)]), 'not held'],
+    // What the wording left open.
+    [
+      'text only, after an ordinary exchange: NOT held',
+      held([guestText('t', 20), venue('r', 15, true), guestText('now', 0)]),
+      'not held',
+    ],
+    [
+      'photo, a HELD card (never reached the guest), then text: still HELD',
+      held([guestMedia('p', 10), venue('card', 9, false), guestText('now', 0)]),
+      'held:unanswered_media',
+    ],
+    [
+      'photo, "hi", then a question: the question is HELD too',
+      held([guestMedia('p', 10), guestText('hi', 5), guestText('now', 0)]),
+      'held:unanswered_media',
+    ],
+    [
+      'photo sent just AFTER the text being answered: HELD',
+      held([guestText('now', 0), guestMedia('p', -0.1)]),
+      'held:unanswered_media',
+    ],
+    [
+      'photo answered last week, text today: NOT held',
+      held([
+        guestMedia('p', 7 * 24 * 60),
+        venue('r', 7 * 24 * 60 - 5, true),
+        guestText('now', 0),
+      ]),
+      'not held',
+    ],
+    [
+      'an unsupported message, then text: HELD',
+      held([guestMedia('u', 3), guestText('now', 0)]),
+      'held:unanswered_media',
+    ],
+    [
+      'the rows could not be read: HELD, and it says why',
+      held(null),
+      'held:lookup_failed',
+    ],
+    [
+      'attachments on the message hold even when the rows could not be read',
+      held(null, true),
+      'held:attachments_on_message',
+    ],
+  ] as const
+).map(([name, got, expected]): Check => [name, got === expected, got])
+
+const heldContext = {
+  mediaContext: true,
+  classification: { category: 'new_question' },
+  venue: { holdAllOutbound: false, approvalPolicy: null },
+} as unknown as RuntimeContext
+const optOutContext = {
+  ...heldContext,
+  classification: { category: 'opt_out' },
+} as unknown as RuntimeContext
+const plainContext = {
+  ...heldContext,
+  mediaContext: false,
+} as unknown as RuntimeContext
+
+const triggerChecks: Check[] = [
+  [
+    'media_context is a registered trigger with a place in the label order',
+    APPROVAL_TRIGGERS.MEDIA_CONTEXT === 'media_context' &&
+      PRIMARY_TRIGGER_PRIORITY.indexOf(APPROVAL_TRIGGERS.MEDIA_CONTEXT) ===
+        PRIMARY_TRIGGER_PRIORITY.indexOf(
+          APPROVAL_TRIGGERS.PREVIOUS_PENDING_HELD,
+        ) +
+          1,
+    String(PRIMARY_TRIGGER_PRIORITY.indexOf(APPROVAL_TRIGGERS.MEDIA_CONTEXT)),
+  ],
+  [
+    'a held reply shows no typing dots; the same turn without media does',
+    !mayAutoSendAfterClassification(heldContext) &&
+      mayAutoSendAfterClassification(plainContext),
+    `${mayAutoSendAfterClassification(heldContext)} / ${mayAutoSendAfterClassification(plainContext)}`,
+  ],
+  [
+    'an opt-out confirmation is not predicted held by media',
+    mayAutoSendAfterClassification(optOutContext),
+    String(mayAutoSendAfterClassification(optOutContext)),
   ],
 ]
 
@@ -1125,6 +1288,8 @@ async function main(): Promise<void> {
   const all = [
     ...checks,
     ...turnChecks,
+    ...holdChecks,
+    ...triggerChecks,
     ...(await redirectChecks()),
     ...(await deletionChecks()),
   ]

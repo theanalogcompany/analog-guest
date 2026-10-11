@@ -446,6 +446,19 @@ export const APPROVAL_TRIGGERS = {
   // no deploy. The link itself is independently safe either way: it is on
   // the curated allowlist or UNVERIFIED_URL fires.
   REVIEW_ASK: 'review_ask',
+  // TAC-582 (owner ruling, 2026-10-11): the reply was written around media
+  // the agent cannot see. Either the message being answered carries
+  // attachments, or the guest sent a photo, voice note or the like that
+  // nobody has answered yet. The agent still drafts; a person reads it before
+  // the guest does. lib/agent/media-context.ts has the rule and the
+  // measurement that led to it.
+  //
+  // DETERMINISTIC AND NOT ABOUT THE DRAFT. It reads the thread, never the
+  // generation, so no wording the model chooses can talk its way past it,
+  // which is the point: two rewordings of the prompt line moved what the
+  // model got wrong and not whether it did. Inbound only: handle-inbound is
+  // the one writer of `ctx.mediaContext`.
+  MEDIA_CONTEXT: 'media_context',
 } as const
 
 /**
@@ -625,6 +638,14 @@ export const PRIMARY_TRIGGER_PRIORITY = [
   // promise still fires a push rather than being treated as a silent re-draft.
   APPROVAL_TRIGGERS.COMPLAINT_COMMITMENT_FLOOR,
   APPROVAL_TRIGGERS.PREVIOUS_PENDING_HELD,
+  // TAC-582: directly below previous_pending_held, on purpose. It is about
+  // the thread, not the draft, so every trigger above that names a concrete
+  // risk in the reply keeps the card's label. And below the sticky-pending
+  // trigger so a card regenerated in place stays labelled as one, which is
+  // what keeps it from pushing a second time at an operator already holding
+  // it. Above the check-failed pair and the policy signals because it says
+  // something specific about this conversation.
+  APPROVAL_TRIGGERS.MEDIA_CONTEXT,
   // TAC-401: ranked below every trigger that names something about this draft.
   // It reports an ABSENCE of information about the reply ("we could not check"),
   // so any trigger naming something concrete is the more useful operator label,
@@ -1944,8 +1965,15 @@ export function mayAutoSendAfterClassification(ctx: RuntimeContext): boolean {
   ) {
     return false
   }
-  // No third condition. TAC-565 removed it: the venue's hours are
-  // deliberately not read here. See the header.
+  // TAC-582: a reply written around media is always held (the media_context
+  // trigger), so it will not auto-send and the dots would be false. Known at
+  // this point: handle-inbound sets it before classification. Like the two
+  // above, it can only narrow what this returns.
+  if (ctx.mediaContext === true && ctx.classification?.category !== 'opt_out') {
+    return false
+  }
+  // No further condition. TAC-565 removed the venue-hours one: the venue's
+  // hours are deliberately not read here. See the header.
   return true
 }
 
@@ -2206,6 +2234,17 @@ export async function applyApprovalPolicyStage(
     reviewAskDisposition === 'operator_approval'
   ) {
     triggers.push(APPROVAL_TRIGGERS.REVIEW_ASK)
+  }
+
+  // Trigger 21 (TAC-582): the reply was written around media the agent
+  // cannot see. Reads the thread (ctx.mediaContext, set by handle-inbound),
+  // never the generation.
+  //
+  // An opt-out confirmation is exempt, the same carve-out as the venue-wide
+  // hold above and for the same reason: it must send at once. It bypasses
+  // ONLY this trigger.
+  if (ctx.mediaContext === true && ctx.classification?.category !== 'opt_out') {
+    triggers.push(APPROVAL_TRIGGERS.MEDIA_CONTEXT)
   }
 
   // Trigger 11 (TAC-355): independent mechanic-offer verification backstop.
