@@ -3088,6 +3088,11 @@ export async function captureScanCodeUnmatched(
  *                      reported to the app as failed.
  *   media_context      the read behind the media_context hold failed, so the
  *                      reply was held without knowing whether it had to be.
+ *   describe           TAC-584: an attachment could not be described (still
+ *                      copying, bytes gone, no ffmpeg, the model call failed).
+ *                      The turn then runs as it did before descriptions: the
+ *                      agent is told a photo arrived that it cannot see, and
+ *                      a message with no text becomes the blank card.
  */
 export type GuestMediaDegradedStage =
   | 'rehost'
@@ -3096,6 +3101,7 @@ export type GuestMediaDegradedStage =
   | 'preview_labels'
   | 'signing'
   | 'media_context'
+  | 'describe'
 
 export interface GuestMediaDegradedProps {
   stage: GuestMediaDegradedStage
