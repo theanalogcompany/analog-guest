@@ -84,6 +84,7 @@ import {
 import { recordInstagramTurnNotRun } from '@/lib/messaging/instagram/record-turn'
 import { runScanGreetingFastPath } from '@/lib/agent/instagram-scan-greeting'
 import { scheduleScanArrival } from '@/lib/agent/scan-arrival-store'
+import { instagramRawPayloadLine } from '@/lib/messaging/instagram/raw-payload-log'
 import { summarizeInstagramPayload } from '@/lib/messaging/instagram/summarize-payload'
 import {
   verifyInstagramSignature,
@@ -232,11 +233,22 @@ export async function POST(request: Request): Promise<Response> {
 
     // Shape only. summarize-payload.ts and logInstagramOutcome are what hold
     // "no guest content in logs": they are the only things this route logs
-    // about a payload.
+    // about a payload, unless the temporary capture below is switched on.
     console.log('instagram webhook: event received', {
       event: 'instagram_event',
       ...summarizeInstagramPayload(parsed),
     })
+
+    // TEMPORARY, remove with the media-messages ticket: the whole verified
+    // body as one JSON line, so the attachment `type` and `payload` Meta sends
+    // for each media kind can be read. Null unless INSTAGRAM_LOG_RAW_PAYLOADS
+    // is exactly 'true'. LEAKS GUEST CONTENT while it is on; raw-payload-log.ts
+    // has what is redacted and how to remove it.
+    const rawPayloadLine = instagramRawPayloadLine(
+      parsed,
+      process.env.INSTAGRAM_LOG_RAW_PAYLOADS,
+    )
+    if (rawPayloadLine !== null) console.log(rawPayloadLine)
 
     const supabase = createAdminClient()
     const outcomes = await processInstagramDelivery(parsed, supabase)
