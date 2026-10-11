@@ -9,9 +9,12 @@
 // and the question was never answered either.
 //
 // THE RULING (2026-10-06), which is what every branch here implements:
-//   - A turn with any text is answered normally and gets NO card. The agent is
-//     told the guest also sent a photo so it can acknowledge it.
-//   - A card only for a turn with no text at all. The owner answers by hand.
+//   - A turn with any text is DRAFTED normally. The agent is told the guest
+//     also sent a photo. (Since the 2026-10-11 ruling that draft is held for
+//     an operator and never auto-sent: lib/agent/media-context.ts. Whether a
+//     reply is held is that file's question, not this one's.)
+//   - A blank card only for a turn with no text at all. The owner answers by
+//     hand.
 //   - The photo-last case must not fail.
 //
 // WHAT "THE TURN" MEANS HERE. Coalescing has no burst membership: a turn is
@@ -35,22 +38,37 @@
 //                exists to remove.
 //
 // WHAT THIS CANNOT DO.
-//   - It cannot see the media. No model looks at the image, and the operator
-//     app has no field for it either (a separate ticket, ruled the same day).
-//   - It cannot tell a photo from a GIF on Instagram. `messages` stores only
-//     the links, and Meta's CDN links carry no file extension, so every
-//     Instagram attachment reads as 'unknown' and the agent is told "a photo
-//     or GIF". Storing the attachment type is a migration on `messages`.
-//   - Instagram stickers, voice notes and attachments with no link never get
-//     a `messages` row (parse-events.ts), so they never reach this module.
+//   - It cannot see the media. No model looks at the image. (The operator app
+//     can be sent it since TAC-582, through the thread endpoints.)
+//   - From the LINKS alone it cannot tell a photo from a GIF on Instagram:
+//     Meta's CDN links carry no file extension, so a message with no
+//     attachment row reads as 'unknown' and the agent is told "a photo or
+//     GIF". A message that has rows is read off them instead (mediaKindOf,
+//     TAC-582), which is every Instagram message saved since that table
+//     existed.
+//   - An Instagram message with nothing to show (Meta's `is_unsupported`, or
+//     attachments with no link) reaches the agent as a row with
+//     `unsupported_content` and takes the card path beside this one
+//     (handle-inbound.ts). It has no media links, so nothing here sees it.
 //   - A text that arrives after the card was written goes through the
-//     ordinary gate with that card pending: a question gets its own reply or
-//     card, a bare "thanks" is silenced behind it, and a correction
-//     regenerates it (resolveConversationDisposition). The wait before
-//     carding exists to make that rare, not impossible.
+//     ordinary gate with that card pending: a question gets its own card
+//     (always a card now, never a reply: the media_context hold), a bare
+//     "thanks" is silenced behind it, and a correction regenerates it
+//     (resolveConversationDisposition). The wait before carding exists to
+//     make that rare, not impossible.
 
 import { createAdminClient } from '@/lib/db/admin'
 import type { InboundMediaKind } from '@/lib/ai/types'
+// TAC-582: the extension lists moved beside the attachment kinds, which read
+// the same links for the same reason. One list, two readers.
+import {
+  type AttachmentKind,
+  GIF_EXTENSIONS,
+  PHOTO_EXTENSIONS,
+  VIDEO_EXTENSIONS,
+  extensionOf,
+  isAttachmentKind,
+} from '@/lib/messaging/attachments/kind'
 
 /**
  * How far back a media-only message looks for the text it belongs with.
@@ -77,21 +95,6 @@ export const MEDIA_COMPANION_WINDOW_MS = 120_000
 export const MEDIA_ONLY_SETTLE_MS = 10_000
 export const MEDIA_ONLY_SETTLE_POLL_MS = 2_000
 
-const GIF_EXTENSIONS = ['gif']
-const PHOTO_EXTENSIONS = ['jpg', 'jpeg', 'png', 'heic', 'heif', 'webp']
-const VIDEO_EXTENSIONS = ['mp4', 'mov', 'm4v', 'webm']
-
-function extensionOf(url: string): string | null {
-  try {
-    const path = new URL(url).pathname
-    const dot = path.lastIndexOf('.')
-    if (dot === -1 || path.indexOf('/', dot) !== -1) return null
-    return path.slice(dot + 1).toLowerCase()
-  } catch {
-    return null
-  }
-}
-
 /**
  * What the links say was sent.
  *
@@ -113,6 +116,46 @@ export function mediaKindFromUrls(urls: readonly string[]): InboundMediaKind {
   return extensions.length > 0 ? 'other' : 'unknown'
 }
 
+// TAC-582: what an attachment row says the guest sent, in the vocabulary of
+// the "[guest also sent ...]" line. `null` means the row does not settle it
+// and the links are read instead.
+//   story_reply  is not something the guest sent. It is the venue's story,
+//                and the turn says so on its own line (repliesToStory).
+//   unknown      is a row that does not know either.
+// A share and a story mention are "an attachment": the line has no wording of
+// its own for them, and that one is true of both.
+const MEDIA_KIND_BY_ATTACHMENT = {
+  image: 'photo',
+  gif: 'gif',
+  video: 'video',
+  audio: 'voice_note',
+  file: 'other',
+  share: 'other',
+  story_mention: 'other',
+  story_reply: null,
+  unknown: null,
+} as const satisfies Record<AttachmentKind, InboundMediaKind | null>
+
+/**
+ * What one message's media is.
+ *
+ * THE ATTACHMENT ROW WINS WHEN THERE IS ONE (TAC-582). Meta's CDN links carry
+ * no file extension, so the links alone read every Instagram attachment as
+ * 'unknown' and a voice note sent beside a text was announced as "a photo or
+ * GIF". The row has Meta's own type. The first attachment that settles it
+ * names the line, as the first link did; a message with no rows, or whose
+ * rows settle nothing, is read off its links exactly as before.
+ */
+export function mediaKindOf(
+  row: Pick<TurnInboundRow, 'mediaUrls' | 'attachmentKinds'>,
+): InboundMediaKind {
+  for (const kind of row.attachmentKinds ?? []) {
+    const settled = MEDIA_KIND_BY_ATTACHMENT[kind]
+    if (settled !== null) return settled
+  }
+  return mediaKindFromUrls(row.mediaUrls)
+}
+
 /** Media present and no text at all. Whitespace is not text. */
 export function isMediaOnly(
   body: string,
@@ -126,6 +169,12 @@ export interface TurnInboundRow {
   body: string
   mediaUrls: string[]
   createdAt: Date
+  /**
+   * TAC-582: the kinds on this message's attachment rows, in position order.
+   * Empty or absent when it has none: a message older than the table, one
+   * whose row write failed, or a row built by hand.
+   */
+  attachmentKinds?: AttachmentKind[]
 }
 
 export interface TurnOutboundRow {
@@ -229,7 +278,15 @@ export function mediaAlongsideText(
   current: TurnInboundRow,
   rows: TurnMediaRows,
 ): InboundMediaKind | null {
-  if (current.mediaUrls.length > 0) return mediaKindFromUrls(current.mediaUrls)
+  // The rows loaded for the turn carry the attachment kinds; `current` is
+  // built from the message itself and usually does not.
+  const self = rows.inbound.find((row) => row.id === current.id) ?? current
+  if (current.mediaUrls.length > 0) {
+    return mediaKindOf({
+      mediaUrls: current.mediaUrls,
+      attachmentKinds: self.attachmentKinds ?? current.attachmentKinds,
+    })
+  }
   const currentMs = current.createdAt.getTime()
   const beside = rows.inbound
     .filter(
@@ -245,7 +302,20 @@ export function mediaAlongsideText(
         ),
     )
     .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())[0]
-  return beside === undefined ? null : mediaKindFromUrls(beside.mediaUrls)
+  return beside === undefined ? null : mediaKindOf(beside)
+}
+
+/**
+ * TAC-582: is the message this turn answers a reply to one of the venue's
+ * stories? Pure. Read off the same rows, by the attachment row parse-events
+ * writes for `message.reply_to.story`.
+ */
+export function repliesToStory(
+  current: Pick<TurnInboundRow, 'id'>,
+  rows: TurnMediaRows,
+): boolean {
+  const self = rows.inbound.find((row) => row.id === current.id)
+  return (self?.attachmentKinds ?? []).includes('story_reply')
 }
 
 export type TurnMediaRowsResult =
@@ -269,18 +339,49 @@ export async function loadTurnMediaRows(input: {
     const sinceIso = new Date(
       input.around.getTime() - 2 * MEDIA_COMPANION_WINDOW_MS,
     ).toISOString()
-    const { data, error } = await createAdminClient()
-      .from('messages')
-      .select(
-        'id, direction, body, media_urls, created_at, reply_to_message_id',
-      )
-      .eq('venue_id', input.venueId)
-      .eq('guest_id', input.guestId)
-      .gte('created_at', sinceIso)
-      .order('created_at', { ascending: false })
-      .limit(50)
+    const supabase = createAdminClient()
+    const [{ data, error }, attachments] = await Promise.all([
+      supabase
+        .from('messages')
+        .select(
+          'id, direction, body, media_urls, created_at, reply_to_message_id',
+        )
+        .eq('venue_id', input.venueId)
+        .eq('guest_id', input.guestId)
+        .gte('created_at', sinceIso)
+        .order('created_at', { ascending: false })
+        .limit(50),
+      // TAC-582: what each of those messages' attachments ARE. By guest and
+      // time, like the rows above, so the two cover the same messages.
+      supabase
+        .from('message_attachments')
+        .select('message_id, kind')
+        .eq('venue_id', input.venueId)
+        .eq('guest_id', input.guestId)
+        .gte('created_at', sinceIso)
+        .order('message_id', { ascending: true })
+        .order('position', { ascending: true })
+        .limit(200),
+    ])
     if (error)
       return { ok: false, error: `loadTurnMediaRows: ${error.message}` }
+    // A failed attachment read does NOT fail the turn's rows: the kinds are
+    // then read off the links, which is what happened before the table
+    // existed. Logged, because the line may then say "a photo or GIF" for a
+    // voice note.
+    if (attachments.error) {
+      console.warn('[agent] turn attachment kinds not loaded', {
+        guestId: input.guestId,
+        error: attachments.error.message,
+      })
+    }
+    const kindsByMessage = new Map<string, AttachmentKind[]>()
+    for (const row of attachments.data ?? []) {
+      if (!isAttachmentKind(row.kind)) continue
+      const kinds = kindsByMessage.get(row.message_id)
+      if (kinds) kinds.push(row.kind)
+      else kindsByMessage.set(row.message_id, [row.kind])
+    }
     const rows: TurnMediaRows = { inbound: [], outbound: [] }
     for (const row of data ?? []) {
       const createdAt = new Date(row.created_at)
@@ -290,6 +391,7 @@ export async function loadTurnMediaRows(input: {
           body: row.body,
           mediaUrls: row.media_urls ?? [],
           createdAt,
+          attachmentKinds: kindsByMessage.get(row.id) ?? [],
         })
       } else {
         rows.outbound.push({

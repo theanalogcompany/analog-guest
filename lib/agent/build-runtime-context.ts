@@ -53,6 +53,7 @@ import {
 import { extractRecentVisits } from './extract-recent-visits'
 import { loadLastInboundChannel } from './last-inbound-channel'
 import { groupIntoResponses } from './group-responses'
+import { loadMediaHistory } from './media-history'
 import { isComplaintClarificationOpen } from './complaint-thread'
 import {
   applyCurrentTurnSuppression,
@@ -242,6 +243,7 @@ export async function buildRuntimeContext(input: {
     pendingQuestionResult,
     intentionRows,
     olderInboundResult,
+    mediaHistory,
   ] = await Promise.all([
     supabase
       .from('venues')
@@ -324,6 +326,19 @@ export async function buildRuntimeContext(input: {
     // (historyEndIso, the Voices regen path) bounds this the same way it
     // bounds the history, so a replayed old message cannot match itself.
     input.currentMessage ? olderInboundQuery : Promise.resolve(null),
+    // TAC-582: what the guest ATTACHED inside the same window. The history
+    // query above is untouched and still skips a message with no text; this
+    // is the read that brings those back for the prompt, and only for the
+    // prompt (lib/agent/media-history.ts has the ruling). Never rejects, and
+    // fails soft to no media.
+    loadMediaHistory(supabase, {
+      venueId: input.venueId,
+      guestId: input.guestId,
+      historyCutoffIso,
+      maxMessages: MAX_HISTORY_MESSAGES,
+      currentMessageId: input.currentMessage?.id,
+      historyEndIso: input.historyEndIso,
+    }),
   ])
 
   if (venueResult.error || !venueResult.data) {
@@ -572,8 +587,21 @@ export async function buildRuntimeContext(input: {
   // Query returns DESC. groupIntoResponses folds each response's bubbles into
   // one entry, caps at MAX_HISTORY_MESSAGES responses, and returns
   // chronological order for the prompt.
+  //
+  // TAC-582: a guest message with text AND an attachment carries its lines.
+  // Only inbound rows are looked up: a photo staff sent from the Instagram
+  // app has attachment rows too, and is deliberately never worded for the
+  // model. No row is added or removed here, so the list's length, and every
+  // first-contact reader that depends on it, is what it was.
   const recentMessages: RecentMessage[] = groupIntoResponses(
-    messagesResult.data ?? [],
+    (messagesResult.data ?? []).map((row) =>
+      row.direction === 'inbound'
+        ? {
+            ...row,
+            attachmentLines: mediaHistory.linesByMessageId.get(row.id),
+          }
+        : row,
+    ),
     MAX_HISTORY_MESSAGES,
   )
 
@@ -1236,6 +1264,7 @@ export async function buildRuntimeContext(input: {
     scanArrival,
     conversationChannel: channelResolution.channel,
     recentMessages,
+    mediaOnlyInbounds: mediaHistory.mediaOnlyInbounds,
     conversationWindowMs,
     openComplaintClarification,
     firstConversation,

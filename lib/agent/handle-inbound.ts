@@ -64,8 +64,10 @@ import {
   isMediaOnly,
   loadTurnMediaRows,
   mediaAlongsideText,
+  repliesToStory,
   resolveMediaOnlyTurn,
 } from './inbound-media'
+import { decideMediaContextHold, loadMediaContextRows } from './media-context'
 import {
   bodyContainsReviewLink,
   deriveReviewAsk,
@@ -117,6 +119,7 @@ import {
   generateStage,
   GENERATION_FAILED_REVIEW_REASON,
   MEDIA_ONLY_REVIEW_REASON,
+  UNSUPPORTED_REVIEW_REASON,
   KNOWLEDGE_GAP_WINDOW_MS,
   mayAutoSendAfterClassification,
   retrieveCorpusStage,
@@ -198,6 +201,9 @@ async function loadInbound(messageId: string): Promise<{
   // this file reads it (lib/agent/inbound-media.ts decides what it means) and
   // InboundMessage is constructed at thirty sites that have no media.
   mediaUrls: string[]
+  // TAC-582: `messages.unsupported_content`. The guest sent something and the
+  // row holds nothing of it: Meta flagged it, or its attachments had no link.
+  unsupported: boolean
   guestId: string
   venueId: string
 }> {
@@ -205,7 +211,7 @@ async function loadInbound(messageId: string): Promise<{
   const { data, error } = await supabase
     .from('messages')
     .select(
-      'id, body, media_urls, provider_message_id, created_at, venue_id, guest_id, direction, channel, referral_source',
+      'id, body, media_urls, unsupported_content, provider_message_id, created_at, venue_id, guest_id, direction, channel, referral_source',
     )
     .eq('id', messageId)
     .single()
@@ -237,6 +243,7 @@ async function loadInbound(messageId: string): Promise<{
       referralSource: data.referral_source,
     },
     mediaUrls: data.media_urls ?? [],
+    unsupported: data.unsupported_content === true,
     guestId: data.guest_id,
     venueId: data.venue_id,
   }
@@ -514,12 +521,16 @@ async function persistGenerationFailureCard(
 async function persistMediaOnlyCard(
   ctx: RuntimeContext,
   agentRunId: string,
+  // TAC-582: which of the two blank cards this is. Everything else about
+  // them is the same card: no draft, no category, its own slot.
+  reviewReason:
+    typeof MEDIA_ONLY_REVIEW_REASON | typeof UNSUPPORTED_REVIEW_REASON,
 ): Promise<AgentResult> {
   try {
     const persisted = await persistOrRegenQueuedDraft(
       ctx,
       buildGenerationFailureGeneration(),
-      MEDIA_ONLY_REVIEW_REASON,
+      reviewReason,
       null,
       { blankBody: true, conversationDisposition: 'own_card' },
     )
@@ -540,8 +551,8 @@ async function persistMediaOnlyCard(
       agentRunId,
       venueId: ctx.venue.id,
       guestId: ctx.guest.id,
-      triggers: [MEDIA_ONLY_REVIEW_REASON],
-      primaryTrigger: MEDIA_ONLY_REVIEW_REASON,
+      triggers: [reviewReason],
+      primaryTrigger: reviewReason,
       modelRequiresApproval: false,
       modelApprovalReason: '',
       compRegexMatchedPattern: null,
@@ -555,12 +566,12 @@ async function persistMediaOnlyCard(
       inboundBody: null,
       generatedBody: '',
     })
-    pushOperatorCard(ctx, persisted.outboundMessageId, MEDIA_ONLY_REVIEW_REASON)
+    pushOperatorCard(ctx, persisted.outboundMessageId, reviewReason)
     return {
       status: 'queued',
       outboundMessageId: persisted.outboundMessageId,
-      triggers: [MEDIA_ONLY_REVIEW_REASON],
-      primaryTrigger: MEDIA_ONLY_REVIEW_REASON,
+      triggers: [reviewReason],
+      primaryTrigger: reviewReason,
     }
   } catch (e) {
     // persistOrRegenQueuedDraft already fired a red alert.
@@ -1079,7 +1090,7 @@ function emptyTestDraft(
  * knowledge relevance floor, and the mirror ran months on stale semantics.
  *
  * WHAT IT STOPS SHORT OF, and why each is safe to skip for a comparison:
- *   - the four post-generation checks and the 20 approval triggers. They
+ *   - the four post-generation checks and the 21 approval triggers. They
  *     decide whether v1 SENDS, never what it says, so they cannot change the
  *     text in the column.
  *   - dispatch, the ledger row, the typing indicator, the guests.context
@@ -1574,7 +1585,17 @@ async function runInboundTurn(
       around: inbound.message.receivedAt,
     })
     let mediaOnlyTurn = false
-    if (isMediaOnly(inbound.message.body, inbound.mediaUrls)) {
+    // TAC-582: a message Meta could not hand us takes the same road as a
+    // photo with no caption, for the same reason: there is no text in it to
+    // answer. Read off the message the turn ADOPTED, before `inbound` can be
+    // swapped to the text beside it, and kept: it names the card.
+    const blankCardReason = inbound.unsupported
+      ? UNSUPPORTED_REVIEW_REASON
+      : MEDIA_ONLY_REVIEW_REASON
+    if (
+      isMediaOnly(inbound.message.body, inbound.mediaUrls) ||
+      (inbound.unsupported && inbound.message.body.trim() === '')
+    ) {
       const rows = await turnMediaRows
       if (!rows.ok) {
         // Fail toward a human: with no rows to judge, the card is written.
@@ -1790,7 +1811,11 @@ async function runInboundTurn(
         testSink.draft = emptyTestDraft(ctx, 'media_only_card')
         return { status: 'refused', reason: 'test_run' }
       }
-      const carded = await persistMediaOnlyCard(ctx, agentRunId)
+      const carded = await persistMediaOnlyCard(
+        ctx,
+        agentRunId,
+        blankCardReason,
+      )
       trace.update({ output: { status: carded.status, mediaOnly: true } })
       return carded
     }
@@ -1807,10 +1832,52 @@ async function runInboundTurn(
         },
         mediaRows.data,
       )
+      // TAC-582: and whether those words are an answer to the venue's story.
+      ctx.inboundStoryReply = repliesToStory(
+        { id: inbound.message.id },
+        mediaRows.data,
+      )
     } else {
       console.warn('[agent] inbound media read failed, no note rendered', {
         agentRunId,
         error: mediaRows.error,
+      })
+    }
+
+    // TAC-582 (owner ruling 2026-10-11): a reply written around media the
+    // agent cannot see is drafted as usual and HELD for an operator. Decided
+    // here, before classification, from the thread alone; the approval gate
+    // reads the flag (APPROVAL_TRIGGERS.MEDIA_CONTEXT). The rule, and the
+    // measurement behind it, are in lib/agent/media-context.ts.
+    //
+    // "Has attachments" is the message's links, or any attachment row on it:
+    // a reply to a story has a row and no link.
+    const ownAttachmentRows = mediaRows.ok
+      ? (mediaRows.data.inbound.find((row) => row.id === inbound.message.id)
+          ?.attachmentKinds ?? [])
+      : []
+    const mediaContext = decideMediaContextHold({
+      currentMessageId: inbound.message.id,
+      currentHasAttachments:
+        inbound.mediaUrls.length > 0 || ownAttachmentRows.length > 0,
+      // Read HERE, after the context is built, and not earlier alongside it.
+      // The prompt's media history is read inside that build; a photo that
+      // landed between an earlier read and the build would be in the prompt
+      // and missing from these rows, and the reply would auto-send (found in
+      // review). Reading last means anything the prompt can mention, this
+      // can see. It costs one query's latency on a text turn. Never rejects;
+      // null means it could not be read, which holds.
+      rows: await loadMediaContextRows({
+        venueId: inbound.venueId,
+        guestId: inbound.guestId,
+        now: new Date(),
+      }),
+    })
+    ctx.mediaContext = mediaContext.hold
+    if (mediaContext.hold) {
+      console.log('[agent] reply will be held: written around guest media', {
+        agentRunId,
+        reason: mediaContext.reason,
       })
     }
 
@@ -2835,7 +2902,7 @@ async function runInboundTurn(
     // write or a send - the typing refresh, the guests.context capture, the
     // four checks, the approval gate, dispatch, the ledger.
     //
-    // The draft is complete at this point. The checks and the 20 triggers that
+    // The draft is complete at this point. The checks and the 21 triggers that
     // follow decide whether v1 would SEND this text, never what the text is,
     // so stopping here costs the comparison nothing.
     //

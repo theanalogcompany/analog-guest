@@ -58,7 +58,7 @@ function identityOf(outcome: InstagramEventOutcome): {
         },
       }
     case 'unhandled':
-      // A guest message saved nowhere (message_unsupported / no_content). The
+      // A guest message saved nowhere (message_no_content). The
       // delivery carries no venue or guest — parse-events could not file it.
       return {
         venueId: null,

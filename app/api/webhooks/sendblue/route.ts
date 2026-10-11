@@ -10,7 +10,14 @@ import { waitUntil } from '@vercel/functions'
 // Aliased: this file already has a local `handleInbound` for webhook-payload
 // handling; the agent's handleInbound is the orchestrator we hand off to.
 import { handleInbound as runInboundAgent } from '@/lib/agent'
+import { captureGuestMediaDegraded } from '@/lib/analytics/posthog'
 import { createAdminClient } from '@/lib/db/admin'
+import {
+  SENDBLUE_PROVIDER_TYPE,
+  kindFromUrlExtension,
+} from '@/lib/messaging/attachments/kind'
+import { rehostMessageAttachments } from '@/lib/messaging/attachments/rehost'
+import { insertMessageAttachments } from '@/lib/messaging/attachments/store'
 import {
   SendblueWebhookPayloadSchema,
   type SendblueWebhookPayload,
@@ -231,6 +238,47 @@ async function handleInbound(
       error: insertMessageError?.message ?? 'no row returned',
     })
     return new Response('OK', { status: 200 })
+  }
+
+  // TAC-582: one row per media link, before the 200, so the agent turn and the
+  // first thread read both find it. Sendblue names no type, so the kind is the
+  // link's file extension until the download says otherwise. A failure here
+  // does not cost the message: the row above is saved with media_urls intact.
+  if (hasMedia) {
+    const stored = await insertMessageAttachments(supabase, {
+      messageId: insertedMessage.id,
+      venueId: venue.id,
+      guestId,
+      attachments: mediaUrls.map((url) => ({
+        kind: kindFromUrlExtension(url),
+        providerType: SENDBLUE_PROVIDER_TYPE,
+        url,
+        title: null,
+      })),
+    })
+    if (!stored.ok) {
+      console.error('webhook inbound: attachment rows not saved', {
+        event: 'sendblue_attachments_insert_failed',
+        venueId: venue.id,
+        messageId: insertedMessage.id,
+        error: stored.error,
+      })
+      waitUntil(
+        captureGuestMediaDegraded({
+          stage: 'attachment_rows',
+          reason: stored.error,
+          venueId: venue.id,
+          guestId,
+          messageId: insertedMessage.id,
+          attachmentId: null,
+          host: null,
+        }),
+      )
+    } else if (stored.data.pending > 0) {
+      // Copied into our own storage after the 200. How long Sendblue keeps a
+      // media link is not documented, so it is treated as one that expires.
+      waitUntil(rehostMessageAttachments(supabase, insertedMessage.id))
+    }
   }
 
   // Hand off to the agent orchestrator. waitUntil keeps the function alive

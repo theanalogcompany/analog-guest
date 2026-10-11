@@ -7,6 +7,7 @@ import {
   type JevClassifyState,
   type JevDeps,
 } from './classify-message-jev'
+import { withAttachmentLines } from './prompts/attachment-lines'
 import { PROMPT_VERSION } from './prompts/system-template'
 import {
   formatTimeDelta,
@@ -165,9 +166,12 @@ function formatClassifierRecentConversation(
     const speaker = m.direction === 'inbound' ? 'guest' : 'venue'
     const delta = formatTimeDelta(m.createdAt, now)
     const marker = historyDeliveryMarker(m.delivery)
+    // TAC-582: a guest's attachments read as bracketed lines ahead of their
+    // text, worded where the generator's history gets them.
+    const body = withAttachmentLines(m.body, m, ' ')
     return marker === null
-      ? `[${speaker}, ${delta}] ${m.body}`
-      : `[${speaker}, ${delta}, ${marker}] ${m.body}`
+      ? `[${speaker}, ${delta}] ${body}`
+      : `[${speaker}, ${delta}, ${marker}] ${body}`
   })
   const block = `Recent conversation (most recent at the bottom):\n${lines.join('\n')}`
   return messages.some((m) => m.delivery !== 'delivered')

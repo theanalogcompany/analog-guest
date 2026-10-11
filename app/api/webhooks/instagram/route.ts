@@ -58,6 +58,7 @@ import { createAdminClient } from '@/lib/db/admin'
 // Imported by path, not through a barrel: lib/pos/square/ sets the
 // no-sub-barrel precedent.
 import {
+  captureGuestMediaDegraded,
   captureInstagramCardResolvedExternally,
   captureInstagramScanUnattributed,
   captureScanCodeBound,
@@ -84,7 +85,7 @@ import {
 import { recordInstagramTurnNotRun } from '@/lib/messaging/instagram/record-turn'
 import { runScanGreetingFastPath } from '@/lib/agent/instagram-scan-greeting'
 import { scheduleScanArrival } from '@/lib/agent/scan-arrival-store'
-import { instagramRawPayloadLine } from '@/lib/messaging/instagram/raw-payload-log'
+import { rehostMessageAttachments } from '@/lib/messaging/attachments/rehost'
 import { summarizeInstagramPayload } from '@/lib/messaging/instagram/summarize-payload'
 import {
   verifyInstagramSignature,
@@ -233,22 +234,11 @@ export async function POST(request: Request): Promise<Response> {
 
     // Shape only. summarize-payload.ts and logInstagramOutcome are what hold
     // "no guest content in logs": they are the only things this route logs
-    // about a payload, unless the temporary capture below is switched on.
+    // about a payload.
     console.log('instagram webhook: event received', {
       event: 'instagram_event',
       ...summarizeInstagramPayload(parsed),
     })
-
-    // TEMPORARY, remove with the media-messages ticket: the whole verified
-    // body as one JSON line, so the attachment `type` and `payload` Meta sends
-    // for each media kind can be read. Null unless INSTAGRAM_LOG_RAW_PAYLOADS
-    // is exactly 'true'. LEAKS GUEST CONTENT while it is on; raw-payload-log.ts
-    // has what is redacted and how to remove it.
-    const rawPayloadLine = instagramRawPayloadLine(
-      parsed,
-      process.env.INSTAGRAM_LOG_RAW_PAYLOADS,
-    )
-    if (rawPayloadLine !== null) console.log(rawPayloadLine)
 
     const supabase = createAdminClient()
     const outcomes = await processInstagramDelivery(parsed, supabase)
@@ -257,6 +247,29 @@ export async function POST(request: Request): Promise<Response> {
     const refreshing = new Set<string>()
     for (const outcome of outcomes) {
       logInstagramOutcome(outcome)
+      // TAC-582: copy the guest's media into our own storage while Meta's
+      // link still works. Independent of the agent handoff below, so staff
+      // photos (echoes) and messages the agent never runs on are copied too.
+      // waitUntil, never awaited: a download must not sit inside Meta's
+      // delivery deadline, and it never throws.
+      if (outcome.status === 'persisted' && outcome.pendingAttachments > 0) {
+        waitUntil(rehostMessageAttachments(supabase, outcome.messageId))
+      }
+      // The message is saved and its attachment rows are not: the thread will
+      // show it with nothing on it. Reported, because nothing else would say.
+      if (outcome.status === 'persisted' && outcome.attachmentRowsFailed) {
+        waitUntil(
+          captureGuestMediaDegraded({
+            stage: 'attachment_rows',
+            reason: 'insert_failed',
+            venueId: outcome.venueId,
+            guestId: outcome.guestId,
+            messageId: outcome.messageId,
+            attachmentId: null,
+            host: null,
+          }),
+        )
+      }
       // TAC-523: a delivery the agent never sees is RECORDED rather than
       // discarded. An agent run records its own outcome at the end of
       // handleInbound, so exactly one of these two writes a row.

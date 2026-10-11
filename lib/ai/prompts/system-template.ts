@@ -2725,7 +2725,52 @@ import {
 //   BASELINE RESET for a venue with offer lines only. Every other venue's
 //   first-attempt prompt is byte-identical to v1.104.0.
 //
-export const PROMPT_VERSION = 'v1.105.0'
+// v1.106.0 (TAC-582): what a guest ATTACHED is in the conversation the model
+// reads. No template text changed.
+//
+//   A photo, a voice note, a GIF, a video, a reel or a story a guest sent used
+//   to be absent from history entirely: the history query skips a message
+//   with no text, and nothing recorded what an attachment was. Each now reads
+//   as one bracketed line, worded in prompts/attachment-lines.ts and
+//   approved verbatim by the owner on 2026-10-11:
+//
+//     [guest sent a photo. It arrived fine, but you can't see it. Don't
+//     describe it, guess what's in it, or say it didn't come through.]
+//
+//   with the opening and the verb matched to the kind (hear a voice note,
+//   watch a video, open a share, see the story).
+//
+//   WHERE THEY APPEAR: in the generator's history turns (a media-only message
+//   is a `user` turn of its own; one sent with text is the line above that
+//   text), in the classifier's `Recent conversation` block, and in the
+//   transcript recorded on the trace. Guest messages only. What the venue
+//   sent is never worded this way.
+//
+//   ON THE TURN BEING ANSWERED, `[guest also sent ...]` changes three ways.
+//   It is now the same sentence, inside the bracket, with "also" in it; it
+//   replaces "[guest also sent a photo] You cannot see it. You can say you
+//   got it, but do not describe it or react to what is in it." Its kind comes
+//   from the message's attachment rows when it has them, so a voice note
+//   sent beside a text reads "a voice note" where it read "a photo or GIF"
+//   (Instagram's links carry no file extension, and the extension was all
+//   that line had). And a message that answers one of the venue's stories
+//   has the story-reply line above "The guest just sent". A photo the first
+//   line already announces is left out of that turn's history so it is said
+//   once.
+//
+//   WHY THE SENTENCE IS INSIDE THE BRACKET. The first wording was the bare
+//   marker, "[guest sent a photo]". Measured on TAC-582 (20 generations, two
+//   venues, a control arm with no line), no reply described a photo it had
+//   not seen, and 5 of 20 told the guest the photo "didn't come through":
+//   the model knew a photo existed, had nothing to look at, and invented a
+//   reason. The sentence gives it the reason. The numbers for this wording
+//   are on the ticket.
+//
+//   BASELINE RESET only for a conversation with guest media in its window.
+//   Every other first-attempt prompt is byte-identical to v1.105.0: a message
+//   with no attachment lines renders through the same code path it did.
+//
+export const PROMPT_VERSION = 'v1.106.0'
 
 export const SYSTEM_TEMPLATE = `You work at a hospitality venue (cafe, bakery, restaurant). You communicate with its guests via iMessage, in whatever voice the venue has configured below — its own collective voice, its owner's, or a named staff member's.
 

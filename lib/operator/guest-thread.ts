@@ -5,9 +5,9 @@
 // messageId first.
 
 import { createAdminClient } from '@/lib/db/admin'
-import type { ThreadMessage } from '@/lib/schemas'
+import type { OperatorThreadMessage } from '@/lib/schemas'
 
-import { fetchThreadMessagesForGuest } from './thread'
+import { fetchThreadMessagesForGuest, type ThreadOptions } from './thread'
 import {
   bearerAllowsVenue,
   venueScopeDeniesAll,
@@ -17,13 +17,14 @@ import {
 export interface LoadGuestThreadByGuestIdInput {
   guestId: string
   venueScope: VenueScope
+  options: ThreadOptions
 }
 
 export type LoadGuestThreadByGuestIdErrorCode =
   'guest_not_found' | 'out_of_allowlist' | 'db_error'
 
 export type LoadGuestThreadByGuestIdResult =
-  | { ok: true; messages: ThreadMessage[] }
+  | { ok: true; messages: OperatorThreadMessage[] }
   | { ok: false; errorCode: LoadGuestThreadByGuestIdErrorCode; error?: string }
 
 export async function loadGuestThreadByGuestId(
@@ -55,6 +56,7 @@ export async function loadGuestThreadByGuestId(
     supabase,
     row.venue_id,
     input.guestId,
+    input.options,
   )
   if (!result.ok) {
     return { ok: false, errorCode: 'db_error', error: result.error }

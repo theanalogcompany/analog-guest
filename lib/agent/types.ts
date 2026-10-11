@@ -476,6 +476,20 @@ export interface RuntimeContext {
   conversationChannel: MessageChannel | null
   recentMessages: RecentMessage[]
   /**
+   * TAC-582: the guest's messages in the history window that had NO text: a
+   * photo, a voice note, a reel, or something Meta flagged unsupported. Each
+   * has an empty body and its worded `attachmentLines`.
+   *
+   * BESIDE `recentMessages`, never in it, by owner ruling: these are history
+   * for the model and are not the guest having written to us, so nothing that
+   * decides first contact may count them. Only historyForPrompt
+   * (lib/agent/media-history.ts) merges the two, where a prompt is built.
+   *
+   * Optional because only buildRuntimeContext loads it; a context built by
+   * hand has none, which reads as no media.
+   */
+  mediaOnlyInbounds?: RecentMessage[]
+  /**
    * TAC-380 ruling 1's single definition of "still the same conversation":
    * `followup_rules.recent_conversation_hours` in ms, 48h by default. Read by
    * the intention brake and, since TAC-547, by the contextual retrieval query,
@@ -642,6 +656,15 @@ export interface RuntimeContext {
   // it), so no proactive path can render the line. buildAiRuntime maps it onto
   // the AI runtime. Null on a turn with no media, which is nearly all of them.
   inboundMedia: InboundMediaKind | null
+  // TAC-582: the message this turn answers is a reply to one of the venue's
+  // stories. Same writer and same lifetime as inboundMedia above. Optional
+  // because a context built by hand has none.
+  inboundStoryReply?: boolean
+  // TAC-582: this reply is being written around media the agent cannot see,
+  // so the approval gate holds it (APPROVAL_TRIGGERS.MEDIA_CONTEXT). Decided
+  // by lib/agent/media-context.ts; handle-inbound.ts is the only writer, so
+  // no proactive path can set it. Absent or false on every other turn.
+  mediaContext?: boolean
   corpus: CorpusMatch[] | null
   // Retrieved knowledge_corpus chunks. Populated by retrieveKnowledgeStage
   // when shouldRetrieveKnowledge fires (always for inbound; followups

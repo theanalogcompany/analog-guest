@@ -86,6 +86,13 @@ const PUSH_POLICY = {
   // TAC-513. Fails closed, so a card exists and somebody has to look at it.
   [APPROVAL_TRIGGERS.PROSE_CANCELLATION_CHECK_FAILED]: 'push',
 
+  // TAC-582. The reply is held because it was written around media the agent
+  // cannot see. The guest is waiting on a person and nothing else surfaces
+  // the card, so it pushes. On photo-then-text the photo's own card pushed a
+  // moment earlier; this is a second push for a second card, about a draft
+  // the first one did not have.
+  [APPROVAL_TRIGGERS.MEDIA_CONTEXT]: 'push',
+
   // #95 (0c1515c). Venue-wide "hold everything" flag.
   // Product call: a venue that opted into flagging EVERYTHING wants eyes on
   // everything — silently queuing without notifying defeats the flag's whole

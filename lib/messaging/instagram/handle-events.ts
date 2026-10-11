@@ -102,6 +102,10 @@ import type { Database } from '@/db/types'
 import type { InstagramScanUnattributedReason } from '@/lib/analytics/posthog'
 // By path, not through @/lib/schemas: TAC-518 shares this predicate with the
 // agent runtime so the two cannot drift.
+import {
+  MESSAGE_HAS_CONTENT_FILTER,
+  insertMessageAttachments,
+} from '@/lib/messaging/attachments/store'
 import { isScanReferral } from '@/lib/schemas/referral-source'
 
 import {
@@ -176,6 +180,19 @@ export type InstagramEventOutcome =
       titlelessPostback: boolean
       /** The new guest's created_via, or null when the guest already existed. */
       guestCreatedVia: InstagramGuestCreatedVia | null
+      /**
+       * TAC-582: how many of this message's attachments were written
+       * `pending`, i.e. still have to be copied into our own storage. The
+       * route hands the message to the re-host step when this is above zero.
+       * 0 for a postback, a referral, and a message with nothing to copy.
+       */
+      pendingAttachments: number
+      /**
+       * TAC-582: the message was saved and its attachment rows were not. The
+       * route reports it; this module stays free of analytics, as the import
+       * note at the top says.
+       */
+      attachmentRowsFailed: boolean
       /**
        * TAC-536, `referral` only; NULL for every other kind, which is the
        * convention titlelessPostback and guestCreatedVia already follow here.
@@ -380,6 +397,9 @@ function inboundInsert(
     status: 'received',
     body: (isMessage ? event.text : event.title) ?? '',
     media_urls: isMessage ? event.mediaUrls : [],
+    // TAC-582: true or absent, never false. NULL is "nothing unusual", which
+    // is every row written before the column existed.
+    ...(isMessage && event.unsupported ? { unsupported_content: true } : {}),
     provider_message_id: event.mid,
     // Instagram's own time for the guest's action (TAC-479). TAC-469's 24-hour
     // window gate and TAC-486's countdown run from this, never created_at.
@@ -447,6 +467,33 @@ async function insertMessage(
   if (error || !data)
     return failedOutcome(event.kind, fail('message_insert', error), venueId)
 
+  // TAC-582: one row per attachment, written before the 200 so the agent turn
+  // and the first thread read both find them. A failure here does NOT fail the
+  // event: the message is saved and media_urls on it is intact, so the guest's
+  // message is not lost, only its attachment rows. Logged with our own ids.
+  let pendingAttachments = 0
+  let attachmentRowsFailed = false
+  if (event.kind !== 'postback' && event.attachments.length > 0) {
+    const stored = await insertMessageAttachments(supabase, {
+      messageId: data.id,
+      venueId,
+      guestId: guest.guestId,
+      attachments: event.attachments,
+    })
+    if (stored.ok) {
+      pendingAttachments = stored.data.pending
+    } else {
+      attachmentRowsFailed = true
+      console.error('instagram webhook: attachment rows not saved', {
+        event: 'instagram_attachments_insert_failed',
+        venueId,
+        messageId: data.id,
+        count: event.attachments.length,
+        error: stored.error,
+      })
+    }
+  }
+
   return {
     status: 'persisted',
     kind: event.kind,
@@ -462,6 +509,8 @@ async function insertMessage(
     titlelessPostback:
       event.kind === 'postback' && (event.title ?? '').trim() === '',
     guestCreatedVia: guest.createdVia,
+    pendingAttachments,
+    attachmentRowsFailed,
     // `referral` only; insertReferralMessage is the one writer.
     hadPriorConversation: null,
   }
@@ -472,13 +521,17 @@ async function insertMessage(
  *
  * Called BEFORE the scan's own row is inserted, so it can never count itself.
  *
- * `body <> ''` is the same filter buildRuntimeContext's history query uses,
- * and for the same reason: a scan row and a blank knowledge-gap card both
- * carry an empty body and neither is a conversation. It under-counts a guest
- * whose only message was media with no caption, which reads as "no record".
- * That is the SAFE direction: the no-record branch's copy says only that
- * there is nothing on file and explicitly does not claim a first contact,
- * whereas the other branch tells the model not to introduce itself.
+ * A row counts when it has text, OR media, OR Meta's unsupported flag. A scan
+ * row and a blank knowledge-gap card have none of the three and neither is a
+ * conversation, which is why an empty body alone has never counted.
+ *
+ * TAC-582 (owner ruling, 2026-10-11): a guest whose only message was a photo
+ * or a voice note HAS a record here, and this used to answer "no record" for
+ * them. This is the one place a media-only message counts as prior contact.
+ * It is NOT the agent's first-contact rule, which still ignores media-only
+ * messages (lib/agent/media-history.ts); the two are different questions. This
+ * one picks the scan greeting's wording, where "nothing on file" would be
+ * false for a guest who sent us a photo last week.
  *
  * A failed read is an error, not a false: false chooses a guest-facing
  * instruction, and a read that failed has established nothing.
@@ -493,7 +546,7 @@ async function hadPriorConversation(
     .select('id')
     .eq('venue_id', venueId)
     .eq('guest_id', guestId)
-    .neq('body', '')
+    .or(MESSAGE_HAS_CONTENT_FILTER)
     .limit(1)
     .maybeSingle()
   if (error) return { ok: false, failure: fail('message_lookup', error) }
@@ -585,6 +638,8 @@ async function insertReferralMessage(
     hasProviderSentAt: event.providerSentAt !== null,
     titlelessPostback: false,
     guestCreatedVia: guest.createdVia,
+    pendingAttachments: 0,
+    attachmentRowsFailed: false,
     hadPriorConversation: prior.value,
   }
 }

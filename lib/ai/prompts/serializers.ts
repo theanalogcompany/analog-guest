@@ -13,6 +13,12 @@ import type { ReOptIn } from '@/lib/guests/opt-out'
 import type { MessageChannel } from '@/lib/schemas/message-channel'
 import type { EmojiDirective } from '../emoji-cadence'
 import {
+  type MediaVerb,
+  STORY_REPLY_HISTORY_LINE,
+  mediaLine,
+  withAttachmentLines,
+} from './attachment-lines'
+import {
   applyChannelSubstitutions,
   type ChannelSubstitution,
   copyVariantFor,
@@ -980,7 +986,8 @@ export const UNSENT_HISTORY_NOTE =
 function formatHistoryLine(m: RecentMessage, now: Date): string {
   const speaker = m.direction === 'inbound' ? 'guest' : 'venue'
   const delta = formatTimeDelta(m.createdAt, now)
-  const body = normalizeHistoryBody(m.body)
+  // TAC-582: a guest's attachments read as bracketed lines ahead of their text.
+  const body = withAttachmentLines(normalizeHistoryBody(m.body), m, ' ')
   const marker = historyDeliveryMarker(m.delivery)
   return marker === null
     ? `[${speaker}, ${delta}] ${body}`
@@ -1035,7 +1042,10 @@ export function splitHistory(messages: readonly RecentMessage[]): SplitHistory {
       undelivered.push(m)
       continue
     }
-    const content = m.body.trim()
+    // TAC-582: a guest message that was only a photo is still a turn. It has
+    // no body and one bracketed line, and skipping it would leave the model
+    // answering a conversation with a hole in it.
+    const content = withAttachmentLines(m.body.trim(), m, '\n')
     if (content === '') continue
     const role = m.direction === 'inbound' ? 'user' : 'assistant'
     if (turns.length === 0 && role === 'assistant') continue
@@ -2568,21 +2578,30 @@ export const FIRST_TOUCH_SIGNAL_LINE =
 
 // TAC-574 (ruled 2026-10-06): a turn with text AND a photo is answered
 // normally, and the agent is told the photo exists so it can acknowledge it.
-// The bracketed marker is the ruling's own wording. The sentence after it is
-// there because the marker alone invites "love the photo!": the model has not
-// seen the image, and a reaction to its contents would be invented.
 //
-// `satisfies Record` so a new kind cannot arrive without wording.
+// TAC-582 (ruled 2026-10-11): the line is now the same sentence the history
+// uses, built by the same function, with "also" in it. It used to be the bare
+// marker followed by "You cannot see it. You can say you got it, but do not
+// describe it or react to what is in it." Two things that sentence said are
+// no longer said in those words: that the model MAY say it got the photo
+// ("It arrived fine" now states the fact without the licence), and "react to
+// what is in it" (now "describe it, guess what's in it").
+//
+// `satisfies Record` so a new kind cannot arrive without wording or a verb.
 const INBOUND_MEDIA_LABELS = {
-  photo: 'a photo',
-  gif: 'a GIF',
-  video: 'a video',
-  other: 'an attachment',
-  unknown: 'a photo or GIF',
-} as const satisfies Record<InboundMediaKind, string>
+  photo: ['a photo', 'see it'],
+  gif: ['a GIF', 'see it'],
+  video: ['a video', 'watch it'],
+  // Only reachable from an attachment row, which is what says so.
+  voice_note: ['a voice note', 'hear it'],
+  // An extension nothing recognizes: the type is not known, so "open".
+  other: ['an attachment', 'open it'],
+  unknown: ['a photo or GIF', 'see it'],
+} as const satisfies Record<InboundMediaKind, readonly [string, MediaVerb]>
 
 export function formatInboundMediaLine(kind: InboundMediaKind): string {
-  return `[guest also sent ${INBOUND_MEDIA_LABELS[kind]}] You cannot see it. You can say you got it, but do not describe it or react to what is in it.`
+  const [label, verb] = INBOUND_MEDIA_LABELS[kind]
+  return mediaLine(`guest also sent ${label}`, verb)
 }
 
 /**
@@ -2856,6 +2875,8 @@ export function runtimeToProse(
   // (inboundMessage set) and outbound flow (perkBeingUnlocked or
   // eventBeingInvited set). Type-system enforcement is TAC-243 backlog.
   if (runtime.inboundMessage) {
+    // TAC-582: above the words it gives the context for, as in the history.
+    if (runtime.inboundStoryReply) lines.push(STORY_REPLY_HISTORY_LINE)
     lines.push(`The guest just sent: "${runtime.inboundMessage}"`)
     if (runtime.inboundMedia) {
       lines.push(formatInboundMediaLine(runtime.inboundMedia))

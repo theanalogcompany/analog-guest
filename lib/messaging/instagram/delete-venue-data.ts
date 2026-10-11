@@ -122,6 +122,18 @@
 //     the import script, so no row is a pending send. The messages it points
 //     at are redacted by the `messages` pass like any other.
 //
+//   - `message_attachments` rows are DELETED, and their files in the private
+//     `guest-media` bucket with them (TAC-582). Enumerated from migration 080:
+//     id, message_id, venue_id, guest_id, position, kind, status,
+//     provider_type, provider_url, storage_path, mime_type, byte_size, title,
+//     link_url, failure_reason, the two timestamps. Three of those are guest
+//     content: `provider_url` and `link_url` are links to what the guest sent,
+//     and `title` is a shared reel's caption. And the file is the content
+//     itself, a photo or a voice note. So nothing is kept: redacting the row
+//     would leave a row that describes a file which must not exist. Deleted
+//     FIRST, before the messages are redacted, and files before rows
+//     (lib/messaging/attachments/delete.ts has why that order).
+//
 // CASCADE NEVER FIRES ON THIS PATH, and that is why every guest-keyed table
 // has to be named here by hand. The guest ROW survives, anonymised, so a
 // foreign key with `on delete cascade` is never triggered. Any table added
@@ -151,6 +163,7 @@ import { randomUUID } from 'node:crypto'
 import type { SupabaseClient } from '@supabase/supabase-js'
 
 import type { Database } from '@/db/types'
+import { deleteAttachmentsForGuests } from '@/lib/messaging/attachments/delete'
 
 type AdminSupabaseClient = SupabaseClient<Database>
 
@@ -208,7 +221,19 @@ export async function deleteInstagramVenueData(
     guestsAffected = guestIds.length
 
     if (guestIds.length > 0) {
-      // Messages first. If this failed after the guests were redacted, the
+      // TAC-582: what the guests SENT, before anything else. The files are the
+      // most direct copy of a guest's content this system holds, and a failure
+      // here stops the run with every identifier still in place, so the retry
+      // finds the same guests and the same rows.
+      const attachments = await deleteAttachmentsForGuests(
+        supabase,
+        venueId,
+        guestIds,
+      )
+      if (!attachments.ok)
+        return { ok: false, error: attachments.error, confirmationCode }
+
+      // Then messages. If this failed after the guests were redacted, the
       // bodies would survive with no identity attached to find them by.
       const messages = await supabase
         .from('messages')
