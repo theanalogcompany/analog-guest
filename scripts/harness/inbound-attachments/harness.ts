@@ -43,6 +43,7 @@ import {
   formatConversationTranscript,
   splitHistory,
 } from '@/lib/ai/prompts/serializers'
+import { deleteAttachmentsForGuests } from '@/lib/messaging/attachments/delete'
 import {
   UNSUPPORTED_PREVIEW_LABEL,
   previewLabelFor,
@@ -318,6 +319,108 @@ const SENDBLUE_PHOTO =
 const SENDBLUE_VOICE =
   'https://storage.googleapis.com/inbound-file-store/abc.caf'
 const SENDBLUE_BARE = 'https://storage.googleapis.com/inbound-file-store/abc'
+
+// --- deletion ------------------------------------------------------------------
+// A stand-in for the two things deleteAttachmentsForGuests talks to: the
+// table and the bucket. It records the order of what was asked of it, which
+// is the property under test. It is NOT a model of PostgREST: the filters are
+// accepted and ignored, and every row it holds is "the guests' rows".
+type FakeRow = {
+  id: string
+  venue_id: string
+  guest_id: string
+  message_id: string
+}
+
+function fakeStore(rows: FakeRow[], removeFails: boolean) {
+  const table = [...rows]
+  const log: string[] = []
+  const select = () => {
+    const builder = {
+      eq: () => builder,
+      in: () => builder,
+      limit: (n: number) =>
+        Promise.resolve({ data: table.slice(0, n), error: null }),
+    }
+    return builder
+  }
+  const client = {
+    from: () => ({
+      select,
+      delete: () => ({
+        in: (_column: string, ids: string[]) => {
+          log.push(`rows:${ids.join(',')}`)
+          for (const id of ids) {
+            const at = table.findIndex((row) => row.id === id)
+            if (at !== -1) table.splice(at, 1)
+          }
+          return Promise.resolve({ error: null })
+        },
+      }),
+    }),
+    storage: {
+      from: () => ({
+        remove: (paths: string[]) => {
+          log.push(`files:${paths.join(',')}`)
+          return Promise.resolve({
+            error: removeFails ? { message: 'storage is down' } : null,
+          })
+        },
+      }),
+    },
+  }
+  return {
+    client: client as unknown as Parameters<
+      typeof deleteAttachmentsForGuests
+    >[0],
+    log,
+    remaining: () => table.length,
+  }
+}
+
+const DELETION_ROWS: FakeRow[] = [
+  { id: 'a1', venue_id: 'v', guest_id: 'g1', message_id: 'm1' },
+  { id: 'a2', venue_id: 'v', guest_id: 'g2', message_id: 'm2' },
+]
+
+async function deletionChecks(): Promise<Check[]> {
+  const works = fakeStore(DELETION_ROWS, false)
+  const worked = await deleteAttachmentsForGuests(works.client, 'v', [
+    'g1',
+    'g2',
+  ])
+  const broken = fakeStore(DELETION_ROWS, true)
+  const failed = await deleteAttachmentsForGuests(broken.client, 'v', [
+    'g1',
+    'g2',
+  ])
+  const nobody = fakeStore(DELETION_ROWS, false)
+  const none = await deleteAttachmentsForGuests(nobody.client, 'v', [])
+  return [
+    [
+      "deletion removes the files BEFORE the rows, at each row's computed path",
+      same(works.log, ['files:v/g1/m1/a1,v/g2/m2/a2', 'rows:a1,a2']),
+      JSON.stringify(works.log),
+    ],
+    [
+      'deletion reports what it removed and leaves nothing',
+      worked.ok && worked.data.removed === 2 && works.remaining() === 0,
+      JSON.stringify(worked),
+    ],
+    [
+      'a Storage failure stops the run with every ROW still there to retry from',
+      !failed.ok &&
+        broken.remaining() === 2 &&
+        !broken.log.some((entry) => entry.startsWith('rows:')),
+      JSON.stringify({ failed, log: broken.log }),
+    ],
+    [
+      'deletion for no guests asks for nothing',
+      none.ok && nobody.log.length === 0,
+      JSON.stringify(nobody.log),
+    ],
+  ]
+}
 
 const lineChecks: Check[] = (
   [
@@ -770,10 +873,15 @@ const checks: Check[] = [
   ],
 ]
 
-let failed = 0
-for (const [name, ok, detail] of checks) {
-  if (!ok) failed += 1
-  console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${ok ? '' : `  -> ${detail}`}`)
+async function main(): Promise<void> {
+  const all = [...checks, ...(await deletionChecks())]
+  let failed = 0
+  for (const [name, ok, detail] of all) {
+    if (!ok) failed += 1
+    console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${ok ? '' : `  -> ${detail}`}`)
+  }
+  console.log(`\n${all.length - failed}/${all.length}`)
+  process.exit(failed > 0 ? 1 : 0)
 }
-console.log(`\n${checks.length - failed}/${checks.length}`)
-process.exit(failed > 0 ? 1 : 0)
+
+void main()

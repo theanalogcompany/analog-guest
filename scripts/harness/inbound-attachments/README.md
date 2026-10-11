@@ -10,7 +10,11 @@ It also holds the wording and the first-contact rule:
   character for character against what was approved on 2026-10-11;
 - **photo first, then text, is still first contact** (owner ruling 4), with a control beside
   it that puts the photo where text goes and shows first contact ending;
-- a message Meta flags `is_unsupported` is kept as a row, not dropped.
+- a message Meta flags `is_unsupported` is kept as a row, not dropped;
+- data deletion removes a guest's files **before** their rows, and a Storage failure leaves
+  the rows in place to retry from. This one runs against a stand-in for the table and the
+  bucket that records call order. It is not a model of PostgREST, and it says nothing about
+  whether Storage really deletes a file.
 
 **Run by hand. Not in CI, not an npm script, not a test suite.** Run it when you change
 `lib/messaging/attachments/`, `lib/agent/media-history.ts`,

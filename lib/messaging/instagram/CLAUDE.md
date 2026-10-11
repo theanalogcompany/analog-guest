@@ -190,6 +190,9 @@ mistaken for Meta or a guest's privacy setting.
 redaction list would have failed every deletion request - found at implementation time. One tombstone per guest; a shared value collides on
 the unique constraint.
 
+Attachments are the one thing **deleted** outright, files before rows (TAC-582): the file is
+the guest's content itself, and the row is the only record of where the file is.
+
 **A redaction list written from the columns you remember is a list of the columns you
 remember.** Enumerate from the schema. `messages.ungrounded_claims` holds verbatim guest
 excerpts (legacy rows) and `pending_commitment` holds model-written descriptions of them.
