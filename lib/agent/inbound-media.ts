@@ -51,6 +51,14 @@
 
 import { createAdminClient } from '@/lib/db/admin'
 import type { InboundMediaKind } from '@/lib/ai/types'
+// TAC-582: the extension lists moved beside the attachment kinds, which read
+// the same links for the same reason. One list, two readers.
+import {
+  GIF_EXTENSIONS,
+  PHOTO_EXTENSIONS,
+  VIDEO_EXTENSIONS,
+  extensionOf,
+} from '@/lib/messaging/attachments/kind'
 
 /**
  * How far back a media-only message looks for the text it belongs with.
@@ -76,21 +84,6 @@ export const MEDIA_COMPANION_WINDOW_MS = 120_000
  */
 export const MEDIA_ONLY_SETTLE_MS = 10_000
 export const MEDIA_ONLY_SETTLE_POLL_MS = 2_000
-
-const GIF_EXTENSIONS = ['gif']
-const PHOTO_EXTENSIONS = ['jpg', 'jpeg', 'png', 'heic', 'heif', 'webp']
-const VIDEO_EXTENSIONS = ['mp4', 'mov', 'm4v', 'webm']
-
-function extensionOf(url: string): string | null {
-  try {
-    const path = new URL(url).pathname
-    const dot = path.lastIndexOf('.')
-    if (dot === -1 || path.indexOf('/', dot) !== -1) return null
-    return path.slice(dot + 1).toLowerCase()
-  } catch {
-    return null
-  }
-}
 
 /**
  * What the links say was sent.

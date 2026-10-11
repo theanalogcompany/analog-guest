@@ -31,6 +31,12 @@
 // Nothing is dropped silently: an unexpected shape is how a future Meta change
 // shows up, and a silent drop would make it look like a bug somewhere else.
 
+import {
+  type ParsedAttachment,
+  STORY_REPLY_PROVIDER_TYPE,
+  kindFromInstagramType,
+} from '@/lib/messaging/attachments/kind'
+
 export type InstagramReferral = {
   /** The `ref` query parameter of the ig.me link the guest followed. */
   ref: string | null
@@ -60,6 +66,13 @@ export type InstagramMessageEvent = EventBase & {
   kind: 'message'
   text: string | null
   mediaUrls: string[]
+  /**
+   * TAC-582: what each attachment IS, in the order Meta sent them, followed by
+   * the story this message replies to if it replies to one. `mediaUrls` is
+   * still exactly the links it always was; this is what `message_attachments`
+   * is written from.
+   */
+  attachments: ParsedAttachment[]
   referral: InstagramReferral | null
 }
 
@@ -67,6 +80,8 @@ export type InstagramEchoEvent = EventBase & {
   kind: 'echo'
   text: string | null
   mediaUrls: string[]
+  /** TAC-582: as on a message. Staff sending a photo from the app has these too. */
+  attachments: ParsedAttachment[]
 }
 
 // The postback's `payload` (e.g. ICEBREAKER_HOURS) is deliberately not carried:
@@ -241,6 +256,53 @@ function attachmentUrls(message: Record<string, unknown>): string[] {
   return urls
 }
 
+// TAC-582: the same walk as attachmentUrls, keeping what that one throws away.
+//
+// An attachment with no `payload.url` is KEPT here, with a null link, where
+// attachmentUrls skips it: the row then says an attachment arrived and what
+// Meta called it, which is the only record there will be of it.
+//
+// `title` is read for every type and is only ever present on a share (the
+// reel's caption, in the payload captured on 2026-10-11).
+function parseAttachments(
+  message: Record<string, unknown>,
+): ParsedAttachment[] {
+  const attachments: ParsedAttachment[] = []
+  if (Array.isArray(message.attachments)) {
+    for (const attachment of message.attachments) {
+      if (!isRecord(attachment)) continue
+      const type = nonEmptyString(attachment.type)
+      const payload = isRecord(attachment.payload) ? attachment.payload : null
+      const url = payload === null ? null : nonEmptyString(payload.url)
+      attachments.push({
+        kind: kindFromInstagramType(type, url),
+        providerType: type,
+        url,
+        title: payload === null ? null : nonEmptyString(payload.title),
+      })
+    }
+  }
+
+  // A reply to the venue's story: `message.reply_to.story { url, id }`, per
+  // Meta's documentation. NOT YET SEEN IN A REAL DELIVERY (the 2026-10-11
+  // capture has none), so this follows the documented shape and nothing else.
+  // It is recorded as an attachment of its own kind so the thread can show
+  // which story the guest was answering. It is deliberately not in mediaUrls:
+  // the story is the venue's, not something the guest sent.
+  const replyTo = isRecord(message.reply_to) ? message.reply_to : null
+  const story =
+    replyTo !== null && isRecord(replyTo.story) ? replyTo.story : null
+  if (story !== null) {
+    attachments.push({
+      kind: 'story_reply',
+      providerType: STORY_REPLY_PROVIDER_TYPE,
+      url: nonEmptyString(story.url),
+      title: null,
+    })
+  }
+  return attachments
+}
+
 function parseMessage(
   item: Record<string, unknown>,
   message: Record<string, unknown>,
@@ -280,6 +342,7 @@ function parseMessage(
       providerSentAt: providerSentAtOf(item),
       text,
       mediaUrls,
+      attachments: parseAttachments(message),
     }
   }
   return {
@@ -290,6 +353,7 @@ function parseMessage(
     providerSentAt: providerSentAtOf(item),
     text,
     mediaUrls,
+    attachments: parseAttachments(message),
     // Inside `message` on an ad referral; beside it, where Meta has put it on
     // other surfaces. Taking either costs nothing, and the ref arrives once.
     referral: parseReferral(message.referral) ?? parseReferral(item.referral),

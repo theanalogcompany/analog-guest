@@ -102,6 +102,7 @@ import type { Database } from '@/db/types'
 import type { InstagramScanUnattributedReason } from '@/lib/analytics/posthog'
 // By path, not through @/lib/schemas: TAC-518 shares this predicate with the
 // agent runtime so the two cannot drift.
+import { insertMessageAttachments } from '@/lib/messaging/attachments/store'
 import { isScanReferral } from '@/lib/schemas/referral-source'
 
 import {
@@ -176,6 +177,13 @@ export type InstagramEventOutcome =
       titlelessPostback: boolean
       /** The new guest's created_via, or null when the guest already existed. */
       guestCreatedVia: InstagramGuestCreatedVia | null
+      /**
+       * TAC-582: how many of this message's attachments were written
+       * `pending`, i.e. still have to be copied into our own storage. The
+       * route hands the message to the re-host step when this is above zero.
+       * 0 for a postback, a referral, and a message with nothing to copy.
+       */
+      pendingAttachments: number
       /**
        * TAC-536, `referral` only; NULL for every other kind, which is the
        * convention titlelessPostback and guestCreatedVia already follow here.
@@ -447,6 +455,31 @@ async function insertMessage(
   if (error || !data)
     return failedOutcome(event.kind, fail('message_insert', error), venueId)
 
+  // TAC-582: one row per attachment, written before the 200 so the agent turn
+  // and the first thread read both find them. A failure here does NOT fail the
+  // event: the message is saved and media_urls on it is intact, so the guest's
+  // message is not lost, only its attachment rows. Logged with our own ids.
+  let pendingAttachments = 0
+  if (event.kind !== 'postback' && event.attachments.length > 0) {
+    const stored = await insertMessageAttachments(supabase, {
+      messageId: data.id,
+      venueId,
+      guestId: guest.guestId,
+      attachments: event.attachments,
+    })
+    if (stored.ok) {
+      pendingAttachments = stored.data.pending
+    } else {
+      console.error('instagram webhook: attachment rows not saved', {
+        event: 'instagram_attachments_insert_failed',
+        venueId,
+        messageId: data.id,
+        count: event.attachments.length,
+        error: stored.error,
+      })
+    }
+  }
+
   return {
     status: 'persisted',
     kind: event.kind,
@@ -462,6 +495,7 @@ async function insertMessage(
     titlelessPostback:
       event.kind === 'postback' && (event.title ?? '').trim() === '',
     guestCreatedVia: guest.createdVia,
+    pendingAttachments,
     // `referral` only; insertReferralMessage is the one writer.
     hadPriorConversation: null,
   }
@@ -585,6 +619,7 @@ async function insertReferralMessage(
     hasProviderSentAt: event.providerSentAt !== null,
     titlelessPostback: false,
     guestCreatedVia: guest.createdVia,
+    pendingAttachments: 0,
     hadPriorConversation: prior.value,
   }
 }
