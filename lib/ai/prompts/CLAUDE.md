@@ -117,6 +117,15 @@ join them in through `withAttachmentLines`; nothing else may, because retrieval 
 pending-question check read history bodies. Guest messages only: what the venue sent is never
 worded this way, since an assistant turn in brackets teaches the model to write brackets.
 
+**A described attachment's line says what it shows** (v1.107.0, TAC-584). In history it is
+`[guest sent a photo: <description>]`; on the turn that answers it, `describedMediaLine` adds
+which drinks may be named, nothing about any person, and nothing the description does not
+say. Both are in `attachment-lines.ts`, approved verbatim. An attachment with no usable
+description keeps the v1.106.0 line, so only conversations with described media changed. The
+description is a model's sentence about a guest's picture and reaches a line only through
+`usableDescription` (`lib/schemas/attachment-description.ts`), which is where it is cleaned.
+The names a line may carry come from `nameableItems` in the same file, and nowhere else.
+
 `serializers.ts` renders the user prompt.
 
 **The intentions block renders LAST of the content blocks**, immediately before the emoji

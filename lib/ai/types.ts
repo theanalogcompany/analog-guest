@@ -203,6 +203,35 @@ export type FollowupContext = {
 export type InboundMediaKind =
   'photo' | 'gif' | 'video' | 'voice_note' | 'other' | 'unknown'
 
+/**
+ * TAC-584: what a described attachment is called in a prompt line. `story` is
+ * a story the guest tagged the venue in. Only these four are ever described
+ * (lib/messaging/attachments/describe.ts).
+ */
+export type DescribedMediaWord = 'photo' | 'video' | 'gif' | 'story'
+
+/**
+ * TAC-584: one attachment on the turn being answered that the describe step
+ * has looked at. lib/agent/handle-inbound.ts builds it; the serializer words
+ * it (lib/ai/prompts/attachment-lines.ts).
+ */
+export type InboundDescribedMedia = {
+  word: DescribedMediaWord
+  /** Cleaned for a prompt. Null when it was looked at and is too unclear to make out. */
+  description: string | null
+  /** The menu items the reply may name. Empty when none is unmistakable. */
+  nameableItems: string[]
+}
+
+/**
+ * TAC-584: an image the model is shown on the turn that answers it. In memory
+ * only: never stored, never traced.
+ */
+export type InboundImage = {
+  bytes: Uint8Array
+  mediaType: 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp'
+}
+
 export type RuntimeContext = {
   guestName?: string
   inboundMessage?: string
@@ -215,6 +244,11 @@ export type RuntimeContext = {
   // stories. Rendered as one bracketed line above "The guest just sent", the
   // same line the history uses. Absent on every other turn.
   inboundStoryReply?: boolean
+  // TAC-584: the attachments on this turn that have been described. When any
+  // has a description, its line replaces the "you can't see it" line above.
+  // On a turn with NO text (`inboundMessage` is then the empty string) these
+  // lines are the whole of what the guest sent. Absent on every other turn.
+  inboundDescribedMedia?: InboundDescribedMedia[]
   perkBeingUnlocked?: {
     name: string
     qualification: string

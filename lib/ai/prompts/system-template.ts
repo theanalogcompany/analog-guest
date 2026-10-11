@@ -2770,7 +2770,60 @@ import {
 //   Every other first-attempt prompt is byte-identical to v1.105.0: a message
 //   with no attachment lines renders through the same code path it did.
 //
-export const PROMPT_VERSION = 'v1.106.0'
+// v1.107.0 (TAC-584): a guest's photo, video, GIF or story mention that has
+// been DESCRIBED reads as what it shows. No template text changed.
+//
+//   TAC-582 put a line in the conversation for every attachment and told the
+//   model it could not see it. An attachment the describe step has looked at
+//   (lib/messaging/attachments/describe.ts) now carries its description
+//   instead. All of the wording is in prompts/attachment-lines.ts and was
+//   approved verbatim by the owner on 2026-10-11, on TAC-584's plan.
+//
+//   IN HISTORY, on later turns:
+//
+//     [guest sent a photo: two iced drinks on a table, one with a blue top]
+//
+//   and the same shape for a video, a GIF, and "guest tagged you in their
+//   story". The bare shape is safe here where v1.106.0's first wording was
+//   not: that defect was a model that knew a photo existed and had nothing to
+//   look at. It now has the description.
+//
+//   ON THE TURN BEING ANSWERED:
+//
+//     [guest also sent a photo. It shows: <description>. You may name <items>
+//     and no other menu item. Reply only to the drinks, the food or the space
+//     in it. Say nothing about any person in it, and nothing the description
+//     does not say.]
+//
+//   with "You can't tell which menu items these are, so name none and keep to
+//   what it looks like" in place of the naming sentence when no drink is
+//   unmistakable. The rules sit inside the bracket, last before the model
+//   writes, because they apply to a turn with a described picture and to no
+//   other; a universal rule would be read on every turn.
+//
+//   A TURN WITH NO TEXT IS NOW GENERATED when its media was described: the
+//   line reads "guest sent a photo with no text" (or a video, a GIF, "guest
+//   tagged you in their story") and stands where "The guest just sent" does.
+//   That turn used to be a blank card with no model call. It is composed as
+//   `casual_chatter`, and it is always held for an operator: the path writes
+//   the card itself (lib/agent/handle-inbound.ts), no gate decides it. On
+//   that turn the model is also shown the picture.
+//
+//   A picture the describe step could not make out gets, on a turn with no
+//   text, "[guest sent a photo with no text. It arrived fine, but it is too
+//   unclear to make out. Thank them for sending it. Don't describe it, guess
+//   what's in it, or say it didn't come through.]", and is not shown.
+//
+//   NOT MEASURED AT MERGE. The behavioural check for this wording is
+//   pre-registered on TAC-584 and needs test images the owner supplies
+//   (scripts/measurement/media-describe.ts). Every reply this wording can
+//   produce is held for an operator until it has been run.
+//
+//   BASELINE RESET only for a conversation with DESCRIBED media in its
+//   window. An attachment with no description renders v1.106.0's line through
+//   the same code path, so every other first-attempt prompt is byte-identical.
+//
+export const PROMPT_VERSION = 'v1.107.0'
 
 export const SYSTEM_TEMPLATE = `You work at a hospitality venue (cafe, bakery, restaurant). You communicate with its guests via iMessage, in whatever voice the venue has configured below — its own collective voice, its owner's, or a named staff member's.
 

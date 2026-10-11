@@ -53,7 +53,7 @@ import {
 } from '@/lib/schemas/attachment-description'
 
 import { getGenerationModel } from './client'
-import type { AIResult } from './types'
+import type { AIResult, DescribedMediaWord } from './types'
 
 export const DESCRIBE_ATTACHMENT_PROMPT_VERSION = 'v1.0.0'
 
@@ -64,8 +64,8 @@ export const DESCRIBE_ATTACHMENT_MAX_OUTPUT_TOKENS = 900
 export const DESCRIBE_ATTACHMENT_TRUNCATED_ERROR_CODE =
   'ai_describe_attachment_truncated'
 
-/** What the guest sent, as the prompt words it. */
-export type DescribedMediaKind = 'photo' | 'video' | 'gif' | 'story'
+/** What the guest sent, as the prompt words it. One union, shared with the lines the agent reads. */
+export type DescribedMediaKind = DescribedMediaWord
 
 export interface DescribeAttachmentInput {
   /** One image for a photo or GIF; up to four frames, in order, for a video. */

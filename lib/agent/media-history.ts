@@ -29,6 +29,11 @@
 // what makes "text behaves exactly as today" true by construction, with no
 // reader to re-check. isFirstContactNeutral below is the condition, named.
 //
+// TAC-584: A DESCRIBED ATTACHMENT'S LINE SAYS WHAT IT SHOWS. The rows read
+// here now carry `description` and `description_meta` (migration 081), and
+// buildMediaHistory hands the usable ones to the wording. This file still
+// decides nothing about wording: lib/ai/prompts/attachment-lines.ts does.
+//
 // FAILS SOFT, to no lines. This is context on top of a turn that works without
 // it. A read that fails is logged and the turn runs as it did before TAC-582.
 //
@@ -43,6 +48,7 @@ import {
 import { captureGuestMediaDegraded } from '@/lib/analytics/posthog'
 import { createAdminClient } from '@/lib/db/admin'
 import { isAttachmentKind } from '@/lib/messaging/attachments/kind'
+import { usableDescription } from '@/lib/schemas/attachment-description'
 
 import { MEDIA_COMPANION_WINDOW_MS } from './inbound-media'
 
@@ -87,6 +93,11 @@ export interface AttachmentHistoryRow {
   kind: string
   provider_type: string | null
   title: string | null
+  // TAC-584: what the describe step wrote, when it has run. Optional so a
+  // row built by hand, or by a caller older than the columns, reads as not
+  // described.
+  description?: string | null
+  description_meta?: unknown
 }
 
 /**
@@ -105,6 +116,14 @@ export function buildMediaHistory(
       kind: isAttachmentKind(row.kind) ? row.kind : 'unknown',
       providerType: row.provider_type,
       title: row.title,
+      // TAC-584: only a description a prompt may carry. Never described,
+      // skipped, and too-unclear-to-make-out all come back null here, and the
+      // line is then the one it has always been.
+      description:
+        usableDescription({
+          description: row.description ?? null,
+          descriptionMeta: row.description_meta ?? null,
+        })?.description ?? null,
     }
     const list = attachmentsByMessage.get(row.message_id)
     if (list) list.push(attachment)
@@ -193,7 +212,9 @@ export async function loadMediaHistory(
     // can hold 180 rows, and that many uuids is a URL PostgREST may refuse.
     const attachmentsQuery = supabase
       .from('message_attachments')
-      .select('message_id, kind, provider_type, title')
+      .select(
+        'message_id, kind, provider_type, title, description, description_meta',
+      )
       .eq('venue_id', input.venueId)
       .eq('guest_id', input.guestId)
       .gte('created_at', input.historyCutoffIso)

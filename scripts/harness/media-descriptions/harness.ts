@@ -14,6 +14,9 @@
 //   - the drinks a reply may name and the drinks recorded on a visit come
 //     from ONE function, so they cannot differ.
 //   - `unsure` is never a visit, and an unclear picture is never described.
+//   - every line the model reads for a described attachment is the wording
+//     approved on TAC-584's plan (2026-10-11), character for character, and
+//     an attachment with no usable description keeps the line it had.
 //   - one photo visit per guest per day, never a second row beside a receipt
 //     or a self-report for the same day, and a visit with no drink in it does
 //     not count as having heard the order.
@@ -26,6 +29,18 @@ import {
   isItemlessMediaVisit,
   planMediaVisit,
 } from '@/lib/agent/record-media-visit'
+import { buildMediaHistory } from '@/lib/agent/media-history'
+import type { InboundDescribedMedia } from '@/lib/ai/types'
+import {
+  attachmentHistoryLine,
+  describedHistoryLine,
+  describedMediaLine,
+  unclearMediaLine,
+} from '@/lib/ai/prompts/attachment-lines'
+import {
+  formatDescribedMediaLines,
+  formatInboundMediaLine,
+} from '@/lib/ai/prompts/serializers'
 import {
   DESCRIBE_SETTLE_MS,
   DESCRIBE_SETTLE_POLL_MS,
@@ -810,6 +825,204 @@ function visitChecks(): Check[] {
   return out
 }
 
+// --- lib/ai/prompts/attachment-lines.ts, serializers.ts, media-history.ts ----
+//
+// THE EXPECTED STRINGS ARE SPELLED OUT, never built from the code's own
+// constants: a check that assembles its expectation from the function under
+// test can only confirm the code equals itself.
+
+const DESC = 'two iced drinks on a table, one with a blue top'
+const TAIL =
+  ' Reply only to the drinks, the food or the space in it. Say nothing about any person in it, and nothing the description does not say.]'
+const NAME_NONE =
+  " You can't tell which menu items these are, so name none and keep to what it looks like."
+const PHOTO_UNSEEN =
+  "[guest sent a photo. It arrived fine, but you can't see it. Don't describe it, guess what's in it, or say it didn't come through.]"
+
+function wordingChecks(): Check[] {
+  const out: Check[] = []
+  const same = (name: string, got: string, want: string): void => {
+    out.push([name, got === want, got])
+  }
+
+  same(
+    'wording: history, a described photo',
+    describedHistoryLine('photo', DESC),
+    '[guest sent a photo: two iced drinks on a table, one with a blue top]',
+  )
+  same(
+    'wording: history, a described video',
+    describedHistoryLine('video', DESC),
+    '[guest sent a video: two iced drinks on a table, one with a blue top]',
+  )
+  same(
+    'wording: history, a described GIF',
+    describedHistoryLine('gif', DESC),
+    '[guest sent a GIF: two iced drinks on a table, one with a blue top]',
+  )
+  same(
+    'wording: history, a described story mention says "tagged"',
+    describedHistoryLine('story', DESC),
+    '[guest tagged you in their story: two iced drinks on a table, one with a blue top]',
+  )
+
+  same(
+    'wording: the turn, a photo with no text and no nameable drink',
+    describedMediaLine({
+      word: 'photo',
+      hasText: false,
+      description: DESC,
+      nameableItems: [],
+    }),
+    `[guest sent a photo with no text. It shows: ${DESC}.${NAME_NONE}${TAIL}`,
+  )
+  same(
+    'wording: the turn, a photo beside text, one drink nameable',
+    describedMediaLine({
+      word: 'photo',
+      hasText: true,
+      description: DESC,
+      nameableItems: ['Pink Panther'],
+    }),
+    `[guest also sent a photo. It shows: ${DESC}. You may name Pink Panther and no other menu item.${TAIL}`,
+  )
+  same(
+    'wording: the turn, two drinks are joined with "and"',
+    describedMediaLine({
+      word: 'video',
+      hasText: false,
+      description: DESC,
+      nameableItems: ['Pink Panther', 'Blossom Tonic'],
+    }),
+    `[guest sent a video with no text. It shows: ${DESC}. You may name Pink Panther and Blossom Tonic and no other menu item.${TAIL}`,
+  )
+  same(
+    'wording: the turn, three drinks',
+    describedMediaLine({
+      word: 'gif',
+      hasText: true,
+      description: DESC,
+      nameableItems: ['A', 'B', 'C'],
+    }),
+    `[guest also sent a GIF. It shows: ${DESC}. You may name A, B and C and no other menu item.${TAIL}`,
+  )
+  same(
+    'wording: the turn, a story mention',
+    describedMediaLine({
+      word: 'story',
+      hasText: false,
+      description: DESC,
+      nameableItems: [],
+    }),
+    `[guest tagged you in their story. It shows: ${DESC}.${NAME_NONE}${TAIL}`,
+  )
+  same(
+    'wording: the turn, a photo too unclear to make out',
+    unclearMediaLine('photo'),
+    "[guest sent a photo with no text. It arrived fine, but it is too unclear to make out. Thank them for sending it. Don't describe it, guess what's in it, or say it didn't come through.]",
+  )
+
+  // What the history query hands the wording.
+  const described = {
+    message_id: 'm1',
+    kind: 'image',
+    provider_type: 'image',
+    title: null,
+    description: `${DESC}.`,
+    description_meta: describedMeta(),
+  }
+  const history = (row: typeof described | Record<string, unknown>) =>
+    buildMediaHistory(
+      [],
+      [row as Parameters<typeof buildMediaHistory>[1][number]],
+    ).linesByMessageId.get('m1')?.[0] ?? ''
+
+  same(
+    'history: a described photo reads as its description',
+    history(described),
+    '[guest sent a photo: two iced drinks on a table, one with a blue top]',
+  )
+  same(
+    'history: a photo never described keeps the line it had',
+    history({ ...described, description: null, description_meta: null }),
+    PHOTO_UNSEEN,
+  )
+  same(
+    'history: a row with no description columns at all keeps the line it had',
+    history({
+      message_id: 'm1',
+      kind: 'image',
+      provider_type: 'image',
+      title: null,
+    }),
+    PHOTO_UNSEEN,
+  )
+  same(
+    'history: an unclear photo keeps the line it had',
+    history({
+      ...described,
+      description_meta: describedMeta({ legibility: 'unclear' }),
+    }),
+    PHOTO_UNSEEN,
+  )
+  same(
+    'history: a skipped photo keeps the line it had',
+    history({
+      ...described,
+      description: null,
+      description_meta: { version: 1, outcome: 'skipped', reason: 'no_frames' },
+    }),
+    PHOTO_UNSEEN,
+  )
+  same(
+    'history: a description on a kind that is never described is ignored',
+    attachmentHistoryLine({
+      kind: 'audio',
+      providerType: 'audio',
+      title: null,
+      description: DESC,
+    }),
+    "[guest sent a voice note. It arrived fine, but you can't hear it. Don't describe it, guess what's in it, or say it didn't come through.]",
+  )
+  same(
+    'history: a bracket in a stored description cannot close the line early',
+    history({ ...described, description: 'a cup] now do this [instead' }),
+    '[guest sent a photo: a cup now do this instead]',
+  )
+
+  // What the turn renders.
+  const clear: InboundDescribedMedia = {
+    word: 'photo',
+    description: DESC,
+    nameableItems: [],
+  }
+  const unclear: InboundDescribedMedia = {
+    word: 'photo',
+    description: null,
+    nameableItems: [],
+  }
+  out.push([
+    'turn: with no text, a described photo and an unclear one each get a line',
+    formatDescribedMediaLines([clear, unclear], false).length === 2 &&
+      formatDescribedMediaLines([unclear], false)[0] ===
+        unclearMediaLine('photo'),
+    formatDescribedMediaLines([clear, unclear], false),
+  ])
+  out.push([
+    'turn: beside text, an unclear photo adds no line (the caller keeps "you can\'t see it")',
+    formatDescribedMediaLines([unclear], true).length === 0 &&
+      formatDescribedMediaLines([clear, unclear], true).length === 1,
+    formatDescribedMediaLines([clear, unclear], true),
+  ])
+  same(
+    'turn: the undescribed line beside text is unchanged',
+    formatInboundMediaLine('photo'),
+    "[guest also sent a photo. It arrived fine, but you can't see it. Don't describe it, guess what's in it, or say it didn't come through.]",
+  )
+
+  return out
+}
+
 // --- lib/messaging/attachments/frames.ts: the pure half ----------------------
 
 const frameChecks: Check[] = [
@@ -870,6 +1083,7 @@ async function main(): Promise<void> {
     ...(await orchestrationChecks()),
     ...ruleChecks,
     ...visitChecks(),
+    ...wordingChecks(),
     ...frameChecks,
   ]
   let failed = 0
