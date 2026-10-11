@@ -12,9 +12,9 @@
 // WHAT IT PROVES, AND WHAT IT DOES NOT. It proves the plumbing end to end
 // against production's own rows: that a stored photo, GIF and video can be
 // read from the bucket and turned into frames, that a story link can be
-// fetched transiently, that a model call accepts a picture in the shape this
-// repo sends it, and that a prompt composed for a turn with no text is one
-// the generator answers. It is one describe and one draft per attachment, so
+// fetched transiently, that the describe call accepts a picture in the shape
+// this repo sends it, and that a prompt composed for a turn with no text is
+// one the generator answers from the description alone. It is one describe and one draft per attachment, so
 // it says NOTHING about how often a description is wrong, a drink is misnamed
 // or a person is commented on. A count from this run is an anecdote.
 //
@@ -67,7 +67,6 @@ import {
   describeMessageAttachments,
   planDescribe,
 } from '@/lib/messaging/attachments/describe'
-import type { Frame } from '@/lib/messaging/attachments/frames'
 import {
   isAttachmentKind,
   isAttachmentStatus,
@@ -375,7 +374,6 @@ async function main(): Promise<void> {
     })
 
     const media: InboundDescribedMedia[] = []
-    const images: Frame[] = []
     for (const item of described) {
       if (item.meta === null || item.meta.outcome !== 'described') {
         const why =
@@ -398,7 +396,6 @@ async function main(): Promise<void> {
         description: clear ? item.description : null,
         nameableItems: allowed,
       })
-      if (clear) images.push(...item.frames)
       const visit = evidencesVisit(item.meta)
       const line =
         `- **${item.mediaKind}** \`${item.attachmentId.slice(0, 8)}\`` +
@@ -460,13 +457,9 @@ async function main(): Promise<void> {
       .split('\n')
       .filter((l) => l.startsWith('[guest '))
     try {
-      // THE PRODUCTION GENERATOR, pictures and all: generateMessage is what a
-      // turn calls, so this is the one place its image parts are exercised
-      // outside production.
-      const generated = await generateMessage({
-        ...input,
-        inboundImages: images.slice(0, 8),
-      })
+      // THE PRODUCTION GENERATOR, given what production gives it: the line
+      // above and no picture. The picture never leaves the describe step.
+      const generated = await generateMessage(input)
       if (!generated.ok) throw new Error(generated.error)
       const draft = generated.data.body
       const block =
@@ -474,7 +467,7 @@ async function main(): Promise<void> {
         (hasText
           ? `  - the guest also wrote: "${body}" (classified \`${category}\`)\n`
           : '') +
-        `  - **draft** (${images.length} picture${images.length === 1 ? '' : 's'} shown): ${draft.replace(/\n+/g, ' / ')}`
+        `  - **draft** (from the description alone): ${draft.replace(/\n+/g, ' / ')}`
       summary.push(block)
       console.log(block)
       log.appendUnit({ messageId, category, mediaLines, draft })

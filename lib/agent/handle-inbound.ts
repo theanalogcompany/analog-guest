@@ -13,7 +13,7 @@ import {
   captureReviewAskSent,
 } from '@/lib/analytics/posthog'
 import { createAdminClient } from '@/lib/db/admin'
-import type { InboundDescribedMedia, InboundImage } from '@/lib/ai/types'
+import type { InboundDescribedMedia } from '@/lib/ai/types'
 import { describeMessageAttachments } from '@/lib/messaging/attachments/describe'
 import { nameableItems } from '@/lib/schemas/attachment-description'
 import { isEmptyContextUpdate, updateGuestContext } from '@/lib/guests/context'
@@ -599,12 +599,6 @@ async function persistMediaOnlyCard(
 }
 
 /**
- * The most images the generator is shown on one turn. A video is four frames,
- * so this is two clips, or a clip and four photos.
- */
-const MAX_INBOUND_IMAGES = 8
-
-/**
  * What a media-only draft is composed as. Nothing was classified (there are
  * no words to classify), and `composePrompt` needs a category for its
  * instructions. A photo with no text is small talk, not a question, a
@@ -630,12 +624,14 @@ const MEDIA_ONLY_DRAFT_CATEGORY = 'casual_chatter' as const
  *   ctx.inboundDescribedMedia  one entry per attachment the model looked at:
  *                              what it shows (null when too unclear) and the
  *                              drinks a reply may name.
- *   ctx.inboundImages          the pictures themselves, for the generator, in
- *                              memory only. None for an unclear one: with
- *                              nothing reliable to say about it, the model is
- *                              given nothing to guess from.
- * Both are left unset when nothing was described, and the turn then runs
- * exactly as it did before descriptions existed.
+ * Left unset when nothing was described, and the turn then runs exactly as
+ * it did before descriptions existed.
+ *
+ * THE PICTURE DOES NOT LEAVE THE DESCRIBE STEP (owner ruling 2026-10-11).
+ * The generator is given the description and nothing else. It was first built
+ * to be shown the picture as well, and a smoke run on three photos had one
+ * draft use a detail its description did not carry: the picture is a way
+ * round the describe step, which is where naming and people are decided.
  *
  * THE VISIT IS DECIDED HERE, whatever becomes of the draft: a story that
  * shows the venue is evidence the guest was there even if generation fails a
@@ -661,7 +657,6 @@ async function describeTurnMedia(
   })
 
   const media: InboundDescribedMedia[] = []
-  const images: InboundImage[] = []
   for (const item of described) {
     if (item.meta === null || item.meta.outcome !== 'described') continue
     const clear = item.meta.legibility === 'clear' && item.description !== null
@@ -670,18 +665,13 @@ async function describeTurnMedia(
       description: clear ? item.description : null,
       nameableItems: clear ? nameableItems(item.meta, menuItemNames) : [],
     })
-    if (clear) images.push(...item.frames)
   }
-  if (media.length > 0) {
-    ctx.inboundDescribedMedia = media
-    ctx.inboundImages = images.slice(0, MAX_INBOUND_IMAGES)
-  }
+  if (media.length > 0) ctx.inboundDescribedMedia = media
   console.log('[agent] inbound media described', {
     agentRunId: ctx.agentRunId,
     attachments: described.length,
     described: media.length,
     unclear: media.filter((m) => m.description === null).length,
-    images: Math.min(images.length, MAX_INBOUND_IMAGES),
   })
 
   // One visit per message, keyed to it (record-media-visit.ts).
@@ -805,7 +795,6 @@ async function persistMediaOnlyDraft(
   const generateSpan = trace.generation('generate', {
     category: MEDIA_ONLY_DRAFT_CATEGORY,
     mediaOnly: true,
-    images: ctx.inboundImages?.length ?? 0,
   })
   let gen: Awaited<ReturnType<typeof generateStage>>
   try {
@@ -3237,15 +3226,14 @@ async function runInboundTurn(
     //
     // EXCEPT ON AN OPT-OUT TURN, which is the one category the hold exempts
     // (a compliance reply always sends). That reply is not written about the
-    // picture, so it is not given one: the description and the image are
-    // dropped and the turn's prompt is the one it has always had.
+    // picture, so it is not told about one: the description is dropped and
+    // the turn's prompt is the one it has always had.
     //
     // The category is read BEFORE the await: an opt-out confirmation must go
     // out at once, and the describe step is seconds long. It is left running
     // (waitUntil, above) so its visit decision is still made.
     if (ctx.classification.category === 'opt_out') {
       ctx.inboundDescribedMedia = undefined
-      ctx.inboundImages = undefined
     } else {
       if (describingMedia !== null) {
         await describingMedia

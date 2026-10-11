@@ -92,8 +92,8 @@ function sameLines(a: readonly string[], b: readonly string[]): boolean {
  * description sat in that turn's history, a reply written from it would go
  * out with nobody reading it. So the history is built WITHOUT descriptions,
  * exactly as it was before they existed, and handle-inbound calls this only
- * after it knows the turn is held. Whether an unheld later turn may read a
- * description is a ruling nobody has made; until one is, it does not.
+ * after it knows the turn is held. The owner accepted that on 2026-10-11:
+ * an unheld later turn does not read a description.
  */
 export function withDescribedHistory(
   messages: readonly RecentMessage[],

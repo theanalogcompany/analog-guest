@@ -231,9 +231,14 @@ export type DescribedTurnMedia = {
  *
  * Every prohibition names what to do instead ("keep to what it looks like",
  * "reply only to the drinks, the food or the space").
+ *
+ * "Don't assume the day, time or occasion" was added by the owner on
+ * 2026-10-11, after the smoke run: a draft answered a screenshot of a pizza
+ * with "a good Friday night plan", on a Sunday. A picture says what is in it
+ * and not when it was taken or why.
  */
 export function describedMediaLine(media: DescribedTurnMedia): string {
-  return `[${describedTurnLead(media.word, media.hasText)}. It shows: ${media.description}. ${namingClause(media.nameableItems)}. Reply only to the drinks, the food or the space in it. Say nothing about any person in it, and nothing the description does not say.]`
+  return `[${describedTurnLead(media.word, media.hasText)}. It shows: ${media.description}. ${namingClause(media.nameableItems)}. Reply only to the drinks, the food or the space in it. Say nothing about any person in it, and nothing the description does not say. Don't assume the day, time or occasion.]`
 }
 
 /**

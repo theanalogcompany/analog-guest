@@ -46,11 +46,11 @@
 // not repeat (the model call, a missing ffmpeg, a re-host still running) is
 // reported and writes nothing, so the row is not marked as tried.
 //
-// THE FRAMES ARE RETURNED, AND ONLY FROM THIS CALL. The turn that answers the
-// message shows the model the picture itself as well as the sentence, so the
-// images this run made are handed back in memory. An attachment described by
-// an earlier run comes back with its sentence and no frames: the bytes are not
-// fetched a second time to rebuild them.
+// THE PICTURE NEVER LEAVES THIS FILE (owner ruling 2026-10-11). What comes
+// back is the sentence and the record beside it. The frames are made, shown
+// to the one vision call, and dropped. The generator that drafts the reply is
+// given words only: handed the picture too, it wrote from details the
+// description did not carry, which is this step's rules being walked round.
 //
 // FAILS SOFT, TO TODAY. Anything that goes wrong leaves the attachment
 // undescribed, and an undescribed attachment is what every turn had before
@@ -85,12 +85,7 @@ import {
   parseDescriptionMeta,
 } from '@/lib/schemas/attachment-description'
 
-import {
-  type Frame,
-  type FramesResult,
-  imageToFrame,
-  videoToFrames,
-} from './frames'
+import { type FramesResult, imageToFrame, videoToFrames } from './frames'
 import {
   type AttachmentKind,
   type AttachmentStatus,
@@ -135,8 +130,6 @@ export type DescribedAttachment = {
   /** Already cleaned for a prompt. Null when there is nothing usable. */
   description: string | null
   meta: AttachmentDescriptionMeta | null
-  /** The images the model was shown, from THIS run only. Never stored. */
-  frames: Frame[]
 }
 
 const MEDIA_KIND = {
@@ -353,7 +346,6 @@ function alreadyDescribed(
     mediaKind,
     description: cleanDescription(target.description),
     meta: parseDescriptionMeta(target.descriptionMeta),
-    frames: [],
   }
 }
 
@@ -530,7 +522,6 @@ export async function describeMessageAttachments(
         mediaKind,
         description,
         meta,
-        frames: framed.frames,
       })
     }
     return results

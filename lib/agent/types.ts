@@ -6,11 +6,7 @@ import type {
   PendingQuestion,
   RecentMessage,
 } from '@/lib/ai'
-import type {
-  InboundDescribedMedia,
-  InboundImage,
-  InboundMediaKind,
-} from '@/lib/ai/types'
+import type { InboundDescribedMedia, InboundMediaKind } from '@/lib/ai/types'
 import type { AgentTrace } from '@/lib/observability'
 import type { KnowledgeCorpusChunk, VoiceCorpusChunk } from '@/lib/rag'
 import type {
@@ -670,12 +666,10 @@ export interface RuntimeContext {
   // no proactive path can set it. Absent or false on every other turn.
   mediaContext?: boolean
   // TAC-584: the attachments on this turn that the describe step has looked
-  // at, and the images it made of them. Set by handle-inbound before
-  // generation, on inbound runs only. `inboundImages` lives in memory for the
-  // length of the turn and is never persisted or traced: for a story it is
-  // the only copy of the bytes there will ever be, by design.
+  // at, in words. Set by handle-inbound before generation, on inbound runs
+  // only. The pictures themselves never reach the context: they stay inside
+  // the describe step (owner ruling 2026-10-11).
   inboundDescribedMedia?: InboundDescribedMedia[]
-  inboundImages?: InboundImage[]
   corpus: CorpusMatch[] | null
   // Retrieved knowledge_corpus chunks. Populated by retrieveKnowledgeStage
   // when shouldRetrieveKnowledge fires (always for inbound; followups

@@ -283,11 +283,12 @@ a failed read holds.
 **A photo, video, GIF or story mention is looked at before the turn drafts** (TAC-584).
 `describeTurnMedia` runs the describe step (`lib/messaging/attachments/describe.ts`) over the
 message being answered, or the media-only message beside it, and puts what it learned on
-`ctx.inboundDescribedMedia` and `ctx.inboundImages`. Then:
+`ctx.inboundDescribedMedia`, in words. **The picture never leaves the describe step**
+(owner-ruled 2026-10-11): the generator is given the description and nothing else. Then:
 
 - **A turn with no text gets a draft on its card** when its media was described
-  (`persistMediaOnlyDraft`), composed as `casual_chatter` with no classifier call, and shown
-  the picture. It is **always a card and no gate decides it**: the path writes the card
+  (`persistMediaOnlyDraft`), composed as `casual_chatter` with no classifier call. It is
+  **always a card and no gate decides it**: the path writes the card
   itself, as the blank card's path does, under `media_context`. `media_only_inbound` still
   means an empty draft. Any failure there falls back to the blank card.
 - **A turn with text** is drafted and held as before; its `[guest also sent ...]` line carries
@@ -296,8 +297,8 @@ message being answered, or the media-only message beside it, and puts what it le
 - **A description is in a prompt only when the reply is held.** That covers history too: once
   the venue has answered a photo, the guest's next message can auto-send, so it reads the old
   "you can't see it" line and not the description (`withDescribedHistory`,
-  `media-history.ts`). Follow-ups and holding messages never read one. Widening that is a
-  ruling, not a refactor.
+  `media-history.ts`). Follow-ups and holding messages never read one. Accepted by the owner
+  on 2026-10-11; widening it is a ruling, not a refactor.
 - **Nothing is described** on a test run, for a message Meta could not hand us, or on an
   opt-out turn's reply (the description is dropped: that reply always sends).
 - **A visit is decided** when the media clearly shows the venue (`record-media-visit.ts`),

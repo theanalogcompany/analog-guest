@@ -2784,8 +2784,8 @@ import {
 //   described wording is swapped in once the turn is known to be held
 //   (lib/agent/media-history.ts, withDescribedHistory). After the venue has
 //   answered a photo, the guest's next message is an ordinary turn that can
-//   auto-send, and it reads v1.106.0's line. Whether such a turn may read a
-//   description is a ruling nobody has made. On a held turn:
+//   auto-send, and it reads v1.106.0's line (accepted by the owner,
+//   2026-10-11). On a held turn:
 //
 //     [guest sent a photo: two iced drinks on a table, one with a blue top]
 //
@@ -2799,7 +2799,7 @@ import {
 //     [guest also sent a photo. It shows: <description>. You may name <items>
 //     and no other menu item. Reply only to the drinks, the food or the space
 //     in it. Say nothing about any person in it, and nothing the description
-//     does not say.]
+//     does not say. Don't assume the day, time or occasion.]
 //
 //   with "You can't tell which menu items these are, so name none and keep to
 //   what it looks like" in place of the naming sentence when no drink is
@@ -2812,13 +2812,16 @@ import {
 //   tagged you in their story") and stands where "The guest just sent" does.
 //   That turn used to be a blank card with no model call. It is composed as
 //   `casual_chatter`, and it is always held for an operator: the path writes
-//   the card itself (lib/agent/handle-inbound.ts), no gate decides it. On
-//   that turn the model is also shown the picture.
+//   the card itself (lib/agent/handle-inbound.ts), no gate decides it.
+//
+//   THE GENERATOR IS GIVEN THE DESCRIPTION AND NEVER THE PICTURE (owner
+//   ruling 2026-10-11). It was first built to be shown both. The picture now
+//   stays inside the describe step.
 //
 //   A picture the describe step could not make out gets, on a turn with no
 //   text, "[guest sent a photo with no text. It arrived fine, but it is too
 //   unclear to make out. Thank them for sending it. Don't describe it, guess
-//   what's in it, or say it didn't come through.]", and is not shown.
+//   what's in it, or say it didn't come through.]".
 //
 //   NOT MEASURED, BY RULING. A 30-image behavioural check was pre-registered
 //   on TAC-584's plan and the owner ruled on 2026-10-11 to ship without it:
@@ -2826,8 +2829,11 @@ import {
 //   quality is read by hand on real cards. What was run is a smoke
 //   (scripts/measurement/media-describe.ts) over the test venue's own media:
 //   three photos, one describe and one draft each. Nothing in it is a rate.
-//   It did show the thing the plan warned of: one of the three drafts used a
-//   detail from the picture that its description did not carry. Nothing here
+//   Its first run showed the generator the picture as well, and two of the
+//   three drafts are why this wording is what it is: one used a detail from
+//   the picture that its description did not carry (so the picture was taken
+//   away), and one called a pizza "a good Friday night plan" on a Sunday (so
+//   the last sentence of the line was added). Nothing here
 //   is evidence that this wording may auto-send.
 //
 //   BASELINE RESET only for a HELD turn with described media. Every prompt

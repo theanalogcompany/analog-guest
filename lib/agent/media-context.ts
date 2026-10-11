@@ -11,8 +11,8 @@
 // answering.
 //
 // TAC-584: THE AGENT CAN NOW BE TOLD WHAT A PHOTO SHOWS, AND THE HOLD STAYS.
-// A described attachment's line carries its description, and on the turn that
-// answers it the model is shown the picture. The owner's ruling on that ticket
+// A described attachment's line carries its description. The model that
+// drafts is never shown the picture itself. The owner's ruling on that ticket
 // is the same one: every media reply is held, at first. So this rule is
 // unchanged, and handle-inbound also sets the flag directly on any turn it
 // described media for, so the hold does not depend on this rule and the

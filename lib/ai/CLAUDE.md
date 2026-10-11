@@ -50,10 +50,11 @@ it loads automatically when you touch a prompt.
 
 ## Image content (TAC-584)
 
-Two calls send a picture, and they are the only two: `describeAttachment`
-(`describe-attachment.ts`), which looks at one guest attachment and reports what is in it,
-and `generateMessage`, which is shown the same picture on the turn that answers it
-(`GenerateMessageInput.inboundImages`), as image parts ahead of the user prompt.
+One call sends a picture, and it is the only one: `describeAttachment`
+(`describe-attachment.ts`), which looks at one guest attachment and reports what is in it.
+**`generateMessage` is never shown a picture** (owner-ruled 2026-10-11). It was first built to
+be, and in a smoke run a draft used a detail its description did not carry: the picture was a
+way round the describe step. The generator reads the description line and nothing else.
 
 - **A picture is never part of a prompt string**, so it is in no trace and no recorded
   prompt. For a story it is held nowhere but the function's memory: Meta forbids keeping one.

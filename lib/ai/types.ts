@@ -221,6 +221,11 @@ export type DescribedMediaWord = 'photo' | 'video' | 'gif' | 'story'
  * TAC-584: one attachment on the turn being answered that the describe step
  * has looked at. lib/agent/handle-inbound.ts builds it; the serializer words
  * it (lib/ai/prompts/attachment-lines.ts).
+ *
+ * THE GENERATOR GETS THIS AND NEVER THE PICTURE (owner ruling 2026-10-11).
+ * The picture stays inside the describe step. A smoke run that showed the
+ * generator both had one draft in three use a detail the description did not
+ * carry, which is the describe step's rules being walked round.
  */
 export type InboundDescribedMedia = {
   word: DescribedMediaWord
@@ -228,15 +233,6 @@ export type InboundDescribedMedia = {
   description: string | null
   /** The menu items the reply may name. Empty when none is unmistakable. */
   nameableItems: string[]
-}
-
-/**
- * TAC-584: an image the model is shown on the turn that answers it. In memory
- * only: never stored, never traced.
- */
-export type InboundImage = {
-  bytes: Uint8Array
-  mediaType: 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp'
 }
 
 export type RuntimeContext = {
@@ -664,13 +660,6 @@ export type GenerateMessageInput = {
   // unknown and gets the Instagram wording, which is false on neither channel.
   // Set from RuntimeContext.conversationChannel (lib/agent) by both callers.
   channel: MessageChannel | null
-  // TAC-584: the guest's picture, shown to the model on the turn that answers
-  // it. The first image content any call in this repo sends. Present only
-  // when the describe step looked at the media THIS run and could make it
-  // out; `runtime.inboundDescribedMedia` carries the rules for replying to it.
-  // Never part of the system or user prompt strings, so it is in no trace and
-  // no recorded prompt: for a story these bytes are held nowhere else.
-  inboundImages?: InboundImage[]
 }
 
 // TAC-296: agent-emitted patch for guests.context, threaded onto every

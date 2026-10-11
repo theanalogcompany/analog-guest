@@ -338,9 +338,11 @@ async function orchestrationChecks(): Promise<Check[]> {
     photo.seen.saves[0]?.description,
   ])
   out.push([
-    'describe: the frames come back from this run, for the turn that answers it',
-    photo.results[0]?.frames.length === 1,
-    photo.results[0]?.frames.length,
+    'describe: what comes back is words and a record, and no picture',
+    Object.keys(photo.results[0] ?? {})
+      .sort()
+      .join() === 'attachmentId,description,mediaKind,messageId,meta',
+    Object.keys(photo.results[0] ?? {}),
   ])
 
   const story = await run([
@@ -437,11 +439,10 @@ async function orchestrationChecks(): Promise<Check[]> {
     }),
   ])
   out.push([
-    'describe: a settled row is returned from the row, with no fetch, no call and no frames',
+    'describe: a settled row is returned from the row, with no fetch and no call',
     settled.seen.describeCalls === 0 &&
       settled.seen.stored.length === 0 &&
-      settled.results[0]?.description === 'A pink drink' &&
-      settled.results[0]?.frames.length === 0,
+      settled.results[0]?.description === 'A pink drink',
     settled,
   ])
 
@@ -1058,7 +1059,7 @@ async function shadowChecks(): Promise<Check[]> {
 
 const DESC = 'two iced drinks on a table, one with a blue top'
 const TAIL =
-  ' Reply only to the drinks, the food or the space in it. Say nothing about any person in it, and nothing the description does not say.]'
+  " Reply only to the drinks, the food or the space in it. Say nothing about any person in it, and nothing the description does not say. Don't assume the day, time or occasion.]"
 const NAME_NONE =
   " You can't tell which menu items these are, so name none and keep to what it looks like."
 const PHOTO_UNSEEN =
