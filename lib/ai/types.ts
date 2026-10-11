@@ -138,6 +138,13 @@ export type RecentMessage = {
   // of `body`, deliberately: lib/ai/prompts/attachment-lines.ts has why. A
   // message whose body is '' and that has lines is a media-only message.
   attachmentLines?: string[]
+  // TAC-584: the same lines with each described attachment's line saying what
+  // it shows. Present only when at least one differs. NO RENDERER READS THIS.
+  // It is swapped into `attachmentLines` by the orchestrator, and only on a
+  // turn whose reply is held for an operator (lib/agent/media-history.ts,
+  // withDescribedHistory): a description must never be in the prompt of a
+  // reply that can auto-send.
+  describedAttachmentLines?: string[]
 }
 
 // One transaction projected for the agent prompt (TAC-234). Replaces the

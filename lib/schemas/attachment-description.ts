@@ -47,18 +47,17 @@ export type ItemConfidence = (typeof ITEM_CONFIDENCE)[number]
 /**
  * Why an attachment has `described_at` and no description. A fixed list, so
  * the reasons can be counted.
+ *
+ * Only the failures that will ALWAYS repeat are here, because only those
+ * settle a row. One that may not repeat (a copy still running, a missing
+ * ffmpeg, a failed model call) writes nothing and is counted on the
+ * `guest_media_degraded` event instead.
  */
 export const DESCRIBE_SKIP_REASONS = [
-  /** the re-host copy never reached `ready` inside the wait */
-  'not_ready',
-  /** the bytes could not be loaded: a dead story link, a missing object */
+  /** a story whose link is dead: the guest removed it, or it expired */
   'bytes_unavailable',
   /** a type the model cannot take and ffmpeg could not convert */
   'unsupported_type',
-  /** no frame could be pulled from the video */
-  'no_frames',
-  /** the vision call failed or was truncated */
-  'model_failed',
 ] as const
 export type DescribeSkipReason = (typeof DESCRIBE_SKIP_REASONS)[number]
 
@@ -201,16 +200,6 @@ export function usableDescription(row: {
   const description = cleanDescription(row.description)
   if (description === null) return null
   return { description, meta }
-}
-
-/** Described, and too unclear to make out. Its own wording on the turn that answers it. */
-export function isUnclear(row: { descriptionMeta: unknown }): boolean {
-  const meta = parseDescriptionMeta(row.descriptionMeta)
-  return (
-    meta !== null &&
-    meta.outcome === 'described' &&
-    meta.legibility === 'unclear'
-  )
 }
 
 /**

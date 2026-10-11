@@ -293,6 +293,11 @@ message being answered, or the media-only message beside it, and puts what it le
 - **A turn with text** is drafted and held as before; its `[guest also sent ...]` line carries
   the description. The describe step is started before classification and awaited just before
   generation, so the crisis short-circuit never waits on a vision call.
+- **A description is in a prompt only when the reply is held.** That covers history too: once
+  the venue has answered a photo, the guest's next message can auto-send, so it reads the old
+  "you can't see it" line and not the description (`withDescribedHistory`,
+  `media-history.ts`). Follow-ups and holding messages never read one. Widening that is a
+  ruling, not a refactor.
 - **Nothing is described** on a test run, for a message Meta could not hand us, or on an
   opt-out turn's reply (the description is dropped: that reply always sends).
 - **A visit is decided** when the media clearly shows the venue (`record-media-visit.ts`),

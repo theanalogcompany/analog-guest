@@ -600,6 +600,8 @@ export async function buildRuntimeContext(input: {
         ? {
             ...row,
             attachmentLines: mediaHistory.linesByMessageId.get(row.id),
+            describedAttachmentLines:
+              mediaHistory.describedLinesByMessageId.get(row.id),
           }
         : row,
     ),

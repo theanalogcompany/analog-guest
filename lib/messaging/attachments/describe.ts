@@ -32,11 +32,13 @@
 //   anything else       never: a voice note, a file, a shared reel or post,
 //                       and the venue's own story a guest replied to.
 //
-// A VENUE WITH NO APPEARANCE NOTES NAMES NOTHING. The model may call a drink
+// A VENUE WITH NO APPEARANCE NOTES NAMES NOTHING AND MARKS NOTHING. The model may call a drink
 // unmistakable only against a note the venue wrote about how it looks
 // (lib/rag/appearance-entries.ts). With no notes there is nothing to match
 // against, so the items the model returns are dropped here before they are
-// stored, and neither a reply nor a visit can carry a drink's name.
+// stored, and neither a reply nor a visit can carry a drink's name. A "yes"
+// on showsVenue is stored as `unsure` for the same reason, so no visit is
+// decided for a venue until it has notes.
 //
 // EACH ROW IS SETTLED ONCE. `described_at` is written with the description,
 // or with a skip reason when the attachment can NEVER be described (a type
@@ -60,7 +62,7 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js'
 
-import type { Database, Json } from '@/db/types'
+import type { Database } from '@/db/types'
 import {
   type DescribeAttachmentInput,
   type DescribeAttachmentResult,
@@ -68,6 +70,7 @@ import {
   describeAttachment,
 } from '@/lib/ai/describe-attachment'
 import type { AIResult } from '@/lib/ai/types'
+import { toJson } from '@/lib/db/json'
 import {
   type GuestMediaDegradedProps,
   captureGuestMediaDegraded,
@@ -303,7 +306,7 @@ function defaultDeps(supabase: AdminSupabaseClient): DescribeDeps {
         .from('message_attachments')
         .update({
           description,
-          description_meta: meta as unknown as Json,
+          description_meta: toJson(meta),
           described_at: new Date().toISOString(),
         })
         .eq('id', attachmentId)
@@ -482,7 +485,13 @@ export async function describeMessageAttachments(
         promptVersion: call.data.promptVersion,
         model: call.data.modelId ?? 'unknown',
         legibility: call.data.legibility,
-        showsVenue: call.data.showsVenue,
+        // NO NOTES, NO VENUE EITHER, for the same reason as the items below:
+        // with nothing written down about what this venue looks like, a
+        // "yes" is the model's guess. `unsure` records no visit.
+        showsVenue:
+          venue.notes.length === 0 && call.data.showsVenue === 'yes'
+            ? 'unsure'
+            : call.data.showsVenue,
         peoplePresent: call.data.peoplePresent,
         // NO NOTES, NO NAMES. The prompt already says nothing can be
         // unmistakable without an appearance note, and that is wording. This
@@ -508,7 +517,13 @@ export async function describeMessageAttachments(
         model: call.data.modelId,
         usage: toAgentUsage(call.data.usage),
       })
-      await deps.save(target.id, description, meta)
+      // A description that could not be saved is still a description: this
+      // turn uses it, and the row stays unsettled for a later one.
+      await deps
+        .save(target.id, description, meta)
+        .catch(async (e: unknown) => {
+          await reportSkip(target, e instanceof Error ? e.message : String(e))
+        })
       results.push({
         attachmentId: target.id,
         messageId: target.messageId,

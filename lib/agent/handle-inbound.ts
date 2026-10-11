@@ -67,6 +67,7 @@ import {
 } from './extract-reported-order'
 import { retractReportedVisits } from './retract-reported-visit'
 import { recordMediaVisit } from './record-media-visit'
+import { withDescribedHistory } from './media-history'
 import {
   MEDIA_ONLY_SETTLE_MS,
   MEDIA_ONLY_SETTLE_POLL_MS,
@@ -703,13 +704,15 @@ async function describeTurnMedia(
             meta: item.meta,
           })),
       }).then((outcome) => {
-        if (outcome.kind === 'no_evidence') return
-        const log = outcome.kind === 'failed' ? console.warn : console.log
-        log('[agent] media visit', {
+        // The decision itself is logged once, by recordMediaVisit
+        // (`media_visit_decision`). Only a failure is said again here, with
+        // the run it belongs to.
+        if (outcome.kind !== 'failed') return
+        console.warn('[agent] media visit failed', {
           agentRunId: ctx.agentRunId,
           guestId: ctx.guest.id,
           messageId,
-          ...outcome,
+          error: outcome.error,
         })
       }),
     )
@@ -776,39 +779,48 @@ async function persistMediaOnlyDraft(
 
   try {
     ctx.corpus = await retrieveCorpusStage(ctx)
+    const named = [
+      ...new Set(
+        (ctx.inboundDescribedMedia ?? []).flatMap((m) => m.nameableItems),
+      ),
+    ]
+    ctx.knowledgeCorpus =
+      named.length > 0
+        ? await retrieveKnowledgeStage(
+            ctx,
+            MEDIA_ONLY_DRAFT_CATEGORY,
+            named.join(', '),
+          )
+        : null
   } catch (e) {
-    return blankInstead(
-      'voice_pack',
-      e instanceof Error ? e.message : String(e),
-    )
+    return blankInstead('retrieval', e instanceof Error ? e.message : String(e))
   }
-
-  const named = [
-    ...new Set(
-      (ctx.inboundDescribedMedia ?? []).flatMap((m) => m.nameableItems),
-    ),
-  ]
-  ctx.knowledgeCorpus =
-    named.length > 0
-      ? await retrieveKnowledgeStage(
-          ctx,
-          MEDIA_ONLY_DRAFT_CATEGORY,
-          named.join(', '),
-        )
-      : null
   ctx.openIntentions = []
   ctx.reviewAsk = null
   ctx.mediaContext = true
+
+  // The history may say what earlier media showed: this turn is held.
+  showDescribedHistory(ctx)
 
   const generateSpan = trace.generation('generate', {
     category: MEDIA_ONLY_DRAFT_CATEGORY,
     mediaOnly: true,
     images: ctx.inboundImages?.length ?? 0,
   })
-  let gen = await generateStage(ctx, MEDIA_ONLY_DRAFT_CATEGORY)
-  // One retry, and none on truncation, as on the main path.
-  if (gen.status === 'failed' && gen.errorCode !== AI_ERROR_TRUNCATED) {
+  let gen: Awaited<ReturnType<typeof generateStage>>
+  try {
     gen = await generateStage(ctx, MEDIA_ONLY_DRAFT_CATEGORY)
+    // One retry, and none on truncation, as on the main path.
+    if (gen.status === 'failed' && gen.errorCode !== AI_ERROR_TRUNCATED) {
+      gen = await generateStage(ctx, MEDIA_ONLY_DRAFT_CATEGORY)
+    }
+  } catch (e) {
+    // generateStage returns its known failures as values. This is the only
+    // generation path that runs with no classification, so anything that
+    // THROWS here must still end as a card and not as the turn's red alert.
+    const error = e instanceof Error ? e.message : String(e)
+    generateSpan.end({ level: 'ERROR', statusMessage: error })
+    return blankInstead('generation_threw', error)
   }
   if (gen.status === 'failed') {
     generateSpan.end({ level: 'ERROR', statusMessage: gen.error })
@@ -952,6 +964,18 @@ function buildGenerationFailureGeneration(): GenerateMessageResult {
  */
 function pushSendFailureCard(ctx: RuntimeContext, cardId: string): void {
   pushOperatorCard(ctx, cardId, INSTAGRAM_SEND_FAILED_REVIEW_REASON)
+}
+
+/**
+ * TAC-584: let this turn's history say what the guest's earlier media showed.
+ * ONLY for a turn whose reply is held: withDescribedHistory has the rule and
+ * the reason. Two call sites, both after the hold is certain.
+ */
+function showDescribedHistory(ctx: RuntimeContext): void {
+  ctx.recentMessages = withDescribedHistory(ctx.recentMessages)
+  if (ctx.mediaOnlyInbounds !== undefined) {
+    ctx.mediaOnlyInbounds = withDescribedHistory(ctx.mediaOnlyInbounds)
+  }
 }
 
 /**
@@ -3215,14 +3239,24 @@ async function runInboundTurn(
     // (a compliance reply always sends). That reply is not written about the
     // picture, so it is not given one: the description and the image are
     // dropped and the turn's prompt is the one it has always had.
-    if (describingMedia !== null) {
-      await describingMedia
-      if (ctx.classification.category === 'opt_out') {
-        ctx.inboundDescribedMedia = undefined
-        ctx.inboundImages = undefined
-      } else if ((ctx.inboundDescribedMedia?.length ?? 0) > 0) {
-        ctx.mediaContext = true
+    //
+    // The category is read BEFORE the await: an opt-out confirmation must go
+    // out at once, and the describe step is seconds long. It is left running
+    // (waitUntil, above) so its visit decision is still made.
+    if (ctx.classification.category === 'opt_out') {
+      ctx.inboundDescribedMedia = undefined
+      ctx.inboundImages = undefined
+    } else {
+      if (describingMedia !== null) {
+        await describingMedia
+        if ((ctx.inboundDescribedMedia?.length ?? 0) > 0) {
+          ctx.mediaContext = true
+        }
       }
+      // And the HISTORY may say what earlier media showed only on a turn
+      // that is held (withDescribedHistory has the rule). `mediaContext` is
+      // final here: nothing below this point writes it.
+      if (ctx.mediaContext === true) showDescribedHistory(ctx)
     }
 
     // Generate
@@ -3961,16 +3995,6 @@ async function runInboundTurn(
         // fire; previous_pending_held skips) and is `never throws` so the
         // .catch is defensive belt-and-braces.
         if (shouldSendDraftFlaggedPush(approval.primaryTrigger)) {
-          // TAC-584: a guest who tagged the venue in a story and then typed
-          // something lands here, not on the media-only path. The push is
-          // still the reshare nudge, EXCEPT for a complaint or a crisis turn,
-          // whose own push wording says the more urgent thing.
-          const storyPush =
-            turnHasStoryMention &&
-            ctx.classification.category !== 'comp_complaint' &&
-            !ctx.classification.crisisSafety
-              ? await loadStoryMentionPush(ctx.guest.id)
-              : null
           waitUntil(
             sendDraftFlaggedPush({
               agentRunId,
@@ -3982,7 +4006,11 @@ async function runInboundTurn(
               guestQuestion: ctx.currentMessage?.body ?? null,
               guestCategory: ctx.classification?.category ?? null,
               guestIsCrisis: ctx.classification?.crisisSafety ?? false,
-              media: storyPush,
+              // TAC-584: null even when this text sits beside a story the
+              // guest tagged the venue in. The reshare nudge would replace
+              // the guest's own words in the push, and what they wrote is the
+              // more useful thing to see; the card still shows the story.
+              media: null,
             }).catch((e) => {
               console.error('apns: sendDraftFlaggedPush threw unexpectedly', {
                 agentRunId,

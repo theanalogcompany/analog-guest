@@ -40,6 +40,9 @@
 //                 safe here where the bare marker was not: the defect the
 //                 second wording fixed was a model that knew a photo existed
 //                 and had nothing to look at. Now it has the description.
+//                 ONLY ON A HELD TURN: the history is built without
+//                 descriptions, and lib/agent/media-history.ts swaps this
+//                 wording in once the reply is known to be held.
 //   on the turn   describedMediaLine, which also carries the three rules for
 //   being         replying to a picture: which drinks may be named, nothing
 //   answered      about any person, nothing the description does not say.

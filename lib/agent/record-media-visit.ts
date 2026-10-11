@@ -365,7 +365,10 @@ function defaultDeps(): MediaVisitDeps {
     },
     async saveDecision(evidence, decision) {
       for (const { attachmentId, meta } of evidence) {
+        // Only the attachments that ARE the evidence. A second photo on the
+        // same message that shows nothing of the venue decided nothing.
         if (meta === null || meta.outcome !== 'described') continue
+        if (!evidencesVisit(meta)) continue
         const { error } = await db()
           .from('message_attachments')
           .update({ description_meta: toJson({ ...meta, visit: decision }) })

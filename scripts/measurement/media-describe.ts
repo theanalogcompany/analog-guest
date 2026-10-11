@@ -42,8 +42,6 @@ import { randomUUID } from 'node:crypto'
 import { mkdirSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 
-import { generateObject } from 'ai'
-
 import { buildRuntimeContext } from '@/lib/agent/build-runtime-context'
 import {
   buildAiRuntime,
@@ -53,13 +51,9 @@ import {
   retrieveKnowledgeWithContextStage,
 } from '@/lib/agent/stages'
 import type { RuntimeContext } from '@/lib/agent/types'
-import { getGenerationModel } from '@/lib/ai/client'
 import { composePrompt } from '@/lib/ai/compose-prompt'
 import { DESCRIBE_ATTACHMENT_PROMPT_VERSION } from '@/lib/ai/describe-attachment'
-import {
-  GeneratedMessageSchema,
-  MAX_OUTPUT_TOKENS,
-} from '@/lib/ai/generate-message'
+import { generateMessage } from '@/lib/ai/generate-message'
 import { PROMPT_VERSION } from '@/lib/ai/prompts/system-template'
 import type {
   InboundDescribedMedia,
@@ -166,42 +160,6 @@ function coinFor(seed: string): () => number {
     flip += 1
     return seededFlip(`${seed}/${flip}`)
   }
-}
-
-async function generateDraft(
-  composed: ReturnType<typeof composePrompt>,
-  images: readonly Frame[],
-): Promise<string> {
-  const { object } = await generateObject({
-    model: getGenerationModel(),
-    messages: [
-      {
-        role: 'system',
-        content: composed.cacheableSystemPrefix,
-        providerOptions: { anthropic: { cacheControl: { type: 'ephemeral' } } },
-      },
-      { role: 'system', content: composed.volatileSystemSuffix },
-      ...composed.historyTurns,
-      {
-        role: 'user',
-        // The shape generateMessage sends: the picture ahead of the prompt.
-        content:
-          images.length > 0
-            ? [
-                ...images.map((frame) => ({
-                  type: 'image' as const,
-                  image: frame.bytes,
-                  mediaType: frame.mediaType,
-                })),
-                { type: 'text' as const, text: composed.userPrompt },
-              ]
-            : composed.userPrompt,
-      },
-    ],
-    schema: GeneratedMessageSchema,
-    maxOutputTokens: MAX_OUTPUT_TOKENS,
-  })
-  return object.body
 }
 
 type Db = ReturnType<typeof createAdminClient>
@@ -487,20 +445,30 @@ async function main(): Promise<void> {
             await retrieveKnowledgeStage(ctx, DRAFT_CATEGORY, named.join(', ')),
           )
         : undefined
-    const composed = composePrompt({
+    const input = {
       category,
       persona: ctx.venue.brandPersona,
       venueInfo: ctx.venue.venueInfo,
       ragChunks,
       knowledgeChunks: knowledge,
       runtime: buildAiRuntime(ctx, coinFor(messageId)),
-      channel: 'instagram',
-    })
+      channel: 'instagram' as const,
+    }
+    // Composed here only to show the line the model reads.
+    const composed = composePrompt(input)
     const mediaLines = composed.userPrompt
       .split('\n')
       .filter((l) => l.startsWith('[guest '))
     try {
-      const draft = await generateDraft(composed, images.slice(0, 8))
+      // THE PRODUCTION GENERATOR, pictures and all: generateMessage is what a
+      // turn calls, so this is the one place its image parts are exercised
+      // outside production.
+      const generated = await generateMessage({
+        ...input,
+        inboundImages: images.slice(0, 8),
+      })
+      if (!generated.ok) throw new Error(generated.error)
+      const draft = generated.data.body
       const block =
         `  - the line the model read: \`${mediaLines.join(' ')}\`\n` +
         (hasText

@@ -41,10 +41,7 @@ import ffmpegStatic from 'ffmpeg-static'
 /** The long side every image is scaled down to. Never scaled up. */
 export const MAX_IMAGE_EDGE_PX = 1568
 
-/** How many frames a video is described from. */
-export const VIDEO_FRAME_COUNT = 4
-
-/** Where in the clip each frame is taken, as a fraction of its length. */
+/** Where in the clip each frame is taken, as a fraction of its length. Four frames. */
 export const VIDEO_FRAME_POSITIONS: readonly number[] = [0.1, 0.35, 0.6, 0.85]
 
 /**

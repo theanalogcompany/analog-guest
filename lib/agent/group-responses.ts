@@ -44,6 +44,8 @@ export interface HistoryRow {
   // Set by buildRuntimeContext on inbound rows only; the query does not
   // select it.
   attachmentLines?: string[]
+  // TAC-584: the same lines with descriptions in, carried beside them.
+  describedAttachmentLines?: string[]
 }
 
 /**
@@ -189,6 +191,9 @@ export function groupIntoResponses(
         ...(first.attachmentLines !== undefined &&
         first.attachmentLines.length > 0
           ? { attachmentLines: first.attachmentLines }
+          : {}),
+        ...(first.describedAttachmentLines !== undefined
+          ? { describedAttachmentLines: first.describedAttachmentLines }
           : {}),
       }
     })

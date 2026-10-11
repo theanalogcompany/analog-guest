@@ -44,7 +44,10 @@ import {
   mediaAlongsideText,
   mediaMessageIdsForTurn,
 } from '@/lib/agent/inbound-media'
-import { buildMediaHistory } from '@/lib/agent/media-history'
+import {
+  buildMediaHistory,
+  withDescribedHistory,
+} from '@/lib/agent/media-history'
 import type { InboundDescribedMedia } from '@/lib/ai/types'
 import {
   attachmentHistoryLine,
@@ -67,7 +70,6 @@ import {
 } from '@/lib/messaging/attachments/describe'
 import {
   MAX_PASS_THROUGH_BYTES,
-  VIDEO_FRAME_COUNT,
   VIDEO_FRAME_POSITIONS,
   frameTimestamps,
   parseDurationSeconds,
@@ -84,7 +86,6 @@ import {
   type DescribedMeta,
   cleanDescription,
   evidencesVisit,
-  isUnclear,
   nameableItems,
   parseDescriptionMeta,
   usableDescription,
@@ -494,6 +495,25 @@ async function orchestrationChecks(): Promise<Check[]> {
       nameableItems(noNotesMeta, MENU).length === 0,
     noNotesMeta,
   ])
+  out.push([
+    'describe: and its "shows the venue: yes" is stored as unsure, so no visit is decided',
+    noNotesMeta?.outcome === 'described' &&
+      noNotesMeta.showsVenue === 'unsure' &&
+      !evidencesVisit(noNotesMeta),
+    noNotesMeta,
+  ])
+  const unsaved = await run([target({})], {
+    save: async () => {
+      throw new Error('write failed')
+    },
+  })
+  out.push([
+    'describe: a description that could not be saved is still returned to the turn',
+    unsaved.results.length === 1 &&
+      unsaved.results[0]?.description !== null &&
+      unsaved.seen.reports.includes('write failed'),
+    unsaved.seen,
+  ])
   const withNotesMeta = photo.seen.saves[0]?.meta
   out.push([
     'describe: with notes the same answer keeps its drink (the control for the check above)',
@@ -576,26 +596,28 @@ const ruleChecks: Check[] = [
     null,
   ],
   [
-    'usable: an unclear one is not, and is reported as unclear',
+    'usable: an unclear one is not',
     usableDescription({
       description: 'Too unclear to make out.',
       descriptionMeta: describedMeta({ legibility: 'unclear' }),
-    }) === null &&
-      isUnclear({ descriptionMeta: describedMeta({ legibility: 'unclear' }) }),
+    }) === null,
     null,
   ],
   [
     'usable: a skipped row is not',
     usableDescription({
       description: null,
-      descriptionMeta: { version: 1, outcome: 'skipped', reason: 'no_frames' },
+      descriptionMeta: {
+        version: 1,
+        outcome: 'skipped',
+        reason: 'unsupported_type',
+      },
     }) === null,
     null,
   ],
   [
-    'usable: a row never described is not, and is not "unclear" either',
-    usableDescription({ description: null, descriptionMeta: null }) === null &&
-      !isUnclear({ descriptionMeta: null }),
+    'usable: a row never described is not',
+    usableDescription({ description: null, descriptionMeta: null }) === null,
     null,
   ],
   [
@@ -703,7 +725,7 @@ function visitChecks(): Check[] {
       plan([
         {
           attachmentId: 'a',
-          meta: { version: 1, outcome: 'skipped', reason: 'no_frames' },
+          meta: { version: 1, outcome: 'skipped', reason: 'unsupported_type' },
         },
       ]).action === 'none',
     null,
@@ -1134,11 +1156,61 @@ function wordingChecks(): Check[] {
     description: `${DESC}.`,
     description_meta: describedMeta(),
   }
-  const history = (row: typeof described | Record<string, unknown>) =>
+  const historyOf = (row: typeof described | Record<string, unknown>) =>
     buildMediaHistory(
       [],
       [row as Parameters<typeof buildMediaHistory>[1][number]],
-    ).linesByMessageId.get('m1')?.[0] ?? ''
+    )
+  // What a HELD turn's history shows: the described wording where there is
+  // one, the ordinary line where there is not (withDescribedHistory).
+  const history = (row: typeof described | Record<string, unknown>) => {
+    const built = historyOf(row)
+    return (
+      (built.describedLinesByMessageId.get('m1') ??
+        built.linesByMessageId.get('m1'))?.[0] ?? ''
+    )
+  }
+
+  // THE DEFAULT HISTORY NEVER CARRIES A DESCRIPTION. A turn that is not held
+  // reads `linesByMessageId`, and a reply written from a description nobody
+  // will read must not be possible.
+  same(
+    'history: an UNHELD turn reads the old line even for a described photo',
+    historyOf(described).linesByMessageId.get('m1')?.[0] ?? '',
+    PHOTO_UNSEEN,
+  )
+  const mediaOnly = buildMediaHistory(
+    [
+      {
+        id: 'm1',
+        created_at: '2026-10-11T21:00:00.000Z',
+        media_urls: [
+          'https://lookaside.fbsbx.com/ig_messaging_cdn/?asset_id=1',
+        ],
+        unsupported_content: null,
+      },
+    ],
+    [described],
+  ).mediaOnlyInbounds
+  same(
+    'history: a media-only message is built without its description',
+    mediaOnly[0]?.attachmentLines?.[0] ?? '',
+    PHOTO_UNSEEN,
+  )
+  same(
+    'history: and shows it once the turn is known to be held',
+    withDescribedHistory(mediaOnly)[0]?.attachmentLines?.[0] ?? '',
+    '[guest sent a photo: two iced drinks on a table, one with a blue top]',
+  )
+  const plainOnly = buildMediaHistory(
+    [],
+    [{ ...described, description: null, description_meta: null }],
+  )
+  out.push([
+    'history: a message with nothing described carries no second wording at all',
+    plainOnly.describedLinesByMessageId.size === 0,
+    plainOnly.describedLinesByMessageId,
+  ])
 
   same(
     'history: a described photo reads as its description',
@@ -1173,7 +1245,11 @@ function wordingChecks(): Check[] {
     history({
       ...described,
       description: null,
-      description_meta: { version: 1, outcome: 'skipped', reason: 'no_frames' },
+      description_meta: {
+        version: 1,
+        outcome: 'skipped',
+        reason: 'unsupported_type',
+      },
     }),
     PHOTO_UNSEEN,
   )
@@ -1389,7 +1465,7 @@ function pushChecks(): Check[] {
 const frameChecks: Check[] = [
   [
     'frames: four positions, inside the clip, in order',
-    VIDEO_FRAME_POSITIONS.length === VIDEO_FRAME_COUNT &&
+    VIDEO_FRAME_POSITIONS.length === 4 &&
       VIDEO_FRAME_POSITIONS.every(
         (p, i) =>
           p > 0 && p < 1 && (i === 0 || p > VIDEO_FRAME_POSITIONS[i - 1]),

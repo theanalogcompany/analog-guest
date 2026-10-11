@@ -4,7 +4,7 @@ import { createAdminClient } from '@/lib/db/admin'
 import { createServerClient } from '@/lib/db/server'
 import { allowsVenue, type VenueScope } from '@/lib/auth/venue-scope'
 
-import { isDeletableTransactionSource } from '../../../lib/parse-ticket'
+import { isDeletableTransactionSource } from '@/app/admin/(authed)/conversations/lib/parse-ticket'
 
 // DELETE /admin/conversations/api/transactions/[transactionId] — TAC-323.
 //

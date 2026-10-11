@@ -43,6 +43,11 @@ It prints one `PASS` or `FAIL` line per check and exits non-zero if any failed.
   out.** Nothing does. The 30-image check pre-registered on TAC-584 was dropped by ruling
   (every media reply is held); `scripts/measurement/media-describe.ts` is a smoke run over a
   venue's existing media and yields no rate.
+- **The turn wiring in `lib/agent/handle-inbound.ts`.** That a described turn is held, that an
+  opt-out reply is not given the picture, and that a media-only draft falls back to the blank
+  card are read from the code, not checked here: the orchestrator reads the database. What IS
+  checked is each piece it calls (which messages a turn describes, that default history
+  carries no description, the swap for a held turn).
 - **Whether ffmpeg runs in a deployment.** The pure half of `frames.ts` is checked here (where
   frames are taken, what passes through untouched). That the binary is present and starts is
   the `/admin/health` row, which runs it.

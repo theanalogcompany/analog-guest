@@ -69,6 +69,9 @@ export const DESCRIBE_ATTACHMENT_PROMPT_VERSION = 'v1.0.0'
 // harness's job; a truncated call is reported as such and never half-read.
 export const DESCRIBE_ATTACHMENT_MAX_OUTPUT_TOKENS = 900
 
+/** The longest one vision call may take before it is given up on. */
+export const DESCRIBE_ATTACHMENT_TIMEOUT_MS = 45_000
+
 export const DESCRIBE_ATTACHMENT_TRUNCATED_ERROR_CODE =
   'ai_describe_attachment_truncated'
 
@@ -150,7 +153,7 @@ export function buildDescribeAttachmentPrompt(
   const notes =
     input.appearanceNotes.length > 0
       ? input.appearanceNotes.map((note) => `- ${note}`).join('\n')
-      : '(none on file, so no item can be "unmistakable" and nothing marks the venue)'
+      : '(none on file, so no item can be "unmistakable" and showsVenue cannot be "yes")'
   return [
     `Venue: ${input.venueName ?? '(name not on file)'}`,
     '',
@@ -176,10 +179,11 @@ export function buildDescribeAttachmentPrompt(
 // Every field is required, so none of them counts against the optional-field
 // budget, and no number or array carries a bound.
 function buildSchema(menuItemNames: readonly string[]) {
+  // One of each: a menu can carry the same name twice (a small and a large),
+  // and an enum with a repeated value is not something to hand a provider.
+  const unique = [...new Set(menuItemNames)]
   const name =
-    menuItemNames.length > 0
-      ? z.enum(menuItemNames as [string, ...string[]])
-      : z.string()
+    unique.length > 0 ? z.enum(unique as [string, ...string[]]) : z.string()
   return z.object({
     reasoning: z.string(),
     description: z.string(),
@@ -225,6 +229,9 @@ export async function describeAttachment(
       // An analytical read, like the verifiers: keep it steady.
       temperature: 0.2,
       maxOutputTokens: DESCRIBE_ATTACHMENT_MAX_OUTPUT_TOKENS,
+      // A turn awaits this. A call that hangs must end as a failed describe
+      // (the blank card), not as a function killed with no card at all.
+      abortSignal: AbortSignal.timeout(DESCRIBE_ATTACHMENT_TIMEOUT_MS),
     })
 
     return {

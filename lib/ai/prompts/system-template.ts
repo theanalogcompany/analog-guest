@@ -2779,7 +2779,13 @@ import {
 //   instead. All of the wording is in prompts/attachment-lines.ts and was
 //   approved verbatim by the owner on 2026-10-11, on TAC-584's plan.
 //
-//   IN HISTORY, on later turns:
+//   IN HISTORY, AND ONLY ON A TURN THAT IS HELD FOR AN OPERATOR. The history
+//   is built without descriptions, exactly as v1.106.0 built it, and the
+//   described wording is swapped in once the turn is known to be held
+//   (lib/agent/media-history.ts, withDescribedHistory). After the venue has
+//   answered a photo, the guest's next message is an ordinary turn that can
+//   auto-send, and it reads v1.106.0's line. Whether such a turn may read a
+//   description is a ruling nobody has made. On a held turn:
 //
 //     [guest sent a photo: two iced drinks on a table, one with a blue top]
 //
@@ -2824,9 +2830,10 @@ import {
 //   detail from the picture that its description did not carry. Nothing here
 //   is evidence that this wording may auto-send.
 //
-//   BASELINE RESET only for a conversation with DESCRIBED media in its
-//   window. An attachment with no description renders v1.106.0's line through
-//   the same code path, so every other first-attempt prompt is byte-identical.
+//   BASELINE RESET only for a HELD turn with described media. Every prompt
+//   of a turn that can auto-send, and every proactive prompt, is
+//   byte-identical to v1.106.0: nothing but the held-turn swap reads a
+//   description.
 //
 export const PROMPT_VERSION = 'v1.107.0'
 
