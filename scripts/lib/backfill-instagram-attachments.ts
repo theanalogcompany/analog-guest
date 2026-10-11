@@ -158,6 +158,12 @@ export type RowOutcome =
   /** Only the id came back, and Meta refused the fetch by id. */
   | 'detail_unavailable'
   /**
+   * Meta listed a file on it in a shape this parser read no link from. NOT
+   * written: a row saying "no link" would be this parser's blind spot stored
+   * as a fact, and it would make every later run skip the message.
+   */
+  | 'unread_shape'
+  /**
    * Not in any conversation's listed messages. Meta gives details for a
    * conversation's 20 most recent only, so this is "too old", plus any row
    * whose conversation Meta no longer lists or we could not read.
@@ -171,6 +177,7 @@ export function emptyRowOutcomes(): Record<RowOutcome, number> {
     already_has_rows: 0,
     guest_erased: 0,
     detail_unavailable: 0,
+    unread_shape: 0,
     too_old: 0,
   } satisfies Record<RowOutcome, number>
 }
@@ -361,9 +368,12 @@ export function createAttachmentsPlanner(
     }
     if (row.storedKinds.length > 0) {
       plan.rowOutcomes.already_has_rows += 1
-      // Only a row the WEBHOOK stored is evidence. One this mode wrote on an
-      // earlier run holds what this same parser read, and would agree with
-      // itself whatever Meta returned.
+      // A row the import wrote is never evidence: its attachments can only
+      // be this mode's, which hold what this same parser read. A live row's
+      // are the webhook's until this mode has written onto live rows too;
+      // from then on `sameKinds` partly agrees with itself and is a
+      // description, not a check. The FAIL leg does not weaken: a request
+      // that stops returning media returns none for those rows either.
       if (!row.imported) {
         plan.control.seen += 1
         if (attachments.length > 0) {
@@ -390,6 +400,10 @@ export function createAttachmentsPlanner(
     if (message.media.unsupported) plan.unsupportedOnOurRows += 1
     if (attachments.length === 0) {
       plan.rowOutcomes.no_attachments += 1
+      return
+    }
+    if (message.media.files.some((file) => file.source === null)) {
+      plan.rowOutcomes.unread_shape += 1
       return
     }
     plan.rowOutcomes.to_write += 1

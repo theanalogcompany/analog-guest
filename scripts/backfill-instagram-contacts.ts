@@ -1288,7 +1288,11 @@ async function loadStoredInstagramRows(
  * webhook's alert and it is not muted here; --limit is how a first run is
  * kept small.
  *
- * RESUME IS A RERUN: a message that already has attachment rows is skipped.
+ * A RERUN FINISHES THE ROWS, NOT THE COPIES. A message that already has
+ * attachment rows is skipped, so a run that died between writing a row and
+ * copying its file leaves that row `pending` and no rerun of this mode picks
+ * it up. --confirm ends by counting the venue's pending rows and naming the
+ * command that does: `npm run rehost-pending-attachments`.
  *
  * WHAT IT PRINTS: counts, verdicts and the NAMES of the fields Meta returned.
  * Never a handle, a scoped id, a message id of Meta's, a link or any text.
@@ -1443,9 +1447,12 @@ async function runAttachmentsOnly(
     rowsByMid.size === (expected.count ?? -1) &&
     rowsAccounted === rowsByMid.size &&
     metaAccounted === messagesSeen
+  // Only the first comparison is an independent check. The other two hold by
+  // construction (each row and each listed message is given exactly one
+  // outcome) and are here to catch a later edit that breaks that.
   console.log(
     reconciled
-      ? `\n    ✓ every row of ours (${rowsByMid.size}) and every message Meta listed (${messagesSeen}) is accounted for above`
+      ? `\n    ✓ the ${rowsByMid.size} rows read match the database's own count; each of them, and each of the ${messagesSeen} messages Meta listed, is in exactly one line above`
       : `\n    ✗ RECONCILIATION FAILED: rows read ${rowsByMid.size}, counted by the database ${expected.count ?? 'unknown'}, accounted ${rowsAccounted}; Meta messages accounted ${metaAccounted} of ${messagesSeen} listed`,
   )
   console.log(
@@ -1481,6 +1488,7 @@ async function runAttachmentsOnly(
     messages: 0,
     attachmentRows: 0,
     alreadyHadRows: 0,
+    guestErased: 0,
     insertFailed: 0,
   }
   const copies: Record<string, number> = {}
@@ -1500,6 +1508,26 @@ async function runAttachmentsOnly(
     }
     if ((existing.count ?? 0) > 0) {
       written.alreadyHadRows += 1
+      continue
+    }
+    // And the guest: a deletion request that landed since the plan was read
+    // removed their attachment rows, so the check above reads as "none yet".
+    const guest = await supabase
+      .from('guests')
+      .select('instagram_scoped_id')
+      .eq('venue_id', venue.id)
+      .eq('id', item.guestId)
+      .maybeSingle()
+    if (guest.error) {
+      console.error(`✗ a guest re-check failed: ${guest.error.message}`)
+      written.insertFailed += 1
+      continue
+    }
+    if (
+      guest.data === null ||
+      (guest.data.instagram_scoped_id ?? '').startsWith('deleted:')
+    ) {
+      written.guestErased += 1
       continue
     }
     const stored = await insertMessageAttachments(supabase, {
@@ -1546,8 +1574,23 @@ async function runAttachmentsOnly(
   console.log(
     `    messages that had rows by the time of the write: ${written.alreadyHadRows}`,
   )
+  console.log(
+    `    messages whose guest was erased since the plan was read: ${written.guestErased}`,
+  )
   console.log(`    messages failed: ${written.insertFailed}`)
   printCounts('files copied into our storage', copies)
+
+  const stillPending = await supabase
+    .from('message_attachments')
+    .select('id', { count: 'exact', head: true })
+    .eq('venue_id', venue.id)
+    .eq('status', 'pending')
+  const pendingRows = stillPending.error ? null : (stillPending.count ?? 0)
+  console.log(
+    pendingRows === 0
+      ? '    attachment rows at this venue still waiting for their file: 0'
+      : `    ✗ attachment rows at this venue still waiting for their file: ${pendingRows ?? 'could not be counted'}. This mode will not retry them; run \`npm run rehost-pending-attachments\` while Meta's links still work.`,
+  )
 
   const copyFailures = Object.entries(copies)
     .filter(([key]) => key !== 'ready' && key !== 'skipped')
@@ -1555,7 +1598,8 @@ async function runAttachmentsOnly(
   const clean =
     written.messages === toWrite.length &&
     written.insertFailed === 0 &&
-    copyFailures === 0
+    copyFailures === 0 &&
+    pendingRows === 0
   const remaining = plan.toWrite.length - toWrite.length
   console.log(
     clean
