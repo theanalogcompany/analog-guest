@@ -174,6 +174,21 @@ const DEFAULT_POLICIES_INPUT = {
       then: 'queue',
       onCheckFailure: 'closed',
     },
+    // The standing-fact clause in promise_leak's false criteria is comp_leak's
+    // standing-policy ruling (above) applied to the other leak row, and it is
+    // the same defect: a quoted price satisfied the true criterion as written,
+    // because a guest told "$6" does "arrive expecting the specific thing
+    // stated". Measured over the clause, nothing else changed - the three
+    // price/menu false positives fall 0.36/0.46/0.38 -> 0.06/0.06/0.07, and
+    // every draft the row exists for is untouched: "set a loaf aside"
+    // 0.96 -> 0.95, "Maya will have your order ready" 0.91 -> 0.90, "hold a
+    // table at 7" 0.94 -> 0.94, the 2026-08-07 incident wording 0.57 -> 0.63,
+    // and the one that must NOT be read as a standing fact - "not on the menu
+    // but we'll make one for you when you come in tomorrow" - 0.90 -> 0.88.
+    //
+    // The row was reported on a flat-white price answer that queued at 0.38.
+    // That draft split into three bubbles scored 0.27 and would have sent, so
+    // before this the verdict also rode on bubble packing.
     {
       key: 'promise_leak',
       label: 'Commits the venue to a future obligation in prose',
@@ -184,7 +199,7 @@ const DEFAULT_POLICIES_INPUT = {
         criteria: {
           true: 'A guest reading this would reasonably arrive expecting the venue to have done the specific thing stated, and `declared_actions` does not carry it.',
           false:
-            'No specific obligation, or it is covered by `declared_actions`. General invitations ("come by any time") are false.',
+            'No specific obligation, or it is covered by `declared_actions`. General invitations ("come by any time") are false. Stating a standing fact about the venue - a price, what is or is not on the menu, what the venue makes or sells, opening hours, or where to order - is false: a fact true of every guest is not an obligation to this one.',
         },
         threshold: 0.3,
       },
