@@ -29,7 +29,18 @@ import { checkTypesafeEnv } from '@/lib/ai/typesafe-env'
 // those belong to the new private_event_inquiry situation (venue-hire leads:
 // rental, buyout, catering), which scores them 0.97/0.98 while attending-an-
 // event questions ("when's the next open mic") stay at 0.02-0.06.
-export const SITUATION_DETECT_VERSION = 'situations-jev-v1.1.0'
+// situations-jev-v1.2.0: private_event_inquiry fired on walk-in group-size
+// questions ("coming with 8 people, will we fit?" scored 0.55-0.64 against a
+// 0.5 floor and queued the reply). Leave-one-out over the question's units
+// found the cause: "a large private group" in `criteria.true` made group SIZE
+// alone sufficient, while `criteria.false` only offered "table-for-two type
+// requests", which an 8-top does not match. Removing the clause moved the
+// message to 0.46-0.51 - still straddling the floor - so the false side now
+// names the walk-in case directly. Measured median-of-3 over 19 probes:
+// control 15/19, this wording 19/19, with every venue-hire case it exists to
+// protect still 0.83-0.97 (including four that LEAD with a headcount, e.g.
+// "we're 20 people and want the place to ourselves").
+export const SITUATION_DETECT_VERSION = 'situations-jev-v1.2.0'
 export const SITUATION_DETECT_TIMEOUT_MS = 1_500
 
 export const SITUATION_KEYS = [
@@ -85,9 +96,9 @@ const QUESTIONS: Record<
     instructions:
       'In `inbound_message`, is the guest asking about booking or hiring the venue itself - renting the space or a room, a private event or buyout, catering, or hosting their own gathering there?',
     criteria: {
-      true: 'The guest wants the venue for their own purpose: rent the space, book a room or the loft, a private party or buyout, catering an event, a large private group.',
+      true: 'The guest wants the venue for their own purpose: rent the space, book a room or the loft, a private party or buyout, catering an event.',
       false:
-        'Asking about or attending the venue\'s own events ("when is the next open mic", "what is on this weekend"), ordinary visits or table-for-two type requests, perks, holds, or anything else.',
+        'Asking about or attending the venue\'s own events ("when is the next open mic", "what is on this weekend"), ordinary visits - including a large group simply coming in and asking whether they will fit, whether there is room, or for a big table - perks, holds, or anything else. Group size alone is not a private event; the guest must want the venue, a room, or staff time for their own purpose.',
     },
   },
   needs_human: {
