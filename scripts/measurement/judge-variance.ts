@@ -103,7 +103,7 @@ function buildBrief(history: HistoryTurn[], inbound: string): string {
     lengthClause: '',
     venueProfile: VENUE_NAME,
     voicePack: '',
-    knowledge: '',
+    knowledgeBrief: '',
     history,
     stateLabel: state.label,
     stateKey: state.key,

@@ -151,7 +151,14 @@ const DEFAULT_GRAPH_INPUT = {
       // a pointer?" / "a nudge in a direction?" - the v2.8.0 instruction-echo
       // family, and its register bled into the reply. Goal-and-gap only,
       // nothing quotable.
-      goal: 'Their thing - the one drink or pastry they would come back for. You do not know it yet. Offering one specific thing from the menu is how you find out.',
+      // Third sentence CUT 2026-10-12 (owner-ruled, unmeasured by request):
+      // "Offering one specific thing from the menu is how you find out." It
+      // was the only clause making this move an offer rather than a question,
+      // so the moves header above it ("your one question is for these") is
+      // now the only instruction on how to pursue it - the v2.10.0-draft
+      // failure family. If this move starts quizzing ("what's your thing?"),
+      // this cut is the first place to look.
+      goal: 'Their thing - the one drink or pastry they would come back for. You do not know it yet.',
       closedWhen: [],
     },
     {

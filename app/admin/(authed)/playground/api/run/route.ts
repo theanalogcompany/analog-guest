@@ -81,7 +81,7 @@ const OverridesSchema = z.object({
   guestProfileText: z.string().optional(),
   interactionMemoryText: z.string().optional(),
   openMovesText: z.string().optional(),
-  knowledgeText: z.string().optional(),
+  knowledgeBriefText: z.string().optional(),
   voicePackText: z.string().optional(),
   venueProfileText: z.string().optional(),
 })

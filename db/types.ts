@@ -2445,6 +2445,7 @@ export type Database = {
           created_at: string
           followup_rules: Json | null
           intention_rules: Json | null
+          knowledge_brief: string | null
           messaging_cadence: Json
           onboarding_status: string
           relationship_strength_formula: Json
@@ -2460,6 +2461,7 @@ export type Database = {
           created_at?: string
           followup_rules?: Json | null
           intention_rules?: Json | null
+          knowledge_brief?: string | null
           messaging_cadence?: Json
           onboarding_status?: string
           relationship_strength_formula?: Json
@@ -2475,6 +2477,7 @@ export type Database = {
           created_at?: string
           followup_rules?: Json | null
           intention_rules?: Json | null
+          knowledge_brief?: string | null
           messaging_cadence?: Json
           onboarding_status?: string
           relationship_strength_formula?: Json

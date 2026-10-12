@@ -37,8 +37,8 @@ The cache is prefix-keyed, so **one volatile section poisons everything in front
 | block | content | volatility | cached |
 | --- | --- | --- | --- |
 | system 1 ROLE | who you are, texting style, intention, rules | static | no (too short to cache) |
-| system 2 THE HOUSE | venue profile, voice pack | per venue | **yes, breakpoint** |
-| system 3 HOUSE NOTES | retrieved knowledge, state mission, guest profile, interaction memory, open moves | per turn | no |
+| system 2 THE HOUSE | the venue's knowledge, then the voice pack | per venue | **yes, breakpoint** |
+| system 3 HOUSE NOTES | state mission, guest profile, interaction memory, open moves | per turn | no |
 | turns | the transcript, then the guest's message(s), verbatim, never wrapped | per turn | no |
 
 **The transcript is not cached, and that is the price of block 3's position** (owner-ruled
@@ -47,6 +47,19 @@ of the transcript and no breakpoint after it can hit. For part of 2026-10-09 HOU
 a user turn behind the transcript, which did cache - measured reading 6,016 on turn 3. Worth
 p50 241 tokens, max 555, at Le Mil's. Moving HOUSE NOTES back behind the transcript is what
 reopens it, and `V2_GUEST_STATE`'s header carries the behavioural side of the same trade.
+
+**v2 does not retrieve** (v2.18.0, owner-ruled 2026-10-12).
+`# What you know` is one authored artifact per venue, `venue_configs.knowledge_brief`
+(migration 082), and it **replaces `renderVenueProfile` outright** for a venue that has one -
+the two are never concatenated, which they were for one afternoon, rendering the whole menu
+twice in two voices that disagreed about which items are vegan.
+So the brief owes everything that renderer supplied, hours and the dated `currentContext`
+notes included, and `renderRightNow`'s clock filtering is the one thing it cannot reproduce -
+a date in the brief outlives itself until someone edits it.
+A venue whose brief is NULL renders `V2_HOUSE_SECTIONS` byte-identically to before, which is
+what makes the bump a no-op everywhere else.
+v1 still retrieves through `lib/agent/stages.ts`; the table, the rows and the `/admin` corpus
+editor are untouched.
 
 **Nothing per-turn may move into system blocks 1 or 2.** `# What you know` sat at the end of
 block 2 until 2026-10-08, where ~150 volatile tokens invalidated ~6,100 static ones every

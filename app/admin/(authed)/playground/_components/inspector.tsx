@@ -115,7 +115,7 @@ interface Edits {
   guestProfileText: string
   interactionMemoryText: string
   openMovesText: string
-  knowledgeText: string
+  knowledgeBriefText: string
   voicePackText: string
   venueProfileText: string
 }
@@ -127,7 +127,7 @@ function editsFromTrace(trace: TurnTrace): Edits {
     guestProfileText: trace.sections.guestProfile,
     interactionMemoryText: trace.sections.interactionMemory,
     openMovesText: trace.sections.openMoves,
-    knowledgeText: trace.sections.knowledge,
+    knowledgeBriefText: trace.sections.knowledgeBrief,
     voicePackText: trace.sections.voicePack,
     venueProfileText: trace.sections.venueProfile,
   }
@@ -145,8 +145,8 @@ function overridesFromEdits(trace: TurnTrace, edits: Edits): TurnOverrides {
     overrides.interactionMemoryText = edits.interactionMemoryText
   if (edits.openMovesText !== base.openMovesText)
     overrides.openMovesText = edits.openMovesText
-  if (edits.knowledgeText !== base.knowledgeText)
-    overrides.knowledgeText = edits.knowledgeText
+  if (edits.knowledgeBriefText !== base.knowledgeBriefText)
+    overrides.knowledgeBriefText = edits.knowledgeBriefText
   if (edits.voicePackText !== base.voicePackText)
     overrides.voicePackText = edits.voicePackText
   if (edits.venueProfileText !== base.venueProfileText)
@@ -273,9 +273,9 @@ function TraceInspector({
           busy={busy}
         />
         <BriefSection
-          title="Knowledge"
-          value={edits.knowledgeText}
-          onChange={(v) => set('knowledgeText', v)}
+          title="What you know"
+          value={edits.knowledgeBriefText}
+          onChange={(v) => set('knowledgeBriefText', v)}
           busy={busy}
         />
         <BriefSection

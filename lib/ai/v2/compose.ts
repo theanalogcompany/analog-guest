@@ -2,6 +2,7 @@ import {
   V2_FRAME,
   V2_GUEST_STATE,
   V2_HOUSE_SECTIONS,
+  V2_HOUSE_SECTIONS_BRIEFED,
   V2_PROMPT_VERSION,
 } from './template'
 
@@ -86,9 +87,27 @@ export interface ComposeInput {
    * written as a literal - see that function for why.
    */
   lengthClause: string
+  /**
+   * `renderVenueProfile`'s output. IGNORED when `knowledgeBrief` is non-empty
+   * - the brief REPLACES this rather than sitting under it (owner-ruled
+   * 2026-10-12). Pass it anyway: the trace reports what the renderer produced
+   * either way, which is what keeps `unrendered` honest about stored keys no
+   * renderer reads.
+   */
   venueProfile: string
   voicePack: string
-  knowledge: string
+  /**
+   * `venue_configs.knowledge_brief`, verbatim, and the SOLE venue content in
+   * block 2 when it is set. STATIC PER VENUE, which is the whole reason it may
+   * sit in block 2 at all - see V2_PROMPT_VERSION's v2.18.0 note. It replaced
+   * four retrieved chunks matched against the inbound; anything that makes
+   * this per-turn again poisons the cached prefix in front of it.
+   *
+   * Empty means this venue has no brief, and then `venueProfile` renders as it
+   * always did - byte-identical, which is what keeps every venue but Le Mil's
+   * unaffected by v2.18.0.
+   */
+  knowledgeBrief: string
   /** Oldest first; must alternate (merge same-role runs before calling). */
   history: HistoryTurn[]
   stateLabel: string
@@ -134,10 +153,10 @@ const EMPTY_SECTION_FALLBACKS = {
   guestProfile: 'Nothing on file yet - this guest is new to you.',
   interactionMemory: 'You have not asked or offered anything yet.',
   openMoves: '(nothing right now - just be present)',
-  // Retrieval returning nothing is normal and fails open (run-turn.ts), but an
-  // empty heading reads as "the house knows nothing", which is a claim. Say
-  // what actually happened instead.
-  knowledge: '(nothing retrieved for this message)',
+  // NO knowledgeBrief fallback, deliberately. An empty brief does not render
+  // an empty `# What you know` for something to apologise in - it selects
+  // `V2_HOUSE_SECTIONS`, which has no such heading at all. A fallback string
+  // here would be unreachable, and an unreachable guard reads as a guard.
 } as const
 
 export function composePrompt(input: ComposeInput): ComposedPrompt {
@@ -147,12 +166,23 @@ export function composePrompt(input: ComposeInput): ComposedPrompt {
     instagram_clause: input.instagramClause,
     length_clause: input.lengthClause,
   })
-  const houseSections = fill(V2_HOUSE_SECTIONS, {
-    venue_profile: input.venueProfile,
-    voice_pack: input.voicePack,
-  })
+  // Block 2 is assembled rather than filled from one template, because the
+  // venue half of it is EITHER the rendered profile OR the authored brief and
+  // never both. Concatenating them put the whole menu in the prompt twice, in
+  // two voices that disagreed - `menu.highlights` said two pastries are vegan
+  // while the brief said five items are, 30k chars apart in one block.
+  const brief = input.knowledgeBrief.trim()
+  const houseSections =
+    brief === ''
+      ? fill(V2_HOUSE_SECTIONS, {
+          venue_profile: input.venueProfile,
+          voice_pack: input.voicePack,
+        })
+      : fill(V2_HOUSE_SECTIONS_BRIEFED, {
+          knowledge_brief: brief,
+          voice_pack: input.voicePack,
+        })
   const guestState = fill(V2_GUEST_STATE, {
-    knowledge: input.knowledge.trim() || EMPTY_SECTION_FALLBACKS.knowledge,
     state_line: `${input.stateLabel} (${input.stateKey})`,
     mission: input.mission,
     guest_profile:
