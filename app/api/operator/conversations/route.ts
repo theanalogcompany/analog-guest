@@ -8,7 +8,10 @@ import { NextResponse } from 'next/server'
 
 import { AuthError, verifyOperatorRequest } from '@/lib/auth'
 import { logger } from '@/lib/observability/logger'
-import { listOperatorConversations } from '@/lib/operator'
+import {
+  listOperatorConversations,
+  threadOptionsFromRequest,
+} from '@/lib/operator'
 
 export const dynamic = 'force-dynamic'
 
@@ -23,7 +26,13 @@ export async function GET(request: Request): Promise<Response> {
     throw err
   }
 
-  const result = await listOperatorConversations(operator.venueScope)
+  // TAC-582: `?attachments=1` lets a media-only message be a conversation's
+  // last message and labels it (`previewLabel`). Without it the list is what
+  // it always was, plus `previewLabel: null` on every row.
+  const result = await listOperatorConversations(
+    operator.venueScope,
+    threadOptionsFromRequest(request),
+  )
   if (!result.ok) {
     logger.warn(
       `[/api/operator/conversations] listOperatorConversations failed error=${result.error}`,

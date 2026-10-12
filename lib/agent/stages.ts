@@ -108,11 +108,13 @@ import {
   pendingSlotOf,
   type SlotDropReason,
 } from './pending-slots'
+import { historyForPrompt } from './media-history'
 import type {
   Classification,
   CorpusMatch,
   FollowupTrigger,
   KnowledgeMatch,
+  RecentMessage,
   RuntimeContext,
   Visit,
 } from './types'
@@ -444,6 +446,19 @@ export const APPROVAL_TRIGGERS = {
   // no deploy. The link itself is independently safe either way: it is on
   // the curated allowlist or UNVERIFIED_URL fires.
   REVIEW_ASK: 'review_ask',
+  // TAC-582 (owner ruling, 2026-10-11): the reply was written around media
+  // the agent cannot see. Either the message being answered carries
+  // attachments, or the guest sent a photo, voice note or the like that
+  // nobody has answered yet. The agent still drafts; a person reads it before
+  // the guest does. lib/agent/media-context.ts has the rule and the
+  // measurement that led to it.
+  //
+  // DETERMINISTIC AND NOT ABOUT THE DRAFT. It reads the thread, never the
+  // generation, so no wording the model chooses can talk its way past it,
+  // which is the point: two rewordings of the prompt line moved what the
+  // model got wrong and not whether it did. Inbound only: handle-inbound is
+  // the one writer of `ctx.mediaContext`.
+  MEDIA_CONTEXT: 'media_context',
 } as const
 
 /**
@@ -497,6 +512,25 @@ export const GENERATION_FAILED_REVIEW_REASON = 'generation_failed'
  * unanswered-question block on later turns. A photo is not a question.
  */
 export const MEDIA_ONLY_REVIEW_REASON = 'media_only_inbound'
+
+/**
+ * TAC-582: `review_reason` on the blank card written when the guest sent
+ * something Meta could not hand us at all (`message.is_unsupported`), or
+ * attachments with no link in any of them. There is a `messages` row and
+ * nothing in it, so there is nothing to classify, generate or show.
+ *
+ * Its own reason rather than MEDIA_ONLY_REVIEW_REASON because that card's copy
+ * says "an attachment" and, since TAC-582, the app shows it. This one's copy
+ * has to say the opposite: there is nothing to look at.
+ *
+ * NOT a voice note. Instagram sends those as `type: "audio"` with a link, so
+ * they are ordinary attachments and get the media-only card (owner ruling 8,
+ * 2026-10-11).
+ *
+ * Outside KNOWLEDGE_GAP_CARD_REVIEW_REASONS for the reason the media-only one
+ * is: nobody asked a question.
+ */
+export const UNSUPPORTED_REVIEW_REASON = 'unsupported_inbound'
 
 /**
  * Priority order for picking the `primaryTrigger` (the value that lands on
@@ -604,6 +638,14 @@ export const PRIMARY_TRIGGER_PRIORITY = [
   // promise still fires a push rather than being treated as a silent re-draft.
   APPROVAL_TRIGGERS.COMPLAINT_COMMITMENT_FLOOR,
   APPROVAL_TRIGGERS.PREVIOUS_PENDING_HELD,
+  // TAC-582: directly below previous_pending_held, on purpose. It is about
+  // the thread, not the draft, so every trigger above that names a concrete
+  // risk in the reply keeps the card's label. And below the sticky-pending
+  // trigger so a card regenerated in place stays labelled as one, which is
+  // what keeps it from pushing a second time at an operator already holding
+  // it. Above the check-failed pair and the policy signals because it says
+  // something specific about this conversation.
+  APPROVAL_TRIGGERS.MEDIA_CONTEXT,
   // TAC-401: ranked below every trigger that names something about this draft.
   // It reports an ABSENCE of information about the reply ("we could not check"),
   // so any trigger naming something concrete is the more useful operator label,
@@ -703,7 +745,10 @@ export async function classifyStage(
     inboundBody: ctx.currentMessage.body,
     persona: ctx.venue.brandPersona,
     venueInfo: ctx.venue.venueInfo,
-    recentMessages: ctx.recentMessages,
+    // TAC-582: with the guest's media-only messages back in their place. The
+    // classifier reads the conversation to judge this message; it decides
+    // nothing about first contact, which still reads ctx.recentMessages.
+    recentMessages: promptHistory(ctx),
     guestState: ctx.recognition.state,
   })
   if (!r.ok) {
@@ -1865,7 +1910,7 @@ export type ApprovalDecision =
  * we can already tell will not send, so the correction is rare rather than
  * routine.
  *
- * The two conditions mirror the gate, and each names the trigger it mirrors
+ * The conditions mirror the gate, and each names the trigger it mirrors
  * so a reader can check them against it:
  *
  *   - the category's own policy       -> trigger 8, category_requires_approval
@@ -1920,8 +1965,15 @@ export function mayAutoSendAfterClassification(ctx: RuntimeContext): boolean {
   ) {
     return false
   }
-  // No third condition. TAC-565 removed it: the venue's hours are
-  // deliberately not read here. See the header.
+  // TAC-582: a reply written around media is always held (the media_context
+  // trigger), so it will not auto-send and the dots would be false. Known at
+  // this point: handle-inbound sets it before classification. Like the two
+  // above, it can only narrow what this returns.
+  if (ctx.mediaContext === true && ctx.classification?.category !== 'opt_out') {
+    return false
+  }
+  // No further condition. TAC-565 removed the venue-hours one: the venue's
+  // hours are deliberately not read here. See the header.
   return true
 }
 
@@ -2182,6 +2234,17 @@ export async function applyApprovalPolicyStage(
     reviewAskDisposition === 'operator_approval'
   ) {
     triggers.push(APPROVAL_TRIGGERS.REVIEW_ASK)
+  }
+
+  // Trigger 21 (TAC-582): the reply was written around media the agent
+  // cannot see. Reads the thread (ctx.mediaContext, set by handle-inbound),
+  // never the generation.
+  //
+  // An opt-out confirmation is exempt, the same carve-out as the venue-wide
+  // hold above and for the same reason: it must send at once. It bypasses
+  // ONLY this trigger.
+  if (ctx.mediaContext === true && ctx.classification?.category !== 'opt_out') {
+    triggers.push(APPROVAL_TRIGGERS.MEDIA_CONTEXT)
   }
 
   // Trigger 11 (TAC-355): independent mechanic-offer verification backstop.
@@ -2846,6 +2909,26 @@ export function deriveFollowupContext(
 // it) structurally unable to disagree about what "the opener turn" means.
 // `buildAiRuntime` below calls this with `new Date()`, identical to its
 // prior inline `Date.now()` call — zero behavior change there.
+/**
+ * TAC-582: the history a prompt is built from. One call shape for the two
+ * prompts that read it (the classifier's and the generator's), so they cannot
+ * disagree about whether a photo the guest sent is in the conversation.
+ */
+function promptHistory(ctx: RuntimeContext): RecentMessage[] {
+  return historyForPrompt({
+    recentMessages: ctx.recentMessages,
+    mediaOnlyInbounds: ctx.mediaOnlyInbounds,
+    inboundMediaAnnounced: ctx.inboundMedia !== null,
+    currentMessageAt: ctx.currentMessage?.receivedAt ?? null,
+  })
+}
+
+// TAC-582: `recentMessages.length === 0` below is the first-contact condition
+// and it is UNCHANGED, on purpose. A guest whose only earlier message was a
+// photo or a story mention still has an empty `recentMessages` (those ride on
+// `ctx.mediaOnlyInbounds`), so their first text is still the opener turn.
+// Owner ruling 4, 2026-10-11; scripts/harness/inbound-attachments/ holds the
+// case.
 export function computeFirstTouchAfterQrScan(
   ctx: RuntimeContext,
   now: Date,
@@ -3094,6 +3177,14 @@ export function buildAiRuntime(
     guestName: ctx.guest.firstName ?? undefined,
     inboundMessage: ctx.currentMessage?.body,
     inboundMedia: ctx.inboundMedia ?? undefined,
+    inboundStoryReply: ctx.inboundStoryReply === true ? true : undefined,
+    // TAC-584: what this turn's media shows. Absent, not empty, when there is
+    // none, so a turn without described media builds the runtime it always did.
+    inboundDescribedMedia:
+      ctx.inboundDescribedMedia !== undefined &&
+      ctx.inboundDescribedMedia.length > 0
+        ? ctx.inboundDescribedMedia
+        : undefined,
     perkBeingUnlocked,
     additionalContext,
     operatorInstruction,
@@ -3129,7 +3220,10 @@ export function buildAiRuntime(
             ctx.recentMessages,
             ctx.followupTrigger.triggeredAt,
           )
-        : ctx.recentMessages,
+        : // TAC-582: with the guest's media-only messages back in their place.
+          // The scan greeting above is left as it was: it is deliberately
+          // written without the earlier conversation.
+          promptHistory(ctx),
     mechanics: ctx.mechanics,
     // TAC-234: thread the recent transactions through to the AI module's
     // RuntimeContext. The serializer gates rendering by category (welcome /

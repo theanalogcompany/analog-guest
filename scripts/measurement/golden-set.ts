@@ -43,7 +43,7 @@
  *     19/8/3/1. Part of that gap is this harness, so do not read the count
  *     as a difference between the engines.
  *   - whether v1 would have sent or queued. `draftInboundReply` stops before
- *     the 20 approval triggers and the four post-generation checks, so v1 has
+ *     the 21 approval triggers and the four post-generation checks, so v1 has
  *     no route to report. v2's gate verdict is recorded for v2 alone.
  *   - anything across two runs in different open/closed states. The prompt
  *     carries an open/closed line, so a run after close hedges through every

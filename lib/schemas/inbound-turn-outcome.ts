@@ -91,12 +91,12 @@ export const INBOUND_TURN_REASONS = [
   /** the delivery was not saved: unhandled, skipped, or the insert failed */
   'event_not_persisted',
   /**
-   * The guest sent something we cannot act on — Meta could not render it
-   * (`message_unsupported`, a voice note or sticker) or it carried neither
-   * text nor an attachment (`message_no_content`). Saved nowhere, so before
-   * this it was invisible; CLAUDE.md notes a STOP sent as a voice note would
-   * have been missed entirely. A guest turn that got nothing, which is exactly
-   * what the ledger is for.
+   * The guest sent something that carried neither text nor an attachment
+   * (`message_no_content`). Saved nowhere, so before this it was invisible. A
+   * guest turn that got nothing, which is exactly what the ledger is for.
+   *
+   * Until TAC-582 this also covered a message Meta could not render. That one
+   * is saved now and gets an operator card, so it no longer lands here.
    */
   'message_unrenderable',
 

@@ -35,6 +35,15 @@
 // it there (CLAUDE.md, TAC-380 Probe 1). Bounded to ~23 characters by the
 // title trim, and it was rendered in the body before this too. Called out
 // because on a comp_complaint push the title is the ONLY thing rendered.
+//
+// TAC-584 ADDS ONE MORE GUEST-INFLUENCED THING: an Instagram handle, on the
+// push for a story the guest tagged the venue in ("@handle tagged you in their
+// story. Reshare?"). It is the first handle on a lock screen, ruled by the
+// owner on that ticket's plan (2026-10-11), because the handle is what tells
+// whoever holds the venue's Instagram which story to reshare. It is a public
+// identifier, not something the guest wrote to us. It is rendered only when it
+// has the shape of a handle (INSTAGRAM_HANDLE), and never in a log line: the
+// TAC-458 rule on logs is unchanged.
 
 import {
   loadPushRecipients,
@@ -49,6 +58,7 @@ import {
   APPROVAL_TRIGGERS,
   GENERATION_FAILED_REVIEW_REASON,
   MEDIA_ONLY_REVIEW_REASON,
+  UNSUPPORTED_REVIEW_REASON,
   type ApprovalTrigger,
 } from '@/lib/agent/stages'
 import type { MessageCategory } from '@/lib/ai/types'
@@ -99,6 +109,11 @@ const BODY_NO_QUESTION = 'Draft ready to review'
 // no guest words to quote, so the shared fallback above would be false on it.
 // Scoped to that one card by review reason; every other card is unchanged.
 const BODY_MEDIA_ONLY = 'Sent an attachment. Reply by hand.'
+// TAC-582. The same case for the unsupported card: no draft, nothing to
+// quote. This is the card's own sentence, approved verbatim 2026-10-11, and
+// not a new one, because no separate push body was put to the owner.
+const BODY_UNSUPPORTED =
+  "Sent something we can't show. Write your reply by hand."
 
 // Used only for a reason this map does not know. The map is total over every
 // value that can reach a push, so this is reachable only if primaryTrigger
@@ -151,15 +166,20 @@ export const REASON_BY_REVIEW_REASON = {
   // The once-ever Google review ask, queue-first at launch.
   [APPROVAL_TRIGGERS.REVIEW_ASK]: 'review ask, your call',
   [APPROVAL_TRIGGERS.HOLD_ALL_OUTBOUND]: 'needs review',
+  // TAC-582, approved verbatim 2026-10-11.
+  [APPROVAL_TRIGGERS.MEDIA_CONTEXT]: 'replied after sending an attachment',
   [GENERATION_FAILED_REVIEW_REASON]: "couldn't write it",
   [INSTAGRAM_SEND_FAILED_REASON]: "didn't send",
   // TAC-574, approved 2026-10-06.
   [MEDIA_ONLY_REVIEW_REASON]: 'sent an attachment',
+  // TAC-582, approved verbatim 2026-10-11.
+  [UNSUPPORTED_REVIEW_REASON]: "sent something we can't show",
 } as const satisfies Record<
   | ApprovalTrigger
   | typeof GENERATION_FAILED_REVIEW_REASON
   | typeof INSTAGRAM_SEND_FAILED_REASON
-  | typeof MEDIA_ONLY_REVIEW_REASON,
+  | typeof MEDIA_ONLY_REVIEW_REASON
+  | typeof UNSUPPORTED_REVIEW_REASON,
   string
 >
 
@@ -228,6 +248,49 @@ function truncateAtWord(text: string, max: number): string {
   return `${base.trimEnd()}…`
 }
 
+/** After the guest's name in the title of a story-mention push. Categorical. */
+export const STORY_MENTION_REASON = 'tagged you in their story'
+
+/** Instagram's own rule for a username: letters, digits, dots, underscores, up to 30. */
+const INSTAGRAM_HANDLE = /^[A-Za-z0-9._]{1,30}$/
+
+/**
+ * TAC-584: what a card raised by media needs its push to say, beyond its
+ * review reason.
+ *
+ *   story_mention     the guest tagged the venue in a story. The push is the
+ *                     nudge to reshare it, whatever is on the card: it is
+ *                     keyed on the attachment, so it reads the same whether
+ *                     the card carries a draft or is blank.
+ *   media_only_draft  media with no text, and the card now carries a draft.
+ *                     The card's reason is `media_context`, whose own title
+ *                     wording ("replied after sending an attachment") is
+ *                     false of a guest who sent only a photo, and the blank
+ *                     card's body ("Reply by hand.") is false of a card with
+ *                     a draft. So it takes the blank card's title reason and
+ *                     the neutral body, both existing copy.
+ */
+export type PushMedia =
+  | { kind: 'story_mention'; instagramUsername: string | null }
+  | { kind: 'media_only_draft' }
+
+/**
+ * The body of a story-mention push. Wording approved verbatim on TAC-584's
+ * plan (2026-10-11), both forms.
+ *
+ * The handle can be missing: a guest's first-ever message can reach the card
+ * before their profile has been fetched. A value that is not shaped like a
+ * handle is treated as missing rather than rendered.
+ */
+export function buildStoryMentionBody(
+  instagramUsername: string | null,
+): string {
+  const handle = (instagramUsername ?? '').trim().replace(/^@/, '')
+  return INSTAGRAM_HANDLE.test(handle)
+    ? `@${handle} tagged you in their story. Reshare?`
+    : 'Tagged you in their story. Reshare?'
+}
+
 export interface SendDraftFlaggedPushInput {
   agentRunId: string
   venueId: string
@@ -260,16 +323,28 @@ export interface SendDraftFlaggedPushInput {
    * classifier picked, not as a complaint.
    */
   guestIsCrisis: boolean
+  /**
+   * TAC-584. Set for a card raised by a guest's media when the review reason
+   * alone would word the push wrongly; null for every other card. Required
+   * for the reason the three above are: each call site has to decide.
+   */
+  media: PushMedia | null
 }
 
 export function buildPushTitle(
   firstName: string | null,
   primaryTrigger: string,
   category: MessageCategory | null,
+  media: PushMedia | null = null,
 ): string {
   const trimmed = firstName?.trim() ?? ''
   const name = trimmed || 'A guest'
-  const reason = resolvePushReason(primaryTrigger, category)
+  const reason =
+    media?.kind === 'story_mention'
+      ? STORY_MENTION_REASON
+      : media?.kind === 'media_only_draft'
+        ? REASON_BY_REVIEW_REASON[MEDIA_ONLY_REVIEW_REASON]
+        : resolvePushReason(primaryTrigger, category)
   const full = `${name}: ${reason}`
   if (full.length <= MAX_PUSH_TITLE_CHARS) return full
   // Over budget: trim the NAME and keep the reason whole. The reason is what
@@ -297,6 +372,36 @@ export function buildPushBody(
   // The quotes are deliberate: they mark the text as the guest's words rather
   // than ours. They cost two of the budget, hence the -2.
   return `"${truncateAtWord(question, MAX_PUSH_BODY_CHARS - 2)}"`
+}
+
+/**
+ * The body for one card's push. Pure, and exported for the harness.
+ *
+ * `media` is read FIRST: a story mention's push is the reshare nudge whichever
+ * card it is on, and a media-only draft has no guest words to quote.
+ */
+export function buildDraftFlaggedPushBody(
+  input: Pick<
+    SendDraftFlaggedPushInput,
+    | 'primaryTrigger'
+    | 'guestQuestion'
+    | 'guestCategory'
+    | 'guestIsCrisis'
+    | 'media'
+  >,
+): string {
+  if (input.media?.kind === 'story_mention') {
+    return buildStoryMentionBody(input.media.instagramUsername)
+  }
+  if (input.media?.kind === 'media_only_draft') return BODY_NO_QUESTION
+  if (input.primaryTrigger === MEDIA_ONLY_REVIEW_REASON) return BODY_MEDIA_ONLY
+  if (input.primaryTrigger === UNSUPPORTED_REVIEW_REASON)
+    return BODY_UNSUPPORTED
+  return buildPushBody(
+    input.guestQuestion,
+    input.guestCategory,
+    input.guestIsCrisis,
+  )
 }
 
 // TAC-473: these three moved to ./recipients when a third push surface
@@ -366,15 +471,9 @@ export async function sendDraftFlaggedPush(
     input.guestFirstName,
     input.primaryTrigger,
     input.guestCategory,
+    input.media,
   )
-  const body =
-    input.primaryTrigger === MEDIA_ONLY_REVIEW_REASON
-      ? BODY_MEDIA_ONLY
-      : buildPushBody(
-          input.guestQuestion,
-          input.guestCategory,
-          input.guestIsCrisis,
-        )
+  const body = buildDraftFlaggedPushBody(input)
 
   for (const recipient of recipients) {
     const badge = await countPendingForOperator(recipient.id)

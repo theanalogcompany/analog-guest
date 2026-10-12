@@ -3,6 +3,7 @@ import { formatInTimeZone } from 'date-fns-tz'
 import { AuthError, devAuthBypass, verifyAnalogAdminAccess } from '@/lib/auth'
 import { createAdminClient } from '@/lib/db/admin'
 import { createServerClient } from '@/lib/db/server'
+import { MESSAGE_HAS_CONTENT_FILTER } from '@/lib/messaging/attachments/store'
 import { logger } from '@/lib/observability/logger'
 import { type GuestState } from '@/lib/recognition'
 import {
@@ -402,7 +403,10 @@ async function loadConversationData({
       .select('id', { count: 'exact', head: true })
       .eq('venue_id', venueRow.id)
       .eq('guest_id', guestId)
-      .neq('body', ''),
+      // TAC-582: a message with no text counts when it has media or Meta's
+      // unsupported flag. It was already SHOWN in the thread below, which has
+      // no body filter, so the headline number disagreed with the thread.
+      .or(MESSAGE_HAS_CONTENT_FILTER),
     // Earliest message timestamp — for the "since" date on the guest card.
     // ASC + limit 1 is cheaper than min() across a potentially-large table
     // and gives the same answer.
@@ -685,7 +689,9 @@ async function loadRecentActivity({
     .select(
       'venue_id, guest_id, created_at, venues(name), guests(first_name, last_name, phone_number, instagram_username)',
     )
-    .neq('body', '')
+    // TAC-582: a guest whose newest message was a photo used to be missing
+    // from the rail, or shown at the time of their last text.
+    .or(MESSAGE_HAS_CONTENT_FILTER)
     .order('created_at', { ascending: false })
     .limit(200)
   const venueIds = venueFilterIds(venueScope)

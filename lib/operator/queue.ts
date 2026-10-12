@@ -14,6 +14,7 @@ import type { Json } from '@/db/types'
 import type {
   ApprovalTrigger,
   MEDIA_ONLY_REVIEW_REASON,
+  UNSUPPORTED_REVIEW_REASON,
 } from '@/lib/agent/stages'
 import type { ThreadMessage } from '@/lib/schemas'
 import { PendingCommitmentSchema } from '@/lib/schemas/guest-commitment'
@@ -181,11 +182,17 @@ export type ListPendingQueueResult =
 //     attachment with no text, so nothing was classified or generated and
 //     handle-inbound wrote a blank card for the owner to answer by hand.
 //     Outside APPROVAL_TRIGGERS because no gate ran.
+//   unsupported_inbound — TAC-582: the guest sent something Meta could not
+//     hand us (`is_unsupported`), or attachments with no link, so the message
+//     row is empty and there is nothing to classify, generate or show. The
+//     same blank card as media_only_inbound with the opposite thing to say.
+//     Outside APPROVAL_TRIGGERS because no gate ran.
 type ExtraReviewReason =
   | 'operator_decline_initiated'
   | 'generation_failed'
   | 'instagram_send_failed'
   | typeof MEDIA_ONLY_REVIEW_REASON
+  | typeof UNSUPPORTED_REVIEW_REASON
 
 // Operator-facing copy for `messages.review_reason`.
 //
@@ -304,6 +311,20 @@ const REVIEW_REASON_LABELS: Record<
   // only when nothing more specific co-fired. "right now" because the flag is
   // a switch someone threw and can throw back.
   hold_all_outbound: "You're holding everything here right now.",
+  // TAC-582, copy approved verbatim 2026-10-11. The draft was written by an
+  // agent that was told a photo or attachment exists and cannot see it, so
+  // the operator, who can, reads it first. True on the two cases the rule
+  // names: media on the message being answered, and media the guest sent
+  // that nobody has replied to.
+  //
+  // NOT TRUE ON A THIRD: when the thread could not be read, the reply is held
+  // without knowing whether there was any media, and the card still says
+  // this. Holding on a failed read is the owner's ruling (2026-10-11); that
+  // the sentence is then untrue was raised with him in review and has no
+  // ruling of its own yet. The reason is on the `guest_media_degraded`
+  // event, not on the card.
+  media_context:
+    'Replying after a photo or attachment. Check the draft before sending.',
   // TAC-361, the defect this ticket was opened on. The old copy read
   // 'Complaint needs your call' — an explicit entry written at v1.24.0 when
   // comp_complaint was the only routed category. TAC-307 generalised the
@@ -384,6 +405,11 @@ const REVIEW_REASON_LABELS: Record<
   // look, because the app cannot show the media on either channel.
   media_only_inbound:
     'Sent an attachment with no text. Write your reply by hand.',
+  // TAC-582, copy approved verbatim 2026-10-11. For a message Meta could not
+  // hand us: the app has nothing to show for it, and the card says so, where
+  // the card above is for media the app CAN show.
+  unsupported_inbound:
+    "Sent something we can't show. Write your reply by hand.",
 
   // --- You're mid-thread with this guest ------------------------------------
   // Ranked 9th, so it only ever wins when nothing else fired: the draft itself

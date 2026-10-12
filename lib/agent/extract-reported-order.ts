@@ -127,7 +127,7 @@ export type ReportedOrderRead =
       continuesRecentVisit: boolean
     }
 
-interface ResolvedReportedItem {
+export interface ResolvedReportedItem {
   name: string
   quantity: number
   unitPriceCents: number | null
@@ -450,7 +450,7 @@ export function venueLocalDayKey(timezone: string, instant: Date): string {
   return `${pad(local.year, 4)}-${pad(local.month, 2)}-${pad(local.day, 2)}`
 }
 
-function sameVenueLocalDay(
+export function sameVenueLocalDay(
   aIso: string,
   bIso: string,
   timezone: string,
@@ -594,7 +594,9 @@ export function resolveOccurredAt(
 // plain typed value to the `raw_data` column's `Json` type — a named
 // interface has no index signature, so TypeScript won't structurally accept
 // it as `Json` on its own.
-function buildStoredLineItems(items: readonly ResolvedReportedItem[]): Json[] {
+export function buildStoredLineItems(
+  items: readonly ResolvedReportedItem[],
+): Json[] {
   return items.map((item) =>
     toJson({
       name: item.name,
@@ -607,7 +609,7 @@ function buildStoredLineItems(items: readonly ResolvedReportedItem[]): Json[] {
 }
 
 // Null when ANY item has no price — a partial sum looks complete and isn't.
-function computeAmountCents(
+export function computeAmountCents(
   items: readonly { unitPriceCents: number | null; quantity: number }[],
 ): number | null {
   if (items.some((i) => i.unitPriceCents === null)) return null
@@ -620,7 +622,7 @@ function computeAmountCents(
 // TAC-325. Defensive read of a `guest_reported_ongoing` row's existing line
 // items — permissive at this boundary (drop anything malformed rather than
 // throwing) since this reads back data this same module already wrote.
-function parseStoredLineItems(
+export function parseStoredLineItems(
   rawData: unknown,
 ): { name: string; quantity: number; unitPriceCents: number | null }[] {
   if (typeof rawData !== 'object' || rawData === null) return []
@@ -651,7 +653,7 @@ function parseStoredLineItems(
 // (flagged, not solved) — the cost lands on item/spend attribution, never
 // on visit count, which is unaffected by how many line items one
 // transaction row carries.
-function dropAlreadyRecordedItems(
+export function dropAlreadyRecordedItems(
   newItems: readonly ResolvedReportedItem[],
   existingItems: readonly { name: string }[],
 ): ResolvedReportedItem[] {
@@ -686,7 +688,7 @@ type SupabaseAdminClient = ReturnType<typeof createAdminClient>
  * already written by the time this runs; this cache is derived and the next
  * report rebuilds it.
  */
-async function advanceLastVisit(
+export async function advanceLastVisit(
   supabase: SupabaseAdminClient,
   guestId: string,
   currentLastVisitAt: string | null,

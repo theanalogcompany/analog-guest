@@ -46,7 +46,7 @@ real bubble - but the v1 test path pins the probabilistic sentence split off
 where a tail earns one structurally: the further-help offer, the getting-to-know-you question.
 v2 emits `messages[]` directly. Part of any gap you see is this harness.
 
-**v1 has no route to report.** `draftInboundReply` stops before the 20 approval triggers and
+**v1 has no route to report.** `draftInboundReply` stops before the 21 approval triggers and
 the four post-generation checks, so a v1 answer on this page is a *draft*, not a prediction of
 what a guest would have received. `v2_gate` is recorded for v2 alone and is never a comparison.
 

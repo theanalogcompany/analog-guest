@@ -48,7 +48,12 @@
 
 import { DELIVERED_OUTBOUND_STATUSES } from '@/lib/agent/group-responses'
 import { createAdminClient } from '@/lib/db/admin'
-import { THREAD_MESSAGE_LIMIT, type ThreadMessage } from '@/lib/schemas'
+import { serveAttachments } from '@/lib/messaging/attachments/serve'
+import {
+  MESSAGE_HAS_CONTENT_FILTER,
+  loadAttachmentsForGuest,
+} from '@/lib/messaging/attachments/store'
+import { THREAD_MESSAGE_LIMIT, type OperatorThreadMessage } from '@/lib/schemas'
 import {
   bearerAllowsVenue,
   venueScopeDeniesAll,
@@ -59,9 +64,40 @@ const REACHED_GUEST_FILTER = `direction.eq.inbound,and(status.in.(${[
   ...DELIVERED_OUTBOUND_STATUSES,
 ].join(',')}),or(review_state.is.null,review_state.neq.pending))`
 
+// TAC-582: the rows `?attachments=1` adds to a thread. A message with no text
+// is shown when it has media or when Meta flagged it unsupported. Everything
+// else with an empty body stays out exactly as before: a reaction, a scan row
+// and a blank card all have neither.
+//
+// The filter itself is MESSAGE_HAS_CONTENT_FILTER, shared with every other
+// reader that asks the same question.
+
+export interface ThreadOptions {
+  /**
+   * `?attachments=1`. Off, the thread is the rows it always was, each with
+   * `attachments: []` and `unsupported: false`. On, media-only and unsupported
+   * rows are included and every row carries its attachments. A flag, until
+   * the operator app that can render them has shipped (TAC-583).
+   */
+  includeAttachments: boolean
+}
+
+/**
+ * The thread options a request asked for. `?attachments=1` exactly; any other
+ * value, and no value, is off. Shared by both thread routes and the
+ * conversations list so the flag cannot mean two things.
+ */
+export function threadOptionsFromRequest(request: Request): ThreadOptions {
+  return {
+    includeAttachments:
+      new URL(request.url).searchParams.get('attachments') === '1',
+  }
+}
+
 export interface LoadGuestThreadInput {
   messageId: string
   venueScope: VenueScope
+  options: ThreadOptions
 }
 
 export type LoadGuestThreadErrorCode =
@@ -69,7 +105,7 @@ export type LoadGuestThreadErrorCode =
 
 export interface LoadGuestThreadSuccess {
   ok: true
-  messages: ThreadMessage[]
+  messages: OperatorThreadMessage[]
 }
 
 export interface LoadGuestThreadFailure {
@@ -82,26 +118,33 @@ export type LoadGuestThreadResult =
   LoadGuestThreadSuccess | LoadGuestThreadFailure
 
 /**
- * Fetches up to THREAD_MESSAGE_LIMIT non-empty-body messages that reached the
- * guest, for a resolved (venueId, guestId) pair, oldest→newest. Shared by
- * loadGuestThread (keyed off a messageId, resolves venue/guest first) and
+ * Fetches up to THREAD_MESSAGE_LIMIT messages that reached the guest, for a
+ * resolved (venueId, guestId) pair, oldest→newest. Shared by loadGuestThread
+ * (keyed off a messageId, resolves venue/guest first) and
  * loadGuestThreadByGuestId (lib/operator/guest-thread.ts, keyed directly off
  * guestId) so both thread endpoints run the identical query instead of
  * drifting independently.
+ *
+ * Without `includeAttachments` only non-empty-body rows are returned, as
+ * before TAC-582.
  */
 export async function fetchThreadMessagesForGuest(
   supabase: ReturnType<typeof createAdminClient>,
   venueId: string,
   guestId: string,
+  options: ThreadOptions,
 ): Promise<
-  { ok: true; messages: ThreadMessage[] } | { ok: false; error: string }
+  { ok: true; messages: OperatorThreadMessage[] } | { ok: false; error: string }
 > {
-  const { data: rows, error: threadErr } = await supabase
+  const base = supabase
     .from('messages')
-    .select('id, body, direction, created_at')
+    .select('id, body, direction, created_at, unsupported_content')
     .eq('venue_id', venueId)
     .eq('guest_id', guestId)
-    .neq('body', '')
+  const shown = options.includeAttachments
+    ? base.or(MESSAGE_HAS_CONTENT_FILTER)
+    : base.neq('body', '')
+  const { data: rows, error: threadErr } = await shown
     .or(REACHED_GUEST_FILTER)
     .order('created_at', { ascending: false })
     .limit(THREAD_MESSAGE_LIMIT)
@@ -111,7 +154,25 @@ export async function fetchThreadMessagesForGuest(
   }
 
   const recentDesc = rows ?? []
-  const messages: ThreadMessage[] = []
+
+  // One query for the guest's attachments, then one signing call for the
+  // ones on a message being shown. By guest, not by a list of 200 ids.
+  // A failed read is a failed thread, not a thread with the media quietly
+  // missing: the caller asked for attachments and would otherwise be told
+  // there are none.
+  let attachmentsByMessage: Awaited<ReturnType<typeof serveAttachments>> =
+    new Map()
+  if (options.includeAttachments) {
+    const loaded = await loadAttachmentsForGuest(supabase, venueId, guestId)
+    if (!loaded.ok) return { ok: false, error: loaded.error }
+    const shown = new Set(recentDesc.map((r) => r.id))
+    attachmentsByMessage = await serveAttachments(
+      supabase,
+      loaded.data.filter((attachment) => shown.has(attachment.messageId)),
+    )
+  }
+
+  const messages: OperatorThreadMessage[] = []
   for (let i = recentDesc.length - 1; i >= 0; i--) {
     const r = recentDesc[i]!
     if (r.direction !== 'inbound' && r.direction !== 'outbound') continue
@@ -120,6 +181,8 @@ export async function fetchThreadMessagesForGuest(
       direction: r.direction,
       body: r.body,
       createdAt: r.created_at,
+      unsupported: options.includeAttachments && r.unsupported_content === true,
+      attachments: attachmentsByMessage.get(r.id) ?? [],
     })
   }
 
@@ -162,6 +225,7 @@ export async function loadGuestThread(
     supabase,
     row.venue_id,
     row.guest_id,
+    input.options,
   )
   if (!result.ok) {
     return { ok: false, errorCode: 'db_error', error: result.error }

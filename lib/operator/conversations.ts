@@ -1,9 +1,16 @@
 // lib/operator/conversations.ts
 // Powers GET /api/operator/conversations. Projects list_operator_conversations
-// RPC rows (migration 033) into the wire shape locked by the Contract in
+// RPC rows (migration 080 holds the current definition) into the wire shape locked by the Contract in
 // analog-operator's docs/superpowers/specs/2026-09-05-conversations-tab-design.md.
 
+import { captureGuestMediaDegraded } from '@/lib/analytics/posthog'
 import { createAdminClient } from '@/lib/db/admin'
+import {
+  UNKNOWN_PREVIEW_LABEL,
+  UNSUPPORTED_PREVIEW_LABEL,
+  previewLabelFor,
+} from '@/lib/messaging/attachments/labels'
+import { loadAttachmentsForMessages } from '@/lib/messaging/attachments/store'
 import {
   parseMessageChannel,
   type MessageChannel,
@@ -15,6 +22,7 @@ import {
 } from './instagram-fields'
 import { normalizeRecognitionState } from './recognition-state'
 import type { GuestRecognitionState } from './recognition-state'
+import type { ThreadOptions } from './thread'
 import {
   venueFilterIds,
   venueScopeDeniesAll,
@@ -35,6 +43,12 @@ export interface ConversationSummary {
   lastMessageAt: string
   lastMessageDirection: 'inbound' | 'outbound'
   lastMessagePreview: string
+  // TAC-582, Contract-locked, ALWAYS PRESENT. What to show in place of the
+  // preview when the last message has no text: "Photo", "Voice note", ...
+  // Null when the last message has text, and always null unless the request
+  // passed `?attachments=1`. Flat, beside lastMessagePreview: there is no
+  // nested last-message object on this wire.
+  previewLabel: string | null
   conversationCount: number
   firstConversationAt: string
   // TAC-473, Contract-locked. All three ALWAYS PRESENT — the client never
@@ -86,10 +100,80 @@ interface RawConversationRow {
   instagram_username: string | null
   last_inbound_channel: string | null
   last_guest_action_at: string | null
+  // TAC-582 (migration 080). NULL for a guest no message has reached, the
+  // same rows whose body the RPC blanks. db/types.ts types both as non-null;
+  // they are not, and `tsc` cannot see that.
+  last_message_id: string | null
+  last_message_unsupported: boolean | null
+}
+
+type AdminSupabaseClient = ReturnType<typeof createAdminClient>
+
+/**
+ * `previewLabel` for every row whose last message has no text, keyed by that
+ * message's id.
+ *
+ * One query for all of them: only the media-only last messages are looked up,
+ * which is a handful of a 200-row list.
+ *
+ * FAILS SOFT, to no label. The list is how an operator finds a conversation at
+ * all, and the client parses it all-or-nothing, so a failed attachment read
+ * must not fail it. The cost is a blank preview on those rows, and the read is
+ * logged.
+ */
+async function loadPreviewLabels(
+  supabase: AdminSupabaseClient,
+  rows: readonly RawConversationRow[],
+): Promise<Map<string, string>> {
+  const labels = new Map<string, string>()
+  const mediaOnlyIds: string[] = []
+  for (const row of rows) {
+    if (row.last_message_body !== '' || row.last_message_id === null) continue
+    if (row.last_message_unsupported === true) {
+      labels.set(row.last_message_id, UNSUPPORTED_PREVIEW_LABEL)
+    } else {
+      mediaOnlyIds.push(row.last_message_id)
+    }
+  }
+
+  const loaded = await loadAttachmentsForMessages(supabase, mediaOnlyIds)
+  if (!loaded.ok) {
+    console.error('operator conversations: preview labels not loaded', {
+      event: 'conversations_preview_labels_failed',
+      count: mediaOnlyIds.length,
+      error: loaded.error,
+    })
+    await captureGuestMediaDegraded({
+      stage: 'preview_labels',
+      reason: loaded.error,
+      venueId: null,
+      guestId: null,
+      messageId: null,
+      attachmentId: null,
+      host: null,
+    })
+    return labels
+  }
+  // Rows come back ordered by message then position, so the first one seen
+  // for a message is its first attachment.
+  for (const attachment of loaded.data) {
+    if (!labels.has(attachment.messageId)) {
+      labels.set(attachment.messageId, previewLabelFor(attachment))
+    }
+  }
+  // A media-only message with no attachment row behind it: its row write
+  // failed at the webhook. The RPC only returns such a message as the last
+  // one because it HAS media, so it is labelled as the general case and never
+  // left as a blank line in the list.
+  for (const id of mediaOnlyIds) {
+    if (!labels.has(id)) labels.set(id, UNKNOWN_PREVIEW_LABEL)
+  }
+  return labels
 }
 
 export async function listOperatorConversations(
   venueScope: VenueScope,
+  options: ThreadOptions,
 ): Promise<ListOperatorConversationsResult> {
   if (venueScopeDeniesAll(venueScope)) {
     return { ok: true, conversations: [] }
@@ -110,16 +194,27 @@ export async function listOperatorConversations(
   }
 
   const supabase = createAdminClient()
+  // TAC-582: `include_media` is what lets a message with no text be a
+  // conversation's last message, count toward its days, or be the only reason
+  // the guest is listed at all. It follows the same `?attachments=1` the
+  // thread endpoints read, so the list and the thread it opens agree. Off, the
+  // RPC returns exactly what it did before the parameter existed.
   const { data, error } = await supabase.rpc('list_operator_conversations', {
     venue_ids: venueIds,
+    include_media: options.includeAttachments,
   })
 
   if (error) {
     return { ok: false, error: error.message }
   }
 
+  const rows = (data ?? []) as RawConversationRow[]
+  const previewLabels = options.includeAttachments
+    ? await loadPreviewLabels(supabase, rows)
+    : new Map<string, string>()
+
   const conversations: ConversationSummary[] = []
-  for (const row of (data ?? []) as RawConversationRow[]) {
+  for (const row of rows) {
     if (
       row.last_message_direction !== 'inbound' &&
       row.last_message_direction !== 'outbound'
@@ -144,6 +239,10 @@ export async function listOperatorConversations(
       lastMessageAt: row.last_message_at,
       lastMessageDirection: row.last_message_direction,
       lastMessagePreview: row.last_message_body,
+      previewLabel:
+        row.last_message_id === null
+          ? null
+          : (previewLabels.get(row.last_message_id) ?? null),
       conversationCount: row.conversation_count,
       firstConversationAt: row.first_conversation_at,
       // TAC-473. `hasPhone` is a typeof check, not `!== null`: an undefined

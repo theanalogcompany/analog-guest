@@ -13,6 +13,9 @@ import {
   captureReviewAskSent,
 } from '@/lib/analytics/posthog'
 import { createAdminClient } from '@/lib/db/admin'
+import type { InboundDescribedMedia } from '@/lib/ai/types'
+import { describeMessageAttachments } from '@/lib/messaging/attachments/describe'
+import { nameableItems } from '@/lib/schemas/attachment-description'
 import { isEmptyContextUpdate, updateGuestContext } from '@/lib/guests/context'
 import {
   clearOptOut,
@@ -22,10 +25,15 @@ import {
 } from '@/lib/guests/opt-out'
 import { sendCommitmentArrivalPush } from '@/lib/notifications/send-commitment-push'
 import {
+  type PushMedia,
   sendDraftFlaggedPush,
   shouldSendDraftFlaggedPush,
 } from '@/lib/notifications/send'
-import { startAgentTrace, toAgentUsage } from '@/lib/observability'
+import {
+  type AgentTrace,
+  startAgentTrace,
+  toAgentUsage,
+} from '@/lib/observability'
 import { resolveCancellation } from '@/lib/schemas/guest-commitment'
 import { parseMessageChannel } from '@/lib/schemas/message-channel'
 import { capturePostHogEvent, fireRedAlert } from './alerts'
@@ -58,14 +66,19 @@ import {
   recordedOrderForThisVisit,
 } from './extract-reported-order'
 import { retractReportedVisits } from './retract-reported-visit'
+import { recordMediaVisit } from './record-media-visit'
+import { withDescribedHistory } from './media-history'
 import {
   MEDIA_ONLY_SETTLE_MS,
   MEDIA_ONLY_SETTLE_POLL_MS,
   isMediaOnly,
   loadTurnMediaRows,
   mediaAlongsideText,
+  mediaMessageIdsForTurn,
+  repliesToStory,
   resolveMediaOnlyTurn,
 } from './inbound-media'
+import { decideMediaContextHold, loadMediaContextRows } from './media-context'
 import {
   bodyContainsReviewLink,
   deriveReviewAsk,
@@ -117,9 +130,11 @@ import {
   generateStage,
   GENERATION_FAILED_REVIEW_REASON,
   MEDIA_ONLY_REVIEW_REASON,
+  UNSUPPORTED_REVIEW_REASON,
   KNOWLEDGE_GAP_WINDOW_MS,
   mayAutoSendAfterClassification,
   retrieveCorpusStage,
+  retrieveKnowledgeStage,
   retrieveKnowledgeWithContextStage,
   shouldRetrieveKnowledge,
 } from './stages'
@@ -198,6 +213,9 @@ async function loadInbound(messageId: string): Promise<{
   // this file reads it (lib/agent/inbound-media.ts decides what it means) and
   // InboundMessage is constructed at thirty sites that have no media.
   mediaUrls: string[]
+  // TAC-582: `messages.unsupported_content`. The guest sent something and the
+  // row holds nothing of it: Meta flagged it, or its attachments had no link.
+  unsupported: boolean
   guestId: string
   venueId: string
 }> {
@@ -205,7 +223,7 @@ async function loadInbound(messageId: string): Promise<{
   const { data, error } = await supabase
     .from('messages')
     .select(
-      'id, body, media_urls, provider_message_id, created_at, venue_id, guest_id, direction, channel, referral_source',
+      'id, body, media_urls, unsupported_content, provider_message_id, created_at, venue_id, guest_id, direction, channel, referral_source',
     )
     .eq('id', messageId)
     .single()
@@ -237,6 +255,7 @@ async function loadInbound(messageId: string): Promise<{
       referralSource: data.referral_source,
     },
     mediaUrls: data.media_urls ?? [],
+    unsupported: data.unsupported_content === true,
     guestId: data.guest_id,
     venueId: data.venue_id,
   }
@@ -467,6 +486,7 @@ async function persistGenerationFailureCard(
           guestQuestion: ctx.currentMessage?.body ?? null,
           guestCategory: ctx.classification?.category ?? null,
           guestIsCrisis: ctx.classification?.crisisSafety ?? false,
+          media: null,
         }).catch(() => {}),
       )
     }
@@ -514,12 +534,18 @@ async function persistGenerationFailureCard(
 async function persistMediaOnlyCard(
   ctx: RuntimeContext,
   agentRunId: string,
+  // TAC-582: which of the two blank cards this is. Everything else about
+  // them is the same card: no draft, no category, its own slot.
+  reviewReason:
+    typeof MEDIA_ONLY_REVIEW_REASON | typeof UNSUPPORTED_REVIEW_REASON,
+  // TAC-584: a story mention's push is the reshare nudge even on a blank card.
+  pushMedia: PushMedia | null = null,
 ): Promise<AgentResult> {
   try {
     const persisted = await persistOrRegenQueuedDraft(
       ctx,
       buildGenerationFailureGeneration(),
-      MEDIA_ONLY_REVIEW_REASON,
+      reviewReason,
       null,
       { blankBody: true, conversationDisposition: 'own_card' },
     )
@@ -540,8 +566,8 @@ async function persistMediaOnlyCard(
       agentRunId,
       venueId: ctx.venue.id,
       guestId: ctx.guest.id,
-      triggers: [MEDIA_ONLY_REVIEW_REASON],
-      primaryTrigger: MEDIA_ONLY_REVIEW_REASON,
+      triggers: [reviewReason],
+      primaryTrigger: reviewReason,
       modelRequiresApproval: false,
       modelApprovalReason: '',
       compRegexMatchedPattern: null,
@@ -555,12 +581,302 @@ async function persistMediaOnlyCard(
       inboundBody: null,
       generatedBody: '',
     })
-    pushOperatorCard(ctx, persisted.outboundMessageId, MEDIA_ONLY_REVIEW_REASON)
+    pushOperatorCard(ctx, persisted.outboundMessageId, reviewReason, pushMedia)
     return {
       status: 'queued',
       outboundMessageId: persisted.outboundMessageId,
-      triggers: [MEDIA_ONLY_REVIEW_REASON],
-      primaryTrigger: MEDIA_ONLY_REVIEW_REASON,
+      triggers: [reviewReason],
+      primaryTrigger: reviewReason,
+    }
+  } catch (e) {
+    // persistOrRegenQueuedDraft already fired a red alert.
+    return {
+      status: 'failed',
+      stage: 'persist',
+      error: e instanceof Error ? e.message : String(e),
+    }
+  }
+}
+
+/**
+ * What a media-only draft is composed as. Nothing was classified (there are
+ * no words to classify), and `composePrompt` needs a category for its
+ * instructions. A photo with no text is small talk, not a question, a
+ * complaint or a request. An EXISTING category on purpose: a new one would be
+ * a migration on `messages`.
+ *
+ * The card's own `category` stays null, as on the blank card: this is what
+ * the prompt was composed as, not a claim that anything classified the turn.
+ */
+const MEDIA_ONLY_DRAFT_CATEGORY = 'casual_chatter' as const
+
+/**
+ * TAC-584: look at what the guest sent on this turn, before anything is
+ * drafted, and put what was learned on the context.
+ *
+ * AWAITED, because a draft written from a description needs it to exist. The
+ * describe step waits for re-host and makes one vision call per attachment
+ * (lib/messaging/attachments/describe.ts has the rules and the limits), so
+ * this adds seconds to a turn. Every turn it runs on ends as a held card, so
+ * the guest is not waiting on it.
+ *
+ * WHAT IT SETS.
+ *   ctx.inboundDescribedMedia  one entry per attachment the model looked at:
+ *                              what it shows (null when too unclear) and the
+ *                              drinks a reply may name.
+ * Left unset when nothing was described, and the turn then runs exactly as
+ * it did before descriptions existed.
+ *
+ * THE PICTURE DOES NOT LEAVE THE DESCRIBE STEP (owner ruling 2026-10-11).
+ * The generator is given the description and nothing else. It was first built
+ * to be shown the picture as well, and a smoke run on three photos had one
+ * draft use a detail its description did not carry: the picture is a way
+ * round the describe step, which is where naming and people are decided.
+ *
+ * THE VISIT IS DECIDED HERE, whatever becomes of the draft: a story that
+ * shows the venue is evidence the guest was there even if generation fails a
+ * moment later. Decided, and written only where the venue's setting says so
+ * (record-media-visit.ts: it ships in shadow mode everywhere). In waitUntil,
+ * because nothing downstream reads it this turn.
+ *
+ * Never throws: describeMessageAttachments and recordMediaVisit both return
+ * on every path.
+ */
+async function describeTurnMedia(
+  ctx: RuntimeContext,
+  messageIds: readonly string[],
+  trace: AgentTrace,
+): Promise<void> {
+  const menuItems = ctx.venue.venueInfo.menu.items
+  const menuItemNames = menuItems.map((item) => item.name)
+  const described = await describeMessageAttachments(createAdminClient(), {
+    messageIds,
+    venue: { id: ctx.venue.id, menuItemNames },
+    guestId: ctx.guest.id,
+    trace,
+  })
+
+  const media: InboundDescribedMedia[] = []
+  for (const item of described) {
+    if (item.meta === null || item.meta.outcome !== 'described') continue
+    const clear = item.meta.legibility === 'clear' && item.description !== null
+    media.push({
+      word: item.mediaKind,
+      description: clear ? item.description : null,
+      nameableItems: clear ? nameableItems(item.meta, menuItemNames) : [],
+    })
+  }
+  if (media.length > 0) ctx.inboundDescribedMedia = media
+  console.log('[agent] inbound media described', {
+    agentRunId: ctx.agentRunId,
+    attachments: described.length,
+    described: media.length,
+    unclear: media.filter((m) => m.description === null).length,
+  })
+
+  // One visit per message, keyed to it (record-media-visit.ts).
+  const receivedAt = ctx.currentMessage?.receivedAt ?? ctx.now
+  for (const messageId of new Set(described.map((item) => item.messageId))) {
+    waitUntil(
+      recordMediaVisit({
+        venue: {
+          id: ctx.venue.id,
+          timezone: ctx.venue.timezone,
+          menuItems,
+        },
+        guestId: ctx.guest.id,
+        messageId,
+        receivedAt,
+        evidence: described
+          .filter((item) => item.messageId === messageId)
+          .map((item) => ({
+            attachmentId: item.attachmentId,
+            meta: item.meta,
+          })),
+      }).then((outcome) => {
+        // The decision itself is logged once, by recordMediaVisit
+        // (`media_visit_decision`). Only a failure is said again here, with
+        // the run it belongs to.
+        if (outcome.kind !== 'failed') return
+        console.warn('[agent] media visit failed', {
+          agentRunId: ctx.agentRunId,
+          guestId: ctx.guest.id,
+          messageId,
+          error: outcome.error,
+        })
+      }),
+    )
+  }
+}
+
+/**
+ * TAC-584: a turn with media and no text, whose media was described, gets a
+ * DRAFT on its card instead of a blank one.
+ *
+ * ALWAYS A CARD, AND NO GATE DECIDES IT. Every media reply is held for an
+ * operator (owner ruling 2026-10-11, restated on TAC-584). The turns that
+ * have text reach that through the approval gate's `media_context` trigger.
+ * This one does not go through the gate at all: like persistMediaOnlyCard
+ * beside it, the path writes the card itself, so there is no branch on which
+ * this reply is sent. `media_context` is the reason on the card because it is
+ * the reason that is true of it, and because `media_only_inbound` means "an
+ * empty draft" to the operator app, which this is not.
+ *
+ * WHY IT IS NOT THE MAIN PIPELINE WITH A PRETEND CLASSIFICATION. Everything
+ * between classification and dispatch reads the guest's words or the category
+ * a classifier gave them: the opt-out rule, the pure-close silence, order
+ * capture, the visit check-in, the four post-generation checks, the pending
+ * question. None of it has anything to read here, and a made-up category
+ * would be read by all of it as real.
+ *
+ * WHAT IS DELIBERATELY OFF for this draft:
+ *   - the getting-to-know-you question and the review invitation. Recording
+ *     that one was asked is the main path's job, and a question asked and not
+ *     recorded is asked again.
+ *   - knowledge retrieval, unless the picture unmistakably shows a drink, in
+ *     which case that drink's name is the query. With no name there is
+ *     nothing to search for and the knowledge block is left out.
+ *
+ * ANY FAILURE FALLS BACK TO THE BLANK CARD, which is what this turn was
+ * before: the voice pack would not load, generation failed twice. The guest
+ * sent something and a human must still see it.
+ *
+ * Never throws.
+ */
+async function persistMediaOnlyDraft(
+  ctx: RuntimeContext,
+  agentRunId: string,
+  trace: AgentTrace,
+  // What the push says for this card when it carries a draft: the reshare
+  // nudge for a story, otherwise "sent an attachment / Draft ready to review".
+  pushMedia: PushMedia,
+): Promise<AgentResult> {
+  const blankInstead = (why: string, error?: string): Promise<AgentResult> => {
+    console.warn('[agent] media-only draft not written; blank card instead', {
+      agentRunId,
+      why,
+      error,
+    })
+    // The blank card's own push copy, unless this is a story: that nudge
+    // does not depend on there being a draft.
+    return persistMediaOnlyCard(
+      ctx,
+      agentRunId,
+      MEDIA_ONLY_REVIEW_REASON,
+      pushMedia.kind === 'story_mention' ? pushMedia : null,
+    )
+  }
+
+  try {
+    ctx.corpus = await retrieveCorpusStage(ctx)
+    const named = [
+      ...new Set(
+        (ctx.inboundDescribedMedia ?? []).flatMap((m) => m.nameableItems),
+      ),
+    ]
+    ctx.knowledgeCorpus =
+      named.length > 0
+        ? await retrieveKnowledgeStage(
+            ctx,
+            MEDIA_ONLY_DRAFT_CATEGORY,
+            named.join(', '),
+          )
+        : null
+  } catch (e) {
+    return blankInstead('retrieval', e instanceof Error ? e.message : String(e))
+  }
+  ctx.openIntentions = []
+  ctx.reviewAsk = null
+  ctx.mediaContext = true
+
+  // The history may say what earlier media showed: this turn is held.
+  showDescribedHistory(ctx)
+
+  const generateSpan = trace.generation('generate', {
+    category: MEDIA_ONLY_DRAFT_CATEGORY,
+    mediaOnly: true,
+  })
+  let gen: Awaited<ReturnType<typeof generateStage>>
+  try {
+    gen = await generateStage(ctx, MEDIA_ONLY_DRAFT_CATEGORY)
+    // One retry, and none on truncation, as on the main path.
+    if (gen.status === 'failed' && gen.errorCode !== AI_ERROR_TRUNCATED) {
+      gen = await generateStage(ctx, MEDIA_ONLY_DRAFT_CATEGORY)
+    }
+  } catch (e) {
+    // generateStage returns its known failures as values. This is the only
+    // generation path that runs with no classification, so anything that
+    // THROWS here must still end as a card and not as the turn's red alert.
+    const error = e instanceof Error ? e.message : String(e)
+    generateSpan.end({ level: 'ERROR', statusMessage: error })
+    return blankInstead('generation_threw', error)
+  }
+  if (gen.status === 'failed') {
+    generateSpan.end({ level: 'ERROR', statusMessage: gen.error })
+    return blankInstead('generation', gen.error)
+  }
+  generateSpan.end({
+    output: {
+      attempts: gen.result.attempts,
+      promptVersion: gen.result.promptVersion,
+      cacheReadTokens: gen.result.cacheReadTokens,
+      cacheWriteTokens: gen.result.cacheWriteTokens,
+      bodyLength: gen.result.body.length,
+    },
+    // The prompts are strings and the picture is not in them, so this content
+    // never carries an image, whatever the capture setting.
+    content: trace.captureContent
+      ? buildGenerateContent(gen.result)
+      : undefined,
+    model: gen.result.modelId,
+    usage: toAgentUsage(gen.result.usage ?? {}),
+  })
+
+  const reviewReason = APPROVAL_TRIGGERS.MEDIA_CONTEXT
+  try {
+    const persisted = await persistOrRegenQueuedDraft(
+      ctx,
+      gen.result,
+      reviewReason,
+      null,
+      { conversationDisposition: 'own_card', reviewTriggers: [reviewReason] },
+    )
+    if (persisted.outboundMessageId === null) {
+      // Unreachable: `own_card` never silences. Handled as the blank card
+      // handles it.
+      return {
+        status: 'failed',
+        stage: 'persist',
+        error: 'media-only draft came back with no id',
+      }
+    }
+    console.log('[agent] media-only inbound drafted and held', {
+      agentRunId,
+      outboundMessageId: persisted.outboundMessageId,
+    })
+    await captureDraftQueued({
+      agentRunId,
+      venueId: ctx.venue.id,
+      guestId: ctx.guest.id,
+      triggers: [reviewReason],
+      primaryTrigger: reviewReason,
+      modelRequiresApproval: gen.result.requiresOperatorApproval,
+      modelApprovalReason: gen.result.approvalReason,
+      compRegexMatchedPattern: null,
+      hasPreviousPending: false,
+      slot: 'conversation',
+      otherSlotOccupied: false,
+      kind: 'inbound',
+      category: MEDIA_ONLY_DRAFT_CATEGORY,
+      inboundBody: null,
+      generatedBody: gen.result.body,
+    })
+    pushOperatorCard(ctx, persisted.outboundMessageId, reviewReason, pushMedia)
+    return {
+      status: 'queued',
+      outboundMessageId: persisted.outboundMessageId,
+      triggers: [reviewReason],
+      primaryTrigger: reviewReason,
     }
   } catch (e) {
     // persistOrRegenQueuedDraft already fired a red alert.
@@ -639,11 +955,52 @@ function pushSendFailureCard(ctx: RuntimeContext, cardId: string): void {
   pushOperatorCard(ctx, cardId, INSTAGRAM_SEND_FAILED_REVIEW_REASON)
 }
 
+/**
+ * TAC-584: let this turn's history say what the guest's earlier media showed.
+ * ONLY for a turn whose reply is held: withDescribedHistory has the rule and
+ * the reason. Two call sites, both after the hold is certain.
+ */
+function showDescribedHistory(ctx: RuntimeContext): void {
+  ctx.recentMessages = withDescribedHistory(ctx.recentMessages)
+  if (ctx.mediaOnlyInbounds !== undefined) {
+    ctx.mediaOnlyInbounds = withDescribedHistory(ctx.mediaOnlyInbounds)
+  }
+}
+
+/**
+ * TAC-584: the push for a story the guest tagged the venue in.
+ *
+ * The handle is read HERE, at push time, and not taken from the context: a
+ * guest's first-ever message starts their profile fetch beside this turn
+ * (the Instagram webhook's refresh), so the handle is often written while the
+ * turn is describing the story. A failed or empty read is null, and the push
+ * then uses its handle-less wording. Never throws, and the handle is never
+ * logged.
+ */
+async function loadStoryMentionPush(guestId: string): Promise<PushMedia> {
+  try {
+    const { data } = await createAdminClient()
+      .from('guests')
+      .select('instagram_username')
+      .eq('id', guestId)
+      .maybeSingle()
+    return {
+      kind: 'story_mention',
+      instagramUsername: data?.instagram_username ?? null,
+    }
+  } catch {
+    return { kind: 'story_mention', instagramUsername: null }
+  }
+}
+
 /** The push for a card a path wrote itself, outside the approval gate. */
 function pushOperatorCard(
   ctx: RuntimeContext,
   cardId: string,
   reviewReason: string,
+  // TAC-584: set for a card raised by a guest's media whose review reason
+  // alone would word the push wrongly (lib/notifications/send.ts, PushMedia).
+  media: PushMedia | null = null,
 ): void {
   if (!shouldSendDraftFlaggedPush(reviewReason)) return
   waitUntil(
@@ -662,6 +1019,7 @@ function pushOperatorCard(
       // category gate alone would have quoted it onto every operator's lock
       // screen.
       guestIsCrisis: ctx.classification?.crisisSafety ?? false,
+      media,
     }).catch(() => {}),
   )
 }
@@ -1079,7 +1437,7 @@ function emptyTestDraft(
  * knowledge relevance floor, and the mirror ran months on stale semantics.
  *
  * WHAT IT STOPS SHORT OF, and why each is safe to skip for a comparison:
- *   - the four post-generation checks and the 20 approval triggers. They
+ *   - the four post-generation checks and the 21 approval triggers. They
  *     decide whether v1 SENDS, never what it says, so they cannot change the
  *     text in the column.
  *   - dispatch, the ledger row, the typing indicator, the guests.context
@@ -1574,7 +1932,17 @@ async function runInboundTurn(
       around: inbound.message.receivedAt,
     })
     let mediaOnlyTurn = false
-    if (isMediaOnly(inbound.message.body, inbound.mediaUrls)) {
+    // TAC-582: a message Meta could not hand us takes the same road as a
+    // photo with no caption, for the same reason: there is no text in it to
+    // answer. Read off the message the turn ADOPTED, before `inbound` can be
+    // swapped to the text beside it, and kept: it names the card.
+    const blankCardReason = inbound.unsupported
+      ? UNSUPPORTED_REVIEW_REASON
+      : MEDIA_ONLY_REVIEW_REASON
+    if (
+      isMediaOnly(inbound.message.body, inbound.mediaUrls) ||
+      (inbound.unsupported && inbound.message.body.trim() === '')
+    ) {
       const rows = await turnMediaRows
       if (!rows.ok) {
         // Fail toward a human: with no rows to judge, the card is written.
@@ -1779,9 +2147,75 @@ async function runInboundTurn(
       return { status: 'failed', stage: 'context_build', error: errMsg }
     }
 
-    // TAC-574: no text anywhere in this turn, so there is nothing to classify
-    // and nothing to generate. The owner gets a blank card. Before retrieval
-    // and classification, so neither runs on an empty body.
+    // A failed read costs the acknowledgement, never the reply.
+    const mediaRows = await turnMediaRows
+
+    let describingMedia: Promise<void> | null = null
+    // Whether the media this turn answers is a story the guest tagged the
+    // venue in. Read off the attachment rows, so it does not depend on the
+    // describe step having worked: it decides the operator's push, which is
+    // the nudge to reshare (TAC-584).
+    let turnHasStoryMention = false
+    // TAC-584: look at what the guest sent, before anything is drafted.
+    // Here, after the context is built (the describe step needs the venue's
+    // menu) and before the media-only branch below, which is where a
+    // description turns a blank card into a draft.
+    //
+    // WHICH MESSAGES. A turn with no text is answering its own media. A turn
+    // with text is answering the media on that message or the media-only
+    // message beside it, by the rule the `[guest also sent ...]` line uses
+    // (mediaMessageIdsForTurn), so what is described and what the prompt
+    // mentions are one set. When the rows could not be read the turn's own
+    // message is still described if it carries media.
+    //
+    // NOT ON A TEST RUN, which writes nothing and makes no call it does not
+    // report: a playground replay of a photo behaves as it did. NOT FOR A
+    // MESSAGE META COULD NOT HAND US, which has nothing to look at.
+    if (!testRun && !inbound.unsupported) {
+      const self = {
+        id: inbound.message.id,
+        mediaUrls: inbound.mediaUrls,
+        createdAt: inbound.message.receivedAt,
+      }
+      const describeIds = mediaOnlyTurn
+        ? [inbound.message.id]
+        : mediaRows.ok
+          ? mediaMessageIdsForTurn(self, mediaRows.data)
+          : inbound.mediaUrls.length > 0
+            ? [inbound.message.id]
+            : []
+      turnHasStoryMention =
+        mediaRows.ok &&
+        mediaRows.data.inbound.some(
+          (row) =>
+            describeIds.includes(row.id) &&
+            (row.attachmentKinds ?? []).includes('story_mention'),
+        )
+      if (describeIds.length > 0) {
+        describingMedia = describeTurnMedia(ctx, describeIds, trace)
+        if (mediaOnlyTurn) {
+          await describingMedia
+        } else {
+          // A turn with text does NOT wait here. Classification and the
+          // crisis short-circuit come next, and the describe step is seconds
+          // long: a guest in crisis who attached a photo must not wait on a
+          // vision call for a reply that never reads it. It is awaited just
+          // before generation, the first thing that does. waitUntil keeps it
+          // alive on the paths that return before then, so the visit is still
+          // recorded; it never rejects.
+          waitUntil(describingMedia)
+        }
+      }
+    }
+
+    // TAC-574: no text anywhere in this turn, so there is nothing to
+    // classify. Before retrieval and classification, so neither runs on an
+    // empty body.
+    //
+    // TAC-584: when the describe step looked at the media, the card carries a
+    // draft that answers it (persistMediaOnlyDraft). Otherwise the owner gets
+    // the blank card, exactly as before: nothing was described, the describe
+    // step failed, or the message is one Meta could not hand us.
     if (mediaOnlyTurn) {
       // A test run writes no card. It reports that v1 would have answered
       // with a blank card and no text, which is a real answer and a different
@@ -1790,13 +2224,31 @@ async function runInboundTurn(
         testSink.draft = emptyTestDraft(ctx, 'media_only_card')
         return { status: 'refused', reason: 'test_run' }
       }
-      const carded = await persistMediaOnlyCard(ctx, agentRunId)
-      trace.update({ output: { status: carded.status, mediaOnly: true } })
+      const drafted =
+        blankCardReason === MEDIA_ONLY_REVIEW_REASON &&
+        (ctx.inboundDescribedMedia?.length ?? 0) > 0
+      const storyPush = turnHasStoryMention
+        ? await loadStoryMentionPush(ctx.guest.id)
+        : null
+      const carded = drafted
+        ? await persistMediaOnlyDraft(
+            ctx,
+            agentRunId,
+            trace,
+            storyPush ?? { kind: 'media_only_draft' },
+          )
+        : await persistMediaOnlyCard(
+            ctx,
+            agentRunId,
+            blankCardReason,
+            storyPush,
+          )
+      trace.update({
+        output: { status: carded.status, mediaOnly: true, drafted },
+      })
       return carded
     }
     // A turn with text: tell the agent what arrived beside it, if anything.
-    // A failed read costs the acknowledgement, never the reply.
-    const mediaRows = await turnMediaRows
     if (mediaRows.ok) {
       ctx.inboundMedia = mediaAlongsideText(
         {
@@ -1807,10 +2259,52 @@ async function runInboundTurn(
         },
         mediaRows.data,
       )
+      // TAC-582: and whether those words are an answer to the venue's story.
+      ctx.inboundStoryReply = repliesToStory(
+        { id: inbound.message.id },
+        mediaRows.data,
+      )
     } else {
       console.warn('[agent] inbound media read failed, no note rendered', {
         agentRunId,
         error: mediaRows.error,
+      })
+    }
+
+    // TAC-582 (owner ruling 2026-10-11): a reply written around media the
+    // agent cannot see is drafted as usual and HELD for an operator. Decided
+    // here, before classification, from the thread alone; the approval gate
+    // reads the flag (APPROVAL_TRIGGERS.MEDIA_CONTEXT). The rule, and the
+    // measurement behind it, are in lib/agent/media-context.ts.
+    //
+    // "Has attachments" is the message's links, or any attachment row on it:
+    // a reply to a story has a row and no link.
+    const ownAttachmentRows = mediaRows.ok
+      ? (mediaRows.data.inbound.find((row) => row.id === inbound.message.id)
+          ?.attachmentKinds ?? [])
+      : []
+    const mediaContext = decideMediaContextHold({
+      currentMessageId: inbound.message.id,
+      currentHasAttachments:
+        inbound.mediaUrls.length > 0 || ownAttachmentRows.length > 0,
+      // Read HERE, after the context is built, and not earlier alongside it.
+      // The prompt's media history is read inside that build; a photo that
+      // landed between an earlier read and the build would be in the prompt
+      // and missing from these rows, and the reply would auto-send (found in
+      // review). Reading last means anything the prompt can mention, this
+      // can see. It costs one query's latency on a text turn. Never rejects;
+      // null means it could not be read, which holds.
+      rows: await loadMediaContextRows({
+        venueId: inbound.venueId,
+        guestId: inbound.guestId,
+        now: new Date(),
+      }),
+    })
+    ctx.mediaContext = mediaContext.hold
+    if (mediaContext.hold) {
+      console.log('[agent] reply will be held: written around guest media', {
+        agentRunId,
+        reason: mediaContext.reason,
       })
     }
 
@@ -2720,6 +3214,39 @@ async function runInboundTurn(
       ctx.knowledgeCorpus = []
     }
 
+    // TAC-584: the describe step started before classification is awaited
+    // HERE, the last point before a prompt is built from what it learned.
+    //
+    // A reply written with a description of the guest's media, or the picture
+    // itself, is held whatever decideMediaContextHold made of the thread.
+    // Every case that reaches here already holds by that rule (the media is
+    // on this message, or is unanswered beside it); this states the guarantee
+    // where the description is, so it does not depend on the two rules
+    // continuing to agree.
+    //
+    // EXCEPT ON AN OPT-OUT TURN, which is the one category the hold exempts
+    // (a compliance reply always sends). That reply is not written about the
+    // picture, so it is not told about one: the description is dropped and
+    // the turn's prompt is the one it has always had.
+    //
+    // The category is read BEFORE the await: an opt-out confirmation must go
+    // out at once, and the describe step is seconds long. It is left running
+    // (waitUntil, above) so its visit decision is still made.
+    if (ctx.classification.category === 'opt_out') {
+      ctx.inboundDescribedMedia = undefined
+    } else {
+      if (describingMedia !== null) {
+        await describingMedia
+        if ((ctx.inboundDescribedMedia?.length ?? 0) > 0) {
+          ctx.mediaContext = true
+        }
+      }
+      // And the HISTORY may say what earlier media showed only on a turn
+      // that is held (withDescribedHistory has the rule). `mediaContext` is
+      // final here: nothing below this point writes it.
+      if (ctx.mediaContext === true) showDescribedHistory(ctx)
+    }
+
     // Generate
     // A GENERATION, not a span: this is the most expensive model call in the turn
     // and Langfuse prices only GENERATION observations. Recorded as a plain span
@@ -2835,7 +3362,7 @@ async function runInboundTurn(
     // write or a send - the typing refresh, the guests.context capture, the
     // four checks, the approval gate, dispatch, the ledger.
     //
-    // The draft is complete at this point. The checks and the 20 triggers that
+    // The draft is complete at this point. The checks and the 21 triggers that
     // follow decide whether v1 would SEND this text, never what the text is,
     // so stopping here costs the comparison nothing.
     //
@@ -3467,6 +3994,11 @@ async function runInboundTurn(
               guestQuestion: ctx.currentMessage?.body ?? null,
               guestCategory: ctx.classification?.category ?? null,
               guestIsCrisis: ctx.classification?.crisisSafety ?? false,
+              // TAC-584: null even when this text sits beside a story the
+              // guest tagged the venue in. The reshare nudge would replace
+              // the guest's own words in the push, and what they wrote is the
+              // more useful thing to see; the card still shows the story.
+              media: null,
             }).catch((e) => {
               console.error('apns: sendDraftFlaggedPush threw unexpectedly', {
                 agentRunId,

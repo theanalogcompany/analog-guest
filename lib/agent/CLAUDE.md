@@ -125,7 +125,7 @@ reply.
 ## Approval gates
 
 `applyApprovalPolicyStage(ctx, generation, mechanicOffer?, prosePromise?, ...)`
-returns `send`, `queue`, `drop`, or `silence`. **Twenty triggers compose; any one
+returns `send`, `queue`, `drop`, or `silence`. **Twenty-one triggers compose; any one
 queues.** The set is `APPROVAL_TRIGGERS`; check it against the constant, never against a
 list in prose.
 
@@ -139,12 +139,15 @@ prose_promise_backstop > prose_cancellation_backstop > unresolved_cancellation_i
 knowledge_gap > comp_regex_backstop > model_flagged >
 closed_venue_arrival_emitted > closed_venue_arrival_backstop > unverified_url >
 self_talk_detected > complaint_commitment_floor > previous_pending_held >
+media_context >
 prose_promise_check_failed > prose_cancellation_check_failed >
 review_ask > category_requires_approval > hold_all_outbound
 ```
 
 The shape of that order: a claim about **this draft** beats an **absence** of information
-about it, which beats **venue-wide policy**.
+about it, which beats **venue-wide policy**. `media_context` is the one claim about the
+**thread**: it sits below everything that names a risk in the draft, and below
+`previous_pending_held` so a card regenerated in place does not push twice.
 
 ### Post-generation checks: post-send on inbound, fail CLOSED on the pre-send paths
 
@@ -248,9 +251,73 @@ the `demo_bypassed_approval_gate` event, which relays to Slack only when
 
 ### Photos, GIFs and other attachments (TAC-574)
 
-A turn with text is answered normally and told `[guest also sent a photo]`; a turn with no
-text at all becomes a blank operator card (`media_only_inbound`), with no classifier call.
+A turn with text is drafted normally and told `[guest also sent a photo. ...]`, and the draft
+is held for an operator (`media_context`, below); a turn with no text at all becomes a blank
+operator card (`media_only_inbound`), with no classifier call.
+The kind in that line comes from the message's `message_attachments` rows when it has them
+(`mediaKindOf`), and from the link's file extension only when it has none: Instagram's links
+have no extension, so the extension alone called a voice note "a photo or GIF".
 The rule, its window and its limits are in `inbound-media.ts`'s header.
+
+A message Meta flags `is_unsupported` takes the same road with its own card
+(`unsupported_inbound`, TAC-582). A voice note is **not** one: Instagram sends it as an
+`audio` attachment, so it is media like any other.
+
+**A media-only message is history for the model and is not the guest having written to us**
+(TAC-582, owner-ruled 2026-10-11). `ctx.recentMessages` is unchanged and still holds no
+message without text; those ride beside it on `ctx.mediaOnlyInbounds` and are merged in only
+by `historyForPrompt`, at the two places a prompt is built. So a guest whose only earlier
+message was a photo or a story mention is still on first contact when they first write. Do
+not "simplify" this by adding the rows to `recentMessages`: a dozen readers decide the kind
+of turn from that list, and `media-history.ts`'s header names them.
+
+**A reply written around media the agent cannot see is held, never auto-sent**
+(`media_context`, owner-ruled 2026-10-11). It fires when the message being answered carries
+attachments, or when the guest has a media-only or unsupported message that no outbound has
+reached them since. The agent still drafts. This is a hold and not a prompt fix on purpose:
+measured, the model never described a photo it had not seen, and kept telling guests "we
+can't see it on our end", and two rewordings changed which false thing it said. Do not try a
+third. `media-context.ts` has the rule, the three places its wording was read wide, and why
+a failed read holds.
+
+**A photo, video, GIF or story mention is looked at before the turn drafts** (TAC-584).
+`describeTurnMedia` runs the describe step (`lib/messaging/attachments/describe.ts`) over the
+message being answered, or the media-only message beside it, and puts what it learned on
+`ctx.inboundDescribedMedia`, in words. **The picture never leaves the describe step**
+(owner-ruled 2026-10-11): the generator is given the description and nothing else. Then:
+
+- **A turn with no text gets a draft on its card** when its media was described
+  (`persistMediaOnlyDraft`), composed as `casual_chatter` with no classifier call. It is
+  **always a card and no gate decides it**: the path writes the card
+  itself, as the blank card's path does, under `media_context`. `media_only_inbound` still
+  means an empty draft. Any failure there falls back to the blank card.
+- **A turn with text** is drafted and held as before; its `[guest also sent ...]` line carries
+  the description. The describe step is started before classification and awaited just before
+  generation, so the crisis short-circuit never waits on a vision call.
+- **A description is in a prompt only when the reply is held.** That covers history too: once
+  the venue has answered a photo, the guest's next message can auto-send, so it reads the old
+  "you can't see it" line and not the description (`withDescribedHistory`,
+  `media-history.ts`). Follow-ups and holding messages never read one. Accepted by the owner
+  on 2026-10-11; widening it is a ruling, not a refactor.
+- **Nothing is described** on a test run, for a message Meta could not hand us, or on an
+  opt-out turn's reply (the description is dropped: that reply always sends).
+- **A visit is decided** when the media clearly shows the venue (`record-media-visit.ts`),
+  whatever becomes of the draft, and **written only where the venue's
+  `record_media_visits` is true**. It is false everywhere (owner-ruled 2026-10-11): in that
+  shadow mode the decision goes on the attachment's `description_meta.visit` and into one
+  `media_visit_decision` log line, and no `transactions` row or `last_visit_at` change is
+  made. When on: `approximate`, one per guest per day, never a second row beside a receipt or
+  a self-report. A visit with no nameable drink does not close `understand_order`.
+- **A venue with no appearance notes names no drink.** The describe step drops the model's
+  items when the venue has none (`describe.ts`), which is every venue until notes are loaded.
+- **Which drinks a reply may name and which go on the visit are one function**
+  (`nameableItems`, `lib/schemas/attachment-description.ts`). Do not add a second reader that
+  decides it another way.
+
+None of this was measured, by ruling: the 30-image check pre-registered on TAC-584 was dropped
+on 2026-10-11 because every media reply is held. `scripts/measurement/media-describe.ts` is a
+smoke run over a venue's existing media, not a measurement. Do not read a held draft's quality
+as licence to auto-send one.
 
 ## Venue status
 

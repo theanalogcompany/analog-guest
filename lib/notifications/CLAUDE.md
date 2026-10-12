@@ -69,6 +69,13 @@ operatorId}`. Per-surface rules:
 - **Arrival push** carries the commitment description, which is our own text about our own
   promise, and the guest's message has no route into that function.
 - **Window warning** is content-free: no body, no handle.
+- **A story-mention push carries the guest's Instagram handle** (TAC-584, owner-ruled
+  2026-10-11): "@handle tagged you in their story. Reshare?". It is the one push that does,
+  because the handle is what tells whoever holds the venue's Instagram which story to
+  reshare. It is rendered only when it has the shape of a handle, falls back to
+  "Tagged you in their story. Reshare?" when it is missing, and is still never logged.
+  `SendDraftFlaggedPushInput.media` is required for the reason the three fields before it
+  are: every call site has to decide.
 
 ## Badge counts genuinely disagree
 

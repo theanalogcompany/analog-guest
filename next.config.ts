@@ -14,6 +14,22 @@ const nextConfig: NextConfig = {
   // bundler so the internals get resolved/rewritten via the bundler's
   // resolver instead of Node's strict ESM loader.
   transpilePackages: ['voyageai'],
+  // TAC-584: ffmpeg-static finds its binary relative to its own directory, so
+  // it has to stay a real node_modules package at runtime rather than be
+  // bundled into a chunk, where that path points at nothing.
+  serverExternalPackages: ['ffmpeg-static'],
+  // And the binary itself is a file no `import` names, so the tracer would
+  // leave it out of the deployment. Listed for the routes that can reach
+  // lib/messaging/attachments/frames.ts: both webhooks run the agent turn
+  // that describes a guest's media, and /admin/health runs the binary to say
+  // whether it is there. A route missing from this list fails soft (photos
+  // small enough are described as they arrived, everything else falls back to
+  // the blank card) and the health row is what reports it.
+  outputFileTracingIncludes: {
+    '/api/webhooks/instagram': ['./node_modules/ffmpeg-static/ffmpeg'],
+    '/api/webhooks/sendblue': ['./node_modules/ffmpeg-static/ffmpeg'],
+    '/admin/health': ['./node_modules/ffmpeg-static/ffmpeg'],
+  },
   turbopack: {
     // Pin the workspace root to this checkout. Unset, Turbopack walks up
     // looking for a lockfile, finds several (every `git worktree` under

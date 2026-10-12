@@ -8,7 +8,10 @@ import { NextResponse } from 'next/server'
 
 import { AuthError, verifyOperatorRequest } from '@/lib/auth'
 import { logger } from '@/lib/observability/logger'
-import { loadGuestThreadByGuestId } from '@/lib/operator'
+import {
+  loadGuestThreadByGuestId,
+  threadOptionsFromRequest,
+} from '@/lib/operator'
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
@@ -37,6 +40,10 @@ export async function GET(
   const result = await loadGuestThreadByGuestId({
     guestId,
     venueScope: operator.venueScope,
+    // TAC-582: `?attachments=1` adds media-only rows and each row's
+    // attachments. Without it the response is what it always was, plus an
+    // empty `attachments` and a false `unsupported` on every message.
+    options: threadOptionsFromRequest(request),
   })
 
   if (!result.ok) {

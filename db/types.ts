@@ -1448,6 +1448,97 @@ export type Database = {
           },
         ]
       }
+      message_attachments: {
+        Row: {
+          byte_size: number | null
+          created_at: string
+          described_at: string | null
+          description: string | null
+          description_meta: Json | null
+          failure_reason: string | null
+          guest_id: string
+          id: string
+          kind: string
+          link_url: string | null
+          message_id: string
+          mime_type: string | null
+          position: number
+          provider_type: string | null
+          provider_url: string | null
+          status: string
+          storage_path: string | null
+          title: string | null
+          updated_at: string
+          venue_id: string
+        }
+        Insert: {
+          byte_size?: number | null
+          created_at?: string
+          described_at?: string | null
+          description?: string | null
+          description_meta?: Json | null
+          failure_reason?: string | null
+          guest_id: string
+          id?: string
+          kind: string
+          link_url?: string | null
+          message_id: string
+          mime_type?: string | null
+          position: number
+          provider_type?: string | null
+          provider_url?: string | null
+          status: string
+          storage_path?: string | null
+          title?: string | null
+          updated_at?: string
+          venue_id: string
+        }
+        Update: {
+          byte_size?: number | null
+          created_at?: string
+          described_at?: string | null
+          description?: string | null
+          description_meta?: Json | null
+          failure_reason?: string | null
+          guest_id?: string
+          id?: string
+          kind?: string
+          link_url?: string | null
+          message_id?: string
+          mime_type?: string | null
+          position?: number
+          provider_type?: string | null
+          provider_url?: string | null
+          status?: string
+          storage_path?: string | null
+          title?: string | null
+          updated_at?: string
+          venue_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "message_attachments_guest_id_fkey"
+            columns: ["guest_id"]
+            isOneToOne: false
+            referencedRelation: "guests"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "message_attachments_message_id_fkey"
+            columns: ["message_id"]
+            isOneToOne: false
+            referencedRelation: "messages"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "message_attachments_venue_id_fkey"
+            columns: ["venue_id"]
+            isOneToOne: false
+            referencedRelation: "venues"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       messages: {
         Row: {
           body: string
@@ -1490,6 +1581,7 @@ export type Database = {
           sent_at: string | null
           status: string
           ungrounded_claims: string[] | null
+          unsupported_content: boolean | null
           updated_at: string
           venue_id: string
           voice_fidelity: number | null
@@ -1536,6 +1628,7 @@ export type Database = {
           sent_at?: string | null
           status: string
           ungrounded_claims?: string[] | null
+          unsupported_content?: boolean | null
           updated_at?: string
           venue_id: string
           voice_fidelity?: number | null
@@ -1582,6 +1675,7 @@ export type Database = {
           sent_at?: string | null
           status?: string
           ungrounded_claims?: string[] | null
+          unsupported_content?: boolean | null
           updated_at?: string
           venue_id?: string
           voice_fidelity?: number | null
@@ -2410,6 +2504,7 @@ export type Database = {
           is_test: boolean
           messaging_phone_number: string | null
           name: string
+          record_media_visits: boolean
           slug: string
           status: string
           timezone: string
@@ -2424,6 +2519,7 @@ export type Database = {
           is_test?: boolean
           messaging_phone_number?: string | null
           name: string
+          record_media_visits?: boolean
           slug: string
           status?: string
           timezone?: string
@@ -2438,6 +2534,7 @@ export type Database = {
           is_test?: boolean
           messaging_phone_number?: string | null
           name?: string
+          record_media_visits?: boolean
           slug?: string
           status?: string
           timezone?: string
@@ -2820,7 +2917,7 @@ export type Database = {
         }
       }
       list_operator_conversations: {
-        Args: { venue_ids: string[] }
+        Args: { include_media?: boolean; venue_ids: string[] }
         Returns: {
           agent_name: string
           conversation_count: number
@@ -2836,6 +2933,8 @@ export type Database = {
           last_message_at: string
           last_message_body: string
           last_message_direction: string
+          last_message_id: string
+          last_message_unsupported: boolean
           recognition_state: string
           venue_id: string
           venue_slug: string

@@ -64,6 +64,29 @@ batches `entry[] x messaging[]`), told apart by the item's own keys. The guest c
 Anything unrecognised becomes an `unhandled` event carrying **key names, never values**, and
 is logged and acknowledged rather than dropped silently.
 
+**An attachment's type is kept, and `media_urls` is still only the links** (TAC-582). Each
+attachment becomes a `message_attachments` row written before the 200; the copy into our own
+storage runs after it, in `waitUntil` (`lib/messaging/attachments/`). The story a guest
+replies to (`message.reply_to.story`) is an attachment row of its own kind and is **not** in
+`media_urls`: it is the venue's story, not something the guest sent. Neither that shape nor
+`video` nor `story_mention` has been seen in a real delivery; all three follow Meta's
+documentation, and `scripts/harness/inbound-attachments/` marks them.
+
+**A story mention is described and still never stored** (TAC-584). The agent's turn fetches
+the story once, through the same host allowlist and size cap re-host uses, shows it to a
+model, and drops the bytes; the row keeps `link_only`, no `storage_path`, and gains a text
+`description`. A story video sits in one temp file for the length of the ffmpeg call
+(`lib/messaging/attachments/frames.ts`). Real story links answer without credentials
+(checked 2026-10-11: `image/jpeg` and `video/mp4` from `lookaside.fbsbx.com`, which the
+allowlist accepts). A story the guest has removed answers 404, and its row is then settled
+as skipped. No story had been described by a model when this merged.
+
+**A message with nothing to show is saved, not dropped.** `is_unsupported`, or attachments
+with no text and no link in any of them, is a `message` event with `unsupported: true` and a
+row with `unsupported_content`. It used to be `unhandled` and the guest heard nothing.
+Guest messages only: an **echo** with nothing to show is still `unhandled`, because a row for
+it would be an empty outbound message that reads as a reply the guest was sent.
+
 `handle-events.ts` saves them one at a time, each in its own try/catch, following the Sendblue
 order: venue, guest, duplicate check on `provider_message_id`, insert.
 
@@ -77,6 +100,14 @@ order: venue, guest, duplicate check on `provider_message_id`, insert.
   leaves `provider_sent_at` NULL, so an inbound Instagram row can now lack one for a reason
   other than age. `instagram_backfill_messages` (migration 075) lists the imported ids, and
   `guests.created_via = 'instagram_backfill'` marks the guests it made.
+- **The conversation API's media is not shaped like the webhook's.** No `type` and no
+  `payload.url`: a file is `attachments.data[].image_data.url` or `.video_data.url`, a share
+  is `shares.data[].link`, a story is `story.mention.link` or `story.reply_to.link`.
+  `backfill-instagram-contacts --attachments-only` reads it for rows we already hold and
+  writes no message row; `--media-only` imports the photos, videos and reel shares the
+  import skipped for having no text, never a story, and only for guests we already hold. On 2026-10-11 it returned no `file_url` and no `mime_type` on any of
+  5,652 messages, so a voice note has never been seen in it, and a story mention the webhook
+  stored as a bare media link came back as `story.mention`.
 - **`is_echo` marks the venue's side, not staff.** A reply typed by hand in the Instagram app
   and the agent's own API sends both arrive as echoes.
 - A read receipt's key is `read`, not `messaging_seen` (that is only the subscription field
@@ -172,6 +203,9 @@ mistaken for Meta or a guest's privacy setting.
 `guests_must_have_identity` forbids nulling phone and scoped id together, so the approved
 redaction list would have failed every deletion request - found at implementation time. One tombstone per guest; a shared value collides on
 the unique constraint.
+
+Attachments are the one thing **deleted** outright, files before rows (TAC-582): the file is
+the guest's content itself, and the row is the only record of where the file is.
 
 **A redaction list written from the columns you remember is a list of the columns you
 remember.** Enumerate from the schema. `messages.ungrounded_claims` holds verbatim guest

@@ -3066,3 +3066,86 @@ export async function captureScanCodeUnmatched(
     ...props,
   })
 }
+
+// ---------------------------------------------------------------------------
+// Guest media (TAC-582)
+// ---------------------------------------------------------------------------
+
+/**
+ * Where a guest's attachment was lost or left out.
+ *
+ *   rehost             the copy into our own storage failed. PERMANENT once
+ *                      the provider's link expires, so this one also goes to
+ *                      Slack.
+ *   attachment_rows    the webhook saved the message and could not save its
+ *                      attachment rows. The thread shows the message with
+ *                      nothing on it.
+ *   history            the agent's media history did not load; that turn's
+ *                      prompt has no attachment lines.
+ *   preview_labels     the conversations list could not label its media-only
+ *                      rows.
+ *   signing            a thread read could not sign its files; they are
+ *                      reported to the app as failed.
+ *   media_context      the read behind the media_context hold failed, so the
+ *                      reply was held without knowing whether it had to be.
+ *   describe           TAC-584: an attachment could not be described (still
+ *                      copying, bytes gone, no ffmpeg, the model call failed).
+ *                      The turn then runs as it did before descriptions: the
+ *                      agent is told a photo arrived that it cannot see, and
+ *                      a message with no text becomes the blank card.
+ */
+export type GuestMediaDegradedStage =
+  | 'rehost'
+  | 'attachment_rows'
+  | 'history'
+  | 'preview_labels'
+  | 'signing'
+  | 'media_context'
+  | 'describe'
+
+export interface GuestMediaDegradedProps {
+  stage: GuestMediaDegradedStage
+  /** A fixed code or a driver error message. Never a link, never guest text. */
+  reason: string
+  venueId: string | null
+  guestId: string | null
+  messageId: string | null
+  attachmentId: string | null
+  /** The download host on a re-host failure. A hostname, never a URL. */
+  host: string | null
+}
+
+/**
+ * Every fail-soft path in the guest media code reports here, because each one
+ * degrades to "the media is simply not there" and a console line is not
+ * something anyone is told about.
+ *
+ * Never throws: capturePostHogEvent swallows, and the Slack post is wrapped,
+ * since every caller is itself a path that must not fail.
+ */
+export async function captureGuestMediaDegraded(
+  props: GuestMediaDegradedProps,
+): Promise<void> {
+  await capturePostHogEvent(
+    'guest_media_degraded',
+    props.guestId ?? props.messageId ?? props.venueId ?? 'guest-media',
+    { ...props },
+  )
+  if (props.stage !== 'rehost') return
+  try {
+    await postToSlack(
+      [
+        `*A guest's attachment could not be copied into our storage*: \`${props.reason}\``,
+        props.host !== null ? `host: \`${props.host}\`` : 'no host',
+        `venue: \`${props.venueId ?? 'unknown'}\``,
+        `message: \`${props.messageId ?? 'unknown'}\``,
+        `attachment: \`${props.attachmentId ?? 'unknown'}\``,
+        'The provider link is kept on the row. `npm run rehost-pending-attachments` cannot retry a failed row; reset it to pending first if the link may still work.',
+      ].join('\n'),
+    )
+  } catch (e) {
+    logger.error('alert: slack post failed for guest_media_degraded', {
+      error: e instanceof Error ? e.message : String(e),
+    })
+  }
+}

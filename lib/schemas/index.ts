@@ -116,7 +116,13 @@ export {
   PrimaryTagSchema,
 } from './knowledge-tags'
 export {
+  type OperatorThreadMessage,
+  OperatorThreadMessageSchema,
+  THREAD_ATTACHMENT_KINDS,
+  THREAD_ATTACHMENT_STATUSES,
   THREAD_MESSAGE_LIMIT,
+  type ThreadAttachment,
+  ThreadAttachmentSchema,
   type ThreadMessage,
   ThreadMessageSchema,
 } from './thread-message'

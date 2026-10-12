@@ -3,6 +3,7 @@ import { createAdminClient } from '@/lib/db/admin'
 import { createServerClient } from '@/lib/db/server'
 import { Eyebrow, HairlineRow, SectionHeader, StatusDot } from '@/lib/ui'
 import { checkApns } from './check-apns'
+import { checkFfmpeg } from './check-ffmpeg'
 import { checkLangfuse } from './check-langfuse'
 import { checkKimi } from './check-kimi'
 import { checkTypesafe } from './check-typesafe'
@@ -59,6 +60,7 @@ export default async function HealthPage() {
     checkApns(),
     checkTypesafe(),
     checkKimi(),
+    await checkFfmpeg(),
     await checkCurrentAdmin(),
   ]
 

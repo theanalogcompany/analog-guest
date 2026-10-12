@@ -5,6 +5,7 @@ import { differenceInCalendarDays } from 'date-fns'
 import { formatInTimeZone } from 'date-fns-tz'
 import { logger } from '@/lib/observability/logger'
 import {
+  isDeletableTransactionSource,
   buildItemsPreview,
   formatPosProvider,
   type ParsedTicket,
@@ -58,7 +59,7 @@ export function TransactionRow({
 }: TransactionRowProps) {
   const ticket = parseTicket(tx.rawData)
   const dateLabel = formatTransactionDate(tx.occurredAt, venueTimezone, now)
-  const deletable = tx.source === 'guest_reported'
+  const deletable = isDeletableTransactionSource(tx.source)
 
   if (!ticket) {
     // Non-clickable; null raw_data has nothing meaningful to expand into.
@@ -149,9 +150,9 @@ function TransactionRowExpandable({
   )
 }
 
-// TAC-323: delete is restricted server-side to source='guest_reported' rows
-// (the route re-checks; this button only ever renders for those rows in the
-// first place). Native confirm() — an internal admin tool, no need for
+// TAC-323: delete is restricted server-side to the sources in
+// DELETABLE_TRANSACTION_SOURCES (the route re-checks with the same list; this
+// button only ever renders for those rows in the first place). Native confirm() — an internal admin tool, no need for
 // bespoke modal chrome for a single irreversible-but-recoverable action
 // (deleting re-arms the extractor, so a mistaken delete just means the guest
 // can report again).
