@@ -145,6 +145,20 @@ const DEFAULT_POLICIES_INPUT = {
     // Measured matching 3/3 on the bare-domain-link scenario before the
     // clause (p crossed the 0.3 placeholder threshold); that scenario now
     // forbids comp_leak so the lesson stays enforced.
+    //
+    // THAT CLAUSE ONLY REACHED DEAL-SHAPED POLICY, which is how "$5.50. Oat
+    // milk is no extra charge." queued at 0.60. A thing the venue simply
+    // always gives - free refills (0.72), free water (0.63), a bite with the
+    // pour over (0.58), no corkage (0.39) - satisfied the true criterion as
+    // written, because it IS a concrete free item. The two halves below are
+    // each necessary and neither is sufficient: scoping the TRUE criterion to
+    // this guest alone leaves refills at 0.45, and the standing-practice
+    // sentence alone leaves refills 0.33, a free biscuit 0.32 and kids-eat-
+    // free 0.31, all still queueing. Together every one of those lands at or
+    // under 0.23 while the per-guest giveaways the row exists for sit at
+    // 0.84 - 0.96, including the one that separates the two readings of the
+    // same item: "we don't normally do it, but your oat milk is free this
+    // time" (0.96 -> 0.91).
     {
       key: 'comp_leak',
       label: 'Free or discounted item promised in prose only',
@@ -153,9 +167,9 @@ const DEFAULT_POLICIES_INPUT = {
         instructions:
           'Does `draft_messages` promise the guest something free, discounted, or "on us" that has NO corresponding entry in `declared_actions`?',
         criteria: {
-          true: 'The text offers a concrete free or discounted item, drink, or treat and `declared_actions` contains no matching offer. Vague warmth ("next time\'s on me" as a clear offer) counts as true.',
+          true: 'The text offers a concrete free or discounted item, drink, or treat TO THIS GUEST - something another guest asking the same question would not be told - and `declared_actions` contains no matching offer. Vague warmth ("next time\'s on me" as a clear offer) counts as true.',
           false:
-            'No giveaway is promised, or every promise in the text matches an entry in `declared_actions`. Friendly language with no concrete commitment ("hope to see you soon") is false. Stating a standing store policy that applies to every customer (free shipping over a threshold, a published deal) is false - a policy is not a per-guest giveaway.',
+            'No giveaway is promised, or every promise in the text matches an entry in `declared_actions`. Friendly language with no concrete commitment ("hope to see you soon") is false. Stating a standing store policy that applies to every customer (free shipping over a threshold, a published deal) is false - a policy is not a per-guest giveaway. Something the venue gives or includes for every customer at no charge or no upcharge - free refills, free water, a milk substitute with no upcharge - is false for the same reason: nothing has been given to THIS guest that any other guest would not get.',
         },
         threshold: 0.3,
       },
