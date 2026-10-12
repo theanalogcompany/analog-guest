@@ -1,5 +1,5 @@
 import { generateObject } from 'ai'
-import { getGenerationModel } from '@/lib/ai/client'
+import { anthropicV2Model, resolveV2ModelProfile } from '@/lib/ai/client'
 import type { AIResult } from '@/lib/ai/types'
 import {
   GenerationOutputSchema,
@@ -35,10 +35,25 @@ import {
 
 export const V2_GENERATE_MAX_OUTPUT_TOKENS = 1_000
 
-// Lowest (owner call, 2026-10-05). Unset, the provider default (1.0) applied
-// and regression runs showed the tail of that distribution: register drift
-// and question stacking. 0 picks the head of the distribution every time;
-// per-guest variety comes from the situation brief differing, not sampling.
+/**
+ * NOT SENT ANY MORE, and kept as the record of what was lost.
+ *
+ * Lowest (owner call, 2026-10-05). Unset, the provider default (1.0) applied
+ * and regression runs showed the tail of that distribution: register drift
+ * and question stacking. 0 picks the head of the distribution every time;
+ * per-guest variety comes from the situation brief differing, not sampling.
+ *
+ * claude-sonnet-5-5 REJECTS the parameter - "`temperature` is deprecated for
+ * this model", 3/3 generations failed with it attached - so the v2 call below
+ * no longer passes a temperature at all. There is no setting that restores
+ * the 2026-10-05 ruling on this model; the knob is gone, not retuned.
+ *
+ * READ THIS BEFORE TRUSTING AN n=3 RUN. `.claude/rules/v2-template-regression.md`
+ * fixes the default at n=3 on the stated grounds that "generation is at
+ * temperature 0, so a single-turn reply barely moves", and that premise is
+ * now false. Determinism is measured rather than assumed - see the
+ * model-boundary note in template.ts for the number.
+ */
 export const V2_GENERATE_TEMPERATURE = 0
 
 /**
@@ -100,8 +115,11 @@ export async function generateV2Reply(
         cacheControl: { type: 'ephemeral' as const, ttl: '1h' },
       },
     }
+    // Resolved ONCE per call, so the model and the parameters it tolerates
+    // cannot come from two different reads of the switch.
+    const profile = resolveV2ModelProfile()
     const { object, usage } = await generateObject({
-      model: getGenerationModel(),
+      model: anthropicV2Model(profile),
       messages: [
         ...prompt.system.map((block) => ({
           role: 'system' as const,
@@ -116,7 +134,19 @@ export async function generateV2Reply(
       ],
       schema: GenerationOutputSchema,
       maxOutputTokens: V2_GENERATE_MAX_OUTPUT_TOKENS,
-      temperature: V2_GENERATE_TEMPERATURE,
+      // Both of these are per-model, and WHY is on V2ModelProfile in
+      // lib/ai/client.ts rather than here - the reasons are about what each
+      // model rejects, which belongs with the profile that records it.
+      ...(profile.sendsTemperature
+        ? { temperature: V2_GENERATE_TEMPERATURE }
+        : {}),
+      ...(profile.forcesOutputFormat
+        ? {
+            providerOptions: {
+              anthropic: { structuredOutputMode: 'outputFormat' as const },
+            },
+          }
+        : {}),
     })
     return {
       ok: true,

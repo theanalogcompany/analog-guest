@@ -189,6 +189,59 @@
 // same day and reverted; `V2_GUEST_STATE` below has the two measurements that
 // killed it.
 //
+// MODEL BOUNDARY 2026-10-12. EVERY measured lesson below was measured on
+// claude-sonnet-4-6, which is still the default. v2 generation is now a
+// switch (`V2_GENERATION_MODEL`, lib/ai/client.ts), and a number in this
+// changelog is evidence about a prompt ON THAT MODEL - not a property of the
+// wording. No version bump: no copy changed, and bumping would signal one.
+//
+// What a different model costs. Same tree, the same 8 single-turn scenarios,
+// n=6, the switch the only thing that moved:
+//
+//   sonnet-4-6  7/8, 0 ceiling breaches   (default; the miss is the
+//               knowledge-pastries BAR, which fails on 4.6 too and is
+//               therefore not about the model)
+//   sonnet-5-5  6/8, 2 - `call-you` + `two-questions`, and `unverified_link`
+//   haiku-5-5   6/8, 2 - `two-questions` twice
+//
+// BOTH 5.x MODELS REJECT `temperature`, and `two-questions` and `call-you` are
+// question stacking and register drift - exactly the two failure modes
+// V2_GENERATE_TEMPERATURE was ruled in to suppress on 2026-10-05. The knob is
+// gone on those profiles, so what the knob was doing has to be done by copy,
+// and none of the copy below was written for that job. That is the mechanism;
+// the rest of this entry is what complicates it.
+//
+// `unverified_link` is the one failure of a different KIND - a link in a
+// guest-facing reply the gate could not verify - and only sonnet-5-5 did it.
+//
+// HAIKU'S BREACHES ARE SUBSTANTIALLY THE VOICE PACK WINNING, not drift. Two of
+// three attributed to `voice_corpus` rows (ba4801ab, 87b89375, 7304b9c3), and
+// the pack sits LATER in the composed prompt than anything here, so it
+// outranks this file by construction. That is the turn-one-move finding again,
+// where every round's breach was one verbatim name-ask exemplar and the owner
+// ruled 2026-10-05 to KEEP the row. So haiku-5-5 follows the venue's own
+// writing more closely than 4.6 does, and the regression rule is explicit that
+// a pack-attributed breach is a data decision rather than a wording arm. Do
+// not chase it with template copy.
+//
+// NEITHER IS STABLE AT n=6, which is the finding that limits all of the above.
+// Two haiku-5-5 runs over the same scenarios both scored 6/8 and breached
+// DIFFERENT ones - bare-domain-link breached in the first and passed in the
+// second. With no temperature there is no head of the distribution to pick, so
+// a per-scenario verdict on these profiles is a sighting, not a baseline.
+//
+// A RUN ON THE v2.18.0 BRIEF TREE agrees in direction for sonnet-5-5 over 10
+// scenarios: 4.6 9/10 with 0 breaches, 5.5 6/10 with 4. Two trees, same
+// direction, so the ordering is not one unlucky draw even though the cells are
+// noisy.
+//
+// Neither 5.x model is uniformly worse. Both PASS the pastries bar 4.6 misses,
+// and sonnet-5-5 runs 3-4x the output tokens. They are differently wrong, in
+// the places the prompt has no copy for.
+//
+// SO: before citing any entry below as current, check which model ran. The
+// regression summary line and both harness run logs print it.
+//
 // v2.18.0 (owner-ruled 2026-10-12): v2 stops retrieving. `# What you know` is
 // no longer four `knowledge_corpus` chunks matched against the inbound; it is
 // one authored per-venue artifact, `venue_configs.knowledge_brief`

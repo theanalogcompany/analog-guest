@@ -1,4 +1,4 @@
-import { GENERATION_MODEL_ID } from '@/lib/ai/client'
+import { resolveV2ModelProfile } from '@/lib/ai/client'
 import { createAdminClient } from '@/lib/db/admin'
 import { startAgentTrace, toAgentUsage } from '@/lib/observability'
 import { loadVoicePack } from '@/lib/rag/voice-pack'
@@ -779,7 +779,7 @@ export async function runTurn(input: RunTurnInput): Promise<TurnTrace> {
     // observations, so a model call recorded as a plain span reports $0
     // whatever usage it carries. `model` is required for the same reason.
     turnTrace.generation('v2.generate').end({
-      model: GENERATION_MODEL_ID,
+      model: resolveV2ModelProfile().id,
       metadata: {
         cache_hit_rate: cacheHitRate(generated.data.usage),
         promptCharCount: composed.promptCharCount,

@@ -9,6 +9,25 @@ Loads only when you work in this directory. Prompt **copy** rules live in
 `claude-sonnet-4-6`. Generation sets no temperature (the provider default applies), 0.2-0.3 for
 anything analytical or idempotent.
 
+**v2 generation is the one exception, and it is a switch.** `V2_GENERATION_MODEL` picks a key
+in `V2_MODEL_PROFILES` (`client.ts`); unset means `claude-sonnet-4-6`, so nothing moves by
+default.
+
+It is a **profile**, not a model id, because models disagree on how the call may be *made* -
+which sampling parameters they accept, and whether the SDK's fallback forced tool call works
+at all. A bare string switch fails generation outright on a model that refuses one of them.
+Add a model by adding a profile, never by passing an id through.
+
+Two rules the switch imposes:
+
+- **Resolve it wherever a v2 call is labelled**, never name a constant. Langfuse prices a
+  generation from its model id, so a hardcoded label bills and reports the wrong model while
+  another one runs.
+- **A non-default profile is not a measured profile.** Every lesson in the v2 template
+  changelog was measured on the default; a changed model makes those numbers evidence about a
+  prompt *on that model*. The harnesses print which one ran - read it before citing any of
+  them. The per-model verdicts live in PRs, not here.
+
 Every module here returns `AIResult<T>` (`{ok: true, data} | {ok: false, error}`). Throw
 only at an outer boundary.
 

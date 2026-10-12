@@ -79,6 +79,7 @@ import {
 } from '@/app/admin/(authed)/playground/api/run/v1-arm'
 import { PROMPT_VERSION } from '@/lib/ai/prompts/system-template'
 import { V2_PROMPT_VERSION } from '@/lib/ai/v2/template'
+import { resolveV2ModelProfile } from '@/lib/ai/client'
 import {
   GOLDEN_QUESTIONS,
   RUNNABLE_DRIVERS,
@@ -696,6 +697,16 @@ async function main(): Promise<void> {
       ranAt: now.toISOString(),
       v1PromptVersion: PROMPT_VERSION,
       v2PromptVersion: V2_PROMPT_VERSION,
+      // v2 generation is a switch (V2_GENERATION_MODEL), and the two profiles
+      // do not answer alike - 4.6 against 5.5 differed by 3 scenarios and 4
+      // ceiling breaches on the regression set. So the model goes in the run
+      // log, which is this run's actual record.
+      //
+      // KNOWN GAP: `golden_runs` has no column for it, so a run read off
+      // /admin/tests/golden instead of off this JSONL cannot be attributed to
+      // a model. That needs a migration and a page change; until then the
+      // JSONL is the only place the model is recorded.
+      v2GenerationModel: resolveV2ModelProfile().id,
       questions: questions.length,
       fullRun,
       concurrency,
