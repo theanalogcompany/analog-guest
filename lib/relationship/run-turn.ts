@@ -1,4 +1,3 @@
-import { GENERATION_MODEL_ID } from '@/lib/ai/client'
 import { createAdminClient } from '@/lib/db/admin'
 import { startAgentTrace, toAgentUsage } from '@/lib/observability'
 import { loadVoicePack } from '@/lib/rag/voice-pack'
@@ -17,6 +16,22 @@ import {
   generateV2Reply,
   type V2Usage,
 } from '@/lib/ai/v2/generate'
+import {
+  resolveV2Effort,
+  resolveV2ModelProfile,
+  V2_GENERATE_MAX_OUTPUT_TOKENS,
+  V2_MODEL_PROFILES,
+  type V2Effort,
+  type V2EffortRequest,
+  type V2ModelKey,
+} from '@/lib/ai/v2/model-call'
+import {
+  applyPromptBlocks,
+  replaceSystemText,
+  type PromptBlockOverride,
+} from '@/lib/ai/v2/prompt-text'
+import { resolveV2TemplateSet } from '@/lib/ai/v2/template-archive'
+import { retrieveKnowledgeContext } from '@/lib/rag/retrieve'
 import { renderVenueProfile } from '@/lib/ai/v2/venue-profile'
 import { declaredActionTypes, type GenerationOutput } from '@/lib/ai/v2/actions'
 import {
@@ -92,8 +107,60 @@ export interface TurnOverrides {
   interactionMemoryText?: string
   openMovesText?: string
   knowledgeBriefText?: string
+  /** Only reaches the prompt on an archived version that retrieves. */
+  knowledgeText?: string
   voicePackText?: string
   venueProfileText?: string
+  /**
+   * SYSTEM BLOCKS, hand-edited, replacing the composer's by label - see
+   * `lib/ai/v2/prompt-text.ts` for why by label and not as one document, and
+   * for why a turn that runs on one is stamped `+hand-edited`.
+   *
+   * These do NOT replace the section overrides above, and the two compose in
+   * the one direction that makes sense: the sections are still rendered (the
+   * trace, the gate and the assessor read them), then a block override wins
+   * for what the model is sent. So a `knowledgeText` override is invisible to
+   * the model once the block it renders into is overridden. The inspector
+   * seeds its editor from the composed blocks, so an operator editing sections
+   * and then the text sees their section edit already in the text.
+   *
+   * THE TRANSCRIPT IS NOT REACHABLE FROM HERE, deliberately. The guest's words
+   * are the turn's input; a surface that let them be rewritten in the same box
+   * as the house copy is how a reply gets read as an answer to a question that
+   * was never asked.
+   *
+   * An override naming a block the prompt does not carry FAILS THE TURN rather
+   * than being skipped - see `applyPromptBlocks`.
+   */
+  promptBlocks?: PromptBlockOverride[]
+  /**
+   * The WHOLE system half as one block, replacing all three composed ones.
+   *
+   * For a surface that edits the prompt as one document rather than by block -
+   * the prompt lab. It WINS over `promptBlocks`, because it is a statement
+   * about the same thing at a coarser grain, and applying both would mean
+   * applying a block override to a prompt that no longer carries that block.
+   * `replaceSystemText` says what collapsing the blocks costs.
+   */
+  systemText?: string
+  /**
+   * An ARCHIVED template version to compose with, from
+   * `lib/ai/v2/template-archive.ts`. Absent means this build's own.
+   *
+   * It is a fixture, not time travel: every other input is today's. And it can
+   * change which LANES run - v2.17.0 retrieves, v2.18.0 does not - which is why
+   * this is resolved before the sections are built rather than at compose time.
+   */
+  templateVersion?: string
+  /**
+   * The model and its call parameters, for a human comparing two models on one
+   * turn. Absent means production's: `V2_GENERATION_MODEL`'s profile, no
+   * effort, `V2_GENERATE_MAX_OUTPUT_TOKENS`.
+   */
+  modelKey?: V2ModelKey
+  /** Omit for `V2_DEFAULT_EFFORT`; `'none'` to send no effort at all. */
+  effort?: V2EffortRequest
+  maxOutputTokens?: number
 }
 
 /** Session-carried state for a multi-turn playground chat (sandbox mode). */
@@ -210,6 +277,13 @@ export interface TurnTrace {
     venueProfile: string
     voicePack: string
     knowledgeBrief: string
+    /**
+     * Retrieved chunks. ALWAYS EMPTY on the current template, which stopped
+     * retrieving in v2.18.0 - non-empty only on an archived version that still
+     * had the lane. Empty here is not "retrieval found nothing", it is "no
+     * retrieval ran", and `composed.promptVersion` is what tells them apart.
+     */
+    knowledge: string
     guestProfile: string
     interactionMemory: string
     openMoves: string
@@ -229,6 +303,44 @@ export interface TurnTrace {
   } | null
   history: HistoryTurn[]
   composed: ComposedPrompt
+  /**
+   * The model and the parameters this turn ASKED FOR, resolved from
+   * `V2_GENERATION_MODEL` unless the overrides named others.
+   *
+   * ON THE TRACE rather than read from a constant by whoever renders it. The
+   * playground's v2 column shows `V2_PROMPT_VERSION` by importing it directly,
+   * which is sound for a build-time constant and WRONG for this: a reader
+   * comparing two turns taken under two different profiles would see one model
+   * named for both. Resolve it where the call happens, carry it, render what
+   * is carried.
+   *
+   * It sits on the trace's shared base, so a FAILED generation reports it too
+   * - which is when the question "under which model?" matters most.
+   */
+  modelCall: {
+    model: string
+    /** null when none was asked for; below `max` no model measured actually thinks. */
+    effort: V2Effort | null
+    maxOutputTokens: number
+  }
+  /**
+   * What the COMPOSER would have produced, when `overrides.promptText`
+   * replaced it - and null when nothing was hand-edited, because then
+   * `composed` already is it.
+   *
+   * Non-null IS the hand-edited flag; `composed.promptVersion`'s
+   * `+hand-edited` suffix carries the same fact for anything that stores only
+   * the version string.
+   *
+   * IT IS HERE TO MAKE THE EDIT UNDOABLE, which is not a UI nicety. The
+   * inspector seeds its textarea from `composed` and sends an override
+   * whenever the two differ, so without this a hand edit became the new
+   * baseline the moment it ran: the next regenerate would compare the textarea
+   * against itself, send no `promptText`, and quietly go back to the composed
+   * prompt - changing the reply for a reason the operator did not ask for and
+   * could not see. Costs ~23k chars on the trace of a hand-edited turn only.
+   */
+  composedWithoutPromptEdit: ComposedPrompt | null
   /** Inbound situation detection (fast axis); null only on pre-generation failures. */
   situations: (SituationDetectionOutcome & { durationMs: number }) | null
   generation:
@@ -244,6 +356,26 @@ export interface TurnTrace {
          * every hand-rolled derivation of this number gets that wrong.
          */
         cacheHitRate: number | null
+        /**
+         * null when the provider reported no breakdown, which is NOT zero -
+         * claude-sonnet-4-6 omits the key at every effort level while
+         * claude-haiku-5-5 reports a real 0 below `max`. Rendering a null as 0
+         * would claim thinking was measured and found absent.
+         */
+        thinkingTokens: number | null
+        /**
+         * The temperature that was SENT, null when the model rejects the
+         * parameter and none was.
+         *
+         * Taken from the generator's own record of its call rather than
+         * re-derived here from the profile, so the one fact this layer cannot
+         * know has a single source. It matters to a reader because
+         * `.claude/rules/v2-template-regression.md` fixes n=3 on the stated
+         * grounds that generation runs at temperature 0 - on a profile that
+         * rejects the parameter that premise is false and one sample is not a
+         * result.
+         */
+        temperature: number | null
       }
     | { ok: false; error: string }
   semantic: (SemanticCheckOutcome & { durationMs: number }) | null
@@ -453,6 +585,31 @@ export async function runTurn(input: RunTurnInput): Promise<TurnTrace> {
   const knowledgeBriefText =
     o.knowledgeBriefText ?? configRow.data?.knowledge_brief ?? ''
 
+  // The template this turn composes on, resolved HERE and not at compose time,
+  // because an archived version can need a lane the current one deleted.
+  const templates = resolveV2TemplateSet(o.templateVersion)
+
+  // RETRIEVAL IS BACK ONLY FOR A VERSION THAT HAD IT. v2.18.0 dropped the call;
+  // running v2.17.0's wording with its `{knowledge}` placeholder fed by nothing
+  // would be a version that never shipped, so the lane is restored for exactly
+  // the sets that declare it. Fails open to [] the way it always did - a less
+  // specific reply still ships - and the same `limit: 4` and query shaping the
+  // v2.17.0 runner used, so the fixture is the fixture and not an approximation.
+  let knowledgeText = o.knowledgeText ?? ''
+  if (o.knowledgeText === undefined && templates.usesRetrieval) {
+    const knowledge = await retrieveKnowledgeContext({
+      venueId: input.venueId,
+      query: input.inbound.join('\n').slice(0, 500),
+      limit: 4,
+    })
+    // Fails open: a less specific reply still ships. Lifted verbatim from the
+    // runner at 53b52347 - the bullet rendering is part of the fixture, not a
+    // detail to re-derive.
+    knowledgeText = knowledge.ok
+      ? knowledge.data.map((c) => `- ${c.text}`).join('\n')
+      : ''
+  }
+
   // ---- Guest data: DB for a real guest, session for a sandbox one. ----
   let profile = input.session?.profile ?? EMPTY_PROFILE
   let memory = input.session?.memory ?? EMPTY_MEMORY
@@ -551,6 +708,7 @@ export async function runTurn(input: RunTurnInput): Promise<TurnTrace> {
     venueProfile,
     voicePack: voicePackText,
     knowledgeBrief: knowledgeBriefText,
+    knowledge: knowledgeText,
     guestProfile: o.guestProfileText ?? renderGuestProfile(profile),
     interactionMemory:
       o.interactionMemoryText ?? renderInteractionMemory(memory),
@@ -565,26 +723,66 @@ export async function runTurn(input: RunTurnInput): Promise<TurnTrace> {
           overridden: o.venueProfileText !== undefined,
         }
 
-  const composed = composePrompt({
-    venueName,
-    speakerClause: '',
-    instagramClause,
-    lengthClause,
-    venueProfile: sections.venueProfile,
-    voicePack: sections.voicePack,
-    knowledgeBrief: sections.knowledgeBrief,
-    history,
-    stateLabel: stateDef.label,
-    stateKey,
-    mission,
-    guestProfile: sections.guestProfile,
-    interactionMemory: sections.interactionMemory,
-    openMoves: sections.openMoves,
-    inboundMessages: input.inbound,
-  })
+  const composedFromSections = composePrompt(
+    {
+      venueName,
+      speakerClause: '',
+      instagramClause,
+      lengthClause,
+      venueProfile: sections.venueProfile,
+      voicePack: sections.voicePack,
+      knowledgeBrief: sections.knowledgeBrief,
+      knowledge: sections.knowledge,
+      history,
+      stateLabel: stateDef.label,
+      stateKey,
+      mission,
+      guestProfile: sections.guestProfile,
+      interactionMemory: sections.interactionMemory,
+      openMoves: sections.openMoves,
+      inboundMessages: input.inbound,
+    },
+    templates,
+  )
+
+  // Hand-edited blocks win over the composed ones for what is SENT, and the
+  // composed prompt is still built above because the trace, the gate and the
+  // assessor all read the sections it was built from - and because a block
+  // override is defined AGAINST it. A failure is returned as a failed
+  // generation rather than silently falling back.
+  const handEdited =
+    o.systemText !== undefined
+      ? {
+          ok: true as const,
+          prompt: replaceSystemText(composedFromSections, o.systemText),
+        }
+      : o.promptBlocks === undefined || o.promptBlocks.length === 0
+        ? null
+        : applyPromptBlocks(composedFromSections, o.promptBlocks)
+  const composed =
+    handEdited !== null && handEdited.ok
+      ? handEdited.prompt
+      : composedFromSections
+
+  const modelProfile =
+    o.modelKey === undefined
+      ? resolveV2ModelProfile()
+      : V2_MODEL_PROFILES[o.modelKey]
 
   const base = {
     input,
+    // On `base`, so BOTH returns carry it: the call is a property of the turn
+    // whether generation succeeded or not, and a failed turn is exactly when
+    // you want to know which model and which effort failed.
+    modelCall: {
+      model: modelProfile.id,
+      // Resolved through the SAME function the call uses, so a trace can
+      // never name an effort the request did not carry.
+      effort: resolveV2Effort(modelProfile, o.effort),
+      maxOutputTokens: o.maxOutputTokens ?? V2_GENERATE_MAX_OUTPUT_TOKENS,
+    },
+    composedWithoutPromptEdit:
+      handEdited !== null && handEdited.ok ? composedFromSections : null,
     graph: { ...graphMeta, ...graphRenderData(graph, facts, profile) },
     facts,
     state: {
@@ -600,6 +798,26 @@ export async function runTurn(input: RunTurnInput): Promise<TurnTrace> {
     composed,
   }
 
+  // A block override this cannot apply is a DEAD TURN, not a turn on the
+  // composed prompt. The stage is named in the error because the inspector
+  // renders `generation.error` verbatim and a bare "invalid prompt" sends the
+  // operator hunting.
+  if (handEdited !== null && !handEdited.ok)
+    return {
+      ...base,
+      situations: null,
+      generation: {
+        ok: false,
+        error: `hand-edited prompt blocks were not applied: ${handEdited.error}`,
+      },
+      semantic: null,
+      gate: null,
+      judge: null,
+      actualJudge: null,
+      assessor: null,
+      totalDurationMs: Date.now() - started,
+    }
+
   // ---- Generate. ----
   const timed = async <T>(
     p: Promise<T>,
@@ -614,7 +832,13 @@ export async function runTurn(input: RunTurnInput): Promise<TurnTrace> {
   // adds no serial latency; its result is what lets situation-scoped policy
   // rows fire in the gate - genuinely pre-send, unlike the assessor's flags.
   const [generated, situationsTimed] = await Promise.all([
-    generateV2Reply(composed),
+    generateV2Reply(composed, {
+      ...(o.modelKey !== undefined ? { modelKey: o.modelKey } : {}),
+      ...(o.effort !== undefined ? { effort: o.effort } : {}),
+      ...(o.maxOutputTokens !== undefined
+        ? { maxOutputTokens: o.maxOutputTokens }
+        : {}),
+    }),
     timed(
       detectSituations({
         inbound_message: input.inbound.join('\n').slice(0, 2000),
@@ -779,7 +1003,7 @@ export async function runTurn(input: RunTurnInput): Promise<TurnTrace> {
     // observations, so a model call recorded as a plain span reports $0
     // whatever usage it carries. `model` is required for the same reason.
     turnTrace.generation('v2.generate').end({
-      model: GENERATION_MODEL_ID,
+      model: base.modelCall.model,
       metadata: {
         cache_hit_rate: cacheHitRate(generated.data.usage),
         promptCharCount: composed.promptCharCount,
@@ -830,6 +1054,8 @@ export async function runTurn(input: RunTurnInput): Promise<TurnTrace> {
       durationMs: generated.data.durationMs,
       usage: generated.data.usage,
       cacheHitRate: cacheHitRate(generated.data.usage),
+      thinkingTokens: generated.data.thinkingTokens,
+      temperature: generated.data.call.temperature,
     },
     semantic: { ...semantic, durationMs: semanticTimed.durationMs },
     gate,

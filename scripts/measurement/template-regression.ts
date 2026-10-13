@@ -74,6 +74,7 @@ import { runTurn, type PlaygroundSession } from '@/lib/relationship/run-turn'
 import type { HistoryTurn } from '@/lib/ai/v2/compose'
 import { EMPTY_MEMORY, EMPTY_PROFILE } from '@/lib/relationship/profile'
 import { V2_PROMPT_VERSION } from '@/lib/ai/v2/template'
+import { resolveV2ModelProfile } from '@/lib/ai/v2/model-call'
 import {
   ASSESSOR_ENABLED,
   ASSESSOR_PROMPT_VERSION,
@@ -105,6 +106,15 @@ import { createRunLog, readRunLog } from './run-log'
 // 3, owner-ruled 2026-10-09, on the grounds that generation runs at
 // temperature 0 (V2_GENERATE_TEMPERATURE) so a single-turn reply barely moves.
 //
+// THAT GROUND IS GONE ON ANY PROFILE WITH `sendsTemperature: false`
+// (lib/ai/v2/model-call.ts). claude-sonnet-5-5 rejects the parameter, so generation
+// samples the model's own distribution: three calls on a byte-identical prompt
+// returned three distinct bodies (2026-10-12). On such a profile n=3 is not
+// the owner's ruling applied, it is a different and weaker instrument - the
+// same 10 scenarios went 9/10 at n=3 and 6/10 at n=6, and the four extra
+// ceiling breaches were all tail behaviour. Use --samples=6 or higher there,
+// and say which model produced any number you report (the summary line does).
+//
 // KNOWN LIMIT, measured the same day: two n=6 runs over a BYTE-IDENTICAL
 // prompt still disagreed on two scenarios - `bare-hey` and `hi-then-good`,
 // both crossing the pursuit bar in opposite directions. Generation is not
@@ -122,6 +132,8 @@ const DEFAULT_SAMPLES = 3
 // tokens each over a ~15s turn, so input tokens bind first at ~80 concurrent
 // samples; the other two dimensions allow hundreds. Re-derive if the model,
 // tier, or prompt size changes - the headers are the source of truth.
+// NOT RE-DERIVED for claude-sonnet-5-5, which also runs 3-4x the output
+// tokens per reply, so output tokens may bind first on that profile.
 const DEFAULT_CONCURRENCY = 64
 const BAR_MIN = 2
 
@@ -856,6 +868,13 @@ async function main(): Promise<void> {
       orphanOverlayRows: loaded.orphanKeys,
       packRows: pack.length,
       promptVersion: V2_PROMPT_VERSION,
+      // The model is as much "the code state" as the prompt version is
+      // (harness convention #4), because generation is a switch now and the
+      // two profiles disagree on this very set. Also in the summary line.
+      // KNOWN GAP: `regression_runs` has no column for it, so /admin/regression
+      // cannot attribute a stored run to a model - this JSONL can.
+      generationModel: resolveV2ModelProfile().id,
+      samplesGroundedInTemperature: resolveV2ModelProfile().sendsTemperature,
       assessorVersion: ASSESSOR_PROMPT_VERSION,
       judgeVersion: JUDGE_PROMPT_VERSION,
     },
@@ -1021,6 +1040,11 @@ async function main(): Promise<void> {
   const allPassed = scenariosPassed === scenarios.length
   console.log(
     `\n${scenariosPassed}/${scenarios.length} scenarios passed on ${V2_PROMPT_VERSION}` +
+      // The MODEL belongs in the same sentence as the verdict. Generation is a
+      // switch now (V2_GENERATION_MODEL), the two profiles disagree by 3
+      // scenarios and 4 ceiling breaches at n=6, and a run that does not say
+      // which one it used is not attributable - harness convention #4.
+      ` / ${resolveV2ModelProfile().id}` +
       (filtered ? ' (FILTERED RUN - cannot certify the template)' : ''),
   )
   // A filtered run can never exit 0: certification requires all scenarios.

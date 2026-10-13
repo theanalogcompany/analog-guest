@@ -366,7 +366,7 @@ generation rather than asked for in prose
 
 One line per purpose. Defaults and behaviour live with the code that reads them.
 
-**LLM** `ANTHROPIC_API_KEY` · **Jev classification** `JEV_API_KEY` · **Embeddings** `VOYAGE_API_KEY` · **DB** `SUPABASE_SECRET_KEY`,
+**LLM** `ANTHROPIC_API_KEY` · **v2 generation model switch, optional** `V2_GENERATION_MODEL` (a key in `V2_MODEL_PROFILES`, `lib/ai/v2/model-call.ts`: `sonnet-4-6`, `sonnet-5-5`, `haiku-5-5`. Unset means Sonnet 4.6, which is what every measured v2 lesson was measured on; an unknown value warns and falls back) · **Jev classification** `JEV_API_KEY` · **Embeddings** `VOYAGE_API_KEY` · **DB** `SUPABASE_SECRET_KEY`,
 `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` · **Migrations and
 codegen, LOCAL ONLY** `SUPABASE_ACCESS_TOKEN` (`db:apply`, `db:types`; connects as
 `postgres`, so it **must never be set on Vercel** - no deployed code reads it, and a

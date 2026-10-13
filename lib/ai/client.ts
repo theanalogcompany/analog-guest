@@ -1,5 +1,7 @@
 import { anthropic } from '@ai-sdk/anthropic'
 
+import { resolveV2ModelProfile, type V2ModelProfile } from './v2/model-call'
+
 // Model identifiers. Re-check on Anthropic model releases.
 /**
  * Exported so a trace can LABEL the generation with the model that produced
@@ -9,6 +11,26 @@ import { anthropic } from '@ai-sdk/anthropic'
  */
 export const GENERATION_MODEL_ID = 'claude-sonnet-4-6'
 const CLASSIFICATION_MODEL_ID = 'claude-haiku-4-5-20251001'
+
+// v2 generation is a SWITCH, and everything about it - the profile table, the
+// effort levels, which parameters each model tolerates, the token constants -
+// lives in `lib/ai/v2/model-call.ts`. It moved there so the playground's model
+// picker can read it without pulling this file's provider SDK into the browser
+// bundle. This file keeps only the one function that constructs a model.
+
+/**
+ * Takes the profile rather than resolving its own, so a caller that also reads
+ * `sendsTemperature` or `forcesOutputFormat` cannot end up sending one model's
+ * parameters to another model's id across two separate reads of the switch.
+ */
+export function anthropicV2Model(profile: V2ModelProfile) {
+  ensureApiKey()
+  return anthropic(profile.id)
+}
+
+export function getV2GenerationModel() {
+  return anthropicV2Model(resolveV2ModelProfile())
+}
 
 /**
  * The LLM-as-judge model, owner-ruled 2026-10-06 to be a different family

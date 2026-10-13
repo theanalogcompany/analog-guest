@@ -26,6 +26,12 @@
 import { z } from 'zod'
 
 import {
+  V2_EFFORT_REQUESTS,
+  V2_MODEL_KEYS,
+  V2_PLAYGROUND_MAX_OUTPUT_TOKENS,
+} from '@/lib/ai/v2/model-call'
+
+import {
   GuestProfileSchema,
   InteractionMemorySchema,
 } from '@/lib/relationship/profile'
@@ -55,6 +61,14 @@ export const SavedPlaygroundSessionSchema = z.object({
  * still parses - it replays with that one override dropped rather than
  * failing, which is the right direction for a saved artifact nobody can
  * migrate by hand. Every other override is unaffected.
+ *
+ * `promptBlocks` ARE SAVED, which sits oddly beside the header's reason for
+ * dropping the TurnTrace ("50-100 KB a turn, mostly reproducible"). They are
+ * kept on exactly that test: a hand-edited block is the one thing here that is
+ * not reproducible. Nothing else holds it, the composer cannot regenerate it,
+ * and it is what a human typed - losing an afternoon's ablation on save is
+ * worse than a large row. It is also absent from the common case, because the
+ * inspector sends only the blocks that differ from the composed ones.
  */
 export const SavedTurnOverridesSchema = z.object({
   stateKey: z.string().optional(),
@@ -63,8 +77,41 @@ export const SavedTurnOverridesSchema = z.object({
   interactionMemoryText: z.string().optional(),
   openMovesText: z.string().optional(),
   knowledgeBriefText: z.string().optional(),
+  // Only reaches the prompt on an archived template version that retrieves.
+  knowledgeText: z.string().optional(),
+  // A key of V2_TEMPLATE_SETS. Not a z.enum over the registry: a conversation
+  // saved on a version later dropped from the archive must still parse, and
+  // `resolveV2TemplateSet` fails open to the current template with a warning.
+  // A hard enum here would reject the whole saved turn over a fixture.
+  templateVersion: z.string().max(40).optional(),
   voicePackText: z.string().optional(),
   venueProfileText: z.string().optional(),
+  // Hand-edited SYSTEM blocks, replaced by label. Capped at the order of the
+  // thing they replace: Le Mil's THE HOUSE block is ~22k chars with the
+  // knowledge brief in it, so 200k per block leaves room to paste a bigger one
+  // in without the field being a way to post a megabyte. 8 blocks against the
+  // composer's 3, so a template can grow without this becoming the limit.
+  promptBlocks: z
+    .array(
+      z.object({
+        label: z.string().min(1).max(80),
+        text: z.string().max(200_000),
+      }),
+    )
+    .max(8)
+    .optional(),
+  modelKey: z.enum(V2_MODEL_KEYS).optional(),
+  // Includes 'none', which is not a level: it means send no effort, which is
+  // what every measurement taken before V2_DEFAULT_EFFORT existed did.
+  effort: z.enum(V2_EFFORT_REQUESTS).optional(),
+  // Bounded at BOTH ends, and the floor is not decoration: a 0 or a 1 here
+  // generates nothing and reads as the model failing.
+  maxOutputTokens: z
+    .number()
+    .int()
+    .min(100)
+    .max(V2_PLAYGROUND_MAX_OUTPUT_TOKENS)
+    .optional(),
 })
 
 export const PlaygroundConversationTurnSchema = z.object({

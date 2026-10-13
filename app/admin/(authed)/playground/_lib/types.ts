@@ -113,6 +113,15 @@ export interface PlaygroundTurn {
   /** Replay mode: the bubbles v1 actually sent after this inbound, null when none followed. */
   v1Reply?: string[] | null
   /**
+   * Replay mode: the inbound row this turn replays.
+   *
+   * Kept on the TURN and not only inside `request.v1Arm`, because the v1 arm
+   * is a live toggle: ticking "also run v1" and pressing Regenerate has to be
+   * able to build a replay arm for a turn that was first run with the toggle
+   * off, and the id is the one thing it cannot reconstruct.
+   */
+  replayMessageId?: string
+  /**
    * Restored from a saved conversation (migration 074): the reply and gate
    * verdict as they were, with NO trace behind them.
    *

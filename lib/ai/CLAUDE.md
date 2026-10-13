@@ -9,6 +9,37 @@ Loads only when you work in this directory. Prompt **copy** rules live in
 `claude-sonnet-4-6`. Generation sets no temperature (the provider default applies), 0.2-0.3 for
 anything analytical or idempotent.
 
+**v2 generation is the one exception, and it is a switch.** `V2_GENERATION_MODEL` picks a key
+in `V2_MODEL_PROFILES` (`v2/model-call.ts`); unset means `claude-sonnet-4-6`, so nothing moves
+by default. That module holds everything about how a v2 call may be made - profiles, effort
+levels, the token and temperature constants - and **imports no provider SDK**, so the
+playground's model picker and the Zod boundaries can read it without pulling
+`@ai-sdk/anthropic` into a browser bundle or a schema module. `client.ts` keeps only the
+function that constructs the model.
+
+It is a **profile**, not a model id, because models disagree on how the call may be *made* -
+which sampling parameters they accept, and whether the SDK's fallback forced tool call works
+at all. A bare string switch fails generation outright on a model that refuses one of them.
+Add a model by adding a profile, never by passing an id through.
+
+**Every v2 call sends `V2_DEFAULT_EFFORT` (`high`) unless the caller says otherwise.** A
+per-call `effort` overrides it and `'none'` sends none, which is what reproduces any
+measurement taken before the default existed. Two things to carry: thinking is charged against
+`maxOutputTokens`, so the default spends part of the reply's budget on every turn (213 of 1,000
+measured on claude-haiku-5-5); and an *explicit* effort a model rejects fails the call, while
+the *default* degrades to none - a human's typo must be reported, a constant must not take
+generation down.
+
+Two rules the switch imposes:
+
+- **Resolve it wherever a v2 call is labelled**, never name a constant. Langfuse prices a
+  generation from its model id, so a hardcoded label bills and reports the wrong model while
+  another one runs.
+- **A non-default profile is not a measured profile.** Every lesson in the v2 template
+  changelog was measured on the default; a changed model makes those numbers evidence about a
+  prompt *on that model*. The harnesses print which one ran - read it before citing any of
+  them. The per-model verdicts live in PRs, not here.
+
 Every module here returns `AIResult<T>` (`{ok: true, data} | {ok: false, error}`). Throw
 only at an outer boundary.
 
