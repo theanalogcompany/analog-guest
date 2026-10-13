@@ -502,6 +502,22 @@ export function V1V2Columns({
           <span className="ml-1 normal-case tracking-normal text-ink-faint/80">
             {V2_PROMPT_VERSION}
           </span>
+          {/* The MODEL, from the TRACE and not from a constant. v2 generation
+              is selectable (V2_GENERATION_MODEL), so two turns in one session
+              can have been written by different models - and they do not
+              answer alike. Reading a constant here would name one model for
+              both, which is the mislabeling the switch's own comment warns
+              about.
+
+              A RESTORED turn carries no trace, so nothing is shown rather
+              than today's resolved model: that would be a claim about a turn
+              generated under whatever the switch said at the time, which this
+              page cannot know. */}
+          {turn.response?.trace.generationModel !== undefined && (
+            <span className="ml-1 normal-case tracking-normal text-ink-faint/80">
+              {turn.response.trace.generationModel}
+            </span>
+          )}
         </span>
         {v2Bubbles.length > 0 ? (
           <ColumnBubbles bubbles={v2Bubbles} tone="v2" />

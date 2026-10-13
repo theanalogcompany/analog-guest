@@ -229,6 +229,17 @@ export interface TurnTrace {
   } | null
   history: HistoryTurn[]
   composed: ComposedPrompt
+  /**
+   * The model that generated this turn, resolved from V2_GENERATION_MODEL.
+   *
+   * ON THE TRACE rather than read from a constant by whoever renders it. The
+   * playground's v2 column shows `V2_PROMPT_VERSION` by importing it directly,
+   * which is sound for a build-time constant and WRONG for this: a reader
+   * comparing two turns taken under two different profiles would see one model
+   * named for both. Resolve it where the call happens, carry it, render what
+   * is carried.
+   */
+  generationModel: string
   /** Inbound situation detection (fast axis); null only on pre-generation failures. */
   situations: (SituationDetectionOutcome & { durationMs: number }) | null
   generation:
@@ -585,6 +596,10 @@ export async function runTurn(input: RunTurnInput): Promise<TurnTrace> {
 
   const base = {
     input,
+    // On `base`, so BOTH returns carry it: the model is a property of the turn
+    // whether generation succeeded or not, and a failed turn is exactly when
+    // you want to know which model failed.
+    generationModel: resolveV2ModelProfile().id,
     graph: { ...graphMeta, ...graphRenderData(graph, facts, profile) },
     facts,
     state: {
