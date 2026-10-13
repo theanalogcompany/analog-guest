@@ -37,15 +37,28 @@ export function PromptLibrary({
   text,
   onLoad,
   busy,
+  serialization = 'blocks',
 }: {
   venueId: string
   /** The version the CURRENT text derives from, stamped onto a save. */
   promptVersion: string
   /** The prompt as it stands in the textarea; Save stores its system half. */
   text: string
-  /** Given the SAVED system text; the caller splices it onto its own turns. */
-  onLoad: (systemText: string) => void
+  /**
+   * Given the SAVED system text and the name it was saved under; the caller
+   * splices the text onto its own turns. The name is passed because a surface
+   * that reports what an arm ran (the prompt lab's sweep header) can only name
+   * the prompt if it is told - the text alone does not carry it.
+   */
+  onLoad: (systemText: string, name: string) => void
   busy: boolean
+  /**
+   * How `text` is shaped. `blocks` is the playground's `<<< SYSTEM: ... >>>`
+   * document, whose transcript half is stripped on save. `plain` is the prompt
+   * lab's single system document, which has no block structure to parse and
+   * no transcript in it to strip - parsing it would refuse every save.
+   */
+  serialization?: 'blocks' | 'plain'
 }) {
   const all = useSyncExternalStore(
     subscribeSavedPrompts,
@@ -62,16 +75,20 @@ export function PromptLibrary({
     // Parsed before storing, so an unparseable prompt cannot be saved and then
     // refuse to load later - the refusal happens while the text is still in
     // front of whoever typed it.
-    const systemOnly = systemTextOf(text)
-    if (!systemOnly.ok) {
-      setError(`cannot save - ${systemOnly.error}`)
-      return
+    let toStore = text
+    if (serialization === 'blocks') {
+      const systemOnly = systemTextOf(text)
+      if (!systemOnly.ok) {
+        setError(`cannot save - ${systemOnly.error}`)
+        return
+      }
+      toStore = systemOnly.text
     }
     const result = saveNamedPrompt({
       name,
       venueId,
       promptVersion,
-      text: systemOnly.text,
+      text: toStore,
     })
     setError(result.ok ? null : result.error)
     if (result.ok) setName('')
@@ -80,7 +97,9 @@ export function PromptLibrary({
   return (
     <div className="flex flex-col gap-2 border-t border-stone-light/60 pt-2">
       <span className="text-[11px] uppercase tracking-wider text-ink-faint">
-        prompt library · house blocks only · this browser only
+        prompt library ·{' '}
+        {serialization === 'blocks' ? 'house blocks only' : 'system prompt'} ·
+        this browser only
       </span>
 
       <div className="flex items-center gap-2">
@@ -130,7 +149,7 @@ export function PromptLibrary({
                 type="button"
                 disabled={busy}
                 onClick={() => {
-                  onLoad(p.text)
+                  onLoad(p.text, p.name)
                   setError(null)
                 }}
                 className="flex-1 cursor-pointer text-left text-xs text-ink hover:underline disabled:cursor-default disabled:opacity-50"

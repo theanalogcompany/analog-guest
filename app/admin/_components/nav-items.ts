@@ -38,6 +38,7 @@ export const NAV_GROUPS: readonly NavGroup[] = [
     section: 'System',
     items: [
       { href: '/admin/playground', label: 'Playground' },
+      { href: '/admin/prompt-lab', label: 'Prompt lab' },
       // Children come from TESTS_SUBNAV, which the tests layout's own sub-nav
       // bar also reads, so the sidebar and the page cannot list different
       // surfaces.
