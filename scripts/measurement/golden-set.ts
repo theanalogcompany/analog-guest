@@ -86,6 +86,7 @@ import {
   runnableGoldenQuestions,
   validateGoldenSet,
 } from '@/lib/eval/golden-set'
+import { goldenTurnFor } from '@/lib/eval/golden-turn'
 import { EMPTY_MEMORY, EMPTY_PROFILE } from '@/lib/relationship/profile'
 import { runTurn } from '@/lib/relationship/run-turn'
 import { VenueHoursSchema } from '@/lib/schemas/venue-info'
@@ -148,33 +149,15 @@ async function runQuestion(
   // context is built by production's own queries, v2 gets it as
   // `sessionHistory`. Nothing about the guest is declared to one arm and not
   // the other.
-  const inbound = question.messages ?? [question.question]
-  const history = (question.history ?? []).map((t) => ({
-    role: t.role,
-    text: t.text,
-  }))
-  // TWO THINGS v2 CANNOT BE ASKED, declined by name rather than asked
-  // anyway. Running it would answer a DIFFERENT turn from v1's - one with no
-  // photo, or one driven by an inbound that does not exist - and the column
-  // would read as "v2 handled it".
   //
-  // `runTurn` is built around an inbound: there is no proactive entry point,
-  // and `question.question` on a proactive scenario is a bracketed display
-  // label, so feeding it in would have v2 answering a stage direction.
-  const v2SkipReason: { stage: string; error: string } | null =
-    question.mediaUrls !== undefined
-      ? {
-          stage: 'media',
-          error:
-            'v2 has no media input - run-turn.ts and the v2 composer take text only, so there is no turn to ask it',
-        }
-      : question.driver === 'proactive'
-        ? {
-            stage: 'proactive',
-            error:
-              'v2 has no proactive path - runTurn answers an inbound, and this scenario has none',
-          }
-        : null
+  // TWO THINGS v2 CANNOT BE ASKED are declined by name rather than asked
+  // anyway, and both the mapping and those refusals now live in
+  // `lib/eval/golden-turn.ts` - /admin/prompt-lab asks the same questions and
+  // a second copy of this would let the two surfaces disagree about what v2
+  // was even shown.
+  const { turn, skip: v2SkipReason } = goldenTurnFor(question)
+  const inbound = turn.inbound
+  const history = turn.history
   const v2Skip: GoldenV2 | null =
     v2SkipReason === null
       ? null
