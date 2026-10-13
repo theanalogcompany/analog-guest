@@ -13,6 +13,7 @@ import {
 import type { ComposedPrompt, ComposedTurn } from '@/lib/ai/v2/compose'
 import {
   changedBlocks,
+  HAND_EDITED_SUFFIX,
   promptToText,
   parsePromptText,
   systemTextOf,
@@ -28,6 +29,11 @@ import {
   type V2ModelKey,
   type V2ModelProfile,
 } from '@/lib/ai/v2/model-call'
+import {
+  resolveV2TemplateSet,
+  V2_TEMPLATE_CURRENT,
+  V2_TEMPLATE_VERSIONS,
+} from '@/lib/ai/v2/template-archive'
 import { PromptLibrary } from './prompt-library'
 import { evaluationRan } from '@/lib/relationship/evaluation-ran'
 import type { TurnOverrides, TurnTrace } from '@/lib/relationship/run-turn'
@@ -162,6 +168,13 @@ interface Edits {
    * document.
    */
   promptText: string
+  /**
+   * An archived template version, or the current one. A SEPARATE axis from
+   * `promptText`: the version decides what the composer produces, the text
+   * decides what replaces it afterwards. Picking a version re-composes and
+   * therefore discards a pending text edit, which the UI says before it does.
+   */
+  templateVersion: string
   modelKey: V2ModelKey
   /**
    * A REQUEST, so `'none'` is a selectable thing rather than an absence. With
@@ -214,6 +227,12 @@ function editsFromTrace(trace: TurnTrace): Edits {
     // claims (a profile removed since). The picker then shows the default
     // while the readout below still shows what actually ran, which is the pair
     // that makes the mismatch visible instead of silently reconciling it.
+    // From the COMPOSED prompt, with the hand-edit suffix stripped - that is
+    // what the turn ran on. `trace.input.overrides` would be the ask rather
+    // than the outcome, and they differ whenever a stored version fell open.
+    templateVersion: resolveV2TemplateSet(
+      trace.composed.promptVersion.replace(HAND_EDITED_SUFFIX, ''),
+    ).version,
     modelKey: v2ModelKeyOf(trace.modelCall.model) ?? V2_MODEL_KEYS[0],
     // null on the trace means none was SENT, which is the `'none'` request.
     effort: trace.modelCall.effort ?? 'none',
@@ -245,6 +264,7 @@ function dirtyFields(base: Edits, edits: Edits): Array<keyof Edits> {
     'voicePackText',
     'venueProfileText',
     'promptText',
+    'templateVersion',
     'modelKey',
     'effort',
     'maxOutputTokens',
@@ -266,7 +286,7 @@ function dirtyFields(base: Edits, edits: Edits): Array<keyof Edits> {
  *   mean something.
  */
 function sendableOverrides(trace: TurnTrace, edits: Edits): TurnOverrides {
-  const base = editsFromTrace(trace)
+  const base: Edits = editsFromTrace(trace)
   const overrides: TurnOverrides = {}
   if (edits.stateKey !== base.stateKey) overrides.stateKey = edits.stateKey
   if (edits.mission !== base.mission) overrides.mission = edits.mission
@@ -289,8 +309,27 @@ function sendableOverrides(trace: TurnTrace, edits: Edits): TurnOverrides {
   //
   // The transcript is unreachable from here by construction - a block override
   // names a SYSTEM block, and the editor holds nothing else.
-  const diff = changedBlocks(composedPromptText(trace), edits.promptText)
-  overrides.promptBlocks = diff.ok ? diff.blocks : []
+  //
+  // NOTHING IS SENT WHEN THE TEMPLATE VERSION CHANGED, and that is the whole
+  // trap this guards. The editor was seeded from the trace, so its diff is
+  // against the OLD template's blocks; sending it would replace the new
+  // version's blocks with the old version's text and the reply would be the
+  // old template wearing a new version number - a version comparison that
+  // compares nothing, reported as one that did. Change the version, read the
+  // reply, then edit. `editBlocker` refuses the combination out loud rather
+  // than letting this silently drop an edit someone typed.
+  if (edits.templateVersion === base.templateVersion) {
+    const diff = changedBlocks(composedPromptText(trace), edits.promptText)
+    overrides.promptBlocks = diff.ok ? diff.blocks : []
+  } else {
+    overrides.promptBlocks = []
+  }
+  // Sent only when it is NOT this build's own, so a turn on the current
+  // template carries no version override at all - the absence is what keeps a
+  // saved conversation from pinning a version that was current when it was
+  // saved and is a fixture now.
+  if (edits.templateVersion !== V2_TEMPLATE_CURRENT.version)
+    overrides.templateVersion = edits.templateVersion
   overrides.modelKey = edits.modelKey
   // Sent as given, `'none'` included - it is a value the route accepts, not an
   // absence, because an absent effort now resolves to V2_DEFAULT_EFFORT.
@@ -317,6 +356,14 @@ function editBlocker(
   base: Edits,
   composedText: string,
 ): string | null {
+  // ONE AT A TIME, refused rather than silently resolved. Both are edits to
+  // what the model is sent and they are defined against each other: the block
+  // diff only means anything relative to the template that produced it.
+  if (
+    edits.templateVersion !== base.templateVersion &&
+    edits.promptText !== base.promptText
+  )
+    return 'a template version and a prompt edit at once - the edit is diffed against the old version\u2019s blocks, so it would quietly undo the version change. Reset the prompt, run the version, then edit.'
   if (edits.promptText !== base.promptText) {
     const parsed = parsePromptText(edits.promptText)
     if (!parsed.ok) return `prompt will not parse - ${parsed.error}`
@@ -487,6 +534,8 @@ function TraceInspector({
         />
 
         <ModelCallSection
+          templateVersion={edits.templateVersion}
+          onTemplateVersion={(v) => set('templateVersion', v)}
           modelKey={edits.modelKey}
           effort={edits.effort}
           maxOutputTokens={edits.maxOutputTokens}
@@ -837,7 +886,7 @@ function PromptSection({
           onChange={(e) => onChange(e.target.value)}
           disabled={busy}
           rows={24}
-          className="min-h-72 font-mono text-[11px] leading-[1.5]"
+          className="max-h-[32rem] min-h-72 overflow-y-auto font-mono text-[11px] leading-[1.5]"
           spellCheck={false}
         />
         <div className="flex items-center gap-3">
@@ -932,6 +981,8 @@ function PromptSection({
  * edit and let them read it as the trace.
  */
 function ModelCallSection({
+  templateVersion,
+  onTemplateVersion,
   modelKey,
   effort,
   maxOutputTokens,
@@ -941,6 +992,8 @@ function ModelCallSection({
   ran,
   busy,
 }: {
+  templateVersion: string
+  onTemplateVersion: (value: string) => void
   modelKey: V2ModelKey
   effort: V2EffortRequest
   maxOutputTokens: string
@@ -963,6 +1016,41 @@ function ModelCallSection({
           </span>{' '}
           out
         </KeyValue>
+
+        <EditLabel>template version</EditLabel>
+        {/* The template is a property of the CALL in the same sense the model
+            is - it decides what gets sent - so it sits here rather than in the
+            prompt section, which edits what the composer produced. */}
+        <Select
+          value={templateVersion}
+          onValueChange={onTemplateVersion}
+          disabled={busy}
+        >
+          <SelectTrigger className="w-full" size="sm">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {V2_TEMPLATE_VERSIONS.map((v) => (
+              <SelectItem key={v} value={v}>
+                {v}
+                {v === V2_TEMPLATE_CURRENT.version
+                  ? ' (this build)'
+                  : ' (archived fixture)'}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        {/* Said at the control, because the obvious reading of a version
+            picker is time travel and this is not that. */}
+        {templateVersion !== V2_TEMPLATE_CURRENT.version && (
+          <span className="text-[11px] leading-relaxed text-clay-deep">
+            An archived version is frozen WORDING only. The venue data, voice
+            pack, graph and model are today&apos;s, so this says what that
+            wording does now - not what the agent did then.
+            {resolveV2TemplateSet(templateVersion).usesRetrieval &&
+              ' It also restores the knowledge retrieval lane that v2.18.0 removed.'}
+          </span>
+        )}
 
         <EditLabel>model for regenerate</EditLabel>
         <Select
@@ -1063,6 +1151,14 @@ function ModelCallSection({
   )
 }
 
+/**
+ * The char count rides the COLLAPSED header, which is the other half of the
+ * "this section is not used" fix. A collapsed row is identical whether the
+ * section holds 40,960 characters or nothing, so the only way to tell an empty
+ * section from a full one was to open it - and opening it was the thing that
+ * appeared to do nothing. Now the rail answers "is there anything in here"
+ * without a click.
+ */
 function BriefSection({
   title,
   value,
@@ -1077,13 +1173,35 @@ function BriefSection({
   note?: React.ReactNode
 }) {
   return (
-    <InspectorSection title={title}>
+    <InspectorSection
+      title={title}
+      badge={
+        <span className="text-[11px] tabular-nums text-ink-faint">
+          {value.length === 0
+            ? 'empty'
+            : `${value.length.toLocaleString()} chars`}
+        </span>
+      }
+    >
       {note}
       <EditArea value={value} onChange={onChange} disabled={busy} />
     </InspectorSection>
   )
 }
 
+/**
+ * CAPPED, and the cap is the fix for a real defect rather than taste.
+ *
+ * The shadcn Textarea carries `field-sizing-content`, so it grows to fit its
+ * value with no bound. Le Mil's knowledge brief is 40,960 characters, which
+ * made this element 28,473px tall and the inspector rail 30,383px of scroll
+ * against a 537px viewport - so every section after it (voice pack, venue
+ * profile, model call, the composed prompt, the gate, the judge) sat ~56
+ * screens down and was effectively unreachable.
+ *
+ * `max-h-64` with the textarea's own scrollbar keeps a long section long
+ * inside its own box instead of inside the page.
+ */
 function EditArea({
   value,
   onChange,
@@ -1099,7 +1217,7 @@ function EditArea({
       onChange={(e) => onChange(e.target.value)}
       disabled={disabled}
       rows={5}
-      className="min-h-20 font-mono text-[11px] leading-[1.5]"
+      className="max-h-64 min-h-20 overflow-y-auto font-mono text-[11px] leading-[1.5]"
     />
   )
 }

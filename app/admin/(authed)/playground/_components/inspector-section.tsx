@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, type ReactNode } from 'react'
+import { useRef, useState, type ReactNode } from 'react'
 import { ChevronRight } from 'lucide-react'
 import { CopyButton } from '@/app/admin/_components/copy-button'
 
@@ -22,11 +22,29 @@ export function InspectorSection({
   children: ReactNode
 }) {
   const [open, setOpen] = useState(defaultOpen)
+  const ref = useRef<HTMLDivElement>(null)
   return (
-    <div className="border-b border-stone-light/60">
+    <div ref={ref} className="border-b border-stone-light/60">
       <button
         type="button"
-        onClick={() => setOpen((o) => !o)}
+        onClick={() => {
+          const next = !open
+          setOpen(next)
+          // SCROLLED INTO VIEW ON EXPAND, because the rail is a scroll
+          // container and a section near its bottom opens entirely BELOW the
+          // fold - the header toggles, nothing appears, and the section reads
+          // as empty. That is what "WHAT YOU KNOW is not used" turned out to
+          // be: a 40,960-character brief rendering 4px past the visible edge.
+          //
+          // rAF, not an effect: the scroll has to happen after React has laid
+          // the opened content out, and an effect that reaches into the DOM on
+          // a state change is the pattern `react-hooks/set-state-in-effect`
+          // exists to discourage.
+          if (next)
+            requestAnimationFrame(() =>
+              ref.current?.scrollIntoView({ block: 'nearest' }),
+            )
+        }}
         className="flex w-full items-center gap-2 px-4 py-2.5 text-left cursor-pointer hover:bg-parchment/50"
         aria-expanded={open}
       >
