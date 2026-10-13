@@ -60,8 +60,34 @@ function nextTurnId(): string {
   return `turn-${turnCounter}`
 }
 
+/**
+ * The venue this page opens on, so the common case is one fewer click.
+ *
+ * MATCHED BY NAME, never by a pasted uuid: an id in a component is unreadable
+ * and cannot be checked against anything, and the measurement harnesses
+ * already resolve this same venue with `ilike('name', "Le Mil's Coffee")`
+ * rather than an id.
+ *
+ * DELIBERATELY ITS OWN CONSTANT rather than imported from those harnesses.
+ * They resolve "the venue every prior v2 measurement ran on", which is a
+ * statement about history; this is "the venue an operator most likely wants",
+ * which is convenience. They point at the same venue today and are free to
+ * stop doing so, and coupling them would make a harness default move because
+ * someone re-ordered a dropdown.
+ *
+ * FALLS BACK TO NO SELECTION, which is the previous behaviour. A venue that is
+ * absent or out of this operator's allowlist must not become "no venue picker
+ * worked" - the page is usable with any venue, so an unmatched name costs one
+ * click and nothing else.
+ */
+const DEFAULT_VENUE_NAME = "Le Mil's Coffee"
+
 export function PlaygroundClient({ venues }: { venues: VenueListRow[] }) {
-  const [venueId, setVenueId] = useState<string | null>(null)
+  // Lazy initializer: `venues` is server-rendered and stable for the life of
+  // the page, so this resolves once rather than on every render.
+  const [venueId, setVenueId] = useState<string | null>(
+    () => venues.find((v) => v.name === DEFAULT_VENUE_NAME)?.venueId ?? null,
+  )
   const [mode, setMode] = useState<PlaygroundMode>('sandbox')
 
   // Run v1 beside v2. FALSE by default: the arm is a second full generation
