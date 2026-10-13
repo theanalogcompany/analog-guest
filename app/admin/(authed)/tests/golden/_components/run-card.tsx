@@ -158,6 +158,17 @@ export function RunCard({ run }: { run: GoldenRunView }) {
     <Card className="block rounded-[2px] border-stone-light/60 bg-paper p-4 shadow-none">
       <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
         <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+          {/* THE RUN ID, because the harness ends by printing it: "stored:
+              /admin/tests/golden (run 6546d12c-...)". Until now it existed on
+              this page only inside the Export CSV href, so the one identifier
+              you arrive holding was the one thing the page would not show -
+              and a run could not be found by it at all. Twice in one session
+              someone went looking for a run by id and could not locate it.
+              Short form, because that is the prefix the harness output and the
+              JSONL filename share. */}
+          <span className="font-mono text-sm font-medium">
+            {run.id.slice(0, 8)}
+          </span>
           <span className="text-sm font-medium">
             {run.units.length} question{run.units.length === 1 ? '' : 's'}
           </span>
