@@ -191,7 +191,7 @@
 //
 // MODEL BOUNDARY 2026-10-12. EVERY measured lesson below was measured on
 // claude-sonnet-4-6, which is still the default. v2 generation is now a
-// switch (`V2_GENERATION_MODEL`, lib/ai/client.ts), and a number in this
+// switch (`V2_GENERATION_MODEL`, lib/ai/v2/model-call.ts), and a number in this
 // changelog is evidence about a prompt ON THAT MODEL - not a property of the
 // wording. No version bump: no copy changed, and bumping would signal one.
 //

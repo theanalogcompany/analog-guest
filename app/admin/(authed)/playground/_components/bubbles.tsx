@@ -499,23 +499,32 @@ export function V1V2Columns({
       >
         <span className="text-[11px] uppercase tracking-wider text-ink-faint">
           v2
+          {/* The version THIS TURN RAN ON, off the trace when there is one.
+              The build constant is only right for a turn the composer
+              produced: a hand-edited prompt is stamped `+hand-edited`
+              (lib/ai/v2/prompt-text.ts) precisely so it cannot be read as the
+              template's output, and reading the constant here would undo
+              that. A restored turn has no trace and falls back to the
+              constant. */}
           <span className="ml-1 normal-case tracking-normal text-ink-faint/80">
-            {V2_PROMPT_VERSION}
+            {turn.response?.trace.composed.promptVersion ?? V2_PROMPT_VERSION}
           </span>
-          {/* The MODEL, from the TRACE and not from a constant. v2 generation
-              is selectable (V2_GENERATION_MODEL), so two turns in one session
-              can have been written by different models - and they do not
-              answer alike. Reading a constant here would name one model for
-              both, which is the mislabeling the switch's own comment warns
-              about.
+          {/* The MODEL and its effort, from the TRACE and not from a constant.
+              v2 generation is selectable (V2_GENERATION_MODEL, and per-turn in
+              the inspector), so two turns in one session can have been written
+              by different models at different efforts - and they do not answer
+              alike. Reading a constant here would name one for both, which is
+              the mislabeling the switch's own comment warns about.
 
               A RESTORED turn carries no trace, so nothing is shown rather
               than today's resolved model: that would be a claim about a turn
               generated under whatever the switch said at the time, which this
               page cannot know. */}
-          {turn.response?.trace.generationModel !== undefined && (
+          {turn.response !== undefined && (
             <span className="ml-1 normal-case tracking-normal text-ink-faint/80">
-              {turn.response.trace.generationModel}
+              {turn.response.trace.modelCall.model}
+              {turn.response.trace.modelCall.effort !== null &&
+                ` effort ${turn.response.trace.modelCall.effort}`}
             </span>
           )}
         </span>

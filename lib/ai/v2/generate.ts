@@ -1,5 +1,15 @@
 import { generateObject } from 'ai'
-import { anthropicV2Model, resolveV2ModelProfile } from '@/lib/ai/client'
+import { anthropicV2Model } from '@/lib/ai/client'
+import {
+  resolveV2Effort,
+  resolveV2ModelProfile,
+  V2_GENERATE_MAX_OUTPUT_TOKENS,
+  V2_GENERATE_TEMPERATURE,
+  V2_MODEL_PROFILES,
+  type V2Effort,
+  type V2EffortRequest,
+  type V2ModelKey,
+} from './model-call'
 import type { AIResult } from '@/lib/ai/types'
 import {
   GenerationOutputSchema,
@@ -33,29 +43,6 @@ import {
 // legal: @ai-sdk/anthropic merges same-role runs into content blocks, so the
 // guest's words stay verbatim in their own block.
 
-export const V2_GENERATE_MAX_OUTPUT_TOKENS = 1_000
-
-/**
- * NOT SENT ANY MORE, and kept as the record of what was lost.
- *
- * Lowest (owner call, 2026-10-05). Unset, the provider default (1.0) applied
- * and regression runs showed the tail of that distribution: register drift
- * and question stacking. 0 picks the head of the distribution every time;
- * per-guest variety comes from the situation brief differing, not sampling.
- *
- * claude-sonnet-5-5 REJECTS the parameter - "`temperature` is deprecated for
- * this model", 3/3 generations failed with it attached - so the v2 call below
- * no longer passes a temperature at all. There is no setting that restores
- * the 2026-10-05 ruling on this model; the knob is gone, not retuned.
- *
- * READ THIS BEFORE TRUSTING AN n=3 RUN. `.claude/rules/v2-template-regression.md`
- * fixes the default at n=3 on the stated grounds that "generation is at
- * temperature 0, so a single-turn reply barely moves", and that premise is
- * now false. Determinism is measured rather than assumed - see the
- * model-boundary note in template.ts for the number.
- */
-export const V2_GENERATE_TEMPERATURE = 0
-
 /**
  * The SDK's `usage` passed through WHOLE, never picked apart here.
  *
@@ -80,10 +67,71 @@ export interface V2Usage {
   } | null
 }
 
+/**
+ * Thinking tokens, dug out of the provider's RAW usage.
+ *
+ * NOT `usage.reasoningTokens`. That field is the obvious one, it is typed, it
+ * is named exactly right, and it is `undefined` on every Anthropic call
+ * checked - while the real number sits at
+ * `usage.raw.output_tokens_details.thinking_tokens`. A reader reaching for the
+ * well-named field concludes no thinking happened.
+ *
+ * Returns null when the provider reported no breakdown at all, which is a
+ * different fact from zero: claude-sonnet-4-6 omits the key entirely at every
+ * effort level, while claude-haiku-5-5 reports a real 0 below `max`.
+ */
+export function thinkingTokensOf(usage: unknown): number | null {
+  if (typeof usage !== 'object' || usage === null) return null
+  const raw = (usage as { raw?: unknown }).raw
+  if (typeof raw !== 'object' || raw === null) return null
+  const details = (raw as { output_tokens_details?: unknown })
+    .output_tokens_details
+  if (typeof details !== 'object' || details === null) return null
+  const t = (details as { thinking_tokens?: unknown }).thinking_tokens
+  return typeof t === 'number' ? t : null
+}
+
+/**
+ * Per-call overrides for the model and its sampling parameters. EMPTY in
+ * production - every field here exists so a human can experiment in the
+ * playground, and the defaults are what production sends.
+ *
+ * `modelKey` rather than a model id: the id alone is not enough to make the
+ * call, because which parameters a model tolerates is part of its profile
+ * (./model-call.ts). Passing an id would let a caller pair one model's id
+ * with another's parameters.
+ */
+export interface V2GenerateOptions {
+  modelKey?: V2ModelKey
+  /** Omit for `V2_DEFAULT_EFFORT`; `'none'` to send no effort at all. */
+  effort?: V2EffortRequest
+  maxOutputTokens?: number
+}
+
 export interface V2GenerationResult {
   output: GenerationOutput
   usage: V2Usage
   durationMs: number
+  /**
+   * What was actually sent, so a report names the call and not the default.
+   *
+   * FOR A DIRECT CALLER. `runTurn` builds its own `modelCall` from the same
+   * inputs before the call (a failed generation must still say which model
+   * failed), and takes only `temperature` from here - the one field it cannot
+   * derive without duplicating the profile's rules. An ablation harness
+   * calling this function straight (`.claude/skills/ablate-a-bad-reply` loops
+   * on composePrompt + generateV2Reply, never runTurn) has no trace at all,
+   * and this is its record of the arm.
+   */
+  call: {
+    model: string
+    effort: V2Effort | null
+    maxOutputTokens: number
+    /** null when the model rejects the parameter, so it was not sent. */
+    temperature: number | null
+  }
+  /** null when the provider reported no breakdown - not the same as 0. */
+  thinkingTokens: number | null
 }
 
 /**
@@ -103,6 +151,7 @@ export function cacheHitRate(usage: V2Usage): number | null {
 
 export async function generateV2Reply(
   prompt: ComposedPrompt,
+  options: V2GenerateOptions = {},
 ): Promise<AIResult<V2GenerationResult>> {
   const started = Date.now()
   try {
@@ -116,8 +165,34 @@ export async function generateV2Reply(
       },
     }
     // Resolved ONCE per call, so the model and the parameters it tolerates
-    // cannot come from two different reads of the switch.
-    const profile = resolveV2ModelProfile()
+    // cannot come from two different reads of the switch. An explicit
+    // `modelKey` wins over the environment - that is the playground asking for
+    // a specific model, which is more specific than a server default.
+    const profile =
+      options.modelKey === undefined
+        ? resolveV2ModelProfile()
+        : V2_MODEL_PROFILES[options.modelKey]
+    const maxOutputTokens =
+      options.maxOutputTokens ?? V2_GENERATE_MAX_OUTPUT_TOKENS
+    // An EXPLICIT effort this model rejects is REFUSED rather than silently
+    // dropped: sending it anyway fails the call at the provider and reports an
+    // experiment as a model failure, and dropping it silently runs a different
+    // experiment than the one asked for.
+    //
+    // THE DEFAULT IS THE OPPOSITE DIRECTION and deliberately so - it degrades
+    // to no effort. A refusal is the right answer to a human's typo and the
+    // wrong answer to a constant: a default no profile accepted would take
+    // every v2 turn down at once.
+    if (
+      options.effort !== undefined &&
+      options.effort !== 'none' &&
+      !profile.allowedEfforts.includes(options.effort)
+    )
+      return {
+        ok: false,
+        error: `${profile.id} does not accept effort "${options.effort}" (accepts: ${profile.allowedEfforts.join(', ')})`,
+      }
+    const effort = resolveV2Effort(profile, options.effort)
     const { object, usage } = await generateObject({
       model: anthropicV2Model(profile),
       messages: [
@@ -133,17 +208,27 @@ export async function generateV2Reply(
         })),
       ],
       schema: GenerationOutputSchema,
-      maxOutputTokens: V2_GENERATE_MAX_OUTPUT_TOKENS,
-      // Both of these are per-model, and WHY is on V2ModelProfile in
-      // lib/ai/client.ts rather than here - the reasons are about what each
-      // model rejects, which belongs with the profile that records it.
+      maxOutputTokens,
+      // Per-model, and WHY is on V2ModelProfile in ./model-call.ts rather
+      // than here - the reasons are about what each model rejects, which
+      // belongs with the profile that records it.
       ...(profile.sendsTemperature
         ? { temperature: V2_GENERATE_TEMPERATURE }
         : {}),
-      ...(profile.forcesOutputFormat
+      // ONE providerOptions object. These were two separate conditional
+      // spreads while `effort` did not exist, and a second spread of the same
+      // key would have silently replaced the first rather than merging - so a
+      // model needing `outputFormat` would have lost it the moment an effort
+      // was set.
+      ...(profile.forcesOutputFormat || effort !== null
         ? {
             providerOptions: {
-              anthropic: { structuredOutputMode: 'outputFormat' as const },
+              anthropic: {
+                ...(profile.forcesOutputFormat
+                  ? { structuredOutputMode: 'outputFormat' as const }
+                  : {}),
+                ...(effort !== null ? { effort } : {}),
+              },
             },
           }
         : {}),
@@ -169,6 +254,18 @@ export async function generateV2Reply(
           cachedInputTokens: usage.cachedInputTokens,
           inputTokenDetails: usage.inputTokenDetails,
         },
+        // WHAT WAS SENT, not what the defaults are. A trace that reported the
+        // constants would be right until the first override and wrong after,
+        // and the whole point of the overrides is comparing turns.
+        call: {
+          model: profile.id,
+          effort,
+          maxOutputTokens,
+          temperature: profile.sendsTemperature
+            ? V2_GENERATE_TEMPERATURE
+            : null,
+        },
+        thinkingTokens: thinkingTokensOf(usage),
         durationMs: Date.now() - started,
       },
     }

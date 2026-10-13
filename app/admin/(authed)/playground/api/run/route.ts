@@ -1,6 +1,11 @@
 import { NextResponse } from 'next/server'
 import { z } from 'zod'
 import { requireVenueAdmin } from '@/lib/auth'
+import {
+  V2_EFFORT_REQUESTS,
+  V2_MODEL_KEYS,
+  V2_PLAYGROUND_MAX_OUTPUT_TOKENS,
+} from '@/lib/ai/v2/model-call'
 import { createAdminClient } from '@/lib/db/admin'
 import {
   GuestProfileSchema,
@@ -84,6 +89,32 @@ const OverridesSchema = z.object({
   knowledgeBriefText: z.string().optional(),
   voicePackText: z.string().optional(),
   venueProfileText: z.string().optional(),
+  // Hand-edited SYSTEM blocks, replaced by label. Capped at the order of the
+  // thing they replace: Le Mil's THE HOUSE block is ~22k chars with the
+  // knowledge brief in it, so 200k per block leaves room to paste a bigger one
+  // in without the field being a way to post a megabyte. 8 blocks against the
+  // composer's 3, so a template can grow without this becoming the limit.
+  promptBlocks: z
+    .array(
+      z.object({
+        label: z.string().min(1).max(80),
+        text: z.string().max(200_000),
+      }),
+    )
+    .max(8)
+    .optional(),
+  modelKey: z.enum(V2_MODEL_KEYS).optional(),
+  // Includes 'none', which is not a level: it means send no effort, which is
+  // what every measurement taken before V2_DEFAULT_EFFORT existed did.
+  effort: z.enum(V2_EFFORT_REQUESTS).optional(),
+  // Bounded at BOTH ends, and the floor is not decoration: a 0 or a 1 here
+  // generates nothing and reads as the model failing.
+  maxOutputTokens: z
+    .number()
+    .int()
+    .min(100)
+    .max(V2_PLAYGROUND_MAX_OUTPUT_TOKENS)
+    .optional(),
 })
 
 const PostBodySchema = z.object({

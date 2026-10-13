@@ -1,6 +1,13 @@
 'use client'
 
-import { useCallback, useEffect, useRef, useState } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from 'react'
+import { V2_PROMPT_VERSION } from '@/lib/ai/v2/template'
 import { evaluationRan } from '@/lib/relationship/evaluation-ran'
 import type {
   PlaygroundSession,
@@ -16,6 +23,14 @@ import {
   postRun,
   postSaveConversation,
 } from './_lib/api'
+import {
+  activePromptFor,
+  activePromptsServerSnapshot,
+  activePromptsSnapshot,
+  clearActivePrompt,
+  setActivePrompt,
+  subscribeActivePrompt,
+} from './_lib/active-prompt'
 import {
   buildReplayContext,
   savedTurnsFromPlayground,
@@ -36,8 +51,17 @@ import { SetupBar, type PlaygroundMode } from './_components/setup-bar'
 
 // Client orchestrator for the v2 playground. Live state is ephemeral -
 // nothing in the URL, reload-to-reset is a feature on a debugging surface -
-// with ONE deliberate exception: a sandbox conversation can be saved to
-// playground_conversations (migration 074) and read back.
+// with TWO deliberate exceptions: a sandbox conversation can be saved to
+// playground_conversations (migration 074) and read back, and a prompt edit
+// stays IN FORCE across turns and across a refresh (`_lib/active-prompt.ts`).
+//
+// The second one is a carve-out from reload-to-reset on purpose. An ablation
+// is "change one line, try it on six inbounds", so an edit that died with the
+// turn would be retyped six times, and a refresh mid-loop is not a request to
+// go back to the composed prompt. It is loud rather than silent: the setup bar
+// carries a strip naming the pinned blocks with one click to clear, because an
+// invisible prompt override would make every later reading of this surface
+// wrong.
 //
 // That exception exists because the ephemerality had a cost the rest of the
 // design did not: getting a guest ten turns deep is ten runs at 15-45s each,
@@ -82,6 +106,19 @@ function nextTurnId(): string {
  */
 const DEFAULT_VENUE_NAME = "Le Mil's Coffee"
 
+/**
+ * A request with no v1 arm, so one can be attached from the live toggle.
+ *
+ * `delete` rather than a rest destructure: the arm is OPTIONAL, and the
+ * idiomatic `const {v1Arm: _, ...rest}` leaves a binding nothing reads, which
+ * lint flags and which reads as an oversight rather than as a deliberate drop.
+ */
+function withoutV1Arm(request: RunRequestBody): RunRequestBody {
+  const copy = { ...request }
+  delete copy.v1Arm
+  return copy
+}
+
 export function PlaygroundClient({ venues }: { venues: VenueListRow[] }) {
   // Lazy initializer: `venues` is server-rendered and stable for the life of
   // the page, so this resolves once rather than on every render.
@@ -89,6 +126,17 @@ export function PlaygroundClient({ venues }: { venues: VenueListRow[] }) {
     () => venues.find((v) => v.name === DEFAULT_VENUE_NAME)?.venueId ?? null,
   )
   const [mode, setMode] = useState<PlaygroundMode>('sandbox')
+  // Survives a refresh by design - see the header. Read through a store rather
+  // than an effect so the server renders "none in force" and the client renders
+  // the truth, with no hydration mismatch.
+  const activePrompt = activePromptFor(
+    useSyncExternalStore(
+      subscribeActivePrompt,
+      activePromptsSnapshot,
+      activePromptsServerSnapshot,
+    ),
+    venueId,
+  )
 
   // Run v1 beside v2. FALSE by default: the arm is a second full generation
   // per turn, so defaulting it on would double the model spend of every
@@ -229,13 +277,69 @@ export function PlaygroundClient({ venues }: { venues: VenueListRow[] }) {
     [venueId],
   )
 
-  /** Run a brand-new turn (sandbox send or replay click). */
+  /**
+   * The v1 arm a run should carry, from the LIVE toggle rather than from
+   * whatever the turn was first sent with.
+   *
+   * This is a fix, not a refactor. Every rerun path hands `runNewTurn` or the
+   * regenerate a STORED request, and the arm used to ride inside it - so
+   * ticking "also run v1" and then pressing Regenerate ran no v1 arm at all,
+   * silently, and the column simply never appeared. The toggle sits at the top
+   * of the page and reads as current state, so it has to be read at run time.
+   *
+   * A replay arm needs the inbound row's id, which only the turn knows; with
+   * no id there is no arm rather than a sandbox one, because a sandbox arm on
+   * a replay turn would answer a different question from the column's label.
+   */
+  const v1ArmFor = useCallback(
+    (
+      turnMode: PlaygroundMode,
+      replayMessageId: string | undefined,
+    ): RunRequestBody['v1Arm'] | null => {
+      if (!compareV1) return null
+      if (turnMode === 'sandbox') return { mode: 'sandbox' }
+      return replayMessageId === undefined
+        ? null
+        : { mode: 'replay', inboundMessageId: replayMessageId }
+    },
+    [compareV1],
+  )
+
+  /**
+   * Run a brand-new turn (sandbox send, replay click, or rerun-from-here).
+   *
+   * THE ACTIVE PROMPT IS BAKED IN HERE, at the one funnel every new turn goes
+   * through, and into the stored request rather than only into the fetch - so
+   * the turn carries what it ran with, the same property the session snapshot
+   * has. A rerun picks up whatever is in force NOW, which is what the strip at
+   * the top of the page is showing; carrying the old one forward would make
+   * the page describe a run it did not describe.
+   */
   const runNewTurn = useCallback(
     (
-      request: RunRequestBody,
+      incoming: RunRequestBody,
       turnMode: PlaygroundMode,
       v1Reply: string[] | null,
+      replayMessageId?: string,
     ) => {
+      // v1Arm is DROPPED and rebuilt rather than spread through, because a
+      // rerun hands back a stored request: spreading would carry the arm
+      // whatever the toggle now says, and there is no way to spread an
+      // absence.
+      const rest = withoutV1Arm(incoming)
+      const arm = v1ArmFor(turnMode, replayMessageId)
+      const request: RunRequestBody = {
+        ...rest,
+        ...(arm !== null ? { v1Arm: arm } : {}),
+        ...(activePrompt === null
+          ? {}
+          : {
+              overrides: {
+                ...incoming.overrides,
+                promptBlocks: activePrompt.blocks,
+              },
+            }),
+      }
       const id = nextTurnId()
       const turn: PlaygroundTurn = {
         id,
@@ -244,6 +348,7 @@ export function PlaygroundClient({ venues }: { venues: VenueListRow[] }) {
         status: 'running',
         runSeq: 0,
         v1Reply,
+        ...(replayMessageId !== undefined ? { replayMessageId } : {}),
       }
       setTurns((prev) => [...prev, turn])
       setSelectedTurnId(id)
@@ -278,7 +383,7 @@ export function PlaygroundClient({ venues }: { venues: VenueListRow[] }) {
         }
       })
     },
-    [],
+    [activePrompt, v1ArmFor],
   )
 
   const onSend = useCallback(
@@ -290,14 +395,14 @@ export function PlaygroundClient({ venues }: { venues: VenueListRow[] }) {
         inbound: [text],
         sessionHistory: sessionHistoryFromTurns(turns),
         ...(session !== null ? { session } : {}),
-        // Only when the operator asked for it. v1 cannot run on a sandbox
-        // guest, so the arm materializes the chat against the venue's
-        // synthetic guest - see api/run/v1-arm.ts.
-        ...(compareV1 ? { v1Arm: { mode: 'sandbox' as const } } : {}),
+        // The v1 arm is attached by `runNewTurn` from the live toggle - one
+        // place, so every path agrees. v1 cannot run on a sandbox guest, so
+        // the arm materializes the chat against the venue's synthetic guest;
+        // see api/run/v1-arm.ts.
       }
       runNewTurn(request, 'sandbox', null)
     },
-    [venueId, busy, turns, session, runNewTurn, compareV1],
+    [venueId, busy, turns, session, runNewTurn],
   )
 
   /**
@@ -321,7 +426,7 @@ export function PlaygroundClient({ venues }: { venues: VenueListRow[] }) {
       if (mode === 'rerun') {
         // Queued after the slice above, so the new turn appends to the
         // truncated list.
-        runNewTurn(turn.request, 'sandbox', null)
+        runNewTurn(turn.request, 'sandbox', null, turn.replayMessageId)
       } else {
         setPrefill((p) => ({
           seq: (p?.seq ?? 0) + 1,
@@ -348,25 +453,43 @@ export function PlaygroundClient({ venues }: { venues: VenueListRow[] }) {
         // Judge what v1 actually sent alongside the v2 draft - same notes,
         // same transcript - so real replies become judge-calibration reads.
         ...(context.v1Reply !== null ? { actualReply: context.v1Reply } : {}),
-        // And, when asked, run v1 LIVE on the same inbound row. Three things
-        // then end up on a replay turn and they are three different claims:
-        // what v1 sent at the time, what v1 would send today, and what v2
-        // drafts now.
-        ...(compareV1
-          ? { v1Arm: { mode: 'replay' as const, inboundMessageId: messageId } }
-          : {}),
+        // The live arm is attached by `runNewTurn`, which is why the row id
+        // travels as its own argument. When it runs, three things end up on a
+        // replay turn and they are three different claims: what v1 sent at the
+        // time, what v1 would send today, and what v2 drafts now.
       }
-      runNewTurn(request, 'replay', context.v1Reply)
+      runNewTurn(request, 'replay', context.v1Reply, messageId)
     },
-    [venueId, busy, timeline, runNewTurn, compareV1],
+    [venueId, busy, timeline, runNewTurn],
   )
 
-  /** Re-run the selected turn with overrides; replaces its trace in place. */
+  /**
+   * Re-run the selected turn with overrides; replaces its trace in place.
+   *
+   * The inspector always sends `promptBlocks` - the full set, empty when
+   * nothing is edited - so this is also where the active prompt is SET and
+   * CLEARED. One source of truth: whatever you last regenerated with is what
+   * the next turn and the next page load use. Were this conditional on the set
+   * being non-empty, "Reset to composed" plus Regenerate would run the
+   * composed prompt once and then silently go back to the pinned one.
+   */
   const onRegenerate = useCallback(
     (overrides: TurnOverrides) => {
       const turn = turns.find((t) => t.id === selectedTurnId)
       if (turn === undefined || busy) return
-      const request: RunRequestBody = { ...turn.request, overrides }
+      if (venueId !== null && overrides.promptBlocks !== undefined)
+        setActivePrompt({
+          venueId,
+          promptVersion: V2_PROMPT_VERSION,
+          blocks: overrides.promptBlocks,
+        })
+      const rest = withoutV1Arm(turn.request)
+      const arm = v1ArmFor(turn.mode, turn.replayMessageId)
+      const request: RunRequestBody = {
+        ...rest,
+        overrides,
+        ...(arm !== null ? { v1Arm: arm } : {}),
+      }
       setBusy(true)
       setTurns((prev) =>
         prev.map((t) => (t.id === turn.id ? { ...t, status: 'running' } : t)),
@@ -391,7 +514,7 @@ export function PlaygroundClient({ venues }: { venues: VenueListRow[] }) {
         )
       })
     },
-    [turns, selectedTurnId, busy],
+    [turns, selectedTurnId, busy, venueId, v1ArmFor],
   )
 
   const onSaveConversation = useCallback(
@@ -480,6 +603,37 @@ export function PlaygroundClient({ venues }: { venues: VenueListRow[] }) {
         onLoadConversation={onLoadConversation}
         onDeleteConversation={onDeleteConversation}
       />
+
+      {/* An override nobody can see is an override that makes every later
+          reading of this page wrong, so it gets a strip rather than a badge
+          inside a collapsed section. HOUSE NOTES is called out by name: it is
+          rebuilt every turn from retrieval and the guest's state, so pinning it
+          hands a stale brief to every turn after the one it was taken on. */}
+      {activePrompt !== null && venueId !== null && (
+        <div className="flex items-center gap-2 border-b border-clay-soft bg-clay-soft/30 px-3 py-1.5">
+          <span className="text-[11px] uppercase tracking-wider text-clay-deep">
+            prompt edit in force
+          </span>
+          <span className="text-xs text-ink">
+            {activePrompt.blocks.map((b) => b.label).join(', ')} replaced on
+            every turn
+            {activePrompt.promptVersion !== V2_PROMPT_VERSION &&
+              ` · edited on ${activePrompt.promptVersion}, template is now ${V2_PROMPT_VERSION}`}
+          </span>
+          {activePrompt.blocks.some((b) => b.label === 'HOUSE NOTES') && (
+            <span className="text-[11px] font-bold uppercase tracking-wider text-red-700">
+              house notes is pinned - every turn gets this brief, not its own
+            </span>
+          )}
+          <button
+            type="button"
+            onClick={() => clearActivePrompt(venueId)}
+            className="ml-auto cursor-pointer text-[11px] uppercase tracking-wider text-clay-deep hover:text-destructive"
+          >
+            clear
+          </button>
+        </div>
+      )}
 
       <div className="grid min-h-0 flex-1 grid-cols-[1fr_440px]">
         <div className="flex min-h-0 flex-col border-r border-stone-light/60">

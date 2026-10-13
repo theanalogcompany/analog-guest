@@ -74,7 +74,7 @@ import { runTurn, type PlaygroundSession } from '@/lib/relationship/run-turn'
 import type { HistoryTurn } from '@/lib/ai/v2/compose'
 import { EMPTY_MEMORY, EMPTY_PROFILE } from '@/lib/relationship/profile'
 import { V2_PROMPT_VERSION } from '@/lib/ai/v2/template'
-import { resolveV2ModelProfile } from '@/lib/ai/client'
+import { resolveV2ModelProfile } from '@/lib/ai/v2/model-call'
 import {
   ASSESSOR_ENABLED,
   ASSESSOR_PROMPT_VERSION,
@@ -107,7 +107,7 @@ import { createRunLog, readRunLog } from './run-log'
 // temperature 0 (V2_GENERATE_TEMPERATURE) so a single-turn reply barely moves.
 //
 // THAT GROUND IS GONE ON ANY PROFILE WITH `sendsTemperature: false`
-// (lib/ai/client.ts). claude-sonnet-5-5 rejects the parameter, so generation
+// (lib/ai/v2/model-call.ts). claude-sonnet-5-5 rejects the parameter, so generation
 // samples the model's own distribution: three calls on a byte-identical prompt
 // returned three distinct bodies (2026-10-12). On such a profile n=3 is not
 // the owner's ruling applied, it is a different and weaker instrument - the

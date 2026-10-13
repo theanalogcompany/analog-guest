@@ -79,7 +79,7 @@ import {
 } from '@/app/admin/(authed)/playground/api/run/v1-arm'
 import { PROMPT_VERSION } from '@/lib/ai/prompts/system-template'
 import { V2_PROMPT_VERSION } from '@/lib/ai/v2/template'
-import { resolveV2ModelProfile } from '@/lib/ai/client'
+import { resolveV2ModelProfile } from '@/lib/ai/v2/model-call'
 import {
   GOLDEN_QUESTIONS,
   RUNNABLE_DRIVERS,

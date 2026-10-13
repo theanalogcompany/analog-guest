@@ -10,13 +10,25 @@ Loads only when you work in this directory. Prompt **copy** rules live in
 anything analytical or idempotent.
 
 **v2 generation is the one exception, and it is a switch.** `V2_GENERATION_MODEL` picks a key
-in `V2_MODEL_PROFILES` (`client.ts`); unset means `claude-sonnet-4-6`, so nothing moves by
-default.
+in `V2_MODEL_PROFILES` (`v2/model-call.ts`); unset means `claude-sonnet-4-6`, so nothing moves
+by default. That module holds everything about how a v2 call may be made - profiles, effort
+levels, the token and temperature constants - and **imports no provider SDK**, so the
+playground's model picker and the Zod boundaries can read it without pulling
+`@ai-sdk/anthropic` into a browser bundle or a schema module. `client.ts` keeps only the
+function that constructs the model.
 
 It is a **profile**, not a model id, because models disagree on how the call may be *made* -
 which sampling parameters they accept, and whether the SDK's fallback forced tool call works
 at all. A bare string switch fails generation outright on a model that refuses one of them.
 Add a model by adding a profile, never by passing an id through.
+
+**Every v2 call sends `V2_DEFAULT_EFFORT` (`high`) unless the caller says otherwise.** A
+per-call `effort` overrides it and `'none'` sends none, which is what reproduces any
+measurement taken before the default existed. Two things to carry: thinking is charged against
+`maxOutputTokens`, so the default spends part of the reply's budget on every turn (213 of 1,000
+measured on claude-haiku-5-5); and an *explicit* effort a model rejects fails the call, while
+the *default* degrades to none - a human's typo must be reported, a constant must not take
+generation down.
 
 Two rules the switch imposes:
 
