@@ -167,8 +167,14 @@ export function RunCard({ run }: { run: GoldenRunView }) {
             {run.clockInjected ? ' (clock injected)' : ''}
             {run.fullRun ? '' : ' · PARTIAL RUN'}
           </span>
+          {/* The MODEL belongs next to the prompt version, because v2
+              generation is selectable and the available models do not answer
+              alike - a reply is not interpretable without it. `null` renders
+              as "not recorded" rather than as the current default, which
+              would be inventing a fact about an old run. */}
           <span className="font-mono text-xs text-muted-foreground">
-            v1 {run.v1PromptVersion} · v2 {run.v2PromptVersion}
+            v1 {run.v1PromptVersion} · v2 {run.v2PromptVersion} ·{' '}
+            {run.v2GenerationModel ?? 'model not recorded'}
           </span>
         </div>
         <a

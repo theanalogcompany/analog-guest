@@ -289,13 +289,16 @@ export type Database = {
           clock_injected: boolean
           finished_at: string | null
           full_run: boolean
+          git_branch: string | null
           git_dirty: boolean
+          git_on_remote: boolean | null
           git_sha: string | null
           git_subject: string | null
           id: string
           questions_total: number
           started_at: string
           v1_prompt_version: string
+          v2_generation_model: string | null
           v2_prompt_version: string
           venue_id: string
           venue_open_state: string
@@ -304,13 +307,16 @@ export type Database = {
           clock_injected?: boolean
           finished_at?: string | null
           full_run: boolean
+          git_branch?: string | null
           git_dirty?: boolean
+          git_on_remote?: boolean | null
           git_sha?: string | null
           git_subject?: string | null
           id?: string
           questions_total: number
           started_at?: string
           v1_prompt_version: string
+          v2_generation_model?: string | null
           v2_prompt_version: string
           venue_id: string
           venue_open_state: string
@@ -319,13 +325,16 @@ export type Database = {
           clock_injected?: boolean
           finished_at?: string | null
           full_run?: boolean
+          git_branch?: string | null
           git_dirty?: boolean
+          git_on_remote?: boolean | null
           git_sha?: string | null
           git_subject?: string | null
           id?: string
           questions_total?: number
           started_at?: string
           v1_prompt_version?: string
+          v2_generation_model?: string | null
           v2_prompt_version?: string
           venue_id?: string
           venue_open_state?: string
@@ -2445,6 +2454,7 @@ export type Database = {
           created_at: string
           followup_rules: Json | null
           intention_rules: Json | null
+          knowledge_brief: string | null
           messaging_cadence: Json
           onboarding_status: string
           relationship_strength_formula: Json
@@ -2460,6 +2470,7 @@ export type Database = {
           created_at?: string
           followup_rules?: Json | null
           intention_rules?: Json | null
+          knowledge_brief?: string | null
           messaging_cadence?: Json
           onboarding_status?: string
           relationship_strength_formula?: Json
@@ -2475,6 +2486,7 @@ export type Database = {
           created_at?: string
           followup_rules?: Json | null
           intention_rules?: Json | null
+          knowledge_brief?: string | null
           messaging_cadence?: Json
           onboarding_status?: string
           relationship_strength_formula?: Json

@@ -39,8 +39,18 @@ export interface GoldenRunView {
   gitSha: string | null
   gitSubject: string | null
   gitDirty: boolean
+  /** See CommitGroup.gitOnRemote - three-state, null is "not determined". */
+  gitOnRemote: boolean | null
+  gitBranch: string | null
   v1PromptVersion: string
   v2PromptVersion: string
+  /**
+   * The resolved v2 generation model, or null for a run predating migration
+   * 083 - which means NOT RECORDED, never "the current default". Rendered,
+   * because the available models do not answer alike and a reply is not
+   * interpretable without knowing which one wrote it.
+   */
+  v2GenerationModel: string | null
   venueOpenState: string
   /**
    * The run was taken with `--at=`, so `venueOpenState` describes the clock
@@ -61,6 +71,19 @@ export interface CommitGroup {
   gitSubject: string | null
   /** Any run in this group was made over a dirty tree. */
   anyDirty: boolean
+  /**
+   * Was the commit on a remote when the run was made? THREE-STATE, and the
+   * page must render all three differently: true links out, false says the
+   * link would 404 and the run is not reproducible by anyone else, null says
+   * it could not be determined (or the run predates migration 083).
+   *
+   * Collapsing null into false would assert "local only" about runs nobody
+   * checked, which is the claim-nothing-enforces failure this surface exists
+   * to avoid.
+   */
+  gitOnRemote: boolean | null
+  /** Branch at run time, null for a detached HEAD or an unrecorded run. */
+  gitBranch: string | null
   runs: GoldenRunView[]
 }
 
@@ -121,7 +144,7 @@ export const loadGoldenPage = cache(async (): Promise<GoldenPageData> => {
   const runsResult = await supabase
     .from('golden_runs')
     .select(
-      'id, git_sha, git_subject, git_dirty, v1_prompt_version, v2_prompt_version, venue_open_state, clock_injected, questions_total, full_run, started_at, finished_at, venues(name)',
+      'id, git_sha, git_subject, git_dirty, git_on_remote, git_branch, v2_generation_model, v1_prompt_version, v2_prompt_version, venue_open_state, clock_injected, questions_total, full_run, started_at, finished_at, venues(name)',
     )
     .order('started_at', { ascending: false })
     .limit(RUNS_LIMIT + 1)
@@ -184,8 +207,11 @@ export const loadGoldenPage = cache(async (): Promise<GoldenPageData> => {
     gitSha: row.git_sha,
     gitSubject: row.git_subject,
     gitDirty: row.git_dirty,
+    gitOnRemote: row.git_on_remote,
+    gitBranch: row.git_branch,
     v1PromptVersion: row.v1_prompt_version,
     v2PromptVersion: row.v2_prompt_version,
+    v2GenerationModel: row.v2_generation_model,
     venueOpenState: row.venue_open_state,
     clockInjected: row.clock_injected,
     questionsTotal: row.questions_total,
@@ -213,6 +239,12 @@ export const loadGoldenPage = cache(async (): Promise<GoldenPageData> => {
       gitSha: run.gitSha,
       gitSubject: run.gitSubject,
       anyDirty: run.gitDirty,
+      // The first run of a sha fixes the group's provenance, which is sound
+      // because these are properties of the COMMIT, not of the run: the same
+      // sha cannot have been simultaneously pushed and not pushed. `anyDirty`
+      // above is the opposite case and is therefore OR-ed across the group.
+      gitOnRemote: run.gitOnRemote,
+      gitBranch: run.gitBranch,
       runs: [run],
     })
   }
