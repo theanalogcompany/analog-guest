@@ -87,6 +87,13 @@ const OverridesSchema = z.object({
   interactionMemoryText: z.string().optional(),
   openMovesText: z.string().optional(),
   knowledgeBriefText: z.string().optional(),
+  // Only reaches the prompt on an archived template version that retrieves.
+  knowledgeText: z.string().optional(),
+  // A key of V2_TEMPLATE_SETS. Not a z.enum over the registry: a conversation
+  // saved on a version later dropped from the archive must still parse, and
+  // `resolveV2TemplateSet` fails open to the current template with a warning.
+  // A hard enum here would reject the whole saved turn over a fixture.
+  templateVersion: z.string().max(40).optional(),
   voicePackText: z.string().optional(),
   venueProfileText: z.string().optional(),
   // Hand-edited SYSTEM blocks, replaced by label. Capped at the order of the
@@ -103,6 +110,11 @@ const OverridesSchema = z.object({
     )
     .max(8)
     .optional(),
+  // The whole system half as one document, for a surface that edits it that
+  // way. Capped at the sum of what it replaces rather than per block - Le
+  // Mil's three blocks compose to ~50k chars, so 400k leaves the same room to
+  // paste a bigger one in without the field being a way to post a megabyte.
+  systemText: z.string().max(400_000).optional(),
   modelKey: z.enum(V2_MODEL_KEYS).optional(),
   // Includes 'none', which is not a level: it means send no effort, which is
   // what every measurement taken before V2_DEFAULT_EFFORT existed did.

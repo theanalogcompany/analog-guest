@@ -27,8 +27,11 @@ import {
 } from '@/lib/ai/v2/model-call'
 import {
   applyPromptBlocks,
+  replaceSystemText,
   type PromptBlockOverride,
 } from '@/lib/ai/v2/prompt-text'
+import { resolveV2TemplateSet } from '@/lib/ai/v2/template-archive'
+import { retrieveKnowledgeContext } from '@/lib/rag/retrieve'
 import { renderVenueProfile } from '@/lib/ai/v2/venue-profile'
 import { declaredActionTypes, type GenerationOutput } from '@/lib/ai/v2/actions'
 import {
@@ -104,6 +107,8 @@ export interface TurnOverrides {
   interactionMemoryText?: string
   openMovesText?: string
   knowledgeBriefText?: string
+  /** Only reaches the prompt on an archived version that retrieves. */
+  knowledgeText?: string
   voicePackText?: string
   venueProfileText?: string
   /**
@@ -128,6 +133,25 @@ export interface TurnOverrides {
    * than being skipped - see `applyPromptBlocks`.
    */
   promptBlocks?: PromptBlockOverride[]
+  /**
+   * The WHOLE system half as one block, replacing all three composed ones.
+   *
+   * For a surface that edits the prompt as one document rather than by block -
+   * the prompt lab. It WINS over `promptBlocks`, because it is a statement
+   * about the same thing at a coarser grain, and applying both would mean
+   * applying a block override to a prompt that no longer carries that block.
+   * `replaceSystemText` says what collapsing the blocks costs.
+   */
+  systemText?: string
+  /**
+   * An ARCHIVED template version to compose with, from
+   * `lib/ai/v2/template-archive.ts`. Absent means this build's own.
+   *
+   * It is a fixture, not time travel: every other input is today's. And it can
+   * change which LANES run - v2.17.0 retrieves, v2.18.0 does not - which is why
+   * this is resolved before the sections are built rather than at compose time.
+   */
+  templateVersion?: string
   /**
    * The model and its call parameters, for a human comparing two models on one
    * turn. Absent means production's: `V2_GENERATION_MODEL`'s profile, no
@@ -253,6 +277,13 @@ export interface TurnTrace {
     venueProfile: string
     voicePack: string
     knowledgeBrief: string
+    /**
+     * Retrieved chunks. ALWAYS EMPTY on the current template, which stopped
+     * retrieving in v2.18.0 - non-empty only on an archived version that still
+     * had the lane. Empty here is not "retrieval found nothing", it is "no
+     * retrieval ran", and `composed.promptVersion` is what tells them apart.
+     */
+    knowledge: string
     guestProfile: string
     interactionMemory: string
     openMoves: string
@@ -554,6 +585,31 @@ export async function runTurn(input: RunTurnInput): Promise<TurnTrace> {
   const knowledgeBriefText =
     o.knowledgeBriefText ?? configRow.data?.knowledge_brief ?? ''
 
+  // The template this turn composes on, resolved HERE and not at compose time,
+  // because an archived version can need a lane the current one deleted.
+  const templates = resolveV2TemplateSet(o.templateVersion)
+
+  // RETRIEVAL IS BACK ONLY FOR A VERSION THAT HAD IT. v2.18.0 dropped the call;
+  // running v2.17.0's wording with its `{knowledge}` placeholder fed by nothing
+  // would be a version that never shipped, so the lane is restored for exactly
+  // the sets that declare it. Fails open to [] the way it always did - a less
+  // specific reply still ships - and the same `limit: 4` and query shaping the
+  // v2.17.0 runner used, so the fixture is the fixture and not an approximation.
+  let knowledgeText = o.knowledgeText ?? ''
+  if (o.knowledgeText === undefined && templates.usesRetrieval) {
+    const knowledge = await retrieveKnowledgeContext({
+      venueId: input.venueId,
+      query: input.inbound.join('\n').slice(0, 500),
+      limit: 4,
+    })
+    // Fails open: a less specific reply still ships. Lifted verbatim from the
+    // runner at 53b52347 - the bullet rendering is part of the fixture, not a
+    // detail to re-derive.
+    knowledgeText = knowledge.ok
+      ? knowledge.data.map((c) => `- ${c.text}`).join('\n')
+      : ''
+  }
+
   // ---- Guest data: DB for a real guest, session for a sandbox one. ----
   let profile = input.session?.profile ?? EMPTY_PROFILE
   let memory = input.session?.memory ?? EMPTY_MEMORY
@@ -652,6 +708,7 @@ export async function runTurn(input: RunTurnInput): Promise<TurnTrace> {
     venueProfile,
     voicePack: voicePackText,
     knowledgeBrief: knowledgeBriefText,
+    knowledge: knowledgeText,
     guestProfile: o.guestProfileText ?? renderGuestProfile(profile),
     interactionMemory:
       o.interactionMemoryText ?? renderInteractionMemory(memory),
@@ -666,23 +723,27 @@ export async function runTurn(input: RunTurnInput): Promise<TurnTrace> {
           overridden: o.venueProfileText !== undefined,
         }
 
-  const composedFromSections = composePrompt({
-    venueName,
-    speakerClause: '',
-    instagramClause,
-    lengthClause,
-    venueProfile: sections.venueProfile,
-    voicePack: sections.voicePack,
-    knowledgeBrief: sections.knowledgeBrief,
-    history,
-    stateLabel: stateDef.label,
-    stateKey,
-    mission,
-    guestProfile: sections.guestProfile,
-    interactionMemory: sections.interactionMemory,
-    openMoves: sections.openMoves,
-    inboundMessages: input.inbound,
-  })
+  const composedFromSections = composePrompt(
+    {
+      venueName,
+      speakerClause: '',
+      instagramClause,
+      lengthClause,
+      venueProfile: sections.venueProfile,
+      voicePack: sections.voicePack,
+      knowledgeBrief: sections.knowledgeBrief,
+      knowledge: sections.knowledge,
+      history,
+      stateLabel: stateDef.label,
+      stateKey,
+      mission,
+      guestProfile: sections.guestProfile,
+      interactionMemory: sections.interactionMemory,
+      openMoves: sections.openMoves,
+      inboundMessages: input.inbound,
+    },
+    templates,
+  )
 
   // Hand-edited blocks win over the composed ones for what is SENT, and the
   // composed prompt is still built above because the trace, the gate and the
@@ -690,9 +751,14 @@ export async function runTurn(input: RunTurnInput): Promise<TurnTrace> {
   // override is defined AGAINST it. A failure is returned as a failed
   // generation rather than silently falling back.
   const handEdited =
-    o.promptBlocks === undefined || o.promptBlocks.length === 0
-      ? null
-      : applyPromptBlocks(composedFromSections, o.promptBlocks)
+    o.systemText !== undefined
+      ? {
+          ok: true as const,
+          prompt: replaceSystemText(composedFromSections, o.systemText),
+        }
+      : o.promptBlocks === undefined || o.promptBlocks.length === 0
+        ? null
+        : applyPromptBlocks(composedFromSections, o.promptBlocks)
   const composed =
     handEdited !== null && handEdited.ok
       ? handEdited.prompt

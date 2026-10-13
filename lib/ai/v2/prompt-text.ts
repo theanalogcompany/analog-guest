@@ -385,3 +385,35 @@ export function applyPromptBlocks(
     },
   }
 }
+
+/**
+ * Every system block collapsed into ONE, carrying the operator's text.
+ *
+ * WHAT THIS GIVES UP, stated because the composer's own header argues the
+ * other way (lib/ai/v2/compose.ts): the three blocks are ordered
+ * volatility-ascending so a cache breakpoint can sit after the stable half.
+ * One block has no stable half. On a surface that sends the SAME text for
+ * every question - the prompt lab's sweep - that costs nothing, and in fact
+ * caches better than the default, because the default's HOUSE NOTES varies per
+ * question while this is byte-identical across all of them. On a surface where
+ * the per-turn block really does change, it would re-read the whole prefix
+ * every turn. Which surface this is, is the caller's to know.
+ *
+ * `guestState` is kept AS COMPOSED rather than recomputed. There is no HOUSE
+ * NOTES block left to read it back out of, and the judge scores a reply
+ * against the brief - handing it an empty one would mark every reply down for
+ * not using facts it was never shown. So the judge reads the composer's brief
+ * while the model read the operator's text, and the trace carries both.
+ */
+export function replaceSystemText(
+  prompt: ComposedPrompt,
+  text: string,
+): ComposedPrompt {
+  return {
+    ...prompt,
+    system: [{ label: 'SYSTEM', text, cacheBreakpoint: true }],
+    promptCharCount:
+      text.length + prompt.turns.reduce((n, t) => n + t.text.length, 0),
+    promptVersion: `${V2_PROMPT_VERSION}${HAND_EDITED_SUFFIX}`,
+  }
+}
