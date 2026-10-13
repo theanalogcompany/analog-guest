@@ -150,6 +150,17 @@ const REGISTER_PATTERNS: Array<{ tell: RegressionTell; pattern: RegExp }> = [
   // ("ends with a full stop") do not trip it. The tic is the standalone
   // emphatic tag, and in guest-facing copy there is no other use.
   { tell: 'full-stop', pattern: /\bfull\s+stop\b/i },
+  // v2.18.0. Reaction and behaviour attributed to OTHER people, which no
+  // venue brief states. Narrow for the off-channel-redirect reason: a brief
+  // can license a crowd FACT ("by far the best seller", "they sell out
+  // regularly" are both in Le Mil's), so "best seller", "sells out", "house
+  // drink", "signature" and bare "popular" are all excluded. Saying one of
+  // those is the hard line's own permitted case, not a breach of it.
+  {
+    tell: 'crowd-claim',
+    pattern:
+      /\b(?:everyone|everybody)\s+(?:loves?|gets?|orders?|raves?)|\bpeople\s+(?:love|rave|go\s+nuts|can'?t\s+get\s+enough)|\b(?:our\s+)?regulars\s+(?:all\s+)?(?:love|order|get|swear)|\b(?:crowd|fan|customer)\s+favou?rite\b|\bbig\s+hit\b|\bflies\s+off\b/i,
+  },
 ]
 // Spaced en dash only: "3–5pm" must survive (normalize-output.ts).
 const DASH_PATTERN = /—|\s–\s/

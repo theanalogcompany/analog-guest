@@ -2,7 +2,6 @@ import { GENERATION_MODEL_ID } from '@/lib/ai/client'
 import { createAdminClient } from '@/lib/db/admin'
 import { startAgentTrace, toAgentUsage } from '@/lib/observability'
 import { loadVoicePack } from '@/lib/rag/voice-pack'
-import { retrieveKnowledgeContext } from '@/lib/rag/retrieve'
 import {
   parseVenueLinks,
   venueOwnDomainWildcard,
@@ -92,7 +91,7 @@ export interface TurnOverrides {
   guestProfileText?: string
   interactionMemoryText?: string
   openMovesText?: string
-  knowledgeText?: string
+  knowledgeBriefText?: string
   voicePackText?: string
   venueProfileText?: string
 }
@@ -210,7 +209,7 @@ export interface TurnTrace {
     venueName: string
     venueProfile: string
     voicePack: string
-    knowledge: string
+    knowledgeBrief: string
     guestProfile: string
     interactionMemory: string
     openMoves: string
@@ -372,7 +371,7 @@ export async function runTurn(input: RunTurnInput): Promise<TurnTrace> {
 
   const configRow = await supabase
     .from('venue_configs')
-    .select('venue_info, brand_persona')
+    .select('venue_info, brand_persona, knowledge_brief')
     .eq('venue_id', input.venueId)
     .maybeSingle()
   // How long this venue's own team writes, from the SAME column v1's length
@@ -436,18 +435,23 @@ export async function runTurn(input: RunTurnInput): Promise<TurnTrace> {
       : ''
   }
 
-  let knowledgeText = o.knowledgeText
-  if (knowledgeText === undefined) {
-    const knowledge = await retrieveKnowledgeContext({
-      venueId: input.venueId,
-      query: input.inbound.join('\n').slice(0, 500),
-      limit: 4,
-    })
-    // Fails open: a less specific reply still ships.
-    knowledgeText = knowledge.ok
-      ? knowledge.data.map((c) => `- ${c.text}`).join('\n')
-      : ''
-  }
+  // v2 does not retrieve (v2.18.0). `# What you know` is one authored artifact
+  // per venue, read from the same `venue_configs` row as venue_info, and it
+  // renders in system block 2 - so unlike the four chunks it replaced, it is
+  // the SAME TEXT on every turn of every conversation at this venue. That is
+  // the property the block 2 cache depends on; the 2026-10-08 split exists
+  // because retrieval did not have it.
+  //
+  // No failure direction to choose here, because there is no call to fail.
+  // A venue with no brief gets the empty-section fallback in compose.ts, which
+  // is the honest statement rather than a silent gap. v1 still retrieves
+  // (lib/agent/stages.ts) and this does not touch it.
+  //
+  // The override stays for the playground inspector's edit-and-regenerate.
+  // It is NOT a per-turn input in production: nothing on the dispatch path
+  // passes it, and anything that starts to would break the cache.
+  const knowledgeBriefText =
+    o.knowledgeBriefText ?? configRow.data?.knowledge_brief ?? ''
 
   // ---- Guest data: DB for a real guest, session for a sandbox one. ----
   let profile = input.session?.profile ?? EMPTY_PROFILE
@@ -546,7 +550,7 @@ export async function runTurn(input: RunTurnInput): Promise<TurnTrace> {
     venueName,
     venueProfile,
     voicePack: voicePackText,
-    knowledge: knowledgeText,
+    knowledgeBrief: knowledgeBriefText,
     guestProfile: o.guestProfileText ?? renderGuestProfile(profile),
     interactionMemory:
       o.interactionMemoryText ?? renderInteractionMemory(memory),
@@ -568,7 +572,7 @@ export async function runTurn(input: RunTurnInput): Promise<TurnTrace> {
     lengthClause,
     venueProfile: sections.venueProfile,
     voicePack: sections.voicePack,
-    knowledge: sections.knowledge,
+    knowledgeBrief: sections.knowledgeBrief,
     history,
     stateLabel: stateDef.label,
     stateKey,

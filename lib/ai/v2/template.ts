@@ -189,6 +189,86 @@
 // same day and reverted; `V2_GUEST_STATE` below has the two measurements that
 // killed it.
 //
+// v2.18.0 (owner-ruled 2026-10-12): v2 stops retrieving. `# What you know` is
+// no longer four `knowledge_corpus` chunks matched against the inbound; it is
+// one authored per-venue artifact, `venue_configs.knowledge_brief`
+// (migration 082), rendered verbatim, and the `retrieveKnowledgeContext` call
+// is gone from run-turn.ts. v1 still retrieves through lib/agent/stages.ts;
+// the table, the rows and the /admin corpus editor are untouched.
+//
+// WHY, in the owner's terms: putting the facts back into retrieval is a bet
+// that the right row gets retrieved, and nobody has measured whether it does.
+// The brief removes retrieval as a variable so the replies can be judged on
+// the facts alone. The intent is to move some of it back once the replies are
+// good, which is a decision this change deliberately defers rather than makes.
+//
+// THE SECTION MOVED TO BLOCK 2, which REVERSES the 2026-10-08 split, and the
+// reason that split was right is the reason this is safe. What broke then was
+// VOLATILITY, not position: retrieval ran per turn, so ~150 changing tokens at
+// the end of the cached venue block invalidated ~6,100 static ones every turn.
+// A column is static per venue. The block 2 contract is unchanged and this
+// obeys it. ANYTHING that makes the brief per-turn breaks the cache exactly
+// the way retrieval did - `cold-latte-cache-probe.ts` is the check.
+//
+// It renders BETWEEN the venue profile and the voice pack. That is further
+// from the guest's message than block 3 ever was, which strengthens the
+// proximity argument `V2_GUEST_STATE`'s header makes rather than dropping it,
+// and it leaves `# How you sound` in the last position it already held.
+//
+// WHAT TO WATCH, and it is not the facts. The brief carries a `<house_rules>`
+// section because ~20 corpus rows were written as INSTRUCTIONS, not facts, and
+// worked only because retrieval surfaced them on topic. They now render on
+// every turn, which is the hazard scripts/CLAUDE.md records as measured ("an
+// imperative in the corpus outranks a universal rule"). Two specific tells: an
+// unearned Google review ask, and offering a mechanic (roasting session, bean
+// sample, referral surprise) to a guest who was never chosen for one. If
+// either appears, the fix is that section's position or its existence, not the
+// facts above it. The right long-term home is a per-venue instruction slot in
+// block 1, which does not exist yet.
+//
+// The brief also carries the only copy of the assistant's own name. `grep -rn
+// "Neha" lib/ app/` returned nothing before this bump: it lived in corpus row
+// af9b59db and reached the model only when retrieval happened to surface it.
+//
+// ALSO IN THIS BUMP (owner-written verbatim 2026-10-12): a second hard line
+// about inventing, this time about OTHER guests. The first line has always
+// covered this guest - visits, orders, preferences, history - and nothing
+// covered claims about other people, so "everyone loves it" and "the regulars
+// all order it" sat outside every rule in the prompt. It goes SECOND, next to
+// the line it pairs with, rather than last where the list has most authority;
+// if fabricated crowd claims survive, last position is the lever to try before
+// any rewording.
+//
+// It is NOT a generic prohibition, which is the form v2.5.0 measured at 0/3
+// across eight variants. It names the four shapes, and it names the permitted
+// case - the model's own taste, with an example - so there is something to
+// comply WITH rather than only something to avoid.
+//
+// It licenses what venue knowledge states, which Le Mil's brief does in two
+// places on purpose ("by far the best seller", "they sell out regularly"). See
+// the brief's `<house_rules>`, whose "never share rankings" clause is the one
+// thing in the prompt that argues with this line.
+//
+// NO NEW NUMERALS COPY, and the measurement is recorded here so nobody adds
+// any. v2.17.0's one sentence below does not name the sentence-initial case,
+// and a longer rule naming it was drafted and then dropped, because an 8-input
+// with/without on that sentence alone found it already reaches that case:
+// "how much is a flat white" answered "$6" with the rule and "Six dollars."
+// without it, and "how many khari" answered "2 pieces" against "Two pieces".
+// 0/8 spelled against 2/8, with "just give me one thing to try" clean in both
+// arms as the over-suppression control. An earlier hypothesis that the
+// punctuation sentence's mark list caused it was also wrong - deleting that
+// changed nothing, 3/3 spelled in both arms.
+//
+// THE DATA CHANGE DID SHIP, and v2.17.0 would lose without it. 39 lines of Le
+// Mil's `knowledge_brief` spelled numbers out, and the brief renders in block
+// 2, AFTER that line, where proximity is authority - the same mechanism that
+// put a salesy knowledge row above "never salesy". Those strings are now
+// numerals. The 5 `voice_corpus` rows that spell a number are deliberately NOT
+// touched: that is the venue's own writing and decision 0010 says we never
+// rewrite it, so the voice pack still argues with the line slightly and that
+// is the correct trade.
+//
 // v2.17.0 (owner-ruled 2026-10-10): `# Texting style` asks for digits.
 // Owner-written, one sentence:
 //
@@ -389,7 +469,7 @@
 // NULL), so a literal handle would put one venue's account in every venue's
 // prompt. Same reason `{venue_name}` stays a placeholder. It needs a
 // venue_info field first.
-export const V2_PROMPT_VERSION = 'v2.17.0-draft'
+export const V2_PROMPT_VERSION = 'v2.18.0-draft'
 
 /** Block 1: ROLE. Static across every venue bar the three placeholders. */
 export const V2_FRAME = `# Who you are
@@ -409,6 +489,7 @@ You have genuine interest in the guests, their needs and want to help them achie
 # Rules
 
 - Never state or imply anything about this guest - visits, orders, preferences, history - that HOUSE NOTES or the conversation does not confirm. If you do not know, you do not know.
+- Never invent claims about other guests, such as how people react, what's popular, what regulars order, or what sells out. Only say these when venue knowledge states them. Your own taste is fine ("I'd get it iced"). A made-up observation about other people is not.
 - You never run a loyalty program. No points, rewards, tiers, earning, or counting visits toward anything.
 - Anything you give or promise - something free, a discount, holding or reserving anything, cancelling or changing an arrangement - exists only if you declare it in \`actions\`. Never commit to any of it in prose alone.
 - Only share links that appear in your knowledge. Never invent or adjust one.
@@ -427,6 +508,31 @@ You have genuine interest in the guests, their needs and want to help them achie
 export const V2_HOUSE_SECTIONS = `# Information about the business you are presenting.
 
 {venue_profile}
+
+# How you sound
+
+{voice_pack}`
+
+/**
+ * Block 2 for a venue that HAS a `knowledge_brief` (v2.18.0). The brief
+ * replaces `renderVenueProfile` outright rather than joining it, so this
+ * constant has no `{venue_profile}` and that is the point - see compose.ts,
+ * where the two were concatenated for one afternoon and rendered the whole
+ * menu twice in two voices that disagreed about which items are vegan.
+ *
+ * The brief therefore owes everything the renderer used to supply, including
+ * hours and the dated `currentContext` notes. `renderRightNow` filtered those
+ * against `now`; prose cannot, so a date in the brief outlives itself and the
+ * brief's own `<whats_on>` paragraph tells the model to check one against
+ * today. That is a real decay cost, owner-ruled 2026-10-12 with the
+ * alternative on the table.
+ *
+ * `V2_HOUSE_SECTIONS` stays byte-identical to its pre-v2.18.0 self, which is
+ * what makes this bump a no-op for every venue whose brief is NULL.
+ */
+export const V2_HOUSE_SECTIONS_BRIEFED = `# What you know
+
+{knowledge_brief}
 
 # How you sound
 
@@ -454,16 +560,16 @@ export const V2_HOUSE_SECTIONS = `# Information about the business you are prese
  * freed the position. If pursuit is ever wanted back, this block moving
  * behind the transcript is the first thing to try.
  *
- * `## What you know` LEADS, so retrieval sits furthest from the guest's
- * message of anything in here. It is the one section that is not about this
- * guest, and proximity is authority: a knowledge row has already out-ranked a
- * tier-0 frame line once (v2.12.0's off-channel redirect). `off-channel-
- * redirect` in the regression harness is the tell if that comes back.
+ * `## What you know` USED TO LEAD this block, for the reason that it was the
+ * one section not about this guest and proximity is authority - a knowledge
+ * row has out-ranked a tier-0 frame line once (v2.12.0's off-channel
+ * redirect). It left in v2.18.0 for block 2, which is further from the
+ * guest's message still, so that argument is satisfied more strongly rather
+ * than abandoned. Everything in here is now about this guest, which is what
+ * the block was named for. `off-channel-redirect` in the regression harness
+ * remains the tell.
  */
 export const V2_GUEST_STATE = `HOUSE NOTES (yours alone - the guest never sees this)
-
-## What you know
-{knowledge}
 
 ## Where this relationship stands
 {state_line}

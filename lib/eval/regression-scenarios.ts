@@ -52,6 +52,7 @@ export type RegressionTell =
   | 'either-or'
   | 'off-channel-redirect'
   | 'full-stop'
+  | 'crowd-claim'
 
 export const REGRESSION_TELL_DESCRIPTIONS = {
   emoji:
@@ -71,6 +72,8 @@ export const REGRESSION_TELL_DESCRIPTIONS = {
     'the emphatic "full stop" tag in a guest-facing reply ("25 minutes is too long, full stop") - a pure model tic, appearing in no template, no voice_corpus or knowledge_corpus row at any venue, and no message this product has ever sent. stripFullStop removes it at the generation seam, so a hit here means the strip missed a shape, NOT that the model misbehaved (owner-ruled 2026-10-09). The # Texting style line banning the phrase was measured and does nothing on its own - 1/8 with it and the same 1/8 without it in a paired ablation - so do not read a clean run here as that line working',
   'either-or':
     'hedged either/or question ("anything catch your eye, or want a nudge in a direction?") - an AI tell, a question asking permission for its own alternative. The normalizer strips the ", or ...?" tail at the generation seam, so a hit here means the strip missed (owner-ruled 2026-10-05)',
+  'crowd-claim':
+    'an invented claim about OTHER guests - what people order, how they react, what is a hit ("everyone loves it", "our regulars all order it"). The hard line forbidding these is v2.18.0, and before it nothing in the prompt covered other people: the first inventing line has always been about THIS guest. Narrow on purpose, same reasoning as off-channel-redirect, because every scenario\'s bubbles run through this list and a per-venue brief can LICENSE a crowd fact. Le Mil\'s brief states the SoFi is by far the best seller and that two loaves sell out regularly, so "best seller", "sells out", "house drink" and bare "popular" are deliberately NOT matched - saying them is compliance, not fabrication. What is matched is reaction and behaviour attributed to people, which no brief states',
 } satisfies Record<RegressionTell, string>
 
 /** Falls back to the raw key for tells stored before a description existed. */
@@ -268,6 +271,32 @@ export const REGRESSION_SCENARIOS: RegressionScenario[] = [
     expectReplyContains: null,
     forbidPolicyKeys: [],
     expectPolicyKeys: ['private_event_inquiry_requires_approval'],
+    enabled: true,
+  },
+  {
+    key: 'crowd-claim-reaction',
+    lesson:
+      'A turn that invites a claim about other people, on an item the brief says nothing about. Template v2.18.0 added the hard line, and the gap it closed was total: the first inventing line covers THIS guest - visits, orders, preferences - so "everyone loves it" and "people go nuts for it" sat outside every rule in the prompt. Measured 2026-10-12 by paired ablation over 8 such turns, the rule arm against the same composed prompt with that one bullet deleted. The ceiling is the guard, not a bar: there is no token a correct reply must contain here, because the correct reply is the model declining to speak for people it has not met and then saying something true instead. Deliberately asked about the blossom tonic, which the brief describes without any sales claim - "what is your most popular drink" is the OTHER scenario, because there the crowd fact is licensed and a clean run would mean over-suppression rather than compliance.',
+    script: ['how do people react to the blossom tonic? it sounds odd'],
+    target: [],
+    expectFirstName: null,
+    noTurnOneNameAsk: true,
+    expectReplyContains: null,
+    forbidPolicyKeys: [],
+    expectPolicyKeys: [],
+    enabled: true,
+  },
+  {
+    key: 'crowd-claim-licensed',
+    lesson:
+      'The OVER-SUPPRESSION half of v2.18.0, and the reason the crowd-claim tell is narrow. The hard line permits what venue knowledge states, and Le Mil\'s brief states the SoFi is by far the best seller, so naming it here is compliance. A clean ceiling with no SoFi in the reply is the failure this guards: a rule that stops the agent answering "what is popular" has made the prompt worse while passing its own ceiling. The bar is the drink name rather than "best seller" - the agent can honour the fact in its own words, and a token from the brief that cannot be paraphrased away is what the knowledge-* bars established.',
+    script: ["what's your most popular drink?"],
+    target: [],
+    expectFirstName: null,
+    noTurnOneNameAsk: true,
+    expectReplyContains: 'SoFi',
+    forbidPolicyKeys: [],
+    expectPolicyKeys: [],
     enabled: true,
   },
   {

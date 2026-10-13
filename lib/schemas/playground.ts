@@ -47,14 +47,22 @@ export const SavedPlaygroundSessionSchema = z.object({
   }),
 })
 
-/** Mirrors TurnOverrides; a turn regenerated with overrides saves them. */
+/**
+ * Mirrors TurnOverrides; a turn regenerated with overrides saves them.
+ *
+ * `knowledgeText` became `knowledgeBriefText` in v2.18.0, when v2 stopped
+ * retrieving. Zod strips unknown keys, so a conversation saved before that
+ * still parses - it replays with that one override dropped rather than
+ * failing, which is the right direction for a saved artifact nobody can
+ * migrate by hand. Every other override is unaffected.
+ */
 export const SavedTurnOverridesSchema = z.object({
   stateKey: z.string().optional(),
   mission: z.string().optional(),
   guestProfileText: z.string().optional(),
   interactionMemoryText: z.string().optional(),
   openMovesText: z.string().optional(),
-  knowledgeText: z.string().optional(),
+  knowledgeBriefText: z.string().optional(),
   voicePackText: z.string().optional(),
   venueProfileText: z.string().optional(),
 })
