@@ -39,7 +39,7 @@ export async function GET(request: Request): Promise<NextResponse> {
   const supabase = createAdminClient()
   const run = await supabase
     .from('golden_runs')
-    .select('id, git_sha, started_at')
+    .select('id, git_sha, started_at, v2_generation_model')
     .eq('id', runId)
     .maybeSingle()
   if (run.error)
@@ -49,6 +49,11 @@ export async function GET(request: Request): Promise<NextResponse> {
     )
   if (!run.data)
     return NextResponse.json({ error: 'no such run' }, { status: 404 })
+
+  // Hoisted out of the row map below: inside a closure tsc cannot keep the
+  // narrowing from the null check above. Empty means NOT RECORDED, never "the
+  // current default".
+  const v2Model = run.data.v2_generation_model ?? ''
 
   const units = await supabase
     .from('golden_run_units')
@@ -126,6 +131,9 @@ export async function GET(request: Request): Promise<NextResponse> {
           v2Data !== null && !v2Data.ok
             ? `${v2Data.stage}: ${v2Data.error}`
             : '',
+        // Constant down the column, from the run. Empty means NOT RECORDED
+        // (the run predates migration 083), never "the current default".
+        v2_model: v2Model,
       }
     })
 

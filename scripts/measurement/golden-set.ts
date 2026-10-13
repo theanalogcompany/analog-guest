@@ -79,6 +79,7 @@ import {
 } from '@/app/admin/(authed)/playground/api/run/v1-arm'
 import { PROMPT_VERSION } from '@/lib/ai/prompts/system-template'
 import { V2_PROMPT_VERSION } from '@/lib/ai/v2/template'
+import { GENERATION_MODEL_ID } from '@/lib/ai/client'
 import {
   GOLDEN_QUESTIONS,
   RUNNABLE_DRIVERS,
@@ -414,6 +415,36 @@ function gitValue(args: string[]): string | null {
   }
 }
 
+/**
+ * Is `sha` on a remote branch, so the page's link to it works and someone else
+ * can reproduce the run?
+ *
+ * THREE-STATE, and the third one is the point: null means "could not tell" -
+ * no remote configured, or git failed - which is a different fact from "local
+ * only" and must not collapse into it. A run recorded as local-only when the
+ * check merely failed would be a claim nothing enforces, which is the defect
+ * class this repo keeps paying for.
+ *
+ * NOT fetched first, deliberately. `git branch -r --contains` reads the remote
+ * refs this checkout already has, so the question it answers is "was this
+ * pushed from here", which is the question a local harness run raises. A fetch
+ * would make the answer depend on network state and could only ever turn a
+ * false into a true for a commit someone else pushed - not a case the page
+ * needs to distinguish.
+ */
+function shaIsOnRemote(sha: string | null): boolean | null {
+  if (sha === null) return null
+  const remotes = gitValue(['branch', '-r', '--contains', sha])
+  if (remotes === null) return null
+  return remotes.length > 0
+}
+
+/** Null on a detached HEAD, which `rev-parse` reports as the literal "HEAD". */
+function gitBranch(): string | null {
+  const branch = gitValue(['rev-parse', '--abbrev-ref', 'HEAD'])
+  return branch === null || branch === 'HEAD' || branch === '' ? null : branch
+}
+
 /** How far `timezone` is from UTC at `at`, in ms. Positive east of Greenwich. */
 function timezoneOffsetMs(timezone: string, at: Date): number | null {
   try {
@@ -684,6 +715,17 @@ async function main(): Promise<void> {
   const gitSha = gitValue(['rev-parse', 'HEAD'])
   const gitSubject = gitValue(['log', '-1', '--format=%s'])
   const gitDirty = (gitValue(['status', '--porcelain']) ?? '').length > 0
+  const gitOnRemote = shaIsOnRemote(gitSha)
+  const gitBranchName = gitBranch()
+  // What v2 generation actually resolves to on this branch: `generateV2Reply`
+  // calls `getGenerationModel()`, so it is this constant.
+  //
+  // ONE LINE TO CHANGE when the V2_GENERATION_MODEL switch lands (PR #377):
+  // this becomes `resolveV2ModelProfile().id`, because the answer stops being
+  // a constant. Whichever of the two merges second owns that edit. Reading the
+  // constant is correct here and would be WRONG there - the point of the column
+  // is that the model is no longer implied by the sha.
+  const v2GenerationModel = GENERATION_MODEL_ID
 
   const log = createRunLog({
     name: 'golden-set',
@@ -704,6 +746,12 @@ async function main(): Promise<void> {
       v1Skipped: skipV1,
       gitDirty,
       gitSubject,
+      // Provenance, so this file answers "whose code, pushed or not, which
+      // model" without a round trip. The same three now reach `golden_runs`
+      // (migration 083); before it they lived only here.
+      gitBranch: gitBranchName,
+      gitOnRemote,
+      v2GenerationModel,
     },
   })
   console.log(`\nrun log: ${log.path}`)
@@ -774,6 +822,9 @@ async function main(): Promise<void> {
     .insert({
       venue_id: venue.id,
       git_sha: gitSha,
+      git_on_remote: gitOnRemote,
+      git_branch: gitBranchName,
+      v2_generation_model: v2GenerationModel,
       git_subject: gitSubject,
       git_dirty: gitDirty,
       v1_prompt_version: PROMPT_VERSION,

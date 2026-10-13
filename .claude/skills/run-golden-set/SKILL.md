@@ -140,18 +140,30 @@ sink now, so a proactive scenario drafts what the venue would say unprompted.
 
 Three places, in order of how much you will use them:
 
-1. **`/admin/tests/golden`** - the surface. Commit-grouped, linked to the sha, Export CSV per
-   run. This is what you send a colleague.
-2. **The CSV** - 18 columns, Excel-safe UTF-8 (the BOM is why a curly apostrophe does not come
+1. **`/admin/tests/golden`** - the surface. Commit-grouped, Export CSV per run. This is what
+   you send a colleague.
+2. **The CSV** - 19 columns, Excel-safe UTF-8 (the BOM is why a curly apostrophe does not come
    out as mojibake). Good for sorting by group or diffing two runs in a spreadsheet.
    `history`, `inbound` and `media` sit left of the two replies, because that is what the
-   engines were given.
+   engines were given. `v2_model` is last and is constant down the column.
 3. **The JSONL run log** - the actual record, path printed at the start of the run. If the DB
    write fails, this still has everything; the harness says so rather than losing the run.
 
-A run is stamped with both prompt versions, the git sha and subject, whether the tree was
-dirty, and the open state. **A dirty-tree run is flagged on the page** - it is not reproducible
-from the sha, so treat it as a sighting rather than a baseline.
+A run is stamped with both prompt versions, the v2 generation model, the git sha, subject and
+branch, whether the commit was on a remote, whether the tree was dirty, and the open state.
+
+**Three of those change what a run is worth**, and the page renders each:
+
+- **A dirty-tree run** is not reproducible from the sha. Treat it as a sighting, never a
+  baseline.
+- **A local commit** is not on GitHub, so the sha is only a link when the commit was found on
+  a remote at run time. An unpushed sha renders as plain text with a note saying nobody else
+  can reproduce the run. A run from before this was recorded says so rather than guessing -
+  `null` is not `false` here.
+- **The v2 generation model**, because it is selectable (`V2_GENERATION_MODEL`) and the
+  available models do not answer alike. A reply is not interpretable without it, and two runs
+  on different models are not comparable. An unrecorded one renders as "model not recorded"
+  rather than as the current default.
 
 ## Adding or rewording a scenario
 

@@ -158,6 +158,17 @@ export function RunCard({ run }: { run: GoldenRunView }) {
     <Card className="block rounded-[2px] border-stone-light/60 bg-paper p-4 shadow-none">
       <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
         <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+          {/* THE RUN ID, because the harness ends by printing it: "stored:
+              /admin/tests/golden (run 6546d12c-...)". Until now it existed on
+              this page only inside the Export CSV href, so the one identifier
+              you arrive holding was the one thing the page would not show -
+              and a run could not be found by it at all. Twice in one session
+              someone went looking for a run by id and could not locate it.
+              Short form, because that is the prefix the harness output and the
+              JSONL filename share. */}
+          <span className="font-mono text-sm font-medium">
+            {run.id.slice(0, 8)}
+          </span>
           <span className="text-sm font-medium">
             {run.units.length} question{run.units.length === 1 ? '' : 's'}
           </span>
@@ -167,8 +178,14 @@ export function RunCard({ run }: { run: GoldenRunView }) {
             {run.clockInjected ? ' (clock injected)' : ''}
             {run.fullRun ? '' : ' · PARTIAL RUN'}
           </span>
+          {/* The MODEL belongs next to the prompt version, because v2
+              generation is selectable and the available models do not answer
+              alike - a reply is not interpretable without it. `null` renders
+              as "not recorded" rather than as the current default, which
+              would be inventing a fact about an old run. */}
           <span className="font-mono text-xs text-muted-foreground">
-            v1 {run.v1PromptVersion} · v2 {run.v2PromptVersion}
+            v1 {run.v1PromptVersion} · v2 {run.v2PromptVersion} ·{' '}
+            {run.v2GenerationModel ?? 'model not recorded'}
           </span>
         </div>
         <a

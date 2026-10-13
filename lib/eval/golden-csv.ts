@@ -39,6 +39,12 @@ export const GOLDEN_CSV_COLUMNS = [
   'v2_ms',
   'v1_error',
   'v2_error',
+  // Per-RUN rather than per-unit, so it is constant down the column - which is
+  // the point. Two exports concatenated or diffed in a spreadsheet are not
+  // comparable without it, because v2's generation model is selectable and the
+  // available models do not answer alike. APPENDED rather than slotted next to
+  // the other v2 columns so existing column positions do not shift.
+  'v2_model',
 ] as const
 
 export type GoldenCsvRow = Record<(typeof GOLDEN_CSV_COLUMNS)[number], string>
