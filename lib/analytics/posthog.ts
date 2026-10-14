@@ -3049,7 +3049,15 @@ export async function captureScanCodeBound(
  * race and the one a retry path would answer.
  */
 export type ScanCodeUnmatchedReason =
-  'code_not_found' | 'payment_not_ingested' | 'claim_lost' | 'db_error'
+  | 'code_not_found'
+  // TAC-588: older than SCAN_CODE_TTL_MS. Its own reason, not folded into
+  // code_not_found: a slip scanned the day after next is a guest doing what
+  // the slip asks, too late, and how often that happens is what says whether
+  // twenty-four hours is the right lifetime.
+  | 'code_expired'
+  | 'payment_not_ingested'
+  | 'claim_lost'
+  | 'db_error'
 
 export interface ScanCodeUnmatchedProps {
   venueId: string

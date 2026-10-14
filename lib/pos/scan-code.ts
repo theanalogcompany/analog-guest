@@ -63,6 +63,41 @@ export function generateScanCode(): string {
 export const SCAN_CODE_PREFIX = 'sc_'
 
 /**
+ * How long a printed code can still bind its order. TWENTY-FOUR HOURS
+ * (TAC-588, ruled 2026-10-14).
+ *
+ * It was the NFC tap's thirty minutes, which receipt codes inherited from the
+ * cron that expires both. A slip is scanned on the walk out, at home, or the
+ * next morning, and each code names exactly one payment, so a late scan can
+ * only ever bind its own order.
+ *
+ * Measured from `pos_tap_events.received_at`, which `issueScanCode` leaves to
+ * the column's `default now()`: the moment the code was issued, which is when
+ * the slip printed.
+ *
+ * ONE VALUE FOR BOTH SOURCES. The expiry cron reads it for NFC taps too; NFC is
+ * not live, and the ruling accepted one number.
+ */
+export const SCAN_CODE_TTL_MS = 24 * 60 * 60 * 1000
+
+/**
+ * Is this code too old to bind?
+ *
+ * The bind checks it itself rather than trusting the expiry cron to have
+ * flipped the row: the cron runs every fifteen minutes, so leaning on it would
+ * let a code bind up to fifteen minutes past its day.
+ *
+ * `>`, so exactly twenty-four hours still binds. An unreadable issue time is
+ * EXPIRED: "a code older than a day does nothing" must hold, and a code we
+ * cannot date is not one we can show is younger.
+ */
+export function isScanCodeExpired(issuedAt: Date, now: Date): boolean {
+  const age = now.getTime() - issuedAt.getTime()
+  if (!Number.isFinite(age)) return true
+  return age > SCAN_CODE_TTL_MS
+}
+
+/**
  * Is this `referral.ref` one of our scan codes?
  *
  * Prefix-only, no length or alphabet check. The row lookup is the real
