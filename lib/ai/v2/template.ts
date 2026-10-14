@@ -242,6 +242,57 @@
 // SO: before citing any entry below as current, check which model ran. The
 // regression summary line and both harness run logs print it.
 //
+// v2.19.0: THE GUEST'S MEDIA REACHES THE PROMPT. No template copy changed in
+// this bump - not one character of the four constants below - and it is still
+// a version, which is the opposite call from the 2026-10-08 cache split. The
+// test is what the MODEL is handed: that split was byte-identical on every
+// turn, so there was nothing to key. This adds bracketed lines to the turns of
+// a prompt whenever the guest sent a photo, a voice note, a video, a story
+// reply or a share, so a trace or an `eval_judgments` row stamped v2.18.0
+// could not have carried them. Every turn WITHOUT media composes
+// byte-identically, which is why no existing measurement moves: all four
+// harnesses run sandbox guests that declare none.
+//
+// WHAT WAS BROKEN. v2 took text only. The transcript query selected `body` and
+// dropped every row whose body was empty, so a guest's photo was invisible -
+// not mentioned on the turn it arrived, not in the transcript an hour later,
+// and nothing holding the reply. At Le Mil's that is not an edge: ALL 120
+// attachments on the venue are on messages with no text, so v2 read those
+// turns as a guest who had written nothing at all.
+//
+// NO NEW WORDING, deliberately, and this is the reason the bump carries no
+// copy change. Every sentence comes from `lib/ai/prompts/attachment-lines.ts`,
+// owner-approved verbatim on TAC-582 and TAC-584 and already in front of
+// guests through v1. Writing a v2 phrasing of "a photo arrived and you cannot
+// see it" would have put two approved-looking wordings of one fact in the
+// codebase, and v1 paid for that sentence twice already - the bare marker made
+// the model tell guests the photo "didn't come through" (5 of 20), and the
+// fixed wording is what replaced it.
+//
+// THE LINES ARE THEIR OWN TURNS, not a prefix on the guest's message. This
+// file's composer never wraps the guest's words in anything, and the SDK
+// merges same-role runs into content blocks, so what the model receives is one
+// user message with the guest's text verbatim in its own block. The media line
+// sits AFTER it, which is where v1 renders it and where the rules for replying
+// to a picture belong: later beats earlier, and "name none of the menu" in
+// front of the guest's message would be the weakest position in the prompt.
+//
+// THE HOLD IS A POLICY ROW, not copy: `guest_media_requires_approval`
+// (lib/policy/default-policies.ts), which is v1's `media_context` trigger in
+// v2's vocabulary. Owner ruling 2026-10-11, measured on v1 and not to be
+// relitigated with wording: the model never described a photo it had not seen,
+// but told guests "we can't see it on our end" in 7 of 20 replies, and two
+// rewordings moved which false thing it said rather than whether it said one.
+// Do not try a third here.
+//
+// MEASURED ON THE REAL THREADS, 2026-10-13, four of Le Mil's own Instagram
+// turns replayed against what production sent: a described media-only video
+// (held, and the reply stayed inside the description), a story reply with text
+// (held), the guest's NEXT text after the venue answered that story (NOT held
+// for media - the negative control), and a text one second after a media-only
+// share (held on the unanswered-media clause). The two new regression
+// scenarios are `media-only-described` and `media-undescribed-with-text`.
+//
 // v2.18.0 (owner-ruled 2026-10-12): v2 stops retrieving. `# What you know` is
 // no longer four `knowledge_corpus` chunks matched against the inbound; it is
 // one authored per-venue artifact, `venue_configs.knowledge_brief`
@@ -522,7 +573,7 @@
 // NULL), so a literal handle would put one venue's account in every venue's
 // prompt. Same reason `{venue_name}` stays a placeholder. It needs a
 // venue_info field first.
-export const V2_PROMPT_VERSION = 'v2.18.0-draft'
+export const V2_PROMPT_VERSION = 'v2.19.0-draft'
 
 /** Block 1: ROLE. Static across every venue bar the three placeholders. */
 export const V2_FRAME = `# Who you are

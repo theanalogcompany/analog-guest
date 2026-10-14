@@ -42,6 +42,20 @@
 //
 // NEVER THROWS. It runs inside buildRuntimeContext's Promise.all, where a
 // rejection fails the whole context build.
+//
+// IT SERVES BOTH ENGINES, in two layers. `loadTurnMediaHistory` and
+// `buildTurnMediaHistory` are the queries and the wording, with no engine's
+// types in them; `loadMediaHistory` and `buildMediaHistory` are v1's view,
+// mapping the same result to `RecentMessage`. v2 reads the neutral pair
+// (lib/relationship/turn-media.ts). Nothing is duplicated between them, which
+// is the point - a second copy of "two wordings, the described one only on a
+// held turn" is exactly the rule that would be rewritten on one side only.
+//
+// IT OUTLIVES v1. Phase 6 deletes lib/agent/, and this file, inbound-media.ts
+// and media-context.ts are three that have to move rather than go - they are
+// the media lane for both engines. Moving them now would be a wide rename
+// through v1 for no behaviour; `lib/messaging/attachments/` is the home that
+// matches when it happens.
 
 import type { RecentMessage } from '@/lib/ai'
 import {
@@ -60,6 +74,42 @@ type AdminSupabaseClient = ReturnType<typeof createAdminClient>
 /** More attachment rows than a 14-day window of one guest's messages holds. */
 const MAX_ATTACHMENT_ROWS = 500
 
+/**
+ * A guest message with NO TEXT, worded as a prompt turn. Engine-neutral: no
+ * `RecentMessage`, so v2 reads it without v1's runtime types.
+ *
+ * `messageId` is carried because v2 needs it and v1 does not. v2 merges these
+ * into a transcript it loaded by id, and a line it cannot key back to a row is
+ * a line it cannot place in time.
+ */
+export interface MediaOnlyPromptMessage {
+  messageId: string
+  createdAt: Date
+  attachmentLines: string[]
+  describedAttachmentLines?: string[]
+}
+
+/**
+ * What a window of one guest's attachments says, before either engine's own
+ * types are involved. `MediaHistory` below is v1's view of the same thing, and
+ * `buildMediaHistory` is the adapter - so the wording, the two-wordings rule
+ * and the skip-a-message-with-no-lines rule exist once for both engines.
+ */
+export interface TurnMediaHistory {
+  linesByMessageId: Map<string, string[]>
+  describedLinesByMessageId: Map<string, string[]>
+  mediaOnlyMessages: MediaOnlyPromptMessage[]
+  /**
+   * The read failed and this is empty for that reason, NOT because the guest
+   * sent nothing. v1 does not need it (it reports through
+   * captureGuestMediaDegraded and carries on), v2 puts it on the trace: a turn
+   * that ran without the guest's media looks exactly like a turn for a guest
+   * who sent none, and "we did not look" has to be distinguishable from
+   * "there was nothing to look at" (.claude/rules/errors-as-values.md).
+   */
+  degraded: boolean
+}
+
 export interface MediaHistory {
   linesByMessageId: Map<string, string[]>
   /**
@@ -71,10 +121,11 @@ export interface MediaHistory {
   mediaOnlyInbounds: RecentMessage[]
 }
 
-export const EMPTY_MEDIA_HISTORY: MediaHistory = {
+export const EMPTY_TURN_MEDIA_HISTORY: TurnMediaHistory = {
   linesByMessageId: new Map(),
   describedLinesByMessageId: new Map(),
-  mediaOnlyInbounds: [],
+  mediaOnlyMessages: [],
+  degraded: false,
 }
 
 function sameLines(a: readonly string[], b: readonly string[]): boolean {
@@ -141,13 +192,44 @@ export interface AttachmentHistoryRow {
 /**
  * Rows to the two things the context carries. Pure, and what the harness runs.
  *
- * `attachmentRows` must be in position order within a message, which is how
- * loadMediaHistory selects them.
+ * v1's view: `mediaOnlyInbounds` as `RecentMessage`, which is what
+ * `buildRuntimeContext` carries and `historyForPrompt` merges. The work is
+ * `buildTurnMediaHistory`'s; this is the adapter, and it exists so v2 reading
+ * the same rows cannot end up with a second wording of the same attachment.
  */
 export function buildMediaHistory(
   mediaOnlyRows: readonly MediaOnlyRow[],
   attachmentRows: readonly AttachmentHistoryRow[],
 ): MediaHistory {
+  const history = buildTurnMediaHistory(mediaOnlyRows, attachmentRows)
+  return {
+    linesByMessageId: history.linesByMessageId,
+    describedLinesByMessageId: history.describedLinesByMessageId,
+    mediaOnlyInbounds: history.mediaOnlyMessages.map(
+      (message): RecentMessage => ({
+        direction: 'inbound',
+        body: '',
+        createdAt: message.createdAt,
+        delivery: 'delivered',
+        attachmentLines: message.attachmentLines,
+        ...(message.describedAttachmentLines !== undefined
+          ? { describedAttachmentLines: message.describedAttachmentLines }
+          : {}),
+      }),
+    ),
+  }
+}
+
+/**
+ * Rows to lines, engine-neutral. Pure.
+ *
+ * `attachmentRows` must be in position order within a message, which is how
+ * loadMediaHistory selects them.
+ */
+export function buildTurnMediaHistory(
+  mediaOnlyRows: readonly MediaOnlyRow[],
+  attachmentRows: readonly AttachmentHistoryRow[],
+): TurnMediaHistory {
   const attachmentsByMessage = new Map<string, HistoryAttachment[]>()
   for (const row of attachmentRows) {
     const attachment: HistoryAttachment = {
@@ -193,7 +275,7 @@ export function buildMediaHistory(
     }
   }
 
-  const mediaOnlyInbounds: RecentMessage[] = []
+  const mediaOnlyMessages: MediaOnlyPromptMessage[] = []
   for (const row of mediaOnlyRows) {
     const attachmentLines = historyAttachmentLines({
       unsupported: row.unsupported_content === true,
@@ -202,21 +284,24 @@ export function buildMediaHistory(
     })
     if (attachmentLines.length === 0) continue
     const describedAttachmentLines = describedLinesByMessageId.get(row.id)
-    mediaOnlyInbounds.push({
-      direction: 'inbound',
-      body: '',
+    mediaOnlyMessages.push({
+      messageId: row.id,
       createdAt: new Date(row.created_at),
-      delivery: 'delivered',
       attachmentLines,
       ...(describedAttachmentLines !== undefined
         ? { describedAttachmentLines }
         : {}),
     })
   }
-  mediaOnlyInbounds.sort(
+  mediaOnlyMessages.sort(
     (a, b) => a.createdAt.getTime() - b.createdAt.getTime(),
   )
-  return { linesByMessageId, describedLinesByMessageId, mediaOnlyInbounds }
+  return {
+    linesByMessageId,
+    describedLinesByMessageId,
+    mediaOnlyMessages,
+    degraded: false,
+  }
 }
 
 // A turn that ran without the guest's media in its history looks, from the
@@ -237,10 +322,44 @@ function reportHistoryDegraded(
   })
 }
 
+/**
+ * v1's view of the window. `loadTurnMediaHistory` does the work; this maps it
+ * to `RecentMessage`, which is what `buildRuntimeContext` carries.
+ */
 export async function loadMediaHistory(
   supabase: AdminSupabaseClient,
   input: LoadMediaHistoryInput,
 ): Promise<MediaHistory> {
+  const history = await loadTurnMediaHistory(supabase, input)
+  return {
+    linesByMessageId: history.linesByMessageId,
+    describedLinesByMessageId: history.describedLinesByMessageId,
+    mediaOnlyInbounds: history.mediaOnlyMessages.map(
+      (message): RecentMessage => ({
+        direction: 'inbound',
+        body: '',
+        createdAt: message.createdAt,
+        delivery: 'delivered',
+        attachmentLines: message.attachmentLines,
+        ...(message.describedAttachmentLines !== undefined
+          ? { describedAttachmentLines: message.describedAttachmentLines }
+          : {}),
+      }),
+    ),
+  }
+}
+
+/**
+ * The window's media, engine-neutral, straight from the two queries.
+ *
+ * FAILS SOFT, to no lines and `degraded: true`. Never throws: v1 runs it
+ * inside `buildRuntimeContext`'s Promise.all, where a rejection fails the
+ * whole context build.
+ */
+export async function loadTurnMediaHistory(
+  supabase: AdminSupabaseClient,
+  input: LoadMediaHistoryInput,
+): Promise<TurnMediaHistory> {
   try {
     // Inbound, no text, and either media or Meta's unsupported flag. That
     // leaves out what an empty body has always meant here: a scan row and a
@@ -289,9 +408,9 @@ export async function loadMediaHistory(
         error,
       })
       await reportHistoryDegraded(input, error)
-      return EMPTY_MEDIA_HISTORY
+      return { ...EMPTY_TURN_MEDIA_HISTORY, degraded: true }
     }
-    return buildMediaHistory(mediaOnly.data ?? [], attachments.data ?? [])
+    return buildTurnMediaHistory(mediaOnly.data ?? [], attachments.data ?? [])
   } catch (e) {
     const error = e instanceof Error ? e.message : String(e)
     console.warn('[agent] media history read threw; history has no media', {
@@ -299,7 +418,7 @@ export async function loadMediaHistory(
       error,
     })
     await reportHistoryDegraded(input, error)
-    return EMPTY_MEDIA_HISTORY
+    return { ...EMPTY_TURN_MEDIA_HISTORY, degraded: true }
   }
 }
 
@@ -316,9 +435,15 @@ export function isFirstContactNeutral(message: RecentMessage): boolean {
   return message.direction === 'inbound' && message.body.trim() === ''
 }
 
-export interface PromptHistoryInput {
-  recentMessages: readonly RecentMessage[]
-  mediaOnlyInbounds?: readonly RecentMessage[]
+/**
+ * GENERIC OVER THE ENTRY, because the rule below is about CLOCKS and not about
+ * either engine's message shape: v1 merges `RecentMessage`, v2 merges its own
+ * transcript turns (lib/relationship/turn-media.ts), and both need the same
+ * window and the same sort. `createdAt` is all it reads.
+ */
+export interface PromptHistoryInput<T extends { createdAt: Date }> {
+  recentMessages: readonly T[]
+  mediaOnlyInbounds?: readonly T[]
   /** Set when this turn's prompt already says "[guest also sent a photo]". */
   inboundMediaAnnounced: boolean
   /** When the message this turn answers arrived. Null on a proactive turn. */
@@ -340,7 +465,9 @@ export interface PromptHistoryInput {
  * the companion window inbound-media.ts uses to pair the two in the first
  * place, measured the same way.
  */
-export function historyForPrompt(input: PromptHistoryInput): RecentMessage[] {
+export function historyForPrompt<T extends { createdAt: Date }>(
+  input: PromptHistoryInput<T>,
+): T[] {
   const mediaOnly = input.mediaOnlyInbounds ?? []
   if (mediaOnly.length === 0) return [...input.recentMessages]
 

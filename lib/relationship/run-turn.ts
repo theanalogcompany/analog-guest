@@ -6,6 +6,7 @@ import {
   venueOwnDomainWildcard,
 } from '@/lib/schemas/venue-info'
 import { DELIVERED_OUTBOUND_STATUSES } from '@/lib/agent/group-responses'
+import { historyForPrompt } from '@/lib/agent/media-history'
 import {
   composePrompt,
   type ComposedPrompt,
@@ -32,7 +33,10 @@ import {
 } from '@/lib/ai/v2/prompt-text'
 import { resolveV2TemplateSet } from '@/lib/ai/v2/template-archive'
 import { retrieveKnowledgeContext } from '@/lib/rag/retrieve'
-import { renderVenueProfile } from '@/lib/ai/v2/venue-profile'
+import {
+  renderVenueProfile,
+  venueMenuItemNames,
+} from '@/lib/ai/v2/venue-profile'
 import { declaredActionTypes, type GenerationOutput } from '@/lib/ai/v2/actions'
 import {
   JUDGE_ENABLED,
@@ -45,6 +49,7 @@ import { replyLengthClause } from '@/lib/ai/v2/reply-length-clause'
 import { fireGateNotifications } from '@/lib/policy/notify'
 import {
   detectSituations,
+  GUEST_MEDIA_SITUATION,
   type SituationDetectionOutcome,
 } from '@/lib/policy/detect-situations'
 import {
@@ -81,6 +86,12 @@ import {
   resolveDeterministicState,
   type StateFacts,
 } from './state'
+import {
+  declaredTurnMedia,
+  loadTurnMedia,
+  type DeclaredTurnMedia,
+  type TurnMedia,
+} from './turn-media'
 
 // The v2 turn runner: one inbound exchange through the whole pipeline, with
 // every stage's input and output captured AS VALUES on a TurnTrace. The
@@ -96,6 +107,13 @@ import {
 // (pre-send gate); judge and assessor run after and concurrently - in
 // production they ride waitUntil, here they are awaited so the trace is
 // complete.
+//
+// THE GUEST'S MEDIA is a lane of its own, `turn-media.ts`, and everything it
+// knows comes from v1: the wording, which messages a turn answers, and the
+// rule that holds the reply. It adds one serial read before generation, and it
+// has to be serial - the transcript window is its cutoff, so a bracketed line
+// can only exist for a message the transcript carries. Its header has the two
+// places v2 deliberately differs.
 
 export interface TurnOverrides {
   /** Force the relationship state (key must exist in the graph). */
@@ -176,8 +194,33 @@ export interface RunTurnInput {
   venueId: string
   /** null = sandbox guest (no DB reads for guest data; session supplies it). */
   guestId: string | null
-  /** The guest's message(s) this turn, oldest first. */
+  /**
+   * The guest's message(s) this turn, oldest first.
+   *
+   * EMPTY IS LEGAL, and means the guest sent media and no words - the shape
+   * every one of Le Mil's 120 attachments arrived in. The turn is then carried
+   * entirely by the media lines (`media` below), and a turn with neither is
+   * the one thing this cannot answer.
+   */
   inbound: string[]
+  /**
+   * The production row this turn answers, when the caller knows which one it
+   * is - a replay, and phase 6's dispatch. It is what lets the media lane see
+   * THIS TURN's attachments; without it the thread's media still reaches the
+   * transcript and still decides the hold, but the "[guest also sent a photo]"
+   * line cannot be built because there is no message to read it off.
+   *
+   * Ignored for a sandbox guest (`guestId: null`), which has no rows at all.
+   */
+  inboundMessageId?: string
+  /**
+   * Media a caller STATES rather than stores: a sandbox chat, a golden
+   * scenario. Only read when `guestId` is null, and the type cannot express
+   * that - a real guest's media comes from their rows, and letting a caller
+   * declare it over the top would be a surface that disagrees with the thread
+   * it is replaying.
+   */
+  declaredMedia?: DeclaredTurnMedia
   /** Prior turns for sandbox chats; ignored when guestId is set (history loads from messages). */
   sessionHistory?: HistoryTurn[]
   session?: PlaygroundSession
@@ -302,6 +345,31 @@ export interface TurnTrace {
     overridden: boolean
   } | null
   history: HistoryTurn[]
+  /**
+   * What the guest sent besides words, this turn and in the thread.
+   *
+   * `hold.hold` IS the `guest_media` situation the gate was handed, so a
+   * reader comparing this with `gate.matched` sees the whole decision. `kind`
+   * and `described` are what the lines were built from, so a line that reads
+   * wrong can be traced to the row rather than to the wording.
+   *
+   * `degraded` says a row read failed: the transcript is thinner than the
+   * thread, which from the outside looks exactly like a guest who sent no
+   * media. Null only when the turn ran with no media lane at all (a sandbox
+   * turn that declared none).
+   */
+  media: {
+    before: string[]
+    after: string[]
+    hold: TurnMedia['hold']
+    degraded: boolean
+    kind: TurnMedia['kind']
+    storyReply: boolean
+    described: TurnMedia['described']
+    /** Media-only messages put back into the transcript, and history lines added. */
+    historyMessagesWithLines: number
+    mediaOnlyInHistory: number
+  } | null
   composed: ComposedPrompt
   /**
    * The model and the parameters this turn ASKED FOR, resolved from
@@ -420,6 +488,54 @@ export interface TurnTrace {
 }
 
 const HISTORY_LIMIT = 30
+
+/**
+ * A transcript turn with the clock it happened on, which is what the media
+ * merge needs and `HistoryTurn` deliberately does not carry: the composer is
+ * handed role and text only, and the timestamps exist to put a media-only
+ * message back in its place before that.
+ */
+type TimedTurn = HistoryTurn & { createdAt: Date }
+
+/**
+ * The newest `HISTORY_LIMIT` messages of one thread, ending at `asOfIso` and
+ * never including the message the turn is answering.
+ *
+ * `id` rides along for the media lane: an attachment's bracketed line is keyed
+ * to the message it was sent on, and a line that cannot be keyed back to a row
+ * cannot be placed in the transcript.
+ *
+ * EXCLUDING THE CURRENT MESSAGE IS A FIX, not a detail of the media work. The
+ * guest's message arrives as `input.inbound` and composes as the last user
+ * turn; it was ALSO the newest row this query returned, so every replay put
+ * the same sentence in the prompt twice - once as history and once as the
+ * thing being answered. Visible as soon as the transcript stopped running past
+ * the turn: "For cafe" composed as two consecutive user turns (Le Mil's,
+ * 2026-10-13). v1 never had it - `buildRuntimeContext` leaves the current
+ * message out of `recentMessages`, and `loadMediaHistory` takes
+ * `currentMessageId` for the same reason.
+ *
+ * It covers the row the caller NAMED. A coalesced burst answers several
+ * messages and names one, so the others still arrive as history; that is the
+ * same shape the playground has always replayed and is left alone here rather
+ * than guessed at by matching text.
+ */
+function transcriptQuery(
+  supabase: ReturnType<typeof createAdminClient>,
+  venueId: string,
+  guestId: string,
+  asOfIso: string | null,
+  currentMessageId: string | undefined,
+) {
+  let query = supabase
+    .from('messages')
+    .select('id, body, direction, status, created_at')
+    .eq('venue_id', venueId)
+    .eq('guest_id', guestId)
+  if (asOfIso !== null) query = query.lte('created_at', asOfIso)
+  if (currentMessageId !== undefined) query = query.neq('id', currentMessageId)
+  return query.order('created_at', { ascending: false }).limit(HISTORY_LIMIT)
+}
 
 export async function runTurn(input: RunTurnInput): Promise<TurnTrace> {
   const now = input.now ?? new Date()
@@ -620,8 +736,49 @@ export async function runTurn(input: RunTurnInput): Promise<TurnTrace> {
   }
   let storedStateKey: string | null = input.session?.stateKey ?? null
   let history: HistoryTurn[] = input.sessionHistory ?? []
+  // Null means no media lane ran at all, which is not the same as a lane that
+  // ran and found nothing: the trace keeps them apart.
+  let turnMedia: TurnMedia | null = null
 
   if (input.guestId !== null) {
+    // ---- When the turn happened, for a turn that names its own inbound row.
+    //
+    // THE TRANSCRIPT MUST END AT THE MESSAGE BEING ANSWERED. Without this a
+    // replay hands the model the venue's own reply TO THIS TURN as history and
+    // asks it to write that reply: measured on Le Mil's (2026-10-13), the
+    // described-video turn composed with "That setup is so good!" - the answer
+    // production sent - sitting in the transcript above the guest's video. It
+    // then reads as a conversation the agent already finished.
+    //
+    // ONE EXTRA READ, and only on a turn that passes `inboundMessageId`. The
+    // bound cannot be derived from the window it bounds, and a caller-supplied
+    // timestamp is a second thing that can disagree with the row.
+    //
+    // It also moves `daysSinceLastContact` onto the replayed turn's own clock,
+    // which is more faithful and is a change: `facts` for a replay used to be
+    // measured from today. Everything else about a replay is still today's
+    // (the graph, the venue's config, the profile) - this is a fixture, not
+    // time travel.
+    const inboundMessageId = input.inboundMessageId
+    // `created_at` VERBATIM, never reformatted: Postgres keeps microseconds
+    // and a `Date` keeps milliseconds, so a bound round-tripped through one
+    // truncates downward and an inclusive comparison then excludes the row it
+    // was built from. That is how it was found (lib/agent/inbound-media.ts
+    // records the measurement): the replayed turn could not see its own video.
+    let asOfIso: string | null = null
+    if (inboundMessageId !== undefined) {
+      const row = await supabase
+        .from('messages')
+        .select('created_at')
+        .eq('id', inboundMessageId)
+        .eq('venue_id', input.venueId)
+        .maybeSingle()
+      // A row that is not there (or not this venue's) leaves the bound unset:
+      // the turn then behaves exactly as it did before this field existed,
+      // rather than pinning the transcript to a time nothing happened at.
+      asOfIso = row.data?.created_at ?? null
+    }
+
     const [profileRow, stateRow, txCount, inboundCount, messageRows] =
       await Promise.all([
         supabase
@@ -650,13 +807,13 @@ export async function runTurn(input: RunTurnInput): Promise<TurnTrace> {
           .eq('venue_id', input.venueId)
           .eq('guest_id', input.guestId)
           .eq('direction', 'inbound'),
-        supabase
-          .from('messages')
-          .select('body, direction, status, created_at')
-          .eq('venue_id', input.venueId)
-          .eq('guest_id', input.guestId)
-          .order('created_at', { ascending: false })
-          .limit(HISTORY_LIMIT),
+        transcriptQuery(
+          supabase,
+          input.venueId,
+          input.guestId,
+          asOfIso,
+          inboundMessageId,
+        ),
       ])
 
     profile = parseGuestProfile(profileRow.data?.profile)
@@ -672,24 +829,98 @@ export async function runTurn(input: RunTurnInput): Promise<TurnTrace> {
         : null,
     }
     const rows = (messageRows.data ?? []).slice().reverse()
-    history = rows
+
+    // ---- The guest's media, this turn and in the thread (turn-media.ts).
+    //
+    // READ HERE, after the transcript window is known, because the two have to
+    // cover the same span: the oldest row loaded is the cutoff, so a bracketed
+    // line can only appear for a message the transcript actually carries. It
+    // costs one serial round trip before generation. v1 reads its own media
+    // context last for the mirror-image reason (handle-inbound.ts) - anything
+    // the prompt can mention, the hold rule must be able to see.
+    //
+    // The whole lane is skipped for a venue with no media at all only in the
+    // sense that the reads come back empty; there is no flag, and a guest who
+    // has sent nothing composes byte-identically to before this existed.
+    const oldestAt = rows[0]?.created_at
+    turnMedia = await loadTurnMedia({
+      venueId: input.venueId,
+      guestId: input.guestId,
+      now,
+      ...(input.inboundMessageId !== undefined
+        ? { currentMessageId: input.inboundMessageId }
+        : {}),
+      hasText: input.inbound.some((m) => m.trim().length > 0),
+      ...(asOfIso !== null ? { asOfIso } : {}),
+      historyCutoffIso: oldestAt ?? new Date(0).toISOString(),
+      maxMediaOnlyMessages: HISTORY_LIMIT,
+      menuItemNames: venueMenuItemNames(configRow.data?.venue_info),
+    })
+
+    // A guest message's attachment lines go ABOVE its words, as in v1's chat
+    // turns (withAttachmentLines, serializers.ts) - a message with no lines is
+    // its body untouched, so a thread with no media is byte-identical.
+    //
+    // ONLY ROWS THAT HAVE WORDS get a line here. A message with no text at all
+    // is not a turn the model reads as the guest writing to us (owner ruling 4,
+    // 2026-10-11); it comes back through `turnMedia.mediaOnly` below, which is
+    // the same split v1 keeps between `recentMessages` and `mediaOnlyInbounds`.
+    const timed = rows
       .filter(
         (m) =>
           m.direction === 'inbound' ||
           DELIVERED_OUTBOUND_STATUSES.has(m.status ?? ''),
       )
-      .map((m): HistoryTurn => ({
-        role: m.direction === 'inbound' ? 'user' : 'assistant',
-        text: m.body ?? '',
-      }))
+      .map((m): TimedTurn => {
+        const body = m.body ?? ''
+        const lines =
+          m.direction === 'inbound' && body.trim().length > 0
+            ? (turnMedia?.historyLines.get(m.id) ?? [])
+            : []
+        return {
+          role: m.direction === 'inbound' ? 'user' : 'assistant',
+          text: [...lines, body].filter((part) => part !== '').join('\n'),
+          createdAt: new Date(m.created_at),
+        }
+      })
       .filter((t) => t.text.length > 0)
+
+    // The guest's media-only messages back in their place in time, by the one
+    // rule that decides it (historyForPrompt, lib/agent/media-history.ts): a
+    // photo this turn's own lines already announce is left out, or the model is
+    // told about it twice and the second telling carries no instructions.
+    const newestInboundAt = rows
+      .filter((m) => m.direction === 'inbound')
+      .at(-1)?.created_at
+    const merged = historyForPrompt<TimedTurn>({
+      recentMessages: timed,
+      mediaOnlyInbounds: (turnMedia?.mediaOnly ?? []).map(
+        (message): TimedTurn => ({
+          role: 'user',
+          text: message.attachmentLines.join('\n'),
+          createdAt: message.createdAt,
+        }),
+      ),
+      inboundMediaAnnounced:
+        (turnMedia?.before.length ?? 0) + (turnMedia?.after.length ?? 0) > 0,
+      currentMessageAt:
+        newestInboundAt === undefined ? null : new Date(newestInboundAt),
+    })
+
     // Merge same-role runs so roles alternate (the splitHistory discipline).
-    history = history.reduce<HistoryTurn[]>((acc, t) => {
+    history = merged.reduce<HistoryTurn[]>((acc, t) => {
       const last = acc[acc.length - 1]
       if (last && last.role === t.role) last.text = `${last.text}\n${t.text}`
-      else acc.push({ ...t })
+      else acc.push({ role: t.role, text: t.text })
       return acc
     }, [])
+  } else if (input.declaredMedia !== undefined) {
+    // A sandbox or golden turn states its media instead of storing it. It
+    // holds, like a loaded one - see declaredTurnMedia.
+    turnMedia = declaredTurnMedia(
+      input.declaredMedia,
+      input.inbound.some((m) => m.trim().length > 0),
+    )
   }
 
   // ---- State. ----
@@ -741,6 +972,12 @@ export async function runTurn(input: RunTurnInput): Promise<TurnTrace> {
       interactionMemory: sections.interactionMemory,
       openMoves: sections.openMoves,
       inboundMessages: input.inbound,
+      ...(turnMedia === null
+        ? {}
+        : {
+            inboundMediaBefore: turnMedia.before,
+            inboundMediaAfter: turnMedia.after,
+          }),
     },
     templates,
   )
@@ -795,8 +1032,52 @@ export async function runTurn(input: RunTurnInput): Promise<TurnTrace> {
     sections,
     venueProfileRender,
     history,
+    media:
+      turnMedia === null
+        ? null
+        : {
+            before: turnMedia.before,
+            after: turnMedia.after,
+            hold: turnMedia.hold,
+            degraded: turnMedia.degraded,
+            kind: turnMedia.kind,
+            storyReply: turnMedia.storyReply,
+            described: turnMedia.described,
+            historyMessagesWithLines: turnMedia.historyLines.size,
+            mediaOnlyInHistory: turnMedia.mediaOnly.length,
+          },
     composed,
   }
+
+  // A TURN WITH NOTHING IN IT is a dead turn, and it is reachable now that
+  // `inbound` may be empty: a media-only turn whose media could not be read
+  // leaves the model a transcript ending in our own last message and a brief,
+  // with nothing from the guest. Generating there produces a reply to a
+  // message nobody sent. Failed as a value, with the reason, rather than asked
+  // for and then puzzled over.
+  if (
+    input.inbound.length === 0 &&
+    (turnMedia === null ||
+      turnMedia.before.length + turnMedia.after.length === 0)
+  )
+    return {
+      ...base,
+      situations: null,
+      generation: {
+        ok: false,
+        error:
+          'the turn has no inbound: no guest message, and no media line to stand for one' +
+          (turnMedia?.degraded === true
+            ? ' (the media read failed - see trace.media.degraded)'
+            : ''),
+      },
+      semantic: null,
+      gate: null,
+      judge: null,
+      actualJudge: null,
+      assessor: null,
+      totalDurationMs: Date.now() - started,
+    }
 
   // A block override this cannot apply is a DEAD TURN, not a turn on the
   // composed prompt. The stage is named in the error because the inspector
@@ -956,6 +1237,32 @@ export async function runTurn(input: RunTurnInput): Promise<TurnTrace> {
   const actualJudged = actualJudgedTimed.value
   const assessed = assessedTimed.value
 
+  // A REPLY WRITTEN AROUND MEDIA THE AGENT CANNOT SEE IS HELD (owner-ruled
+  // 2026-10-11), and it reaches the gate as a situation rather than a second
+  // mechanism - `guest_media_requires_approval` in default-policies.ts is the
+  // row. The fact is already settled: turn-media.ts ran v1's own
+  // `decideMediaContextHold` over the thread's rows before generation.
+  //
+  // NOT ON AN OPT-OUT TURN, and this is the one place the two rails collide.
+  // `POLICY_EXEMPT_SITUATIONS` strips `opt_out_request` from what rows may
+  // MATCH on, so it would not have stopped this row from queueing a stop
+  // confirmation that happened to arrive with a photo - and TCPA says that
+  // confirmation goes out. v1 never had the collision: it drops the
+  // description and sends (handle-inbound.ts). So the situation is withheld
+  // here, which is the same answer in the v2 vocabulary.
+  //
+  // WHAT IT DOES NOT FIX, stated because it is a real asymmetry: detection
+  // runs CONCURRENTLY with generation, so an opt-out turn carrying a photo was
+  // already composed with the media line in it. The reply sends, as it must;
+  // v1 composes without the description because classification precedes
+  // generation there. Closing it means serializing detection ahead of every
+  // turn's generation, which is latency on all of them for this one.
+  const mediaSituations =
+    turnMedia?.hold.hold === true &&
+    !detectedSituations.includes('opt_out_request')
+      ? [GUEST_MEDIA_SITUATION]
+      : []
+
   const gate = decideDispatch({
     draftMessages: output.messages,
     declaredActionTypes: declaredActionTypes(output),
@@ -965,7 +1272,7 @@ export async function runTurn(input: RunTurnInput): Promise<TurnTrace> {
     // From the INBOUND detection above - genuinely available pre-send. Never
     // from the assessor, whose flags are post-send in production wiring; the
     // gate refuses opt_out_request regardless (POLICY_EXEMPT_SITUATIONS).
-    situations: detectedSituations,
+    situations: [...detectedSituations, ...mediaSituations],
   })
 
   // Notify-row hits reach the venue here. Dry-run fires nothing: the trace
@@ -1019,7 +1326,10 @@ export async function runTurn(input: RunTurnInput): Promise<TurnTrace> {
       agentRunId: input.dispatch.agentRunId,
       venueId: input.venueId,
       guestId: input.guestId,
-      situations: detectedSituations,
+      // "as handed to the gate", which includes the code-set media situation:
+      // an event that listed only the detected ones would read as though the
+      // thread's media had no part in the decision.
+      situations: [...detectedSituations, ...mediaSituations],
       inboundBody: input.inbound.at(-1) ?? null,
       draftMessages: output.messages,
     })

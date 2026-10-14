@@ -29,7 +29,9 @@ import { V2_TEMPLATE_CURRENT, type V2TemplateSet } from './template-archive'
 // 555 at Le Mil's against a ~6,000-token prefix, which is what was traded
 // away. Moving HOUSE NOTES back behind the transcript is what reopens it.
 //
-// Never wrap the guest's own words in anything.
+// Never wrap the guest's own words in anything. What the guest sent BESIDES
+// words - a photo, a voice note - is its own turn beside theirs, never a
+// prefix on it: see `inboundMediaAfter`.
 //
 // Pure assembly - no DB, no model call. The turn runner (phase 3) loads
 // section inputs and owns the generate call; the playground renders exactly
@@ -123,6 +125,28 @@ export interface ComposeInput {
   openMoves: string
   /** The guest's message(s) this turn, oldest first, verbatim. */
   inboundMessages: string[]
+  /**
+   * The bracketed lines for what the guest sent BESIDES words this turn - a
+   * photo, a voice note, the story they are replying to - built by
+   * `turnMediaPromptLines` and worded by `lib/ai/prompts/attachment-lines.ts`.
+   * Empty on a turn with no media, which is every turn at most venues.
+   *
+   * THEY ARE THEIR OWN TURNS, not a prefix or a suffix on the guest's words.
+   * This file's standing rule is that the guest's own words are never wrapped
+   * in anything, and a bracketed sentence of ours inside the user turn that
+   * carries their message is exactly that. The SDK merges same-role runs into
+   * content blocks, so what reaches the model is one user message with the
+   * guest's text verbatim in its own block.
+   *
+   * `inboundMediaAfter` is LAST, after the guest's message, because that is
+   * where v1 renders it and because the rules for replying to a picture ride
+   * inside the bracket with it - later beats earlier in a composed prompt, and
+   * `# What you may name` sitting in front of the guest's message would be the
+   * weakest position available. `inboundMediaBefore` is the story being
+   * replied to, which is context for the words that follow it.
+   */
+  inboundMediaBefore?: string[]
+  inboundMediaAfter?: string[]
 }
 
 export interface ComposedPrompt {
@@ -229,12 +253,17 @@ export function composePrompt(
   // `ComposedTurn.cacheBreakpoint` stays in the type because the layout that
   // uses it is one move away (see the header), and generate.ts still honours
   // it - an unset flag is not a dead one.
+  const asUserTurns = (lines: readonly string[] | undefined): ComposedTurn[] =>
+    (lines ?? []).map((text) => ({ role: 'user' as const, text }))
+
   const turns: ComposedTurn[] = [
     ...input.history,
+    ...asUserTurns(input.inboundMediaBefore),
     ...input.inboundMessages.map((text): ComposedTurn => ({
       role: 'user',
       text,
     })),
+    ...asUserTurns(input.inboundMediaAfter),
   ]
 
   const system: ComposedSystemBlock[] = [

@@ -274,6 +274,48 @@ export const REGRESSION_SCENARIOS: RegressionScenario[] = [
     enabled: true,
   },
   {
+    key: 'media-only-described',
+    lesson:
+      "The shape every one of Le Mil's 120 attachments arrived in: a photo or video with NO words. v2 was blind to it until the media lane landed - the transcript query dropped every bodyless row, so the turn read as a guest who wrote nothing, and nothing held the reply. The bar is the gate key, not a word: the one rule every media reply has is that it is HELD for an operator (owner-ruled 2026-10-11, after v1 measured the model telling guests \"we can't see it on our end\" in 7 of 20 replies and two rewordings only changing which false thing it said). The description here is the one a real Le Mil's video carries, so the ceiling that matters is the model staying inside it: a reply naming a drink breaches, because `nameableItems` is empty and the line says to name none.",
+    script: ['hey!'],
+    media: {
+      kind: 'video',
+      description:
+        'A small outdoor vendor trailer with wire shelves holding dark-packaged coffee bags and ceramic jugs, with a printed sign on the door',
+      nameableItems: [],
+      storyReply: false,
+      arrival: 'alone',
+    },
+    target: [],
+    expectFirstName: null,
+    noTurnOneNameAsk: true,
+    expectReplyContains: null,
+    forbidPolicyKeys: [],
+    expectPolicyKeys: ['guest_media_requires_approval'],
+    enabled: true,
+  },
+  {
+    key: 'media-undescribed-with-text',
+    lesson:
+      'A photo beside words that NOBODY HAS LOOKED AT - the describe step never ran, or could not. The agent is told it arrived and that it cannot see it, and the line it is told that in is the one v1 measured twice (TAC-582: the bare marker made the model say the photo "didn\'t come through" in 5 of 20 replies, so the sentence now says all three things inside the bracket). The gate key is the bar for the same reason as the scenario above. The ceiling worth watching is the model answering the WORDS rather than stalling on the picture: this turn has a real question in it, and a reply that only acknowledges the photo has lost the guest their answer.',
+    script: ['is this one of yours?'],
+    media: {
+      // No extension, which is every Instagram CDN link: the kind cannot be
+      // read off the link and the line says "a photo or GIF".
+      mediaUrls: ['https://scontent.cdninstagram.com/v/t51.2885-15/example'],
+      nameableItems: [],
+      storyReply: false,
+      arrival: 'with-text',
+    },
+    target: [],
+    expectFirstName: null,
+    noTurnOneNameAsk: true,
+    expectReplyContains: null,
+    forbidPolicyKeys: [],
+    expectPolicyKeys: ['guest_media_requires_approval'],
+    enabled: true,
+  },
+  {
     key: 'crowd-claim-reaction',
     lesson:
       'A turn that invites a claim about other people, on an item the brief says nothing about. Template v2.18.0 added the hard line, and the gap it closed was total: the first inventing line covers THIS guest - visits, orders, preferences - so "everyone loves it" and "people go nuts for it" sat outside every rule in the prompt. Measured 2026-10-12 by paired ablation over 8 such turns, the rule arm against the same composed prompt with that one bullet deleted. The ceiling is the guard, not a bar: there is no token a correct reply must contain here, because the correct reply is the model declining to speak for people it has not met and then saying something true instead. Deliberately asked about the blossom tonic, which the brief describes without any sales claim - "what is your most popular drink" is the OTHER scenario, because there the crowd fact is licensed and a clean run would mean over-suppression rather than compliance.',

@@ -1,5 +1,6 @@
 import type { GoldenQuestion } from '@/lib/schemas/golden'
 import { RUNNABLE_DRIVERS } from '@/lib/eval/golden-set'
+import type { DeclaredTurnMedia } from '@/lib/relationship/turn-media'
 
 // One golden question to the turn v2 would be asked, or the reason it cannot
 // be asked at all.
@@ -19,10 +20,20 @@ export interface GoldenTurnInput {
   inbound: string[]
   /** The conversation before it. Empty for a cold open. */
   history: Array<{ role: 'user' | 'assistant'; text: string }>
+  /**
+   * What the guest sent besides words, for a scenario carrying `mediaUrls`.
+   * Absent on a text scenario, which composes byte-identically to before.
+   *
+   * A TYPE-ONLY IMPORT, and it has to stay one: this module is imported by
+   * `prompt-lab-client.tsx`, a client component, and `turn-media.ts` reaches
+   * for the admin DB client. The value side of that module never belongs in a
+   * browser bundle; the shape does no harm.
+   */
+  media?: DeclaredTurnMedia
 }
 
 export interface GoldenTurnSkip {
-  stage: 'media' | 'proactive' | 'not_automated'
+  stage: 'proactive' | 'not_automated'
   error: string
 }
 
@@ -30,10 +41,11 @@ export interface GoldenTurnSkip {
  * The turn, and whether v2 can be asked it.
  *
  * `skip` is NOT a failure. It is the harness declining, by name, rather than
- * asking anyway - running it would answer a DIFFERENT turn from v1's (one with
- * no photo, or one driven by an inbound that does not exist) and the column
- * would read as "v2 handled it". A caller must render it as a labelled gap and
- * never count it as a failed arm.
+ * asking anyway - running it would answer a turn driven by an inbound that
+ * does not exist, and the column would read as "v2 handled it". A caller must
+ * render it as a labelled gap and never count it as a failed arm.
+ *
+ * ONE SKIP LEFT, where there were two: media scenarios now run on both arms.
  */
 export function goldenTurnFor(question: GoldenQuestion): {
   turn: GoldenTurnInput
@@ -46,22 +58,30 @@ export function goldenTurnFor(question: GoldenQuestion): {
         role: t.role,
         text: t.text,
       })),
+      // v2 HAS A MEDIA INPUT NOW, so the skip this branch used to return is
+      // gone: it read "run-turn.ts and the v2 composer take text only", which
+      // stopped being true when the media lane landed
+      // (lib/relationship/turn-media.ts). The scenario's links are stated
+      // rather than stored, exactly as the v1 arm states them, so both arms
+      // answer a turn that mentions the same photo.
+      //
+      // The links are read for their FILE EXTENSION and nothing else, on both
+      // arms. Nothing looks at the image, and no description exists for a
+      // scenario - so these turns measure the "you can't see it" wording and
+      // the hold, which is what they measured on v1.
+      ...(question.mediaUrls !== undefined
+        ? { media: { mediaUrls: question.mediaUrls } }
+        : {}),
     },
     skip:
       notAutomatedSkip(question) ??
-      (question.mediaUrls !== undefined
+      (question.driver === 'proactive'
         ? {
-            stage: 'media',
+            stage: 'proactive',
             error:
-              'v2 has no media input - run-turn.ts and the v2 composer take text only, so there is no turn to ask it',
+              'v2 has no proactive path - runTurn answers an inbound, and this scenario has none',
           }
-        : question.driver === 'proactive'
-          ? {
-              stage: 'proactive',
-              error:
-                'v2 has no proactive path - runTurn answers an inbound, and this scenario has none',
-            }
-          : null),
+        : null),
   }
 }
 

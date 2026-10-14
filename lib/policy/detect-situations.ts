@@ -53,6 +53,27 @@ export const SITUATION_KEYS = [
 export type SituationKey = (typeof SITUATION_KEYS)[number]
 
 /**
+ * A situation NOTHING ASKS JEV ABOUT: the guest sent media this turn, or has
+ * media nobody has answered, and the reply is therefore written around
+ * something the model cannot see. It is a structural fact read off rows
+ * (lib/relationship/turn-media.ts, which carries v1's rule verbatim), not a
+ * judgment about the guest's words.
+ *
+ * It is DELIBERATELY NOT A `SITUATION_KEYS` MEMBER. That array is the Jev
+ * request's question set: every key there must come back with a noul or the
+ * whole outcome fails, so a key Jev is never asked about would break the
+ * contract. The gate takes `situations: string[]` rather than
+ * `SituationKey[]`, which is what lets a code-set situation scope a policy row
+ * exactly like a detected one - no second gate mechanism, and the row shows up
+ * in `gate.matched` and on the policy viewer like any other.
+ *
+ * It names the FACT and not the verdict ('guest_media', not 'hold_for_media'):
+ * a venue tuning its own policy row is the thing that decides what happens
+ * about it, which is the whole point of the registry.
+ */
+export const GUEST_MEDIA_SITUATION = 'guest_media'
+
+/**
  * P(yes) floors, PLACEHOLDERS until the calibration set measures real
  * distributions. opt_out_request is LOW on the classifier's own asymmetry:
  * missing one has legal weight, and the gate exemption means a false

@@ -16,8 +16,15 @@
 // the bracket: it arrived, you cannot see it, and what not to do about that.
 // Changing any of it changes the composed prompt and is a PROMPT_VERSION bump.
 //
+// IT IS THE WORDING LAYER FOR BOTH ENGINES. v1 renders these through
+// serializers.ts and v2 through lib/relationship/turn-media.ts, and both take
+// every line from here - including WHICH lines a turn produces
+// (turnMediaPromptLines). A second wording of "the guest sent a photo you
+// cannot see" is the drift this file exists to prevent, and the approvals
+// below are approvals of these sentences, not of the idea of them.
+//
 // ONE SENTENCE SHAPE, ONE VERB PER KIND. mediaLine builds every line, here
-// and on the turn being answered (serializers.ts), so the two cannot drift.
+// and on the turn being answered, so the two cannot drift.
 // The verb is what one does with that kind of thing: see a photo, hear a
 // voice note, watch a video, open a share.
 //
@@ -64,7 +71,12 @@
 // about keeping the line's shape, which is the only thing wording can do; it
 // is not a claim that a caption cannot carry an instruction.
 
-import type { DescribedMediaWord, RecentMessage } from '@/lib/ai/types'
+import type {
+  DescribedMediaWord,
+  InboundDescribedMedia,
+  InboundMediaKind,
+  RecentMessage,
+} from '@/lib/ai/types'
 import {
   type AttachmentKind,
   isReelProviderType,
@@ -159,8 +171,17 @@ const DESCRIBED_WORD_BY_KIND = {
   story_mention: 'story',
 } as const satisfies Partial<Record<AttachmentKind, DescribedMediaWord>>
 
-/** The kinds a description can exist for. Nothing else is ever described. */
-function describedWordFor(kind: AttachmentKind): DescribedMediaWord | null {
+/**
+ * The kinds a description can exist for. Nothing else is ever described.
+ *
+ * Exported for v2, which reads `message_attachments` rows directly rather than
+ * taking `DescribedAttachment`s back from the describe step, so it needs the
+ * row's kind turned into the word a line is built from. One mapping, so a kind
+ * cannot be describable on one engine's reading and not the other's.
+ */
+export function describedWordFor(
+  kind: AttachmentKind,
+): DescribedMediaWord | null {
   return kind in DESCRIBED_WORD_BY_KIND
     ? DESCRIBED_WORD_BY_KIND[kind as keyof typeof DESCRIBED_WORD_BY_KIND]
     : null
@@ -251,6 +272,126 @@ export function describedMediaLine(media: DescribedTurnMedia): string {
  */
 export function unclearMediaLine(word: DescribedMediaWord): string {
   return `[${describedTurnLead(word, false)}. It arrived fine, but it is too unclear to make out. Thank them for sending it. Don't describe it, guess what's in it, or say it didn't come through.]`
+}
+
+// TAC-574 (ruled 2026-10-06): a turn with text AND a photo is answered
+// normally, and the agent is told the photo exists so it can acknowledge it.
+//
+// TAC-582 (ruled 2026-10-11): the line is now the same sentence the history
+// uses, built by the same function, with "also" in it. It used to be the bare
+// marker followed by "You cannot see it. You can say you got it, but do not
+// describe it or react to what is in it." Two things that sentence said are
+// no longer said in those words: that the model MAY say it got the photo
+// ("It arrived fine" now states the fact without the licence), and "react to
+// what is in it" (now "describe it, guess what's in it").
+//
+// `satisfies Record` so a new kind cannot arrive without wording or a verb.
+const INBOUND_MEDIA_LABELS = {
+  photo: ['a photo', 'see it'],
+  gif: ['a GIF', 'see it'],
+  video: ['a video', 'watch it'],
+  // Only reachable from an attachment row, which is what says so.
+  voice_note: ['a voice note', 'hear it'],
+  // An extension nothing recognizes: the type is not known, so "open".
+  other: ['an attachment', 'open it'],
+  unknown: ['a photo or GIF', 'see it'],
+} as const satisfies Record<InboundMediaKind, readonly [string, MediaVerb]>
+
+export function formatInboundMediaLine(kind: InboundMediaKind): string {
+  const [label, verb] = INBOUND_MEDIA_LABELS[kind]
+  return mediaLine(`guest also sent ${label}`, verb)
+}
+
+/**
+ * TAC-584: the lines for this turn's described attachments, in the order they
+ * were sent.
+ *
+ * Beside text, only an attachment with a description gets a line here; the
+ * caller keeps the older "you can't see it" line when none has one. With no
+ * text, an attachment that was looked at and could not be made out gets its
+ * own line, because on that turn it is all there is to answer.
+ */
+export function formatDescribedMediaLines(
+  media: readonly InboundDescribedMedia[],
+  hasText: boolean,
+): string[] {
+  const lines: string[] = []
+  for (const item of media) {
+    if (item.description !== null) {
+      lines.push(
+        describedMediaLine({
+          word: item.word,
+          hasText,
+          description: item.description,
+          nameableItems: item.nameableItems,
+        }),
+      )
+    } else if (!hasText) {
+      lines.push(unclearMediaLine(item.word))
+    }
+  }
+  return lines
+}
+
+export interface TurnMediaPromptInput {
+  /** The guest sent words this turn as well as media. */
+  hasText: boolean
+  /** The message being answered is a reply to one of the venue's stories. */
+  storyReply: boolean
+  /** What the links or the attachment rows say arrived; null when nothing did. */
+  kind: InboundMediaKind | null
+  /** This turn's attachments the describe step has looked at. */
+  described: readonly InboundDescribedMedia[]
+  /**
+   * For a turn with NO text whose media was never described - see the
+   * docstring below. v1 passes nothing.
+   */
+  fallbackLines?: readonly string[]
+}
+
+/**
+ * Every media line for the turn being answered, split by where it goes
+ * relative to the guest's own words. Pure.
+ *
+ * ONE DEFINITION FOR BOTH ENGINES. v1 renders these around its
+ * `The guest just sent: "..."` line (serializers.ts) and v2 renders them as
+ * their own turns around the guest's verbatim messages (lib/ai/v2/compose.ts
+ * never wraps the guest's words in anything), so the two cannot PLACE them
+ * identically. Which lines a turn produces is one rule all the same, and the
+ * precedence inside it is the part that would drift: a described attachment's
+ * line REPLACES the "you can't see it" line rather than joining it, and an
+ * attachment too unclear to make out says nothing new beside text.
+ *
+ * `before` is the story the guest is replying to, and only on a turn with
+ * text: it is the context for the words that follow it, which is why history
+ * renders it first too. With no words there is nothing for it to introduce,
+ * and v1 suppressed it on that turn - `fallbackLines` carries it instead,
+ * because `historyAttachmentLines` sorts a story reply first itself.
+ *
+ * `fallbackLines` IS THE ONE BEHAVIOURAL DIFFERENCE between the engines, and
+ * it is a parameter rather than a branch on who is calling. A turn with no
+ * text whose media was never described is a BLANK OPERATOR CARD in v1: it
+ * reaches no prompt, so v1 passes nothing and gets nothing. v2 has no
+ * blank-card path - its media turn drafts and the gate holds it - so it passes
+ * the lines history shows for that message and the model has the one fact it
+ * needs. Both are the same approved sentences from this file; neither engine
+ * gets wording the other cannot produce.
+ */
+export function turnMediaPromptLines(input: TurnMediaPromptInput): {
+  before: string[]
+  after: string[]
+} {
+  const before =
+    input.hasText && input.storyReply ? [STORY_REPLY_HISTORY_LINE] : []
+  const described = formatDescribedMediaLines(input.described, input.hasText)
+  if (described.length > 0) return { before, after: described }
+  if (input.hasText) {
+    return {
+      before,
+      after: input.kind === null ? [] : [formatInboundMediaLine(input.kind)],
+    }
+  }
+  return { before, after: [...(input.fallbackLines ?? [])] }
 }
 
 /** The one line for one attachment. */

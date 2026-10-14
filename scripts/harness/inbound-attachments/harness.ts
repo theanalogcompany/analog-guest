@@ -51,11 +51,11 @@ import {
   UNKNOWN_ATTACHMENT_HISTORY_LINE,
   UNSUPPORTED_HISTORY_LINE,
   attachmentHistoryLine,
+  formatInboundMediaLine,
   withAttachmentLines,
 } from '@/lib/ai/prompts/attachment-lines'
 import {
   formatConversationTranscript,
-  formatInboundMediaLine,
   splitHistory,
 } from '@/lib/ai/prompts/serializers'
 import { deleteAttachmentsForGuests } from '@/lib/messaging/attachments/delete'
