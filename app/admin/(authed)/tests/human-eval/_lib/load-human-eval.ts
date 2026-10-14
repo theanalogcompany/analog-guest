@@ -2,6 +2,7 @@ import { cache } from 'react'
 import { createAdminClient } from '@/lib/db/admin'
 import { GOLDEN_QUESTIONS } from '@/lib/eval/golden-set'
 import { humanEvalExcluded, humanEvalQuestions } from '@/lib/eval/human-eval'
+import { mark } from '../../../_lib/request-timing'
 import {
   HUMAN_EVAL_UNIT_COLUMNS,
   sortUnitsByQuestionOrder,
@@ -65,6 +66,7 @@ export const loadHumanEvalPage = cache(
       .eq('venue_id', venueId)
       .order('started_at', { ascending: false })
       .limit(SESSIONS_LIMIT + 1)
+    mark('sessions')
     if (sessionsResult.error)
       return {
         ...base,
@@ -98,6 +100,7 @@ export const loadHumanEvalPage = cache(
         'session_id',
         windowed.map((s) => s.id),
       )
+    mark('counts')
     if (countsResult.error)
       return {
         ...base,
@@ -115,6 +118,7 @@ export const loadHumanEvalPage = cache(
       .from('human_eval_units')
       .select(HUMAN_EVAL_UNIT_COLUMNS)
       .eq('session_id', selected.id)
+    mark('units')
     if (unitsResult.error)
       return {
         ...base,

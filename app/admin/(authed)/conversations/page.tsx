@@ -1,8 +1,6 @@
 import { redirect } from 'next/navigation'
 import { formatInTimeZone } from 'date-fns-tz'
-import { AuthError, devAuthBypass, verifyAnalogAdminAccess } from '@/lib/auth'
 import { createAdminClient } from '@/lib/db/admin'
-import { createServerClient } from '@/lib/db/server'
 import { MESSAGE_HAS_CONTENT_FILTER } from '@/lib/messaging/attachments/store'
 import { logger } from '@/lib/observability/logger'
 import { type GuestState } from '@/lib/recognition'
@@ -11,6 +9,7 @@ import {
   VenueInfoSchema,
   filterActiveContext,
 } from '@/lib/schemas'
+import { resolveAdminSession } from '../_lib/admin-session'
 import { guestNameWithPhone } from '../_lib/guest-name'
 import {
   SLOW_RENDER_MS,
@@ -120,28 +119,12 @@ async function renderConversations(
   params: { venue?: string; guest?: string },
   timer: StageTimer,
 ) {
-  // Resolve operator + allowed venues
-  let venueScope: VenueScope
-  // Local-dev bypass (lib/auth/dev-bypass.ts): triple-guarded, null anywhere
-  // but a developer's own `next dev` on localhost.
-  const bypass = await devAuthBypass()
-  if (bypass) {
-    venueScope = bypass.venueScope
-  } else {
-    const supabaseSession = await createServerClient()
-    const {
-      data: { session },
-    } = await supabaseSession.auth.getSession()
-    if (!session) redirect('/admin/sign-in')
-
-    try {
-      const op = await verifyAnalogAdminAccess(session.user.id)
-      venueScope = op.venueScope
-    } catch (e) {
-      if (e instanceof AuthError && e.status === 403) redirect('/admin')
-      throw e
-    }
-  }
+  // Resolve operator + allowed venues. Already done for this request by the
+  // (authed) layout; this is the memoized read, not a second trip.
+  const session = await resolveAdminSession()
+  if (session.kind === 'no-session') redirect('/admin/sign-in')
+  if (session.kind === 'not-admin') redirect('/admin')
+  const venueScope = session.venueScope
   timer.mark('auth')
 
   const supabase = createAdminClient({ timeoutMs: SUPABASE_TIMEOUT_MS })
