@@ -1,10 +1,13 @@
-// TAC-586: one stamp as SVG, in 1x units. Pure apart from the font metrics it
-// is handed.
+// TAC-586, TAC-587: one stamp as SVG, in 1x units. Pure apart from the font
+// metrics it is handed.
 //
 // THE GEOMETRY IS lib/passport/assets/stamp-spec.md, number for number: sizes,
 // stroke widths, insets, font sizes, letter-spacing, the y of every line. Where
 // that file and the Figma spec block (161:1632) differ, the file wins (ruled
-// 2026-10-14). A number here that is not in the spec says why beside it.
+// 2026-10-14). TAC-587's time lines and VISIT layout are Figma section 08
+// (181:1633), stars kept: the drawing lost them only because its font has no
+// ★ (ruled 2026-10-14). A number here that is not in the spec says why beside
+// it.
 //
 // TEXT IS PLACED BY ITS CENTRE, as the spec gives it. A line is drawn
 // start-anchored at `cx - width / 2`, with its baseline at `cy` plus half the
@@ -20,11 +23,12 @@
 // five-point polygon as tall as the cap height of Oswald Medium at the size
 // the spec names for it.
 //
-// SHRINK-TO-FIT. The spec shrinks two lines: VISIT's venue (to 108) and
-// DISCOVERED's item (26, then 21 past 12 characters, then to fit 200). Every
-// other line that carries a fill-in - the venue, the city, the perk - also
-// shrinks to fit inside its border less 16, decided at plan time: "LE MIL'S
-// COFFEE" fits everywhere at full size, and a longer venue name would
+// SHRINK-TO-FIT. The spec shrinks VISIT's venue (to 104), DISCOVERED's item
+// (26, then 21 past 12 characters, then to fit 200), and the three lines that
+// carry the time: ARRIVED's date line (160), DISCOVERED's bottom line (212)
+// and INVITED's (186). Every other line that carries a fill-in - ARRIVED's
+// venue and city, VISIT's city, the perk - also shrinks to fit inside its
+// border less 16, decided at TAC-586's plan time: a longer venue name would
 // otherwise run off the stamp.
 
 import type { StampKind } from '../decide'
@@ -54,6 +58,8 @@ export type StampFace = {
   label: string | null
   /** Already formatted: `30 OCT 2026`. */
   date: string
+  /** Already formatted, venue-local: `1:22 PM`. */
+  time: string
   /** As printed: `LE MIL'S COFFEE`. */
   venueName: string
   /** ARRIVED's city: `S.F.` */
@@ -201,12 +207,13 @@ function arrivedBody(face: StampFace, m: MetricsFor, ink: string): string {
     textElement(
       m,
       {
-        text: upper(face.date),
+        text: `${upper(face.date)} · ${face.time}`,
         font: 'courierPrimeBold',
-        size: 17,
+        size: 13,
         spacing: 0,
         cx: w / 2,
         cy: 89,
+        maxWidth: 160,
       },
       ink,
     ),
@@ -233,11 +240,23 @@ function visitBody(face: StampFace, m: MetricsFor, ink: string): string {
   const c = w / 2
   const outerR = c - 3 / 2
   const innerR = outerR - 9
-  // SAN FRANCISCO's room is the inner ring's chord at y=104, less 16.
-  const chordHalf = Math.sqrt(innerR ** 2 - (104 - c) ** 2)
+  // SAN FRANCISCO's room is the inner ring's chord at y=106, less 16.
+  const chordHalf = Math.sqrt(innerR ** 2 - (106 - c) ** 2)
   return [
     `<circle cx="${c}" cy="${c}" r="${outerR}" fill="none" stroke="${ink}" stroke-width="3"/>`,
     `<circle cx="${c}" cy="${c}" r="${innerR}" fill="none" stroke="${ink}" stroke-width="1.1"/>`,
+    textElement(
+      m,
+      {
+        text: 'VISITED',
+        font: 'oswaldSemiBold',
+        size: 9,
+        spacing: 0.45,
+        cx: c,
+        cy: 29,
+      },
+      ink,
+    ),
     textElement(
       m,
       {
@@ -247,12 +266,12 @@ function visitBody(face: StampFace, m: MetricsFor, ink: string): string {
         spacing: 0.03,
         cx: c,
         cy: 45,
-        maxWidth: 108,
+        maxWidth: 104,
       },
       ink,
     ),
-    rule(26, 124, 62, 1.4, ink),
-    rule(26, 124, 88, 1.4, ink),
+    rule(26, 124, 58, 1.4, ink),
+    rule(26, 124, 93, 1.4, ink),
     textElement(
       m,
       {
@@ -261,7 +280,19 @@ function visitBody(face: StampFace, m: MetricsFor, ink: string): string {
         size: 14,
         spacing: 0,
         cx: c,
-        cy: 75,
+        cy: 70,
+      },
+      ink,
+    ),
+    textElement(
+      m,
+      {
+        text: face.time,
+        font: 'courierPrimeBold',
+        size: 10.5,
+        spacing: 0,
+        cx: c,
+        cy: 83,
       },
       ink,
     ),
@@ -273,12 +304,12 @@ function visitBody(face: StampFace, m: MetricsFor, ink: string): string {
         size: 8,
         spacing: 0.14,
         cx: c,
-        cy: 104,
+        cy: 106,
         maxWidth: chordHalf * 2 - 16,
       },
       ink,
     ),
-    star(m, c, 120, 9, ink),
+    star(m, c, 121, 9, ink),
   ].join('')
 }
 
@@ -321,13 +352,13 @@ function discoveredBody(face: StampFace, m: MetricsFor, ink: string): string {
     textElement(
       m,
       {
-        text: `${upper(face.date)} · ${upper(face.venueName)}`,
+        text: `${upper(face.date)} · ${face.time} · ${upper(face.venueName)}`,
         font: 'courierPrimeBold',
         size: 10.5,
         spacing: 0,
         cx: w / 2,
         cy: 97,
-        maxWidth: innerWidth - 16,
+        maxWidth: 212,
       },
       ink,
     ),
@@ -387,13 +418,13 @@ function invitedBody(face: StampFace, m: MetricsFor, ink: string): string {
     textElement(
       m,
       {
-        text: `${upper(face.date)} · ${upper(face.venueName)}`,
+        text: `${upper(face.date)} · ${face.time} · ${upper(face.venueName)}`,
         font: 'courierPrimeBold',
         size: 10.5,
         spacing: 0,
         cx: w / 2,
         cy: 127,
-        maxWidth: innerWidth - 16,
+        maxWidth: 186,
       },
       ink,
     ),
