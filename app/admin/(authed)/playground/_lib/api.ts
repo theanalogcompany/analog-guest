@@ -1,5 +1,11 @@
 import type { PlaygroundConversationTurn } from '@/lib/schemas/playground'
 import type { PlaygroundSession } from '@/lib/relationship/run-turn'
+import {
+  deleteJson,
+  getJson,
+  postJson,
+  type FetchResult,
+} from '../../_lib/fetch-json'
 import type {
   GuestListResponse,
   RunRequestBody,
@@ -10,61 +16,19 @@ import type {
   TimelineResponse,
 } from './types'
 
-// Client-side fetch wrappers for the playground routes. Errors as values all
-// the way to the UI: a failed run renders in the inspector, never a crash.
+// The playground's own routes, one wrapper each. The HTTP half - how a route's
+// `{error, detail}` becomes a string the UI can render - is
+// `(authed)/_lib/fetch-json.ts`, shared with every other admin surface.
 // Admin API routes live at /admin/playground/api/* (app/admin/CLAUDE.md -
 // /api/admin/... 404s in production behind the host gate).
 
-export type FetchResult<T> =
-  { ok: true; data: T } | { ok: false; error: string }
-
-async function readError(response: Response): Promise<string> {
-  try {
-    const body: unknown = await response.json()
-    if (body !== null && typeof body === 'object') {
-      const { error, detail } = body as { error?: unknown; detail?: unknown }
-      const parts = [error, detail].filter(
-        (p): p is string => typeof p === 'string' && p.length > 0,
-      )
-      if (parts.length > 0) return `${response.status}: ${parts.join(' - ')}`
-    }
-  } catch {
-    // fall through to the status line
-  }
-  return `request failed with status ${response.status}`
-}
-
-async function getJson<T>(url: string): Promise<FetchResult<T>> {
-  try {
-    const response = await fetch(url)
-    if (!response.ok) return { ok: false, error: await readError(response) }
-    return { ok: true, data: (await response.json()) as T }
-  } catch (e) {
-    return {
-      ok: false,
-      error: e instanceof Error ? e.message : 'network request failed',
-    }
-  }
-}
+export type { FetchResult }
 
 /** One full turn through the v2 engine. Takes 15-45s (three model calls). */
-export async function postRun(
+export function postRun(
   body: RunRequestBody,
 ): Promise<FetchResult<RunResponseBody>> {
-  try {
-    const response = await fetch('/admin/playground/api/run', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    })
-    if (!response.ok) return { ok: false, error: await readError(response) }
-    return { ok: true, data: (await response.json()) as RunResponseBody }
-  } catch (e) {
-    return {
-      ok: false,
-      error: e instanceof Error ? e.message : 'network request failed',
-    }
-  }
+  return postJson('/admin/playground/api/run', body)
 }
 
 export function fetchGuests(
@@ -97,7 +61,7 @@ export function fetchSavedConversation(
   )
 }
 
-export async function postSaveConversation(
+export function postSaveConversation(
   venueId: string,
   body: {
     name: string
@@ -105,43 +69,14 @@ export async function postSaveConversation(
     nextSession: PlaygroundSession | null
   },
 ): Promise<FetchResult<SavedConversationSummary>> {
-  try {
-    const response = await fetch(
-      `/admin/playground/api/venues/${venueId}/conversations`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      },
-    )
-    if (!response.ok) return { ok: false, error: await readError(response) }
-    return {
-      ok: true,
-      data: (await response.json()) as SavedConversationSummary,
-    }
-  } catch (e) {
-    return {
-      ok: false,
-      error: e instanceof Error ? e.message : 'network request failed',
-    }
-  }
+  return postJson(`/admin/playground/api/venues/${venueId}/conversations`, body)
 }
 
-export async function deleteSavedConversation(
+export function deleteSavedConversation(
   venueId: string,
   conversationId: string,
 ): Promise<FetchResult<{ ok: true }>> {
-  try {
-    const response = await fetch(
-      `/admin/playground/api/venues/${venueId}/conversations/${conversationId}`,
-      { method: 'DELETE' },
-    )
-    if (!response.ok) return { ok: false, error: await readError(response) }
-    return { ok: true, data: { ok: true } }
-  } catch (e) {
-    return {
-      ok: false,
-      error: e instanceof Error ? e.message : 'network request failed',
-    }
-  }
+  return deleteJson(
+    `/admin/playground/api/venues/${venueId}/conversations/${conversationId}`,
+  )
 }

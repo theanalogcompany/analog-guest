@@ -35,20 +35,26 @@ export const GOLDEN_GROUPS = [
   'press',
   'handling',
   'proactive',
-  'arrival',
 ] as const
 export type GoldenGroup = (typeof GOLDEN_GROUPS)[number]
 
 /**
- * What drives a scenario. `inbound` is the only one the harness runs.
+ * What drives a scenario. `inbound` and `proactive` are the two the harness
+ * runs - `RUNNABLE_DRIVERS` in lib/eval/golden-set.ts is the one definition.
  *
  * The rest are real production paths with NO read-only test entry: only
- * `runInboundTurn` has a test sink (`draftInboundReply`), so a proactive
- * follow-up, a scan greeting, a media-only turn and a held-draft timeout
- * cannot be drafted without new test-mode plumbing in paths that do not have
- * it - which is `lib/agent/` runtime work, not a harness change. They are in
- * the set, named and explained, because a gap you can see is worth more than
- * a set that looks complete.
+ * `runInboundTurn` and the follow-up engine have a test sink, so a scan
+ * greeting and a held-draft timeout cannot be drafted without new test-mode
+ * plumbing in paths that do not have it - which is `lib/agent/` runtime work,
+ * not a harness change.
+ *
+ * NO SCENARIO CARRIES ONE OF THOSE TODAY. The set's `scan_arrival` and
+ * `held_draft_expiry` scenarios were removed 2026-10-13 (golden-set.ts names
+ * which, and why) because neither engine could answer them, so the set covers
+ * those paths not at all rather than visibly-but-emptily. The values stay here
+ * because the paths still exist in production and the validator still has to
+ * refuse a scenario that claims one; `GOLDEN_DRIVERS` is the vocabulary, not a
+ * census of the set.
  */
 export const GOLDEN_DRIVERS = [
   'inbound',

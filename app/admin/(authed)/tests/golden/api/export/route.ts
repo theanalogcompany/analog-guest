@@ -1,8 +1,10 @@
 import { NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/db/admin'
 import { GOLDEN_QUESTIONS } from '@/lib/eval/golden-set'
+import { CSV_UTF8_BOM } from '@/lib/eval/csv'
 import {
   goldenCsvFilename,
+  goldenInputCells,
   goldenRowsToCsv,
   type GoldenCsvRow,
 } from '@/lib/eval/golden-csv'
@@ -82,22 +84,11 @@ export async function GET(request: Request): Promise<NextResponse> {
         question_key: row.question_key,
         group: question?.group ?? 'orphan',
         question: question?.question ?? '(question no longer in the set)',
-        // The input, beside the answers. An orphan key has no code definition
-        // left, so its transcript is genuinely unknown rather than empty -
-        // said so, never rendered as a cold open it may not have been.
-        history:
-          question === null
-            ? '(unknown - question no longer in the set)'
-            : (question.history ?? [])
-                .map(
-                  (t) => `${t.role === 'user' ? 'guest' : 'venue'}: ${t.text}`,
-                )
-                .join('\n'),
-        inbound:
-          question === null
-            ? ''
-            : (question.messages ?? [question.question]).join('\n'),
-        media: question?.mediaUrls?.join('\n') ?? '',
+        // The input, beside the answers. Shared with the human-evaluation
+        // export rather than built here - goldenInputCells says why, and it
+        // is the one place that decides what an orphan key's transcript reads
+        // as.
+        ...goldenInputCells(question),
         v1_reply:
           v1Data === null
             ? 'UNREADABLE stored column'
@@ -137,7 +128,7 @@ export async function GET(request: Request): Promise<NextResponse> {
   // the local codepage; without it a curly apostrophe in a reply - and the
   // voice pack is full of them - renders as mojibake. Added here rather than
   // in the serializer so `goldenRowsToCsv` stays plain CSV.
-  return new NextResponse(`﻿${goldenRowsToCsv(rows)}`, {
+  return new NextResponse(`${CSV_UTF8_BOM}${goldenRowsToCsv(rows)}`, {
     headers: {
       'Content-Type': 'text/csv; charset=utf-8',
       'Content-Disposition': `attachment; filename="${filename}"`,

@@ -289,13 +289,16 @@ export type Database = {
           clock_injected: boolean
           finished_at: string | null
           full_run: boolean
+          git_branch: string | null
           git_dirty: boolean
+          git_on_remote: boolean | null
           git_sha: string | null
           git_subject: string | null
           id: string
           questions_total: number
           started_at: string
           v1_prompt_version: string
+          v2_generation_model: string | null
           v2_prompt_version: string
           venue_id: string
           venue_open_state: string
@@ -304,13 +307,16 @@ export type Database = {
           clock_injected?: boolean
           finished_at?: string | null
           full_run: boolean
+          git_branch?: string | null
           git_dirty?: boolean
+          git_on_remote?: boolean | null
           git_sha?: string | null
           git_subject?: string | null
           id?: string
           questions_total: number
           started_at?: string
           v1_prompt_version: string
+          v2_generation_model?: string | null
           v2_prompt_version: string
           venue_id: string
           venue_open_state: string
@@ -319,13 +325,16 @@ export type Database = {
           clock_injected?: boolean
           finished_at?: string | null
           full_run?: boolean
+          git_branch?: string | null
           git_dirty?: boolean
+          git_on_remote?: boolean | null
           git_sha?: string | null
           git_subject?: string | null
           id?: string
           questions_total?: number
           started_at?: string
           v1_prompt_version?: string
+          v2_generation_model?: string | null
           v2_prompt_version?: string
           venue_id?: string
           venue_open_state?: string
@@ -780,6 +789,106 @@ export type Database = {
             columns: ["venue_id"]
             isOneToOne: false
             referencedRelation: "venues"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      human_eval_sessions: {
+        Row: {
+          git_sha: string | null
+          id: string
+          rated_by: string
+          started_at: string
+          v1_prompt_version: string
+          v2_model: string
+          v2_prompt_version: string
+          venue_id: string
+          venue_open_state: string
+        }
+        Insert: {
+          git_sha?: string | null
+          id?: string
+          rated_by: string
+          started_at?: string
+          v1_prompt_version: string
+          v2_model: string
+          v2_prompt_version: string
+          venue_id: string
+          venue_open_state: string
+        }
+        Update: {
+          git_sha?: string | null
+          id?: string
+          rated_by?: string
+          started_at?: string
+          v1_prompt_version?: string
+          v2_model?: string
+          v2_prompt_version?: string
+          venue_id?: string
+          venue_open_state?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "human_eval_sessions_venue_id_fkey"
+            columns: ["venue_id"]
+            isOneToOne: false
+            referencedRelation: "venues"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      human_eval_units: {
+        Row: {
+          a_arm: string
+          a_verdict: string | null
+          b_verdict: string | null
+          generated_at: string
+          id: string
+          judged_at: string | null
+          note: string | null
+          preference: string | null
+          question_key: string
+          revealed_at: string | null
+          session_id: string
+          v1: Json
+          v2: Json
+        }
+        Insert: {
+          a_arm: string
+          a_verdict?: string | null
+          b_verdict?: string | null
+          generated_at?: string
+          id?: string
+          judged_at?: string | null
+          note?: string | null
+          preference?: string | null
+          question_key: string
+          revealed_at?: string | null
+          session_id: string
+          v1: Json
+          v2: Json
+        }
+        Update: {
+          a_arm?: string
+          a_verdict?: string | null
+          b_verdict?: string | null
+          generated_at?: string
+          id?: string
+          judged_at?: string | null
+          note?: string | null
+          preference?: string | null
+          question_key?: string
+          revealed_at?: string | null
+          session_id?: string
+          v1?: Json
+          v2?: Json
+        }
+        Relationships: [
+          {
+            foreignKeyName: "human_eval_units_session_id_fkey"
+            columns: ["session_id"]
+            isOneToOne: false
+            referencedRelation: "human_eval_sessions"
             referencedColumns: ["id"]
           },
         ]

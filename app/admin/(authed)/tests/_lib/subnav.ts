@@ -18,5 +18,8 @@ export interface TestsSubnavItem {
 
 export const TESTS_SUBNAV: readonly TestsSubnavItem[] = [
   { href: '/admin/tests/golden', label: 'Golden set' },
+  // The same questions, judged rather than read: both engines answer live,
+  // the pair is shown blind as A and B, and the verdicts export as a CSV.
+  { href: '/admin/tests/human-eval', label: 'Human eval' },
   { href: '/admin/regression', label: 'Regression' },
 ]
