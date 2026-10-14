@@ -20,12 +20,9 @@ STORE = "lib/agent/scan-arrival-store.ts"
 TIMING = "lib/agent/scan-arrival.ts"
 PROCESSOR = "lib/agent/instagram-scan-greeting.ts"
 
-SLEEP = (
-    "    await deps.sleep(\n"
-    "      msUntilScanGreetingDue(scheduled.scannedAt, deps.now()) +\n"
-    "        SCAN_FAST_PATH_WAKE_MARGIN_MS,\n"
-    "    )\n"
-)
+# The top of the fast path's guarded block (TAC-588: it waits for the stamp
+# run before it reads the row and sleeps).
+FAST_PATH_TOP = "  try {\n    if (scheduled.passportSettled !== undefined) {\n"
 
 # (name, file, exact text that must match ONCE, replacement)
 MUTANTS = [
@@ -62,14 +59,14 @@ MUTANTS = [
     (
         "fast path judges at the pre-sleep instant",
         PROCESSOR,
-        "  try {\n" + SLEEP,
-        "  const stale = deps.now()\n  deps = { ...deps, now: () => stale }\n  try {\n" + SLEEP,
+        FAST_PATH_TOP,
+        "  const stale = deps.now()\n  deps = { ...deps, now: () => stale }\n" + FAST_PATH_TOP,
     ),
     (
         "fast path guard does not cover the sleep",
         PROCESSOR,
-        "  try {\n" + SLEEP,
-        "  await deps.sleep(0)\n  try {\n" + SLEEP,
+        FAST_PATH_TOP,
+        "  await deps.sleep(0)\n" + FAST_PATH_TOP,
     ),
     (
         "inbound re-check skipped",
@@ -86,8 +83,32 @@ MUTANTS = [
     (
         "sleep uncapped",
         TIMING,
-        "  return Math.min(Math.max(remaining, 0), 2 * delayMs)",
+        "  return Math.min(Math.max(remaining, 0), cap)",
         "  return Math.max(remaining, 0)",
+    ),
+    (
+        "TAC-588: hello ignores when the images went out",
+        TIMING,
+        "  if (timing.passportSentAt !== null) {",
+        "  if (false) {",
+    ),
+    (
+        "TAC-588: no passport cap, an unsettled run greets at 20s",
+        TIMING,
+        "  return new Date(scanned + PASSPORT_WAIT_CAP_MS)",
+        "  return new Date(scanned + delayMs)",
+    ),
+    (
+        "TAC-588: fast path does not wait for the stamp run",
+        PROCESSOR,
+        "      await scheduled.passportSettled.catch(() => undefined)\n",
+        "      void scheduled.passportSettled.catch(() => undefined)\n",
+    ),
+    (
+        "TAC-588: a second settle overwrites the first",
+        STORE,
+        "      .eq('id', id)\n      .is('passport_settled_at', null)\n",
+        "      .eq('id', id)\n",
     ),
     (
         "carry-forward re-derived from the delay",

@@ -30,7 +30,12 @@ partial unique index, with the sleep and the clock injected.
 
 - **Can:** the timing boundaries, every suppression reached through the fast path, that the
   clock is read after the sleep, and what happens when the two runners overlap on one row
-  or one guest-day.
+  or one guest-day. Since TAC-588, also the hello's wait for a receipt scan's passport
+  images: 4 s after they went, the 20 s fallback when the run sent nothing, the 60 s cap
+  when it never reported, and that its outcome is written once.
+- **Cannot:** see the webhook chain itself (`app/api/webhooks/instagram/route.ts`) that
+  hands the fast path its stamp promise. That ordering is the device UAT: the two images
+  land before the text.
 - **Cannot:** observe a send. With no credentials `handleFollowup` fails at context build, so
   a greeting is observed through the **claim** that precedes it. A check that says "claims
   once" means exactly that.

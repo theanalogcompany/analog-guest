@@ -22,11 +22,14 @@
 // A failure at 4 or 5 leaves the row with `sent_at` NULL and says where in one
 // `event:` log line and one PostHog capture. Nothing retries it later.
 //
-// IT NEVER TOUCHES THE SCAN GREETING. The greeting is scheduled in its own
-// `waitUntil` and reads none of what this writes: no scan-arrival row, no
+// IT NEVER WRITES TO THE SCAN GREETING'S STATE: no scan-arrival row, no
 // inbound row, no `last_proactive_send_at`, and the image rows are
 // `generated_by = 'system'`, which every "has the venue spoken" reader skips
-// (lib/messaging/system-rows.ts).
+// (lib/messaging/system-rows.ts). TAC-588: the greeting now WAITS for this
+// run, though. The webhook writes this run's outcome to the scan's row
+// (settleScanPassport) and the hello is timed from `sentAt` below; a mark-sent
+// failure (the images did reach the guest) still reports `failed`, so that
+// hello goes on the twenty-second fallback, a few seconds late.
 //
 // Never throws: everything past the gates is inside one try/catch, so an
 // escape becomes `stage: 'unexpected'` rather than an unhandled rejection in
@@ -76,7 +79,11 @@ export type IssueStampInput = {
 }
 
 export type IssueStampOutcome =
-  | { status: 'issued'; stampId: string }
+  /**
+   * `sentAt` is when both images had reached the guest, the instant written
+   * to `sent_at`. TAC-588 times the scan's hello from it.
+   */
+  | { status: 'issued'; stampId: string; sentAt: Date }
   | { status: 'skipped'; reason: PassportStampSkipReason }
   | { status: 'failed'; stage: string; stampId: string | null }
 
@@ -382,7 +389,8 @@ export async function issuePassportStamp(
           `${sent.error ?? ''} (attempts ${sent.attempts}, delivered ${sent.delivered})`.trim(),
       })
 
-    const marked = await markStampSent(supabase, rowScope, new Date())
+    const sentAt = new Date()
+    const marked = await markStampSent(supabase, rowScope, sentAt)
     if (!marked.ok)
       // Both images reached the guest; only the marker failed. Reported, so
       // the null `sent_at` is not read as an undelivered stamp.
@@ -409,7 +417,7 @@ export async function issuePassportStamp(
       attempts: sent.attempts,
       durationMs: Date.now() - startedMs,
     })
-    return { status: 'issued', stampId: stamp.id }
+    return { status: 'issued', stampId: stamp.id, sentAt }
   } catch (e) {
     return fail(input, { stage: 'unexpected', stampId, error: message(e) })
   }

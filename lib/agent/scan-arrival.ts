@@ -19,6 +19,11 @@
 //
 //   Twenty seconds of silence sends the greeting.
 //
+//   TAC-588: a scan of a RECEIPT code binds the order and sends the passport
+//   images first, and the greeting follows the images by a few seconds
+//   instead of the twenty-second timer (scanGreetingDueAt). With no passport,
+//   or a run that sent nothing, the twenty seconds stand.
+//
 //   Separately, anything the guest sends within FIVE MINUTES of the scan is
 //   treated as at-counter, greeted or not: order capture arms off the scan.
 //
@@ -90,24 +95,85 @@ export const SCAN_CARRY_FORWARD_MS = 5 * 60 * 1000
  */
 export const SCAN_GREETING_CARRY_FORWARD_MS = 30 * 60 * 1000
 
-/** A pending scan, as the greeting processor and the carry-forward see it. */
+/**
+ * How long after the passport images reached the guest the hello follows them.
+ *
+ * FOUR SECONDS, a choice (TAC-588: the ruling says "a few seconds"). Long
+ * enough that the spread has landed in the thread before the text, short
+ * enough that the images and the hello read as one moment.
+ */
+export const HELLO_AFTER_PASSPORT_MS = 4 * 1000
+
+/**
+ * How long a scan carrying a receipt code waits for its stamp run before the
+ * hello goes anyway.
+ *
+ * SIXTY SECONDS, a choice. A normal run is a render, an upload and two sends,
+ * a few seconds. Its worst case is the send retry ladder (2 s + 6 s) plus the
+ * echo wait (2 s + 6 s) plus the render, about 25 s. Past a minute the run has
+ * died (an instance recycled mid-render), and the hello goes without it. Well
+ * inside SCAN_GREETING_MAX_AGE_MS, so a scan is never stale before its cap.
+ */
+export const PASSPORT_WAIT_CAP_MS = 60 * 1000
+
+/**
+ * A pending scan, as the greeting processor and the carry-forward see it.
+ *
+ * The three passport fields are migration 089's, and they decide when the
+ * hello is due (scanGreetingDueAt). A scan with no receipt code has
+ * `awaitsPassport: false` and nothing else set, and is due exactly as before.
+ */
 export interface ScanArrivalTiming {
   scannedAt: Date
+  /** The scan carried a receipt code, so a stamp run was started for it. */
+  awaitsPassport: boolean
+  /** When that run ended, sent or not. Null while it is still running. */
+  passportSettledAt: Date | null
+  /** When both images reached the guest. Null if the run sent nothing. */
+  passportSentAt: Date | null
 }
 
 /**
- * Has the greeting delay elapsed?
+ * When the hello is due (TAC-588). ONE RULE, read by both runners.
+ *
+ *   no receipt code              the scan + SCAN_GREETING_DELAY_MS, as before
+ *   images sent at T             T + HELLO_AFTER_PASSPORT_MS
+ *   run ended, nothing sent      the scan + SCAN_GREETING_DELAY_MS: no passport
+ *                                configured, an opted-out guest, a failed send,
+ *                                an expired or unknown code, a payment Square
+ *                                has not told us about
+ *   run still going              the scan + PASSPORT_WAIT_CAP_MS, so a run that
+ *                                died costs a minute, never the hello
+ *
+ * The images-sent case can be EARLIER than twenty seconds after the scan, and
+ * that is the point: the hello follows the images, not the clock.
+ */
+export function scanGreetingDueAt(
+  timing: ScanArrivalTiming,
+  delayMs: number = SCAN_GREETING_DELAY_MS,
+): Date {
+  const scanned = timing.scannedAt.getTime()
+  if (!timing.awaitsPassport) return new Date(scanned + delayMs)
+  if (timing.passportSentAt !== null) {
+    return new Date(timing.passportSentAt.getTime() + HELLO_AFTER_PASSPORT_MS)
+  }
+  if (timing.passportSettledAt !== null) return new Date(scanned + delayMs)
+  return new Date(scanned + PASSPORT_WAIT_CAP_MS)
+}
+
+/**
+ * Is the hello due?
  *
  * `>=` rather than `>`: the delay is a floor the guest has had, not a deadline
  * to beat, and a check landing on the exact millisecond should fire rather
  * than leave the row for the next cron tick.
  */
 export function isScanGreetingDue(
-  scannedAt: Date,
+  timing: ScanArrivalTiming,
   now: Date,
   delayMs: number = SCAN_GREETING_DELAY_MS,
 ): boolean {
-  return now.getTime() - scannedAt.getTime() >= delayMs
+  return now.getTime() >= scanGreetingDueAt(timing, delayMs).getTime()
 }
 
 /**
@@ -124,25 +190,30 @@ export const SCAN_FAST_PATH_WAKE_MARGIN_MS = 250
 /**
  * How long the fast path should sleep before the greeting is due.
  *
- * Measured from `scannedAt`, the same clock `isScanGreetingDue` reads. It is
- * the EXACT remainder, and a timer can fire a millisecond short of what it
+ * Measured to scanGreetingDueAt, the same instant `isScanGreetingDue` reads. It
+ * is the EXACT remainder, and a timer can fire a millisecond short of what it
  * was asked for, so a caller that wants the row due on waking adds
  * SCAN_FAST_PATH_WAKE_MARGIN_MS.
  *
  * Floored at zero: a delivery Meta held for longer than the delay is already
- * due. CAPPED at twice the delay: `scannedAt` is Meta's clock, and a
- * timestamp ahead of ours (or simply wrong) must not hold a webhook
- * invocation open for however long it says. Past the cap the row is not due
- * when the sleep ends, the fast path leaves it, and the cron takes it.
+ * due. CAPPED: `scannedAt` is Meta's clock, and a timestamp ahead of ours (or
+ * simply wrong) must not hold a webhook invocation open for however long it
+ * says. Past the cap the row is not due when the sleep ends, the fast path
+ * leaves it, and the cron takes it. The cap is twice the delay for a plain
+ * scan, and the passport wait plus the delay for one with a receipt code
+ * (TAC-588), which is the longest a correct row can need.
  */
 export function msUntilScanGreetingDue(
-  scannedAt: Date,
+  timing: ScanArrivalTiming,
   now: Date,
   delayMs: number = SCAN_GREETING_DELAY_MS,
 ): number {
-  const remaining = scannedAt.getTime() + delayMs - now.getTime()
+  const remaining = scanGreetingDueAt(timing, delayMs).getTime() - now.getTime()
   if (!Number.isFinite(remaining)) return 0
-  return Math.min(Math.max(remaining, 0), 2 * delayMs)
+  const cap = timing.awaitsPassport
+    ? PASSPORT_WAIT_CAP_MS + delayMs
+    : 2 * delayMs
+  return Math.min(Math.max(remaining, 0), cap)
 }
 
 /**

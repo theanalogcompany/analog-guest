@@ -45,7 +45,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import type { Database } from '@/db/types'
 import { logger } from '@/lib/observability/logger'
 import { DELIVERED_OUTBOUND_STATUSES } from './group-responses'
-import { latestGreetings } from './scan-arrival'
+import { latestGreetings, type ScanArrivalTiming } from './scan-arrival'
 
 type AdminSupabaseClient = SupabaseClient<Database>
 
@@ -68,12 +68,11 @@ export type ScanArrivalOutcome =
   | 'already_greeted_today'
   | 'errored'
 
-export interface PendingScanArrival {
+export interface PendingScanArrival extends ScanArrivalTiming {
   id: string
   venueId: string
   guestId: string
   scanMessageId: string | null
-  scannedAt: Date
   /**
    * Whether the guest had any message on our record when the scan arrived.
    * Settled at scan time and carried, never recomputed: it picks which of the
@@ -108,6 +107,11 @@ export async function scheduleScanArrival(
     venueId: string
     guestId: string
     hadPriorConversation: boolean
+    /**
+     * TAC-588: the scan carried a receipt code and a stamp run is starting
+     * for it, so the hello waits for that run (scanGreetingDueAt).
+     */
+    awaitsPassport: boolean
   },
 ): Promise<StoreResult<{ id: string; scannedAt: Date }>> {
   const scan = await supabase
@@ -127,6 +131,7 @@ export async function scheduleScanArrival(
       scan_message_id: input.messageId,
       scanned_at: scannedAt,
       had_prior_conversation: input.hadPriorConversation,
+      awaits_passport: input.awaitsPassport,
     })
     .select('id')
     .single()
@@ -140,7 +145,14 @@ export async function scheduleScanArrival(
 }
 
 const PENDING_COLUMNS =
-  'id, venue_id, guest_id, scan_message_id, scanned_at, had_prior_conversation'
+  'id, venue_id, guest_id, scan_message_id, scanned_at, had_prior_conversation, awaits_passport, passport_settled_at, passport_sent_at'
+
+/** A stored timestamp, or null when it is absent or unreadable. */
+function dateOrNull(value: string | null): Date | null {
+  if (value === null) return null
+  const date = new Date(value)
+  return Number.isFinite(date.getTime()) ? date : null
+}
 
 function toPendingScanArrival(row: {
   id: string
@@ -149,6 +161,9 @@ function toPendingScanArrival(row: {
   scan_message_id: string | null
   scanned_at: string
   had_prior_conversation: boolean
+  awaits_passport: boolean
+  passport_settled_at: string | null
+  passport_sent_at: string | null
 }): PendingScanArrival {
   return {
     id: row.id,
@@ -157,6 +172,9 @@ function toPendingScanArrival(row: {
     scanMessageId: row.scan_message_id,
     scannedAt: new Date(row.scanned_at),
     hadPriorConversation: row.had_prior_conversation,
+    awaitsPassport: row.awaits_passport,
+    passportSettledAt: dateOrNull(row.passport_settled_at),
+    passportSentAt: dateOrNull(row.passport_sent_at),
   }
 }
 
@@ -196,6 +214,40 @@ export async function loadDueScanArrivals(
     .limit(limit)
   if (error) return { ok: false, error: error.message }
   return { ok: true, data: (data ?? []).map(toPendingScanArrival) }
+}
+
+/**
+ * TAC-588: record how this scan's stamp run ended, which is what the hello is
+ * timed from (scanGreetingDueAt).
+ *
+ * `sentAt` is when both images reached the guest, or null when the run ended
+ * without sending them. Written once, by the run's own chain in the webhook,
+ * and only on a row still waiting (`passport_settled_at is null`), so a late
+ * duplicate cannot move a hello that has already been timed.
+ *
+ * Returns the error rather than throwing. A settle that fails leaves the row
+ * looking like a run still in progress, and the hello goes at the cap
+ * (PASSPORT_WAIT_CAP_MS) instead: a late hello, never a lost one.
+ */
+export async function settleScanPassport(
+  supabase: AdminSupabaseClient,
+  id: string,
+  settled: { settledAt: Date; sentAt: Date | null },
+): Promise<StoreResult<void>> {
+  try {
+    const { error } = await supabase
+      .from('instagram_scan_arrivals')
+      .update({
+        passport_settled_at: settled.settledAt.toISOString(),
+        passport_sent_at: settled.sentAt?.toISOString() ?? null,
+      })
+      .eq('id', id)
+      .is('passport_settled_at', null)
+    if (error) return { ok: false, error: error.message }
+    return { ok: true, data: undefined }
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) }
+  }
 }
 
 export type ClaimResult =

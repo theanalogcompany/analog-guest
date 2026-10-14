@@ -20,15 +20,19 @@ import {
   processScanArrival,
   runScanGreetingFastPath,
 } from '@/lib/agent/instagram-scan-greeting'
+import { settleScanPassport } from '@/lib/agent/scan-arrival-store'
 import {
+  HELLO_AFTER_PASSPORT_MS,
   isScanGreetingDue,
   msUntilScanGreetingDue,
+  PASSPORT_WAIT_CAP_MS,
   SCAN_CARRY_FORWARD_MS,
   SCAN_FAST_PATH_WAKE_MARGIN_MS,
   SCAN_GREETING_CARRY_FORWARD_MS,
   SCAN_GREETING_DELAY_MS,
   SCAN_GREETING_MAX_AGE_MS,
   scanCarryForwardAt,
+  scanGreetingDueAt,
 } from '@/lib/agent/scan-arrival'
 
 // With real credentials `handleFollowup` would talk to the real database and
@@ -95,6 +99,9 @@ function makeDb(seed: Seed) {
     venue_local_date: null,
     outcome: null,
     resolved_at: null,
+    awaits_passport: false,
+    passport_settled_at: null,
+    passport_sent_at: null,
     ...row,
   }))
   const messages = seed.messages ?? []
@@ -156,6 +163,10 @@ function makeDb(seed: Seed) {
     return builder
   }
 
+  type UpdateResult =
+    | { data: null; error: { code: string; message: string } }
+    | { data: { id: Value }[]; error: null }
+
   function arrivalsUpdate(patch: Row) {
     const filters: Filter[] = []
     const builder = {
@@ -167,7 +178,14 @@ function makeDb(seed: Seed) {
         filters.push([column, value])
         return builder
       },
-      async select() {
+      // Awaited directly (no `.select()`), as settleScanPassport does.
+      then<T>(
+        resolve: (value: UpdateResult) => T,
+        reject?: (reason: unknown) => T,
+      ): Promise<T> {
+        return builder.select().then(resolve, reject)
+      },
+      async select(): Promise<UpdateResult> {
         await pause()
         if ('claimed_at' in patch) seed.beforeClaim?.(arrivals)
         // From here to the return is one atomic statement, as in Postgres.
@@ -297,14 +315,27 @@ const PENDING = {
   scanMessageId: 'm-a1',
   scannedAt: SCAN,
   hadPriorConversation: true,
+  awaitsPassport: false,
+  passportSettledAt: null,
+  passportSentAt: null,
 }
+/** A scan with no receipt code: the timing every check before TAC-588 used. */
+const plain = (scannedAt: Date) => ({
+  scannedAt,
+  awaitsPassport: false,
+  passportSettledAt: null,
+  passportSentAt: null,
+})
 
-/** A clock that advances by exactly what was slept. */
+/** A clock that advances by exactly what was slept, or by `advance`. */
 function fakeClock(start: Date) {
   let now = start.getTime()
   const slept: number[] = []
   return {
     slept,
+    advance(ms: number) {
+      now += ms
+    },
     deps: {
       now: () => new Date(now),
       async sleep(ms: number) {
@@ -340,18 +371,24 @@ async function main() {
   )
 
   await check('isScanGreetingDue: false at 19s, true at 20s', () => {
-    assert.equal(isScanGreetingDue(SCAN, at(19 * SECOND)), false)
-    assert.equal(isScanGreetingDue(SCAN, at(20 * SECOND)), true)
+    assert.equal(isScanGreetingDue(plain(SCAN), at(19 * SECOND)), false)
+    assert.equal(isScanGreetingDue(plain(SCAN), at(20 * SECOND)), true)
   })
 
   await check(
     'msUntilScanGreetingDue: fresh, half elapsed, already due, capped, invalid',
     () => {
-      assert.equal(msUntilScanGreetingDue(SCAN, SCAN), 20 * SECOND)
-      assert.equal(msUntilScanGreetingDue(SCAN, at(10 * SECOND)), 10 * SECOND)
-      assert.equal(msUntilScanGreetingDue(SCAN, at(25 * SECOND)), 0)
-      assert.equal(msUntilScanGreetingDue(at(10 * MINUTE), SCAN), 40 * SECOND)
-      assert.equal(msUntilScanGreetingDue(new Date(NaN), SCAN), 0)
+      assert.equal(msUntilScanGreetingDue(plain(SCAN), SCAN), 20 * SECOND)
+      assert.equal(
+        msUntilScanGreetingDue(plain(SCAN), at(10 * SECOND)),
+        10 * SECOND,
+      )
+      assert.equal(msUntilScanGreetingDue(plain(SCAN), at(25 * SECOND)), 0)
+      assert.equal(
+        msUntilScanGreetingDue(plain(at(10 * MINUTE)), SCAN),
+        40 * SECOND,
+      )
+      assert.equal(msUntilScanGreetingDue(plain(new Date(NaN)), SCAN), 0)
     },
   )
 
@@ -384,11 +421,7 @@ async function main() {
     async () => {
       const db = makeDb({ arrivals: [scanRow()] })
       const clock = fakeClock(at(2 * SECOND))
-      await runScanGreetingFastPath(
-        db.client,
-        { id: 'a1', scannedAt: SCAN },
-        clock.deps,
-      )
+      await runScanGreetingFastPath(db.client, { id: 'a1' }, clock.deps)
       const woke = 20 * SECOND + SCAN_FAST_PATH_WAKE_MARGIN_MS
       assert.deepEqual(clock.slept, [woke - 2 * SECOND])
       assert.equal(db.stats.claimWins, 1)
@@ -403,7 +436,7 @@ async function main() {
       let now = SCAN.getTime()
       await runScanGreetingFastPath(
         db.client,
-        { id: 'a1', scannedAt: SCAN },
+        { id: 'a1' },
         {
           now: () => new Date(now),
           async sleep(ms) {
@@ -422,7 +455,7 @@ async function main() {
       const clock = fakeClock(at(SECOND))
       await runScanGreetingFastPath(
         db.client,
-        { id: 'a1', scannedAt: SCAN },
+        { id: 'a1' },
         {
           now: clock.deps.now,
           async sleep(ms) {
@@ -441,7 +474,7 @@ async function main() {
     async () => {
       const scan = new Date('2026-09-20T21:59:50.000Z')
       const arrivals = [scanRow({ scanned_at: scan.toISOString() })]
-      const scheduled = { id: 'a1', scannedAt: scan }
+      const scheduled = { id: 'a1' }
 
       const db = makeDb({ arrivals })
       await runScanGreetingFastPath(db.client, scheduled, fakeClock(scan).deps)
@@ -467,7 +500,7 @@ async function main() {
         const [, cron] = await Promise.all([
           runScanGreetingFastPath(
             db.client,
-            { id: 'a1', scannedAt: SCAN },
+            { id: 'a1' },
             fakeClock(at(20 * SECOND)).deps,
           ),
           processDueScanGreetings(at(21 * SECOND), db.client),
@@ -530,7 +563,7 @@ async function main() {
           ['a1', 'a2'].map((id) =>
             runScanGreetingFastPath(
               db.client,
-              { id, scannedAt: SCAN },
+              { id },
               fakeClock(at(20 * SECOND)).deps,
             ),
           ),
@@ -585,7 +618,7 @@ async function main() {
       const db = makeDb({ arrivals: [scanRow()] })
       await runScanGreetingFastPath(
         db.client,
-        { id: 'a1', scannedAt: SCAN },
+        { id: 'a1' },
         {
           now: () => SCAN,
           async sleep() {
@@ -606,11 +639,7 @@ async function main() {
       arrivals: [scanRow()],
       throwOn: 'instagram_scan_arrivals',
     })
-    await runScanGreetingFastPath(
-      db.client,
-      { id: 'a1', scannedAt: SCAN },
-      fakeClock(SCAN).deps,
-    )
+    await runScanGreetingFastPath(db.client, { id: 'a1' }, fakeClock(SCAN).deps)
   })
 
   await check(
@@ -626,7 +655,7 @@ async function main() {
       })
       await runScanGreetingFastPath(
         db.client,
-        { id: 'a1', scannedAt: SCAN },
+        { id: 'a1' },
         fakeClock(SCAN).deps,
       )
       assert.equal(db.stats.updates, 0)
@@ -642,7 +671,7 @@ async function main() {
       })
       await runScanGreetingFastPath(
         db.client,
-        { id: 'a1', scannedAt: ahead },
+        { id: 'a1' },
         fakeClock(SCAN).deps,
       )
       assert.equal(db.stats.updates, 0)
@@ -658,10 +687,203 @@ async function main() {
       })
       await runScanGreetingFastPath(
         db.client,
-        { id: 'a1', scannedAt: SCAN },
+        { id: 'a1' },
         fakeClock(SCAN).deps,
       )
       assert.equal(db.stats.updates, 0)
+    },
+  )
+
+  // ---------------------------------------------------------------------------
+  // TAC-588: a scan of a receipt code waits for its passport images
+  // ---------------------------------------------------------------------------
+
+  const passport = (over: {
+    settled?: number | null
+    sent?: number | null
+  }) => ({
+    scannedAt: SCAN,
+    awaitsPassport: true,
+    passportSettledAt:
+      over.settled === undefined || over.settled === null
+        ? null
+        : at(over.settled),
+    passportSentAt:
+      over.sent === undefined || over.sent === null ? null : at(over.sent),
+  })
+
+  await check(
+    'TAC-588 constants: hello 4s after the images, 60s passport cap',
+    () => {
+      assert.equal(HELLO_AFTER_PASSPORT_MS, 4 * SECOND)
+      assert.equal(PASSPORT_WAIT_CAP_MS, 60 * SECOND)
+    },
+  )
+
+  await check(
+    'scanGreetingDueAt: no code 20s; sent at 5s -> 9s; ended unsent -> 20s; still running -> 60s',
+    () => {
+      assert.deepEqual(scanGreetingDueAt(plain(SCAN)), at(20 * SECOND))
+      assert.deepEqual(
+        scanGreetingDueAt(passport({ settled: 5 * SECOND, sent: 5 * SECOND })),
+        at(9 * SECOND),
+      )
+      assert.deepEqual(
+        scanGreetingDueAt(
+          passport({ settled: 30 * SECOND, sent: 28 * SECOND }),
+        ),
+        at(32 * SECOND),
+      )
+      assert.deepEqual(
+        scanGreetingDueAt(passport({ settled: 6 * SECOND })),
+        at(20 * SECOND),
+      )
+      // An unsent run that ended after the fallback is already due.
+      assert.equal(
+        isScanGreetingDue(passport({ settled: 45 * SECOND }), at(45 * SECOND)),
+        true,
+      )
+      assert.deepEqual(scanGreetingDueAt(passport({})), at(60 * SECOND))
+    },
+  )
+
+  await check(
+    'msUntilScanGreetingDue: a running stamp waits to the 60s cap, never the old 40s one',
+    () => {
+      assert.equal(
+        msUntilScanGreetingDue(passport({}), at(2 * SECOND)),
+        58 * SECOND,
+      )
+      assert.equal(
+        msUntilScanGreetingDue(passport({}), at(-10 * MINUTE)),
+        PASSPORT_WAIT_CAP_MS + 20 * SECOND,
+      )
+    },
+  )
+
+  await check(
+    'fast path waits for the stamp run, then greets 4s after the images (not at 20s, not at 60s)',
+    async () => {
+      const db = makeDb({ arrivals: [scanRow({ awaits_passport: true })] })
+      const clock = fakeClock(at(SECOND))
+      const passportSettled = (async () => {
+        await pause()
+        await pause()
+        clock.advance(4 * SECOND)
+        Object.assign(db.arrivals[0] ?? {}, {
+          passport_settled_at: at(5 * SECOND).toISOString(),
+          passport_sent_at: at(5 * SECOND).toISOString(),
+        })
+      })()
+      await runScanGreetingFastPath(
+        db.client,
+        { id: 'a1', passportSettled },
+        clock.deps,
+      )
+      const woke = 9 * SECOND + SCAN_FAST_PATH_WAKE_MARGIN_MS
+      assert.equal(db.stats.claimWins, 1)
+      assert.equal(db.arrivals[0]?.claimed_at, at(woke).toISOString())
+    },
+  )
+
+  await check('stamp run ended without sending: the 20s fallback', async () => {
+    const db = makeDb({
+      arrivals: [
+        scanRow({
+          awaits_passport: true,
+          passport_settled_at: at(6 * SECOND).toISOString(),
+        }),
+      ],
+    })
+    const clock = fakeClock(at(6 * SECOND))
+    await runScanGreetingFastPath(
+      db.client,
+      { id: 'a1', passportSettled: Promise.resolve() },
+      clock.deps,
+    )
+    const woke = 20 * SECOND + SCAN_FAST_PATH_WAKE_MARGIN_MS
+    assert.equal(db.arrivals[0]?.claimed_at, at(woke).toISOString())
+  })
+
+  await check(
+    'stamp run never recorded an outcome: the hello goes at the 60s cap',
+    async () => {
+      const db = makeDb({ arrivals: [scanRow({ awaits_passport: true })] })
+      const clock = fakeClock(at(2 * SECOND))
+      await runScanGreetingFastPath(
+        db.client,
+        { id: 'a1', passportSettled: Promise.resolve() },
+        clock.deps,
+      )
+      const woke = 60 * SECOND + SCAN_FAST_PATH_WAKE_MARGIN_MS
+      assert.equal(db.arrivals[0]?.claimed_at, at(woke).toISOString())
+    },
+  )
+
+  await check(
+    'a rejected stamp promise does not escape the fast path, and the cap still greets',
+    async () => {
+      const db = makeDb({ arrivals: [scanRow({ awaits_passport: true })] })
+      await runScanGreetingFastPath(
+        db.client,
+        { id: 'a1', passportSettled: Promise.reject(new Error('boom')) },
+        fakeClock(at(2 * SECOND)).deps,
+      )
+      assert.equal(db.stats.claimWins, 1)
+    },
+  )
+
+  await check(
+    'cron behind a receipt scan: not at 20s or 59s while the run is open, claims at 60s',
+    async () => {
+      const db = makeDb({ arrivals: [scanRow({ awaits_passport: true })] })
+      await processDueScanGreetings(at(20 * SECOND), db.client)
+      await processDueScanGreetings(at(59 * SECOND), db.client)
+      assert.equal(db.stats.updates, 0)
+      await processDueScanGreetings(at(60 * SECOND), db.client)
+      assert.equal(db.stats.claimWins, 1)
+    },
+  )
+
+  await check(
+    'cron behind a receipt scan whose images went at 5s: not at 8.9s, claims at 9s',
+    async () => {
+      const db = makeDb({
+        arrivals: [
+          scanRow({
+            awaits_passport: true,
+            passport_settled_at: at(5 * SECOND).toISOString(),
+            passport_sent_at: at(5 * SECOND).toISOString(),
+          }),
+        ],
+      })
+      await processDueScanGreetings(at(8900), db.client)
+      assert.equal(db.stats.updates, 0)
+      await processDueScanGreetings(at(9 * SECOND), db.client)
+      assert.equal(db.stats.claimWins, 1)
+    },
+  )
+
+  await check(
+    'settleScanPassport writes once: a second outcome cannot move a timed hello',
+    async () => {
+      const db = makeDb({ arrivals: [scanRow({ awaits_passport: true })] })
+      await settleScanPassport(db.client, 'a1', {
+        settledAt: at(5 * SECOND),
+        sentAt: at(5 * SECOND),
+      })
+      await settleScanPassport(db.client, 'a1', {
+        settledAt: at(30 * SECOND),
+        sentAt: null,
+      })
+      assert.equal(
+        db.arrivals[0]?.passport_sent_at,
+        at(5 * SECOND).toISOString(),
+      )
+      assert.equal(
+        db.arrivals[0]?.passport_settled_at,
+        at(5 * SECOND).toISOString(),
+      )
     },
   )
 

@@ -450,7 +450,7 @@ export async function processScanArrival(
   // then on the follow-up it carried stands, whatever throws afterwards.
   let greetingOut = false
   try {
-    if (!isScanGreetingDue(row.scannedAt, now)) {
+    if (!isScanGreetingDue(row, now)) {
       return { kind: 'not_yet' }
     }
     if (isScanTooStale(row.scannedAt, now)) {
@@ -693,7 +693,18 @@ const FAST_PATH_DEPS: ScanGreetingFastPathDeps = {
 
 /**
  * Greet about twenty seconds after the scan, instead of whenever the next
- * cron tick after that happens to land.
+ * cron tick after that happens to land. TAC-588: for a scan of a receipt code,
+ * a few seconds after its passport images instead (scanGreetingDueAt).
+ *
+ * WAITS FOR THE STAMP RUN FIRST, when the webhook hands it one
+ * (`passportSettled`, which resolves once the run's outcome is WRITTEN to the
+ * row). The promise is only a wake-up; the row is the record, re-read after
+ * it, so this runner and the cron time the hello from the same facts. It is
+ * awaited with no timeout of its own, deliberately: a run that hangs leaves
+ * the row unsettled, the cron greets at PASSPORT_WAIT_CAP_MS, and when this
+ * runner finally wakes it finds the row claimed and stops. Racing the promise
+ * against a sleep would only add a second deadline beside the one the row
+ * already carries.
  *
  * Started by the Instagram webhook inside the `waitUntil` that recorded the
  * scan, so the wait happens after Meta has its 200. It sleeps until the row
@@ -725,12 +736,29 @@ const FAST_PATH_DEPS: ScanGreetingFastPathDeps = {
  */
 export async function runScanGreetingFastPath(
   supabase: AdminSupabaseClient,
-  scheduled: { id: string; scannedAt: Date },
+  scheduled: { id: string; passportSettled?: Promise<unknown> },
   deps: ScanGreetingFastPathDeps = FAST_PATH_DEPS,
 ): Promise<void> {
   try {
+    if (scheduled.passportSettled !== undefined) {
+      await scheduled.passportSettled.catch(() => undefined)
+    }
+
+    // Read BEFORE the sleep, to size it from the row's own passport facts,
+    // and again AFTER it, because either runner may have claimed or resolved
+    // the row in the meantime.
+    const timing = await loadPendingScanArrival(supabase, scheduled.id)
+    if (!timing.ok) {
+      logger.warn(
+        '[scan-greeting] fast path could not read the scan; leaving it to the cron',
+        { scanArrivalId: scheduled.id, error: timing.error },
+      )
+      return
+    }
+    if (timing.data === null) return
+
     await deps.sleep(
-      msUntilScanGreetingDue(scheduled.scannedAt, deps.now()) +
+      msUntilScanGreetingDue(timing.data, deps.now()) +
         SCAN_FAST_PATH_WAKE_MARGIN_MS,
     )
 

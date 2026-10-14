@@ -176,15 +176,12 @@ export async function reconcileTapFromInbound(opts: {
 // because the claim is a CAS on `status`, so of two racing inbounds exactly
 // one wins and the other reads `claim_lost`.
 //
-// ORDERING AGAINST THE SCAN GREETING. The greeting for a bare scan is sent
-// after SCAN_GREETING_DELAY_MS (20s), and this bind runs in its own
-// `waitUntil` alongside the scheduling, so in practice it finishes four orders
-// of magnitude before the greeting generates. That is a RACE THIS CODE WINS,
-// not an ordering this code guarantees. It does not matter yet: nothing in the
-// greeting reads the bound transaction today. The moment a greeting is
-// supposed to name what the guest just bought, the ordering has to become
-// explicit -- chained ahead of `scheduleScanArrival` rather than inherited
-// from a sleep.
+// ORDERING AGAINST THE SCAN GREETING. Explicit since TAC-588, when the
+// greeting started naming what the guest bought. For a bare scan, the webhook
+// writes the pending greeting row, then runs this bind and the stamp, writes
+// how that ended to the row, and only then times the hello from it
+// (scanGreetingDueAt). This used to be a race the bind won against a
+// twenty-second sleep.
 //
 // Fails OPEN at the call site, like the SendBlue arm: a reconciliation failure
 // must never cost the 200 or break inbound handling. A guest whose purchase
