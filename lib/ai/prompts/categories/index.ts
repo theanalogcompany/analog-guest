@@ -153,7 +153,7 @@ const CATEGORY_INSTRUCTIONS_BY_CHANNEL: Record<
  * falls safe on.
  *
  * The scan greeting takes NO channel substitution: its copy names no channel
- * (it says the guest scanned the code at the counter and is in the shop), so
+ * (it says the guest scanned the code at the counter, or on their receipt), so
  * there is nothing to swap. Do not introduce a channel claim into it.
  */
 export function categoryInstructionsFor(
@@ -162,6 +162,8 @@ export function categoryInstructionsFor(
   scanArrival: {
     hadPriorConversation: boolean
     afterComplaint?: boolean
+    order?: unknown
+    expiredCode?: boolean
   } | null = null,
   // TAC-386: a per-turn exception, on the same reasoning as the scan-arrival one
   // above. An inquiry follow-up stores `category: 'follow_up'`, but that

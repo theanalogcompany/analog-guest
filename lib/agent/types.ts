@@ -1,3 +1,4 @@
+import type { ComplimentPick, ScanOrder } from './scan-order'
 import type { SlotDropReason } from './pending-slots'
 import type {
   FollowupReason,
@@ -272,6 +273,12 @@ export interface FollowupTrigger {
      * complaint is too old to bring up.
      */
     afterComplaint?: boolean
+    /**
+     * TAC-588: what the scan's receipt code says they ordered, read once by
+     * the processor (loadScanOrder) so the greeting and the item question
+     * see the same answer. Absent is `none`: today's greeting.
+     */
+    order?: ScanOrder
   }
   /**
    * TAC-560: set only when `reason === 'warm_close'`. Typed channel rather than
@@ -452,6 +459,17 @@ export interface RuntimeContext {
      * sees no other part of the earlier conversation.
      */
     priorGreetings: string[]
+    /**
+     * TAC-588: the item the hello compliments, when the scan bound an order.
+     * Null otherwise, and then the greeting asks what they got, as before.
+     */
+    order: ComplimentPick | null
+    /**
+     * TAC-588: the scan's receipt code was past its twenty-four hours, so it
+     * bound nothing. The hello goes with no compliment and no question
+     * (ruled 2026-10-14, question 3).
+     */
+    expiredCode: boolean
   } | null
   /**
    * TAC-386: the question and our answer, on an inquiry-follow-up turn only.

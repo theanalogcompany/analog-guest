@@ -19,6 +19,7 @@ HARNESS = os.path.join("scripts", "harness", "scan-greeting", "harness.ts")
 STORE = "lib/agent/scan-arrival-store.ts"
 TIMING = "lib/agent/scan-arrival.ts"
 PROCESSOR = "lib/agent/instagram-scan-greeting.ts"
+ORDER = "lib/agent/scan-order.ts"
 
 # The top of the fast path's guarded block (TAC-588: it waits for the stamp
 # run before it reads the row and sleeps).
@@ -109,6 +110,42 @@ MUTANTS = [
         STORE,
         "      .eq('id', id)\n      .is('passport_settled_at', null)\n",
         "      .eq('id', id)\n",
+    ),
+    (
+        "TAC-588: a bound order no longer lifts the closed check",
+        PROCESSOR,
+        "      order.kind !== 'bound' &&\n",
+        "",
+    ),
+    (
+        "TAC-588: the DISCOVERED item no longer wins",
+        ORDER,
+        "    if (discovered !== undefined) return pick(discovered, true)\n",
+        "",
+    ),
+    (
+        "TAC-588: drinks no longer beat food",
+        ORDER,
+        "  return pick(drink ?? names[0], false)",
+        "  return pick(names[0], false)",
+    ),
+    (
+        "TAC-588: the question backstop keeps questions",
+        TIMING,
+        "      if (!sentence.includes('?')) return true",
+        "      if (true) return true",
+    ),
+    (
+        "TAC-588: an expired code reads as no order",
+        ORDER,
+        "      ? { kind: 'expired' }\n      : NONE",
+        "      ? NONE\n      : NONE",
+    ),
+    (
+        "TAC-588: another guest's order is complimented",
+        ORDER,
+        "  if (!row || row.guest_id !== scan.guestId || row.retracted_at !== null)",
+        "  if (!row || row.retracted_at !== null)",
     ),
     (
         "carry-forward re-derived from the delay",

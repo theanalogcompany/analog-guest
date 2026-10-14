@@ -22,6 +22,24 @@ import {
 } from '@/lib/agent/instagram-scan-greeting'
 import { settleScanPassport } from '@/lib/agent/scan-arrival-store'
 import {
+  isDrink,
+  loadScanOrder,
+  pickComplimentItem,
+} from '@/lib/agent/scan-order'
+import {
+  GUEST_ARRIVED_HELLO_ONLY_INSTRUCTIONS_AFTER_COMPLAINT,
+  GUEST_ARRIVED_HELLO_ONLY_INSTRUCTIONS_NEW,
+  GUEST_ARRIVED_HELLO_ONLY_INSTRUCTIONS_RETURNING,
+  GUEST_ARRIVED_INSTRUCTIONS_AFTER_COMPLAINT,
+  GUEST_ARRIVED_INSTRUCTIONS_NEW,
+  GUEST_ARRIVED_INSTRUCTIONS_RETURNING,
+  GUEST_ARRIVED_ORDER_INSTRUCTIONS_AFTER_COMPLAINT,
+  GUEST_ARRIVED_ORDER_INSTRUCTIONS_NEW,
+  GUEST_ARRIVED_ORDER_INSTRUCTIONS_RETURNING,
+  guestArrivedInstructionsFor,
+} from '@/lib/ai/prompts/categories/guest-arrived'
+import type { MenuItem } from '@/lib/schemas'
+import {
   HELLO_AFTER_PASSPORT_MS,
   isScanGreetingDue,
   msUntilScanGreetingDue,
@@ -33,6 +51,7 @@ import {
   SCAN_GREETING_MAX_AGE_MS,
   scanCarryForwardAt,
   scanGreetingDueAt,
+  withoutQuestions,
 } from '@/lib/agent/scan-arrival'
 
 // With real credentials `handleFollowup` would talk to the real database and
@@ -65,6 +84,17 @@ interface Seed {
   throwOn?: string
   /** Runs inside the claim UPDATE's round trip, before it is applied. */
   beforeClaim?: (arrivals: Row[]) => void
+  /**
+   * TAC-588: what a receipt scan's code resolves to. The scan message's
+   * `referral_ref`, its `pos_tap_events` row, the transaction and the stamp,
+   * each written out longhand rather than built by the code under check.
+   */
+  order?: {
+    referralRef: string | null
+    tap?: Row | null
+    transaction?: Record<string, unknown> | null
+    stamp?: Row | null
+  }
 }
 
 const DAYS = [
@@ -216,7 +246,24 @@ function makeDb(seed: Seed) {
     return builder
   }
 
-  function messagesSelect() {
+  function messagesSelect(columns?: string) {
+    // TAC-588: the scan-order loader reads the scan's own row by id.
+    if (columns === 'referral_ref') {
+      return {
+        eq: () => ({
+          async maybeSingle() {
+            await pause()
+            return {
+              data:
+                seed.order === undefined
+                  ? null
+                  : { referral_ref: seed.order.referralRef },
+              error: null,
+            }
+          },
+        }),
+      }
+    }
     const filters: Filter[] = []
     let since: string | null = null
     const builder = {
@@ -245,6 +292,19 @@ function makeDb(seed: Seed) {
     return builder
   }
 
+  /** Any number of `.eq()`s, then `.maybeSingle()`: one row or none. */
+  const chain = (data: () => Record<string, unknown> | null) => {
+    const builder = {
+      eq: () => builder,
+      async maybeSingle() {
+        await pause()
+        const row = data()
+        return { data: row ? { ...row } : null, error: null }
+      },
+    }
+    return builder
+  }
+
   const single = (data: () => Record<string, unknown>) => ({
     eq: () => ({
       async maybeSingle() {
@@ -262,6 +322,14 @@ function makeDb(seed: Seed) {
           return { select: arrivalsSelect, update: arrivalsUpdate }
         case 'messages':
           return { select: messagesSelect }
+        case 'pos_tap_events':
+          return { select: () => chain(() => seed.order?.tap ?? null) }
+        case 'transactions':
+          return {
+            select: () => chain(() => seed.order?.transaction ?? null),
+          }
+        case 'passport_stamps':
+          return { select: () => chain(() => seed.order?.stamp ?? null) }
         case 'venues':
           return { select: () => single(() => ({ ...venue })) }
         case 'venue_configs':
@@ -884,6 +952,373 @@ async function main() {
         db.arrivals[0]?.passport_settled_at,
         at(5 * SECOND).toISOString(),
       )
+    },
+  )
+
+  // ---------------------------------------------------------------------------
+  // TAC-588: the order, the item, and a hello that asks nothing
+  // ---------------------------------------------------------------------------
+
+  const menu = (name: string, category: string, description?: string) =>
+    ({
+      name,
+      category,
+      price: 5,
+      modifiers: [],
+      dietary: [],
+      isOffMenu: false,
+      ...(description === undefined ? {} : { description }),
+    }) satisfies MenuItem
+  const MENU: MenuItem[] = [
+    menu('Oat Cortado', 'Espresso Drinks', 'Smooth and nutty, with oat milk.'),
+    menu('Pink Panther', 'Signature Drinks', '   '),
+    menu('Matcha Latte', 'Matcha'),
+    menu('Croissant', 'Pastries', 'Laminated in-house, best warm.'),
+    menu('Sourdough Toast', 'Food'),
+    menu('Iced Sofi', 'Coffee'),
+  ]
+  const pickOf = (names: string[], discovered: string | null = null) =>
+    pickComplimentItem({
+      lineItemNames: names,
+      discoveredLabel: discovered,
+      menuItems: MENU,
+    })
+
+  await check(
+    'item pick: the DISCOVERED item beats a drink, and is marked first time',
+    () => {
+      const pick = pickOf(
+        ['Croissant', 'Oat Cortado', 'Pink Panther'],
+        'Pink Panther',
+      )
+      assert.equal(pick?.item, 'Pink Panther')
+      assert.equal(pick?.firstTime, true)
+      // A blank menu description is no description.
+      assert.equal(pick?.menuDescription, null)
+      // The stamp's label matches by its own key: case and spacing fold.
+      assert.equal(
+        pickOf(['Croissant', 'Pink Panther'], 'pink  PANTHER')?.item,
+        'Pink Panther',
+      )
+    },
+  )
+
+  await check(
+    'item pick: a drink beats food, the first drink in Square order, with its menu description',
+    () => {
+      const pick = pickOf(['Croissant', 'Oat Cortado', 'Matcha Latte'])
+      assert.equal(pick?.item, 'Oat Cortado')
+      assert.equal(pick?.firstTime, false)
+      assert.equal(pick?.menuDescription, 'Smooth and nutty, with oat milk.')
+      // A DISCOVERED label naming nothing on this order falls back to drinks.
+      assert.equal(
+        pickOf(['Croissant', 'Matcha Latte'], 'Chai')?.item,
+        'Matcha Latte',
+      )
+    },
+  )
+
+  await check(
+    'item pick: food only takes the first item; nothing named is null',
+    () => {
+      assert.equal(pickOf(['Croissant', 'Sourdough Toast'])?.item, 'Croissant')
+      assert.equal(pickOf([]), null)
+      assert.equal(pickOf(['  ']), null)
+    },
+  )
+
+  await check(
+    'drink test: the menu category decides when the item is on the menu, the name when it is not',
+    () => {
+      const row = (name: string) =>
+        MENU.find((item) => item.name === name) ?? null
+      // On the menu: the category, not the name. "Iced Sofi" names no drink.
+      assert.equal(isDrink('Iced Sofi', row('Iced Sofi')), true)
+      assert.equal(isDrink('Pink Panther', row('Pink Panther')), true)
+      assert.equal(isDrink('Croissant', row('Croissant')), false)
+      // Off the menu: the name.
+      assert.equal(isDrink('Iced Oat Cortado', null), true)
+      assert.equal(isDrink('Flat White', null), true)
+      assert.equal(isDrink('Almond Croissant', null), false)
+      // Whole words only: "teacake" is not tea.
+      assert.equal(isDrink('Teacake', null), false)
+    },
+  )
+
+  await check(
+    'withoutQuestions: drops the asking sentence, keeps the rest and the line breaks',
+    () => {
+      assert.deepEqual(
+        withoutQuestions(
+          "hey jaipal, good to see you\nthe oat cortado's a great one. what did you get?",
+        ),
+        {
+          body: "hey jaipal, good to see you\nthe oat cortado's a great one.",
+          dropped: 1,
+        },
+      )
+      assert.deepEqual(withoutQuestions('really?! that one is lovely.'), {
+        body: 'that one is lovely.',
+        dropped: 1,
+      })
+      assert.deepEqual(withoutQuestions('hey! the croissant is best warm'), {
+        body: 'hey! the croissant is best warm',
+        dropped: 0,
+      })
+      assert.deepEqual(withoutQuestions('what did you get?'), {
+        body: '',
+        dropped: 1,
+      })
+    },
+  )
+
+  await check(
+    'greeting wording: an order compliments, an expired code says hello only, neither asks as before',
+    () => {
+      const order = {
+        item: 'Oat Cortado',
+        firstTime: false,
+        menuDescription: null,
+      }
+      const pickFor = (over: {
+        prior?: boolean
+        complaint?: boolean
+        order?: typeof order | null
+        expired?: boolean
+      }) =>
+        guestArrivedInstructionsFor({
+          hadPriorConversation: over.prior ?? false,
+          afterComplaint: over.complaint ?? false,
+          order: over.order ?? null,
+          expiredCode: over.expired ?? false,
+        })
+      assert.equal(pickFor({ order }), GUEST_ARRIVED_ORDER_INSTRUCTIONS_NEW)
+      assert.equal(
+        pickFor({ order, prior: true }),
+        GUEST_ARRIVED_ORDER_INSTRUCTIONS_RETURNING,
+      )
+      assert.equal(
+        pickFor({ order, prior: true, complaint: true }),
+        GUEST_ARRIVED_ORDER_INSTRUCTIONS_AFTER_COMPLAINT,
+      )
+      assert.equal(
+        pickFor({ expired: true }),
+        GUEST_ARRIVED_HELLO_ONLY_INSTRUCTIONS_NEW,
+      )
+      assert.equal(
+        pickFor({ expired: true, prior: true }),
+        GUEST_ARRIVED_HELLO_ONLY_INSTRUCTIONS_RETURNING,
+      )
+      assert.equal(
+        pickFor({ expired: true, complaint: true }),
+        GUEST_ARRIVED_HELLO_ONLY_INSTRUCTIONS_AFTER_COMPLAINT,
+      )
+      // No order and no expired code: today's counter wording, unchanged.
+      assert.equal(pickFor({}), GUEST_ARRIVED_INSTRUCTIONS_NEW)
+      assert.equal(
+        pickFor({ prior: true }),
+        GUEST_ARRIVED_INSTRUCTIONS_RETURNING,
+      )
+      assert.equal(
+        pickFor({ complaint: true }),
+        GUEST_ARRIVED_INSTRUCTIONS_AFTER_COMPLAINT,
+      )
+      assert.equal(
+        guestArrivedInstructionsFor(null),
+        GUEST_ARRIVED_INSTRUCTIONS_NEW,
+      )
+    },
+  )
+
+  await check(
+    'greeting wording: every receipt variant asks nothing and never says they are in the shop; hello-only never compliments',
+    () => {
+      const receipt = [
+        GUEST_ARRIVED_ORDER_INSTRUCTIONS_NEW,
+        GUEST_ARRIVED_ORDER_INSTRUCTIONS_RETURNING,
+        GUEST_ARRIVED_ORDER_INSTRUCTIONS_AFTER_COMPLAINT,
+        GUEST_ARRIVED_HELLO_ONLY_INSTRUCTIONS_NEW,
+        GUEST_ARRIVED_HELLO_ONLY_INSTRUCTIONS_RETURNING,
+        GUEST_ARRIVED_HELLO_ONLY_INSTRUCTIONS_AFTER_COMPLAINT,
+      ]
+      for (const text of receipt) {
+        assert.match(text, /ask nothing at all/i)
+        assert.match(text, /may already have left/)
+        assert.doesNotMatch(text, /in the shop right now/)
+        assert.match(text, /Don't mention a passport or a stamp/)
+      }
+      for (const text of receipt.slice(3)) {
+        assert.doesNotMatch(text, /compliment/i)
+      }
+    },
+  )
+
+  const ORDER_SCAN = {
+    venueId: 'v1',
+    guestId: 'g1',
+    scanMessageId: 'm-a1',
+    scannedAt: SCAN,
+  }
+  const tap = (over: Row = {}): Row => ({
+    status: 'matched',
+    received_at: at(-5 * MINUTE).toISOString(),
+    reconciled_transaction_id: 't1',
+    ...over,
+  })
+  const txn = (over: Row = {}) => ({
+    id: 't1',
+    guest_id: 'g1',
+    occurred_at: at(-5 * MINUTE).toISOString(),
+    retracted_at: null,
+    raw_data: {
+      line_items: [
+        { name: 'Croissant', quantity: 1 },
+        { name: 'Pink Panther', quantity: 1 },
+      ],
+    },
+    ...over,
+  })
+
+  await check(
+    'scan order: a bound code reads the order, its line items and its DISCOVERED label',
+    async () => {
+      const db = makeDb({
+        arrivals: [],
+        order: {
+          referralRef: 'sc_abc',
+          tap: tap(),
+          transaction: txn(),
+          stamp: { kind: 'discovered', label: 'Pink Panther' },
+        },
+      })
+      const order = await loadScanOrder(db.client, ORDER_SCAN)
+      assert.equal(order.kind, 'bound')
+      if (order.kind !== 'bound') return
+      assert.deepEqual(order.lineItemNames, ['Croissant', 'Pink Panther'])
+      assert.equal(order.discoveredLabel, 'Pink Panther')
+      assert.deepEqual(order.orderedAt, at(-5 * MINUTE))
+    },
+  )
+
+  await check(
+    "scan order: none for the counter sign, another guest's order, a retracted one, and a payment not yet ingested",
+    async () => {
+      const kindOf = async (order: Seed['order']) =>
+        (
+          await loadScanOrder(
+            makeDb({ arrivals: [], order }).client,
+            ORDER_SCAN,
+          )
+        ).kind
+      assert.equal(await kindOf({ referralRef: 'LEMILS-COUNTER' }), 'none')
+      assert.equal(await kindOf({ referralRef: null }), 'none')
+      assert.equal(
+        await kindOf({
+          referralRef: 'sc_abc',
+          tap: tap(),
+          transaction: txn({ guest_id: 'g2' }),
+        }),
+        'none',
+      )
+      assert.equal(
+        await kindOf({
+          referralRef: 'sc_abc',
+          tap: tap(),
+          transaction: txn({ retracted_at: at(0).toISOString() }),
+        }),
+        'none',
+      )
+      assert.equal(
+        await kindOf({
+          referralRef: 'sc_abc',
+          tap: tap({ status: 'pending', reconciled_transaction_id: null }),
+        }),
+        'none',
+      )
+    },
+  )
+
+  await check(
+    'scan order: an unbound code past 24h at the scan is expired (pending or already flipped); 23h59m is not',
+    async () => {
+      const kindAt = async (status: string, ageMs: number) =>
+        (
+          await loadScanOrder(
+            makeDb({
+              arrivals: [],
+              order: {
+                referralRef: 'sc_abc',
+                tap: tap({
+                  status,
+                  reconciled_transaction_id: null,
+                  received_at: at(-ageMs).toISOString(),
+                }),
+              },
+            }).client,
+            ORDER_SCAN,
+          )
+        ).kind
+      assert.equal(
+        await kindAt('pending', 24 * 60 * MINUTE + SECOND),
+        'expired',
+      )
+      assert.equal(await kindAt('expired', 25 * 60 * MINUTE), 'expired')
+      assert.equal(await kindAt('pending', 24 * 60 * MINUTE - MINUTE), 'none')
+    },
+  )
+
+  await check(
+    'ruling Q2: a receipt scan with a bound order is greeted after hours; one without an order is not',
+    async () => {
+      // 16:30 in Los Angeles, after the 3 PM close.
+      const late = new Date('2026-09-20T23:30:00.000Z')
+      const row = scanRow({
+        scanned_at: late.toISOString(),
+        awaits_passport: true,
+        passport_settled_at: late.toISOString(),
+      })
+      const pending = {
+        ...PENDING,
+        scannedAt: late,
+        awaitsPassport: true,
+        passportSettledAt: late,
+      }
+      const bound = makeDb({
+        arrivals: [row],
+        order: {
+          referralRef: 'sc_abc',
+          tap: tap(),
+          transaction: txn(),
+          stamp: null,
+        },
+      })
+      await processScanArrival(
+        bound.client,
+        pending,
+        new Date(late.getTime() + 20 * SECOND),
+      )
+      assert.equal(bound.stats.claimWins, 1)
+
+      const expired = makeDb({
+        arrivals: [row],
+        order: {
+          referralRef: 'sc_abc',
+          tap: tap({
+            status: 'expired',
+            reconciled_transaction_id: null,
+            received_at: new Date(
+              late.getTime() - 25 * 60 * MINUTE,
+            ).toISOString(),
+          }),
+        },
+      })
+      await processScanArrival(
+        expired.client,
+        pending,
+        new Date(late.getTime() + 20 * SECOND),
+      )
+      assert.equal(expired.arrivals[0]?.outcome, 'venue_closed')
+      assert.equal(expired.stats.claimWins, 0)
     },
   )
 

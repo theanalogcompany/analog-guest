@@ -2841,7 +2841,32 @@ import {
 //   byte-identical to v1.106.0: nothing but the held-turn swap reads a
 //   description.
 //
-export const PROMPT_VERSION = 'v1.107.0'
+// v1.108.0 (TAC-588): a scan of a RECEIPT code greets without asking.
+//
+//   The scan binds the order before the hello, so the greeting knows what they
+//   ordered and compliments it instead of asking "what did you get?". Three
+//   new `guest_arrived` wordings (new / returning / after a complaint),
+//   approved verbatim 2026-10-14, plus three hello-only ones for a code past
+//   its twenty-four hours, each its compliment wording with the compliment
+//   sentence removed. All six say "ask nothing at all", and code enforces it
+//   (withoutQuestions, lib/agent/scan-arrival.ts). None asserts the guest is in
+//   the shop: a receipt is scanned on the walk out, at home, or next morning.
+//
+//   `## Guest just arrived` gains up to three lines when an order is bound:
+//   what they ordered (the item picked by pickComplimentItem), whether it is
+//   new to them, and the venue's own menu description of it. The greeting
+//   also retrieves knowledge against that item's name, tag `menu`.
+//
+//   The item question, about twenty minutes after the order, is a new
+//   category instruction (scan-item-question.ts) on a new follow-up reason,
+//   and a new intention, `scan_order_liked`, carries it when the guest wrote
+//   back first.
+//
+//   BASELINE RESET for a receipt-scan greeting and for the item question.
+//   The counter greeting (no code, or a payment Square had not reported) and
+//   every other prompt are byte-identical to v1.107.0.
+//
+export const PROMPT_VERSION = 'v1.108.0'
 
 export const SYSTEM_TEMPLATE = `You work at a hospitality venue (cafe, bakery, restaurant). You communicate with its guests via iMessage, in whatever voice the venue has configured below — its own collective voice, its owner's, or a named staff member's.
 

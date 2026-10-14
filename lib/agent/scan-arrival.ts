@@ -62,6 +62,11 @@ export const SCAN_GREETING_DELAY_MS = 20 * 1000
  * Same reasoning as TAC-428's rule that an arrival push never fires after the
  * arrival it announces: a catch-up that asserts the present tense is worse
  * than no catch-up.
+ *
+ * TAC-588: measured from the SCAN, never from the order, so a receipt scanned
+ * twenty hours after the order is not stale. Its wording no longer says the
+ * guest is in the shop, but the bound still holds: a hello a quarter of an
+ * hour after they opened the thread answers nothing they did.
  */
 export const SCAN_GREETING_MAX_AGE_MS = 15 * 60 * 1000
 
@@ -350,3 +355,48 @@ export function latestGreetings(
  * definition of "which day is it" would be a second definition of that guard.
  */
 export { venueLocalDate }
+
+// ---------------------------------------------------------------------------
+// The receipt-scan hello asks nothing (TAC-588)
+// ---------------------------------------------------------------------------
+
+/**
+ * The hello with every question taken out.
+ *
+ * The receipt-scan greetings say "ask nothing at all", and the item question
+ * has its own moment about twenty minutes after the order. A prompt's "don't"
+ * is a request, so the rule is ALSO made here, in code (decision 0007's lesson
+ * for the getting-to-know-you question).
+ *
+ * A sentence with a `?` in it is dropped; everything else is kept as written,
+ * line breaks included, so the bubbles the venue's texting style splits it
+ * into are unchanged. A bare `?` is the detector, as for
+ * intentionQuestionDroppedForBodyQuestion: this reads our own outbound, where
+ * the copy always punctuates a question.
+ *
+ * `body` is empty when the whole hello was questions; the caller decides what
+ * that means (handleFollowup regenerates once, then sends nothing). Pure.
+ */
+export function withoutQuestions(body: string): {
+  body: string
+  dropped: number
+} {
+  let dropped = 0
+  const lines = body.split('\n').map((line) => {
+    const sentences = line.match(/[^.!?]+(?:[.!?]+|$)\s*/g) ?? []
+    const kept = sentences.filter((sentence) => {
+      if (!sentence.includes('?')) return true
+      dropped += 1
+      return false
+    })
+    return kept.join('').trim()
+  })
+  return {
+    body: lines
+      .filter((line, i) => line !== '' || body.split('\n')[i]?.trim() === '')
+      .join('\n')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim(),
+    dropped,
+  }
+}

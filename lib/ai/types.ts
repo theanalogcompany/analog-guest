@@ -349,6 +349,21 @@ export type RuntimeContext = {
      * nothing.
      */
     priorGreetings?: string[]
+    /**
+     * TAC-588: what they ordered, when the scan bound an order. Renders the
+     * order lines in `## Guest just arrived` and picks the compliment
+     * wording. Absent or null is today's greeting, which asks.
+     */
+    order?: {
+      item: string
+      firstTime: boolean
+      menuDescription: string | null
+    } | null
+    /**
+     * TAC-588: the receipt code was past its day. Picks the hello-only
+     * wording: no compliment, no question.
+     */
+    expiredCode?: boolean
   } | null
   /**
    * TAC-575: this reply is the first of a counter visit by a guest whose last

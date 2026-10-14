@@ -81,6 +81,7 @@ import {
   type PendingScanArrival,
   type ScanArrivalOutcome,
 } from './scan-arrival-store'
+import { loadScanOrder, type ScanOrder } from './scan-order'
 import { isVenueClosed } from './venue-open-state'
 import type { InboundTurnReason } from '@/lib/schemas/inbound-turn-outcome'
 
@@ -484,10 +485,24 @@ export async function processScanArrival(
     if (await isTooSoonAfterAnotherProactiveSend(supabase, row.guestId, now)) {
       return { kind: 'held_for_spacing' }
     }
+    // TAC-588: what the scan's receipt code says they ordered. Read once,
+    // here, and carried on the trigger, so the greeting's wording and its
+    // item question see one answer. Only a scan that carried a receipt code
+    // has one; every other scan skips the reads and is greeted as before.
+    const order: ScanOrder = row.awaitsPassport
+      ? await loadScanOrder(supabase, row)
+      : { kind: 'none' }
     // `unknown` hours proceed: isVenueClosed is true only for a POSITIVE
     // closed verdict, which is how TAC-363's ruling holds by construction
     // rather than by each caller remembering it.
+    //
+    // TAC-588 (ruled 2026-10-14, question 2): a scan that BOUND AN ORDER is
+    // greeted whatever the hours. The guest has just opened the thread, so a
+    // reply is no intrusion, and its wording asserts nothing about being in
+    // the shop. Every other scan keeps the closed check: today's counter
+    // wording says they are there.
     if (
+      order.kind !== 'bound' &&
       clock.timezone !== null &&
       isVenueClosed(
         { venueInfo: { hours: clock.hours ?? {} }, timezone: clock.timezone },
@@ -538,6 +553,7 @@ export async function processScanArrival(
           scanMessageId: row.scanMessageId,
           hadPriorConversation: row.hadPriorConversation,
           afterComplaint: followup?.mention === true,
+          order,
         },
       },
     })

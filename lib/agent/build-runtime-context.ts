@@ -45,6 +45,7 @@ import { loadComplaintCheckins, loadVisitCheckin } from './visit-checkin-store'
 // "first conversation". warm-close.ts is pure and builds no client at import.
 import { hasAnsweredGuestBefore, reachedGuest } from './retrieval-context'
 import { isFirstConversation, isQuietAfterWarmClose } from './warm-close'
+import { pickComplimentItem } from './scan-order'
 import { loadPriorGreetings, loadScanCarryForward } from './scan-arrival-store'
 import {
   resolveConversationChannel,
@@ -1214,6 +1215,7 @@ export async function buildRuntimeContext(input: {
   // that nothing is on file.
   let scanArrival: RuntimeContext['scanArrival'] = null
   if (input.followupTrigger?.reason === 'instagram_scan_arrival') {
+    const scanOrder = input.followupTrigger.instagramScanArrival?.order
     const arrival = await findEarliestAcknowledgedArrival({
       venueId: input.venueId,
       guestId: input.guestId,
@@ -1258,6 +1260,18 @@ export async function buildRuntimeContext(input: {
       afterComplaint:
         input.followupTrigger.instagramScanArrival?.afterComplaint === true,
       priorGreetings: priorGreetings.ok ? priorGreetings.data : [],
+      // TAC-588: the item to compliment, from the order the processor read
+      // off the scan's receipt code. Picked here because this is where the
+      // venue's menu is loaded.
+      order:
+        scanOrder?.kind === 'bound'
+          ? pickComplimentItem({
+              lineItemNames: scanOrder.lineItemNames,
+              discoveredLabel: scanOrder.discoveredLabel,
+              menuItems: venue.venueInfo.menu.items,
+            })
+          : null,
+      expiredCode: scanOrder?.kind === 'expired',
     }
   }
 
