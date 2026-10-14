@@ -8,6 +8,10 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import {
+  humanEvalBlockers,
+  type HumanEvalCompleteness,
+} from '@/lib/eval/human-eval'
 import type { VenueListRow } from '../../../_lib/load-venues'
 import type {
   HumanEvalSessionSummary,
@@ -24,6 +28,13 @@ import type {
 // that is a safety property rather than an omission: re-generating a question
 // clears its verdicts, so one wrong click on a finished pass would destroy an
 // hour of human judgment. Re-doing a single row is a button on that row.
+//
+// SUBMIT IS THE FINISH LINE AND IT IS ONE-WAY. It is disabled until the pass
+// is complete, with the label naming exactly what is missing rather than a
+// tooltip nobody hovers; it freezes the pass; and until it has been pressed
+// there is no CSV link, because the export route refuses an unsubmitted pass.
+// The counts here are advisory - `humanEvalCompleteness` is re-run server-side
+// by the submit route, which is what actually decides (migration 084).
 
 export function SessionBar({
   venues,
@@ -37,8 +48,12 @@ export function SessionBar({
   judgeable,
   running,
   busy,
+  completeness,
+  submitting,
+  submitError,
   onGenerate,
   onCancel,
+  onSubmit,
 }: {
   venues: VenueListRow[]
   venueId: string | null
@@ -52,9 +67,16 @@ export function SessionBar({
   judgeable: number
   running: number
   busy: boolean
+  /** What is still in the way of submitting. Null before a pass exists. */
+  completeness: HumanEvalCompleteness | null
+  submitting: boolean
+  submitError: string | null
   onGenerate: () => void
   onCancel: () => void
+  onSubmit: () => void
 }) {
+  const submitted = session?.submittedAt ?? null
+  const blockers = completeness === null ? [] : humanEvalBlockers(completeness)
   return (
     <div className="flex flex-col gap-3 border-b border-stone-light/60 px-4 py-3">
       <div className="flex flex-wrap items-end gap-4">
@@ -94,8 +116,11 @@ export function SessionBar({
               <SelectContent>
                 {sessions.map((s) => (
                   <SelectItem key={s.id} value={s.id}>
-                    {s.startedAt.slice(0, 16).replace('T', ' ')} · {s.judged}/
-                    {s.generated} judged · {s.v2Model} · {s.venueOpenState}
+                    {s.startedAt.slice(0, 16).replace('T', ' ')} ·{' '}
+                    {s.submittedAt !== null
+                      ? 'submitted'
+                      : `${s.judged}/${s.generated} judged`}{' '}
+                    · {s.v2Model} · {s.venueOpenState}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -119,12 +144,12 @@ export function SessionBar({
           {/* Loud, and beside the count it qualifies: "58/58 judged" next to
               four findings nobody wrote down is a pass that looks finished
               and is not. */}
-          {needComment > 0 ? (
+          {needComment > 0 && submitted === null ? (
             <span className="text-xs text-destructive">
               {needComment} need a comment
             </span>
           ) : null}
-          {busy ? (
+          {submitted !== null ? null : busy ? (
             <Button
               type="button"
               size="sm"
@@ -137,6 +162,7 @@ export function SessionBar({
             <Button
               type="button"
               size="sm"
+              variant="outline"
               disabled={venueId === null || missing === 0}
               onClick={onGenerate}
               title={
@@ -150,16 +176,62 @@ export function SessionBar({
                 : `Generate ${missing} × 2 replies`}
             </Button>
           )}
-          {session !== null ? (
-            <a
-              className="text-xs underline underline-offset-4"
-              href={`/admin/tests/human-eval/api/export?sessionId=${session.id}`}
+
+          {/* THE FINISH LINE, and the only route to a CSV. Before: a Submit
+              that says what is missing. After: the instant, and the file.
+              Never both, because a pass is in exactly one of those states. */}
+          {session === null ? null : submitted !== null ? (
+            <span className="flex items-center gap-3 text-xs text-ink-faint">
+              submitted {submitted.slice(0, 16).replace('T', ' ')}
+              <a
+                className="underline underline-offset-4"
+                href={`/admin/tests/human-eval/api/export?sessionId=${session.id}`}
+              >
+                Download CSV
+              </a>
+            </span>
+          ) : (
+            <Button
+              type="button"
+              size="sm"
+              // The label carries the reason. A disabled button with the
+              // reason in a tooltip is a button that reads as broken, and
+              // "what is left to do" is the one thing a rater on row 50 of 58
+              // actually wants from this bar.
+              disabled={busy || submitting || blockers.length > 0}
+              onClick={onSubmit}
             >
-              CSV
-            </a>
-          ) : null}
+              {submitting
+                ? 'Submitting…'
+                : blockers.length > 0
+                  ? `Submit - ${blockers.join(', ')}`
+                  : `Submit ${judged} judged rows`}
+            </Button>
+          )}
         </div>
       </div>
+
+      {submitError !== null ? (
+        // The submit route re-checks completeness itself, so this can disagree
+        // with the button - and when it does, the route is right. Shown
+        // verbatim rather than summarised.
+        <p className="text-xs text-destructive" role="alert">
+          {submitError}
+        </p>
+      ) : null}
+
+      {submitted === null &&
+      completeness !== null &&
+      completeness.broken > 0 ? (
+        // Named, because these rows cannot be judged and therefore cannot be
+        // what is blocking Submit - without this line, "3 rows have no
+        // verdict" and "Submit" being enabled look like a contradiction.
+        <p className="text-[11px] text-ink-faint">
+          {completeness.broken} row{completeness.broken === 1 ? '' : 's'}{' '}
+          produced no reply from one engine - not judgeable, exported with the
+          failure, and not blocking submission.
+        </p>
+      ) : null}
 
       {session !== null ? (
         // The code state the answers were generated under. On the pass rather

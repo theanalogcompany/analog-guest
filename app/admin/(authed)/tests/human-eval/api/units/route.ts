@@ -9,7 +9,10 @@ import {
   type HumanEvalUnitRow,
 } from '../../_lib/map-unit'
 import { parseJsonBody } from '../../_lib/parse-body'
-import { requireSessionAdmin } from '../../_lib/require-pass-admin'
+import {
+  refuseIfSubmitted,
+  requireSessionAdmin,
+} from '../../_lib/require-pass-admin'
 
 // POST /admin/tests/human-eval/api/units - store one question's pair of
 // answers, scrambled.
@@ -50,6 +53,11 @@ export async function POST(request: Request): Promise<NextResponse> {
 
   const auth = await requireSessionAdmin(body.sessionId)
   if (!auth.ok) return auth.response
+  // A submitted pass takes no new answers either. Re-generating one would
+  // replace a reply the exported CSV already quoted, leaving the file and the
+  // rows disagreeing about what was judged.
+  const frozen = refuseIfSubmitted(auth)
+  if (frozen !== null) return frozen
 
   // Refused by name, and this is not a formality: a scenario only one engine
   // can answer has no pair to scramble, so storing one would put a reply in

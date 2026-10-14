@@ -60,7 +60,7 @@ export const loadHumanEvalPage = cache(
     const sessionsResult = await supabase
       .from('human_eval_sessions')
       .select(
-        'id, venue_id, rated_by, v1_prompt_version, v2_prompt_version, v2_model, venue_open_state, git_sha, started_at, venues(name)',
+        'id, venue_id, rated_by, v1_prompt_version, v2_prompt_version, v2_model, venue_open_state, git_sha, started_at, submitted_at, venues(name)',
       )
       .eq('venue_id', venueId)
       .order('started_at', { ascending: false })
@@ -138,6 +138,7 @@ export const loadHumanEvalPage = cache(
       venueOpenState: selected.venue_open_state,
       gitSha: selected.git_sha,
       startedAt: selected.started_at,
+      submittedAt: selected.submitted_at,
       units,
     }
 
@@ -148,6 +149,7 @@ export const loadHumanEvalPage = cache(
       v2Model: s.v2_model,
       generated: generated.get(s.id) ?? 0,
       judged: judged.get(s.id) ?? 0,
+      submittedAt: s.submitted_at,
     }))
 
     return { ...base, sessions, session, hasMoreSessions }

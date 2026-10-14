@@ -93,13 +93,21 @@ export default async function HumanEvalPage({
 
       <div className="flex flex-col gap-2 text-xs text-muted-foreground">
         <p>
-          Each row generates a reply from BOTH engines for the same inbound,
-          shows them as A and B in an order drawn per question, and records what
-          you decide. Nothing on this page ever says which engine wrote which -
-          the CSV export is the only place A and B are named, so every verdict
-          here is blind by construction. The better-reply question is only asked
-          when something failed: two acceptable replies are not a regression,
-          and a failing row needs a comment saying what went wrong.
+          Each row generates a reply from BOTH engines for the same inbound and
+          shows them as A and B in an order drawn per question. They are graded
+          one at a time - B stays hidden until A has a verdict, so the first
+          read of A is not an argument with something already on screen - and
+          nothing on this page ever says which engine wrote which. The
+          better-reply question is only asked when something failed: two
+          acceptable replies are not a regression, and a failing row needs a
+          comment saying what went wrong.
+        </p>
+        <p>
+          <strong>Submitting is the finish line.</strong> It is offered once
+          every question has been generated, judged, and commented wherever
+          something failed; it freezes the pass - no more verdicts, no
+          re-generating - and generates the CSV, which is the only place A and B
+          are named. There is no undo, and an unsubmitted pass has no file.
         </p>
         <p>
           A pass runs {data.judgeableCount} questions four at a time, so about a

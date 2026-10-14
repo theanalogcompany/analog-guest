@@ -100,6 +100,10 @@ export async function POST(request: Request): Promise<NextResponse> {
     venueOpenState: inserted.data.venue_open_state,
     gitSha: inserted.data.git_sha,
     startedAt: inserted.data.started_at,
+    // A pass is born unsubmitted. Not selected back from the row: the column
+    // has no default and this insert does not set it, so reading it would be
+    // asking the database to confirm a constant.
+    submittedAt: null,
     units: [],
   }
   return NextResponse.json({ session })

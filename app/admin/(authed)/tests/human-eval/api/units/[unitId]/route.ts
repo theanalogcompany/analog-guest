@@ -7,7 +7,10 @@ import {
   type HumanEvalUnitRow,
 } from '../../../_lib/map-unit'
 import { parseJsonBody } from '../../../_lib/parse-body'
-import { requireUnitAdmin } from '../../../_lib/require-pass-admin'
+import {
+  refuseIfSubmitted,
+  requireUnitAdmin,
+} from '../../../_lib/require-pass-admin'
 
 // PATCH /admin/tests/human-eval/api/units/<unitId> - record what the rater
 // decided about one row.
@@ -42,6 +45,11 @@ export async function PATCH(
   const { unitId } = await context.params
   const auth = await requireUnitAdmin(unitId)
   if (!auth.ok) return auth.response
+  // Before the body is even read: a submitted pass does not accept a verdict,
+  // and this is the enforcement rather than the disabled button the rater
+  // sees (migration 084).
+  const frozen = refuseIfSubmitted(auth)
+  if (frozen !== null) return frozen
 
   const parsed = await parseJsonBody(request, HumanEvalJudgmentSchema)
   if (!parsed.ok) return parsed.response

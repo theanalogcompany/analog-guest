@@ -7,12 +7,14 @@ import type { VenueListRow } from '../../_lib/load-venues'
 import { goldenSessionFor, goldenTurnFor } from '@/lib/eval/golden-turn'
 import { goldenV1FromOutcome, goldenV2FromTrace } from '@/lib/eval/golden-arms'
 import {
+  humanEvalCompleteness,
   humanEvalQuestions,
+  isUnitJudgeable,
   judgmentComplete,
   judgmentFromUnit,
   type HumanEvalJudgment,
 } from '@/lib/eval/human-eval'
-import { patchJudgment, postPair, postPass } from './_lib/api'
+import { patchJudgment, postPair, postPass, postSubmit } from './_lib/api'
 import type {
   HumanEvalPageData,
   HumanEvalSessionView,
@@ -107,7 +109,15 @@ export function HumanEvalClient({
   >({})
   const [fatal, setFatal] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  const [submitting, setSubmitting] = useState(false)
+  const [submitError, setSubmitError] = useState<string | null>(null)
   const cancelRef = useRef(false)
+  /**
+   * The pass is finished: every control goes read-only and the CSV exists.
+   * Read off the session, which the submit response updates, so a reload and
+   * a fresh submit land in the same state.
+   */
+  const readOnly = session?.submittedAt != null
 
   const questions = useMemo(() => humanEvalQuestions(), [])
   const missing = useMemo(
@@ -133,6 +143,25 @@ export function HumanEvalClient({
       u.bVerdict !== null &&
       !judgmentComplete(judgmentFromUnit(u)),
   ).length
+  /**
+   * What is still in the way of submitting, by the SAME function the submit
+   * route runs against the stored rows. The button it labels is advisory -
+   * the route decides - but the two cannot describe the pass differently.
+   */
+  const completeness = useMemo(() => {
+    const all = Object.values(units)
+    const inSet = new Set(questions.map((q) => q.key))
+    return humanEvalCompleteness(
+      all.map((u) => ({
+        judgeable: isUnitJudgeable(u),
+        aVerdict: u.aVerdict,
+        bVerdict: u.bVerdict,
+        note: u.note,
+      })),
+      questions.length,
+      all.filter((u) => inSet.has(u.questionKey)).length,
+    )
+  }, [units, questions])
 
   /** One question, both arms, stored. Returns nothing - it writes state. */
   const generateOne = useCallback(
@@ -246,7 +275,7 @@ export function HumanEvalClient({
     }, [session, venueId])
 
   const onGenerate = useCallback(() => {
-    if (busy || venueId === null) return
+    if (busy || venueId === null || readOnly) return
     setBusy(true)
     setFatal(null)
     cancelRef.current = false
@@ -262,12 +291,12 @@ export function HumanEvalClient({
       )
       setBusy(false)
     })()
-  }, [busy, venueId, ensureSession, missing, runQueue])
+  }, [busy, venueId, readOnly, ensureSession, missing, runQueue])
 
   /** One question - a pending row's Generate, or a judged row's Regenerate. */
   const onGenerateOne = useCallback(
     (questionKey: string) => {
-      if (busy) return
+      if (busy || readOnly) return
       const unit = units[questionKey]
       // Confirmed, because this clears a verdict the rater already gave: the
       // new pair is a different reply and the old judgment is not about it.
@@ -292,12 +321,46 @@ export function HumanEvalClient({
         setBusy(false)
       })()
     },
-    [busy, units, ensureSession, runQueue],
+    [busy, readOnly, units, ensureSession, runQueue],
   )
 
   const onCancel = useCallback(() => {
     cancelRef.current = true
   }, [])
+
+  /**
+   * Finish the pass, then fetch its CSV.
+   *
+   * IN THAT ORDER, AND ONLY IN THAT ORDER. The export route refuses an
+   * unsubmitted pass, so the download cannot be the thing that happens when
+   * the stamp did not - a failed submit leaves the error on screen and no
+   * file, which is the honest outcome. The confirm is because this is
+   * one-way: there is no unsubmit, by design.
+   */
+  const onSubmit = useCallback(() => {
+    if (session === null || submitting || readOnly) return
+    if (
+      !window.confirm(
+        'Submitting freezes this pass - no more verdicts, comments or re-generating - and generates its CSV. There is no undo. Continue?',
+      )
+    )
+      return
+    setSubmitting(true)
+    setSubmitError(null)
+    void (async () => {
+      const result = await postSubmit(session.id)
+      setSubmitting(false)
+      if (!result.ok) {
+        setSubmitError(result.error)
+        return
+      }
+      setSession({ ...session, submittedAt: result.data.submittedAt })
+      // A plain navigation rather than fetch-and-blob: the route answers with
+      // Content-Disposition: attachment, so the browser saves it and the page
+      // stays exactly where it was, scroll position included.
+      window.location.href = `/admin/tests/human-eval/api/export?sessionId=${session.id}`
+    })()
+  }, [session, submitting, readOnly])
 
   /**
    * Record a judgment.
@@ -366,8 +429,12 @@ export function HumanEvalClient({
         judgeable={questions.length}
         running={runningCount}
         busy={busy}
+        completeness={session === null ? null : completeness}
+        submitting={submitting}
+        submitError={submitError}
         onGenerate={onGenerate}
         onCancel={onCancel}
+        onSubmit={onSubmit}
       />
 
       {fatal !== null ? (
@@ -390,7 +457,10 @@ export function HumanEvalClient({
               questionKey={question.key}
               running={running[question.key] === true}
               error={error}
-              busy={busy}
+              // A question ADDED to the golden set after this pass was
+              // submitted shows up here, on a pass that can no longer take a
+              // pair. Disabled rather than offered-then-409'd.
+              busy={busy || readOnly}
               onGenerate={() => onGenerateOne(question.key)}
             />
           )
@@ -410,6 +480,7 @@ export function HumanEvalClient({
               judgment={pending[unit.id] ?? judgmentFromUnit(unit)}
               saveState={saving[unit.id] ?? 'idle'}
               busy={busy}
+              readOnly={readOnly}
               onJudge={(judgment) => onJudge(unit.id, judgment)}
               onRegenerate={() => onGenerateOne(question.key)}
             />
@@ -430,6 +501,7 @@ export function HumanEvalClient({
             judgment={pending[unit.id] ?? judgmentFromUnit(unit)}
             saveState={saving[unit.id] ?? 'idle'}
             busy={busy}
+            readOnly={readOnly}
             onJudge={(judgment) => onJudge(unit.id, judgment)}
             onRegenerate={() => onGenerateOne(unit.questionKey)}
           />
