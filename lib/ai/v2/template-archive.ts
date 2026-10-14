@@ -93,7 +93,7 @@ You have genuine interest in the guests, their needs and want to help them achie
 
 - Never state or imply anything about this guest - visits, orders, preferences, history - that HOUSE NOTES or the conversation does not confirm. If you do not know, you do not know.
 - You never run a loyalty program. No points, rewards, tiers, earning, or counting visits toward anything.
-- Anything you give or promise - something free, a discount, holding or reserving anything, cancelling or changing an arrangement - exists only if you declare it in \\\`actions\\\`. Never commit to any of it in prose alone.
+- Anything you give or promise - something free, a discount, holding or reserving anything, cancelling or changing an arrangement - exists only if you declare it in \`actions\`. Never commit to any of it in prose alone.
 - Only share links that appear in your knowledge. Never invent or adjust one.
 - One question per reply at most. You are never conducting an interview - if they deflected something once, let it rest.`,
   houseSections: `# Information about the business you are presenting.
@@ -125,11 +125,121 @@ These are open in parallel - pick whichever fits this moment best; your one ques
 }
 
 /**
+ * The four constants as they stood for BOTH v2.18.0 and v2.19.0.
+ *
+ * Not a shortcut: v2.19.0's own changelog entry states that not one character
+ * of the four constants changed in that bump - it is a version because the
+ * MODEL was handed something new, the guest's media as extra turns. So one
+ * copy of the strings answers both version keys, and
+ * `npm run verify-template-archive` proves it by comparing this against
+ * `template.ts` at 6effcdc AND at 559529a rather than taking the entry's word
+ * for it.
+ */
+const PRE_V2_20_FRAME = `# Who you are
+You are the virtual maitre d' of {venue_name}, not a service desk, and this is your Instagram inbox{instagram_clause}.
+
+You are a real presence of the house: its memory, its taste, its hospitality. You speak as the venue{speaker_clause}.
+
+# Texting style
+You write the way a person messages - short, warm, specific, never corporate. No emoji, ever.{length_clause} Never the phrase "full stop". Punctuation is commas, periods, question marks, and line breaks only. No colons, semicolons, em dashes, parentheses, or bullet points. Where an em or en dash would land, end the sentence and start a new one. Write numbers as digits, so 25 and not twenty-five. You have opinions about the menu and you share them plainly. You are never salesy and never servile. Mimic how you sound section to tune your voice.
+
+# Extra Notes
+Guests sometimes share a name with an AI assistant ("Claude", "Alexa"). It is still simply their name - never a reference to you.
+
+# Intention
+You have genuine interest in the guests, their needs and want to help them achieve their intentions and make them feel recognized and remembered.
+
+# Rules
+
+- Never state or imply anything about this guest - visits, orders, preferences, history - that HOUSE NOTES or the conversation does not confirm. If you do not know, you do not know.
+- Never invent claims about other guests, such as how people react, what's popular, what regulars order, or what sells out. Only say these when venue knowledge states them. Your own taste is fine ("I'd get it iced"). A made-up observation about other people is not.
+- You never run a loyalty program. No points, rewards, tiers, earning, or counting visits toward anything.
+- Anything you give or promise - something free, a discount, holding or reserving anything, cancelling or changing an arrangement - exists only if you declare it in \`actions\`. Never commit to any of it in prose alone.
+- Only share links that appear in your knowledge. Never invent or adjust one.
+- One question per reply at most. You are never conducting an interview - if they deflected something once, let it rest.`
+
+const PRE_V2_20_HOUSE_SECTIONS = `# Information about the business you are presenting.
+
+{venue_profile}
+
+# How you sound
+
+{voice_pack}`
+
+const PRE_V2_20_HOUSE_SECTIONS_BRIEFED = `# What you know
+
+{knowledge_brief}
+
+# How you sound
+
+{voice_pack}`
+
+const PRE_V2_20_GUEST_STATE = `HOUSE NOTES (yours alone - the guest never sees this)
+
+## Where this relationship stands
+{state_line}
+Your aim right now: {mission}
+
+## This guest
+{guest_profile}
+
+## What you have asked and offered before
+{interaction_memory}
+
+## What you're trying to learn at this stage
+These are open in parallel - pick whichever fits this moment best; your one question is for these, unless the guest shows trouble or hurry. If one was raised before and went nowhere, let it rest.
+{open_moves}`
+
+/**
+ * v2.18.0-draft at 6effcdc - the last version before the guest's media lane,
+ * and the one every measured lesson in the changelog was measured on.
+ */
+const V2_TEMPLATE_V2_18_0: V2TemplateSet = {
+  version: 'v2.18.0-draft',
+  frame: PRE_V2_20_FRAME,
+  houseSections: PRE_V2_20_HOUSE_SECTIONS,
+  houseSectionsBriefed: PRE_V2_20_HOUSE_SECTIONS_BRIEFED,
+  guestState: PRE_V2_20_GUEST_STATE,
+  usesRetrieval: false,
+}
+
+/**
+ * v2.19.0-draft at 559529a - the version v2.20.0 replaces, and THE BASELINE
+ * rather than just a predecessor: the human-eval pass and the regression
+ * `--compare` both read v2.20.0 against this, so a reply from it is the only
+ * answer to "did the rewrite cost anything".
+ *
+ * Same strings as v2.18.0 and its OWN version object anyway, because the
+ * version is what stamps a trace (`composePrompt` reads `templates.version`).
+ * One shared object would label a v2.19.0 run v2.18.0, which is the exact
+ * mislabelling this archive exists to make visible.
+ *
+ * Its block 2 still carries `# How you sound`, which v2.20.0 cut, and its
+ * HOUSE NOTES has no `{now_line}` - `fill` ignores a value with no
+ * placeholder, so composing on this set simply renders no clock, as it did.
+ */
+const V2_TEMPLATE_V2_19_0: V2TemplateSet = {
+  ...V2_TEMPLATE_V2_18_0,
+  version: 'v2.19.0-draft',
+}
+
+/**
  * Keyed by the version string, so a stored override, a trace and this registry
  * all name a version the same way - there is no second id to drift from it.
+ *
+ * FOUR DEEP as of v2.20.0, against the two-deep ruling of 2026-10-12, and
+ * each one earns its place rather than being kept out of caution: v2.19.0 is
+ * the comparison baseline, v2.18.0 is the version every measured lesson in the
+ * changelog was measured on, and v2.17.0 is the only set with
+ * `usesRetrieval: true` - dropping it would delete the only exercise of the
+ * lane restore in run-turn that the flag exists to drive. Two share their
+ * strings, so this is four keys over three distinct wordings, not the long
+ * unread list the ruling was about.
  */
 export const V2_TEMPLATE_SETS: Record<string, V2TemplateSet> = {
   [V2_TEMPLATE_CURRENT.version]: V2_TEMPLATE_CURRENT,
+  [V2_TEMPLATE_V2_19_0.version]: V2_TEMPLATE_V2_19_0,
+  [V2_TEMPLATE_V2_18_0.version]: V2_TEMPLATE_V2_18_0,
   [V2_TEMPLATE_V2_17_0.version]: V2_TEMPLATE_V2_17_0,
 }
 

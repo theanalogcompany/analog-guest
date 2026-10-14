@@ -46,6 +46,7 @@ import {
 import { DEFAULT_POLICY_SET } from '@/lib/policy/default-policies'
 import { decideDispatch, type GateDecision } from '@/lib/policy/gate'
 import { replyLengthClause } from '@/lib/ai/v2/reply-length-clause'
+import { venueNowLine } from '@/lib/ai/v2/now-line'
 import { fireGateNotifications } from '@/lib/policy/notify'
 import {
   detectSituations,
@@ -591,10 +592,21 @@ export async function runTurn(input: RunTurnInput): Promise<TurnTrace> {
   // ---- Venue sections. ----
   const venueRow = await supabase
     .from('venues')
-    .select('name')
+    .select('name, timezone')
     .eq('id', input.venueId)
     .maybeSingle()
   const venueName = venueRow.data?.name ?? 'the venue'
+
+  // `{now_line}` in HOUSE NOTES (v2.20.0): the venue's own wall clock, because
+  // the frame tells the model to use the time when it matters and until now no
+  // v2 prompt carried one.
+  //
+  // FAILS OPEN TO '', which compose.ts renders as an explicit "unavailable"
+  // line. An unreadable venue row or an invalid zone must not hold a guest's
+  // reply, and the alternative direction - defaulting to server time - would
+  // tell a San Francisco cafe it is evening all morning. See now-line.ts.
+  const nowLine =
+    venueRow.data === null ? '' : venueNowLine(venueRow.data.timezone, now)
 
   // The venue's OWN Instagram handle, so the frame can name the inbox the
   // agent is answering in. `is_active` and `deauthorized_at` are both checked:
@@ -960,6 +972,7 @@ export async function runTurn(input: RunTurnInput): Promise<TurnTrace> {
       speakerClause: '',
       instagramClause,
       lengthClause,
+      nowLine,
       venueProfile: sections.venueProfile,
       voicePack: sections.voicePack,
       knowledgeBrief: sections.knowledgeBrief,

@@ -9,10 +9,22 @@ import { V2_TEMPLATE_CURRENT, type V2TemplateSet } from './template-archive'
 //   system 3  HOUSE NOTES  retrieval + guest state, per turn
 //   turns     the transcript, then the guest's message(s), verbatim
 //
-// ONE BREAKPOINT, after system 2. Block 1 carries none: at ~590 tokens it is
-// under Anthropic's 1024-token minimum cacheable prefix, so it could never
-// have produced an entry, and it held one for months anyway. Block 3 changes
+// ONE BREAKPOINT, after system 2, and block 1 carries none. Block 3 changes
 // every turn, so a breakpoint after it would write entries nothing reads.
+//
+// THE REASON BLOCK 1 CARRIES NONE CHANGED IN v2.20.0, and the old one is
+// recorded because it was quoted in three places. It used to be SIZE: at
+// ~2,100 chars (~590 tokens) the block sat under Anthropic's 1024-token
+// minimum cacheable prefix, so the breakpoint it held for months could never
+// have produced an entry. The owner's hand-written frame is 4,677 chars, which
+// by any chars-per-token estimate is at or past that floor, so that argument
+// is GONE.
+//
+// What holds instead: the breakpoint after block 2 already makes blocks 1 and
+// 2 ONE cached prefix, because the cache is prefix-keyed. A second breakpoint
+// between them would buy a separate block-1 entry, which is worth something
+// only if block 2 changed often - and block 2 is per-venue static by
+// construction. Same conclusion, different load-bearing fact.
 //
 // NOTHING PER-TURN MAY MOVE INTO SYSTEM 1 OR 2. That is not tidiness:
 // `# What you know` lived at the end of block 2 until 2026-10-08 and cost the
@@ -114,6 +126,21 @@ export interface ComposeInput {
    * unaffected by v2.18.0.
    */
   knowledgeBrief: string
+  /**
+   * The venue's local clock, for a template whose HOUSE NOTES carries
+   * `{now_line}` (v2.20.0). One sentence, e.g. `Monday 13 October 2026,
+   * 10:04am, venue local time.`
+   *
+   * HOUSE NOTES IS THE ONLY BLOCK THIS MAY REACH. It changes every turn, so
+   * rendering it in block 1 or 2 would invalidate the cached prefix in front
+   * of it on every single turn - the 2026-10-08 defect, in the one shape the
+   * composer's header warns about by name.
+   *
+   * Empty when the venue's timezone is unusable, which renders the honest
+   * fallback rather than a guessed time. A wrong clock is worse than no clock:
+   * the frame tells the model to use this when it matters.
+   */
+  nowLine: string
   /** Oldest first; must alternate (merge same-role runs before calling). */
   history: HistoryTurn[]
   stateLabel: string
@@ -178,6 +205,11 @@ function fill(template: string, values: Record<string, string>): string {
 }
 
 const EMPTY_SECTION_FALLBACKS = {
+  // A venue whose timezone this runtime cannot read. The frame tells the model
+  // to use the time when it matters, so saying the clock is unavailable is the
+  // only honest filler - a guessed instant would be a fact nothing checked,
+  // and UTC is not this venue's morning.
+  nowLine: "(the venue's local time is unavailable for this turn)",
   guestProfile: 'Nothing on file yet - this guest is new to you.',
   interactionMemory: 'You have not asked or offered anything yet.',
   openMoves: '(nothing right now - just be present)',
@@ -238,6 +270,11 @@ export function composePrompt(
             (input.knowledge ?? '').trim() || EMPTY_SECTION_FALLBACKS.knowledge,
         }
       : {}),
+    // Passed UNCONDITIONALLY, unlike `knowledge` above: `fill` ignores a value
+    // with no placeholder, and no archived set carries `{now_line}`, so the
+    // only thing a guard would buy here is a second place for the lane to
+    // disagree with the template.
+    now_line: input.nowLine.trim() || EMPTY_SECTION_FALLBACKS.nowLine,
     state_line: `${input.stateLabel} (${input.stateKey})`,
     mission: input.mission,
     guest_profile:

@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Card } from '@/components/ui/card'
+import { LIVE_REGRESSION_TELLS } from '@/lib/eval/regression-scenarios'
 import type { ScenarioListItem } from '../_lib/load-regression'
 
 // Scenario cards. There is no add form: a scenario is an entry in
@@ -132,10 +133,16 @@ export function ScenarioList({ scenarios }: { scenarios: ScenarioListItem[] }) {
                         bar: gate must match {s.expectPolicyKeys.join(' or ')}
                       </span>
                     ) : null}
-                    <span>
-                      ceilings: emoji · dash · assistant register · two
-                      questions
-                    </span>
+                    {s.expectEmptyReply ? (
+                      <span>ceiling: sends nothing at all</span>
+                    ) : null}
+                    {/* Derived, never typed out. This line read "emoji · dash
+                        · assistant register · two questions" from the day it
+                        shipped, and by v2.20.0 the harness checked nine - a
+                        surface whose whole job is to say what is checked,
+                        understating it by five. assertLiveTells refuses a run
+                        where this list and the harness disagree. */}
+                    <span>ceilings: {LIVE_REGRESSION_TELLS.join(' · ')}</span>
                   </div>
                 </>
               ) : null}

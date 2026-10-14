@@ -101,6 +101,14 @@ function buildBrief(history: HistoryTurn[], inbound: string): string {
     // Empty for the same reason: the judge reads the brief, not the frame,
     // and an empty clause keeps this harness byte-identical across the bump.
     lengthClause: '',
+    // PINNED, not the real clock. v2.20.0 put `## Right now` in HOUSE NOTES,
+    // which is the one block this harness's subject actually reads - so a live
+    // timestamp would change the brief on every run and make a score shift
+    // indistinguishable from judge variance, which is the only thing this
+    // harness measures. A fixed sentence keeps runs comparable to each other;
+    // they are NOT comparable to pre-v2.20.0 runs, because the brief gained a
+    // section.
+    nowLine: 'Tuesday 13 October 2026, 10:04am, venue local time.',
     venueProfile: VENUE_NAME,
     voicePack: '',
     knowledgeBrief: '',

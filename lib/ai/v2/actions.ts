@@ -32,9 +32,22 @@ export type Action = z.infer<typeof ActionSchema>
 
 export const GenerationOutputSchema = z.object({
   /**
-   * The actual text bubbles, in send order. The model owns splitting; bubble
-   * quality is judged per-response (Economy axis), not legislated. Capped
-   * after the call with .slice(0, MAX_MESSAGES) - never maxItems.
+   * The actual text bubbles, in send order. Capped after the call with
+   * .slice(0, MAX_MESSAGES) - never maxItems.
+   *
+   * SPLITTING IS LEGISLATED AS OF v2.20.0, and this comment used to say the
+   * opposite ("the model owns splitting; bubble quality is judged
+   * per-response, not legislated"). The owner's `# Texting style` now asks for
+   * 1 to 3 messages, puts anything past the direct answer in its own message,
+   * and bans a trailing period. The Economy axis still scores it; the prompt
+   * is no longer silent on it. `MAX_MESSAGES` is 4, so the contract still
+   * permits one more bubble than the prompt asks for.
+   *
+   * `.min(1)` BINDS THE MODEL, NOT THE RESULT. `# Rules` tells it to respond
+   * nothing on an opt-out, which this floor makes unrepresentable, so
+   * generate.ts drops blank bubbles after the slice and a turn can come back
+   * with zero messages. Anything reading this output has to handle an empty
+   * array.
    */
   messages: z.array(z.string()).min(1),
   actions: z.array(ActionSchema).optional(),
