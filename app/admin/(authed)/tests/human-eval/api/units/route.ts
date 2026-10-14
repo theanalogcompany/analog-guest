@@ -86,7 +86,6 @@ export async function POST(request: Request): Promise<NextResponse> {
         note: null,
         generated_at: new Date().toISOString(),
         judged_at: null,
-        revealed_at: null,
       },
       { onConflict: 'session_id,question_key' },
     )

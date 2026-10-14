@@ -8,6 +8,7 @@ import { goldenSessionFor, goldenTurnFor } from '@/lib/eval/golden-turn'
 import { goldenV1FromOutcome, goldenV2FromTrace } from '@/lib/eval/golden-arms'
 import {
   humanEvalQuestions,
+  judgmentComplete,
   judgmentFromUnit,
   type HumanEvalJudgment,
 } from '@/lib/eval/human-eval'
@@ -115,6 +116,22 @@ export function HumanEvalClient({
   )
   const judged = Object.values(units).filter(
     (u) => u.aVerdict !== null && u.bVerdict !== null,
+  ).length
+  /**
+   * Judged rows that still owe a comment, which a failing verdict requires
+   * (`judgmentComplete`). Counted and SHOWN rather than folded into `judged`:
+   * the two numbers answer different questions - how much of the pass has
+   * been looked at, and how much of it is actually usable - and a pass that
+   * reads as finished while its findings are blank is the one failure this
+   * requirement exists to prevent.
+   *
+   * Read off the stored rows, so it only counts a comment the database has.
+   */
+  const needComment = Object.values(units).filter(
+    (u) =>
+      u.aVerdict !== null &&
+      u.bVerdict !== null &&
+      !judgmentComplete(judgmentFromUnit(u)),
   ).length
 
   /** One question, both arms, stored. Returns nothing - it writes state. */
@@ -288,11 +305,11 @@ export function HumanEvalClient({
    * TWO THINGS HERE ARE NOT OPTIONAL, and both were found by using the page
    * rather than by reading it.
    *
-   * THE WRITES FOR ONE ROW ARE SERIALIZED. Clicking Reveal after typing a note
-   * fires TWO writes - the textarea's blur, then the click - and unordered
-   * responses meant the stale one landed last and wiped a reveal that the
-   * database had actually recorded. The row then showed an unrevealed state
-   * for a revealed row.
+   * THE WRITES FOR ONE ROW ARE SERIALIZED. Clicking a control after typing a
+   * note fires TWO writes - the textarea's blur, then the click - and
+   * unordered responses meant the stale one landed last and overwrote what
+   * the database had actually recorded, leaving the row showing the older
+   * state of a field the rater had just changed.
    *
    * THE PENDING INTENT IS WHAT THE NEXT CLICK COMPOSES WITH, not the last
    * stored row. Every write carries the whole judgment, so a second click
@@ -345,6 +362,7 @@ export function HumanEvalClient({
         missing={missing.length}
         generated={Object.keys(units).length}
         judged={judged}
+        needComment={needComment}
         judgeable={questions.length}
         running={runningCount}
         busy={busy}

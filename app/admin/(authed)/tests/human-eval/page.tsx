@@ -17,7 +17,7 @@ import { HumanEvalClient } from './human-eval-client'
 // side by side, labelled, with everything about them on screen - which is the
 // right surface for debugging a prompt and the wrong one for judging it,
 // because knowing which engine wrote a reply changes how it reads. This one
-// withholds that until both verdicts are in.
+// never says, at all: the CSV export is the only place A and B are named.
 //
 // WHY IT IS NOT THE PROMPT LAB EITHER. The lab's unit of work is a PROMPT
 // under edit, with v1 read from storage as a fixed backdrop. Here both arms
@@ -95,11 +95,11 @@ export default async function HumanEvalPage({
         <p>
           Each row generates a reply from BOTH engines for the same inbound,
           shows them as A and B in an order drawn per question, and records what
-          you decide. Reveal unlocks once both replies have a verdict - the
-          export says, per row, whether a verdict was written after it, so
-          &quot;this pass was blind&quot; is checkable rather than asserted. The
-          better-reply question is only asked when something failed: two
-          acceptable replies are not a regression.
+          you decide. Nothing on this page ever says which engine wrote which -
+          the CSV export is the only place A and B are named, so every verdict
+          here is blind by construction. The better-reply question is only asked
+          when something failed: two acceptable replies are not a regression,
+          and a failing row needs a comment saying what went wrong.
         </p>
         <p>
           A pass runs {data.judgeableCount} questions four at a time, so about a

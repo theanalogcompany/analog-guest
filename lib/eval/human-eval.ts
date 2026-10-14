@@ -9,6 +9,15 @@
 // disagree about which engine won a row, which would be a disagreement about
 // the only output this surface has.
 //
+// THE PAGE NEVER UNBLINDS A ROW. There is no reveal: `unblind` is called by
+// the CSV export and by nothing the rater can see, so "the verdicts in this
+// pass were given blind" is a property of what the surface is able to render
+// rather than a claim about how it was used. The earlier version offered a
+// Reveal button gated on both verdicts plus a `revealed_at` stamp to audit it
+// after the fact; not being able to unblind at all is the stronger guarantee
+// and needs no audit column. `human_eval_units.revealed_at` survives in the
+// schema carrying old passes' stamps and has no reader.
+//
 // Pure: no DB, no SDK, no clock. The page, the write routes and the export all
 // import from here.
 
@@ -75,12 +84,6 @@ export const HumanEvalJudgmentSchema = z
      * paragraph into.
      */
     note: z.string().max(4000),
-    /**
-     * The rater asked to see which engine wrote which. One-way: the server
-     * stamps `revealed_at` once and never clears it, so `false` on a later
-     * write cannot un-reveal a row and make a late verdict look blind.
-     */
-    revealed: z.boolean(),
   })
   .superRefine((value, ctx) => {
     if (
@@ -97,6 +100,30 @@ export const HumanEvalJudgmentSchema = z
 export type HumanEvalJudgment = z.infer<typeof HumanEvalJudgmentSchema>
 
 /**
+ * Is this row finished?
+ *
+ * BOTH VERDICTS, AND A COMMENT ONCE EITHER ONE FAILS. A fail is the only
+ * output of this pass that costs anything to act on - "v2 regressed on 4 of
+ * 58" is a number, and what regressed is the finding - so a failing row with
+ * an empty `why` is a row that recorded the cheap half and threw away the
+ * expensive one.
+ *
+ * NOT ENFORCED BY THE WRITE SCHEMA, deliberately. Every write carries the
+ * whole judgment, so the click that marks A `fail` necessarily arrives with
+ * an empty note; rejecting it at the route would mean the first click of a
+ * failing row could not be saved at all, and a verdict that would not persist
+ * is the one failure this surface cannot absorb. The row saves, renders as
+ * incomplete, and the session bar counts how many still owe a comment -
+ * checkable against the export, where those are exactly the rows with a
+ * verdict and a blank `why`.
+ */
+export function judgmentComplete(judgment: HumanEvalJudgment): boolean {
+  if (judgment.aVerdict === null || judgment.bVerdict === null) return false
+  if (!needsPreference(judgment.aVerdict, judgment.bVerdict)) return true
+  return judgment.note.trim().length > 0
+}
+
+/**
  * The judgment a stored row represents - the inverse of writing one.
  *
  * ONE DEFINITION, because the surface needs to layer an unsaved click over a
@@ -109,14 +136,12 @@ export function judgmentFromUnit(unit: {
   bVerdict: HumanEvalVerdict | null
   preference: HumanEvalPreference | null
   note: string
-  revealedAt: string | null
 }): HumanEvalJudgment {
   return {
     aVerdict: unit.aVerdict,
     bVerdict: unit.bVerdict,
     preference: unit.preference,
     note: unit.note,
-    revealed: unit.revealedAt !== null,
   }
 }
 

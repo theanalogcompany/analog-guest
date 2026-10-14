@@ -27,6 +27,11 @@ import { requireSessionAdmin } from '../../_lib/require-pass-admin'
 // carrying empty verdict cells. Filtering them out would make a half-finished
 // pass read as a complete one with a smaller set, and the row count is how
 // anyone reading the file knows which they have.
+//
+// DOWNLOADING THIS IS THE ONLY WAY TO LEARN WHICH ENGINE WROTE WHICH. The
+// page has no reveal, so `shown_as_a` here is the unblinding - which is also
+// why it is worth reading the file away from the surface rather than beside a
+// pass someone is still judging.
 
 export const dynamic = 'force-dynamic'
 
@@ -105,15 +110,6 @@ export async function GET(request: Request): Promise<NextResponse> {
           : '',
       generated_at: unit.generatedAt,
       judged_at: unit.judgedAt ?? '',
-      revealed_at: unit.revealedAt ?? '',
-      // Blank unless both instants exist: a row never revealed, or never
-      // judged, has no comparison to report and must not read as 'no'.
-      verdict_after_reveal:
-        unit.revealedAt === null || unit.judgedAt === null
-          ? ''
-          : Date.parse(unit.judgedAt) > Date.parse(unit.revealedAt)
-            ? 'yes'
-            : 'no',
     }
   })
 

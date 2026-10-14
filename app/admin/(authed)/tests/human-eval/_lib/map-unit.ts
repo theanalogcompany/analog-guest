@@ -42,7 +42,6 @@ export interface HumanEvalUnitRow {
   note: string | null
   generated_at: string
   judged_at: string | null
-  revealed_at: string | null
 }
 
 export function unitViewFromRow(row: HumanEvalUnitRow): HumanEvalUnitView {
@@ -81,7 +80,6 @@ export function unitViewFromRow(row: HumanEvalUnitRow): HumanEvalUnitView {
     note: row.note ?? '',
     generatedAt: row.generated_at,
     judgedAt: row.judged_at,
-    revealedAt: row.revealed_at,
   }
 }
 
@@ -103,6 +101,12 @@ export function sortUnitsByQuestionOrder(
   )
 }
 
-/** The columns `unitViewFromRow` reads, for a `select()`. One definition. */
+/**
+ * The columns `unitViewFromRow` reads, for a `select()`. One definition.
+ *
+ * `revealed_at` is NOT among them. The surface has no reveal - the CSV export
+ * is the only place A and B are named - so the column holds old passes'
+ * stamps and has no reader (lib/eval/human-eval.ts).
+ */
 export const HUMAN_EVAL_UNIT_COLUMNS =
-  'id, question_key, a_arm, v1, v2, a_verdict, b_verdict, preference, note, generated_at, judged_at, revealed_at'
+  'id, question_key, a_arm, v1, v2, a_verdict, b_verdict, preference, note, generated_at, judged_at'

@@ -33,6 +33,7 @@ export function SessionBar({
   missing,
   generated,
   judged,
+  needComment,
   judgeable,
   running,
   busy,
@@ -46,6 +47,8 @@ export function SessionBar({
   missing: number
   generated: number
   judged: number
+  /** Judged rows with a fail and no comment - the pass is not done yet. */
+  needComment: number
   judgeable: number
   running: number
   busy: boolean
@@ -113,6 +116,14 @@ export function SessionBar({
               : ''}
             {running > 0 ? ` · ${running} in flight` : ''}
           </span>
+          {/* Loud, and beside the count it qualifies: "58/58 judged" next to
+              four findings nobody wrote down is a pass that looks finished
+              and is not. */}
+          {needComment > 0 ? (
+            <span className="text-xs text-destructive">
+              {needComment} need a comment
+            </span>
+          ) : null}
           {busy ? (
             <Button
               type="button"
