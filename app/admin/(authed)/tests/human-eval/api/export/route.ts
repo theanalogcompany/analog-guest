@@ -28,10 +28,13 @@ import { requireSessionAdmin } from '../../_lib/require-pass-admin'
 // pass read as a complete one with a smaller set, and the row count is how
 // anyone reading the file knows which they have.
 //
-// DOWNLOADING THIS IS THE ONLY WAY TO LEARN WHICH ENGINE WROTE WHICH. The
-// page has no reveal, so `shown_as_a` here is the unblinding - which is also
-// why it is worth reading the file away from the surface rather than beside a
-// pass someone is still judging.
+// DOWNLOADING THIS IS THE ONLY WAY TO LEARN WHICH ENGINE WROTE WHICH, and it
+// only exists for a SUBMITTED pass. The page has no reveal, so `shown_as_a`
+// here is the unblinding; refusing an unsubmitted pass is what stops it being
+// used to peek at a pass still being judged, and it is what makes "submitting
+// generates the CSV" a fact about this route rather than a sentence about a
+// button. A pass cannot be submitted while it is incomplete and cannot change
+// after it is, so the file is the pass.
 
 export const dynamic = 'force-dynamic'
 
@@ -43,13 +46,21 @@ export async function GET(request: Request): Promise<NextResponse> {
   const supabase = createAdminClient()
   const session = await supabase
     .from('human_eval_sessions')
-    .select('id, git_sha, started_at')
+    .select('id, git_sha, started_at, submitted_at')
     .eq('id', auth.sessionId)
     .maybeSingle()
   if (session.error || !session.data)
     return NextResponse.json(
       { error: `pass unreadable: ${session.error?.message ?? 'gone'}` },
       { status: 500 },
+    )
+  if (session.data.submitted_at === null)
+    return NextResponse.json(
+      {
+        error:
+          'this pass has not been submitted, so it has no CSV - submit it from /admin/tests/human-eval once every row is judged',
+      },
+      { status: 409 },
     )
 
   const units = await supabase

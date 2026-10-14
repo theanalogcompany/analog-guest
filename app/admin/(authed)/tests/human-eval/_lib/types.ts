@@ -48,6 +48,12 @@ export interface HumanEvalSessionView {
   /** Null on a local dev server - there is no deployment sha to record. */
   gitSha: string | null
   startedAt: string
+  /**
+   * When the pass was submitted, null while it is in progress. A submitted
+   * pass is READ-ONLY: every write route on it answers 409, and it is the
+   * only state in which its CSV exists (migration 084).
+   */
+  submittedAt: string | null
   units: HumanEvalUnitView[]
 }
 
@@ -59,6 +65,8 @@ export interface HumanEvalSessionSummary {
   v2Model: string
   generated: number
   judged: number
+  /** Submitted passes are labelled in the picker - they are the finished ones. */
+  submittedAt: string | null
 }
 
 export interface HumanEvalPageData {

@@ -20,10 +20,43 @@ import { createAdminClient } from '@/lib/db/admin'
 // pass" is the answer for a row that does not exist and for one belonging to a
 // venue outside the caller's allowlist, because distinguishing them would turn
 // this into a venue-enumeration oracle.
+//
+// IT ALSO CARRIES `submittedAt`, and that is why a submitted pass is actually
+// frozen rather than merely greyed out. Every write route on this surface
+// already calls this, so the one lookup that resolves the venue also answers
+// "may this still change?" - a second helper, or a per-route re-read, is how
+// one route ends up accepting a write the others refuse. `refuseIfSubmitted`
+// below is the one wording.
 
 export type RequirePassResult =
-  | { ok: true; sessionId: string; venueId: string; operatorId: string }
+  | {
+      ok: true
+      sessionId: string
+      venueId: string
+      operatorId: string
+      /** Set once the pass was submitted; every write must then refuse. */
+      submittedAt: string | null
+    }
   | { ok: false; response: NextResponse }
+
+/**
+ * 409 on a submitted pass, null when the write may proceed.
+ *
+ * 409 rather than 403: the caller is allowed to write here, the pass is just
+ * no longer in a state that accepts one - and the client renders the message,
+ * so it names the instant rather than saying "forbidden".
+ */
+export function refuseIfSubmitted(
+  auth: Extract<RequirePassResult, { ok: true }>,
+): NextResponse | null {
+  if (auth.submittedAt === null) return null
+  return NextResponse.json(
+    {
+      error: `this pass was submitted at ${auth.submittedAt} and is read-only - run a new pass to judge these questions again`,
+    },
+    { status: 409 },
+  )
+}
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
@@ -41,7 +74,7 @@ export async function requireSessionAdmin(
   const supabase = createAdminClient()
   const row = await supabase
     .from('human_eval_sessions')
-    .select('id, venue_id')
+    .select('id, venue_id, submitted_at')
     .eq('id', sessionId)
     .maybeSingle()
   if (row.error)
@@ -65,6 +98,7 @@ export async function requireSessionAdmin(
     sessionId: row.data.id,
     venueId: row.data.venue_id,
     operatorId: auth.operatorId,
+    submittedAt: row.data.submitted_at,
   }
 }
 

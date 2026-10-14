@@ -16,12 +16,17 @@ import type { HumanEvalUnitView } from '../_lib/types'
 // One question, blind: the input both engines were given, then their two
 // replies as A and B with nothing saying which is which.
 //
+// ONE AT A TIME, NOT SIDE BY SIDE. A is graded first and B is not on screen
+// until it has been - see `showB`. Two replies rendered together are read
+// against each other, and "is this an acceptable reply" becomes "which of
+// these is better" without anyone deciding to change the question.
+//
 // WHAT THIS COMPONENT DELIBERATELY DOES NOT RENDER, and why each one matters -
 // every item here is something /admin/prompt-lab's comparison row DOES show,
 // and any one of them hands the rater the answer:
 //
 //   * COLOUR. The prompt lab tints v2's bubbles blue and outlines v1's so the
-//     eye lands on v2. Here both columns are the same outlined bubble.
+//     eye lands on v2. Here both replies are the same outlined bubble.
 //   * the prompt version, the model, the effort, the duration - v1 and v2
 //     never carry the same values, so one glance at a meta line identifies
 //     both columns.
@@ -29,8 +34,8 @@ import type { HumanEvalUnitView } from '../_lib/types'
 //     one engine has at all.
 //   * v1's `substitute` label. "v1 sends its fixed crisis-safety reply" names
 //     the engine in the sentence. A row where one arm sent nothing renders
-//     `[no reply]` in BOTH columns' shape, so the absence does not read as a
-//     label.
+//     `[no reply]` in the SAME shape either reply would take, so the absence
+//     does not read as a label.
 //
 // NONE OF IT IS AVAILABLE FROM THIS PAGE AT ALL. There is no reveal: the CSV
 // export is the only place A and B are named, so the rater cannot unblind a
@@ -47,6 +52,7 @@ export function BlindRow({
   judgment,
   saveState,
   busy,
+  readOnly,
   onJudge,
   onRegenerate,
 }: {
@@ -63,6 +69,13 @@ export function BlindRow({
   judgment: HumanEvalJudgment
   saveState: 'idle' | 'saving' | 'saved' | { error: string }
   busy: boolean
+  /**
+   * The pass was submitted, so nothing here can change. Every control is
+   * disabled rather than hidden - the judgments are still the thing worth
+   * reading, and a row stripped of its verdict buttons would read as
+   * unjudged. The routes refuse the writes too (migration 084).
+   */
+  readOnly: boolean
   onJudge: (judgment: HumanEvalJudgment) => void
   onRegenerate: () => void
 }) {
@@ -87,6 +100,17 @@ export function BlindRow({
   // (`judgmentComplete` in lib/eval/human-eval.ts is the same predicate).
   const askPreference = needsPreference(judgment.aVerdict, judgment.bVerdict)
   const noteMissing = askPreference && note.trim().length === 0
+
+  // ONE REPLY AT A TIME. B is withheld until A has a verdict, because two
+  // replies on screen together are judged against each other - the second one
+  // read becomes the yardstick for the first, and "is this an acceptable
+  // reply" quietly turns into "which of these two is better", which is a
+  // different question and the one the preference control asks separately.
+  //
+  // `|| bVerdict !== null` so clearing A after grading B does not yank B off
+  // the screen mid-row. Clearing both hides it again, which is the honest
+  // state: nothing has been judged here.
+  const showB = judgment.aVerdict !== null || judgment.bVerdict !== null
 
   // A row where either engine produced nothing is not judgeable: there is no
   // pair to compare, and a verdict on an error message is not a verdict on a
@@ -127,7 +151,12 @@ export function BlindRow({
             size="sm"
             variant="outline"
             className="h-6 px-2 text-[11px]"
-            disabled={busy}
+            disabled={busy || readOnly}
+            title={
+              readOnly
+                ? 'This pass was submitted - its replies are what the CSV quotes'
+                : undefined
+            }
             onClick={onRegenerate}
           >
             Regenerate
@@ -143,21 +172,33 @@ export function BlindRow({
         </p>
       ) : null}
 
-      <div className="grid grid-cols-2 gap-4">
-        <Column
+      <div className="flex flex-col gap-4">
+        <Reply
           label="Reply A"
           reply={aColumn}
           verdict={judgment.aVerdict}
-          disabled={broken}
+          disabled={broken || readOnly}
           onVerdict={(v) => judge({ aVerdict: v })}
         />
-        <Column
-          label="Reply B"
-          reply={bColumn}
-          verdict={judgment.bVerdict}
-          disabled={broken}
-          onVerdict={(v) => judge({ bVerdict: v })}
-        />
+        {showB ? (
+          <Reply
+            label="Reply B"
+            reply={bColumn}
+            verdict={judgment.bVerdict}
+            disabled={broken || readOnly}
+            onVerdict={(v) => judge({ bVerdict: v })}
+          />
+        ) : (
+          <div className="flex flex-col gap-2">
+            <span className="text-[11px] uppercase tracking-wider text-ink-faint">
+              Reply B
+            </span>
+            <span className="text-[11px] italic text-ink-faint">
+              Grade reply A first. B stays hidden until then, so the first read
+              of A is not an argument with something already on screen.
+            </span>
+          </div>
+        )}
       </div>
 
       {broken ? (
@@ -187,6 +228,7 @@ export function BlindRow({
                     judgment.preference === value ? 'default' : 'outline'
                   }
                   className="h-6 px-2 text-[11px]"
+                  disabled={readOnly}
                   onClick={() =>
                     judge({
                       preference: judgment.preference === value ? null : value,
@@ -199,37 +241,42 @@ export function BlindRow({
             </div>
           ) : null}
 
-          <Textarea
-            value={note}
-            onChange={(e) =>
-              setDraft({
-                id: unit.id,
-                committed: judgment.note,
-                text: e.target.value,
-              })
-            }
-            // Committed on blur, and only when it actually changed - a tab
-            // through the field must not cost a write.
-            onBlur={() => {
-              if (note !== judgment.note) judge({ note })
-            }}
-            rows={2}
-            placeholder={
-              askPreference
-                ? 'Required - what is wrong with the failing reply?'
-                : 'Anything worth noting (optional)'
-            }
-            // Marked on the box itself rather than only in the line below:
-            // the rater is looking at the control they have to fill in, and a
-            // message somewhere else on a row this tall is a message they
-            // scroll past.
-            className={
-              noteMissing
-                ? 'border-destructive text-xs focus-visible:ring-destructive/40'
-                : 'text-xs'
-            }
-            aria-invalid={noteMissing}
-          />
+          {/* A frozen row with nothing written reads better as nothing than
+              as an empty box that can never be filled in. */}
+          {readOnly && note.trim().length === 0 ? null : (
+            <Textarea
+              value={note}
+              onChange={(e) =>
+                setDraft({
+                  id: unit.id,
+                  committed: judgment.note,
+                  text: e.target.value,
+                })
+              }
+              // Committed on blur, and only when it actually changed - a tab
+              // through the field must not cost a write.
+              onBlur={() => {
+                if (note !== judgment.note) judge({ note })
+              }}
+              rows={2}
+              readOnly={readOnly}
+              placeholder={
+                askPreference
+                  ? 'Required - what is wrong with the failing reply?'
+                  : 'Anything worth noting (optional)'
+              }
+              // Marked on the box itself rather than only in the line below:
+              // the rater is looking at the control they have to fill in, and a
+              // message somewhere else on a row this tall is a message they
+              // scroll past.
+              className={
+                noteMissing
+                  ? 'border-destructive text-xs focus-visible:ring-destructive/40'
+                  : 'text-xs'
+              }
+              aria-invalid={noteMissing}
+            />
+          )}
 
           {noteMissing ? (
             // Not an error - nothing failed to save. The verdict IS stored;
@@ -247,10 +294,10 @@ export function BlindRow({
 }
 
 /**
- * One reply and its verdict. The two columns are byte-identical in styling -
+ * One reply and its verdict. The two blocks are byte-identical in styling -
  * see the header for why that is the whole point.
  */
-function Column({
+function Reply({
   label,
   reply,
   verdict,
@@ -278,11 +325,10 @@ function Column({
         ? reply.bubbles
         : reply.messages
   return (
-    // `h-full` plus `mt-auto` on the verdict row below: the two replies rarely
-    // have the same number of bubbles, and controls that float at different
-    // heights make the eye work out which pair belongs together before it can
-    // read either. Bottom-aligned, the two rows of buttons are one line.
-    <div className="flex h-full flex-col gap-2">
+    // Stacked, one reply above the other, each with its buttons directly
+    // under it - the replies are graded one at a time, so a control shared
+    // between two columns or aligned across them would belong to neither.
+    <div className="flex flex-col gap-2">
       <span className="text-[11px] uppercase tracking-wider text-ink-faint">
         {label}
       </span>
@@ -303,15 +349,19 @@ function Column({
         </span>
       ) : (
         bubbles.map((b, i) => (
+          // Capped at the width a text bubble actually has. Full-width in a
+          // stacked layout, a two-line reply reads as a paragraph of prose,
+          // which is not what the guest would see and not what is being
+          // judged.
           <div
             key={i}
-            className="w-fit max-w-full rounded-2xl border border-stone-light bg-paper px-3 py-1.5 text-xs leading-snug text-ink"
+            className="w-fit max-w-[32rem] rounded-2xl border border-stone-light bg-paper px-3 py-1.5 text-xs leading-snug text-ink"
           >
             {b}
           </div>
         ))
       )}
-      <div className="mt-auto flex items-center gap-2 pt-1">
+      <div className="flex items-center gap-2 pt-1">
         {(['pass', 'fail'] as const).map((value) => (
           <Button
             key={value}

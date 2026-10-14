@@ -27,6 +27,20 @@ export function postPair(body: {
   return postJson('/admin/tests/human-eval/api/units', body)
 }
 
+/**
+ * Finish a pass. Answers with the instant it was stamped; the caller renders
+ * the pass read-only from that and only then asks for the CSV, which the
+ * export route refuses until this has succeeded.
+ */
+export function postSubmit(
+  sessionId: string,
+): Promise<FetchResult<{ submittedAt: string }>> {
+  return postJson(
+    `/admin/tests/human-eval/api/sessions/${sessionId}/submit`,
+    {},
+  )
+}
+
 export function patchJudgment(
   unitId: string,
   judgment: HumanEvalJudgment,

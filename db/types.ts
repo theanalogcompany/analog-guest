@@ -799,6 +799,8 @@ export type Database = {
           id: string
           rated_by: string
           started_at: string
+          submitted_at: string | null
+          submitted_by: string | null
           v1_prompt_version: string
           v2_model: string
           v2_prompt_version: string
@@ -810,6 +812,8 @@ export type Database = {
           id?: string
           rated_by: string
           started_at?: string
+          submitted_at?: string | null
+          submitted_by?: string | null
           v1_prompt_version: string
           v2_model: string
           v2_prompt_version: string
@@ -821,6 +825,8 @@ export type Database = {
           id?: string
           rated_by?: string
           started_at?: string
+          submitted_at?: string | null
+          submitted_by?: string | null
           v1_prompt_version?: string
           v2_model?: string
           v2_prompt_version?: string
