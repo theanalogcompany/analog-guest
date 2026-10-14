@@ -91,6 +91,8 @@ import {
   resolveScenarios,
   scenarioVerdict,
   validateScenarioSet,
+  assertLiveTells,
+  REGRESSION_SCENARIOS,
 } from '@/lib/eval/regression-scenarios'
 import { countEmoji } from '@/lib/ai/emoji-cadence'
 import { EITHER_OR_QUESTION } from '@/lib/ai/v2/normalize-output'
@@ -173,9 +175,39 @@ const REGISTER_PATTERNS: Array<{ tell: RegressionTell; pattern: RegExp }> = [
     pattern:
       /\b(?:everyone|everybody)\s+(?:loves?|gets?|orders?|raves?)|\bpeople\s+(?:love|rave|go\s+nuts|can'?t\s+get\s+enough)|\b(?:our\s+)?regulars\s+(?:all\s+)?(?:love|order|get|swear)|\b(?:crowd|fan|customer)\s+favou?rite\b|\bbig\s+hit\b|\bflies\s+off\b/i,
   },
+  // v2.20.0. The inability to send media, announced. Two narrowing choices,
+  // both for the off-channel-redirect reason - every scenario's bubbles run
+  // through this list, so a tell that fails a correct reply is the expensive
+  // direction:
+  //
+  //  - A MEDIA NOUN IS REQUIRED within a short window of the verb, so "we
+  //    can't share the wifi password" and "we can't hold a table" survive.
+  //  - FIRST-PERSON INABILITY ONLY. "the menu isn't online" is a fact about
+  //    the venue and a legitimate answer; "I can't send you the menu" is the
+  //    sentence the frame forbids.
+  {
+    tell: 'cant-send-media',
+    pattern:
+      /\b(?:can'?t|cannot|can not|am not able to|'?m not able to|not able to|unable to|no way to)\s+(?:send|share|attach|upload|post|text|show)\b[^.?!]{0,24}\b(?:photo|photos|pic|pics|picture|pictures|image|images|video|videos|file|files)\b/i,
+  },
 ]
 // Spaced en dash only: "3–5pm" must survive (normalize-output.ts).
 const DASH_PATTERN = /—|\s–\s/
+
+/**
+ * Every tell `bubbleBreaches` can produce: the pattern list plus the four
+ * checked by their own code below. Hand-written because that is what it is
+ * asserting - `assertLiveTells` compares it to the list the admin page
+ * advertises and refuses the run if they disagree, so forgetting to add a key
+ * here is a loud failure rather than a silent overstatement on the page.
+ */
+const EMITTED_TELLS: RegressionTell[] = [
+  ...REGISTER_PATTERNS.map((p) => p.tell),
+  'emoji',
+  'dash',
+  'either-or',
+  'two-questions',
+]
 
 function normalize(text: string): string {
   return text
@@ -523,6 +555,18 @@ async function loadScenarios(
     process.exit(1)
   }
 
+  // Does what this run can breach match what /admin/regression tells a reader
+  // it checks? Offline, free, and fails closed for validateScenarioSet's
+  // reason: an advertised ceiling with no check behind it is the gate-with-no
+  // -true-positives failure, and it reads as coverage until someone looks.
+  const tellProblems = assertLiveTells(EMITTED_TELLS)
+  if (tellProblems.length > 0) {
+    console.error(
+      `the regression tell list disagrees with this harness - refusing to run:\n  ${tellProblems.join('\n  ')}`,
+    )
+    process.exit(1)
+  }
+
   const { data, error } = await supabase
     .from('regression_scenarios')
     .select('key, enabled')
@@ -692,6 +736,12 @@ async function importRunLog(
         expectReplyContains: null,
         forbidPolicyKeys: [],
         expectPolicyKeys: [],
+        // An imported scenario with no current definition keeps its CEILINGS
+        // and loses its bars, and this one is a ceiling - but it cannot be
+        // asserted without a definition saying the turn was an opt-out, and
+        // asserting it on every unknown scenario would fail every imported
+        // run. Off, like the bars.
+        expectEmptyReply: false,
       },
       samples,
       BAR_MIN,
@@ -757,6 +807,24 @@ async function main(): Promise<void> {
   const importPath = flags.find((f) => f.startsWith('--import='))?.split('=')[1]
   if (importPath !== undefined) {
     await importRunLog(createAdminClient(), importPath)
+    return
+  }
+  // `--check` runs the OFFLINE half and exits: scenario shapes and the tell
+  // list, no DB, no model calls, no credentials. The checks themselves are not
+  // new - loadScenarios has always refused a bad set - but they were reachable
+  // only by starting a run that spends money, so nothing proved they fire.
+  if (flags.includes('--check')) {
+    const problems = [
+      ...validateScenarioSet(),
+      ...assertLiveTells(EMITTED_TELLS),
+    ]
+    if (problems.length > 0) {
+      console.error(`FAILED:\n  ${problems.join('\n  ')}`)
+      process.exit(1)
+    }
+    console.log(
+      `ok - ${REGRESSION_SCENARIOS.length} scenarios, ${EMITTED_TELLS.length} live tells (${EMITTED_TELLS.join(', ')})`,
+    )
     return
   }
   const samplesFlag = flags.find((f) => f.startsWith('--samples='))

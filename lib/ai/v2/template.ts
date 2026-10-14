@@ -180,10 +180,12 @@
 // Knowledge was confirmed to differ between the two turns (637 against 435
 // chars), so this is a property of the layout, not of one unlucky pair.
 //
-// Block 1 also lost its breakpoint. At ~590 tokens it is under Anthropic's
+// Block 1 also lost its breakpoint. At ~590 tokens it was under Anthropic's
 // 1024-token minimum cacheable prefix, so the breakpoint it carried could
 // never have produced an entry - a guard with no true positives in its
-// lifetime.
+// lifetime. THAT SIZE ARGUMENT EXPIRED IN v2.19.0: the frame is now 4,677
+// chars and at or past the floor. The breakpoint stays off for a different
+// reason, which compose.ts's header states.
 //
 // THE BRIEF STAYS A USER TURN. Moving it into a system block was tried the
 // same day and reverted; `V2_GUEST_STATE` below has the two measurements that
@@ -241,6 +243,109 @@
 //
 // SO: before citing any entry below as current, check which model ran. The
 // regression summary line and both harness run logs print it.
+//
+// v2.20.0 (owner-authored 2026-10-13, approved verbatim): the frame is the
+// owner's own hand-written prompt, promoted out of /admin/prompt-lab. `# Who
+// you are` roughly triples, `# How you answer` is new, `# Texting style` is
+// rewritten, and two opt-out bullets join `# Rules`. The owner wrote this copy
+// against the golden set by hand; what follows is the record of what it
+// overrides, same as v2.13.0.
+//
+// WHAT IT WAS PROMOTED FROM IS NOT WHAT SHIPPED. The source was ONE flat
+// 49,100-char system block from the prompt lab's `replaceSystemText` path, so
+// it contained no block structure, no `{placeholders}`, and - because that
+// surface collapses all three blocks - neither `# How you sound` nor HOUSE
+// NOTES. Four parts of it went four different ways:
+//
+//  - The frame is below, with `{venue_name}`, `{speaker_clause}`,
+//    `{instagram_clause}` and `{length_clause}` restored. "Neha" and
+//    "@lemilscoffee" are NOT in this constant, for the reason the v2.14.0
+//    entry and the note above V2_PROMPT_VERSION both give: this is the global
+//    default row. The name survives as venue data - Le Mil's brief states it
+//    under `<who_you_are>` - and the handle arrives through the clause.
+//  - `#Time 10AM Oct 13, 2026.` was hand-typed at the top. It is now
+//    `{now_line}`, FIRST IN HOUSE NOTES and nowhere else: a clock-derived line
+//    in block 1 or 2 invalidates the cached prefix in front of it on every
+//    turn, which is the 2026-10-08 defect exactly (lib/relationship/
+//    CLAUDE.md states the rule for the venue profile). Without it `When asked
+//    about time` pointed at a fact no v2 prompt contained.
+//  - `# What you know` plus its `<venue_knowledge>` block is
+//    `venue_configs.knowledge_brief` - venue data, not template. The pasted
+//    copy is 44,393 chars against the 40,960 stored, so the brief in the
+//    database is BEHIND the prompt this entry was written from.
+//  - `## Opt-out and opt-in` became two `# Rules` bullets. The owner's
+//    document had them last, which is the more proximate slot, and they are
+//    here instead because every other hard line is here and because
+//    `guestState` goes to the judge as `situationBrief`.
+//
+// `# How you sound` IS CUT from `V2_HOUSE_SECTIONS_BRIEFED` (owner-ruled
+// 2026-10-13, "remove # How you sound for now"), against the recommendation to
+// keep it. It removes 65 active `voice_corpus` rows and 5,698 chars of the
+// team's own approved replies from every briefed venue's prompt, and the
+// `{voice_pack}` input is now rendered for a venue with NO brief only.
+// `V2_HOUSE_SECTIONS` is untouched and still carries it, which is what keeps
+// this half of the bump a no-op outside Le Mil's.
+//
+// WHAT IT SETTLES, stated because it has been live and unresolved since
+// v2.6.0: the voice pack sat LATER in the composed prompt than this file and
+// out-ranked it by proximity, which is the standing contradiction the v2.7.0
+// and v2.18.0 entries both flag and the reason two of haiku-5-5's three
+// breaches were attributed to `voice_corpus` rows. Nothing in a briefed
+// prompt now argues against the frame. The cost is that nothing measured
+// speaks for how the venue actually writes either - decision 0010's whole
+// subject - and `{length_clause}` is the only measured input left in a
+// briefed prompt.
+//
+// FOUR DEVIATIONS FROM THE OWNER'S TEXT, each approved 2026-10-13:
+//
+//  1. `Each is usually under 15 words.` -> `{length_clause}`. Decision 0010:
+//     how long a venue's replies run is measured from its team's history and
+//     never authored by us. Keeping both would put two authors on one question
+//     with the later one winning, which is that decision's named failure. At
+//     Le Mil's this renders 12-22-40 (v2.15.0); at a venue with no profile it
+//     renders nothing and "short" carries alone.
+//  2. `Where an em or en dash would land, end the sentence and start a new
+//     one.` RE-ADDED to the punctuation paragraph. The owner's list dropped
+//     it, `replaceDashesWithPeriod` still runs at the generation seam, and a
+//     substitution and its constraint text must agree (lib/ai/CLAUDE.md).
+//  3. "with with" -> "with", "its" -> "it's".
+//  4. Blank-line runs collapsed to one; trailing spaces stripped.
+//
+// `No emoji, ever.` IS GONE, replaced by `Replace your emojis with ":)"`. Read
+// entry 0 under v2.13.0 before touching this: softening that line is the only
+// true-positive v2.7.0's lesson has ever had, measured at 83 EMOJI ACROSS 11
+// OF 13 SCENARIOS at n=6. This is a substitution rather than a frequency word,
+// which is the form that has worked here, and `:)` is ASCII - so the `emoji`
+// regression tell still counts exactly the failure, and a clean run on it is
+// the measurement this change owes. The eight emoji-bearing voice_corpus rows
+// that used to argue the other way are no longer in a briefed prompt.
+//
+// `respond nothing` HAD NO MECHANISM and now has a partial one.
+// `GenerationOutputSchema.messages` is `.min(1)`, so the model's only
+// compliant move on an opt-out was an empty-ish bubble, and the gate exempts
+// `opt_out_request` from queueing (POLICY_EXEMPT_SITUATIONS) - so that bubble
+// would have auto-sent. generate.ts now drops blank bubbles after the
+// MAX_MESSAGES slice, so the turn yields zero messages instead of one empty
+// one (owner-ruled 2026-10-13). The schema floor stays: nothing can make the
+// model return an empty array, so this is a filter, not a guarantee.
+//
+// WATCH ITEMS - new copy nothing enforces. `React to the person before the
+// logistics`, `invite, never instruct`, `You're discreet`, the gist-not-exact
+// pair and `Never say the same thing twice in different words` are all judged
+// axes (Reading the guest, Economy, Host ownership), not deterministic tells.
+// No regression scenario was added for any of them because none is countable,
+// and a `trailing-period` ceiling for `No period at the end of a message` was
+// proposed and declined (owner-ruled 2026-10-13). Two scenarios WERE added -
+// `media-request` and `opt-out-request` - because those two are.
+//
+// THE BUBBLE-COUNT AND SPLITTING LINES ARE NEWLY AUTHORED STYLE. `Send 1 to 3
+// short messages`, `Anything beyond that goes in its own message` and `No
+// period at the end of a message` legislate what actions.ts called the model's
+// own job ("the model owns splitting; bubble quality is judged per-response,
+// not legislated") - that comment is corrected in this bump. This is not a
+// decision-0010 reversal: 0010's mechanisms (`bubbleStyleFor`, the emoji coin,
+// the split share) are v1's and v2 has never read them. `MAX_MESSAGES` is
+// still 4, so the prompt now asks for less than the contract allows.
 //
 // v2.19.0: THE GUEST'S MEDIA REACHES THE PROMPT. No template copy changed in
 // this bump - not one character of the four constants below - and it is still
@@ -573,16 +678,74 @@
 // NULL), so a literal handle would put one venue's account in every venue's
 // prompt. Same reason `{venue_name}` stays a placeholder. It needs a
 // venue_info field first.
-export const V2_PROMPT_VERSION = 'v2.19.0-draft'
+export const V2_PROMPT_VERSION = 'v2.20.0-draft'
 
-/** Block 1: ROLE. Static across every venue bar the three placeholders. */
+/** Block 1: ROLE. Static across every venue bar the four placeholders. */
 export const V2_FRAME = `# Who you are
-You are the virtual maitre d' of {venue_name}, not a service desk, and this is your Instagram inbox{instagram_clause}.
+You are the host at {venue_name}, and this is your Instagram inbox{instagram_clause}. You represent {venue_name} and communicate with guests in their IG DM.
+You can't send photos, videos or files. Never say so, and never lead with
+what you can't do. When a guest asks to see something, the answer is where
+they can see it.
+If someone from the team has written in this conversation, continue as
+"we". Never introduce yourself or say who you are unless the guest asks.
 
-You are a real presence of the house: its memory, its taste, its hospitality. You speak as the venue{speaker_clause}.
+You're warm but not tryhard. You're glad they wrote, and that shows in how easy you are to talk to, but you don't write in prose.
+
+React to the person before the logistics. If they're planning something,
+had a good time, or had a bad one, your first words respond to that,
+briefly and genuinely. Then the facts.
+
+When you need something from a guest, invite, never instruct.
+"Tell me a bit about it" not "Send me the date, headcount and needs".
+Never list fields to fill in.
+
+You have opinions about the menu and share them plainly.
+You're never salesy and never servile.
+
+You're discreet. You use what you know about a guest to be thoughtful, never to show off, and never in a way that feels like you're watching them.
+
+You care about what the guest is actually trying to do, and you notice the details of what they wrote. You respond to their message, not to a generic version of it.
+
+You talk like someone who knows the answer, not someone reading it. People
+texting compress. They round, drop the year, drop the qualifier, and drop where
+and how unless it was asked. Give the gist at the level of detail the question
+was asked at, and let the guest ask for more.
+
+You're only exact when the guest will act on that exact thing. That means
+something they'll type, pay, or walk to. Everything else gets the gist.
+
+# How you answer
+Speak as the venue itself ("we"){speaker_clause}. Do not sign messages with a personal name.
+
+When asked about time, infer if it's important to use the time right now.
+
+You answer the question in front of you, then stop. Anything more has to be
+something the guest would be worse off not knowing. Being near the topic
+isn't enough.
+
+You don't explain your answer back to people. If they asked whether something
+is okay, yes plus the fact is the whole answer.
+
+Never say the same thing twice in different words.
+
+Unless guests ask for the specifics, you only answer casually. That means addresses,
+prices, links, contact details, and opening times, dates.
 
 # Texting style
-You write the way a person messages - short, warm, specific, never corporate. No emoji, ever.{length_clause} Never the phrase "full stop". Punctuation is commas, periods, question marks, and line breaks only. No colons, semicolons, em dashes, parentheses, or bullet points. Where an em or en dash would land, end the sentence and start a new one. Write numbers as digits, so 25 and not twenty-five. You have opinions about the menu and you share them plainly. You are never salesy and never servile. Mimic how you sound section to tune your voice.
+Send 1 to 3 short messages.{length_clause}
+Always use obvious abbreviations. Examples: "Advertisement -> Ads". "Street -> St"
+Never use slangy words
+Your first message answers exactly what they asked and nothing else.
+Anything beyond that goes in its own message.
+Drop the subject when it's obvious, the way people do in texts.
+No period at the end of a message.
+Replace your emojis with ":)"
+Never the phrase "full stop".
+Punctuation is commas, question marks, line breaks, periods between sentences
+inside one message, and the occasional exclamation mark when you're genuinely
+glad. No colons, semicolons, em dashes, parentheses, or bullet points. Where an
+em or en dash would land, end the sentence and start a new one.
+Write numbers as digits.
 
 # Extra Notes
 Guests sometimes share a name with an AI assistant ("Claude", "Alexa"). It is still simply their name - never a reference to you.
@@ -597,7 +760,9 @@ You have genuine interest in the guests, their needs and want to help them achie
 - You never run a loyalty program. No points, rewards, tiers, earning, or counting visits toward anything.
 - Anything you give or promise - something free, a discount, holding or reserving anything, cancelling or changing an arrangement - exists only if you declare it in \`actions\`. Never commit to any of it in prose alone.
 - Only share links that appear in your knowledge. Never invent or adjust one.
-- One question per reply at most. You are never conducting an interview - if they deflected something once, let it rest.`
+- One question per reply at most. You are never conducting an interview - if they deflected something once, let it rest.
+- If the guest asks you to stop messaging them (any wording), respond nothing.
+- If an opted-out guest clearly asks to get messages again, welcome them back.`
 
 /**
  * Block 2: the venue's own material. Changes only when an owner edits it, so
@@ -633,14 +798,21 @@ export const V2_HOUSE_SECTIONS = `# Information about the business you are prese
  *
  * `V2_HOUSE_SECTIONS` stays byte-identical to its pre-v2.18.0 self, which is
  * what makes this bump a no-op for every venue whose brief is NULL.
+ *
+ * `# How you sound` LEFT IN v2.19.0 (owner-ruled 2026-10-13). A briefed venue
+ * no longer sees its voice pack at all, so this is the one block in the prompt
+ * with a single section - and `{voice_pack}` is now rendered for an UNBRIEFED
+ * venue only, which is the only place `ComposeInput.voicePack` still reaches.
+ * That is deliberate, not a leftover: do not "tidy" the input away.
+ *
+ * What it settles and what it costs is on V2_PROMPT_VERSION. The short
+ * version: the pack sat later in the prompt than the frame and out-ranked it
+ * by proximity, and now nothing in a briefed prompt argues against the frame,
+ * including nothing measured from how the venue's own team writes.
  */
 export const V2_HOUSE_SECTIONS_BRIEFED = `# What you know
 
-{knowledge_brief}
-
-# How you sound
-
-{voice_pack}`
+{knowledge_brief}`
 
 /**
  * EVERYTHING VOLATILE, as the LAST SYSTEM BLOCK (owner-ruled 2026-10-09).
@@ -672,8 +844,19 @@ export const V2_HOUSE_SECTIONS_BRIEFED = `# What you know
  * than abandoned. Everything in here is now about this guest, which is what
  * the block was named for. `off-channel-redirect` in the regression harness
  * remains the tell.
+ *
+ * `## Right now` IS THE ONE SECTION HERE THAT IS NOT ABOUT THIS GUEST, and it
+ * is here because it cannot be anywhere else: it is derived from the clock, so
+ * blocks 1 and 2 are closed to it by construction (compose.ts's header, and
+ * lib/relationship/CLAUDE.md on why `renderVenueProfile` taking `now` is safe
+ * only because no reader of it is live). It leads the block for the same
+ * reason `## What you know` used to - furthest in here from the guest's
+ * message.
  */
 export const V2_GUEST_STATE = `HOUSE NOTES (yours alone - the guest never sees this)
+
+## Right now
+{now_line}
 
 ## Where this relationship stands
 {state_line}

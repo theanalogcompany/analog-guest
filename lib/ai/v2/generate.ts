@@ -243,7 +243,25 @@ export async function generateV2Reply(
             // break, and the two strips after it read sentence boundaries.
             .map((m) =>
               stripFullStop(stripEitherOrQuestion(replaceDashesWithPeriod(m))),
-            ),
+            )
+            // BLANK BUBBLES DROPPED, so a turn can send nothing (v2.20.0,
+            // owner-ruled 2026-10-13). `# Rules` tells the model to respond
+            // nothing when a guest asks to stop messaging them, and
+            // GenerationOutputSchema.messages is `.min(1)`, so the only
+            // compliant way to obey that is an empty string - which the gate
+            // would then auto-send, because `opt_out_request` is exempt from
+            // queueing (POLICY_EXEMPT_SITUATIONS).
+            //
+            // NOT A GUARANTEE, and the schema floor is why: nothing can make
+            // the model return an empty array, and a model answering "no
+            // problem, you won't hear from us" instead of nothing is still
+            // one bubble. This removes the empty-bubble send and nothing more.
+            //
+            // Downstream must accept zero messages. Today's only readers are
+            // the playground, the harnesses and the judge; phase 6's dispatch
+            // has to treat an empty reply as "send nothing", never as a
+            // generation failure.
+            .filter((m) => m.trim() !== ''),
           actions: object.actions,
         },
         // Whole, not picked apart - see V2Usage.

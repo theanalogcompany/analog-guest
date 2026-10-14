@@ -36,9 +36,9 @@ The cache is prefix-keyed, so **one volatile section poisons everything in front
 
 | block | content | volatility | cached |
 | --- | --- | --- | --- |
-| system 1 ROLE | who you are, texting style, intention, rules | static | no (too short to cache) |
-| system 2 THE HOUSE | the venue's knowledge, then the voice pack | per venue | **yes, breakpoint** |
-| system 3 HOUSE NOTES | state mission, guest profile, interaction memory, open moves | per turn | no |
+| system 1 ROLE | who you are, how you answer, texting style, intention, rules | static | no, see below |
+| system 2 THE HOUSE | the venue's knowledge; plus the voice pack **only for a venue with no brief** | per venue | **yes, breakpoint** |
+| system 3 HOUSE NOTES | the venue's clock, state mission, guest profile, interaction memory, open moves | per turn | no |
 | turns | the transcript, then the guest's message(s), verbatim, never wrapped | per turn | no |
 
 **The transcript is not cached, and that is the price of block 3's position** (owner-ruled
@@ -68,13 +68,37 @@ Le Mil's, two turns of one conversation: write 6,326 then write 6,267, reuse **0
 split: write 6,133 then reuse **6,133**. The split is byte-identical to the model, so it
 carries no `V2_PROMPT_VERSION` bump.
 
-**Block 1 carries no breakpoint.** At ~590 tokens it is under Anthropic's 1024-token minimum
-cacheable prefix, so the breakpoint it used to carry could never have produced an entry.
+**Block 1 carries no breakpoint**, and **not for the reason this file gave until v2.20.0**.
+At ~590 tokens the block was under Anthropic's 1024-token minimum cacheable prefix, so the
+breakpoint it used to carry could never have produced an entry.
+The owner's hand-written frame is 4,677 chars and at or past that floor, so that argument is
+gone.
+What holds instead: the breakpoint after block 2 already makes blocks 1 and 2 a single cached
+prefix, and a second breakpoint between them would only pay off if block 2 changed often,
+which it cannot.
+`lib/ai/v2/compose.ts`'s header is the long version.
 
 **Retrieval sits after the venue sections**, where proximity ranks it above them - the
 v2.12.0 off-channel-redirect failure mode, which `off-channel-redirect` in the regression
 harness is the tell for. It leads block 3 so it is at least the furthest thing in that block
 from the guest's message.
+
+**A briefed venue no longer sees its voice pack** (v2.20.0, owner-ruled 2026-10-13).
+`V2_HOUSE_SECTIONS_BRIEFED` is `# What you know` and nothing else, so `# How you sound` and
+its 65 approved `voice_corpus` rows reach only a venue whose brief is NULL.
+That settles the contradiction every emoji and dash entry in the template changelog flags -
+the pack sat later in the prompt than the frame and out-ranked it - and it costs the one
+measured account of how the venue's own team writes, leaving `{length_clause}` as the only
+measured input in a briefed prompt.
+`ComposeInput.voicePack` is still loaded and still rendered on the unbriefed path; it is not
+dead, do not tidy it away.
+
+**The venue's clock is in HOUSE NOTES, and that is the only block it may reach** (v2.20.0).
+`{now_line}` is `venueNowLine` over `venues.timezone` (`lib/ai/v2/now-line.ts`), because the
+frame tells the model to use the time when it matters and until v2.20.0 no v2 prompt carried
+one.
+It fails to `''`, which renders an explicit "unavailable" line rather than server time or a
+guess.
 
 **`renderVenueProfile` takes `now`, and that is safe for block 2**: the only reader is
 `renderRightNow`, which filters dated `currentContext` notes. No live open/closed line, so

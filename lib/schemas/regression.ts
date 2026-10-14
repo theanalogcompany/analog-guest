@@ -76,6 +76,19 @@ export const RegressionScenarioSchema = z.object({
       arrival: z.enum(['with-text', 'alone']).default('with-text'),
     })
     .optional(),
+  /**
+   * Ceiling: the final turn must send NOTHING - no bubbles at all.
+   *
+   * The only guard that can express v2.20.0's opt-out rule, because every
+   * other one here reads the text of a reply and the correct reply has no
+   * text. A tell cannot do it either: tells match substrings in bubbles, and
+   * what is forbidden here is a bubble of ANY content.
+   *
+   * A CEILING, not a bar, and it is checked before the bars for the usual
+   * reason - whatever the model said instead, it said it to a guest who asked
+   * to be left alone, and that is not a rate.
+   */
+  expectEmptyReply: z.boolean().default(false),
   enabled: z.boolean().default(true),
 })
 export type RegressionScenario = z.infer<typeof RegressionScenarioSchema>

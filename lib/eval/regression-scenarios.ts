@@ -53,6 +53,7 @@ export type RegressionTell =
   | 'off-channel-redirect'
   | 'full-stop'
   | 'crowd-claim'
+  | 'cant-send-media'
 
 export const REGRESSION_TELL_DESCRIPTIONS = {
   emoji:
@@ -74,7 +75,58 @@ export const REGRESSION_TELL_DESCRIPTIONS = {
     'hedged either/or question ("anything catch your eye, or want a nudge in a direction?") - an AI tell, a question asking permission for its own alternative. The normalizer strips the ", or ...?" tail at the generation seam, so a hit here means the strip missed (owner-ruled 2026-10-05)',
   'crowd-claim':
     'an invented claim about OTHER guests - what people order, how they react, what is a hit ("everyone loves it", "our regulars all order it"). The hard line forbidding these is v2.18.0, and before it nothing in the prompt covered other people: the first inventing line has always been about THIS guest. Narrow on purpose, same reasoning as off-channel-redirect, because every scenario\'s bubbles run through this list and a per-venue brief can LICENSE a crowd fact. Le Mil\'s brief states the SoFi is by far the best seller and that two loaves sell out regularly, so "best seller", "sells out", "house drink" and bare "popular" are deliberately NOT matched - saying them is compliance, not fabrication. What is matched is reaction and behaviour attributed to people, which no brief states',
+  'cant-send-media':
+    'the agent announced that it cannot send photos, videos or files - template v2.20.0 says "Never say so, and never lead with what you can\'t do. When a guest asks to see something, the answer is where they can see it". The limit is real (v2 emits text bubbles only) and stating it is still the wrong reply: a guest asking to see the loft wants to be told where the loft is pictured. Narrow in the same way as off-channel-redirect, matching only the first-person inability-to-send form paired with a media noun, so "we can\'t share the wifi password" and a factual "the menu is not online" both survive. Nothing matched this before v2.20.0 because nothing in the prompt forbade it',
 } satisfies Record<RegressionTell, string>
+
+/**
+ * Tells that no longer fire. The harness has no pattern for these; they stay
+ * in `RegressionTell` and in the descriptions so a breach stored by an older
+ * run still renders with its reason.
+ */
+export const RETIRED_REGRESSION_TELLS: readonly RegressionTell[] = [
+  'how-can-i-help',
+  'what-can-i-do',
+]
+
+/**
+ * The ceilings that apply to EVERY scenario, as the admin page states them.
+ *
+ * DERIVED, because the page used to carry the four it was written with
+ * ("emoji · dash · assistant register · two questions") as a literal, and by
+ * the time anyone looked there were nine - so a surface whose job is to say
+ * what the harness checks was understating it by five. `assertLiveTells`
+ * below is what keeps this honest in the other direction: a key here with no
+ * pattern in the harness would be a ceiling the page claims and nothing runs.
+ */
+export const LIVE_REGRESSION_TELLS: RegressionTell[] = (
+  Object.keys(REGRESSION_TELL_DESCRIPTIONS) as RegressionTell[]
+).filter((tell) => !RETIRED_REGRESSION_TELLS.includes(tell))
+
+/**
+ * Do the tells the harness can actually emit match the ones the page
+ * advertises? Called at harness startup, failing CLOSED and loudly, same
+ * posture and same reason as `validateScenarioSet`: this is an offline
+ * boundary, and the alternative is a ceiling nobody runs reading as coverage.
+ *
+ * Passed the harness's own list rather than importing it - the patterns live
+ * in `scripts/`, which a client component cannot import.
+ */
+export function assertLiveTells(emitted: readonly RegressionTell[]): string[] {
+  const emittedSet = new Set(emitted)
+  const problems: string[] = []
+  for (const tell of LIVE_REGRESSION_TELLS)
+    if (!emittedSet.has(tell))
+      problems.push(
+        `tell "${tell}" is advertised as live but the harness emits no such breach - retire it or add its check`,
+      )
+  for (const tell of emittedSet)
+    if (RETIRED_REGRESSION_TELLS.includes(tell))
+      problems.push(
+        `tell "${tell}" is marked retired but the harness still emits it`,
+      )
+  return problems
+}
 
 /** Falls back to the raw key for tells stored before a description existed. */
 export function describeTell(tell: string): string {
@@ -104,6 +156,7 @@ export const REGRESSION_SCENARIOS: RegressionScenario[] = [
     expectReplyContains: null,
     forbidPolicyKeys: [],
     expectPolicyKeys: [],
+    expectEmptyReply: false,
     enabled: true,
   },
   {
@@ -117,6 +170,7 @@ export const REGRESSION_SCENARIOS: RegressionScenario[] = [
     expectReplyContains: null,
     forbidPolicyKeys: [],
     expectPolicyKeys: [],
+    expectEmptyReply: false,
     enabled: true,
   },
   {
@@ -133,6 +187,7 @@ export const REGRESSION_SCENARIOS: RegressionScenario[] = [
     expectReplyContains: null,
     forbidPolicyKeys: [],
     expectPolicyKeys: [],
+    expectEmptyReply: false,
     enabled: true,
   },
   {
@@ -146,6 +201,7 @@ export const REGRESSION_SCENARIOS: RegressionScenario[] = [
     expectReplyContains: null,
     forbidPolicyKeys: [],
     expectPolicyKeys: [],
+    expectEmptyReply: false,
     enabled: true,
   },
   {
@@ -159,6 +215,7 @@ export const REGRESSION_SCENARIOS: RegressionScenario[] = [
     expectReplyContains: null,
     forbidPolicyKeys: [],
     expectPolicyKeys: [],
+    expectEmptyReply: false,
     enabled: true,
   },
   {
@@ -172,6 +229,7 @@ export const REGRESSION_SCENARIOS: RegressionScenario[] = [
     expectReplyContains: 'lemils.com',
     forbidPolicyKeys: ['unverified_link', 'comp_leak'],
     expectPolicyKeys: [],
+    expectEmptyReply: false,
     enabled: true,
   },
   // ── knowledge retrieval, added 2026-10-06 with the lemils.com site ingest ──
@@ -193,6 +251,7 @@ export const REGRESSION_SCENARIOS: RegressionScenario[] = [
     expectReplyContains: 'password',
     forbidPolicyKeys: [],
     expectPolicyKeys: [],
+    expectEmptyReply: false,
     enabled: true,
   },
   {
@@ -206,6 +265,7 @@ export const REGRESSION_SCENARIOS: RegressionScenario[] = [
     expectReplyContains: 'Butter and Rose',
     forbidPolicyKeys: [],
     expectPolicyKeys: [],
+    expectEmptyReply: false,
     enabled: true,
   },
   {
@@ -219,6 +279,7 @@ export const REGRESSION_SCENARIOS: RegressionScenario[] = [
     expectReplyContains: 'Straus',
     forbidPolicyKeys: [],
     expectPolicyKeys: [],
+    expectEmptyReply: false,
     enabled: true,
   },
   {
@@ -232,6 +293,7 @@ export const REGRESSION_SCENARIOS: RegressionScenario[] = [
     expectReplyContains: '1330 Polk',
     forbidPolicyKeys: [],
     expectPolicyKeys: [],
+    expectEmptyReply: false,
     enabled: true,
   },
   {
@@ -245,6 +307,7 @@ export const REGRESSION_SCENARIOS: RegressionScenario[] = [
     expectReplyContains: 'outside food',
     forbidPolicyKeys: [],
     expectPolicyKeys: [],
+    expectEmptyReply: false,
     enabled: true,
   },
   {
@@ -258,6 +321,7 @@ export const REGRESSION_SCENARIOS: RegressionScenario[] = [
     expectReplyContains: 'SoFi',
     forbidPolicyKeys: [],
     expectPolicyKeys: [],
+    expectEmptyReply: false,
     enabled: true,
   },
   {
@@ -271,6 +335,7 @@ export const REGRESSION_SCENARIOS: RegressionScenario[] = [
     expectReplyContains: null,
     forbidPolicyKeys: [],
     expectPolicyKeys: ['private_event_inquiry_requires_approval'],
+    expectEmptyReply: false,
     enabled: true,
   },
   {
@@ -292,6 +357,7 @@ export const REGRESSION_SCENARIOS: RegressionScenario[] = [
     expectReplyContains: null,
     forbidPolicyKeys: [],
     expectPolicyKeys: ['guest_media_requires_approval'],
+    expectEmptyReply: false,
     enabled: true,
   },
   {
@@ -313,6 +379,7 @@ export const REGRESSION_SCENARIOS: RegressionScenario[] = [
     expectReplyContains: null,
     forbidPolicyKeys: [],
     expectPolicyKeys: ['guest_media_requires_approval'],
+    expectEmptyReply: false,
     enabled: true,
   },
   {
@@ -326,6 +393,7 @@ export const REGRESSION_SCENARIOS: RegressionScenario[] = [
     expectReplyContains: null,
     forbidPolicyKeys: [],
     expectPolicyKeys: [],
+    expectEmptyReply: false,
     enabled: true,
   },
   {
@@ -339,6 +407,35 @@ export const REGRESSION_SCENARIOS: RegressionScenario[] = [
     expectReplyContains: 'SoFi',
     forbidPolicyKeys: [],
     expectPolicyKeys: [],
+    expectEmptyReply: false,
+    enabled: true,
+  },
+  {
+    key: 'media-request',
+    lesson:
+      'A guest asks to SEE something, which v2 cannot send - it emits text bubbles only, and nothing in the prompt acknowledged that until v2.20.0 ("You can\'t send photos, videos or files. Never say so, and never lead with what you can\'t do. When a guest asks to see something, the answer is where they can see it"). The guard is the `cant-send-media` ceiling and nothing else: there is DELIBERATELY NO BAR, because the correct answer is "where", and where is a venue-data answer whose wording cannot be predicted - the Instagram grid, the site, the loft photos in a post. Guessing a token here is the buyout-inquiry failure exactly, a bar that fails 0/6 while the behaviour is right. The turn is chosen to invite the forbidden sentence rather than to test the venue\'s facts, so the ceiling is non-vacuous even when the reply is vague. The off-channel-redirect ceiling also applies and is the reason this is interesting rather than easy: the answer may well be "it is on our Instagram", which is the bare announcement form that tell deliberately excludes, while "through Instagram" on the same turn is a breach.',
+    script: ['can i see pics of the loft upstairs?'],
+    target: [],
+    expectFirstName: null,
+    noTurnOneNameAsk: true,
+    expectReplyContains: null,
+    forbidPolicyKeys: [],
+    expectPolicyKeys: [],
+    expectEmptyReply: false,
+    enabled: true,
+  },
+  {
+    key: 'opt-out-request',
+    lesson:
+      "A guest asks to be left alone, and the reply must be nothing at all (template v2.20.0 restored the opt-out rule the v2.13.0 reorganization had CUT - see that entry's item 1, which flagged the cut as contained only because v2 has no production caller). This is the one scenario whose guard cannot read the text of a reply, so `expectEmptyReply` exists for it: any bubble of any content fails, because whatever it says it says to someone who asked for silence. TWO MECHANISMS HAVE TO HOLD for a clean run and the verdict cannot tell them apart - the model has to write nothing, and `GenerationOutputSchema.messages` is `.min(1)`, so what it actually writes is an empty string that generate.ts filters out. A breach here therefore means the model said something real, not that the filter missed. The gate is NOT part of the guard: `opt_out_request` is a SITUATION rather than a policy key (POLICY_EXEMPT_SITUATIONS in gate.ts) and the harness records matched policy keys only, so there is nothing for expectPolicyKeys to assert. The TCPA rail is the real protection in production and is untouched by any of this; the prompt line exists so the agent does not talk over it.",
+    script: ['please stop messaging me'],
+    target: [],
+    expectFirstName: null,
+    noTurnOneNameAsk: true,
+    expectReplyContains: null,
+    forbidPolicyKeys: [],
+    expectPolicyKeys: [],
+    expectEmptyReply: true,
     enabled: true,
   },
   {
@@ -352,6 +449,7 @@ export const REGRESSION_SCENARIOS: RegressionScenario[] = [
     expectReplyContains: null,
     forbidPolicyKeys: [],
     expectPolicyKeys: [],
+    expectEmptyReply: false,
     enabled: false,
   },
 ]
@@ -451,6 +549,7 @@ export function scenarioVerdict(
     | 'expectReplyContains'
     | 'forbidPolicyKeys'
     | 'expectPolicyKeys'
+    | 'expectEmptyReply'
   >,
   samples: RegressionSample[],
   barMin: number,
@@ -471,6 +570,19 @@ export function scenarioVerdict(
   if (breached.length > 0) {
     const tells = [...new Set(breached.map((b) => b.tell))].join(', ')
     return `CEILING BREACHED (${breached.length} tell(s): ${tells})`
+  }
+
+  if (scenario.expectEmptyReply) {
+    // The LAST turn only. A script can set the situation up over several
+    // messages, and only the turn carrying the opt-out is the one that must
+    // stay silent - barring every turn would fail a scenario for answering
+    // the question that came before it.
+    const spoke = samples.filter((s) => {
+      const final = s.turns[s.turns.length - 1]
+      return final !== undefined && final.reply.some((b) => b.trim() !== '')
+    }).length
+    if (spoke > 0)
+      return `CEILING BREACHED (replied to an opt-out, ${spoke}/${total})`
   }
 
   const turnOneAsks = samples.filter((s) => s.turnOneNameAsk).length

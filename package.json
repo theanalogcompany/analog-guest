@@ -41,6 +41,7 @@
     "measure-judge-variance": "tsx --env-file=.env.local scripts/measurement/judge-variance.ts",
     "measure-turn-one-move": "tsx --env-file=.env.local scripts/measurement/turn-one-move.ts",
     "measure-template-regression": "tsx --env-file=.env.local scripts/measurement/template-regression.ts",
+    "verify-template-archive": "tsx scripts/measurement/template-archive-verbatim.ts",
     "measure-prose-promise": "tsx --env-file=.env.local scripts/measurement/prose-promise-catch-rate.ts",
     "measure-warm-close": "tsx --env-file=.env.local scripts/measurement/warm-close-variety.ts",
     "measure-prose-promise-elliptical": "tsx --env-file=.env.local scripts/measurement/prose-promise-elliptical.ts",
