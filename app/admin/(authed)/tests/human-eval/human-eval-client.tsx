@@ -201,7 +201,29 @@ export function HumanEvalClient({
         // question whose output this surface never renders. The gate does not
         // read them, and nothing chains off a single-turn scenario.
         skipEvaluation: true,
-        v1Arm: { mode: 'sandbox', slot },
+        // AN OUTREACH TURN IS PAIRED ARM FOR ARM. v2 writes first off the
+        // history (goldenTurnFor decides which scenarios do), and v1's
+        // proactive path is driven by the TRIGGER rather than by a message -
+        // so the two arms are told the same thing in the only two vocabularies
+        // they have. The route refuses the mismatched pairings in both
+        // directions, so sending the wrong one is a 400 rather than a row
+        // where the engines answered different turns.
+        // Narrowed rather than asserted: `humanEvalQuestions` already drops a
+        // proactive scenario with no trigger, so the else-branch here is
+        // unreachable - and if it ever is reached, a 400 naming the mismatch
+        // beats a `!` that silently sends `undefined`.
+        ...(turn.outreach !== undefined &&
+        question.followupTrigger !== undefined
+          ? {
+              outreach: turn.outreach,
+              v1Arm: {
+                mode: 'sandbox_followup' as const,
+                trigger: question.followupTrigger,
+                channel: question.channel,
+                slot,
+              },
+            }
+          : { v1Arm: { mode: 'sandbox' as const, slot } }),
       })
       setRunning((p) => withoutKey(p, questionKey))
       if (!run.ok) {

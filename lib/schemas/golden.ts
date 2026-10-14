@@ -65,6 +65,31 @@ export const GOLDEN_DRIVERS = [
 ] as const
 export type GoldenDriver = (typeof GOLDEN_DRIVERS)[number]
 
+/**
+ * The follow-up triggers a proactive scenario may name - v1's
+ * `FollowupTrigger['reason']` vocabulary.
+ *
+ * EXPORTED, because the playground run route's proactive v1 arm takes one
+ * over the wire and has to accept exactly these: a second list there would
+ * let a fixture name a trigger the route refuses, which reads on the surface
+ * as "v1 cannot answer this scenario" rather than as the two lists drifting.
+ */
+export const GOLDEN_FOLLOWUP_TRIGGERS = [
+  'day_1',
+  'day_3',
+  'day_7',
+  'day_14',
+  'cold_lapsed',
+  'perk_unlock',
+  'event',
+  'manual',
+  'instagram_scan_arrival',
+  'warm_close',
+  'inquiry_followup',
+  'visit_checkback',
+] as const
+export type GoldenFollowupTrigger = (typeof GOLDEN_FOLLOWUP_TRIGGERS)[number]
+
 /** One prior turn. `assistant` is us - the venue, or a staff member by hand. */
 export const GoldenHistoryTurnSchema = z.object({
   role: z.enum(['user', 'assistant']),
@@ -146,22 +171,7 @@ export const GoldenQuestionSchema = z.object({
    * (`handle-followup.ts` refuses them on a text conversation by name), so
    * a scenario naming one also needs `channel: 'instagram'`.
    */
-  followupTrigger: z
-    .enum([
-      'day_1',
-      'day_3',
-      'day_7',
-      'day_14',
-      'cold_lapsed',
-      'perk_unlock',
-      'event',
-      'manual',
-      'instagram_scan_arrival',
-      'warm_close',
-      'inquiry_followup',
-      'visit_checkback',
-    ])
-    .optional(),
+  followupTrigger: z.enum(GOLDEN_FOLLOWUP_TRIGGERS).optional(),
   /**
    * The conversation this scenario happens on. Defaults to text.
    *

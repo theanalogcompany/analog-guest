@@ -4,6 +4,7 @@ import type { HistoryTurn } from '@/lib/ai/v2/compose'
 // drag it into the client bundle. Imported rather than re-declared because a
 // second copy of this shape is a contract that can disagree with itself.
 import type { TestDraft } from '@/lib/agent/handle-inbound'
+import type { GoldenFollowupTrigger } from '@/lib/schemas/golden'
 import type { PlaygroundConversationTurn } from '@/lib/schemas/playground'
 import type {
   PlaygroundSession,
@@ -67,6 +68,18 @@ export interface RunRequestBody {
   v1Arm?:
     | { mode: 'sandbox'; slot?: number }
     | { mode: 'replay'; inboundMessageId: string }
+    /**
+     * v1 writing FIRST, to pair against a v2 outreach turn. The trigger is
+     * what sets it off where an inbound sets the other two off, and the route
+     * refuses it unless `outreach` is set - two arms answering different turn
+     * shapes is not a comparison.
+     */
+    | {
+        mode: 'sandbox_followup'
+        trigger: GoldenFollowupTrigger
+        channel?: 'text' | 'instagram'
+        slot?: number
+      }
 }
 
 /**

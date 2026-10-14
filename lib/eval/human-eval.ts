@@ -269,17 +269,22 @@ export function judgmentFromUnit(unit: {
  * to scramble: showing it would put a reply in column A and a labelled gap in
  * column B, which identifies the arm and is not a comparison.
  *
- * An OUTREACH turn (v2.21.0) is exactly that scenario: v2 composes it, but
- * this surface's v1 arm answers an inbound (the run route refuses the
- * pairing), so the proactive fixtures have no pair and are excluded here -
- * and named in `humanEvalExcluded`, never silently dropped.
+ * AN OUTREACH TURN IS IN THE PASS. v2 composes one (v2.21.0) and v1 has its
+ * own proactive path, so the pair exists - what was missing was the run route
+ * carrying it, which it now does as `v1Arm: { mode: 'sandbox_followup' }`.
+ * The one thing v1's arm needs that v2's does not is the TRIGGER, so a
+ * proactive scenario without one still has no pair, and that is the only
+ * reason left to drop one here (the set's own validator requires it, so this
+ * guard should never fire - it is here because "should never" is what the
+ * excluded list exists to make visible).
  */
 export function humanEvalQuestions(
   questions: readonly GoldenQuestion[] = GOLDEN_QUESTIONS,
 ): GoldenQuestion[] {
   return questions.filter((q) => {
     const { turn, skip } = goldenTurnFor(q)
-    return skip === null && turn.outreach === undefined
+    if (skip !== null) return false
+    return turn.outreach === undefined || q.followupTrigger !== undefined
   })
 }
 
@@ -304,13 +309,13 @@ export function humanEvalExcluded(
           reason: `${skip.stage}: ${skip.error}`,
         },
       ]
-    if (turn.outreach !== undefined)
+    if (turn.outreach !== undefined && q.followupTrigger === undefined)
       return [
         {
           key: q.key,
           question: q.question,
           reason:
-            'outreach turn: v2 writes first, and the v1 arm answers an inbound - no pair to scramble',
+            'outreach turn with no follow-up trigger: v2 can write first off the history alone, v1 cannot - its proactive arm is driven by the trigger',
         },
       ]
     return []
