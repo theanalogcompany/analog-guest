@@ -1,4 +1,4 @@
-// TAC-586: passport-check. Behavioural checks for the passport stamp, with no
+// TAC-586, TAC-587: passport-check. Behavioural checks for the passport stamp, with no
 // database, no network and no model. See README.md beside this file.
 //
 //   npm run passport-check                  run every check
@@ -14,21 +14,27 @@ import { join } from 'node:path'
 import sharp from 'sharp'
 
 import { decideStamp, itemKey, stampItemName } from '@/lib/passport/decide'
-import { formatStampDate } from '@/lib/passport/face'
+import { formatStampDate, formatStampTime } from '@/lib/passport/face'
 import {
+  eligibleSpots,
   MAX_ROTATION,
   mulberry32,
-  pageForSeq,
+  pagesForSeq,
   placeStamp,
   spreadForPage,
+  STAMPS_PER_PAGE,
+  STAMPS_PER_SPREAD,
   templateFor,
+  type UsedSpot,
 } from '@/lib/passport/layout'
+import { PAGE_TEMPLATES } from '@/lib/passport/templates'
 import { fontMetrics, PASSPORT_FONTS } from '@/lib/passport/render/assets'
 import { renderStamp, resvgOptions } from '@/lib/passport/render/stamp'
 import { renderSpread, type PlacedStamp } from '@/lib/passport/render/spread'
 import type { StampFace } from '@/lib/passport/render/stamp-svg'
 import { sendWithRetry } from '@/lib/passport/send-retry'
 import type { InstagramImageSendResult } from '@/lib/messaging/instagram/send'
+import { venueLocalDate } from '@/lib/schemas'
 import { Resvg } from '@resvg/resvg-js'
 
 const HERE = join(process.cwd(), 'scripts', 'harness', 'passport')
@@ -182,18 +188,61 @@ function partA(): void {
     formatStampDate('2026-10-30') === '30 OCT 2026' &&
       formatStampDate('nope') === null,
   )
+
+  // TAC-587: the time, from the same instant and timezone as the date.
+  const LA = 'America/Los_Angeles'
+  const at = (iso: string) => formatStampTime(new Date(iso), LA)
+  check(
+    'the time prints 12-hour with no leading zero: 1:22 PM, 9:05 AM, 12:00 PM, 12:05 AM',
+    at('2026-10-30T20:22:00Z') === '1:22 PM' &&
+      at('2026-10-30T16:05:00Z') === '9:05 AM' &&
+      at('2026-10-30T19:00:00Z') === '12:00 PM' &&
+      at('2026-10-30T07:05:00Z') === '12:05 AM',
+  )
+  const lateNight = new Date('2026-10-31T06:30:00Z')
+  const lateDate = venueLocalDate(lateNight, LA)
+  check(
+    'a late-night purchase prints the venue-local date and time: 30 OCT 2026, 11:30 PM',
+    lateDate !== null &&
+      formatStampDate(lateDate) === '30 OCT 2026' &&
+      formatStampTime(lateNight, LA) === '11:30 PM',
+    `${lateDate} ${formatStampTime(lateNight, LA)}`,
+  )
+  check(
+    'an unusable timezone prints no time',
+    formatStampTime(lateNight, 'Not/AZone') === null,
+  )
 }
 
 // ---------------------------------------------------------------------------
 // (b) Layout
 // ---------------------------------------------------------------------------
 
+/** TAC-586's template rule, written out again: what every sent stamp was drawn with. */
+function templateBefore587(guestId: string, page: number): string {
+  let hash = 0x811c9dc5
+  const text = `${guestId}:${page}`
+  for (let i = 0; i < text.length; i++) {
+    hash ^= text.charCodeAt(i)
+    hash = Math.imul(hash, 0x01000193) >>> 0
+  }
+  return PAGE_TEMPLATES[(hash >>> 0) % PAGE_TEMPLATES.length]!.name
+}
+
+// Ruled 2026-10-14 (TAC-587 Q1 = C). Written here as a number, not imported
+// from layout.ts: a check that reads the constant it is checking passes
+// whatever the constant says.
+const RULED_MAX_PAGE_LEAD = 2
+
 function partB(): void {
   console.log('\n(b) where it lands')
   const input = {
     guestId: 'guest-a',
     seq: 3,
-    usedSlots: [0, 4],
+    used: [
+      { page: 1, slot: 0 },
+      { page: 2, slot: 4 },
+    ],
     textureSeed: 123456,
   }
   const first = placeStamp(input)
@@ -203,11 +252,12 @@ function partB(): void {
   check('the same seed places the same way, 1,000 times', stable)
 
   check(
-    'page rollover: 6 → 01, 7 → 02, 12 → 02, 13 → 03',
-    pageForSeq(6) === 1 &&
-      pageForSeq(7) === 2 &&
-      pageForSeq(12) === 2 &&
-      pageForSeq(13) === 3,
+    'spread rollover: 1 and 12 → 01–02, 13 and 24 → 03–04, 25 → 05–06',
+    same(pagesForSeq(1), [1, 2]) &&
+      same(pagesForSeq(12), [1, 2]) &&
+      same(pagesForSeq(13), [3, 4]) &&
+      same(pagesForSeq(24), [3, 4]) &&
+      same(pagesForSeq(25), [5, 6]),
   )
   check(
     'spreads: page 1 and 2 → 01–02, page 3 → 03–04',
@@ -216,46 +266,120 @@ function partB(): void {
       same(spreadForPage(3), [3, 4]),
   )
 
-  // 60 guests, 13 stamps each, seeds from a fixed stream: no slot is used
-  // twice on a page, and every tilt is inside the spec's ±8°.
-  const seeds = mulberry32(586)
+  // The balance rule, driven directly: two ahead closes a page, one does not.
+  const spotsWith = (used: UsedSpot[]) =>
+    eligibleSpots({ guestId: 'guest-b', seq: used.length + 1, used })
+  const twoAhead = spotsWith([
+    { page: 1, slot: 0 },
+    { page: 1, slot: 1 },
+  ])
+  const oneAhead = spotsWith([{ page: 1, slot: 0 }])
+  check(
+    `a page ${RULED_MAX_PAGE_LEAD} stamps ahead takes no stamp; 1 ahead still does`,
+    twoAhead.length === STAMPS_PER_PAGE &&
+      twoAhead.every((spot) => spot.page === 2) &&
+      oneAhead.some((spot) => spot.page === 1) &&
+      oneAhead.some((spot) => spot.page === 2),
+  )
+
+  // 60 guests, 25 stamps each, seeds from a fixed stream.
+  const seeds = mulberry32(587)
   let collisions = 0
   let outOfRange = 0
   let unplaced = 0
+  let offSpread = 0
+  let overLead = 0
+  let fullBeforeOther = 0
+  let unevenAtFull = 0
+  let bothPagesUsed = 0
   for (let g = 0; g < 60; g++) {
     const guestId = `guest-${g}`
-    const used = new Map<number, number[]>()
-    for (let seq = 1; seq <= 13; seq++) {
-      const page = pageForSeq(seq)
-      const usedSlots = used.get(page) ?? []
+    const used: UsedSpot[] = []
+    let firstSpreadPages = new Set<number>()
+    for (let seq = 1; seq <= 25; seq++) {
+      const pages = pagesForSeq(seq)
       const placed = placeStamp({
         guestId,
         seq,
-        usedSlots,
+        used,
         textureSeed: Math.floor(seeds() * 2 ** 31),
       })
       if (placed === null) {
         unplaced += 1
         continue
       }
-      if (usedSlots.includes(placed.slot)) collisions += 1
+      if (!pages.includes(placed.page)) offSpread += 1
+      if (used.some((u) => u.page === placed.page && u.slot === placed.slot))
+        collisions += 1
       if (Math.abs(placed.rotation) > MAX_ROTATION) outOfRange += 1
-      used.set(page, [...usedSlots, placed.slot])
+      used.push({ page: placed.page, slot: placed.slot })
+      if (seq <= STAMPS_PER_SPREAD) firstSpreadPages.add(placed.page)
+
+      const [top, bottom] = pages.map(
+        (page) => used.filter((u) => u.page === page).length,
+      ) as [number, number]
+      if (Math.abs(top - bottom) > RULED_MAX_PAGE_LEAD) overLead += 1
+      if (
+        (top === STAMPS_PER_PAGE && bottom === 0) ||
+        (bottom === STAMPS_PER_PAGE && top === 0)
+      )
+        fullBeforeOther += 1
+      if (seq % STAMPS_PER_SPREAD === 0 && (top !== 6 || bottom !== 6))
+        unevenAtFull += 1
     }
+    if (firstSpreadPages.size === 2) bothPagesUsed += 1
+    firstSpreadPages = new Set()
   }
   check(
-    'no slot collisions across 60 guests × 13 stamps',
-    collisions === 0 && unplaced === 0,
+    'no spot used twice across 60 guests × 25 stamps, none unplaced, none off its spread',
+    collisions === 0 && unplaced === 0 && offSpread === 0,
+    `${collisions} collisions, ${unplaced} unplaced, ${offSpread} off spread`,
   )
   check('every tilt within ±8°', outOfRange === 0)
   check(
-    'a full page has no slot to give',
-    placeStamp({
-      guestId: 'g',
-      seq: 6,
-      usedSlots: [0, 1, 2, 3, 4, 5],
-      textureSeed: 1,
-    }) === null,
+    '12 stamps per spread, 6 on each page',
+    unevenAtFull === 0,
+    `${unevenAtFull} uneven`,
+  )
+  check(
+    `neither page ever more than ${RULED_MAX_PAGE_LEAD} stamps ahead of the other`,
+    overLead === 0,
+    `${overLead} over`,
+  )
+  check(
+    'both pages receive stamps before either is full',
+    fullBeforeOther === 0 && bothPagesUsed === 60,
+  )
+  const fullSpread: UsedSpot[] = [1, 2].flatMap((page) =>
+    [0, 1, 2, 3, 4, 5].map((slot) => ({ page, slot })),
+  )
+  check(
+    'a full spread has no spot to give',
+    placeStamp({ guestId: 'g', seq: 12, used: fullSpread, textureSeed: 1 }) ===
+      null,
+  )
+
+  // Templates. A row stores its slot, not its coordinates, so the template a
+  // page was drawn on must never change while it holds stamps.
+  let sameOnSpread = 0
+  let moved = 0
+  for (let i = 0; i < 10_000; i++) {
+    const id = `t-${i}`
+    for (let page = 1; page <= 40; page += 2)
+      if (templateFor(id, page).name === templateFor(id, page + 1).name)
+        sameOnSpread += 1
+    for (let page = 1; page <= 8; page++)
+      if (templateFor(id, page).name !== templateBefore587(id, page)) moved += 1
+  }
+  check(
+    "a spread's two pages never share a template, pages 01–40, 10,000 guests",
+    sameOnSpread === 0,
+    `${sameOnSpread} shared`,
+  )
+  check(
+    'pages 01–08 keep the template every sent stamp was drawn on, 10,000 guests',
+    moved === 0,
+    `${moved} moved`,
   )
 }
 
@@ -305,12 +429,24 @@ const GOLDEN_FACES: Record<
   { face: StampFace; seed: number; rotation: number }
 > = {
   arrived: {
-    face: { kind: 'arrived', label: null, date: '30 OCT 2026', ...LE_MILS },
+    face: {
+      kind: 'arrived',
+      label: null,
+      date: '30 OCT 2026',
+      time: '1:22 PM',
+      ...LE_MILS,
+    },
     seed: 101,
     rotation: 4.25,
   },
   visit: {
-    face: { kind: 'visit', label: null, date: '02 NOV 2026', ...LE_MILS },
+    face: {
+      kind: 'visit',
+      label: null,
+      date: '02 NOV 2026',
+      time: '1:22 PM',
+      ...LE_MILS,
+    },
     seed: 202,
     rotation: -3.5,
   },
@@ -319,6 +455,7 @@ const GOLDEN_FACES: Record<
       kind: 'discovered',
       label: 'Oat Cortado',
       date: '06 NOV 2026',
+      time: '1:22 PM',
       ...LE_MILS,
     },
     seed: 303,
@@ -329,6 +466,7 @@ const GOLDEN_FACES: Record<
       kind: 'invited',
       label: 'Off menu',
       date: '02 JAN 2027',
+      time: '1:22 PM',
       ...LE_MILS,
     },
     seed: 404,
@@ -336,25 +474,57 @@ const GOLDEN_FACES: Record<
   },
 }
 
+/** A full first spread: twelve stamps, both pages filling together. */
 function goldenSpreadStamps(): PlacedStamp[] {
   const faces: Array<Omit<StampFace, keyof typeof LE_MILS>> = [
-    { kind: 'arrived', label: null, date: '30 OCT 2026' },
-    { kind: 'discovered', label: 'Oat Cortado', date: '01 NOV 2026' },
-    { kind: 'visit', label: null, date: '03 NOV 2026' },
-    { kind: 'visit', label: null, date: '05 NOV 2026' },
-    { kind: 'discovered', label: 'Chai Latte', date: '07 NOV 2026' },
-    { kind: 'invited', label: 'Off menu', date: '09 NOV 2026' },
+    { kind: 'arrived', label: null, date: '30 OCT 2026', time: '8:14 AM' },
+    {
+      kind: 'discovered',
+      label: 'Oat Cortado',
+      date: '01 NOV 2026',
+      time: '1:22 PM',
+    },
+    { kind: 'visit', label: null, date: '03 NOV 2026', time: '9:05 AM' },
+    { kind: 'visit', label: null, date: '05 NOV 2026', time: '12:40 PM' },
+    {
+      kind: 'discovered',
+      label: 'Chai Latte',
+      date: '07 NOV 2026',
+      time: '3:58 PM',
+    },
+    {
+      kind: 'invited',
+      label: 'Off menu',
+      date: '09 NOV 2026',
+      time: '11:30 AM',
+    },
+    { kind: 'visit', label: null, date: '13 NOV 2026', time: '7:45 AM' },
+    {
+      kind: 'discovered',
+      label: 'Cardamom Bun',
+      date: '16 NOV 2026',
+      time: '10:12 AM',
+    },
+    { kind: 'visit', label: null, date: '18 NOV 2026', time: '2:03 PM' },
+    { kind: 'visit', label: null, date: '20 NOV 2026', time: '12:05 PM' },
+    {
+      kind: 'discovered',
+      label: 'Matcha Latte',
+      date: '24 NOV 2026',
+      time: '4:30 PM',
+    },
+    { kind: 'visit', label: null, date: '27 NOV 2026', time: '6:55 PM' },
   ]
-  const used: number[] = []
+  const used: UsedSpot[] = []
   return faces.map((face, i) => {
     const seq = i + 1
     const placed = placeStamp({
       guestId: 'golden',
       seq,
-      usedSlots: used,
+      used,
       textureSeed: 9000 + i,
     })!
-    used.push(placed.slot)
+    used.push({ page: placed.page, slot: placed.slot })
     return {
       seq,
       guestId: 'golden',
@@ -458,7 +628,7 @@ async function partC(): Promise<void> {
     )
   } else {
     check(
-      '6-stamp spread re-renders pixel-identically',
+      '12-stamp spread re-renders pixel-identically',
       (await rawHash(spreadOne.data.png)) ===
         (await rawHash(spreadTwo.data.png)),
     )
@@ -519,20 +689,45 @@ async function partD(): Promise<void> {
   const guestId = referenceGuest()
   // The twelve stamps of 167:1632, in its slot order (templates.ts).
   const top: Array<Omit<StampFace, keyof typeof LE_MILS>> = [
-    { kind: 'discovered', label: 'Oat Cortado', date: '01 NOV 2026' },
-    { kind: 'visit', label: null, date: '03 NOV 2026' },
-    { kind: 'visit', label: null, date: '05 NOV 2026' },
-    { kind: 'arrived', label: null, date: '30 OCT 2026' },
-    { kind: 'discovered', label: 'Chai Latte', date: '07 NOV 2026' },
-    { kind: 'visit', label: null, date: '09 NOV 2026' },
+    {
+      kind: 'discovered',
+      label: 'Oat Cortado',
+      date: '01 NOV 2026',
+      time: '1:22 PM',
+    },
+    { kind: 'visit', label: null, date: '03 NOV 2026', time: '1:22 PM' },
+    { kind: 'visit', label: null, date: '05 NOV 2026', time: '1:22 PM' },
+    { kind: 'arrived', label: null, date: '30 OCT 2026', time: '1:22 PM' },
+    {
+      kind: 'discovered',
+      label: 'Chai Latte',
+      date: '07 NOV 2026',
+      time: '1:22 PM',
+    },
+    { kind: 'visit', label: null, date: '09 NOV 2026', time: '1:22 PM' },
   ]
   const bottom: Array<Omit<StampFace, keyof typeof LE_MILS>> = [
-    { kind: 'visit', label: null, date: '13 NOV 2026' },
-    { kind: 'discovered', label: 'Cardamom Bun', date: '16 NOV 2026' },
-    { kind: 'visit', label: null, date: '24 NOV 2026' },
-    { kind: 'visit', label: null, date: '18 NOV 2026' },
-    { kind: 'invited', label: 'Off menu', date: '20 NOV 2026' },
-    { kind: 'discovered', label: 'Matcha Latte', date: '27 NOV 2026' },
+    { kind: 'visit', label: null, date: '13 NOV 2026', time: '1:22 PM' },
+    {
+      kind: 'discovered',
+      label: 'Cardamom Bun',
+      date: '16 NOV 2026',
+      time: '1:22 PM',
+    },
+    { kind: 'visit', label: null, date: '24 NOV 2026', time: '1:22 PM' },
+    { kind: 'visit', label: null, date: '18 NOV 2026', time: '1:22 PM' },
+    {
+      kind: 'invited',
+      label: 'Off menu',
+      date: '20 NOV 2026',
+      time: '1:22 PM',
+    },
+    {
+      kind: 'discovered',
+      label: 'Matcha Latte',
+      date: '27 NOV 2026',
+      time: '1:22 PM',
+    },
   ]
   const stamps: PlacedStamp[] = [...top, ...bottom].map((face, i) => {
     const page = i < 6 ? 1 : 2

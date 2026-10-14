@@ -49,6 +49,7 @@ const FIXTURE = {
         kind: 'discovered' as const,
         label: 'Oat Cortado',
         date: '30 OCT 2026',
+        time: '1:22 PM',
         venueName: 'HEALTH CHECK',
         cityShort: 'S.F.',
         cityLong: 'SAN FRANCISCO',

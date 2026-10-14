@@ -7,6 +7,11 @@
 // outcome, `conflict`: another purchase by the same guest claimed that
 // position first, and the caller re-reads and places again.
 //
+// A STAMP'S TIME IS READ, NEVER STORED (TAC-587). Every stamp prints its
+// purchase's local time, and a spread re-draws the earlier stamps on its two
+// pages, so each prior stamp is loaded with its transaction's `occurred_at`,
+// embedded through the `transaction_id` foreign key.
+//
 // Every query is scoped on venue AND guest, never on an id alone, per
 // .claude/rules/errors-as-values.md. Never throws: supabase-js throws on some
 // transport failures, so each function catches.
@@ -44,6 +49,8 @@ export type StoredStamp = {
   rotation: number
   textureSeed: number
   transactionId: string
+  /** The purchase's instant; the stamp prints it in the venue's timezone. */
+  occurredAt: Date
 }
 
 export type StampContext = {
@@ -68,7 +75,7 @@ function message(e: unknown): string {
 }
 
 const STAMP_COLUMNS =
-  'id, seq, kind, label, stamped_on, page, slot, dx, dy, rotation, texture_seed, transaction_id'
+  'id, seq, kind, label, stamped_on, page, slot, dx, dy, rotation, texture_seed, transaction_id, transaction:transactions!inner(occurred_at)'
 
 type StampRow = Pick<
   Database['public']['Tables']['passport_stamps']['Row'],
@@ -84,10 +91,13 @@ type StampRow = Pick<
   | 'rotation'
   | 'texture_seed'
   | 'transaction_id'
->
+> & { transaction: { occurred_at: string } }
 
-function toStored(row: StampRow): StoredStamp | null {
-  if (!isStampKind(row.kind)) return null
+function toStored(row: StampRow): StoredStamp | string {
+  if (!isStampKind(row.kind)) return `unknown stamp kind on ${row.id}`
+  const occurredAt = new Date(row.transaction.occurred_at)
+  if (Number.isNaN(occurredAt.getTime()))
+    return `occurred_at unreadable on ${row.id}`
   return {
     id: row.id,
     seq: row.seq,
@@ -101,6 +111,7 @@ function toStored(row: StampRow): StoredStamp | null {
     rotation: Number(row.rotation),
     textureSeed: row.texture_seed,
     transactionId: row.transaction_id,
+    occurredAt,
   }
 }
 
@@ -120,9 +131,9 @@ export async function loadPriorStamps(
     const out: StoredStamp[] = []
     for (const row of data ?? []) {
       const stored = toStored(row)
-      // A kind outside the check constraint cannot be stored; reported, not skipped.
-      if (stored === null)
-        return { ok: false, error: `unknown stamp kind on ${row.id}` }
+      // A kind outside the check constraint cannot be stored, and every
+      // purchase has an instant: either one missing is reported, not skipped.
+      if (typeof stored === 'string') return { ok: false, error: stored }
       out.push(stored)
     }
     return { ok: true, data: out }

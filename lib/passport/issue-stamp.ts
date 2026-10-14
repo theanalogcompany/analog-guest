@@ -12,10 +12,11 @@
 //   2. Gates, before anything is written: a paused venue, a venue with no
 //      passport settings (fails CLOSED: no stamp beats one with the wrong
 //      name), a guest who opted out (ruled: nothing sent, no stamp).
-//   3. Decide the kind, place it, and INSERT. The insert is the claim
-//      (migration 085): a second runner for the same purchase stops here as
-//      `already_stamped`. A `conflict` (another purchase by the same guest
-//      took this seq or slot first) re-reads and places again, three times.
+//   3. Decide the kind, place it on its spread (layout.ts), and INSERT. The
+//      insert is the claim (migration 085): a second runner for the same
+//      purchase stops here as `already_stamped`. A `conflict` (another
+//      purchase by the same guest took this seq or spot first) re-reads and
+//      places again, three times.
 //   4. Render both images, upload them, record their paths.
 //   5. Send both (dispatch-instagram-stamp.ts), then set `sent_at`.
 // A failure at 4 or 5 leaves the row with `sent_at` NULL and says where in one
@@ -49,7 +50,7 @@ import { isVenueProcessingHalted } from '@/lib/venues/status'
 import { decideStamp } from './decide'
 import { sendPassportImages } from './dispatch-instagram-stamp'
 import { stampFace } from './face'
-import { pageForSeq, placeStamp, spreadForPage } from './layout'
+import { pagesForSeq, placeStamp, spreadForPage } from './layout'
 import { passportImagePath } from './paths'
 import { renderStamp } from './render/stamp'
 import { renderSpread, type PlacedStamp } from './render/spread'
@@ -136,7 +137,7 @@ function placed(
 ): PlacedStamp | null {
   const settings = context.venue.passport
   if (settings === null) return null
-  const face = stampFace(stamp, settings)
+  const face = stampFace(stamp, settings, context.venue.timezone)
   if (face === null) return null
   return {
     seq: stamp.seq,
@@ -224,20 +225,20 @@ export async function issuePassportStamp(
       })
       const seq = (context.prior.at(-1)?.seq ?? 0) + 1
       const textureSeed = randomInt(0, 2 ** 31 - 1)
-      const page = pageForSeq(seq)
+      const pages = pagesForSeq(seq)
       const placement = placeStamp({
         guestId: input.guestId,
         seq,
-        usedSlots: context.prior
-          .filter((p) => p.page === page)
-          .map((p) => p.slot),
+        used: context.prior
+          .filter((p) => pages.includes(p.page))
+          .map((p) => ({ page: p.page, slot: p.slot })),
         textureSeed,
       })
       if (placement === null)
         return fail(input, {
           stage: 'claim',
           stampId,
-          error: `page ${page} has no free slot`,
+          error: `pages ${pages.join('–')} have no free spot`,
         })
 
       const inserted = await insertStamp(supabase, {
@@ -274,6 +275,7 @@ export async function issuePassportStamp(
         rotation: placement.rotation,
         textureSeed,
         transactionId: input.transactionId,
+        occurredAt: context.transaction.occurredAt,
       }
     }
     if (stamp === null || context === null)
