@@ -6,6 +6,7 @@ import { Textarea } from '@/components/ui/textarea'
 import type { PlaygroundTurn } from '../_lib/types'
 import {
   GuestBubbles,
+  OutreachMarker,
   TurnReply,
   V1ActualReply,
   V1ComparisonCaveat,
@@ -43,6 +44,16 @@ function RewindButton({
 /** Default save name: the opening guest message, trimmed to something readable. */
 const NAME_FROM_FIRST_MESSAGE_CHARS = 60
 
+/**
+ * Default hours-quiet for an outreach turn: roughly "yesterday afternoon",
+ * the same ~21 the golden harness authors (run-turn.ts outreach doc).
+ */
+const DEFAULT_HOURS_QUIET = '21'
+
+/** Bounds mirror the run route's schema; out of range would 400 there. */
+const HOURS_QUIET_MIN = 1
+const HOURS_QUIET_MAX = 336
+
 export function ChatPane({
   turns,
   selectedTurnId,
@@ -57,6 +68,8 @@ export function ChatPane({
   savableTurnCount,
   saving,
   onSaveConversation,
+  outreachDisabledReason,
+  onOutreach,
 }: {
   turns: PlaygroundTurn[]
   selectedTurnId: string | null
@@ -75,10 +88,14 @@ export function ChatPane({
   savableTurnCount: number
   saving: boolean
   onSaveConversation: (name: string) => void
+  /** Why "Venue writes first" cannot fire right now, or null when it can. */
+  outreachDisabledReason: string | null
+  onOutreach: (hoursQuiet: number) => void
 }) {
   const [draft, setDraft] = useState('')
   const [savingOpen, setSavingOpen] = useState(false)
   const [saveName, setSaveName] = useState('')
+  const [hoursQuietDraft, setHoursQuietDraft] = useState(DEFAULT_HOURS_QUIET)
   const scrollRef = useRef<HTMLDivElement>(null)
 
   // Stable identity: TurnReply calls this from an effect on every bubble
@@ -108,6 +125,17 @@ export function ChatPane({
     onSend(text)
   }
 
+  const hoursQuiet = Number(hoursQuietDraft)
+  const hoursQuietValid =
+    Number.isFinite(hoursQuiet) &&
+    hoursQuiet >= HOURS_QUIET_MIN &&
+    hoursQuiet <= HOURS_QUIET_MAX
+
+  const fireOutreach = () => {
+    if (outreachDisabledReason !== null || !hoursQuietValid) return
+    onOutreach(hoursQuiet)
+  }
+
   const openSave = () => {
     const first = turns.find((t) => t.mode === 'sandbox')?.request.inbound[0]
     setSaveName((first ?? '').slice(0, NAME_FROM_FIRST_MESSAGE_CHARS))
@@ -135,7 +163,13 @@ export function ChatPane({
                 {/* Stacked, never a flex row: a row wrapper makes GuestBubbles
                     content-sized, and the bubble's max-w-[75%] then resolves
                     against a collapsing parent - one character per line. */}
-                <GuestBubbles texts={turn.request.inbound} />
+                {turn.request.outreach !== undefined ? (
+                  <OutreachMarker
+                    hoursQuiet={turn.request.outreach.hoursQuiet}
+                  />
+                ) : (
+                  <GuestBubbles texts={turn.request.inbound} />
+                )}
                 {turn.mode === 'sandbox' && (
                   <span className="flex gap-3 opacity-0 transition-opacity group-hover:opacity-100">
                     <RewindButton
@@ -144,12 +178,17 @@ export function ChatPane({
                       disabled={busy}
                       onClick={() => onRewind(turn.id, 'rerun')}
                     />
-                    <RewindButton
-                      label="edit from here"
-                      title="Discard everything from this message on and put it back in the composer"
-                      disabled={busy}
-                      onClick={() => onRewind(turn.id, 'edit')}
-                    />
+                    {/* No edit on an outreach turn: there is no inbound to put
+                        back in the composer, and prefilling it empty would
+                        leave the pane in a state Send cannot leave. */}
+                    {turn.request.outreach === undefined && (
+                      <RewindButton
+                        label="edit from here"
+                        title="Discard everything from this message on and put it back in the composer"
+                        disabled={busy}
+                        onClick={() => onRewind(turn.id, 'edit')}
+                      />
+                    )}
                   </span>
                 )}
                 {/* One or the other, never both: the comparison block carries
@@ -277,6 +316,40 @@ export function ChatPane({
           >
             {busy ? 'Running' : 'Send'}
           </Button>
+          {/* The outreach control: fire a turn with NO guest message. A plain
+              <button> rather than <Button> because shadcn's disabled
+              pointer-events-none swallows hover, and the title explaining WHY
+              it is disabled is the whole point of disabling instead of
+              hiding. */}
+          <div className="flex shrink-0 items-center gap-1.5 border-l border-stone-light/60 pl-2">
+            <label className="flex items-center gap-1 whitespace-nowrap text-[11px] text-ink-faint">
+              <input
+                type="number"
+                min={HOURS_QUIET_MIN}
+                max={HOURS_QUIET_MAX}
+                value={hoursQuietDraft}
+                onChange={(e) => setHoursQuietDraft(e.target.value)}
+                disabled={outreachDisabledReason !== null}
+                aria-label="hours quiet"
+                className="h-8 w-14 rounded-[2px] border border-stone-light bg-paper px-1.5 text-xs text-ink outline-none focus:border-clay/60 disabled:cursor-not-allowed disabled:opacity-50"
+              />
+              hours quiet
+            </label>
+            <button
+              type="button"
+              onClick={fireOutreach}
+              disabled={outreachDisabledReason !== null || !hoursQuietValid}
+              title={
+                outreachDisabledReason ??
+                (hoursQuietValid
+                  ? 'Run an outreach turn: the venue writes first after this many quiet hours'
+                  : `hours quiet must be ${HOURS_QUIET_MIN}-${HOURS_QUIET_MAX}`)
+              }
+              className="cursor-pointer whitespace-nowrap rounded-[2px] border border-stone-light/60 bg-paper px-3 py-1.5 text-xs font-medium text-ink-soft hover:bg-parchment disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              Venue writes first
+            </button>
+          </div>
         </div>
       )}
     </div>

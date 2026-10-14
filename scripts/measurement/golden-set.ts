@@ -52,7 +52,7 @@
  * `--skip-v1` ASKS v2 ALONE, and is the one flag that changes what a column
  * MEANS rather than which scenarios run. Every v1 column comes back
  * `not_run`, which the page greys out exactly as it does v2's media and
- * proactive gaps, and the run writes nothing to production `messages` because
+ * not-automated gaps, and the run writes nothing to production `messages` because
  * the v1 arm is what materializes those rows. Two consequences:
  *   - A SKIPPED RUN IS NOT A COMPARISON. Nothing on that run's page or export
  *     may be read as v1 vs v2; it answers "what does v2 say", alone.
@@ -235,6 +235,11 @@ async function runQuestion(
           // to read. The v1 arm materializes the same links onto a bodyless
           // final message, so both arms answer a turn carrying the same photo.
           ...(turn.media !== undefined ? { declaredMedia: turn.media } : {}),
+          // A proactive scenario is a v2 outreach turn: inbound is empty and
+          // the authored history is the whole input, same as the v1 arm's
+          // draftV1FollowupForSandbox above. goldenTurnFor is the one place
+          // that decides which scenarios get one.
+          ...(turn.outreach !== undefined ? { outreach: turn.outreach } : {}),
           now,
           // No judge, no assessor. This set is read by a person and has no
           // grader, so their scores are never displayed - and the gate is

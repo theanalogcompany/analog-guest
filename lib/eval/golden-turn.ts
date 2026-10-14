@@ -22,7 +22,7 @@ import {
 // a client component alike.
 
 export interface GoldenTurnInput {
-  /** The guest's message(s) this turn, oldest first. */
+  /** The guest's message(s) this turn, oldest first. Empty on an outreach turn. */
   inbound: string[]
   /** The conversation before it. Empty for a cold open. */
   history: Array<{ role: 'user' | 'assistant'; text: string }>
@@ -36,7 +36,20 @@ export interface GoldenTurnInput {
    * browser bundle; the shape does no harm.
    */
   media?: DeclaredTurnMedia
+  /**
+   * Set on a proactive scenario: the v2 outreach turn (v2.21.0). The authored
+   * history is the whole input and the venue writes first.
+   */
+  outreach?: { hoursQuiet: number }
 }
+
+/**
+ * The quiet gap a golden proactive scenario simulates. The fixtures all say
+ * "the next day"; 21 hours is that, authored here once so the harness and
+ * /admin/prompt-lab cannot drift. An AUTHORED fixture value, not a product
+ * constant - the phase-B sweep computes the real gap from the real anchor.
+ */
+export const GOLDEN_OUTREACH_HOURS_QUIET = 21
 
 export interface GoldenTurnSkip {
   stage: 'proactive' | 'not_automated'
@@ -51,19 +64,48 @@ export interface GoldenTurnSkip {
  * does not exist, and the column would read as "v2 handled it". A caller must
  * render it as a labelled gap and never count it as a failed arm.
  *
- * ONE SKIP LEFT, where there were two: media scenarios now run on both arms.
+ * The skips are down to `not_automated` plus one degenerate case: media
+ * scenarios run on both arms (the media lane), proactive scenarios run as v2
+ * outreach turns, and the only 'proactive' skip left is a fixture with no
+ * history - a follow-up to nothing, which runTurn refuses by the same name.
  */
 export function goldenTurnFor(question: GoldenQuestion): {
   turn: GoldenTurnInput
   skip: GoldenTurnSkip | null
 } {
+  const history = (question.history ?? []).map((t) => ({
+    role: t.role,
+    text: t.text,
+  }))
+
+  // A proactive scenario is a v2 OUTREACH turn (v2.21.0): no inbound - the
+  // scenario's `question` string is a bracketed descriptor, never a guest
+  // message - the authored history is the whole input, and the venue writes
+  // first. A proactive fixture with no history is still declined: a follow-up
+  // answers a relationship, and runTurn refuses the same turn by name.
+  if (question.driver === 'proactive') {
+    return {
+      turn: {
+        inbound: [],
+        history,
+        outreach: { hoursQuiet: GOLDEN_OUTREACH_HOURS_QUIET },
+      },
+      skip:
+        notAutomatedSkip(question) ??
+        (history.length === 0
+          ? {
+              stage: 'proactive',
+              error:
+                'a follow-up answers a relationship - this proactive scenario carries no history, so there is no thread to pick up',
+            }
+          : null),
+    }
+  }
+
   return {
     turn: {
       inbound: question.messages ?? [question.question],
-      history: (question.history ?? []).map((t) => ({
-        role: t.role,
-        text: t.text,
-      })),
+      history,
       // v2 HAS A MEDIA INPUT NOW, so the skip this branch used to return is
       // gone: it read "run-turn.ts and the v2 composer take text only", which
       // stopped being true when the media lane landed
@@ -79,15 +121,7 @@ export function goldenTurnFor(question: GoldenQuestion): {
         ? { media: { mediaUrls: question.mediaUrls } }
         : {}),
     },
-    skip:
-      notAutomatedSkip(question) ??
-      (question.driver === 'proactive'
-        ? {
-            stage: 'proactive',
-            error:
-              'v2 has no proactive path - runTurn answers an inbound, and this scenario has none',
-          }
-        : null),
+    skip: notAutomatedSkip(question),
   }
 }
 

@@ -58,6 +58,19 @@ export function GuestBubbles({ texts }: { texts: string[] }) {
   )
 }
 
+/**
+ * Replaces the guest bubbles on an outreach turn. There is no inbound to
+ * render, and rendering nothing would make the venue's reply read as answering
+ * the previous guest message - which is the one thing an outreach turn is not.
+ */
+export function OutreachMarker({ hoursQuiet }: { hoursQuiet: number }) {
+  return (
+    <span className="text-[11px] italic text-ink-faint">
+      venue writes first · {hoursQuiet}h quiet
+    </span>
+  )
+}
+
 const REDUCED_MOTION_QUERY = '(prefers-reduced-motion: reduce)'
 
 function subscribeReducedMotion(onChange: () => void): () => void {

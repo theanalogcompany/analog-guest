@@ -51,6 +51,7 @@ import { fireGateNotifications } from '@/lib/policy/notify'
 import {
   detectSituations,
   GUEST_MEDIA_SITUATION,
+  OUTREACH_SITUATION,
   type SituationDetectionOutcome,
 } from '@/lib/policy/detect-situations'
 import {
@@ -222,6 +223,29 @@ export interface RunTurnInput {
    * it is replaying.
    */
   declaredMedia?: DeclaredTurnMedia
+  /**
+   * Set on an OUTREACH turn: the venue writing first after a conversation
+   * ended on us and went quiet (v2.21.0). `inbound` must be empty and the
+   * loaded history non-empty - a follow-up answers a relationship - and both
+   * are refused as dead turns, never silently composed around. The OTHER
+   * legal empty-inbound shape, a media-only turn, is disjoint from this one:
+   * media rides an inbound event, and an outreach turn has no inbound event.
+   *
+   * `hoursQuiet` is how long since our last message, supplied by the caller:
+   * the playground and golden harness author it (default ~21), and the phase
+   * B sweep will compute it from the real anchor. It renders into the HOUSE
+   * NOTES outreach note; the occasion reaches the judge and the gate through
+   * `guestState` with no extra plumbing.
+   *
+   * What an outreach turn changes in this pipeline: situation detection is
+   * skipped (there is no inbound to read) and the structural
+   * `OUTREACH_SITUATION` is handed to the gate instead - which the seeded
+   * `outreach_requires_approval` policy row matches, so every unprompted
+   * draft queues for the operator by default. The assessor is also skipped:
+   * its "one exchange" framing assumes guest words, and an outreach turn has
+   * none (phase B's writer records the deterministic memory note instead).
+   */
+  outreach?: { hoursQuiet: number }
   /** Prior turns for sandbox chats; ignored when guestId is set (history loads from messages). */
   sessionHistory?: HistoryTurn[]
   session?: PlaygroundSession
@@ -410,8 +434,17 @@ export interface TurnTrace {
    * could not see. Costs ~23k chars on the trace of a hand-edited turn only.
    */
   composedWithoutPromptEdit: ComposedPrompt | null
-  /** Inbound situation detection (fast axis); null only on pre-generation failures. */
-  situations: (SituationDetectionOutcome & { durationMs: number }) | null
+  /**
+   * Inbound situation detection (fast axis); null only on pre-generation
+   * failures. `{skipped: true}` is an OUTREACH turn - there was no inbound to
+   * read, so detection was never asked, which is not "it ran and found
+   * nothing" and not "it failed" (the three-state rule). The gate still ran,
+   * on the structural OUTREACH_SITUATION.
+   */
+  situations:
+    | (SituationDetectionOutcome & { durationMs: number })
+    | { skipped: true }
+    | null
   generation:
     | {
         ok: true
@@ -554,7 +587,15 @@ export async function runTurn(input: RunTurnInput): Promise<TurnTrace> {
   // Same shape as the judges, and the consequence is bigger: no assessor means
   // no `nextSession`, so a chained caller carries nothing between turns.
   // `ASSESSOR_ENABLED` in assessor.ts lists what that breaks.
-  const skipAssessor = skipEvaluation || !ASSESSOR_ENABLED
+  //
+  // An OUTREACH turn skips it too: the assessor reads "one exchange between
+  // the venue and a guest" and an outreach turn has no guest words in it, so
+  // there is nothing for it to record that the phase-B writer's deterministic
+  // "reached out" memory note does not say better. A sandbox chain keeps the
+  // previous session across the outreach turn, which is also correct - the
+  // turn taught us nothing about the guest.
+  const skipAssessor =
+    skipEvaluation || !ASSESSOR_ENABLED || input.outreach !== undefined
 
   // ---- Load the graph (active row, else default; malformed falls back). ----
   const graphRow = await supabase
@@ -955,7 +996,13 @@ export async function runTurn(input: RunTurnInput): Promise<TurnTrace> {
     guestProfile: o.guestProfileText ?? renderGuestProfile(profile),
     interactionMemory:
       o.interactionMemoryText ?? renderInteractionMemory(memory),
-    openMoves: o.openMovesText ?? renderOpenMoves(moves, memory),
+    // On an outreach turn the moves blank to the just-be-present fallback:
+    // the moves header's "your one question is for these" would argue with
+    // the outreach note's "pick the thread up", and later-beats-earlier is a
+    // lever, not a guarantee. An explicit playground override still wins.
+    openMoves:
+      o.openMovesText ??
+      (input.outreach !== undefined ? '' : renderOpenMoves(moves, memory)),
   }
   const venueProfileRender: TurnTrace['venueProfileRender'] =
     rendered === null
@@ -991,6 +1038,7 @@ export async function runTurn(input: RunTurnInput): Promise<TurnTrace> {
             inboundMediaBefore: turnMedia.before,
             inboundMediaAfter: turnMedia.after,
           }),
+      ...(input.outreach !== undefined ? { outreach: input.outreach } : {}),
     },
     templates,
   )
@@ -1062,13 +1110,47 @@ export async function runTurn(input: RunTurnInput): Promise<TurnTrace> {
     composed,
   }
 
+  // An outreach turn that cannot run honestly is a DEAD TURN, never a turn
+  // quietly composed as something else. Three refusals, each named for the
+  // inspector: the cue is not a guest message, so inbound and outreach are
+  // mutually exclusive; an empty history has no relationship to follow up on;
+  // and a template set with no outreach lane would compose a version that
+  // never shipped. Checked BEFORE the nothing-in-it refusal below, because an
+  // outreach turn is the other legal empty-inbound shape and would otherwise
+  // be refused as a media turn that lost its media.
+  const outreachError =
+    input.outreach === undefined
+      ? null
+      : input.inbound.length > 0
+        ? 'an outreach turn carries no inbound - it is the venue writing first'
+        : history.length === 0
+          ? 'an outreach turn needs history - a follow-up answers a relationship, and this guest has none'
+          : templates.outreach === undefined
+            ? `template ${templates.version} has no outreach lane - a version predating v2.21.0 cannot compose a venue-initiated turn`
+            : null
+  if (outreachError !== null)
+    return {
+      ...base,
+      situations: null,
+      generation: { ok: false, error: outreachError },
+      semantic: null,
+      gate: null,
+      judge: null,
+      actualJudge: null,
+      assessor: null,
+      totalDurationMs: Date.now() - started,
+    }
+
   // A TURN WITH NOTHING IN IT is a dead turn, and it is reachable now that
   // `inbound` may be empty: a media-only turn whose media could not be read
   // leaves the model a transcript ending in our own last message and a brief,
   // with nothing from the guest. Generating there produces a reply to a
   // message nobody sent. Failed as a value, with the reason, rather than asked
-  // for and then puzzled over.
+  // for and then puzzled over. An OUTREACH turn is exempt: writing first with
+  // nothing from the guest is exactly what it is for, and its own refusals ran
+  // above.
   if (
+    input.outreach === undefined &&
     input.inbound.length === 0 &&
     (turnMedia === null ||
       turnMedia.before.length + turnMedia.after.length === 0)
@@ -1125,6 +1207,11 @@ export async function runTurn(input: RunTurnInput): Promise<TurnTrace> {
   // Detection reads only the inbound, so it rides the generation wait and
   // adds no serial latency; its result is what lets situation-scoped policy
   // rows fire in the gate - genuinely pre-send, unlike the assessor's flags.
+  //
+  // An OUTREACH turn has no inbound to read, so detection is SKIPPED - not
+  // run over '' to return a shrug - and the gate is handed the structural
+  // OUTREACH_SITUATION instead, which is what the seeded
+  // outreach_requires_approval row matches.
   const [generated, situationsTimed] = await Promise.all([
     generateV2Reply(composed, {
       ...(o.modelKey !== undefined ? { modelKey: o.modelKey } : {}),
@@ -1133,24 +1220,29 @@ export async function runTurn(input: RunTurnInput): Promise<TurnTrace> {
         ? { maxOutputTokens: o.maxOutputTokens }
         : {}),
     }),
-    timed(
-      detectSituations({
-        inbound_message: input.inbound.join('\n').slice(0, 2000),
-        recent_conversation: history
-          .slice(-4)
-          .map((t) => `${t.role === 'user' ? 'GUEST' : 'VENUE'}: ${t.text}`)
-          .join('\n')
-          .slice(0, 2000),
-      }),
-    ),
+    input.outreach === undefined
+      ? timed(
+          detectSituations({
+            inbound_message: input.inbound.join('\n').slice(0, 2000),
+            recent_conversation: history
+              .slice(-4)
+              .map((t) => `${t.role === 'user' ? 'GUEST' : 'VENUE'}: ${t.text}`)
+              .join('\n')
+              .slice(0, 2000),
+          }),
+        )
+      : Promise.resolve(null),
   ])
-  const situationsTrace = {
-    ...situationsTimed.value,
-    durationMs: situationsTimed.durationMs,
-  }
-  const detectedSituations = situationsTimed.value.ok
-    ? situationsTimed.value.detected
-    : []
+  const situationsTrace: TurnTrace['situations'] =
+    situationsTimed === null
+      ? { skipped: true }
+      : { ...situationsTimed.value, durationMs: situationsTimed.durationMs }
+  const detectedSituations: string[] =
+    situationsTimed === null
+      ? [OUTREACH_SITUATION]
+      : situationsTimed.value.ok
+        ? situationsTimed.value.detected
+        : []
 
   if (!generated.ok) {
     return {
@@ -1360,7 +1452,13 @@ export async function runTurn(input: RunTurnInput): Promise<TurnTrace> {
         profile: applied.profile,
         memory: applied.memory,
         stateKey: assessed.data.validatedStateKey ?? stateKey,
-        facts: { ...facts, replyCount: facts.replyCount + 1 },
+        // Conditional rather than +1: a turn with no inbound (outreach) added
+        // no guest reply. Unreachable on outreach turns today (the assessor
+        // skips them), kept correct for whichever caller runs this next.
+        facts: {
+          ...facts,
+          replyCount: facts.replyCount + (input.inbound.length > 0 ? 1 : 0),
+        },
       },
       durationMs: assessedTimed.durationMs,
     }

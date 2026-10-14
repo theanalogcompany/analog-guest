@@ -128,11 +128,19 @@ export function judgmentFromUnit(unit: {
  * capable of being handed. A scenario only one engine can answer has no pair
  * to scramble: showing it would put a reply in column A and a labelled gap in
  * column B, which identifies the arm and is not a comparison.
+ *
+ * An OUTREACH turn (v2.21.0) is exactly that scenario: v2 composes it, but
+ * this surface's v1 arm answers an inbound (the run route refuses the
+ * pairing), so the proactive fixtures have no pair and are excluded here -
+ * and named in `humanEvalExcluded`, never silently dropped.
  */
 export function humanEvalQuestions(
   questions: readonly GoldenQuestion[] = GOLDEN_QUESTIONS,
 ): GoldenQuestion[] {
-  return questions.filter((q) => goldenTurnFor(q).skip === null)
+  return questions.filter((q) => {
+    const { turn, skip } = goldenTurnFor(q)
+    return skip === null && turn.outreach === undefined
+  })
 }
 
 /**
@@ -147,15 +155,25 @@ export function humanEvalExcluded(
   questions: readonly GoldenQuestion[] = GOLDEN_QUESTIONS,
 ): Array<{ key: string; question: string; reason: string }> {
   return questions.flatMap((q) => {
-    const { skip } = goldenTurnFor(q)
-    if (skip === null) return []
-    return [
-      {
-        key: q.key,
-        question: q.question,
-        reason: `${skip.stage}: ${skip.error}`,
-      },
-    ]
+    const { turn, skip } = goldenTurnFor(q)
+    if (skip !== null)
+      return [
+        {
+          key: q.key,
+          question: q.question,
+          reason: `${skip.stage}: ${skip.error}`,
+        },
+      ]
+    if (turn.outreach !== undefined)
+      return [
+        {
+          key: q.key,
+          question: q.question,
+          reason:
+            'outreach turn: v2 writes first, and the v1 arm answers an inbound - no pair to scramble',
+        },
+      ]
+    return []
   })
 }
 

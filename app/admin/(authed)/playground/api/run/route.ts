@@ -130,54 +130,88 @@ const OverridesSchema = z.object({
     .optional(),
 })
 
-const PostBodySchema = z.object({
-  venueId: z.string().uuid(),
-  guestId: z.string().uuid().nullable(),
-  inbound: z.array(z.string().min(1)).min(1).max(10),
-  sessionHistory: z.array(HistoryTurnSchema).max(200).optional(),
-  session: SessionSchema.optional(),
-  overrides: OverridesSchema.optional(),
-  // Replay mode: what production actually sent after this inbound, judged
-  // alongside the v2 draft against the same notes (judge calibration data).
-  actualReply: z.array(z.string().min(1)).max(10).optional(),
-  /**
-   * Skip the judge and the post-turn assessor - two model calls whose output
-   * this route returns on the trace and which a caller may not be rendering.
-   *
-   * FOR A FAN-OUT CALLER, and safe for the same reason the golden harness
-   * passes it: the gate is independent of both (decideDispatch reads the
-   * semantic check and the inbound-detected situations, never the assessor),
-   * so `messages`, `stateKey` and `gateVerdict` are unchanged. The assessor's
-   * `nextSession` is what would carry profile and memory into a FOLLOWING
-   * turn, so this is only safe where nothing chains - one turn against
-   * authored history, which is what /admin/tests/human-eval runs. A
-   * multi-turn caller must not send it.
-   */
-  skipEvaluation: z.boolean().optional(),
-  // The v1 arm, run concurrently with v2. See v1-arm.ts.
-  v1Arm: z
-    .discriminatedUnion('mode', [
-      z.object({
-        mode: z.literal('sandbox'),
-        // The concurrency slot, which decides WHICH synthetic guest the
-        // transcript is materialized against. Bounded here as well as in the
-        // arm: out of range is a 400 rather than a per-column error message,
-        // because a fan-out caller sending slot 12 has a bug in its worker
-        // pool and should hear about it on the first request, not 58 times.
-        slot: z
-          .number()
-          .int()
-          .min(0)
-          .max(SANDBOX_SLOTS - 1)
-          .optional(),
-      }),
-      z.object({
-        mode: z.literal('replay'),
-        inboundMessageId: z.string().uuid(),
-      }),
-    ])
-    .optional(),
-})
+const PostBodySchema = z
+  .object({
+    venueId: z.string().uuid(),
+    guestId: z.string().uuid().nullable(),
+    // `.min(1)` moved into the refinement below: an OUTREACH turn is the one
+    // caller allowed to post an empty inbound, and only that one.
+    inbound: z.array(z.string().min(1)).max(10),
+    sessionHistory: z.array(HistoryTurnSchema).max(200).optional(),
+    session: SessionSchema.optional(),
+    overrides: OverridesSchema.optional(),
+    // Replay mode: what production actually sent after this inbound, judged
+    // alongside the v2 draft against the same notes (judge calibration data).
+    actualReply: z.array(z.string().min(1)).max(10).optional(),
+    // An outreach turn: the venue writing first after the conversation went
+    // quiet (v2.21.0). Client JSON, not LLM output, so bounds are allowed.
+    outreach: z.object({ hoursQuiet: z.number().min(1).max(336) }).optional(),
+    /**
+     * Skip the judge and the post-turn assessor - two model calls whose output
+     * this route returns on the trace and which a caller may not be rendering.
+     *
+     * FOR A FAN-OUT CALLER, and safe for the same reason the golden harness
+     * passes it: the gate is independent of both (decideDispatch reads the
+     * semantic check and the inbound-detected situations, never the assessor),
+     * so `messages`, `stateKey` and `gateVerdict` are unchanged. The assessor's
+     * `nextSession` is what would carry profile and memory into a FOLLOWING
+     * turn, so this is only safe where nothing chains - one turn against
+     * authored history, which is what /admin/tests/human-eval runs. A
+     * multi-turn caller must not send it.
+     */
+    skipEvaluation: z.boolean().optional(),
+    // The v1 arm, run concurrently with v2. See v1-arm.ts.
+    v1Arm: z
+      .discriminatedUnion('mode', [
+        z.object({
+          mode: z.literal('sandbox'),
+          // The concurrency slot, which decides WHICH synthetic guest the
+          // transcript is materialized against. Bounded here as well as in the
+          // arm: out of range is a 400 rather than a per-column error message,
+          // because a fan-out caller sending slot 12 has a bug in its worker
+          // pool and should hear about it on the first request, not 58 times.
+          slot: z
+            .number()
+            .int()
+            .min(0)
+            .max(SANDBOX_SLOTS - 1)
+            .optional(),
+        }),
+        z.object({
+          mode: z.literal('replay'),
+          inboundMessageId: z.string().uuid(),
+        }),
+      ])
+      .optional(),
+  })
+  .superRefine((body, ctx) => {
+    if (body.outreach === undefined && body.inbound.length === 0)
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'inbound may be empty only on an outreach turn',
+      })
+    if (body.outreach !== undefined && body.inbound.length > 0)
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message:
+          'an outreach turn carries no inbound - it is the venue writing first',
+      })
+    // The v1 proactive arm is draftV1FollowupForSandbox, which the golden
+    // harness owns; this route's sandbox arm answers an inbound. Refusing the
+    // pairing beats running v1 on a turn shape it was never given.
+    if (body.outreach !== undefined && body.v1Arm !== undefined)
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message:
+          'the v1 arm answers an inbound - an outreach turn has none to hand it',
+      })
+    if (body.outreach !== undefined && body.actualReply !== undefined)
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message:
+          'replay judges what production sent after an inbound - production has no outreach turns to replay',
+      })
+  })
 
 export async function POST(request: Request): Promise<NextResponse> {
   let body: z.infer<typeof PostBodySchema>
@@ -232,6 +266,7 @@ export async function POST(request: Request): Promise<NextResponse> {
           session: body.session,
           overrides: body.overrides,
           actualReply: body.actualReply,
+          ...(body.outreach !== undefined ? { outreach: body.outreach } : {}),
           skipEvaluation: body.skipEvaluation,
         }).then((trace) => {
           v2Ms = Date.now() - started

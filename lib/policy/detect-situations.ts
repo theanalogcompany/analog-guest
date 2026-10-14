@@ -74,6 +74,19 @@ export type SituationKey = (typeof SITUATION_KEYS)[number]
 export const GUEST_MEDIA_SITUATION = 'guest_media'
 
 /**
+ * The second code-set situation, same mechanics as `GUEST_MEDIA_SITUATION`
+ * above (not a `SITUATION_KEYS` member, for the same contract reason): the
+ * turn is the venue writing FIRST - a v2 outreach turn, where there is no
+ * inbound for this module to read at all, so detection is skipped outright
+ * and the runner hands the gate this instead. The seeded
+ * `outreach_requires_approval` row is what matches it.
+ *
+ * It names the FACT ('outreach', the turn's shape) and not the verdict, same
+ * as its sibling: the policy row decides what happens about it.
+ */
+export const OUTREACH_SITUATION = 'outreach'
+
+/**
  * P(yes) floors, PLACEHOLDERS until the calibration set measures real
  * distributions. opt_out_request is LOW on the classifier's own asymmetry:
  * missing one has legal weight, and the gate exemption means a false

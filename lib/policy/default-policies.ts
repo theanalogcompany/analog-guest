@@ -1,4 +1,4 @@
-import { GUEST_MEDIA_SITUATION } from './detect-situations'
+import { GUEST_MEDIA_SITUATION, OUTREACH_SITUATION } from './detect-situations'
 import { PolicySetSchema, type PolicySet } from './schema'
 
 // The seed policy set every venue starts from. Thresholds are PLACEHOLDERS
@@ -170,6 +170,23 @@ const DEFAULT_POLICIES_INPUT = {
       conditions: { situations: ['needs_human'] },
       then: 'queue',
       onCheckFailure: 'open',
+    },
+    // Venue-initiated outreach (v2.21.0): EVERY unprompted draft queues for
+    // the operator - the default posture for a surface no measurement has
+    // earned auto-send for yet. The situation is structural (OUTREACH_SITUATION
+    // in detect-situations.ts, injected by the turn runner on outreach turns,
+    // never detected), so this row fires on exactly those turns and no others.
+    // Relaxing it per venue is an owner decision for after the queue has
+    // shown draft quality - and that relaxation must also decide the
+    // Jev-outage direction for unprompted sends (nobody is waiting on one, so
+    // holding costs nothing; decision 0003's asymmetry).
+    {
+      key: 'outreach_requires_approval',
+      label: 'Venue-initiated outreach',
+      detection: { kind: 'always' },
+      conditions: { situations: [OUTREACH_SITUATION] },
+      then: 'queue',
+      onCheckFailure: 'closed',
     },
     // Semantic: the prose-leak backstops.
     //

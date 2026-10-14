@@ -33,6 +33,10 @@ export function mergeSameRoleRuns(
  * so a trace-only read would build a transcript of the guest talking into
  * silence. Nothing would error - the next turn would just be generated
  * against a conversation that never happened.
+ *
+ * An OUTREACH turn needs no branch: its inbound is empty, so only its reply
+ * enters, as assistant text the merge folds into the previous assistant run -
+ * which is exactly how a venue double-text reads in a real transcript.
  */
 export function sessionHistoryFromTurns(
   turns: readonly PlaygroundTurn[],
@@ -86,6 +90,12 @@ export function savedTurnsFromPlayground(
     if (turn.status === 'running') continue
     saved.push({
       inbound: turn.request.inbound,
+      // Inbound-empty ⟺ outreach-present holds by construction here (the run
+      // route enforced it on the request), and the saved-turn schema asserts
+      // the same invariant on the way in.
+      ...(turn.request.outreach !== undefined
+        ? { outreach: turn.request.outreach }
+        : {}),
       ...(turn.request.session !== undefined
         ? { session: turn.request.session }
         : {}),
@@ -125,6 +135,7 @@ export function turnsFromSaved(
       sessionHistory: sessionHistoryFromTurns(turns),
       ...(entry.session !== undefined ? { session: entry.session } : {}),
       ...(entry.overrides !== undefined ? { overrides: entry.overrides } : {}),
+      ...(entry.outreach !== undefined ? { outreach: entry.outreach } : {}),
     }
     turns.push({
       id: nextId(),
