@@ -1,6 +1,7 @@
 'use client'
 
 import { Button } from '@/components/ui/button'
+import { GoldenTranscript } from '@/app/admin/_components/golden-transcript'
 import { goldenTurnFor } from '@/lib/eval/golden-turn'
 import type { LabRow, LabV2State } from '../_lib/types'
 
@@ -39,13 +40,10 @@ export function ComparisonRow({
     <div className="grid grid-cols-[1fr_1fr] gap-3 border-b border-stone-light/60 px-4 py-3">
       <div className="col-span-2 flex items-center gap-2">
         <span className="text-xs text-ink">{question.question}</span>
-        <span className="text-[11px] text-ink-faint">{question.key}</span>
-        {question.history !== undefined && question.history.length > 0 && (
-          <span className="rounded-[2px] bg-parchment px-1.5 py-0.5 text-[11px] text-ink-faint">
-            {question.history.length} prior turn
-            {question.history.length === 1 ? '' : 's'}
-          </span>
-        )}
+        <span className="font-mono text-[11px] text-ink-faint">
+          {question.key}
+          {(question.history ?? []).length === 0 && ' · cold open'}
+        </span>
         {runnable && (
           <Button
             type="button"
@@ -58,6 +56,16 @@ export function ComparisonRow({
             Run
           </Button>
         )}
+      </div>
+
+      {/* The INPUT, not a count of it. A badge reading "3 prior turns" told
+          the reader there was history without telling them what it said, and
+          on a burst the header line above is a display label rather than the
+          messages the engines were handed - so the row was reporting an input
+          neither engine received. Same component /admin/tests/golden renders,
+          for the reason given there: these answers are unreadable without it. */}
+      <div className="col-span-2">
+        <GoldenTranscript question={question} />
       </div>
 
       <Column label="v1 · stored">

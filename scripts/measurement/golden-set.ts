@@ -81,16 +81,19 @@ import { PROMPT_VERSION } from '@/lib/ai/prompts/system-template'
 import { V2_PROMPT_VERSION } from '@/lib/ai/v2/template'
 import { resolveV2ModelProfile } from '@/lib/ai/v2/model-call'
 import {
+  goldenArmFailure,
+  goldenV1FromOutcome,
+  goldenV2FromTrace,
+} from '@/lib/eval/golden-arms'
+import {
   GOLDEN_QUESTIONS,
   RUNNABLE_DRIVERS,
   runnableGoldenQuestions,
   validateGoldenSet,
 } from '@/lib/eval/golden-set'
-import { goldenTurnFor } from '@/lib/eval/golden-turn'
-import { EMPTY_MEMORY, EMPTY_PROFILE } from '@/lib/relationship/profile'
+import { goldenSessionFor, goldenTurnFor } from '@/lib/eval/golden-turn'
+import { loadVenueOpenState } from '@/lib/eval/venue-open-state'
 import { runTurn } from '@/lib/relationship/run-turn'
-import { VenueHoursSchema } from '@/lib/schemas/venue-info'
-import { resolveOpenState } from '@/lib/schemas/venue-hours'
 import type { GoldenQuestion, GoldenV1, GoldenV2 } from '@/lib/schemas/golden'
 import { createRunLog } from './run-log'
 
@@ -246,35 +249,24 @@ async function runQuestion(
           // multi-turn scenario would have to drop this flag.
           skipEvaluation: true,
           // No profile, no memory, and ZERO VISITS even on a scenario whose
-          // history implies past ones. That is deliberate parity: the v1 arm's
-          // synthetic guest has no `transactions` rows, so declaring visits here
-          // would have v2 answering about a regular while v1 answers about a
-          // stranger. Anything a scenario needs the guest to have done is in the
-          // transcript, where both arms read it.
-          //
-          // replyCount counts the guest's inbound messages, which is what v1's
-          // own count would see for this materialized thread.
-          session: {
-            profile: EMPTY_PROFILE,
-            memory: EMPTY_MEMORY,
-            facts: {
-              visitCount: 0,
-              replyCount:
-                history.filter((t) => t.role === 'user').length +
-                inbound.length,
-              daysSinceLastContact: null,
-            },
-          },
+          // history implies past ones - `goldenSessionFor` holds that
+          // reasoning and is shared with /admin/tests/human-eval, so the two
+          // surfaces cannot tell v2 it is talking to different guests.
+          session: goldenSessionFor(turn),
         }).then(stopV2),
     v1Arm.then(stopV1),
   ])
 
+  // The reduction to the stored columns is `lib/eval/golden-arms.ts`, shared
+  // with /admin/tests/human-eval - a second copy would let the two surfaces
+  // record the same reply differently. What stays here is what is genuinely
+  // the harness's: the skip decisions, the stopwatches, and the `allSettled`
+  // rejection branches.
   let v1: GoldenV1
   if (v1Skip !== null) {
     v1 = v1Skip
   } else if (v1Settled.status === 'rejected') {
-    v1 = {
-      ok: false,
+    v1 = goldenArmFailure({
       kind: 'error',
       stage: 'threw',
       error:
@@ -282,46 +274,27 @@ async function runQuestion(
           ? v1Settled.reason.message
           : String(v1Settled.reason),
       durationMs: v1Ms,
-    }
+    })
   } else if (v1Settled.value === null) {
     // Unreachable: `v1Skip !== null` is the only way this thunk resolves null
     // and it is handled above. Named rather than cast, for the same reason
     // v2's twin below is - a future second skip reason fails here instead of
     // rendering as a successful empty v1.
-    v1 = {
-      ok: false,
+    v1 = goldenArmFailure({
       kind: 'error',
       stage: 'harness',
       error: 'v1 resolved null with no recorded skip reason',
       durationMs: 0,
-    }
-  } else if (!v1Settled.value.ok) {
-    v1 = {
-      ok: false,
-      kind: 'error',
-      stage: v1Settled.value.stage,
-      error: v1Settled.value.error,
-      durationMs: v1Ms,
-    }
+    })
   } else {
-    const draft = v1Settled.value.data
-    v1 = {
-      ok: true,
-      bubbles: draft.bubbles,
-      category: draft.category,
-      recognitionState: draft.recognitionState,
-      substitute: draft.substitute,
-      promptVersion: draft.promptVersion,
-      durationMs: v1Ms,
-    }
+    v1 = goldenV1FromOutcome(v1Settled.value, v1Ms)
   }
 
   let v2: GoldenV2
   if (v2Skip !== null) {
     v2 = v2Skip
   } else if (v2Settled.status === 'rejected') {
-    v2 = {
-      ok: false,
+    v2 = goldenArmFailure({
       kind: 'error',
       stage: 'threw',
       error:
@@ -329,41 +302,22 @@ async function runQuestion(
           ? v2Settled.reason.message
           : String(v2Settled.reason),
       durationMs: v2Ms,
-    }
+    })
   } else if (v2Settled.value === null) {
     // Unreachable: `v2Skip !== null` is the only way the thunk resolves null
     // and it is handled above. Named rather than cast, so a future third
     // skip reason fails here instead of rendering as a successful empty v2.
-    v2 = {
-      ok: false,
+    v2 = goldenArmFailure({
       kind: 'error',
       stage: 'harness',
       error: 'v2 resolved null with no recorded skip reason',
       durationMs: 0,
-    }
+    })
   } else {
-    const trace = v2Settled.value
-    v2 = trace.generation.ok
-      ? {
-          ok: true,
-          messages: trace.generation.output.messages,
-          stateKey: trace.state.resolvedKey,
-          gateVerdict: trace.gate?.verdict ?? null,
-          gateMatched: (trace.gate?.matched ?? []).map((m) => m.policyKey),
-          promptVersion: V2_PROMPT_VERSION,
-          // The HARNESS's stopwatch, not `trace.totalDurationMs`. Both
-          // columns have to measure the same boundary or the pair is not a
-          // comparison: v1's figure covers its sandbox setup too, and
-          // runTurn's own total does not.
-          durationMs: v2Ms,
-        }
-      : {
-          ok: false,
-          kind: 'error',
-          stage: 'generation',
-          error: trace.generation.error,
-          durationMs: v2Ms,
-        }
+    // The HARNESS's stopwatch, not `trace.totalDurationMs` - golden-arms.ts
+    // records why. V2_PROMPT_VERSION because this run composes with the
+    // current template and never an archived one.
+    v2 = goldenV2FromTrace(v2Settled.value, V2_PROMPT_VERSION, v2Ms)
   }
 
   return { question, v1, v2 }
@@ -629,31 +583,18 @@ async function main(): Promise<void> {
 
   // The open/closed line the prompt carries. Three-state, never a boolean:
   // "the hours were unreadable" must stay distinguishable from "the venue was
-  // closed", or a failed read is recorded as a stated closure.
-  const configRow = await supabase
-    .from('venue_configs')
-    .select('venue_info')
-    .eq('venue_id', venue.id)
-    .maybeSingle()
+  // closed", or a failed read is recorded as a stated closure. Resolved
+  // against `now`, so an injected clock's open state is the one the prompt
+  // will actually carry rather than the one outside the window.
   //
-  // The HOURS SUB-OBJECT, never the whole VenueInfoSchema: that schema
-  // requires `address`, so a venue missing an unrelated field would have its
-  // open state read as unknown for a reason that has nothing to do with hours
-  // (the trap loadVenueClock in lib/agent/instagram-scan-greeting.ts
-  // documents).
-  const rawInfo = configRow.data?.venue_info
-  const parsedHours =
-    rawInfo != null && typeof rawInfo === 'object' && !Array.isArray(rawInfo)
-      ? VenueHoursSchema.safeParse(
-          (rawInfo as Record<string, unknown>).hours ?? {},
-        )
-      : null
-  // Resolved against `now`, so an injected clock's open state is the one the
-  // prompt will actually carry rather than the one outside the window.
-  const openState =
-    parsedHours?.success === true
-      ? resolveOpenState(parsedHours.data, venue.timezone, now).state
-      : 'unknown'
+  // The read itself is `lib/eval/venue-open-state.ts`, shared with the blind
+  // human evaluation, which stores the same column for the same reason - and
+  // which names the hours-sub-object trap a second copy would walk into.
+  const openState = await loadVenueOpenState({
+    venueId: venue.id,
+    timezone: venue.timezone,
+    at: now,
+  })
   if (injectedNow !== null)
     console.warn(
       `\nCLOCK INJECTED: running as ${now.toISOString()} (${venue.timezone}), not the real time.` +
