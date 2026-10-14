@@ -114,26 +114,49 @@ export const SavedTurnOverridesSchema = z.object({
     .optional(),
 })
 
-export const PlaygroundConversationTurnSchema = z.object({
-  /** The guest's message(s) for this turn, oldest first. */
-  inbound: z.array(z.string().min(1)).min(1).max(10),
-  /**
-   * The session this turn ran with. ABSENT ON THE FIRST TURN and that is
-   * correct, not a gap: the sandbox's opening send carries no session, so the
-   * engine enters at the graph's own initial state. Storing a fabricated
-   * empty session here would make turn 1 rerun differently than it ran.
-   */
-  session: SavedPlaygroundSessionSchema.optional(),
-  overrides: SavedTurnOverridesSchema.optional(),
-  /**
-   * The bubbles v2 replied with. EMPTY when the run failed or generation
-   * failed - a turn that produced nothing is saved as having produced
-   * nothing, and renders as the failure it was rather than as silence.
-   */
-  reply: z.array(z.string()).max(10),
-  /** The gate verdict, for the "gate: queue" strip. Null when the run never reached the gate. */
-  verdict: z.enum(['send', 'queue', 'block']).nullable(),
-})
+export const PlaygroundConversationTurnSchema = z
+  .object({
+    /** The guest's message(s) for this turn, oldest first. EMPTY only on an outreach turn. */
+    inbound: z.array(z.string().min(1)).max(10),
+    /**
+     * Set when this turn was the venue writing first (v2.21.0). Mirrors
+     * `RunRequestBody.outreach`, bounds matching the run route's; the marker
+     * line re-renders from it on restore.
+     */
+    outreach: z.object({ hoursQuiet: z.number().min(1).max(336) }).optional(),
+    /**
+     * The session this turn ran with. ABSENT ON THE FIRST TURN and that is
+     * correct, not a gap: the sandbox's opening send carries no session, so the
+     * engine enters at the graph's own initial state. Storing a fabricated
+     * empty session here would make turn 1 rerun differently than it ran.
+     */
+    session: SavedPlaygroundSessionSchema.optional(),
+    overrides: SavedTurnOverridesSchema.optional(),
+    /**
+     * The bubbles v2 replied with. EMPTY when the run failed or generation
+     * failed - a turn that produced nothing is saved as having produced
+     * nothing, and renders as the failure it was rather than as silence.
+     */
+    reply: z.array(z.string()).max(10),
+    /** The gate verdict, for the "gate: queue" strip. Null when the run never reached the gate. */
+    verdict: z.enum(['send', 'queue', 'block']).nullable(),
+  })
+  .superRefine((turn, ctx) => {
+    // Same invariant as the run route: inbound empty ⟺ outreach present. A
+    // save predating v2.21.0 has inbound ≥ 1 and no outreach key, so it
+    // trips neither branch and parses unchanged.
+    if (turn.outreach === undefined && turn.inbound.length === 0)
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'inbound may be empty only on an outreach turn',
+      })
+    if (turn.outreach !== undefined && turn.inbound.length > 0)
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message:
+          'an outreach turn carries no inbound - it is the venue writing first',
+      })
+  })
 export type PlaygroundConversationTurn = z.infer<
   typeof PlaygroundConversationTurnSchema
 >

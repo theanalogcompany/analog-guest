@@ -244,6 +244,30 @@
 // SO: before citing any entry below as current, check which model ran. The
 // regression summary line and both harness run logs print it.
 //
+// v2.21.0 (owner-approved 2026-10-13): the OUTREACH lane - the prompt can now
+// compose a venue-initiated turn, for the v2 follow-up system (a conversation
+// that ended on us and went quiet for about a day gets one check-back).
+// `V2_GUEST_STATE` gains a trailing `{followup_note}` placeholder; on an
+// inbound turn it fills with '' and the composed prompt is BYTE-IDENTICAL to
+// v2.20.0, which is what keeps this bump a no-op for every existing caller.
+// On an outreach turn it fills with `V2_FOLLOWUP_NOTE` (below) and the turns
+// array gains one fixed synthetic final user turn, `V2_FOLLOWUP_CUE` - the
+// documented-legal shape, chosen over trailing-assistant prefill, which is
+// untested in this repo under structured output on any profile.
+//
+// The note renders LAST in HOUSE NOTES because later beats earlier and the
+// outreach turn is about exactly that thread; `{open_moves}` fills with ''
+// on outreach turns so "your one question is for these" never composes
+// against "pick the thread up where it left off".
+//
+// NO per-turn text enters blocks 1 or 2 - the note is block 3, the cue is a
+// turn, and the venue prefix cache is untouched by construction.
+//
+// WHETHER a follow-up happens is not this file's concern: code detects the
+// silence (phase B), the operator approval queue releases the draft (the
+// `outreach_requires_approval` policy row), and this copy only governs what
+// the model writes once the turn runs.
+//
 // v2.20.0 (owner-authored 2026-10-13, approved verbatim): the frame is the
 // owner's own hand-written prompt, promoted out of /admin/prompt-lab. `# Who
 // you are` roughly triples, `# How you answer` is new, `# Texting style` is
@@ -678,7 +702,7 @@
 // NULL), so a literal handle would put one venue's account in every venue's
 // prompt. Same reason `{venue_name}` stays a placeholder. It needs a
 // venue_info field first.
-export const V2_PROMPT_VERSION = 'v2.20.0-draft'
+export const V2_PROMPT_VERSION = 'v2.21.0-draft'
 
 /** Block 1: ROLE. Static across every venue bar the four placeholders. */
 export const V2_FRAME = `# Who you are
@@ -870,4 +894,31 @@ Your aim right now: {mission}
 
 ## What you're trying to learn at this stage
 These are open in parallel - pick whichever fits this moment best; your one question is for these, unless the guest shows trouble or hurry. If one was raised before and went nowhere, let it rest.
-{open_moves}`
+{open_moves}{followup_note}`
+
+/**
+ * The outreach section, filling `{followup_note}` on an OUTREACH turn only -
+ * an inbound turn fills '' and composes byte-identically to v2.20.0. Leading
+ * blank lines are the join with `{open_moves}` above. `{hours_quiet}` is the
+ * one substitution, done by the composer.
+ *
+ * It sits LAST in HOUSE NOTES deliberately: proximity is authority, and the
+ * outreach turn exists for this thread and nothing else.
+ */
+export const V2_FOLLOWUP_NOTE = `
+
+## Why you're writing first
+The guest hasn't written since your last message, about {hours_quiet} hours ago. You're reaching out, not replying. Pick the thread up exactly where it left off - specific to what was said, never a survey. Never open with a greeting that ignores the conversation, never repeat an unanswered question word for word, and never mention the silence.`
+
+/**
+ * The fixed synthetic final user turn on an outreach turn. Variable-free: the
+ * elapsed time lives in the note above, so this constant is the same bytes on
+ * every outreach turn everywhere.
+ *
+ * It exists because the turns array must not end on an assistant turn -
+ * trailing-assistant is prefill semantics under structured output, untested
+ * in this repo on any model profile - and because the most-proximate slot is
+ * the right place to say whose turn this is. Bracketed, machine-authored,
+ * self-describing: it is NOT the guest's words and never wraps any.
+ */
+export const V2_FOLLOWUP_CUE = `[The guest hasn't replied. This turn is yours - you're writing first. HOUSE NOTES says why.]`

@@ -32,6 +32,12 @@ export interface RunRequestBody {
   /** Replay mode: what production actually sent, for the comparison judgment. */
   actualReply?: string[]
   /**
+   * An outreach turn: the venue writing first (v2.21.0). `inbound` must be
+   * empty, and the route refuses the pairing with `v1Arm` or `actualReply` -
+   * both of those answer an inbound this turn does not have.
+   */
+  outreach?: { hoursQuiet: number }
+  /**
    * Skip the judge and the post-turn assessor. Only safe where nothing chains
    * off the turn - the route's own schema has the full reasoning.
    */

@@ -687,7 +687,7 @@ function TraceInspector({
 
         <InspectorSection title="Timings">
           <div className="flex flex-col gap-1">
-            {trace.situations !== null && (
+            {trace.situations !== null && !('skipped' in trace.situations) && (
               <KeyValue label="situations (inbound)">
                 <span className="tabular-nums">
                   {trace.situations.durationMs}ms

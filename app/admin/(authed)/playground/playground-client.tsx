@@ -326,8 +326,15 @@ export function PlaygroundClient({ venues }: { venues: VenueListRow[] }) {
       // rerun hands back a stored request: spreading would carry the arm
       // whatever the toggle now says, and there is no way to spread an
       // absence.
+      //
+      // NEVER an arm on an outreach turn, whatever the toggle says: the route
+      // 400s the pairing, because v1's sandbox arm answers an inbound and an
+      // outreach turn has none to hand it.
       const rest = withoutV1Arm(incoming)
-      const arm = v1ArmFor(turnMode, replayMessageId)
+      const arm =
+        incoming.outreach !== undefined
+          ? null
+          : v1ArmFor(turnMode, replayMessageId)
       const request: RunRequestBody = {
         ...rest,
         ...(arm !== null ? { v1Arm: arm } : {}),
@@ -373,9 +380,12 @@ export function PlaygroundClient({ venues }: { venues: VenueListRow[] }) {
         // profile, memory and state forward turn over turn.
         if (result.ok && turnMode === 'sandbox') {
           // `evaluationRan` and not a bare null check: a skipped assessor
-          // produces no nextSession, and carrying the previous one forward
-          // unchanged would silently make the chat forget this turn. The
-          // playground never skips, so this is a guard rather than a branch.
+          // produces no nextSession. On a guest turn carrying the previous
+          // session forward unchanged would silently make the chat forget the
+          // turn - but the playground never skips those. OUTREACH turns do
+          // skip (run-turn.ts skips the assessor when there are no guest
+          // words), and there carrying the previous session forward is the
+          // correct behaviour this guard quietly provides.
           const assessor = result.data.trace.assessor
           if (evaluationRan(assessor) && assessor.ok) {
             setSession(assessor.nextSession)
@@ -403,6 +413,55 @@ export function PlaygroundClient({ venues }: { venues: VenueListRow[] }) {
       runNewTurn(request, 'sandbox', null)
     },
     [venueId, busy, turns, session, runNewTurn],
+  )
+
+  /**
+   * Why "Venue writes first" cannot fire, or null when it can. The
+   * no-completed-turn reason mirrors runTurn's own refusal - an outreach turn
+   * with empty history is a dead turn there, so the button says why up front
+   * rather than letting the run fail with the same sentence.
+   */
+  const outreachDisabledReason =
+    mode !== 'sandbox'
+      ? 'Outreach is a sandbox turn - replay mode replays what a real guest sent'
+      : !turns.some((t) => t.status === 'done')
+        ? 'An outreach turn needs history - complete at least one exchange first'
+        : busy
+          ? 'A run is in flight'
+          : null
+
+  /**
+   * An outreach turn: the venue writing first after the chat went quiet. Same
+   * request shape as a send with `inbound: []` plus the quiet-hours cue; the
+   * gate gets the structural 'outreach' situation and the seeded
+   * outreach_requires_approval row queues the draft, so the strip reads
+   * "queue".
+   *
+   * The session deliberately does NOT advance afterwards: runTurn skips the
+   * assessor on outreach (no guest words to assess), the trace carries
+   * `assessor: {skipped: true}`, and runNewTurn's `evaluationRan` guard
+   * already declines to adopt from a skipped assessor - the previous session
+   * carries forward, which is correct because the guest said nothing to learn
+   * from.
+   */
+  const onOutreach = useCallback(
+    (hoursQuiet: number) => {
+      if (venueId === null || busy || mode !== 'sandbox') return
+      if (!turns.some((t) => t.status === 'done')) return
+      const request: RunRequestBody = {
+        venueId,
+        guestId: null,
+        inbound: [],
+        sessionHistory: sessionHistoryFromTurns(turns),
+        ...(session !== null ? { session } : {}),
+        outreach: { hoursQuiet },
+        // No v1Arm and no actualReply, ever: the route 400s either pairing.
+        // runNewTurn skips the live toggle's arm on outreach for the same
+        // reason.
+      }
+      runNewTurn(request, 'sandbox', null)
+    },
+    [venueId, busy, mode, turns, session, runNewTurn],
   )
 
   /**
@@ -484,7 +543,12 @@ export function PlaygroundClient({ venues }: { venues: VenueListRow[] }) {
           blocks: overrides.promptBlocks,
         })
       const rest = withoutV1Arm(turn.request)
-      const arm = v1ArmFor(turn.mode, turn.replayMessageId)
+      // Same refusal as runNewTurn: regenerating an outreach turn with the v1
+      // toggle on must not attach the arm the route rejects.
+      const arm =
+        turn.request.outreach !== undefined
+          ? null
+          : v1ArmFor(turn.mode, turn.replayMessageId)
       const request: RunRequestBody = {
         ...rest,
         overrides,
@@ -674,6 +738,8 @@ export function PlaygroundClient({ venues }: { venues: VenueListRow[] }) {
             savableTurnCount={savableTurnCount}
             saving={saving}
             onSaveConversation={onSaveConversation}
+            outreachDisabledReason={outreachDisabledReason}
+            onOutreach={onOutreach}
           />
         </div>
 

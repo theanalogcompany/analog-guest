@@ -21,6 +21,8 @@ export function SituationsBadge({
 }) {
   if (situations === null)
     return <span className="text-[11px] text-ink-faint">not run</span>
+  if ('skipped' in situations)
+    return <span className="text-[11px] text-ink-faint">outreach turn</span>
   if (!situations.ok)
     return <span className="text-[11px] text-destructive">failed open</span>
   if (situations.detected.length === 0)
@@ -53,6 +55,18 @@ export function SituationsSection({
   if (situations === null) {
     return (
       <p className="text-xs italic text-ink-faint">Detection did not run.</p>
+    )
+  }
+
+  // Outreach turns skip detection (no inbound to read); the gate ran on the
+  // structural 'outreach' situation instead. Skipped is not failed and not
+  // "nothing detected" - the three-state rule.
+  if ('skipped' in situations) {
+    return (
+      <p className="text-xs italic text-ink-faint">
+        Skipped - an outreach turn has no inbound to detect over. The gate ran
+        on the structural situation &quot;outreach&quot;.
+      </p>
     )
   }
 

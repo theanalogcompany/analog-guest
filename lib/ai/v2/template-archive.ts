@@ -1,4 +1,6 @@
 import {
+  V2_FOLLOWUP_CUE,
+  V2_FOLLOWUP_NOTE,
   V2_FRAME,
   V2_GUEST_STATE,
   V2_HOUSE_SECTIONS,
@@ -54,6 +56,15 @@ export interface V2TemplateSet {
    * let a wording change silently switch a retrieval call on or off.
    */
   usesRetrieval: boolean
+  /**
+   * The outreach lane (v2.21.0): the section filling `{followup_note}` and
+   * the fixed synthetic final user turn. PRESENCE IS THE CLAIM, the
+   * `houseSectionsBriefed` pattern: a version predating the lane has no entry,
+   * and the runner REFUSES an outreach turn on it rather than composing a
+   * version that never shipped. The strings ride the set, not the build
+   * constants, so an archived outreach turn runs on its own version's copy.
+   */
+  outreach?: { note: string; cue: string }
 }
 
 /** The template this build ships. Always the default. */
@@ -64,6 +75,7 @@ export const V2_TEMPLATE_CURRENT: V2TemplateSet = {
   houseSectionsBriefed: V2_HOUSE_SECTIONS_BRIEFED,
   guestState: V2_GUEST_STATE,
   usesRetrieval: false,
+  outreach: { note: V2_FOLLOWUP_NOTE, cue: V2_FOLLOWUP_CUE },
 }
 
 /**

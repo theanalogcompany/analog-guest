@@ -174,6 +174,18 @@ export interface ComposeInput {
    */
   inboundMediaBefore?: string[]
   inboundMediaAfter?: string[]
+  /**
+   * Set on an OUTREACH turn - the venue writing first after a conversation
+   * went quiet (v2.21.0). The composer then fills `{followup_note}` with the
+   * template set's outreach note and appends its fixed synthetic cue as the
+   * final user turn. `inboundMessages` must be empty; the turn runner owns
+   * that invariant (and refuses a template set with no outreach lane) - this
+   * stays pure assembly.
+   *
+   * On an inbound turn `{followup_note}` fills with '', which composes
+   * byte-identically to v2.20.0.
+   */
+  outreach?: { hoursQuiet: number }
 }
 
 export interface ComposedPrompt {
@@ -259,6 +271,16 @@ export function composePrompt(
           knowledge_brief: brief,
           voice_pack: input.voicePack,
         })
+  // The outreach note: '' on every inbound turn (byte-identical compose), the
+  // set's own note on an outreach turn. The hour count is rounded and floored
+  // at 1 - "about 0 hours ago" is a sentence no host would send.
+  const followupNote =
+    input.outreach === undefined || templates.outreach === undefined
+      ? ''
+      : templates.outreach.note.replace(
+          '{hours_quiet}',
+          String(Math.max(1, Math.round(input.outreach.hoursQuiet))),
+        )
   const guestState = fill(templates.guestState, {
     // Only a set that declares the lane gets the placeholder filled. `fill`
     // throws on a placeholder with no value and ignores a value with no
@@ -283,6 +305,7 @@ export function composePrompt(
       input.interactionMemory.trim() ||
       EMPTY_SECTION_FALLBACKS.interactionMemory,
     open_moves: input.openMoves.trim() || EMPTY_SECTION_FALLBACKS.openMoves,
+    followup_note: followupNote,
   })
 
   // No breakpoint on any turn: HOUSE NOTES is a system block and therefore
@@ -290,6 +313,12 @@ export function composePrompt(
   // `ComposedTurn.cacheBreakpoint` stays in the type because the layout that
   // uses it is one move away (see the header), and generate.ts still honours
   // it - an unset flag is not a dead one.
+  //
+  // An outreach turn ends on the set's fixed synthetic cue instead of a guest
+  // message: the turns array must not end on an assistant turn (prefill
+  // semantics under structured output, untested here), and the cue is
+  // machine-authored bracketed text, never the guest's words - the
+  // never-wrap rule protects verbatim guest text, of which this turn has none.
   const asUserTurns = (lines: readonly string[] | undefined): ComposedTurn[] =>
     (lines ?? []).map((text) => ({ role: 'user' as const, text }))
 
@@ -301,6 +330,9 @@ export function composePrompt(
       text,
     })),
     ...asUserTurns(input.inboundMediaAfter),
+    ...(input.outreach !== undefined && templates.outreach !== undefined
+      ? [{ role: 'user', text: templates.outreach.cue } as ComposedTurn]
+      : []),
   ]
 
   const system: ComposedSystemBlock[] = [

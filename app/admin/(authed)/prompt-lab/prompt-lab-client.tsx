@@ -213,6 +213,9 @@ export function PromptLabClient({
         guestId: null,
         inbound: turn.inbound,
         sessionHistory: turn.history,
+        // Proactive scenarios run as v2 outreach turns (goldenTurnFor is the
+        // one place that decides which, so this surface and the harness agree).
+        ...(turn.outreach !== undefined ? { outreach: turn.outreach } : {}),
         overrides: overridesOf(),
       }
       const result = await postRun(request)
