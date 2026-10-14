@@ -12,14 +12,7 @@ import {
 import type { ReOptIn } from '@/lib/guests/opt-out'
 import type { MessageChannel } from '@/lib/schemas/message-channel'
 import type { EmojiDirective } from '../emoji-cadence'
-import {
-  type MediaVerb,
-  STORY_REPLY_HISTORY_LINE,
-  describedMediaLine,
-  mediaLine,
-  unclearMediaLine,
-  withAttachmentLines,
-} from './attachment-lines'
+import { turnMediaPromptLines, withAttachmentLines } from './attachment-lines'
 import {
   applyChannelSubstitutions,
   type ChannelSubstitution,
@@ -34,8 +27,6 @@ import {
 import type {
   FollowupContext,
   FollowupReason,
-  InboundDescribedMedia,
-  InboundMediaKind,
   KnowledgeCorpusChunk,
   MessageCategory,
   MessageDelivery,
@@ -2579,65 +2570,6 @@ function formatEmojiDirective(directive: EmojiDirective): string {
 export const FIRST_TOUCH_SIGNAL_LINE =
   "This is the guest's first message, sent after they scanned your venue's QR sign."
 
-// TAC-574 (ruled 2026-10-06): a turn with text AND a photo is answered
-// normally, and the agent is told the photo exists so it can acknowledge it.
-//
-// TAC-582 (ruled 2026-10-11): the line is now the same sentence the history
-// uses, built by the same function, with "also" in it. It used to be the bare
-// marker followed by "You cannot see it. You can say you got it, but do not
-// describe it or react to what is in it." Two things that sentence said are
-// no longer said in those words: that the model MAY say it got the photo
-// ("It arrived fine" now states the fact without the licence), and "react to
-// what is in it" (now "describe it, guess what's in it").
-//
-// `satisfies Record` so a new kind cannot arrive without wording or a verb.
-const INBOUND_MEDIA_LABELS = {
-  photo: ['a photo', 'see it'],
-  gif: ['a GIF', 'see it'],
-  video: ['a video', 'watch it'],
-  // Only reachable from an attachment row, which is what says so.
-  voice_note: ['a voice note', 'hear it'],
-  // An extension nothing recognizes: the type is not known, so "open".
-  other: ['an attachment', 'open it'],
-  unknown: ['a photo or GIF', 'see it'],
-} as const satisfies Record<InboundMediaKind, readonly [string, MediaVerb]>
-
-export function formatInboundMediaLine(kind: InboundMediaKind): string {
-  const [label, verb] = INBOUND_MEDIA_LABELS[kind]
-  return mediaLine(`guest also sent ${label}`, verb)
-}
-
-/**
- * TAC-584: the lines for this turn's described attachments, in the order they
- * were sent.
- *
- * Beside text, only an attachment with a description gets a line here; the
- * caller keeps the older "you can't see it" line when none has one. With no
- * text, an attachment that was looked at and could not be made out gets its
- * own line, because on that turn it is all there is to answer.
- */
-export function formatDescribedMediaLines(
-  media: readonly InboundDescribedMedia[],
-  hasText: boolean,
-): string[] {
-  const lines: string[] = []
-  for (const item of media) {
-    if (item.description !== null) {
-      lines.push(
-        describedMediaLine({
-          word: item.word,
-          hasText,
-          description: item.description,
-          nameableItems: item.nameableItems,
-        }),
-      )
-    } else if (!hasText) {
-      lines.push(unclearMediaLine(item.word))
-    }
-  }
-  return lines
-}
-
 /**
  * `channel` picks the channel copy (today, only the first-visit opener's). It
  * defaults to null, the unknown channel, which gets the copy that asserts no
@@ -2908,25 +2840,26 @@ export function runtimeToProse(
   // handleFollowup) enforces mutual exclusion between inbound flow
   // (inboundMessage set) and outbound flow (perkBeingUnlocked or
   // eventBeingInvited set). Type-system enforcement is TAC-243 backlog.
-  const describedMedia = runtime.inboundDescribedMedia ?? []
+  // TAC-582: the story reply goes above the words it gives the context for,
+  // as in the history. TAC-584: a described attachment's line says what it
+  // shows and takes the place of "you can't see it"; one too unclear to make
+  // out says nothing new beside text. All of that is one rule, in
+  // `turnMediaPromptLines`, shared with v2 - see its docstring for why the
+  // two engines can share the decision while placing the lines differently.
+  //
+  // NO `fallbackLines` HERE: a turn with media and no words never reaches this
+  // prompt in v1, it becomes a blank operator card.
+  const media = turnMediaPromptLines({
+    hasText: Boolean(runtime.inboundMessage),
+    storyReply: runtime.inboundStoryReply === true,
+    kind: runtime.inboundMedia ?? null,
+    described: runtime.inboundDescribedMedia ?? [],
+  })
+  lines.push(...media.before)
   if (runtime.inboundMessage) {
-    // TAC-582: above the words it gives the context for, as in the history.
-    if (runtime.inboundStoryReply) lines.push(STORY_REPLY_HISTORY_LINE)
     lines.push(`The guest just sent: "${runtime.inboundMessage}"`)
-    // TAC-584: a described attachment's line says what it shows, and takes
-    // the place of "you can't see it". One too unclear to make out says
-    // nothing new beside text, so it falls through to the line below.
-    const describedLines = formatDescribedMediaLines(describedMedia, true)
-    if (describedLines.length > 0) {
-      lines.push(...describedLines)
-    } else if (runtime.inboundMedia) {
-      lines.push(formatInboundMediaLine(runtime.inboundMedia))
-    }
-  } else if (describedMedia.length > 0) {
-    // TAC-584: media and no words. These lines are everything the guest sent,
-    // so they stand where "The guest just sent" does.
-    lines.push(...formatDescribedMediaLines(describedMedia, false))
   }
+  lines.push(...media.after)
   // TAC-324: R1 carve-out signal. This is the ONLY place createdVia/timing
   // surfaces in the prompt — without this line the model has no way to know
   // a guest arrived via QR scan, since createdVia isn't rendered anywhere

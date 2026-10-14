@@ -342,14 +342,45 @@ async function runSample(
     turns: [],
   }
 
-  for (const [turnIndex, inbound] of scenario.script.entries()) {
+  // A media scenario's turns, in the shape the media actually arrived in. An
+  // `alone` arrival appends a turn with NO words - the media lines are the
+  // whole inbound, which is what run-turn.ts allows an empty `inbound` for.
+  const scriptTurns: Array<{ inbound: string[]; media: boolean }> = [
+    ...scenario.script.map((inbound) => ({ inbound: [inbound], media: false })),
+    ...(scenario.media?.arrival === 'alone'
+      ? [{ inbound: [] as string[], media: true }]
+      : []),
+  ]
+  if (scenario.media !== undefined && scenario.media.arrival === 'with-text') {
+    const last = scriptTurns[scriptTurns.length - 1]
+    if (last !== undefined) last.media = true
+  }
+
+  for (const [turnIndex, turn] of scriptTurns.entries()) {
     const trace = await runTurn({
       venueId,
       guestId: null,
-      inbound: [inbound],
+      inbound: turn.inbound,
       sessionHistory: history,
       session,
       overrides: { voicePackText },
+      ...(turn.media && scenario.media !== undefined
+        ? {
+            declaredMedia: {
+              ...(scenario.media.mediaUrls !== undefined
+                ? { mediaUrls: scenario.media.mediaUrls }
+                : {}),
+              ...(scenario.media.kind !== undefined
+                ? { kind: scenario.media.kind }
+                : {}),
+              ...(scenario.media.description !== undefined
+                ? { description: scenario.media.description }
+                : {}),
+              nameableItems: scenario.media.nameableItems,
+              storyReply: scenario.media.storyReply,
+            },
+          }
+        : {}),
     })
     if (!trace.generation.ok) {
       outcome.disqualified = `generation failed: ${trace.generation.error}`
@@ -415,7 +446,14 @@ async function runSample(
       .filter((k) => k.length > 0)
     const gateMatched =
       trace.gate === null ? [] : trace.gate.matched.map((m) => m.policyKey)
-    outcome.turns.push({ inbound, reply, tagged, gateMatched })
+    // A media-only turn has no words, and the stored unit says so rather than
+    // recording an empty string a reader would take for a missing value.
+    outcome.turns.push({
+      inbound: turn.inbound.join('\n') || '(media, no text)',
+      reply,
+      tagged,
+      gateMatched,
+    })
     const bubbleCheck = await checkBubbles(
       sampleIndex,
       turnIndex + 1,
@@ -444,7 +482,12 @@ async function runSample(
 
     history = [
       ...history,
-      { role: 'user' as const, text: inbound },
+      // A turn with no words contributes no user turn to the next turn's
+      // history. The media lines are not the guest writing to us (owner ruling
+      // 4, 2026-10-11), and a sandbox chain has no rows for the media lane to
+      // re-read them from - so the following turn sees the reply alone, which
+      // is the honest reconstruction rather than a line we invent twice.
+      ...turn.inbound.map((text) => ({ role: 'user' as const, text })),
       ...reply.map((text) => ({ role: 'assistant' as const, text })),
     ]
     // Unchanged when the assessor is off: the next turn is handed the same

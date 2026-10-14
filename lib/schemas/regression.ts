@@ -47,6 +47,35 @@ export const RegressionScenarioSchema = z.object({
    * being agreeable (scripts/CLAUDE.md #7).
    */
   expectPolicyKeys: z.array(z.string().min(1)).default([]),
+  /**
+   * What the guest sent BESIDES words, stated rather than stored - the sandbox
+   * guest these scenarios run as has no rows for the media lane to read
+   * (`declaredTurnMedia`, lib/relationship/turn-media.ts).
+   *
+   * `arrival` is the two shapes a photo actually arrives in, and they are
+   * different turns rather than a flag on one:
+   *   `with-text`  it rides the LAST scripted message - the guest typed and
+   *                attached in one go.
+   *   `alone`      an EXTRA final turn with no words at all, which is how
+   *                every one of Le Mil's 120 attachments arrived.
+   *
+   * It is a field here and not an extra `script` entry because a script entry
+   * is a non-empty string by construction, and a media-only turn has no
+   * string. Loosening that would let an empty inbound into every scenario.
+   */
+  media: z
+    .object({
+      mediaUrls: z.array(z.string().url()).min(1).optional(),
+      kind: z
+        .enum(['photo', 'gif', 'video', 'voice_note', 'other', 'unknown'])
+        .optional(),
+      /** As if the describe step had run and written this. */
+      description: z.string().min(1).optional(),
+      nameableItems: z.array(z.string().min(1)).default([]),
+      storyReply: z.boolean().default(false),
+      arrival: z.enum(['with-text', 'alone']).default('with-text'),
+    })
+    .optional(),
   enabled: z.boolean().default(true),
 })
 export type RegressionScenario = z.infer<typeof RegressionScenarioSchema>

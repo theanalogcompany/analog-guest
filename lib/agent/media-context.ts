@@ -148,12 +148,39 @@ export async function loadMediaContextRows(input: {
   venueId: string
   guestId: string
   now: Date
+  /**
+   * The thread AS IT STOOD at this instant, inclusive. Unset in production,
+   * where the turn is answering the newest message and "now" is the same
+   * thing.
+   *
+   * IT IS WHAT MAKES A REPLAY FAITHFUL, and without it a replay inverts this
+   * rule rather than approximating it. Measured on Le Mil's (2026-10-13):
+   * replaying the described-video turn a day later, the newest row in the
+   * thread is the venue's own answer TO THAT TURN, so the walk below stops at
+   * an outbound that reached the guest and returns `hold: false` - while
+   * production held the same turn under `media_context` and an operator
+   * approved it. The rule was right both times; the input was not.
+   *
+   * A STRING, STRAIGHT FROM `created_at`: `Date` keeps milliseconds where
+   * Postgres keeps microseconds, so a bound built by round-tripping one
+   * truncates downward and excludes the row it came from. See
+   * `loadTurnMediaRows`, where that cost a turn its own attachments.
+   */
+  untilIso?: string
 }): Promise<MediaContextRow[] | null> {
   try {
+    // THE 14 DAYS RUN BACK FROM THE TURN, not from today, and that matters
+    // only when the two differ - a replay. Measured from `now` with `untilIso`
+    // in the past, the two bounds cross for anything older than a fortnight:
+    // `since` lands AFTER `until`, the query returns nothing, and an empty
+    // result reads as "no unanswered media in the thread" when it means
+    // "nothing was read at all". The walk below would then auto-send.
+    const anchor =
+      input.untilIso === undefined ? input.now : new Date(input.untilIso)
     const sinceIso = new Date(
-      input.now.getTime() - LOOKBACK_DAYS * MS_PER_DAY,
+      anchor.getTime() - LOOKBACK_DAYS * MS_PER_DAY,
     ).toISOString()
-    const { data, error } = await createAdminClient()
+    let query = createAdminClient()
       .from('messages')
       .select(
         'id, direction, body, media_urls, unsupported_content, status, review_state, created_at',
@@ -161,6 +188,10 @@ export async function loadMediaContextRows(input: {
       .eq('venue_id', input.venueId)
       .eq('guest_id', input.guestId)
       .gte('created_at', sinceIso)
+    if (input.untilIso !== undefined) {
+      query = query.lte('created_at', input.untilIso)
+    }
+    const { data, error } = await query
       .order('created_at', { ascending: false })
       .limit(MAX_ROWS)
     if (error) {

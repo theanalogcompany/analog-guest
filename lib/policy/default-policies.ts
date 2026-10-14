@@ -1,3 +1,4 @@
+import { GUEST_MEDIA_SITUATION } from './detect-situations'
 import { PolicySetSchema, type PolicySet } from './schema'
 
 // The seed policy set every venue starts from. Thresholds are PLACEHOLDERS
@@ -112,6 +113,39 @@ const DEFAULT_POLICIES_INPUT = {
       conditions: { situations: ['complaint'] },
       then: 'queue',
       onCheckFailure: 'closed',
+    },
+    // The v2 successor of v1's `media_context` approval trigger, and the same
+    // owner ruling (2026-10-11): A REPLY WRITTEN AROUND MEDIA THE AGENT CANNOT
+    // SEE IS HELD, NEVER AUTO-SENT. The agent still drafts.
+    //
+    // It is a hold and not a prompt fix on purpose, and that was measured on
+    // v1 (TAC-582, 20 generations, two venues): the model never described a
+    // photo it had not seen, and in 7 of 20 replies it told the guest "we
+    // can't see it on our end", which is false - the operator can. Two
+    // rewordings moved which false thing it said and not whether it said one.
+    // Do not try a third here either.
+    //
+    // `kind: 'always'` because the fact is already settled before the gate
+    // runs: `guest_media` is in `situations` only when the thread's own rows
+    // say the reply is written around media (lib/relationship/turn-media.ts,
+    // which calls v1's `decideMediaContextHold`). There is nothing for a Noul
+    // to add, and nothing to pay for.
+    //
+    // `onCheckFailure: 'open'` is NOT a relaxation. The row never consults the
+    // semantic check at all, so that field is unreachable for it; the
+    // situation-scoped rows above read the same way.
+    //
+    // A DESCRIBED PHOTO IS STILL HELD. Once the describe step has looked at
+    // one, the prompt says what it shows - and the owner's ruling on that
+    // ticket (TAC-584) was the same one: every media reply is held, at first.
+    // Do not read a good held draft as licence to auto-send it.
+    {
+      key: 'guest_media_requires_approval',
+      label: 'Reply written around media the agent cannot see',
+      detection: { kind: 'always' },
+      conditions: { situations: [GUEST_MEDIA_SITUATION] },
+      then: 'queue',
+      onCheckFailure: 'open',
     },
     {
       key: 'mechanic_request_requires_approval',

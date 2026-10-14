@@ -234,6 +234,23 @@ const KNOWN_KEYS: ReadonlySet<string> = new Set(
 )
 
 /**
+ * The venue's menu items in the menu's OWN SPELLING: which drinks a reply to a
+ * photo may name, and the list `nameableItems` checks a description against
+ * (lib/schemas/attachment-description.ts).
+ *
+ * FAILS OPEN TO NONE, which is the opposite direction from `renderVenueProfile`
+ * below, and on purpose. There, an unreadable row means the agent would answer
+ * from nothing and the loud failure is right. Here, no names means no drink may
+ * be named - the same posture `describe.ts` takes for a venue with no
+ * appearance notes, which is every venue until notes are loaded. A thrown
+ * parse would make a guest's photo take the whole turn down.
+ */
+export function venueMenuItemNames(raw: unknown): string[] {
+  const parsed = VenueInfoSchema.safeParse(raw)
+  return parsed.success ? parsed.data.menu.items.map((item) => item.name) : []
+}
+
+/**
  * @throws if `raw` fails VenueInfoSchema. Deliberate: a malformed row means a
  * fact the agent answers with is unreadable, and v1 throws on exactly this.
  */

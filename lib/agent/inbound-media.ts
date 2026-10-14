@@ -367,6 +367,27 @@ export async function loadTurnMediaRows(input: {
   venueId: string
   guestId: string
   around: Date
+  /**
+   * The thread AS IT STOOD at this instant, inclusive. Unset in production,
+   * where `around` is the newest message and there is nothing after it yet.
+   *
+   * A REPLAY NEEDS IT because two of the rules above read OUTBOUND rows:
+   * `answersTo` asks whether a text has been answered, and
+   * `mediaOnlyMessageBeside` refuses a photo anything has been sent after.
+   * Replayed later, the venue's own answer to this very turn is in the window
+   * and both read it as "already handled" - measured on Le Mil's
+   * (2026-10-13), the reel beside "For cafe" stopped pairing with it because
+   * a reply nine seconds later existed by then.
+   *
+   * A STRING, STRAIGHT FROM `created_at`, AND NOT A `Date`. Postgres keeps
+   * microseconds and `Date` keeps milliseconds, so a bound round-tripped
+   * through `new Date(...).toISOString()` truncates DOWNWARD and an inclusive
+   * `lte` then excludes the very row it was built from. That is not
+   * theoretical: it is how this was found - `05:50:49.486123+00` became
+   * `05:50:49.486Z`, the turn could not see its own message, and the lane
+   * reported no media on a turn that had some.
+   */
+  untilIso?: string
 }): Promise<TurnMediaRowsResult> {
   try {
     // Twice the window: the message the turn ends up answering can itself be
@@ -374,26 +395,40 @@ export async function loadTurnMediaRows(input: {
     const sinceIso = new Date(
       input.around.getTime() - 2 * MEDIA_COMPANION_WINDOW_MS,
     ).toISOString()
+    const untilIso = input.untilIso
     const supabase = createAdminClient()
+    let messagesQuery = supabase
+      .from('messages')
+      .select(
+        'id, direction, body, media_urls, created_at, reply_to_message_id',
+      )
+      .eq('venue_id', input.venueId)
+      .eq('guest_id', input.guestId)
+      .gte('created_at', sinceIso)
+    // TAC-582: what each of those messages' attachments ARE. By guest and
+    // time, like the rows above, so the two cover the same messages.
+    const attachmentsQuery = supabase
+      .from('message_attachments')
+      .select('message_id, kind')
+      .eq('venue_id', input.venueId)
+      .eq('guest_id', input.guestId)
+      .gte('created_at', sinceIso)
+    // THE BOUND IS ON THE MESSAGES AND NOT ON THEIR ATTACHMENTS, and that is
+    // not an oversight. An attachment row is written AFTER the message it
+    // hangs off - the webhook inserts the message, then the rows - so its own
+    // `created_at` is milliseconds later. Bounding both at the message's
+    // instant drops the attachments of the very message being answered:
+    // measured on Le Mil's (2026-10-13), the described video came back
+    // `unknown` instead of `video` and the story reply stopped being one, so
+    // the turn read as carrying no attachments and the hold went away. The
+    // messages bound already decides which messages are in the window; these
+    // rows only say what those messages carry.
+    if (untilIso !== undefined) {
+      messagesQuery = messagesQuery.lte('created_at', untilIso)
+    }
     const [{ data, error }, attachments] = await Promise.all([
-      supabase
-        .from('messages')
-        .select(
-          'id, direction, body, media_urls, created_at, reply_to_message_id',
-        )
-        .eq('venue_id', input.venueId)
-        .eq('guest_id', input.guestId)
-        .gte('created_at', sinceIso)
-        .order('created_at', { ascending: false })
-        .limit(50),
-      // TAC-582: what each of those messages' attachments ARE. By guest and
-      // time, like the rows above, so the two cover the same messages.
-      supabase
-        .from('message_attachments')
-        .select('message_id, kind')
-        .eq('venue_id', input.venueId)
-        .eq('guest_id', input.guestId)
-        .gte('created_at', sinceIso)
+      messagesQuery.order('created_at', { ascending: false }).limit(50),
+      attachmentsQuery
         .order('message_id', { ascending: true })
         .order('position', { ascending: true })
         .limit(200),

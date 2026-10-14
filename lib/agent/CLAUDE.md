@@ -314,6 +314,16 @@ message being answered, or the media-only message beside it, and puts what it le
   (`nameableItems`, `lib/schemas/attachment-description.ts`). Do not add a second reader that
   decides it another way.
 
+**Three files here now serve v2 as well, and they outlive this directory.** `inbound-media.ts`,
+`media-context.ts` and `media-history.ts` are the media lane for both engines: v2 calls their
+pure functions and the neutral half of their loaders (`buildTurnMediaHistory`,
+`loadTurnMediaHistory`, which `buildMediaHistory` and `loadMediaHistory` now adapt to
+`RecentMessage`) from `lib/relationship/turn-media.ts`. `historyForPrompt` is generic over the
+entry for the same reason. **Phase 6 deletes `lib/agent/` and these three have to move rather
+than go**; `lib/messaging/attachments/` is the home that matches. Two of them also gained an
+optional `untilIso` so a replayed turn reads the thread as it stood - unset in production, so
+nothing here changed.
+
 None of this was measured, by ruling: the 30-image check pre-registered on TAC-584 was dropped
 on 2026-10-11 because every media reply is held. `scripts/measurement/media-describe.ts` is a
 smoke run over a venue's existing media, not a measurement. Do not read a held draft's quality

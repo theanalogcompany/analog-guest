@@ -53,12 +53,10 @@ import {
   attachmentHistoryLine,
   describedHistoryLine,
   describedMediaLine,
-  unclearMediaLine,
-} from '@/lib/ai/prompts/attachment-lines'
-import {
   formatDescribedMediaLines,
   formatInboundMediaLine,
-} from '@/lib/ai/prompts/serializers'
+  unclearMediaLine,
+} from '@/lib/ai/prompts/attachment-lines'
 import {
   DESCRIBE_SETTLE_MS,
   DESCRIBE_SETTLE_POLL_MS,

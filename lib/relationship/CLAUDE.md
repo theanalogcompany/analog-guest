@@ -85,6 +85,43 @@ clock-derived line to the venue profile would silently break the cache.
 `turns`** - `turns[history.length]` was how two callers found it, and that expression
 silently returns the guest's own message the moment the layout moves.
 
+## The guest's media (v2.19.0)
+
+`turn-media.ts`. A guest's photo, video, GIF, voice note, story reply or share reaches the
+prompt as **one bracketed line per attachment**, and the reply is **held for an operator**.
+
+**None of the wording or the rules are v2's.** Every sentence comes from
+`lib/ai/prompts/attachment-lines.ts` (owner-approved verbatim, TAC-582 and TAC-584) and every
+decision from v1's own pure modules: `turnMediaPromptLines` for which lines a turn produces,
+`mediaAlongsideText` / `mediaMessageIdsForTurn` / `repliesToStory` for which messages a turn is
+answering, `decideMediaContextHold` for the hold, `loadTurnMediaHistory` for the window,
+`nameableItems` / `usableDescription` for what a reply may name.
+If a rule reads wrong here it reads wrong in v1 too, which is the point.
+Do not write a v2 phrasing of "a photo arrived and you cannot see it" - v1 paid for that
+sentence twice.
+
+| | |
+| --- | --- |
+| the line's position | its **own user turn**, after the guest's words. The composer never wraps the guest's message, and the rules for replying to a picture belong last (later beats earlier) |
+| the hold | `guest_media_requires_approval` in `lib/policy/default-policies.ts`, scoped on the `guest_media` situation - v1's `media_context` trigger in policy-row form |
+| `guest_media` | **not** a `SITUATION_KEYS` member. Jev is never asked about it; the gate takes `situations: string[]`, which is what lets a code-set fact scope a row like a detected one |
+| a described photo | still held. Both owner rulings say so (2026-10-11) |
+| an opt-out turn | never carries the situation, because `POLICY_EXEMPT_SITUATIONS` only stops a row *matching* on opt-out and TCPA says that confirmation goes out |
+| the describe step | **not called from here.** It makes a vision call and writes rows; v2 reads what it recorded. Running it on the live path is phase 6, where v1 has it |
+
+**A media-only turn is where the engines genuinely differ.** v1 writes an operator card and
+never builds an ordinary prompt; v2 has no card path, so it drafts and the gate holds it.
+`inbound: []` is therefore legal, the media lines stand for the guest's message, and a turn
+with neither fails as a value rather than generating against nothing.
+
+**A replay must be bounded at the message it answers**, and three reads take that bound
+(`asOfIso`, `untilIso`, `historyEndIso`). Unbounded, a replay hands the model the venue's own
+answer to the turn it is being asked to write, the four-minute companion window cannot see the
+turn's own attachments, and the hold rule walks a thread that now ends in that answer - all
+three measured on Le Mil's, 2026-10-13. **Carry `created_at` as the string**: Postgres keeps
+microseconds, `Date` keeps milliseconds, and a bound round-tripped through one excludes the row
+it came from.
+
 ## State derivation
 
 Hard predicates (`lib/relationship/schema.ts`, closed vocabulary) bound the **frontier**; the post-turn assessor chooses within it, with hysteresis, and can never promote past a failed hard predicate.
@@ -135,6 +172,7 @@ Mission and move text is **prompt-facing copy**: wording changes go through the 
 | 2 | state derivation (`state.ts`), policy registry + Jev check + gate (`lib/policy/`), v2 template + tiered composer (`lib/ai/v2/`) | **built** - template copy is draft pending approval |
 | 3 | turn runner (`run-turn.ts`, dry-run: writes nothing), v2 generate call, assessor (`assessor.ts`), profile/memory (`profile.ts`) | **built** - hysteresis and situation scoping land with phase 6 (single validated pick adopted today; gate sees no situations anywhere) |
 | 4 | judge (`lib/eval/judge.ts`) | **built** - calibration set + harness pending |
+| media | the guest's attachments through `turn-media.ts` + the policy row (v2.19.0) | **built** - the lane and the hold; the playground has no surface for it (its replay runs `guestId: null` on purpose, so it loads no rows) |
 | 5 | playground (`app/admin/(authed)/playground`): sandbox chat, production replay with v1 comparison, full trace inspector, edit-and-regenerate, inline judge, graph visual (nodes, requirement edges, per-guest frontier and move status) | **built** - standalone owner-facing graph viewer page still pending |
 | 6 | production wiring through `runTurn` (persistence + dispatch + waitUntil), promote flow, per-venue flag flip, v1 deletion | not started |
 

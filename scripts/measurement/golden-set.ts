@@ -150,11 +150,11 @@ async function runQuestion(
   // `sessionHistory`. Nothing about the guest is declared to one arm and not
   // the other.
   //
-  // TWO THINGS v2 CANNOT BE ASKED are declined by name rather than asked
-  // anyway, and both the mapping and those refusals now live in
+  // WHAT v2 CANNOT BE ASKED is declined by name rather than asked anyway, and
+  // both the mapping and those refusals now live in
   // `lib/eval/golden-turn.ts` - /admin/prompt-lab asks the same questions and
   // a second copy of this would let the two surfaces disagree about what v2
-  // was even shown.
+  // was even shown. Media used to be one of them and is not any more.
   const { turn, skip: v2SkipReason } = goldenTurnFor(question)
   const inbound = turn.inbound
   const history = turn.history
@@ -228,6 +228,10 @@ async function runQuestion(
           guestId: null,
           inbound,
           sessionHistory: history,
+          // Stated, not stored: a sandbox guest has no rows for the media lane
+          // to read. The v1 arm materializes the same links onto a bodyless
+          // final message, so both arms answer a turn carrying the same photo.
+          ...(turn.media !== undefined ? { declaredMedia: turn.media } : {}),
           now,
           // No judge, no assessor. This set is read by a person and has no
           // grader, so their scores are never displayed - and the gate is

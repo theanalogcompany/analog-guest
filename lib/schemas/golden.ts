@@ -104,10 +104,19 @@ export const GoldenQuestionSchema = z.object({
    *     With text in `messages` it is the photo-last case, which does
    *     generate.
    *
-   * v2 IS NOT RUN on a scenario carrying these. It has no media input at
-   * all - nothing in `run-turn.ts` or the v2 composer takes one - so an
-   * answer from it would be an answer to a turn that never mentioned a
-   * photo, which is worse than no answer.
+   * BOTH ARMS RUN ON THESE NOW. v2 took text only until the media lane landed
+   * (`lib/relationship/turn-media.ts`); it is given the same links, states
+   * them the same way, and words them from the same approved sentences, so the
+   * two columns answer a turn that mentions the same photo. Its reply is HELD
+   * by `guest_media_requires_approval`, which is v1's `media_context` trigger
+   * in policy-row form - so a queued v2 column on these rows is the rule
+   * working, not a failure.
+   *
+   * ONE DIFFERENCE SURVIVES, and it is v1's own shape: a scenario with
+   * `messages: []` is a blank operator card on v1 and a held DRAFT on v2,
+   * because v2 has no card path of its own yet. The two columns are then
+   * answering the same turn and doing different things with the answer, which
+   * is the comparison the page exists to show.
    */
   mediaUrls: z.array(z.string().url()).min(1).optional(),
   /**
