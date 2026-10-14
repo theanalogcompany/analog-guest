@@ -64,6 +64,7 @@
 
 import { captureGuestMediaDegraded } from '@/lib/analytics/posthog'
 import { createAdminClient } from '@/lib/db/admin'
+import { isSystemRow } from '@/lib/messaging/system-rows'
 
 import { DELIVERED_OUTBOUND_STATUSES } from './group-responses'
 
@@ -183,7 +184,7 @@ export async function loadMediaContextRows(input: {
     let query = createAdminClient()
       .from('messages')
       .select(
-        'id, direction, body, media_urls, unsupported_content, status, review_state, created_at',
+        'id, direction, body, media_urls, unsupported_content, status, review_state, created_at, generated_by',
       )
       .eq('venue_id', input.venueId)
       .eq('guest_id', input.guestId)
@@ -201,6 +202,10 @@ export async function loadMediaContextRows(input: {
     const rows: MediaContextRow[] = []
     for (const row of data ?? []) {
       if (row.direction !== 'inbound' && row.direction !== 'outbound') continue
+      // A passport image is not the venue speaking (TAC-586,
+      // lib/messaging/system-rows.ts): an unanswered photo before a scan is
+      // still unanswered after its stamp goes out.
+      if (isSystemRow(row.generated_by)) continue
       rows.push({
         id: row.id,
         direction: row.direction,
@@ -217,7 +222,10 @@ export async function loadMediaContextRows(input: {
     // since the venue last spoke runs past what was read, and an unanswered
     // photo could be on the far side of it. That is "not known", and falling
     // off the end of the walk would read it as "not held" (found in review).
-    if (rows.length >= MAX_ROWS && !rows.some((row) => row.reachedGuest)) {
+    if (
+      (data ?? []).length >= MAX_ROWS &&
+      !rows.some((row) => row.reachedGuest)
+    ) {
       await reportLookupFailed(input, 'row_cap_reached')
       return null
     }

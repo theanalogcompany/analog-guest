@@ -93,6 +93,7 @@ Webhooks live on `webhooks.theanalog.company`; future integrations inherit that 
 | `lib/policy/` | v2 policy gate: registry, Jev semantic check, decision table (detail: `lib/relationship/CLAUDE.md`) |
 | `lib/eval/` | v2 maitre d' judge (detail: `lib/relationship/CLAUDE.md`) |
 | `lib/followups/` | the follow-up engine and its detectors |
+| `lib/passport/` | the passport stamp a bound scan sends: decide, place, render, send (TAC-586; geometry in `assets/stamp-spec.md`) |
 | `lib/schemas/` | Zod schemas for JSONB fields. Read JSONB through these, never raw SQL paths |
 | `lib/auth/` | cookie-session admin gate, bearer operator gate, venue scope |
 | `lib/observability/` | Langfuse wrapper. Never import `langfuse` directly from app code |

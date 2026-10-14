@@ -3068,6 +3068,87 @@ export async function captureScanCodeUnmatched(
 }
 
 // ---------------------------------------------------------------------------
+// Passport stamps (TAC-586)
+// ---------------------------------------------------------------------------
+
+export interface PassportStampIssuedProps {
+  venueId: string
+  guestId: string
+  transactionId: string
+  stampId: string
+  kind: string
+  seq: number
+  page: number
+  /** Send attempts the two images took in total: 2 when both went first time. */
+  attempts: number
+  durationMs: number
+}
+
+/** Both images reached the guest and `sent_at` is set. */
+export async function capturePassportStampIssued(
+  props: PassportStampIssuedProps,
+): Promise<void> {
+  await capturePostHogEvent('passport_stamp_issued', props.guestId, {
+    ...props,
+  })
+}
+
+/**
+ * Why no stamp was made, when that was the right outcome rather than a
+ * failure: the purchase already has one, the guest opted out, the venue is
+ * paused, the venue holds all outbound for review, or the venue has no
+ * passport settings.
+ */
+export type PassportStampSkipReason =
+  | 'already_stamped'
+  | 'opted_out'
+  | 'venue_paused'
+  | 'venue_holding_outbound'
+  | 'passport_not_configured'
+
+export async function capturePassportStampSkipped(props: {
+  venueId: string
+  guestId: string
+  transactionId: string
+  reason: PassportStampSkipReason
+}): Promise<void> {
+  await capturePostHogEvent('passport_stamp_skipped', props.guestId, {
+    ...props,
+  })
+}
+
+export interface PassportStampFailedProps {
+  venueId: string
+  guestId: string
+  transactionId: string
+  /** Null when the failure came before the row was claimed. */
+  stampId: string | null
+  /**
+   * Where it stopped: load, claim, render, upload, window, target, sign,
+   * send_stamp, send_spread, save, unexpected - or mark_sent, the one stage
+   * where BOTH images reached the guest and only `sent_at` failed to write.
+   */
+  stage: string
+  /** The send failure kind, when the stage is a send. */
+  kind: string | null
+  /** An error message: never guest content, a token or a scoped id. */
+  error: string | null
+}
+
+/**
+ * `sent_at` stays null and nothing retries it later. The stamp was not
+ * delivered, EXCEPT at `stage: 'mark_sent'`, where it was and only the marker
+ * failed: count deliveries with that stage excluded.
+ */
+export async function capturePassportStampFailed(
+  props: PassportStampFailedProps,
+): Promise<void> {
+  await capturePostHogEvent('passport_stamp_failed', props.guestId, {
+    ...props,
+  })
+}
+
+// ---------------------------------------------------------------------------
 // Guest media (TAC-582)
 // ---------------------------------------------------------------------------
 

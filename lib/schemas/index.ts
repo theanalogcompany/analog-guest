@@ -32,6 +32,8 @@ export {
   VenueMenuSchema,
   parseVenueLinks,
   findReviewLink,
+  parsePassportSettings,
+  type PassportSettings,
   type VenueServices,
   VenueServicesSchema,
 } from './venue-info'
@@ -138,3 +140,4 @@ export {
   MechanicPatchSchema,
   type MechanicTriggerType,
 } from './mechanic'
+export { parseLineItemNames } from './transaction-raw-data'

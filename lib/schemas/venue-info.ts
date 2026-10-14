@@ -240,9 +240,64 @@ export const VenueInfoSchema = z.object({
   // default would also give every venue an empty row in the admin page's
   // Unclaimed catch-all.
   links: z.array(z.unknown()).optional().catch(undefined),
+  // TAC-586: what a passport stamp prints for this venue, and which page
+  // background it is drawn on. Read it through `parsePassportSettings` below,
+  // never directly.
+  //
+  // `z.unknown()` FOR THE REASON `links` GIVES: the admin PATCH writes the
+  // re-parsed object back, so a strict or `.catch(undefined)` shape here
+  // would delete a mistyped block the next time someone edited the hours.
+  // Stored inert, validated where it is read. Never rendered into a prompt
+  // (lib/ai/v2/venue-profile.ts maps it to null; v1's venueInfoToProse names
+  // its fields one by one).
+  passport: z.unknown().optional(),
 })
 
 export type VenueInfo = z.infer<typeof VenueInfoSchema>
+
+// ── TAC-586: passport settings ──────────────────────────────────────────────
+
+/**
+ * What a venue's passport stamps say and are drawn on (ruled 2026-10-14: the
+ * venue's full name on every stamp and page header, from venue settings).
+ *
+ * Every string is printed as stored, uppercased: `venueName` "LE MIL'S
+ * COFFEE", `cityShort` "S.F." (ARRIVED), `cityLong` "SAN FRANCISCO" (VISIT).
+ * `background` is one file name in lib/passport/assets/: the venue's own page
+ * background, because the crest on it is the venue's.
+ */
+export interface PassportSettings {
+  venueName: string
+  cityShort: string
+  cityLong: string
+  background: string
+}
+
+const PassportSettingsSchema = z.object({
+  venueName: z.string().trim().min(1),
+  cityShort: z.string().trim().min(1),
+  cityLong: z.string().trim().min(1),
+  background: z.string().regex(/^[a-z0-9@._-]+\.png$/),
+})
+
+/**
+ * Validate `venue_info.passport` at the read boundary. Null when it is absent
+ * or unusable, and the caller FAILS CLOSED on null: no stamp is better than a
+ * stamp with the wrong name on it. Logs which field failed, never the values.
+ */
+export function parsePassportSettings(raw: unknown): PassportSettings | null {
+  if (raw === undefined || raw === null) return null
+  const parsed = PassportSettingsSchema.safeParse(raw)
+  if (!parsed.success) {
+    console.warn('[venue-info] venue_info.passport is unusable', {
+      reason: parsed.error.issues.map(
+        (i) => `${i.path.join('.') || '(root)'}: ${i.code}`,
+      ),
+    })
+    return null
+  }
+  return parsed.data
+}
 
 // ── TAC-509: the curated link allowlist ─────────────────────────────────────
 

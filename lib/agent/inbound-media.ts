@@ -64,6 +64,7 @@
 //     make that rare, not impossible.
 
 import { createAdminClient } from '@/lib/db/admin'
+import { isSystemRow } from '@/lib/messaging/system-rows'
 import type { InboundMediaKind } from '@/lib/ai/types'
 // TAC-582: the extension lists moved beside the attachment kinds, which read
 // the same links for the same reason. One list, two readers.
@@ -400,7 +401,7 @@ export async function loadTurnMediaRows(input: {
     let messagesQuery = supabase
       .from('messages')
       .select(
-        'id, direction, body, media_urls, created_at, reply_to_message_id',
+        'id, direction, body, media_urls, created_at, reply_to_message_id, generated_by',
       )
       .eq('venue_id', input.venueId)
       .eq('guest_id', input.guestId)
@@ -463,7 +464,10 @@ export async function loadTurnMediaRows(input: {
           createdAt,
           attachmentKinds: kindsByMessage.get(row.id) ?? [],
         })
-      } else {
+      } else if (!isSystemRow(row.generated_by)) {
+        // A passport image answers nothing (TAC-586,
+        // lib/messaging/system-rows.ts), so it never covers a message sent
+        // before it.
         rows.outbound.push({
           replyToMessageId: row.reply_to_message_id,
           createdAt,

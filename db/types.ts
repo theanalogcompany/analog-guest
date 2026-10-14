@@ -1937,6 +1937,91 @@ export type Database = {
         }
         Relationships: []
       }
+      passport_stamps: {
+        Row: {
+          created_at: string
+          dx: number
+          dy: number
+          guest_id: string
+          id: string
+          kind: string
+          label: string | null
+          page: number
+          rotation: number
+          sent_at: string | null
+          seq: number
+          slot: number
+          spread_image_path: string | null
+          stamp_image_path: string | null
+          stamped_on: string
+          texture_seed: number
+          transaction_id: string
+          venue_id: string
+        }
+        Insert: {
+          created_at?: string
+          dx: number
+          dy: number
+          guest_id: string
+          id?: string
+          kind: string
+          label?: string | null
+          page: number
+          rotation: number
+          sent_at?: string | null
+          seq: number
+          slot: number
+          spread_image_path?: string | null
+          stamp_image_path?: string | null
+          stamped_on: string
+          texture_seed: number
+          transaction_id: string
+          venue_id: string
+        }
+        Update: {
+          created_at?: string
+          dx?: number
+          dy?: number
+          guest_id?: string
+          id?: string
+          kind?: string
+          label?: string | null
+          page?: number
+          rotation?: number
+          sent_at?: string | null
+          seq?: number
+          slot?: number
+          spread_image_path?: string | null
+          stamp_image_path?: string | null
+          stamped_on?: string
+          texture_seed?: number
+          transaction_id?: string
+          venue_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "passport_stamps_guest_id_fkey"
+            columns: ["guest_id"]
+            isOneToOne: false
+            referencedRelation: "guests"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "passport_stamps_transaction_id_fkey"
+            columns: ["transaction_id"]
+            isOneToOne: true
+            referencedRelation: "transactions"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "passport_stamps_venue_id_fkey"
+            columns: ["venue_id"]
+            isOneToOne: false
+            referencedRelation: "venues"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       playground_conversations: {
         Row: {
           created_at: string

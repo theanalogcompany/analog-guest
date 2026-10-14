@@ -29,6 +29,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 
 import type { Database } from '@/db/types'
 import { isInquiryFollowupMessage } from '@/lib/followups/inquiry-followup-store'
+import { NOT_SYSTEM_ROW_FILTER } from '@/lib/messaging/system-rows'
 import { DELIVERED_OUTBOUND_STATUSES } from './group-responses'
 import { warmCloseBlocker, type WarmCloseBlocker } from './warm-close'
 
@@ -172,6 +173,10 @@ export async function loadWarmCloseCandidates(
     )
     .eq('venue_id', venueId)
     .eq('channel', 'instagram')
+    // TAC-586: a passport image is never "our last word". Excluded in the
+    // query, not the loop: the loop's newest-row-decides rule must see the
+    // thread as it was before the stamp went out (lib/messaging/system-rows.ts).
+    .or(NOT_SYSTEM_ROW_FILTER)
     .gte('created_at', windowStart.toISOString())
     .order('created_at', { ascending: false })
     .limit(limit)

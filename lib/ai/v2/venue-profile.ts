@@ -226,6 +226,9 @@ const SECTIONS = {
   // twice and import v1 instruction copy into a frame whose design is that
   // style is judged, not legislated.
   links: null,
+  // What a passport stamp prints and the page it is drawn on (TAC-586). It
+  // is artwork configuration, not a fact a guest would ask about.
+  passport: null,
 } satisfies Record<keyof VenueInfo, SectionRenderer | null>
 
 /** Derived from the schema itself so it cannot drift from what Zod accepts. */

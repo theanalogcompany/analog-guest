@@ -1,5 +1,6 @@
 import { formatInTimeZone } from 'date-fns-tz'
 import { createAdminClient } from '@/lib/db/admin'
+import { SYSTEM_GENERATED_BY } from '@/lib/messaging/system-rows'
 import { logger } from '@/lib/observability/logger'
 import { extractMenuExploration } from './extract-menu-exploration'
 import {
@@ -72,6 +73,7 @@ export async function loadSignals({
     engagementEventsResult,
     guestResult,
     scansResult,
+    systemResponsesResult,
   ] = await Promise.all([
     supabase
       .from('venues')
@@ -124,6 +126,21 @@ export async function loadSignals({
       guestId,
       sinceIso: lookbackIso,
     }),
+    // TAC-586: passport images are sent rows the RPC above counts, and they
+    // are not the venue responding to anything. Each scan's two images share
+    // one generation_id, so the RPC sees one extra "response" per scan and
+    // `replied / sent` drifts down for exactly the guests who scan most.
+    // Their distinct generation_ids are subtracted below, which leaves the
+    // count what it was before stamps existed (lib/messaging/system-rows.ts).
+    supabase
+      .from('messages')
+      .select('generation_id')
+      .eq('venue_id', venueId)
+      .eq('guest_id', guestId)
+      .eq('direction', 'outbound')
+      .eq('generated_by', SYSTEM_GENERATED_BY)
+      .in('status', ['sent', 'delivered'])
+      .limit(5000),
   ])
 
   if (venueResult.error) {
@@ -152,6 +169,20 @@ export async function loadSignals({
       errorCode: 'load_messages_failed',
     }
   }
+  if (systemResponsesResult.error) {
+    return {
+      ok: false,
+      error: systemResponsesResult.error.message,
+      errorCode: 'load_messages_failed',
+    }
+  }
+  // The RPC's own grouping: coalesce(generation_id, id). Every system row is
+  // written with a generation_id, so a null here is counted as its own group.
+  const systemResponses = new Set(
+    (systemResponsesResult.data ?? []).map(
+      (row, index) => row.generation_id ?? `row-${index}`,
+    ),
+  ).size
   if (inboundMessagesResult.error) {
     return {
       ok: false,
@@ -231,7 +262,10 @@ export async function loadSignals({
       // to a row count on failure — the error branch above returns instead, so
       // a broken RPC surfaces as a recognition failure rather than silently
       // restoring the row-counting bug.
-      outboundMessageCount: outboundMessagesResult.data ?? 0,
+      outboundMessageCount: Math.max(
+        0,
+        (outboundMessagesResult.data ?? 0) - systemResponses,
+      ),
       // TODO: refine to per-message reply attribution when message threading is wired up.
       repliedMessageCount: inboundMessagesResult.count ?? 0,
       engagementEventsByType,

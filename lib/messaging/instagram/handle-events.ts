@@ -106,6 +106,7 @@ import {
   MESSAGE_HAS_CONTENT_FILTER,
   insertMessageAttachments,
 } from '@/lib/messaging/attachments/store'
+import { NOT_SYSTEM_ROW_FILTER } from '@/lib/messaging/system-rows'
 import { isScanReferral } from '@/lib/schemas/referral-source'
 
 import {
@@ -546,7 +547,12 @@ async function hadPriorConversation(
     .select('id')
     .eq('venue_id', venueId)
     .eq('guest_id', guestId)
-    .or(MESSAGE_HAS_CONTENT_FILTER)
+    // TAC-586: passport images are not a conversation. A guest whose only
+    // history is an earlier scan still gets a first-scan greeting
+    // (lib/messaging/system-rows.ts). One `or` holding an `and` of both
+    // conditions, so the AND is explicit in the one filter rather than
+    // resting on how two `or=` params combine.
+    .or(`and(or(${MESSAGE_HAS_CONTENT_FILTER}),or(${NOT_SYSTEM_ROW_FILTER}))`)
     .limit(1)
     .maybeSingle()
   if (error) return { ok: false, failure: fail('message_lookup', error) }
