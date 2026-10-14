@@ -6,7 +6,6 @@ import { Textarea } from '@/components/ui/textarea'
 import { GoldenTranscript } from '@/app/admin/_components/golden-transcript'
 import {
   needsPreference,
-  unblind,
   type HumanEvalJudgment,
   type HumanEvalPreference,
   type HumanEvalVerdict,
@@ -33,8 +32,10 @@ import type { HumanEvalUnitView } from '../_lib/types'
 //     `[no reply]` in BOTH columns' shape, so the absence does not read as a
 //     label.
 //
-// All of it is one click away under Reveal, which is offered only once both
-// verdicts are in.
+// NONE OF IT IS AVAILABLE FROM THIS PAGE AT ALL. There is no reveal: the CSV
+// export is the only place A and B are named, so the rater cannot unblind a
+// row they are still judging, or the next one. A surface that CAN unblind has
+// to be audited to be believed - one that cannot does not.
 //
 // THE ORDER COMES FROM THE ROW, not from this render. `aArm` was decided and
 // stored by the server when the pair was generated, so a re-render, a reload
@@ -81,10 +82,11 @@ export function BlindRow({
     setDraft({ id: unit.id, committed: judgment.note, text: judgment.note })
   const note = draft.id === unit.id ? draft.text : judgment.note
 
-  const revealed = judgment.revealed
-  const bothJudged = judgment.aVerdict !== null && judgment.bVerdict !== null
+  // One condition, two things hang off it: something failed, so there is a
+  // better-reply question to ask and a comment the row cannot do without
+  // (`judgmentComplete` in lib/eval/human-eval.ts is the same predicate).
   const askPreference = needsPreference(judgment.aVerdict, judgment.bVerdict)
-  const read = unblind({ aArm: unit.aArm, ...judgment })
+  const noteMissing = askPreference && note.trim().length === 0
 
   // A row where either engine produced nothing is not judgeable: there is no
   // pair to compare, and a verdict on an error message is not a verdict on a
@@ -214,59 +216,30 @@ export function BlindRow({
             rows={2}
             placeholder={
               askPreference
-                ? 'Why is it better, or what is wrong with the other one?'
+                ? 'Required - what is wrong with the failing reply?'
                 : 'Anything worth noting (optional)'
             }
-            className="text-xs"
+            // Marked on the box itself rather than only in the line below:
+            // the rater is looking at the control they have to fill in, and a
+            // message somewhere else on a row this tall is a message they
+            // scroll past.
+            className={
+              noteMissing
+                ? 'border-destructive text-xs focus-visible:ring-destructive/40'
+                : 'text-xs'
+            }
+            aria-invalid={noteMissing}
           />
 
-          <div className="flex items-center gap-3">
-            {revealed ? (
-              <span className="text-[11px] text-ink-faint">
-                A was{' '}
-                <span className="font-mono">
-                  {unit.aArm === 'v1' ? 'v1' : 'v2'}
-                </span>
-                , B was{' '}
-                <span className="font-mono">
-                  {unit.aArm === 'v1' ? 'v2' : 'v1'}
-                </span>
-                {read.better !== null && ` · better: ${read.better}`}
-                {unit.v1?.ok &&
-                  unit.v1.substitute !== null &&
-                  ` · v1 substitute: ${unit.v1.substitute}`}
-                {unit.v2?.ok &&
-                  unit.v2.gateVerdict !== null &&
-                  ` · v2 gate: ${unit.v2.gateVerdict}`}
-              </span>
-            ) : (
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                className="h-6 px-2 text-[11px]"
-                // The gate that makes the pass blind rather than claiming to
-                // be. The route refuses it too, so this is not the only guard.
-                disabled={!bothJudged}
-                title={
-                  bothJudged
-                    ? undefined
-                    : 'Judge both replies first - that is what makes the pass blind'
-                }
-                onClick={() => judge({ revealed: true })}
-              >
-                Reveal
-              </Button>
-            )}
-            {unit.revealedAt !== null &&
-            unit.judgedAt !== null &&
-            Date.parse(unit.judgedAt) > Date.parse(unit.revealedAt) ? (
-              <span className="text-[11px] text-clay-deep">
-                verdict changed after the reveal - recorded as such in the
-                export
-              </span>
-            ) : null}
-          </div>
+          {noteMissing ? (
+            // Not an error - nothing failed to save. The verdict IS stored;
+            // this says the row is not finished, which is what the count in
+            // the bar above is counting.
+            <p className="text-[11px] text-destructive">
+              A comment is required once either reply is a fail - the verdict is
+              saved, the finding is what the pass is for.
+            </p>
+          ) : null}
         </>
       )}
     </div>

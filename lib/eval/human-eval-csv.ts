@@ -10,6 +10,11 @@
 // spreadsheet formula means the one definition in `human-eval.ts` is what the
 // file carries.
 //
+// THIS FILE IS THE ONLY PLACE A AND B ARE NAMED. The page has no reveal, so
+// downloading the export is how anyone finds out which engine wrote which -
+// which is what makes every verdict in a pass blind by construction, with no
+// `revealed_at` audit column needed to say so.
+//
 // NO `media` COLUMN, and that is not an omission: a scenario carrying an
 // attachment is one only v1 can answer, so it never reaches a blind pass at
 // all (`humanEvalQuestions`). A column that is empty in every row of every
@@ -52,21 +57,6 @@ export const HUMAN_EVAL_CSV_COLUMNS = [
   'v2_error',
   'generated_at',
   'judged_at',
-  'revealed_at',
-  /**
-   * 'yes' when the row's most recent verdict was written AFTER the rater
-   * unblinded it, 'no' when it was blind, blank when the row was never
-   * revealed or never judged.
-   *
-   * THE REASON THIS COLUMN EXISTS. "These labels were blind" is a claim a
-   * surface can make and nothing can contradict - and an unfalsifiable claim
-   * is what stops anyone looking. Reveal is gated behind both verdicts being
-   * in, and this says whether the rater then changed their mind knowing the
-   * answer. A pass of 58 'no' rows is evidence; a column of blanks and 'yes'es
-   * is a different and much weaker thing, and the file has to be able to say
-   * which it is.
-   */
-  'verdict_after_reveal',
 ] as const
 
 export type HumanEvalCsvRow = Record<

@@ -20,13 +20,18 @@ import { requireUnitAdmin } from '../../../_lib/require-pass-admin'
 // longer has anything to adjudicate, which a per-field patch could not
 // express.
 //
-// REVEAL IS ONE-WAY AND GATED. `revealed_at` is stamped the first time the
-// rater unblinds a row and never cleared, and a reveal is refused outright
-// while either verdict is missing. Both halves matter: the gate is what makes
-// "the verdicts in this pass were given blind" a property of the surface
-// rather than a claim on it, and the one-way stamp is what stops a later write
-// from erasing the evidence that a row was revealed before its verdict
-// changed. The CSV export derives that comparison per row.
+// THIS ROUTE CANNOT UNBLIND A ROW, because nothing can: the surface has no
+// reveal and the CSV export is the only place A and B are named. That is why
+// there is no `revealed_at` write here and no gate guarding one - "the
+// verdicts in this pass were given blind" is a property of what the page can
+// render rather than a claim this route has to police. The column is still in
+// the schema, holding old passes' stamps, and nothing reads it.
+//
+// A COMMENT IS REQUIRED ON A FAILING ROW, AND NOT BY THIS ROUTE. The whole
+// judgment arrives on every write, so the click that marks the first `fail`
+// necessarily carries an empty note - a 400 here would make that click
+// unsaveable. `judgmentComplete` (lib/eval/human-eval.ts) is where the rule
+// lives; the page renders it and the session bar counts it.
 
 export const dynamic = 'force-dynamic'
 
@@ -42,31 +47,7 @@ export async function PATCH(
   if (!parsed.ok) return parsed.response
   const judgment = parsed.body
 
-  const bothJudged = judgment.aVerdict !== null && judgment.bVerdict !== null
-  if (judgment.revealed && !bothJudged)
-    return NextResponse.json(
-      {
-        error:
-          'a row cannot be unblinded before both replies have a verdict - that is what makes the pass blind',
-      },
-      { status: 400 },
-    )
-
   const supabase = createAdminClient()
-  // Read-modify-write: `revealed_at` is stamped once and the stored value is
-  // what decides, so a second reveal does not move the instant a verdict is
-  // compared against.
-  const current = await supabase
-    .from('human_eval_units')
-    .select('revealed_at')
-    .eq('id', auth.unitId ?? unitId)
-    .maybeSingle()
-  if (current.error || !current.data)
-    return NextResponse.json(
-      { error: `row unreadable: ${current.error?.message ?? 'gone'}` },
-      { status: 500 },
-    )
-
   const now = new Date().toISOString()
   const updated = await supabase
     .from('human_eval_units')
@@ -82,7 +63,6 @@ export async function PATCH(
       // both cleared. An unjudged row must not carry a judged instant.
       judged_at:
         judgment.aVerdict === null && judgment.bVerdict === null ? null : now,
-      revealed_at: current.data.revealed_at ?? (judgment.revealed ? now : null),
     })
     .eq('id', auth.unitId ?? unitId)
     .select(HUMAN_EVAL_UNIT_COLUMNS)

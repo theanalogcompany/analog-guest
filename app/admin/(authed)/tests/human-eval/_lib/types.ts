@@ -33,8 +33,6 @@ export interface HumanEvalUnitView {
   generatedAt: string
   /** The most recent verdict write, null when the row is unjudged. */
   judgedAt: string | null
-  /** When the rater unblinded this row. Set once, never cleared. */
-  revealedAt: string | null
 }
 
 /** A pass, with the code state both arms ran at. */
