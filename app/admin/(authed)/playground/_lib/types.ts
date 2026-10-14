@@ -38,6 +38,13 @@ export interface RunRequestBody {
    */
   outreach?: { hoursQuiet: number }
   /**
+   * What the guest sent besides words, stated rather than stored - a golden
+   * scenario's links. Reaches BOTH arms from this one field, and it is what
+   * makes `inbound: []` legal: a photo with no caption is a media-only turn,
+   * not an empty one.
+   */
+  media?: { mediaUrls: string[] }
+  /**
    * Skip the judge and the post-turn assessor. Only safe where nothing chains
    * off the turn - the route's own schema has the full reasoning.
    */

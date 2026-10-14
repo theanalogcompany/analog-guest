@@ -15,10 +15,12 @@
 // which is what makes every verdict in a pass blind by construction, with no
 // `revealed_at` audit column needed to say so.
 //
-// NO `media` COLUMN, and that is not an omission: a scenario carrying an
-// attachment is one only v1 can answer, so it never reaches a blind pass at
-// all (`humanEvalQuestions`). A column that is empty in every row of every
-// export would read as "no scenario had media".
+// THERE IS A `media` COLUMN, because a scenario carrying a photo DOES reach a
+// blind pass. It used not to - v2 had no media input - and this file said so;
+// the claim outlived the media lane and then outlived the run route carrying
+// it to both arms. A verdict about "guest sends a photo and nothing else" is
+// not interpretable without the thing the guest sent, same as the history and
+// the inbound beside it.
 //
 // Pure module: no DB, no React, no Next. The quoting is `./csv.ts`, shared
 // with the golden set's export.
@@ -38,6 +40,9 @@ export const HUMAN_EVAL_CSV_COLUMNS = [
   'question',
   'history',
   'inbound',
+  // Left of the replies for the same reason as the two above: it is part of
+  // what was asked. Blank on a text scenario, which is most of them.
+  'media',
   'v1_reply',
   'v2_reply',
   // What the rater was shown, and what they said about it.

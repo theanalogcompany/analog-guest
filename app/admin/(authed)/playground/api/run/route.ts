@@ -134,9 +134,25 @@ const PostBodySchema = z
   .object({
     venueId: z.string().uuid(),
     guestId: z.string().uuid().nullable(),
-    // `.min(1)` moved into the refinement below: an OUTREACH turn is the one
-    // caller allowed to post an empty inbound, and only that one.
+    // `.min(1)` moved into the refinement below: an outreach turn and a
+    // MEDIA-ONLY turn are the two callers allowed to post an empty inbound.
     inbound: z.array(z.string().min(1)).max(10),
+    /**
+     * What the guest sent besides words, STATED rather than stored - a golden
+     * scenario's links, mirroring `DeclaredTurnMedia`.
+     *
+     * BOTH ARMS GET IT, from this one field: v2 as `declaredMedia`, v1 as the
+     * bodyless attachment row `materializeTranscript` writes. Without it the
+     * route silently answered "guest asks a question, then sends a photo" as
+     * a text turn on both arms - a row a human then judged as though the
+     * photo had been there.
+     *
+     * Links only, no description: nothing looks at the image on either arm,
+     * so the extension is all either one reads (lib/eval/golden-turn.ts).
+     */
+    media: z
+      .object({ mediaUrls: z.array(z.string().url()).min(1).max(10) })
+      .optional(),
     sessionHistory: z.array(HistoryTurnSchema).max(200).optional(),
     session: SessionSchema.optional(),
     overrides: OverridesSchema.optional(),
@@ -185,10 +201,28 @@ const PostBodySchema = z
       .optional(),
   })
   .superRefine((body, ctx) => {
-    if (body.outreach === undefined && body.inbound.length === 0)
+    // TWO LEGAL EMPTY-INBOUND SHAPES, and they are disjoint (runTurn's own
+    // contract says so): an outreach turn, where there is no inbound event at
+    // all, and a media-only turn - a photo with no caption, which is how
+    // every one of the pilot venue's attachments arrived and the exact shape
+    // v1's `media_only_card` exists for. A turn with neither is the one thing
+    // nothing can answer.
+    if (
+      body.outreach === undefined &&
+      body.media === undefined &&
+      body.inbound.length === 0
+    )
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        message: 'inbound may be empty only on an outreach turn',
+        message:
+          'inbound may be empty only on an outreach turn or a media-only turn',
+      })
+    // Media rides an inbound event; an outreach turn has none to carry it.
+    if (body.outreach !== undefined && body.media !== undefined)
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message:
+          'an outreach turn has no inbound event, so it cannot carry the guest’s media',
       })
     if (body.outreach !== undefined && body.inbound.length > 0)
       ctx.addIssue({
@@ -267,6 +301,10 @@ export async function POST(request: Request): Promise<NextResponse> {
           overrides: body.overrides,
           actualReply: body.actualReply,
           ...(body.outreach !== undefined ? { outreach: body.outreach } : {}),
+          // Stated, not stored - a sandbox guest has no rows for the media
+          // lane to read. runTurn reads it only when `guestId` is null, which
+          // is what keeps a replay reading the real thread's attachments.
+          ...(body.media !== undefined ? { declaredMedia: body.media } : {}),
           skipEvaluation: body.skipEvaluation,
         }).then((trace) => {
           v2Ms = Date.now() - started
@@ -373,6 +411,11 @@ async function runV1Arm(
           venueId: body.venueId,
           sessionHistory: body.sessionHistory ?? [],
           inbound: body.inbound,
+          // The SAME links v2 is handed above, written as the bodyless
+          // attachment row both webhooks store - so the two arms answer a
+          // turn that mentions the same photo rather than one of them
+          // answering a turn without it.
+          mediaUrls: body.media?.mediaUrls,
           // Undefined stays slot 0 inside the arm, so the playground's own
           // behaviour is unchanged. A fan-out caller (/admin/tests/human-eval)
           // passes its worker index.
