@@ -18,6 +18,7 @@ import type { RunResponseBody } from '../../_lib/types'
 import {
   draftV1ForReplay,
   draftV1ForSandbox,
+  SANDBOX_SLOTS,
   type V1ArmOutcome,
 } from './v1-arm'
 
@@ -139,10 +140,37 @@ const PostBodySchema = z.object({
   // Replay mode: what production actually sent after this inbound, judged
   // alongside the v2 draft against the same notes (judge calibration data).
   actualReply: z.array(z.string().min(1)).max(10).optional(),
+  /**
+   * Skip the judge and the post-turn assessor - two model calls whose output
+   * this route returns on the trace and which a caller may not be rendering.
+   *
+   * FOR A FAN-OUT CALLER, and safe for the same reason the golden harness
+   * passes it: the gate is independent of both (decideDispatch reads the
+   * semantic check and the inbound-detected situations, never the assessor),
+   * so `messages`, `stateKey` and `gateVerdict` are unchanged. The assessor's
+   * `nextSession` is what would carry profile and memory into a FOLLOWING
+   * turn, so this is only safe where nothing chains - one turn against
+   * authored history, which is what /admin/tests/human-eval runs. A
+   * multi-turn caller must not send it.
+   */
+  skipEvaluation: z.boolean().optional(),
   // The v1 arm, run concurrently with v2. See v1-arm.ts.
   v1Arm: z
     .discriminatedUnion('mode', [
-      z.object({ mode: z.literal('sandbox') }),
+      z.object({
+        mode: z.literal('sandbox'),
+        // The concurrency slot, which decides WHICH synthetic guest the
+        // transcript is materialized against. Bounded here as well as in the
+        // arm: out of range is a 400 rather than a per-column error message,
+        // because a fan-out caller sending slot 12 has a bug in its worker
+        // pool and should hear about it on the first request, not 58 times.
+        slot: z
+          .number()
+          .int()
+          .min(0)
+          .max(SANDBOX_SLOTS - 1)
+          .optional(),
+      }),
       z.object({
         mode: z.literal('replay'),
         inboundMessageId: z.string().uuid(),
@@ -183,7 +211,17 @@ export async function POST(request: Request): Promise<NextResponse> {
     // and nothing else. The v2 trace is the primary payload and a debugging
     // surface losing it because the retiring engine fell over would be the
     // wrong failure.
+    //
+    // EACH ARM IS TIMED FROM THE SAME INSTANT AND STOPPED WHEN IT ITSELF
+    // SETTLES, never after the barrier. Reading the clock after `allSettled`
+    // resolves gives both arms max(v1, v2) - the measurement harness recorded
+    // exactly that bug, and it was believable right up until the two arms'
+    // maxima came out byte-identical. A caller that stores these numbers
+    // (/admin/tests/human-eval) is storing a comparison, so they have to
+    // measure the same boundary as each other and nothing wider.
     const started = Date.now()
+    let v1Ms: number | null = null
+    let v2Ms = 0
     const settled = await Promise.race([
       Promise.allSettled([
         runTurn({
@@ -194,8 +232,16 @@ export async function POST(request: Request): Promise<NextResponse> {
           session: body.session,
           overrides: body.overrides,
           actualReply: body.actualReply,
+          skipEvaluation: body.skipEvaluation,
+        }).then((trace) => {
+          v2Ms = Date.now() - started
+          return trace
         }),
-        runV1Arm(body),
+        runV1Arm(body).then((column) => {
+          // Null when no arm was requested, which is not a duration of zero.
+          if (column !== null) v1Ms = Date.now() - started
+          return column
+        }),
       ]),
       new Promise<'timed_out'>((resolve) =>
         setTimeout(() => resolve('timed_out'), TURN_BUDGET_MS),
@@ -230,6 +276,7 @@ export async function POST(request: Request): Promise<NextResponse> {
 
     const response: RunResponseBody = {
       trace: v2Settled.value,
+      armMs: { v1: v1Ms, v2: v2Ms },
       graphStates: await loadGraphStates(body.venueId),
       v1:
         v1Settled.status === 'fulfilled'
@@ -291,6 +338,10 @@ async function runV1Arm(
           venueId: body.venueId,
           sessionHistory: body.sessionHistory ?? [],
           inbound: body.inbound,
+          // Undefined stays slot 0 inside the arm, so the playground's own
+          // behaviour is unchanged. A fan-out caller (/admin/tests/human-eval)
+          // passes its worker index.
+          slot: body.v1Arm.slot,
         })
 
   let timer: ReturnType<typeof setTimeout> | undefined

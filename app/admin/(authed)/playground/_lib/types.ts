@@ -32,13 +32,28 @@ export interface RunRequestBody {
   /** Replay mode: what production actually sent, for the comparison judgment. */
   actualReply?: string[]
   /**
+   * Skip the judge and the post-turn assessor. Only safe where nothing chains
+   * off the turn - the route's own schema has the full reasoning.
+   */
+  skipEvaluation?: boolean
+  /**
    * Run the v1 arm beside v2 and return its draft. Replay needs the real
    * inbound row id (v1 is invoked on the row); sandbox needs nothing beyond
    * the request's own `sessionHistory` + `inbound`.
    *
    * Omitted = v2 only, which is what every pre-existing caller gets.
+   *
+   * `slot` IS LOAD-BEARING FOR ANY CALLER THAT FANS OUT. The sandbox arm
+   * materializes the transcript by DELETING the synthetic guest's messages and
+   * rewriting them (v1-arm.ts), so two concurrent requests on one slot answer
+   * each other's transcript - or a row the other just removed. A batch caller
+   * passes its worker index, 0..SANDBOX_SLOTS-1, and keeps it for the whole
+   * run; omitted means slot 0, which is what the playground's one-turn-at-a-
+   * time use has always had.
    */
-  v1Arm?: { mode: 'sandbox' } | { mode: 'replay'; inboundMessageId: string }
+  v1Arm?:
+    | { mode: 'sandbox'; slot?: number }
+    | { mode: 'replay'; inboundMessageId: string }
 }
 
 /**
@@ -57,6 +72,17 @@ export interface V1Column {
 
 export interface RunResponseBody {
   trace: TurnTrace
+  /**
+   * How long each arm took, both timed by the ROUTE from the same instant and
+   * each stopped when it itself settled.
+   *
+   * Here rather than read off the trace, because `trace.totalDurationMs`
+   * covers a different boundary from the v1 arm's (which includes
+   * materializing the sandbox transcript), and two numbers measuring different
+   * boundaries are not a comparison. `v1` is null when no v1 arm was
+   * requested - which is not a duration of zero.
+   */
+  armMs: { v1: number | null; v2: number }
   /**
    * The active graph's states, for the inspector's state-override dropdown -
    * the trace itself only carries the resolved state, not the menu.

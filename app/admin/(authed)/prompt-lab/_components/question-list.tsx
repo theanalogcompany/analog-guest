@@ -1,6 +1,5 @@
 'use client'
 
-import { Button } from '@/components/ui/button'
 import { GOLDEN_GROUPS } from '@/lib/schemas/golden'
 import type { StoredV1Index } from '../_lib/load-stored-v1'
 import type { StoredSweep } from '../_lib/sweep-store'
@@ -138,5 +137,3 @@ export function QuestionList({
     </div>
   )
 }
-
-export { Button }

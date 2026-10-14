@@ -1,6 +1,12 @@
 import type { GoldenQuestion } from '@/lib/schemas/golden'
 import { RUNNABLE_DRIVERS } from '@/lib/eval/golden-set'
 import type { DeclaredTurnMedia } from '@/lib/relationship/turn-media'
+import {
+  EMPTY_MEMORY,
+  EMPTY_PROFILE,
+  type GuestProfile,
+  type InteractionMemory,
+} from '@/lib/relationship/profile'
 
 // One golden question to the turn v2 would be asked, or the reason it cannot
 // be asked at all.
@@ -82,6 +88,47 @@ export function goldenTurnFor(question: GoldenQuestion): {
               'v2 has no proactive path - runTurn answers an inbound, and this scenario has none',
           }
         : null),
+  }
+}
+
+/**
+ * What v2 is told about the guest for a golden turn. One definition, for the
+ * same reason `goldenTurnFor` is: the harness and /admin/tests/human-eval both
+ * ask v2 these questions, and a difference here is a difference in WHO v2
+ * thinks it is talking to - which would show up as a difference in the reply
+ * and be read as a finding about the prompt.
+ *
+ * EMPTY PROFILE, EMPTY MEMORY, ZERO VISITS, even on a scenario whose history
+ * implies past ones. That is deliberate parity with the v1 arm: its synthetic
+ * guest has no `transactions` rows, so declaring visits here would have v2
+ * answering about a regular while v1 answers about a stranger, and the
+ * asymmetry would flatter whichever arm was told more. Anything a scenario
+ * needs the guest to have done is in the transcript, where both arms read it.
+ *
+ * `replyCount` counts the guest's own messages - the authored history plus
+ * this turn - which is what v1's count sees for the same materialized thread.
+ * Defaulting it (runTurn's own fallback is 1) would tell v2 that a guest six
+ * turns into a conversation had just said their first word.
+ */
+export function goldenSessionFor(turn: GoldenTurnInput): {
+  profile: GuestProfile
+  memory: InteractionMemory
+  facts: {
+    visitCount: number
+    replyCount: number
+    daysSinceLastContact: number | null
+  }
+} {
+  return {
+    profile: EMPTY_PROFILE,
+    memory: EMPTY_MEMORY,
+    facts: {
+      visitCount: 0,
+      replyCount:
+        turn.history.filter((t) => t.role === 'user').length +
+        turn.inbound.length,
+      daysSinceLastContact: null,
+    },
   }
 }
 

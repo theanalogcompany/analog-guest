@@ -221,6 +221,14 @@ export const GOLDEN_QUESTIONS: GoldenQuestion[] = [
     ],
   },
   {
+    // The order is in the transcript, which is the only place it can be: the
+    // past order a scenario needs is carried as something the guest said, per
+    // the note above. Every menu detail the venue line adds is checked against
+    // the knowledge brief first - the Spiced Cold Brew is Chikka steeped with
+    // fennel, nutmeg and ginger, and an earlier draft of this line credited
+    // jaggery, which belongs to the SoFi MJ and the Almost Latte. A reply then
+    // has to either contradict the venue or inherit the invention, and the
+    // cell stops being readable as an answer to the question asked.
     key: 'what-did-i-get',
     group: 'returning',
     question: 'What did I get last time?',
@@ -228,7 +236,7 @@ export const GOLDEN_QUESTIONS: GoldenQuestion[] = [
       { role: 'user', text: 'had the spiced cold brew last week, really good' },
       {
         role: 'assistant',
-        text: 'glad it landed. the jaggery in it is what makes it',
+        text: 'glad it landed. the fennel is what makes that one work',
       },
     ],
   },
@@ -244,16 +252,23 @@ export const GOLDEN_QUESTIONS: GoldenQuestion[] = [
     ],
   },
   {
+    // The usual is established as a habit the guest mentioned, never as an
+    // order the venue took: ordering is counter or DoorDash, so a venue line
+    // accepting one in the thread ("coming up") hands the agent a capability
+    // the cafe does not have and makes the turn under test a reply to the
+    // fixture rather than to the guest. The turn is worth keeping precisely
+    // because "the usual please" is order-shaped - the reply has to know what
+    // the usual is and still point at the counter.
     key: 'regular-returns',
     group: 'returning',
     question: 'back again, the usual please',
     history: [
-      { role: 'user', text: 'cortado and a khari' },
+      { role: 'user', text: 'cortado and a khari is my go to here' },
       { role: 'assistant', text: 'good combination. that one is Alex, right?' },
       { role: 'user', text: 'yep thats me' },
       { role: 'assistant', text: 'got it. see you soon Alex' },
-      { role: 'user', text: 'in again today, cortado' },
-      { role: 'assistant', text: 'coming up' },
+      { role: 'user', text: 'in again today' },
+      { role: 'assistant', text: 'good day for it. enjoy' },
     ],
   },
 
@@ -446,18 +461,37 @@ export const GOLDEN_QUESTIONS: GoldenQuestion[] = [
     ],
   },
 
-  // ---- In the set, not runnable yet. -------------------------------------
+  // ---- v1 answers these; v2 declines them by name. -----------------------
   //
-  // Every one of these is a real production path whose only entry point
-  // SENDS. `draftInboundReply` exists because `runInboundTurn` was given a
-  // test sink; the follow-up engine, the scan greeting, the media-only turn
-  // and the held-draft timeout have no equivalent, so there is no way to get
-  // v1's answer without writing test-mode plumbing into those paths - which
-  // is lib/agent/ runtime work with its own plan gate, not a harness change.
+  // A real production path whose only entry point SENDS. `draftInboundReply`
+  // exists because `runInboundTurn` was given a test sink; the follow-up
+  // engine and the media-only turn have no v2 equivalent - `runTurn` answers
+  // an inbound, and the v2 composer takes text only - so `goldenTurnFor`
+  // refuses to build a turn and the v2 column renders a labelled gap.
   //
-  // They stay in the set and the page lists them as gaps. A set that quietly
-  // omitted them would read as complete coverage, which is the failure this
-  // repo names most often.
+  // They stay because v1 DOES answer them: deleting them would drop the set's
+  // only coverage of media input and proactive follow-ups.
+  //
+  // ---- FIVE PATHS THIS SET NO LONGER COVERS AT ALL -----------------------
+  //
+  // Removed 2026-10-13 (owner-ruled) because NEITHER engine could answer
+  // them, so every surface rendered an empty row in both columns and the lab
+  // carried five permanent greyed-out rows nobody could act on:
+  //
+  //   followup-after-we-helped           inquiry_followup, Instagram-only
+  //   followup-after-complaint-made-right visit_checkback, Instagram-only
+  //   sticker-tap-first-visit            scan_arrival has no draft path
+  //   sticker-tap-known-guest            same
+  //   held-draft-past-24h                time-triggered, nothing generates
+  //
+  // WRITTEN DOWN RATHER THAN DELETED SILENTLY. The first two were blocked by
+  // the FIXTURE (the sandbox guest has a phone and no Instagram id, and
+  // `resolveConversationChannel` reads the guest's identifiers, so no value of
+  // `channel` on a scenario can change the verdict); the last three by the
+  // DRIVER, whose only entry point sends. Both are lifted by work in
+  // `lib/agent/`, not by re-adding a row here. Until then this set says
+  // nothing about those five paths, and a reader counting its scenarios as
+  // coverage would be wrong about them.
 
   // ---- Proactive: what the venue says UNPROMPTED. -------------------------
   //
@@ -484,31 +518,6 @@ export const GOLDEN_QUESTIONS: GoldenQuestion[] = [
       { role: 'assistant', text: 'strong pick. see you next time' },
     ],
   },
-  // These two ride Instagram-only triggers (TAC-386 and TAC-575 both ruled
-  // their SMS arm a separate ticket), and the sandbox guest is text-only, so
-  // handle-followup refuses them by name before generation. The blocker is
-  // the FIXTURE, not the test sink that now exists: an Instagram sandbox
-  // guest needs its own identifier and its own collision guard, which is the
-  // same shape of work `ensureSandboxGuest` already does for phone numbers.
-  // Keeping the production trigger named rather than substituting a
-  // text-safe one - a day_1 here would run green while testing a different
-  // path.
-  {
-    key: 'followup-after-we-helped',
-    group: 'proactive',
-    question: '[We helped with parking]; we check in that it worked out',
-    driver: 'proactive',
-    notAutomated:
-      "rides inquiry_followup, which handle-followup refuses on a text conversation; the sandbox guest has a phone and no Instagram id, and resolveConversationChannel reads the guest's identifiers rather than the row's channel. Needs an Instagram sandbox guest.",
-  },
-  {
-    key: 'followup-after-complaint-made-right',
-    group: 'proactive',
-    question: "[A complaint was made right]; the guest's next visit",
-    driver: 'proactive',
-    notAutomated:
-      'rides visit_checkback, Instagram-only for the same reason as the inquiry follow-up. Needs an Instagram sandbox guest.',
-  },
   {
     key: 'followup-went-quiet',
     group: 'proactive',
@@ -522,23 +531,6 @@ export const GOLDEN_QUESTIONS: GoldenQuestion[] = [
         text: 'we do, the decaf is a Colombian and it goes through the espresso machine same as everything else. want me to tell you what it tastes like?',
       },
     ],
-  },
-  {
-    key: 'sticker-tap-first-visit',
-    group: 'arrival',
-    question:
-      'First visit, new guest: someone who has never messaged taps a table sticker',
-    driver: 'scan_arrival',
-    notAutomated:
-      'a scan row is not an inbound message (null provider_message_id); instagram-scan-greeting.ts only sends',
-  },
-  {
-    key: 'sticker-tap-known-guest',
-    group: 'arrival',
-    question: "Guest who has DM'd before taps a sticker",
-    driver: 'scan_arrival',
-    notAutomated:
-      'same path as the first-visit tap, with the prior thread deliberately withheld from the greeting (guest-arrived.ts)',
   },
   // ---- Attachments. ------------------------------------------------------
   //
@@ -568,14 +560,6 @@ export const GOLDEN_QUESTIONS: GoldenQuestion[] = [
     question: 'Guest asks a question, then sends a photo',
     messages: ['do you have oat milk'],
     mediaUrls: ['https://example.com/sandbox/latte.jpg'],
-  },
-  {
-    key: 'held-draft-past-24h',
-    group: 'handling',
-    question: 'A held reply sits unapproved past 24 hours',
-    driver: 'held_draft_expiry',
-    notAutomated:
-      'time-triggered with no generation in it; the harness cannot move the clock on a pending row',
   },
 ]
 
