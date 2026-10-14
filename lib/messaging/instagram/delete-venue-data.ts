@@ -133,6 +133,11 @@
 //     would leave a row that describes a file which must not exist. Deleted
 //     FIRST, before the messages are redacted, and files before rows
 //     (lib/messaging/attachments/delete.ts has why that order).
+//   - `passport_stamps` and their images under guest-media/passport/
+//     (TAC-586): deleted, files first, straight after the attachments
+//     (lib/passport/delete.ts). A passport is a record of every visit and
+//     what was ordered, and the images live outside the attachment sweep's
+//     paths, so it is cleared by name.
 //
 // CASCADE NEVER FIRES ON THIS PATH, and that is why every guest-keyed table
 // has to be named here by hand. The guest ROW survives, anonymised, so a
@@ -164,6 +169,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 
 import type { Database } from '@/db/types'
 import { deleteAttachmentsForGuests } from '@/lib/messaging/attachments/delete'
+import { deletePassportForGuests } from '@/lib/passport/delete'
 
 type AdminSupabaseClient = SupabaseClient<Database>
 
@@ -232,6 +238,17 @@ export async function deleteInstagramVenueData(
       )
       if (!attachments.ok)
         return { ok: false, error: attachments.error, confirmationCode }
+
+      // TAC-586: their passport. The stamp images are a record of every visit
+      // and what they ordered, so they go with the rest of what the guests
+      // sent, files first, and stop the run on failure the same way.
+      const passport = await deletePassportForGuests(
+        supabase,
+        venueId,
+        guestIds,
+      )
+      if (!passport.ok)
+        return { ok: false, error: passport.error, confirmationCode }
 
       // Then messages. If this failed after the guests were redacted, the
       // bodies would survive with no identity attached to find them by.

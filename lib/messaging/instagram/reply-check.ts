@@ -37,6 +37,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 
 import type { Database } from '@/db/types'
 import { DELIVERED_OUTBOUND_STATUSES } from '@/lib/agent/group-responses'
+import { isSystemRow } from '@/lib/messaging/system-rows'
 
 type AdminSupabaseClient = SupabaseClient<Database>
 
@@ -168,7 +169,7 @@ export async function findReplyToInbound(
   const { data: rows, error: rowsError } = await supabase
     .from('messages')
     .select(
-      'id, reply_to_message_id, provider_sent_at, sent_at, created_at, review_state',
+      'id, reply_to_message_id, provider_sent_at, sent_at, created_at, review_state, generated_by',
     )
     .eq('venue_id', input.venueId)
     .eq('guest_id', input.guestId)
@@ -185,6 +186,10 @@ export async function findReplyToInbound(
     // A pending draft reached nobody. Filtered here rather than in the query:
     // PostgREST's `neq` drops NULLs, and every echo row's review_state is NULL.
     if (row.review_state === 'pending') continue
+    // A passport image answers nothing (TAC-586, lib/messaging/system-rows.ts).
+    // Without this, a guest who scans and types gets their reply dropped as
+    // already answered by the stamp that went out seconds before it.
+    if (isSystemRow(row.generated_by)) continue
     const sentAt = dateOrNull(row.sent_at) ?? dateOrNull(row.created_at)
     if (sentAt === null) continue
     outbound.push({

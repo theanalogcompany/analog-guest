@@ -627,6 +627,11 @@ a warm-close anchor, excluded inside `loadWarmCloseCandidates`. Reasons in those
 
 ## Other rules that bite
 
+- **A `generated_by = 'system'` outbound row is never the venue speaking** (TAC-586: the
+  passport images a bound scan sends). Any reader asking "has the venue spoken since X" skips
+  it, through `lib/messaging/system-rows.ts`, which keeps NULL rows. A new reader of that
+  shape needs the same filter.
+
 - **A short answer to something we said is read against what we said**
   (`answer-to-our-question.ts`, 2026-10-07). Two decisions on the same turn: under the
   confidence floor a classifier whose pick is `reply` or `new_question`, with a conversational

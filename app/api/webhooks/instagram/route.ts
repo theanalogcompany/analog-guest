@@ -72,6 +72,7 @@ import {
   scanCodeBindTargetFor,
   scanUnattributedReason,
 } from '@/lib/messaging/instagram/handle-events'
+import { issuePassportStamp } from '@/lib/passport/issue-stamp'
 import { reconcileScanCodeFromReferral } from '@/lib/pos/reconcile-tap'
 import { looksLikeScanCode } from '@/lib/pos/scan-code'
 import {
@@ -423,12 +424,37 @@ export async function POST(request: Request): Promise<Response> {
               })
             }
             if (result.data.status === 'bound') {
-              return captureScanCodeBound({
+              // TAC-586: the bind gets the guest a passport stamp. Chained
+              // here so it rides the bind's own waitUntil and starts the
+              // moment the purchase is theirs; the scan greeting is in a
+              // separate waitUntil and reads nothing this writes (see
+              // lib/passport/issue-stamp.ts). issuePassportStamp never
+              // throws, so it cannot cost the bind's analytics either.
+              return Promise.all([
+                captureScanCodeBound({
+                  venueId: scanCodeTarget.venueId,
+                  guestId: scanCodeTarget.guestId,
+                  transactionId: result.data.transactionId,
+                  codeAgeMs: result.data.codeAgeMs,
+                  fingerprint: result.data.fingerprint,
+                }),
+                issuePassportStamp(supabase, {
+                  venueId: scanCodeTarget.venueId,
+                  guestId: scanCodeTarget.guestId,
+                  transactionId: result.data.transactionId,
+                }),
+              ]).then(() => undefined)
+            }
+            if (result.data.status === 'payment_not_ingested') {
+              // TAC-586 (ruled 2026-10-14): no stamp and no retry. The slip
+              // prints after Square records the sale, so this should not
+              // happen; if it does, it must be seen, so it gets its own log
+              // line beside the capture below.
+              console.warn('instagram: scan beat its payment; no stamp', {
+                event: 'pos_scan_payment_not_ingested',
                 venueId: scanCodeTarget.venueId,
                 guestId: scanCodeTarget.guestId,
-                transactionId: result.data.transactionId,
-                codeAgeMs: result.data.codeAgeMs,
-                fingerprint: result.data.fingerprint,
+                messageId: scanCodeTarget.messageId,
               })
             }
             // Every non-bound outcome keeps its own reason rather than being

@@ -17,7 +17,11 @@ const nextConfig: NextConfig = {
   // TAC-584: ffmpeg-static finds its binary relative to its own directory, so
   // it has to stay a real node_modules package at runtime rather than be
   // bundled into a chunk, where that path points at nothing.
-  serverExternalPackages: ['ffmpeg-static'],
+  //
+  // TAC-586: resvg and sharp load native binaries (the platform package in
+  // the lockfile) that a bundled chunk cannot resolve, so they stay real
+  // node_modules packages too.
+  serverExternalPackages: ['ffmpeg-static', '@resvg/resvg-js', 'sharp'],
   // And the binary itself is a file no `import` names, so the tracer would
   // leave it out of the deployment. Listed for the routes that can reach
   // lib/messaging/attachments/frames.ts: both webhooks run the agent turn
@@ -25,10 +29,22 @@ const nextConfig: NextConfig = {
   // whether it is there. A route missing from this list fails soft (photos
   // small enough are described as they arrived, everything else falls back to
   // the blank card) and the health row is what reports it.
+  //
+  // TAC-586: the passport's fonts, texture and page backgrounds are read
+  // from disk with fs, so the tracer cannot see them either. Carried into the
+  // two routes that render a stamp: the Instagram webhook (a bound scan) and
+  // /admin/health (the renderer row). A route missing here fails as
+  // `asset_missing` and the health row turns red.
   outputFileTracingIncludes: {
-    '/api/webhooks/instagram': ['./node_modules/ffmpeg-static/ffmpeg'],
+    '/api/webhooks/instagram': [
+      './node_modules/ffmpeg-static/ffmpeg',
+      './lib/passport/assets/**',
+    ],
     '/api/webhooks/sendblue': ['./node_modules/ffmpeg-static/ffmpeg'],
-    '/admin/health': ['./node_modules/ffmpeg-static/ffmpeg'],
+    '/admin/health': [
+      './node_modules/ffmpeg-static/ffmpeg',
+      './lib/passport/assets/**',
+    ],
   },
   turbopack: {
     // Pin the workspace root to this checkout. Unset, Turbopack walks up

@@ -135,8 +135,13 @@ exactly where one of our sends could still be in flight.
 
 ## Outbound
 
-Only `lib/agent/dispatch-instagram-reply.ts` and `lib/operator/dispatch-instagram-outbound.ts`
-may import `send.ts`, `window.ts`, `reply-check.ts`, `send-target.ts` or `graph.ts`.
+Only `lib/agent/dispatch-instagram-reply.ts`, `lib/operator/dispatch-instagram-outbound.ts` and
+`lib/passport/dispatch-instagram-stamp.ts` (TAC-586, the two passport images a bound scan sends) may
+import `send.ts`, `window.ts`, `reply-check.ts`, `send-target.ts` or `graph.ts`. Nothing
+enforces this list; it is read, not linted.
+
+- **A passport image is `generated_by = 'system'`**, and every reader that asks "has the venue
+  spoken since" skips system rows (`lib/messaging/system-rows.ts`). It is never a reply.
 
 - **24-hour reply window** computed from `provider_sent_at` on the newest inbound row that has
   one. `INSTAGRAM_WINDOW_MARGIN_MS` is 5 minutes, a judgement against roughly 11 s of known

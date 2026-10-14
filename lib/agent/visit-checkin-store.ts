@@ -7,6 +7,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 
 import type { Database } from '@/db/types'
+import { NOT_SYSTEM_ROW_FILTER } from '@/lib/messaging/system-rows'
 import { DELIVERED_OUTBOUND_STATUSES } from './group-responses'
 import type {
   ComplaintCheckin,
@@ -357,6 +358,9 @@ export async function loadNewestThreadMessage(
     .select('id, direction, status, review_state, created_at')
     .eq('venue_id', venueId)
     .eq('guest_id', guestId)
+    // TAC-586: a passport image does not restart the quiet timer
+    // (lib/messaging/system-rows.ts).
+    .or(NOT_SYSTEM_ROW_FILTER)
     .order('created_at', { ascending: false })
     .limit(1)
     .maybeSingle()

@@ -77,6 +77,12 @@ export type InstagramSendFailureKind =
   | 'graph_error'
   | 'malformed_response'
 
+/** The kinds a Graph response can produce; the rest are refused before any request. */
+export type GraphSendFailureKind = Exclude<
+  InstagramSendFailureKind,
+  'empty_text' | 'over_byte_cap'
+>
+
 export type InstagramSendResult =
   | { ok: true; mid: string }
   | { ok: false; kind: InstagramSendFailureKind; failure: GraphFailure | null }
@@ -87,7 +93,7 @@ export type InstagramSendResult =
  * accepted the message before it did.
  */
 export function sendOutcomeUnknown(
-  kind: InstagramSendFailureKind,
+  kind: InstagramSendFailureKind | InstagramImageSendFailureKind,
   httpStatus: number | null = null,
 ): boolean {
   if (kind === 'timeout' || kind === 'network' || kind === 'malformed_response')
@@ -106,7 +112,7 @@ export function sendResultOutcomeUnknown(
 
 export function classifySendFailure(
   failure: GraphFailure,
-): InstagramSendFailureKind {
+): GraphSendFailureKind {
   switch (failure.reason) {
     case 'timeout':
       return 'timeout'
@@ -157,6 +163,15 @@ export async function sendInstagramText(input: {
       timeoutMs: INSTAGRAM_SEND_TIMEOUT_MS,
     },
   )
+  return sendResultFrom(result)
+}
+
+/** A Send API response, read the same way for every kind of message. */
+function sendResultFrom(
+  result: Awaited<ReturnType<typeof graphRequest>>,
+):
+  | { ok: true; mid: string }
+  | { ok: false; kind: GraphSendFailureKind; failure: GraphFailure } {
   if (!result.ok)
     return {
       ok: false,
@@ -178,4 +193,73 @@ export async function sendInstagramText(input: {
     }
   }
   return { ok: true, mid }
+}
+
+// ---------------------------------------------------------------------------
+// Images (TAC-586)
+// ---------------------------------------------------------------------------
+//
+//   POST /{instagram_account_id}/messages
+//   { "recipient": { "id": "<IGSID>" },
+//     "message": { "attachment": { "type": "image", "payload": { "url": "..." } } } }
+//
+// The Instagram Login path takes an attachment only BY URL: Meta fetches it
+// once, keeps its own copy, and the guest sees the image, never the link. The
+// caller passes a signed link to our private bucket with an hour on it, which
+// is far longer than Meta's fetch takes and short enough that a leaked link
+// is soon dead.
+//
+// Same timeout, same failure kinds and the same "a 200 with no mid is
+// malformed" rule as a text, because it is the same endpoint answering. The
+// text-only kinds (`empty_text`, `over_byte_cap`) cannot happen here, and
+// `invalid_url` is refused before any request, so the kinds stay their own
+// type rather than widening InstagramSendFailureKind under its readers.
+
+export type InstagramImageSendFailureKind = GraphSendFailureKind | 'invalid_url'
+
+export type InstagramImageSendResult =
+  | { ok: true; mid: string }
+  | {
+      ok: false
+      kind: InstagramImageSendFailureKind
+      failure: GraphFailure | null
+    }
+
+function isHttpsUrl(value: string): boolean {
+  try {
+    return new URL(value).protocol === 'https:'
+  } catch {
+    return false
+  }
+}
+
+export async function sendInstagramImage(input: {
+  /** venues.instagram_account_id: the account the message is sent from. */
+  accountId: string
+  /** guests.instagram_scoped_id: the guest's IGSID for this account. */
+  recipientId: string
+  /** An https link Meta can fetch the image from. */
+  imageUrl: string
+  token: string
+  fetchImpl: FetchLike
+}): Promise<InstagramImageSendResult> {
+  if (!isHttpsUrl(input.imageUrl))
+    return { ok: false, kind: 'invalid_url', failure: null }
+
+  const result = await graphRequest(
+    'POST',
+    `/${encodeURIComponent(input.accountId)}/messages`,
+    input.token,
+    input.fetchImpl,
+    {
+      body: {
+        recipient: { id: input.recipientId },
+        message: {
+          attachment: { type: 'image', payload: { url: input.imageUrl } },
+        },
+      },
+      timeoutMs: INSTAGRAM_SEND_TIMEOUT_MS,
+    },
+  )
+  return sendResultFrom(result)
 }
