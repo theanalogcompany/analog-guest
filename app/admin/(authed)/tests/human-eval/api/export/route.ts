@@ -1,12 +1,10 @@
 import { NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/db/admin'
 import { CSV_UTF8_BOM } from '@/lib/eval/csv'
-import { goldenInputCells } from '@/lib/eval/golden-csv'
-import { unblind } from '@/lib/eval/human-eval'
 import {
   humanEvalCsvFilename,
+  humanEvalCsvRows,
   humanEvalRowsToCsv,
-  type HumanEvalCsvRow,
 } from '@/lib/eval/human-eval-csv'
 import {
   HUMAN_EVAL_UNIT_COLUMNS,
@@ -35,6 +33,20 @@ import { requireSessionAdmin } from '../../_lib/require-pass-admin'
 // generates the CSV" a fact about this route rather than a sentence about a
 // button. A pass cannot be submitted while it is incomplete and cannot change
 // after it is, so the file is the pass.
+//
+// TWO SOURCES FOR THE SAME FILE, and which one answers is not a detail the
+// caller can see. Submitting stores the file on the pass and then clears the
+// replies (migration 087, 088), so a pass submitted from then on serves the
+// stored bytes. A pass submitted BEFORE that still has its replies and no
+// stored copy, and its file is built here from the rows by the same function
+// that wrote the stored one - so both downloads are the same spreadsheet, and
+// the older passes did not have to be migrated to keep working.
+//
+// NEITHER SOURCE IS A STATE THIS CAN INVENT A FILE FROM: a pass whose replies
+// are gone and whose file was never stored is refused outright rather than
+// served as a spreadsheet of empty reply cells. Submitting writes the file
+// before it clears anything, so that state means someone cleared the rows by
+// hand.
 
 export const dynamic = 'force-dynamic'
 
@@ -46,7 +58,7 @@ export async function GET(request: Request): Promise<NextResponse> {
   const supabase = createAdminClient()
   const session = await supabase
     .from('human_eval_sessions')
-    .select('id, git_sha, started_at, submitted_at')
+    .select('id, git_sha, started_at, submitted_at, csv')
     .eq('id', auth.sessionId)
     .maybeSingle()
   if (session.error || !session.data)
@@ -63,6 +75,23 @@ export async function GET(request: Request): Promise<NextResponse> {
       { status: 409 },
     )
 
+  const filename = humanEvalCsvFilename({
+    gitSha: session.data.git_sha,
+    startedAt: session.data.started_at,
+  })
+  const attachment = (csv: string): NextResponse =>
+    new NextResponse(csv, {
+      headers: {
+        'Content-Type': 'text/csv; charset=utf-8',
+        'Content-Disposition': `attachment; filename="${filename}"`,
+        'Cache-Control': 'no-store',
+      },
+    })
+
+  // The stored file, byte for byte as the submit route wrote it. The BOM is
+  // part of those bytes, which is why it is not added again here.
+  if (session.data.csv !== null) return attachment(session.data.csv)
+
   const units = await supabase
     .from('human_eval_units')
     .select(HUMAN_EVAL_UNIT_COLUMNS)
@@ -73,67 +102,22 @@ export async function GET(request: Request): Promise<NextResponse> {
       { status: 500 },
     )
 
-  const rows: HumanEvalCsvRow[] = sortUnitsByQuestionOrder(
+  const views = sortUnitsByQuestionOrder(
     (units.data as HumanEvalUnitRow[]).map(unitViewFromRow),
-  ).map((unit) => {
-    const question = unit.question
-    const input = goldenInputCells(question)
-    // The one definition of "what this A/B answer says about the engines"
-    // (lib/eval/human-eval.ts), so the file and the page cannot disagree
-    // about which engine won a row.
-    const read = unblind(unit)
-    return {
-      question_key: unit.questionKey,
-      group: question?.group ?? 'orphan',
-      question: question?.question ?? '(question no longer in the set)',
-      history: input.history,
-      inbound: input.inbound,
-      media: input.media,
-      v1_reply:
-        unit.v1 === null
-          ? 'UNREADABLE stored column'
-          : unit.v1.ok
-            ? unit.v1.bubbles.join('\n')
-            : '',
-      v2_reply:
-        unit.v2 === null
-          ? 'UNREADABLE stored column'
-          : unit.v2.ok
-            ? unit.v2.messages.join('\n')
-            : '',
-      shown_as_a: unit.aArm,
-      a_verdict: unit.aVerdict ?? '',
-      b_verdict: unit.bVerdict ?? '',
-      v1_verdict: read.v1Verdict ?? '',
-      v2_verdict: read.v2Verdict ?? '',
-      better: read.better ?? '',
-      why: unit.note,
-      v1_substitute: unit.v1?.ok ? (unit.v1.substitute ?? '') : '',
-      v2_gate: unit.v2?.ok ? (unit.v2.gateVerdict ?? '') : '',
-      v1_ms: unit.v1 === null ? '' : String(unit.v1.durationMs),
-      v2_ms: unit.v2 === null ? '' : String(unit.v2.durationMs),
-      v1_error:
-        unit.v1 !== null && !unit.v1.ok
-          ? `${unit.v1.stage}: ${unit.v1.error}`
-          : '',
-      v2_error:
-        unit.v2 !== null && !unit.v2.ok
-          ? `${unit.v2.stage}: ${unit.v2.error}`
-          : '',
-      generated_at: unit.generatedAt,
-      judged_at: unit.judgedAt ?? '',
-    }
-  })
+  )
+  // Fails CLOSED rather than serving a file with every reply cell blank. See
+  // the header: submitting stores the file first, so this is unreachable
+  // except by hand.
+  if (views.some((unit) => unit.answersAbsent))
+    return NextResponse.json(
+      {
+        error:
+          "this pass's replies are no longer stored and no CSV was saved with it, so the file cannot be rebuilt - whoever has the download from when it was submitted has the only copy",
+      },
+      { status: 409 },
+    )
 
-  const filename = humanEvalCsvFilename({
-    gitSha: session.data.git_sha,
-    startedAt: session.data.started_at,
-  })
-  return new NextResponse(`${CSV_UTF8_BOM}${humanEvalRowsToCsv(rows)}`, {
-    headers: {
-      'Content-Type': 'text/csv; charset=utf-8',
-      'Content-Disposition': `attachment; filename="${filename}"`,
-      'Cache-Control': 'no-store',
-    },
-  })
+  return attachment(
+    `${CSV_UTF8_BOM}${humanEvalRowsToCsv(humanEvalCsvRows(views))}`,
+  )
 }

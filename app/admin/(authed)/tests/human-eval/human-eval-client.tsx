@@ -400,6 +400,13 @@ export function HumanEvalClient({
    * the stamp did not - a failed submit leaves the error on screen and no
    * file, which is the honest outcome. The confirm is because this is
    * one-way: there is no unsubmit, by design.
+   *
+   * A WARNING IS NOT AN ERROR. Submitting stores the pass's file and then
+   * clears the replies; either can fail with the pass already frozen, and in
+   * both cases the pass is submitted and its CSV downloadable. So the message
+   * is shown AND the download still happens - swapping to the error branch
+   * would leave a submitted pass looking like a failed submit, which is the
+   * one reading that would send someone pressing the button again.
    */
   const onSubmit = useCallback(() => {
     if (session === null || submitting || readOnly) return
@@ -418,6 +425,7 @@ export function HumanEvalClient({
         setSubmitError(result.error)
         return
       }
+      if (result.data.warning !== undefined) setSubmitError(result.data.warning)
       setSession({ ...session, submittedAt: result.data.submittedAt })
       // A plain navigation rather than fetch-and-blob: the route answers with
       // Content-Disposition: attachment, so the browser saves it and the page

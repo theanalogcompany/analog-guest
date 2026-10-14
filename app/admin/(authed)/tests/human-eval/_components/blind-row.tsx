@@ -101,6 +101,11 @@ export function BlindRow({
   const askPreference = needsPreference(judgment.aVerdict, judgment.bVerdict)
   const noteMissing = askPreference && note.trim().length === 0
 
+  // This pass was submitted and its replies are no longer stored. Read off the
+  // row rather than from `readOnly`, so a frozen pass that still has its
+  // replies - submitted before the clearing existed - keeps showing them.
+  const cleared = unit.answersAbsent
+
   // ONE REPLY AT A TIME. B is withheld until A has a verdict, because two
   // replies on screen together are judged against each other - the second one
   // read becomes the yardstick for the first, and "is this an acceptable
@@ -110,16 +115,28 @@ export function BlindRow({
   // `|| bVerdict !== null` so clearing A after grading B does not yank B off
   // the screen mid-row. Clearing both hides it again, which is the honest
   // state: nothing has been judged here.
-  const showB = judgment.aVerdict !== null || judgment.bVerdict !== null
+  //
+  // `|| cleared` because there is nothing left to withhold: with no replies on
+  // screen, hiding B's own verdict would hide half of what the row recorded.
+  const showB =
+    judgment.aVerdict !== null || judgment.bVerdict !== null || cleared
 
   // A row where either engine produced nothing is not judgeable: there is no
   // pair to compare, and a verdict on an error message is not a verdict on a
   // reply. Shown with the failure, counted apart, and the form withheld
   // rather than inviting a judgment that would mean nothing.
+  //
+  // A CLEARED ROW IS NOT A BROKEN ONE, and both have no replies to show. The
+  // judgment on a cleared row was given against replies that existed at the
+  // time and is the thing worth reading; calling it "not judgeable" would say
+  // the opposite about every row of every finished pass. So the verdicts, the
+  // better-reply answer and the comment all still render, and only the two
+  // replies are missing.
   const aColumn = unit.aArm === 'v1' ? unit.v1 : unit.v2
   const bColumn = unit.aArm === 'v1' ? unit.v2 : unit.v1
   const broken =
-    unit.v1 === null || unit.v2 === null || !unit.v1.ok || !unit.v2.ok
+    !cleared &&
+    (unit.v1 === null || unit.v2 === null || !unit.v1.ok || !unit.v2.ok)
 
   const judge = (patch: Partial<HumanEvalJudgment>): void => {
     const next: HumanEvalJudgment = { ...judgment, note, ...patch }
@@ -154,7 +171,7 @@ export function BlindRow({
             disabled={busy || readOnly}
             title={
               readOnly
-                ? 'This pass was submitted - its replies are what the CSV quotes'
+                ? 'This pass was submitted - its CSV is the record, and its replies are no longer stored'
                 : undefined
             }
             onClick={onRegenerate}
@@ -176,6 +193,7 @@ export function BlindRow({
         <Reply
           label="Reply A"
           reply={aColumn}
+          cleared={cleared}
           verdict={judgment.aVerdict}
           disabled={broken || readOnly}
           onVerdict={(v) => judge({ aVerdict: v })}
@@ -184,6 +202,7 @@ export function BlindRow({
           <Reply
             label="Reply B"
             reply={bColumn}
+            cleared={cleared}
             verdict={judgment.bVerdict}
             disabled={broken || readOnly}
             onVerdict={(v) => judge({ bVerdict: v })}
@@ -300,6 +319,7 @@ export function BlindRow({
 function Reply({
   label,
   reply,
+  cleared,
   verdict,
   disabled,
   onVerdict,
@@ -312,6 +332,12 @@ function Reply({
    * quietly reading a field only one engine has.
    */
   reply: GoldenV1 | GoldenV2 | null
+  /**
+   * The pass was submitted and its replies cleared, so `reply` is null for a
+   * reason that is not a failure. Checked BEFORE null is read as unreadable:
+   * the two states look identical from here and read as opposites.
+   */
+  cleared: boolean
   verdict: HumanEvalVerdict | null
   disabled: boolean
   onVerdict: (verdict: HumanEvalVerdict | null) => void
@@ -332,7 +358,13 @@ function Reply({
       <span className="text-[11px] uppercase tracking-wider text-ink-faint">
         {label}
       </span>
-      {reply === null ? (
+      {cleared ? (
+        // Not an error and not styled as one: the pass is finished and this is
+        // what finished looks like. The verdict below it is still the record.
+        <span className="text-[11px] italic text-ink-faint">
+          cleared when the pass was submitted - the downloaded CSV has the reply
+        </span>
+      ) : reply === null ? (
         <span className="text-[11px] text-destructive" role="alert">
           unreadable stored answer
         </span>

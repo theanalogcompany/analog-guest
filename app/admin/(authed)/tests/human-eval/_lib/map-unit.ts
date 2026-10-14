@@ -24,6 +24,14 @@ import type { HumanEvalUnitView } from './types'
 // `null` plus a `parseError` the page renders: a silently empty reply reads as
 // "the engine said nothing", which is a different and false claim about a
 // reply a human is about to judge.
+//
+// AN ABSENT ANSWER IS NOT AN UNPARSEABLE ONE, and the schema cannot tell them
+// apart - `safeParse(null)` fails like any other bad value would. Both columns
+// holding SQL null is the state a submitted pass is left in once its CSV has
+// been stored and the replies cleared (migration 088), which is a finished
+// pass rather than a broken row, so it is checked for before parsing and
+// reported as `answersAbsent`. Calling it a parse error would put "unreadable"
+// on every row of every pass anyone ever finished.
 
 const BY_KEY = new Map<string, GoldenQuestion>(
   GOLDEN_QUESTIONS.map((q) => [q.key, q]),
@@ -45,6 +53,11 @@ export interface HumanEvalUnitRow {
 }
 
 export function unitViewFromRow(row: HumanEvalUnitRow): HumanEvalUnitView {
+  // BOTH, never one. Clearing writes both columns in a single statement, so
+  // one absent column is an anomaly rather than a cleared row - it falls
+  // through to the parse below and is reported as unreadable, which is the
+  // honest reading of a row nothing in this code could have written.
+  const answersAbsent = row.v1 === null && row.v2 === null
   const v1 = GoldenV1Schema.safeParse(row.v1)
   const v2 = GoldenV2Schema.safeParse(row.v2)
   const aVerdict = HumanEvalVerdictSchema.safeParse(row.a_verdict)
@@ -64,10 +77,15 @@ export function unitViewFromRow(row: HumanEvalUnitRow): HumanEvalUnitView {
       : 'v1') as HumanEvalArm,
     v1: v1.success ? v1.data : null,
     v2: v2.success ? v2.data : null,
+    answersAbsent,
     parseError:
       [
-        v1.success ? null : `v1: ${v1.error.issues[0]?.message ?? 'invalid'}`,
-        v2.success ? null : `v2: ${v2.error.issues[0]?.message ?? 'invalid'}`,
+        answersAbsent || v1.success
+          ? null
+          : `v1: ${v1.error.issues[0]?.message ?? 'invalid'}`,
+        answersAbsent || v2.success
+          ? null
+          : `v2: ${v2.error.issues[0]?.message ?? 'invalid'}`,
         row.a_arm === 'v1' || row.a_arm === 'v2'
           ? null
           : `a_arm: '${row.a_arm}' is not an arm - the A column is showing v1 as a fallback and the scramble for this row cannot be trusted`,

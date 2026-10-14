@@ -25,6 +25,13 @@ export interface HumanEvalUnitView {
    */
   v1: GoldenV1 | null
   v2: GoldenV2 | null
+  /**
+   * Both answers are gone from the row, which on a submitted pass means they
+   * were cleared once its CSV was stored (migration 088). Carried separately
+   * because `v1`/`v2` are null for the unrelated reason above, and the two
+   * must not render alike: one is a finished pass, the other a broken row.
+   */
+  answersAbsent: boolean
   parseError: string | null
   aVerdict: HumanEvalVerdict | null
   bVerdict: HumanEvalVerdict | null

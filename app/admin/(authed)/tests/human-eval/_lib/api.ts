@@ -31,10 +31,16 @@ export function postPair(body: {
  * Finish a pass. Answers with the instant it was stamped; the caller renders
  * the pass read-only from that and only then asks for the CSV, which the
  * export route refuses until this has succeeded.
+ *
+ * `warning` IS A SUCCESS, NOT A FAILURE. Submitting also stores the pass's
+ * file and then clears the replies, and either of those two can fail after
+ * the pass is already frozen - the pass is submitted and downloadable in
+ * every such case, so it answers 200 and says what did not happen. The caller
+ * shows it and still fetches the file.
  */
 export function postSubmit(
   sessionId: string,
-): Promise<FetchResult<{ submittedAt: string }>> {
+): Promise<FetchResult<{ submittedAt: string; warning?: string }>> {
   return postJson(
     `/admin/tests/human-eval/api/sessions/${sessionId}/submit`,
     {},

@@ -795,6 +795,7 @@ export type Database = {
       }
       human_eval_sessions: {
         Row: {
+          csv: string | null
           git_sha: string | null
           id: string
           rated_by: string
@@ -808,6 +809,7 @@ export type Database = {
           venue_open_state: string
         }
         Insert: {
+          csv?: string | null
           git_sha?: string | null
           id?: string
           rated_by: string
@@ -821,6 +823,7 @@ export type Database = {
           venue_open_state: string
         }
         Update: {
+          csv?: string | null
           git_sha?: string | null
           id?: string
           rated_by?: string
@@ -856,8 +859,8 @@ export type Database = {
           question_key: string
           revealed_at: string | null
           session_id: string
-          v1: Json
-          v2: Json
+          v1: Json | null
+          v2: Json | null
         }
         Insert: {
           a_arm: string
@@ -871,8 +874,8 @@ export type Database = {
           question_key: string
           revealed_at?: string | null
           session_id: string
-          v1: Json
-          v2: Json
+          v1?: Json | null
+          v2?: Json | null
         }
         Update: {
           a_arm?: string
@@ -886,8 +889,8 @@ export type Database = {
           question_key?: string
           revealed_at?: string | null
           session_id?: string
-          v1?: Json
-          v2?: Json
+          v1?: Json | null
+          v2?: Json | null
         }
         Relationships: [
           {
