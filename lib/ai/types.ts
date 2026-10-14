@@ -418,6 +418,12 @@ export type RuntimeContext = {
    */
   visitCheckback?: boolean
   /**
+   * TAC-588: a receipt scan's item question, which rides the check-back's
+   * trigger. Its item is passed as data, unlike the check-back's: no message
+   * of the guest's names it, because the scan told us.
+   */
+  scanItemQuestion?: { item: string }
+  /**
    * TAC-575: this turn is a sign-off, and which one. `happy` and
    * `after_complaint` each render a `## Sign off` block in place of
    * `## Ask for a review` (both need `reviewAsk` set, which carries the

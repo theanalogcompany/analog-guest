@@ -30,6 +30,7 @@ const MS_PER_DAY = 24 * 60 * 60 * 1000
 export type IntentionKey =
   | 'understand_order'
   | 'hows_it_so_far'
+  | 'scan_order_liked'
   | 'check_back_on_order'
   | 'are_they_new_here'
   | 'got_the_recommendation'
@@ -146,6 +147,19 @@ export type IntentionArmsOn =
    * and never looks like a newer event than itself.
    */
   | { kind: 'checkback_due' }
+  /**
+   * TAC-588: a receipt scan's hello complimented an order we know, and the
+   * guest has written back before its timed item question went.
+   *
+   * Their writing back CANCELS that timer (lib/agent/scan-item-question.ts),
+   * so this is the only way the visit is still asked how they liked it: on one
+   * of their turns, when it fits. Resolved by the caller
+   * (resolveScanOrderLikedAt, lib/agent/scan-arrival.ts) and passed in as
+   * `scanOrderLikedAt`. The anchor is the HELLO, not the order: for a slip
+   * scanned the next morning an order-anchored window would have expired
+   * before the guest could reply.
+   */
+  | { kind: 'scan_order_known' }
 
 /**
  * Whether a strictly newer event re-arms an intention that already has a row
@@ -175,6 +189,9 @@ export function rearmsOnNewerEvent(armsOn: IntentionArmsOn): boolean {
     case 'same_visit_order':
     // TAC-575. A later visit's check-in is a later order, so a newer anchor.
     case 'checkback_due':
+    // TAC-588. A later receipt scan is a later order. Inside one visit the
+    // anchor is that scan's hello, the same on every turn.
+    case 'scan_order_known':
       return true
   }
 }
@@ -513,6 +530,37 @@ const DEFINITIONS = {
       'asks how the item the guest has just got is so far, or how it is treating them',
     satisfactionLabel:
       'Closes once raised. A later visit re-arms it. What the guest answers is recorded on the visit check-in, not here.',
+    expiresAfterMs: HOWS_IT_SO_FAR_WINDOW_MS,
+    isSatisfied: () => false,
+  },
+  // TAC-588 (ruled 2026-10-14). The receipt-scan visit's "how'd you like it?"
+  // when the guest wrote back to the hello before the timed question went:
+  // their reply cancelled the timer, so their turns are where it can be asked.
+  scan_order_liked: {
+    key: 'scan_order_liked',
+    // Beside hows_it_so_far, whose counter-flow job this does for a scan
+    // visit, and just ahead of it. The two are never open together:
+    // same_visit_order does not arm on a visit whose order the scan told us.
+    priority: 11,
+    armsOn: { kind: 'scan_order_known' },
+    // No gate: like hows_it_so_far, it is about the order, not the guest.
+    gate: { kind: 'none' },
+    onFirstConversation: 'allowed',
+    // WHEN IT FITS, NOT REQUIRED. The ruling: "the agent can ask whenever it
+    // fits naturally". If no moment comes, nothing asks; the timer it
+    // replaces was cancelled by the guest writing, by ruling.
+    raise: 'when_it_fits',
+    pacing: 'visit',
+    // Jaipal's wording, approved verbatim (ruled 2026-10-14). The ONE prompt
+    // line here that names an item: `{item}` is filled in with the item the
+    // hello complimented when the line is built (build-runtime-context.ts).
+    // The guest never named it, so there is nothing in the thread to point at.
+    promptLine:
+      'You know what this guest ordered on this visit: {item}. You don\'t know yet how they liked it. If you ask, ask how they liked it, in words that work whether they\'re still finishing it or have left; not "how is it" or "how was it".',
+    classifierDescription:
+      'asks how the guest liked the item they ordered on this visit',
+    satisfactionLabel:
+      'Closes once raised. A later receipt scan re-arms it. The answer is recorded on the visit check-in, which also spends the visit check-back.',
     expiresAfterMs: HOWS_IT_SO_FAR_WINDOW_MS,
     isSatisfied: () => false,
   },

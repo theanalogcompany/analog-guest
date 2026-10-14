@@ -400,3 +400,105 @@ export function withoutQuestions(body: string): {
     dropped,
   }
 }
+
+// ---------------------------------------------------------------------------
+// The item question (TAC-588)
+// ---------------------------------------------------------------------------
+//
+// "How'd you like the cortado?", asked once, about twenty minutes after the
+// ORDER and never sooner than five minutes after the hello. It replaces the
+// counter flow's "how is it so far?" and its ten-to-thirty-minute check-back
+// for a scan visit whose receipt bound an order.
+
+/** The question waits this long after the order. Ruled (TAC-588). */
+export const SCAN_ITEM_QUESTION_AFTER_ORDER_MS = 20 * 60 * 1000
+
+/** And at least this long after the hello. Ruled (TAC-588). */
+export const SCAN_ITEM_QUESTION_AFTER_HELLO_MS = 5 * 60 * 1000
+
+/**
+ * How long past its due time a held question may still go.
+ *
+ * TWO HOURS, a choice: the check-in answer window (CHECKIN_ANSWER_WINDOW_MS),
+ * which is how long "this visit" lasts everywhere else. It bounds a question
+ * held by quiet hours or a card on the operator's desk; past it the question
+ * is given up, not sent late (ruled 2026-10-14, question 2: a scan at 11 pm
+ * can get the hello and no question).
+ */
+export const SCAN_ITEM_QUESTION_MAX_AGE_MS = 2 * 60 * 60 * 1000
+
+/**
+ * When the item question is due: the order + twenty minutes, or the hello +
+ * five, whichever is LATER. A scan at the counter two minutes after paying is
+ * asked at the twenty-minute mark; a slip scanned the next morning is asked
+ * five minutes after its hello. Pure.
+ */
+export function scanItemQuestionDueAt(input: {
+  orderedAt: Date
+  helloAt: Date
+}): Date {
+  return new Date(
+    Math.max(
+      input.orderedAt.getTime() + SCAN_ITEM_QUESTION_AFTER_ORDER_MS,
+      input.helloAt.getTime() + SCAN_ITEM_QUESTION_AFTER_HELLO_MS,
+    ),
+  )
+}
+
+/** Has a held question waited too long to send? `>`, so the bound is inside. */
+export function isScanItemQuestionTooLate(dueAt: Date, now: Date): boolean {
+  return now.getTime() - dueAt.getTime() > SCAN_ITEM_QUESTION_MAX_AGE_MS
+}
+
+/**
+ * Was the last unprompted message to this guest THIS scan's own hello?
+ *
+ * The one-hour spacing rule (proactive-spacing.ts) must not stop the item
+ * question, which is part of the same visit as the hello five to twenty
+ * minutes before it (ruled 2026-10-14). The check-back's version of this,
+ * lastProactiveWasThisVisit, anchors on the order, and for a slip scanned the
+ * next morning that would also excuse an unrelated message from hours before
+ * the scan. Anchored on the scan instead: anything sent at or after it is this
+ * scan's hello. The hour rule stands against everything else.
+ */
+export function lastProactiveWasThisScan(
+  lastProactiveSendAt: Date | null,
+  scannedAt: Date,
+): boolean {
+  if (lastProactiveSendAt === null) return false
+  return lastProactiveSendAt.getTime() >= scannedAt.getTime()
+}
+
+/**
+ * How long after a receipt-scan hello a reply still belongs to that visit:
+ * TWO HOURS, the check-in answer window and the intention's own lifetime
+ * (HOWS_IT_SO_FAR_WINDOW_MS), so one number says "this visit is still going".
+ */
+export const SCAN_ORDER_VISIT_MS = 2 * 60 * 60 * 1000
+
+/**
+ * TAC-588: is this reply part of a receipt-scan visit whose order we know, and
+ * may it carry the item question?
+ *
+ *   known    the reply came within SCAN_ORDER_VISIT_MS of the hello. The
+ *            counter flow's "they just told you what they got" arming
+ *            (same_visit_order) is then off: nobody told us, the scan did.
+ *   likedAt  the hello, when the timed question has not gone. The guest
+ *            writing back cancelled that timer, so their turns may ask instead
+ *            (scan_order_liked). Null once the timer has sent it.
+ *
+ * Pure. The caller also withholds it once the visit has a check-in.
+ */
+export function resolveScanOrderVisit(input: {
+  helloAt: Date
+  itemQuestionSentAt: Date | null
+  inboundAt: Date
+}): { known: boolean; likedAt: Date | null } {
+  const since = input.inboundAt.getTime() - input.helloAt.getTime()
+  const known =
+    Number.isFinite(since) && since >= 0 && since <= SCAN_ORDER_VISIT_MS
+  return {
+    known,
+    likedAt: known && input.itemQuestionSentAt === null ? input.helloAt : null,
+  }
+}

@@ -108,6 +108,13 @@ export async function recordVisitCheckinAsked(
     askedAt: Date
     /** Only when the order message itself said how it is. */
     answer?: VisitCheckinAnswer
+    /**
+     * TAC-588: the question WAS the visit's check-back (a receipt scan's item
+     * question), so the row is written with the check-back already spent:
+     * claimed and sent at this instant. No ten-to-thirty-minute check-back
+     * follows it, and the warm close reads an unanswered one as it does any.
+     */
+    checkbackSpentAt?: Date
   },
 ): Promise<RecordAskedResult> {
   try {
@@ -121,6 +128,12 @@ export async function recordVisitCheckinAsked(
       ...(args.answer === undefined
         ? {}
         : { answer: args.answer, answered_at: args.askedAt.toISOString() }),
+      ...(args.checkbackSpentAt === undefined
+        ? {}
+        : {
+            checkback_claimed_at: args.checkbackSpentAt.toISOString(),
+            checkback_sent_at: args.checkbackSpentAt.toISOString(),
+          }),
     })
     if (!error) return { ok: true, data: 'recorded' }
     if (error.code === UNIQUE_VIOLATION)

@@ -13,6 +13,10 @@
 // does not stop a check-back worked into a reply to a guest who is still
 // chatting; that one is the agent answering a message.
 //
+// TAC-588: it also runs the receipt-scan item question
+// (lib/agent/scan-item-question.ts), which is the check-back for a scan visit,
+// so the one switch still stops every timed check-back.
+//
 // EVERY MINUTE MATTERS HERE more than for the warm close. The check-back is
 // due ten minutes after the order and worthless after thirty, so a schedule
 // coarser than a minute spends a real share of that window.
@@ -28,6 +32,7 @@
 // Auth follows the same dev-skip pattern as the other crons: in dev
 // `curl localhost:3000/api/cron/visit-checkbacks` works without the header.
 
+import { processDueScanItemQuestions } from '@/lib/agent/scan-item-question'
 import { processDueVisitCheckbacks } from '@/lib/agent/visit-checkin-timeout'
 
 function isAuthorized(request: Request): boolean {
@@ -42,7 +47,14 @@ export async function GET(request: Request): Promise<Response> {
     return new Response('Unauthorized', { status: 401 })
   }
 
-  const summary = await processDueVisitCheckbacks(new Date())
-  console.log('[cron visit-checkbacks] tick complete', summary)
-  return Response.json({ ok: true, ...summary })
+  const now = new Date()
+  const summary = await processDueVisitCheckbacks(now)
+  // TAC-588: the receipt-scan item question, which replaces the check-back
+  // for a scan visit and so shares its route: pausing one pauses both.
+  const scanItemQuestions = await processDueScanItemQuestions(now)
+  console.log('[cron visit-checkbacks] tick complete', {
+    ...summary,
+    scanItemQuestions,
+  })
+  return Response.json({ ok: true, ...summary, scanItemQuestions })
 }

@@ -30,6 +30,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import type { Database } from '@/db/types'
 import { isInquiryFollowupMessage } from '@/lib/followups/inquiry-followup-store'
 import { NOT_SYSTEM_ROW_FILTER } from '@/lib/messaging/system-rows'
+import { VenueMenuSchema, type MenuItem } from '@/lib/schemas'
 import { DELIVERED_OUTBOUND_STATUSES } from './group-responses'
 import { warmCloseBlocker, type WarmCloseBlocker } from './warm-close'
 
@@ -53,6 +54,13 @@ export interface WarmCloseVenue {
    * link from it to decide whether a sign-off carries the invitation.
    */
   links: unknown
+  /**
+   * TAC-588: the venue's own menu rows, for the receipt-scan item question to
+   * name the same item the hello complimented (pickComplimentItem). Empty
+   * when the menu is missing or unreadable; the pick then falls back to the
+   * item names alone.
+   */
+  menuItems: MenuItem[]
 }
 
 /**
@@ -133,9 +141,25 @@ export async function loadWarmCloseVenues(
           (config as { followup_rules?: unknown } | null)?.followup_rules ??
           null,
         links: linksOf((config as { venue_info?: unknown } | null)?.venue_info),
+        menuItems: menuItemsOf(
+          (config as { venue_info?: unknown } | null)?.venue_info,
+        ),
       }
     }),
   }
+}
+
+/**
+ * TAC-588: the menu sub-object only, never the whole VenueInfoSchema, for the
+ * reason loadVenueClock gives (instagram-scan-greeting.ts): that schema needs
+ * fields this has nothing to do with.
+ */
+function menuItemsOf(venueInfo: unknown): MenuItem[] {
+  if (venueInfo === null || typeof venueInfo !== 'object') return []
+  const parsed = VenueMenuSchema.safeParse(
+    (venueInfo as Record<string, unknown>).menu ?? {},
+  )
+  return parsed.success ? parsed.data.items : []
 }
 
 /**

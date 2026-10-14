@@ -434,3 +434,264 @@ export async function loadPriorGreetings(
     return { ok: false, error: e instanceof Error ? e.message : String(e) }
   }
 }
+
+// ---------------------------------------------------------------------------
+// The item question (TAC-588)
+// ---------------------------------------------------------------------------
+//
+// Timed off the greeted scan's own row (migration 089): `item_question_due_at`
+// is written when the hello goes, `item_question_claimed_at` is the claim
+// taken before the send (or with no send, when the timer is cancelled or
+// given up), and `item_question_sent_at` says it reached the guest.
+
+/** How many due questions one tick looks at. */
+export const SCAN_ITEM_QUESTION_SCAN_LIMIT = 50
+
+/**
+ * Owe this greeted scan its item question.
+ *
+ * Only on a row that does not have one yet, so a second runner reaching the
+ * same greeting cannot move a due time already set.
+ */
+export async function scheduleScanItemQuestion(
+  supabase: AdminSupabaseClient,
+  id: string,
+  dueAt: Date,
+): Promise<StoreResult<void>> {
+  try {
+    const { error } = await supabase
+      .from('instagram_scan_arrivals')
+      .update({ item_question_due_at: dueAt.toISOString() })
+      .eq('id', id)
+      .is('item_question_due_at', null)
+    if (error) return { ok: false, error: error.message }
+    return { ok: true, data: undefined }
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) }
+  }
+}
+
+/** A greeted scan owed its item question, as the timer sees it. */
+export interface DueScanItemQuestion {
+  id: string
+  venueId: string
+  guestId: string
+  scanMessageId: string | null
+  scannedAt: Date
+  /** When the hello went: the row's `resolved_at` on a `greeted` row. */
+  helloAt: Date
+  dueAt: Date
+}
+
+/**
+ * Greeted scans whose item question is due and unclaimed, oldest first.
+ * Everything else is re-checked per row on `now`.
+ */
+export async function loadDueScanItemQuestions(
+  supabase: AdminSupabaseClient,
+  now: Date,
+  limit: number = SCAN_ITEM_QUESTION_SCAN_LIMIT,
+): Promise<StoreResult<DueScanItemQuestion[]>> {
+  const { data, error } = await supabase
+    .from('instagram_scan_arrivals')
+    .select(
+      'id, venue_id, guest_id, scan_message_id, scanned_at, resolved_at, item_question_due_at',
+    )
+    .eq('outcome', 'greeted')
+    .is('item_question_claimed_at', null)
+    .lte('item_question_due_at', now.toISOString())
+    .order('item_question_due_at', { ascending: true })
+    .limit(limit)
+  if (error) return { ok: false, error: error.message }
+  const rows: DueScanItemQuestion[] = []
+  for (const row of data ?? []) {
+    const dueAt = dateOrNull(row.item_question_due_at)
+    const helloAt = dateOrNull(row.resolved_at)
+    const scannedAt = dateOrNull(row.scanned_at)
+    if (dueAt === null || helloAt === null || scannedAt === null) continue
+    rows.push({
+      id: row.id,
+      venueId: row.venue_id,
+      guestId: row.guest_id,
+      scanMessageId: row.scan_message_id,
+      scannedAt,
+      helloAt,
+      dueAt,
+    })
+  }
+  return { ok: true, data: rows }
+}
+
+/**
+ * Take this scan's one item question: a compare-and-set on it still being
+ * unclaimed. Also how a cancelled or given-up question is settled, with no
+ * send, so no later tick looks at it again.
+ */
+export async function claimScanItemQuestion(
+  supabase: AdminSupabaseClient,
+  id: string,
+  now: Date,
+): Promise<ClaimResult> {
+  const { data, error } = await supabase
+    .from('instagram_scan_arrivals')
+    .update({ item_question_claimed_at: now.toISOString() })
+    .eq('id', id)
+    .is('item_question_claimed_at', null)
+    .select('id')
+  if (error) return { status: 'failed', error: error.message }
+  return (data ?? []).length === 1 ? { status: 'claimed' } : { status: 'lost' }
+}
+
+/**
+ * Give the claim back when nothing reached the guest. Scoped to the claim's
+ * own timestamp and to an unsent question, so it can only undo itself.
+ */
+export async function releaseScanItemQuestionClaim(
+  supabase: AdminSupabaseClient,
+  id: string,
+  claimedAt: Date,
+): Promise<void> {
+  const { error } = await supabase
+    .from('instagram_scan_arrivals')
+    .update({ item_question_claimed_at: null })
+    .eq('id', id)
+    .eq('item_question_claimed_at', claimedAt.toISOString())
+    .is('item_question_sent_at', null)
+  if (error) {
+    logger.warn('[scan-item-question] claim release failed', {
+      scanArrivalId: id,
+      error: error.message,
+    })
+  }
+}
+
+/** The question reached the guest. */
+export async function markScanItemQuestionSent(
+  supabase: AdminSupabaseClient,
+  id: string,
+  sentAt: Date,
+): Promise<void> {
+  const { error } = await supabase
+    .from('instagram_scan_arrivals')
+    .update({ item_question_sent_at: sentAt.toISOString() })
+    .eq('id', id)
+  if (error) {
+    logger.warn('[scan-item-question] sent stamp failed', {
+      scanArrivalId: id,
+      error: error.message,
+    })
+  }
+}
+
+/**
+ * The guest's newest still-owed item question, for the warm close to wait
+ * on (`scan_question_pending`). Owed means: greeted, due time set, unclaimed,
+ * and not yet past its max age. Whether the guest has written since its hello
+ * is the caller's to check, because that cancels it.
+ */
+export async function loadOwedScanItemQuestion(
+  supabase: AdminSupabaseClient,
+  venueId: string,
+  guestId: string,
+  dueNoEarlierThan: Date,
+): Promise<StoreResult<{ helloAt: Date } | null>> {
+  const { data, error } = await supabase
+    .from('instagram_scan_arrivals')
+    .select('resolved_at')
+    .eq('venue_id', venueId)
+    .eq('guest_id', guestId)
+    .eq('outcome', 'greeted')
+    .is('item_question_claimed_at', null)
+    .gte('item_question_due_at', dueNoEarlierThan.toISOString())
+    .order('item_question_due_at', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+  if (error) return { ok: false, error: error.message }
+  const helloAt = dateOrNull(data?.resolved_at ?? null)
+  return { ok: true, data: helloAt === null ? null : { helloAt } }
+}
+
+/**
+ * Has the guest sent anything since this instant? A real message: a scan row
+ * carries no provider message id, so a second scan is not the guest writing.
+ * Fails CLOSED to true, the direction instagram-scan-greeting.ts takes: the
+ * cost is one question not asked, never one asked over them.
+ */
+export async function guestHasWrittenSince(
+  supabase: AdminSupabaseClient,
+  venueId: string,
+  guestId: string,
+  since: Date,
+): Promise<boolean> {
+  const { data, error } = await supabase
+    .from('messages')
+    .select('id')
+    .eq('venue_id', venueId)
+    .eq('guest_id', guestId)
+    .eq('direction', 'inbound')
+    .not('provider_message_id', 'is', null)
+    .gte('created_at', since.toISOString())
+    .limit(1)
+    .maybeSingle()
+  if (error) {
+    logger.warn(
+      '[scan-item-question] inbound-since read failed; reading as written',
+      {
+        venueId,
+        guestId,
+        error: error.message,
+      },
+    )
+    return true
+  }
+  return data !== null
+}
+
+/** The guest's newest greeted receipt scan, as a reply turn sees it. */
+export interface ScanOrderVisit {
+  id: string
+  scanMessageId: string | null
+  scannedAt: Date
+  helloAt: Date
+  itemQuestionSentAt: Date | null
+}
+
+/**
+ * TAC-588: the guest's newest greeted scan whose hello complimented a bound
+ * order. `item_question_due_at` is set on exactly those rows (it is written
+ * when such a hello goes), which is what makes it the marker. Null when there
+ * is none. Returns the error so the caller picks the direction.
+ */
+export async function loadScanOrderVisit(
+  supabase: AdminSupabaseClient,
+  venueId: string,
+  guestId: string,
+): Promise<StoreResult<ScanOrderVisit | null>> {
+  const { data, error } = await supabase
+    .from('instagram_scan_arrivals')
+    .select(
+      'id, scan_message_id, scanned_at, resolved_at, item_question_sent_at',
+    )
+    .eq('venue_id', venueId)
+    .eq('guest_id', guestId)
+    .eq('outcome', 'greeted')
+    .not('item_question_due_at', 'is', null)
+    .order('scanned_at', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+  if (error) return { ok: false, error: error.message }
+  if (!data) return { ok: true, data: null }
+  const scannedAt = dateOrNull(data.scanned_at)
+  const helloAt = dateOrNull(data.resolved_at)
+  if (scannedAt === null || helloAt === null) return { ok: true, data: null }
+  return {
+    ok: true,
+    data: {
+      id: data.id,
+      scanMessageId: data.scan_message_id,
+      scannedAt,
+      helloAt,
+      itemQuestionSentAt: dateOrNull(data.item_question_sent_at),
+    },
+  }
+}

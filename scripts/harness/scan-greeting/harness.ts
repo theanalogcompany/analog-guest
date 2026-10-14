@@ -21,6 +21,10 @@ import {
   runScanGreetingFastPath,
 } from '@/lib/agent/instagram-scan-greeting'
 import { settleScanPassport } from '@/lib/agent/scan-arrival-store'
+import { processDueScanItemQuestions } from '@/lib/agent/scan-item-question'
+import { resolveSameVisitOrderAt } from '@/lib/agent/visit-checkin'
+import { scanItemQuestionInstructions } from '@/lib/ai/prompts/categories/scan-item-question'
+import { resolveScanItemQuestionDisposition } from '@/lib/schemas/approval-policy'
 import {
   isDrink,
   loadScanOrder,
@@ -49,8 +53,12 @@ import {
   SCAN_GREETING_CARRY_FORWARD_MS,
   SCAN_GREETING_DELAY_MS,
   SCAN_GREETING_MAX_AGE_MS,
+  isScanItemQuestionTooLate,
+  lastProactiveWasThisScan,
+  resolveScanOrderVisit,
   scanCarryForwardAt,
   scanGreetingDueAt,
+  scanItemQuestionDueAt,
   withoutQuestions,
 } from '@/lib/agent/scan-arrival'
 
@@ -132,6 +140,9 @@ function makeDb(seed: Seed) {
     awaits_passport: false,
     passport_settled_at: null,
     passport_sent_at: null,
+    item_question_due_at: null,
+    item_question_claimed_at: null,
+    item_question_sent_at: null,
     ...row,
   }))
   const messages = seed.messages ?? []
@@ -145,6 +156,7 @@ function makeDb(seed: Seed) {
     id: 'g1',
     opted_out_at: null,
     last_proactive_send_at: null,
+    instagram_scoped_id: 'igsid-1',
     ...seed.guest,
   }
   const stats = { claimWins: 0, resolveWins: 0, updates: 0 }
@@ -163,9 +175,15 @@ function makeDb(seed: Seed) {
 
   function arrivalsSelect() {
     const filters: Filter[] = []
+    const atMost: Filter[] = []
     const builder = {
       eq(column: string, value: Value) {
         filters.push([column, value])
+        return builder
+      },
+      // TAC-588: the item question's due read.
+      lte(column: string, value: Value) {
+        atMost.push([column, value])
         return builder
       },
       is(column: string, value: Value) {
@@ -177,6 +195,12 @@ function makeDb(seed: Seed) {
         await pause()
         const data = arrivals
           .filter((row) => matches(row, filters))
+          .filter((row) =>
+            atMost.every(
+              ([column, value]) =>
+                row[column] !== null && String(row[column]) <= String(value),
+            ),
+          )
           .sort((a, b) =>
             String(a.scanned_at).localeCompare(String(b.scanned_at)),
           )
@@ -331,7 +355,26 @@ function makeDb(seed: Seed) {
         case 'passport_stamps':
           return { select: () => chain(() => seed.order?.stamp ?? null) }
         case 'venues':
-          return { select: () => single(() => ({ ...venue })) }
+          return {
+            // TAC-588: the item question reads every venue at once, with its
+            // config embedded (loadWarmCloseVenues), and awaits the select.
+            select: (columns?: string) =>
+              columns?.includes('venue_configs')
+                ? Promise.resolve({
+                    data: [
+                      {
+                        ...venue,
+                        instagram_account_id: 'ig-1',
+                        venue_configs: {
+                          followup_rules: null,
+                          venue_info: { menu: { highlights: [], items: [] } },
+                        },
+                      },
+                    ],
+                    error: null,
+                  })
+                : single(() => ({ ...venue })),
+          }
         case 'venue_configs':
           return {
             select: () =>
@@ -1319,6 +1362,208 @@ async function main() {
       )
       assert.equal(expired.arrivals[0]?.outcome, 'venue_closed')
       assert.equal(expired.stats.claimWins, 0)
+    },
+  )
+
+  // ---------------------------------------------------------------------------
+  // TAC-588: the item question
+  // ---------------------------------------------------------------------------
+
+  await check(
+    'item question timing: scans at order +2, +15, +28 min, +3 h and +20 h (hello 10 s after each scan)',
+    () => {
+      const order = SCAN
+      const dueFor = (scanAfterOrderMs: number) =>
+        scanItemQuestionDueAt({
+          orderedAt: order,
+          helloAt: at(scanAfterOrderMs + 10 * SECOND),
+        })
+      // +2: the order + 20 wins.
+      assert.deepEqual(dueFor(2 * MINUTE), at(20 * MINUTE))
+      // +15: hello at 15:10, so hello + 5 = 20:10 wins.
+      assert.deepEqual(dueFor(15 * MINUTE), at(20 * MINUTE + 10 * SECOND))
+      // +28: hello + 5 = 33:10.
+      assert.deepEqual(dueFor(28 * MINUTE), at(33 * MINUTE + 10 * SECOND))
+      // Late scans: always hello + 5.
+      assert.deepEqual(
+        dueFor(3 * 60 * MINUTE),
+        at(3 * 60 * MINUTE + 5 * MINUTE + 10 * SECOND),
+      )
+      assert.deepEqual(
+        dueFor(20 * 60 * MINUTE),
+        at(20 * 60 * MINUTE + 5 * MINUTE + 10 * SECOND),
+      )
+    },
+  )
+
+  await check('item question gives up 2 h after it was due, not at 2 h', () => {
+    const due = at(20 * MINUTE)
+    assert.equal(
+      isScanItemQuestionTooLate(due, at(20 * MINUTE + 2 * 60 * MINUTE)),
+      false,
+    )
+    assert.equal(
+      isScanItemQuestionTooLate(
+        due,
+        at(20 * MINUTE + 2 * 60 * MINUTE + SECOND),
+      ),
+      true,
+    )
+  })
+
+  await check(
+    "spacing: only this scan's own hello is exempt, not a message from before the scan",
+    () => {
+      const late = at(20 * 60 * MINUTE)
+      assert.equal(
+        lastProactiveWasThisScan(at(20 * 60 * MINUTE + 10 * SECOND), late),
+        true,
+      )
+      assert.equal(lastProactiveWasThisScan(late, late), true)
+      // A warm close from the night before is not this visit, even though it
+      // is after the order: the order-anchored rule would have excused it.
+      assert.equal(lastProactiveWasThisScan(at(10 * 60 * MINUTE), late), false)
+      assert.equal(lastProactiveWasThisScan(null, late), false)
+    },
+  )
+
+  await check(
+    'reply turns: a receipt-scan visit lasts 2 h from its hello; the reply path closes once the timer has sent',
+    () => {
+      const hello = at(20 * SECOND)
+      const at1h = resolveScanOrderVisit({
+        helloAt: hello,
+        itemQuestionSentAt: null,
+        inboundAt: at(60 * MINUTE),
+      })
+      assert.deepEqual(at1h, { known: true, likedAt: hello })
+      const afterTimer = resolveScanOrderVisit({
+        helloAt: hello,
+        itemQuestionSentAt: at(20 * MINUTE),
+        inboundAt: at(30 * MINUTE),
+      })
+      assert.deepEqual(afterTimer, { known: true, likedAt: null })
+      const tooLate = resolveScanOrderVisit({
+        helloAt: hello,
+        itemQuestionSentAt: null,
+        inboundAt: at(20 * SECOND + 2 * 60 * MINUTE + SECOND),
+      })
+      assert.deepEqual(tooLate, { known: false, likedAt: null })
+    },
+  )
+
+  await check(
+    "counter flow's 'they named it' arming is off on a receipt-scan visit, and unchanged without one",
+    () => {
+      const base = {
+        scanAt: SCAN,
+        guestCreatedVia: 'instagram',
+        guestCreatedAt: at(-60 * MINUTE),
+        inboundAt: at(MINUTE),
+        mentionsMenuItem: true,
+        answeringOurQuestion: true,
+        alreadyAskedThisVisit: false,
+      }
+      assert.deepEqual(resolveSameVisitOrderAt(base), at(MINUTE))
+      assert.equal(
+        resolveSameVisitOrderAt({ ...base, scanOrderKnown: true }),
+        null,
+      )
+    },
+  )
+
+  await check(
+    'approval: nothing set auto-sends; only an explicit hold holds; visitCheckback is not read',
+    () => {
+      assert.equal(resolveScanItemQuestionDisposition(null), 'auto_send')
+      assert.equal(
+        resolveScanItemQuestionDisposition({
+          default: 'auto_send',
+          perCategory: {},
+          visitCheckback: 'operator_approval',
+        }),
+        'auto_send',
+      )
+      assert.equal(
+        resolveScanItemQuestionDisposition({
+          default: 'auto_send',
+          perCategory: {},
+          scanItemQuestion: 'operator_approval',
+        }),
+        'operator_approval',
+      )
+    },
+  )
+
+  await check(
+    'item question wording: names the item, bans the two tenses',
+    () => {
+      const text = scanItemQuestionInstructions('Oat\n  Cortado')
+      assert.match(text, /how they liked the Oat Cortado,/)
+      assert.match(text, /Don't say "how is it" or "how was it"/)
+      assert.match(text, /still finishing it or have already left/)
+    },
+  )
+
+  const greeted = (over: Row = {}): Row =>
+    scanRow({
+      claimed_at: at(20 * SECOND).toISOString(),
+      venue_local_date: '2026-09-20',
+      outcome: 'greeted',
+      resolved_at: at(20 * SECOND).toISOString(),
+      item_question_due_at: at(20 * MINUTE).toISOString(),
+      ...over,
+    })
+
+  await check('item question timer: not read before it is due', async () => {
+    const db = makeDb({ arrivals: [greeted()] })
+    const tick = await processDueScanItemQuestions(at(19 * MINUTE), db.client)
+    assert.equal(tick.scanned, 0)
+    assert.equal(db.arrivals[0]?.item_question_claimed_at, null)
+  })
+
+  await check(
+    'a guest reply after the hello cancels the timer for good: claimed, never sent',
+    async () => {
+      const db = makeDb({
+        arrivals: [greeted()],
+        messages: [inbound(5 * MINUTE)],
+      })
+      const tick = await processDueScanItemQuestions(at(21 * MINUTE), db.client)
+      assert.equal(tick.skipped.guest_replied, 1)
+      assert.equal(
+        db.arrivals[0]?.item_question_claimed_at,
+        at(21 * MINUTE).toISOString(),
+      )
+      assert.equal(db.arrivals[0]?.item_question_sent_at, null)
+      const again = await processDueScanItemQuestions(
+        at(22 * MINUTE),
+        db.client,
+      )
+      assert.equal(again.scanned, 0)
+    },
+  )
+
+  await check(
+    'a reply BEFORE the hello (the scan delay) does not cancel it; held past 2 h it is given up',
+    async () => {
+      const before = makeDb({
+        arrivals: [greeted()],
+        messages: [inbound(5 * SECOND)],
+      })
+      const tick = await processDueScanItemQuestions(
+        at(21 * MINUTE),
+        before.client,
+      )
+      assert.equal(tick.skipped.guest_replied, undefined)
+
+      const late = makeDb({ arrivals: [greeted()] })
+      const lateTick = await processDueScanItemQuestions(
+        at(20 * MINUTE + 2 * 60 * MINUTE + SECOND),
+        late.client,
+      )
+      assert.equal(lateTick.skipped.too_late, 1)
+      assert.equal(late.arrivals[0]?.item_question_sent_at, null)
     },
   )
 

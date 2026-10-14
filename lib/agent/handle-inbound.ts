@@ -4267,9 +4267,15 @@ async function runInboundTurn(
       // twice: the operator path records the intention's prompt, and arming
       // reads that too (build-runtime-context, promptedThisVisit). A known
       // limit, stated on the PR.
+      // TAC-588: a receipt-scan visit's "how'd you like it?" opens the same
+      // check-in, through the same writer, with two differences: the order is
+      // the one the scan bound, not the message that named it, and the
+      // question IS the visit's check-back, so that is spent in the same row.
       const askedHowItIs = renderedIntentions.find(
-        (o) => o.key === 'hows_it_so_far',
+        (o) => o.key === 'hows_it_so_far' || o.key === 'scan_order_liked',
       )
+      const scanOrderVisit =
+        askedHowItIs?.key === 'scan_order_liked' ? ctx.scanOrderVisit : null
       const sentQuestion = gen.result.intentionQuestion.trim()
       const checkinVenueId = ctx.venue.id
       const checkinGuestId = ctx.guest.id
@@ -4284,17 +4290,22 @@ async function runInboundTurn(
         via: 'sent_field' | 'classifier',
       ): Promise<void> => {
         if (askedHowItIs === undefined || checkinLocalDate === null) return
-        const orderedAt = askedHowItIs.eligibleAt
+        if (askedHowItIs.key === 'scan_order_liked' && scanOrderVisit === null)
+          return
+        const orderedAt = scanOrderVisit?.orderedAt ?? askedHowItIs.eligibleAt
+        const askedAt = new Date()
         const recorded = await recordVisitCheckinAsked(createAdminClient(), {
           venueId: checkinVenueId,
           guestId: checkinGuestId,
           venueLocalDate: checkinLocalDate,
           orderMessageId:
+            scanOrderVisit === null &&
             orderedAt.getTime() === orderMessage.receivedAt.getTime()
               ? orderMessage.id
               : null,
           orderedAt,
-          askedAt: new Date(),
+          askedAt,
+          ...(scanOrderVisit !== null ? { checkbackSpentAt: askedAt } : {}),
         })
         if (!recorded.ok) {
           console.error('[agent] visit check-in write failed', {
@@ -4433,7 +4444,10 @@ async function runInboundTurn(
             .then(async (outcome) => {
               if (outcome.kind === 'recorded') {
                 // TAC-575: the second signal. See recordAskedHowItIs.
-                if (outcome.raisedKeys.includes('hows_it_so_far')) {
+                if (
+                  outcome.raisedKeys.includes('hows_it_so_far') ||
+                  outcome.raisedKeys.includes('scan_order_liked')
+                ) {
                   await recordAskedHowItIs('classifier')
                 }
                 const classifierSawCheckback = outcome.raisedKeys.includes(

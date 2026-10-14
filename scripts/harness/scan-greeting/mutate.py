@@ -20,6 +20,9 @@ STORE = "lib/agent/scan-arrival-store.ts"
 TIMING = "lib/agent/scan-arrival.ts"
 PROCESSOR = "lib/agent/instagram-scan-greeting.ts"
 ORDER = "lib/agent/scan-order.ts"
+QUESTION = "lib/agent/scan-item-question.ts"
+CHECKIN = "lib/agent/visit-checkin.ts"
+POLICY = "lib/schemas/approval-policy.ts"
 
 # The top of the fast path's guarded block (TAC-588: it waits for the stamp
 # run before it reads the row and sleeps).
@@ -146,6 +149,48 @@ MUTANTS = [
         ORDER,
         "  if (!row || row.guest_id !== scan.guestId || row.retracted_at !== null)",
         "  if (!row || row.retracted_at !== null)",
+    ),
+    (
+        "TAC-588: question due at the EARLIER of order+20 and hello+5",
+        TIMING,
+        "    Math.max(\n      input.orderedAt.getTime() + SCAN_ITEM_QUESTION_AFTER_ORDER_MS,",
+        "    Math.min(\n      input.orderedAt.getTime() + SCAN_ITEM_QUESTION_AFTER_ORDER_MS,",
+    ),
+    (
+        "TAC-588: spacing exemption anchored on nothing",
+        TIMING,
+        "  return lastProactiveSendAt.getTime() >= scannedAt.getTime()",
+        "  return true",
+    ),
+    (
+        "TAC-588: a guest reply no longer cancels the timer",
+        QUESTION,
+        "    await guestHasWrittenSince(supabase, row.venueId, row.guestId, row.helloAt)\n",
+        "    false\n",
+    ),
+    (
+        "TAC-588: cancellation counts replies from before the hello",
+        QUESTION,
+        "    await guestHasWrittenSince(supabase, row.venueId, row.guestId, row.helloAt)\n",
+        "    await guestHasWrittenSince(supabase, row.venueId, row.guestId, row.scannedAt)\n",
+    ),
+    (
+        "TAC-588: a held question is never given up",
+        QUESTION,
+        "  if (isScanItemQuestionTooLate(row.dueAt, now))\n    return settleUnasked(supabase, row, now, 'too_late')",
+        "",
+    ),
+    (
+        "TAC-588: same_visit_order still arms on a receipt-scan visit",
+        CHECKIN,
+        "  if (input.scanOrderKnown === true) return null\n",
+        "",
+    ),
+    (
+        "TAC-588: item question inherits the check-back's HOLD default",
+        POLICY,
+        "  return policy?.scanItemQuestion ?? 'auto_send'",
+        "  return policy?.scanItemQuestion ?? policy?.visitCheckback ?? 'operator_approval'",
     ),
     (
         "carry-forward re-derived from the delay",

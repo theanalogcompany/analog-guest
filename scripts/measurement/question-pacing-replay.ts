@@ -222,6 +222,7 @@ async function main(): Promise<void> {
     visitConfirmedAt: null,
     sameVisitOrderAt: null,
     checkbackDueAt: null,
+    scanOrderLikedAt: null,
     openRecommendationTimes: [],
     openRecommendationTouchedTimes: [],
     openRecommendationsUnreadable: false,

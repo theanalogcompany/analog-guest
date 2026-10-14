@@ -37,6 +37,7 @@ import { UNKNOWN_INSTRUCTIONS } from './unknown'
 // MessageCategory (it stores `acknowledgment`), it is a per-turn replacement
 // chosen in categoryInstructionsFor. See that function.
 import { INQUIRY_FOLLOWUP_INSTRUCTIONS } from './inquiry-followup'
+import { scanItemQuestionInstructions } from './scan-item-question'
 import { VISIT_CHECKBACK_INSTRUCTIONS } from './visit-checkback'
 import { WARM_CLOSE_INSTRUCTIONS } from './warm-close'
 import { WELCOME_INSTRUCTIONS } from './welcome'
@@ -184,8 +185,13 @@ export function categoryInstructionsFor(
   // `category: 'acknowledgment'` although the guest signed off on nothing. See
   // warm-close.ts.
   timedClose = false,
+  // TAC-588: a receipt scan's item question, which rides the check-back's
+  // trigger and swaps its wording. The item is the one the hello complimented.
+  scanItem: string | null = null,
 ): string {
   if (timedClose) return WARM_CLOSE_INSTRUCTIONS
+  if (visitCheckback && scanItem !== null)
+    return scanItemQuestionInstructions(scanItem)
   if (visitCheckback) return VISIT_CHECKBACK_INSTRUCTIONS
   if (inquiryFollowup) return INQUIRY_FOLLOWUP_INSTRUCTIONS
   if (category === 'guest_arrived')

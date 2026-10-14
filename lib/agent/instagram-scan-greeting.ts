@@ -69,6 +69,7 @@ import {
 import {
   isScanGreetingDue,
   isScanTooStale,
+  scanItemQuestionDueAt,
   msUntilScanGreetingDue,
   SCAN_FAST_PATH_WAKE_MARGIN_MS,
   venueLocalDate,
@@ -78,6 +79,7 @@ import {
   loadDueScanArrivals,
   loadPendingScanArrival,
   resolveScanArrival,
+  scheduleScanItemQuestion,
   type PendingScanArrival,
   type ScanArrivalOutcome,
 } from './scan-arrival-store'
@@ -570,6 +572,33 @@ export async function processScanArrival(
       followup = null
     }
     greetingOut = !RELEASES_CLAIM[outcome.status]
+
+    // TAC-588: a hello that complimented a bound order owes the item
+    // question, at the order + twenty minutes and at least five after this
+    // hello. Only when the hello went (sent, or held for an operator): a
+    // question after a hello that never reached them would be the first word.
+    // A failure here costs the question, never the greeting, so it is logged.
+    if (
+      greetingOut &&
+      order.kind === 'bound' &&
+      order.lineItemNames.length > 0
+    ) {
+      const scheduled = await scheduleScanItemQuestion(
+        supabase,
+        row.id,
+        scanItemQuestionDueAt({
+          orderedAt: order.orderedAt,
+          helloAt: new Date(),
+        }),
+      )
+      if (!scheduled.ok) {
+        logger.error('[scan-greeting] item question not scheduled', {
+          event: 'scan_item_question_not_scheduled',
+          scanArrivalId: row.id,
+          error: scheduled.error,
+        })
+      }
+    }
 
     await resolveScanArrival(
       supabase,

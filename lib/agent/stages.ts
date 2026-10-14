@@ -59,6 +59,7 @@ import {
   resolveCategoryPolicy,
   resolvePolicyDecision,
   resolveSignOffReviewAskDisposition,
+  resolveScanItemQuestionDisposition,
   resolveVisitCheckbackDisposition,
   type PolicyDecision,
   resolveReviewAskDisposition,
@@ -2150,12 +2151,17 @@ export async function applyApprovalPolicyStage(
   // Treated as `stored` because a venue chose it, which also keeps the
   // complaint carve-out below off it. `hold_all_outbound` still applies: that
   // trigger is separate and nothing here touches it.
+  //
+  // TAC-588: a receipt scan's item question rides that trigger and reads its
+  // OWN knob, `approval_policy.scanItemQuestion`, which defaults to AUTO-SEND
+  // (ruled 2026-10-14). Also `stored`, for the same reason.
   const policyDecision: PolicyDecision =
     ctx.followupTrigger?.reason === 'visit_checkback'
       ? {
-          disposition: resolveVisitCheckbackDisposition(
-            ctx.venue.approvalPolicy,
-          ),
+          disposition:
+            ctx.scanItemQuestion !== null
+              ? resolveScanItemQuestionDisposition(ctx.venue.approvalPolicy)
+              : resolveVisitCheckbackDisposition(ctx.venue.approvalPolicy),
           source: 'stored',
         }
       : resolvePolicyDecision(
@@ -3344,6 +3350,7 @@ export function buildAiRuntime(
     // optional RuntimeContext fields around it read.
     inquiryFollowup: ctx.inquiryFollowup ?? undefined,
     visitCheckback: ctx.visitCheckback || undefined,
+    scanItemQuestion: ctx.scanItemQuestion ?? undefined,
     // TAC-575: the sign-off. The kind is decided upstream, by the pause timer
     // and nothing else; this only carries it. The venue's close
     // text rides along on a plain close as a guide to its content.

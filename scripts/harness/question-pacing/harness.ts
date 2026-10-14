@@ -111,6 +111,7 @@ function derive(turn: Turn) {
     recordedOrderTimes: [],
     sameVisitOrderAt: null,
     checkbackDueAt: null,
+    scanOrderLikedAt: null,
     rows: { prompted: turn.prompted ?? [], eligible: [] },
     inboundTimes: messages.map((m) => m.at),
     inboundMessages: messages,
