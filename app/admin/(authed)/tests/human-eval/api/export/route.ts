@@ -88,6 +88,7 @@ export async function GET(request: Request): Promise<NextResponse> {
       question: question?.question ?? '(question no longer in the set)',
       history: input.history,
       inbound: input.inbound,
+      media: input.media,
       v1_reply:
         unit.v1 === null
           ? 'UNREADABLE stored column'

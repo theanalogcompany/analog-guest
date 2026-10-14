@@ -111,9 +111,11 @@ export default async function HumanEvalPage({
         </p>
         <p>
           A pass runs {data.judgeableCount} questions four at a time, so about a
-          quarter of an hour, and the v1 arm writes its transcript to production{' '}
-          <code className="rounded bg-muted px-1">messages</code> against this
-          venue&apos;s synthetic sandbox guests - so{' '}
+          quarter of an hour. Generation only runs while this tab is open, so an
+          unfinished pass picks itself back up when you open it - Stop halts it
+          for the rest of the visit. The v1 arm writes its transcript to
+          production <code className="rounded bg-muted px-1">messages</code>{' '}
+          against this venue&apos;s synthetic sandbox guests - so{' '}
           <strong>run it during the venue&apos;s open hours</strong>, and not at
           the same time as{' '}
           <code className="rounded bg-muted px-1">

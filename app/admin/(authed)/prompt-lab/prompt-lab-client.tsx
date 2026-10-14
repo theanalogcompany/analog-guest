@@ -216,6 +216,12 @@ export function PromptLabClient({
         // Proactive scenarios run as v2 outreach turns (goldenTurnFor is the
         // one place that decides which, so this surface and the harness agree).
         ...(turn.outreach !== undefined ? { outreach: turn.outreach } : {}),
+        // A scenario's photo, stated the way the harness states it. Dropping
+        // it here would have this surface judging a reply to a turn the
+        // scenario did not describe.
+        ...(turn.media?.mediaUrls !== undefined
+          ? { media: { mediaUrls: [...turn.media.mediaUrls] } }
+          : {}),
         overrides: overridesOf(),
       }
       const result = await postRun(request)

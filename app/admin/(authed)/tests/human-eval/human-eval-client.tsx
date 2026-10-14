@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { postRun } from '../../playground/_lib/api'
 import type { VenueListRow } from '../../_lib/load-venues'
@@ -186,6 +186,14 @@ export function HumanEvalClient({
         guestId: null,
         inbound: turn.inbound,
         sessionHistory: turn.history,
+        // A scenario carrying a photo states its links, which reach both
+        // arms. Without this the two media scenarios were asked as text: one
+        // of them 400'd (no inbound at all, so the turn read as empty), and
+        // the other was generated and judged as though the photo had been
+        // there when neither engine was told about it.
+        ...(turn.media?.mediaUrls !== undefined
+          ? { media: { mediaUrls: [...turn.media.mediaUrls] } }
+          : {}),
         // The same guest picture the harness gives v2, from the same
         // function - zero visits, empty profile, the real reply count.
         session: goldenSessionFor(turn),
@@ -327,6 +335,40 @@ export function HumanEvalClient({
   const onCancel = useCallback(() => {
     cancelRef.current = true
   }, [])
+
+  /**
+   * An unfinished pass picks itself back up on load.
+   *
+   * THE FAN-OUT IS CLIENT-SIDE, so it only runs while the tab is open: a
+   * reload, a navigation or a sleeping laptop left the remaining questions at
+   * "not generated yet" with nothing restarting them, and the surface gave no
+   * sign that it had stopped rather than finished. Submitting needs every
+   * question generated, so a pass abandoned at 40 of 60 was a pass that could
+   * never be finished without noticing and pressing the button again.
+   *
+   * ONCE PER MOUNT, guarded by a ref rather than by state: Stop must stay
+   * stopped for the rest of the page view, and in development the effect runs
+   * twice. A reload DOES restart it, which is the intended escape hatch -
+   * reloading is a deliberate act, and the only thing it can cost is the gaps
+   * that were going to be generated anyway.
+   *
+   * NEVER OPENS A PASS. A venue with none sits idle until someone presses
+   * Generate, so landing on this page cannot start spending on its own.
+   */
+  const autoResumed = useRef(false)
+  useEffect(() => {
+    if (autoResumed.current) return
+    if (session === null || readOnly || busy || missing.length === 0) return
+    autoResumed.current = true
+    // ONE TICK LATER, and NOT cleaned up on re-render. Starting a fan-out is
+    // an action against an external system rather than state synchronization,
+    // so calling it in the effect body sets state during commit
+    // (react-hooks/set-state-in-effect); clearing the timer in a cleanup
+    // would be worse, because the first state change this run causes
+    // re-renders the effect, and the ref guard means a cancelled start is
+    // never retried.
+    setTimeout(onGenerate, 0)
+  }, [session, readOnly, busy, missing, onGenerate])
 
   /**
    * Finish the pass, then fetch its CSV.
