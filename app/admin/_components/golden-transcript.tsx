@@ -26,12 +26,25 @@ import type { GoldenQuestion } from '@/lib/schemas/golden'
  */
 export function GoldenTranscript({ question }: { question: GoldenQuestion }) {
   const history = question.history ?? []
-  const inbound = question.messages ?? [question.question]
+  // A PROACTIVE SCENARIO HAS NO MESSAGE THIS TURN. Its `question` is a
+  // bracketed descriptor of the occasion ("[Guest said the visit was great];
+  // we follow up the next day"), and the `?? [question.question]` fallback
+  // below would render that as something the GUEST said - a line in the
+  // transcript that was never sent, under the one label that makes a rater
+  // read it as the input. The venue writes first here, so the turn is the
+  // absence of a guest message.
+  const proactive = question.driver === 'proactive'
+  const inbound = proactive ? [] : (question.messages ?? [question.question])
   const media = question.mediaUrls ?? []
   // Media counts: a scenario with one text message and a photo would
   // otherwise fall through this guard and render as a plain cold open, which
   // is the input the turn did NOT have.
-  if (history.length === 0 && inbound.length === 1 && media.length === 0)
+  if (
+    history.length === 0 &&
+    inbound.length === 1 &&
+    media.length === 0 &&
+    !proactive
+  )
     return null
   return (
     <div className="flex flex-col gap-1 border-l-2 border-stone-light/60 pl-3">
@@ -51,6 +64,15 @@ export function GoldenTranscript({ question }: { question: GoldenQuestion }) {
           {text}
         </p>
       ))}
+      {/* The occasion, as an occasion. Neither GUEST nor VENUE, because
+          nothing was sent this turn - what the engines were handed is the
+          history above plus "it has been a day". */}
+      {proactive ? (
+        <p className="text-xs italic text-muted-foreground">
+          — nothing new from the guest; the venue writes first:{' '}
+          {question.question}
+        </p>
+      ) : null}
       {/* Its own bodyless message, which is how both webhooks store an
           attachment - and the distinction the media path branches on. */}
       {media.length > 0 ? (

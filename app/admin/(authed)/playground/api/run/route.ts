@@ -14,10 +14,12 @@ import {
 import { DEFAULT_RELATIONSHIP_GRAPH } from '@/lib/relationship/default-graph'
 import { parseRelationshipGraph } from '@/lib/relationship/schema'
 import { runTurn } from '@/lib/relationship/run-turn'
+import { GOLDEN_FOLLOWUP_TRIGGERS } from '@/lib/schemas/golden'
 import type { RunResponseBody } from '../../_lib/types'
 import {
   draftV1ForReplay,
   draftV1ForSandbox,
+  draftV1FollowupForSandbox,
   SANDBOX_SLOTS,
   type V1ArmOutcome,
 } from './v1-arm'
@@ -197,6 +199,38 @@ const PostBodySchema = z
           mode: z.literal('replay'),
           inboundMessageId: z.string().uuid(),
         }),
+        /**
+         * The PROACTIVE v1 arm, for pairing against a v2 outreach turn.
+         *
+         * A third mode rather than a flag on `sandbox`, because it is a
+         * different entry point into v1 - `draftFollowupReply`, which asserts
+         * there is no current message - and the trigger is what sets it off
+         * where an inbound sets the other one off. The harness has run this
+         * pairing since the outreach turn landed; this is the route catching
+         * up, and it is what lets a blind pass cover v2's follow-ups at all.
+         */
+        z.object({
+          mode: z.literal('sandbox_followup'),
+          /**
+           * The trigger the scenario rides IN PRODUCTION. Four of these are
+           * Instagram-only - `handle-followup.ts` refuses them by name on a
+           * text conversation - so one of those needs `channel: 'instagram'`
+           * beside it or v1 answers with that refusal.
+           */
+          trigger: z.enum(GOLDEN_FOLLOWUP_TRIGGERS),
+          /**
+           * What the materialized transcript is written as, which is what
+           * `resolveConversationChannel` reads with no current message. Not
+           * cosmetic here: see the trigger above.
+           */
+          channel: z.enum(['text', 'instagram']).optional(),
+          slot: z
+            .number()
+            .int()
+            .min(0)
+            .max(SANDBOX_SLOTS - 1)
+            .optional(),
+        }),
       ])
       .optional(),
   })
@@ -230,14 +264,26 @@ const PostBodySchema = z
         message:
           'an outreach turn carries no inbound - it is the venue writing first',
       })
-    // The v1 proactive arm is draftV1FollowupForSandbox, which the golden
-    // harness owns; this route's sandbox arm answers an inbound. Refusing the
-    // pairing beats running v1 on a turn shape it was never given.
-    if (body.outreach !== undefined && body.v1Arm !== undefined)
+    // THE TWO ARMS MUST ANSWER THE SAME TURN SHAPE, in both directions.
+    // `sandbox` and `replay` answer an inbound, so neither can be paired with
+    // an outreach turn; `sandbox_followup` is v1 writing first, so it is only
+    // meaningful beside one. Either mismatch would put two different turns in
+    // one comparison, which is worse than refusing: the surface would render
+    // them side by side as though they answered the same thing.
+    if (
+      body.outreach !== undefined &&
+      body.v1Arm !== undefined &&
+      body.v1Arm.mode !== 'sandbox_followup'
+    )
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: `the '${body.v1Arm.mode}' v1 arm answers an inbound - an outreach turn has none to hand it. Use mode 'sandbox_followup'.`,
+      })
+    if (body.v1Arm?.mode === 'sandbox_followup' && body.outreach === undefined)
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         message:
-          'the v1 arm answers an inbound - an outreach turn has none to hand it',
+          "the 'sandbox_followup' v1 arm is the venue writing first - pair it with an outreach turn, or v2 would be answering an inbound v1 never saw",
       })
     if (body.outreach !== undefined && body.actualReply !== undefined)
       ctx.addIssue({
@@ -407,20 +453,32 @@ async function runV1Arm(
   const arm =
     body.v1Arm.mode === 'replay'
       ? draftV1ForReplay(body.v1Arm.inboundMessageId)
-      : draftV1ForSandbox({
-          venueId: body.venueId,
-          sessionHistory: body.sessionHistory ?? [],
-          inbound: body.inbound,
-          // The SAME links v2 is handed above, written as the bodyless
-          // attachment row both webhooks store - so the two arms answer a
-          // turn that mentions the same photo rather than one of them
-          // answering a turn without it.
-          mediaUrls: body.media?.mediaUrls,
-          // Undefined stays slot 0 inside the arm, so the playground's own
-          // behaviour is unchanged. A fan-out caller (/admin/tests/human-eval)
-          // passes its worker index.
-          slot: body.v1Arm.slot,
-        })
+      : body.v1Arm.mode === 'sandbox_followup'
+        ? draftV1FollowupForSandbox({
+            venueId: body.venueId,
+            sessionHistory: body.sessionHistory ?? [],
+            // `triggeredAt` is this request's clock. The harness passes its
+            // `--at` instead, which is what lets a run taken after close
+            // still follow up "the next morning"; this route has no injected
+            // clock, so a pass taken at night asks v1 to follow up at night.
+            trigger: { reason: body.v1Arm.trigger, triggeredAt: new Date() },
+            channel: body.v1Arm.channel,
+            slot: body.v1Arm.slot,
+          })
+        : draftV1ForSandbox({
+            venueId: body.venueId,
+            sessionHistory: body.sessionHistory ?? [],
+            inbound: body.inbound,
+            // The SAME links v2 is handed above, written as the bodyless
+            // attachment row both webhooks store - so the two arms answer a
+            // turn that mentions the same photo rather than one of them
+            // answering a turn without it.
+            mediaUrls: body.media?.mediaUrls,
+            // Undefined stays slot 0 inside the arm, so the playground's own
+            // behaviour is unchanged. A fan-out caller (/admin/tests/human-eval)
+            // passes its worker index.
+            slot: body.v1Arm.slot,
+          })
 
   let timer: ReturnType<typeof setTimeout> | undefined
   const timeout = new Promise<V1ArmOutcome>((resolve) => {
