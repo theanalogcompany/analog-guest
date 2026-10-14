@@ -31,9 +31,20 @@
 -- old schema is a constraint violation on the last step of a pass, after the
 -- file was already stored. Reverse of the SET NOT NULL rule, same reasoning.
 --
--- `db/types.ts` is hand-patched in the same commit so the code typechecks
--- before this lands (db/migrations/CLAUDE.md, step 4). The next `db:types`
--- run overwrites the patch with canonical output.
+-- `db/types.ts` IS HAND-PATCHED IN THE SAME COMMIT, AND NOT BECAUSE THE CODE
+-- NEEDS IT TO TYPECHECK - it does not. The generated `Json` union already
+-- contains `null`, so `v1: Json` admits null and `tsc` is clean either way;
+-- that was checked by reverting the patch and re-running it, not assumed. The
+-- patch is here so the committed types match what `db:types` emits once this
+-- lands, rather than leaving a spurious diff for whoever regenerates next.
+-- Until then the file is deliberately ahead of the live schema in this one
+-- respect. The next `db:types` run makes it canonical.
+--
+-- ALSO RESTATES `human_eval_sessions.csv`'s COMMENT, which belongs to 087 and
+-- is here because 087's body cannot be re-run: the column was applied while
+-- this work was still numbered 085, so the stored comment cross-references a
+-- migration number that now belongs to the passport stamps. A `comment on` is
+-- additive and re-runnable; `add column` is not.
 
 begin;
 
@@ -46,5 +57,9 @@ comment on column human_eval_units.v1 is
 
 comment on column human_eval_units.v2 is
   'v2''s answer, shape GoldenV2Schema in lib/schemas/golden.ts. Null means the same two things as v1 - see that column.';
+
+-- 087's, restated: see the header. The stored text names migration 085.
+comment on column human_eval_sessions.csv is
+  'The pass as a CSV, written once by the submit route before the replies are cleared, and what the export route serves. Null on a pass still in progress, and on one submitted before migration 087 - the export route then builds the file from the rows instead. The filename is not stored; it stays derived from git_sha and started_at.';
 
 commit;
