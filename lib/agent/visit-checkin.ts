@@ -24,8 +24,14 @@
 // WHAT THIS MODULE DOES NOT DECIDE: what the sign-off says. That belongs to a
 // later part of the ticket and reads the row this one writes.
 
-/** What a guest said when asked how their order is. */
-export type VisitCheckinAnswer = 'good' | 'bad' | 'not_yet'
+import type { CheckinAnswerVerdict } from '@/lib/ai/read-checkin-answer'
+
+/**
+ * What a guest said when asked how their order is. `ok` is the lukewarm one
+ * ("fine", "not bad"; TAC-588 hotfix, ruled 2026-10-15, migration 090): no
+ * review link, and no further question, because it is an answer.
+ */
+export type VisitCheckinAnswer = 'good' | 'ok' | 'bad' | 'not_yet'
 
 /** One guest's check-in for one venue-local day, as stored. */
 export interface VisitCheckin {
@@ -226,38 +232,87 @@ export function isCheckinFresh(checkin: VisitCheckin, at: Date): boolean {
 /**
  * Read one reply as an answer.
  *
- * NO NEW MODEL CALL AND NO CLASSIFIER CHANGE. Both signals already exist on
- * every turn, from both classifier arms:
+ * TWO READINGS, and the first that can decide does (TAC-588 hotfix, ruled
+ * 2026-10-15):
  *
  *   bad      the turn classified `comp_complaint`. Checked FIRST: a burst that
  *            praises one thing and complains about another classifies as a
  *            complaint, and that is the reading this must agree with.
- *   good     the classifier's `praisedExperience`, the flag the review ask
- *            already rides on.
- *   not yet  everything else.
+ *   READ     the check-in answer reader's verdict (lib/ai/read-checkin-
+ *            answer.ts), which reads the reply against the question we asked:
+ *            liked -> good, ok -> ok, disliked -> bad, not_yet and unclear ->
+ *            not_yet.
+ *   FALLBACK when the reader failed or was not run: the old reading, off the
+ *            classifier's `praisedExperience`. good when it is set, not yet
+ *            otherwise.
  *
- * "NOT YET" IS THE DEFAULT, NOT A DETECTION, and that is the honest name for
- * it. "haven't tried it" lands here, and so does "it's fine" when the
- * classifier does not read that as praise, and so does a question about wifi.
- * The cost is one check-back to a guest who had half-answered, which is why it
- * is the default rather than `good`: reading a lukewarm reply as happy would
- * send a review ask to someone who never said they liked it.
+ * WHY THE READER, NOT THE PRAISE FLAG. The flag is the review-ask signal and
+ * set high on purpose, so a plain "it was good" in answer to "how'd you like
+ * it?" fell under it to `not_yet`. After a receipt scan's item question, the
+ * visit's only check-back, that left nothing to follow (UAT, 2026-10-15). The
+ * flag still decides on the fallback, where it errs the safe way: a lukewarm
+ * reply is never read as happy, so no review ask goes to someone who never
+ * said they liked it.
  */
 export function classifyCheckinAnswer(input: {
   category: string
   praisedExperience: boolean
+  /** The reader's verdict, or null when it failed or was not run. */
+  read?: CheckinAnswerVerdict | null
 }): VisitCheckinAnswer {
   if (input.category === 'comp_complaint') return 'bad'
+  if (input.read !== undefined && input.read !== null) {
+    return CHECKIN_ANSWER_FOR_VERDICT[input.read]
+  }
   if (input.praisedExperience) return 'good'
   return 'not_yet'
 }
+
+/**
+ * How long after the question's own timestamp its message row may land. The
+ * row's `asked_at` (or `checkback_sent_at`) is stamped around the send, a
+ * second or two from the message row's `created_at`; a minute is far past that
+ * and far short of any reply of ours to a message of theirs.
+ */
+export const CHECKIN_QUESTION_SLACK_MS = 60 * 1000
+
+/**
+ * TAC-588 hotfix: is our newest delivered message the check-in question
+ * itself, so this reply is answering it? Only then is the check-in answer
+ * reader run: it is told the venue asked how they liked their order, and
+ * "perfect thanks" to an answer about the wifi must not read as liking it.
+ *
+ * The question is the check-in's own (`askedAt`) or its check-back
+ * (`checkbackSentAt`); our newest message may be either, and no later. Pure.
+ */
+export function ourLastWasTheCheckinQuestion(
+  ourLastAt: Date,
+  checkin: VisitCheckin,
+): boolean {
+  const askedAt = Math.max(
+    checkin.askedAt.getTime(),
+    checkin.checkbackSentAt?.getTime() ?? 0,
+  )
+  return ourLastAt.getTime() <= askedAt + CHECKIN_QUESTION_SLACK_MS
+}
+
+/** How the reader's verdict is stored. A total map, so a new verdict must say. */
+export const CHECKIN_ANSWER_FOR_VERDICT = {
+  liked: 'good',
+  ok: 'ok',
+  disliked: 'bad',
+  not_yet: 'not_yet',
+  unclear: 'not_yet',
+} as const satisfies Record<CheckinAnswerVerdict, VisitCheckinAnswer>
 
 /**
  * Given what is on the row and what this reply read as, what should be
  * written? Null means leave the row alone.
  *
  *   nothing yet -> anything
- *   not yet     -> good or bad
+ *   not yet     -> good, ok or bad
+ *   ok          -> good or bad (a later "actually it was great" moves it up;
+ *                  a later "not yet" does not move it back)
  *   good        -> bad
  *   bad         -> nothing, ever
  *
@@ -274,6 +329,7 @@ export function nextCheckinAnswer(
   if (current === incoming) return null
   if (current === 'bad') return null
   if (current === 'good') return incoming === 'bad' ? 'bad' : null
+  if (current === 'ok') return incoming === 'not_yet' ? null : incoming
   return incoming
 }
 

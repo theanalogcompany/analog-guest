@@ -2872,7 +2872,20 @@ import {
 //   The counter greeting (no code, or a payment Square had not reported) and
 //   every other prompt are byte-identical to v1.107.0.
 //
-export const PROMPT_VERSION = 'v1.108.0'
+// v1.109.0 (TAC-588 hotfix): a reply that answers the venue's own question
+//   about the guest's order is told so, in one line just before the guest's
+//   message: "They are answering your question about the {item}: they liked
+//   it / they thought it was ok / they didn't like it / they haven't tried it
+//   yet or didn't say. Respond to that answer." (approved 2026-10-15,
+//   checkin-answer-line.ts). The verdict comes from a new reader,
+//   READ_CHECKIN_ANSWER_PROMPT_VERSION v1.0.0, in place of the praise flag;
+//   UAT found "it was good" read as not yet and a reply that complimented the
+//   order a second time.
+//
+//   BASELINE RESET only for a turn that answers a check-in question. Every
+//   other prompt is byte-identical to v1.108.0.
+//
+export const PROMPT_VERSION = 'v1.109.0'
 
 export const SYSTEM_TEMPLATE = `You work at a hospitality venue (cafe, bakery, restaurant). You communicate with its guests via iMessage, in whatever voice the venue has configured below — its own collective voice, its owner's, or a named staff member's.
 

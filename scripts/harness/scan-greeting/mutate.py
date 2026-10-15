@@ -241,6 +241,24 @@ MUTANTS = [
         "",
     ),
     (
+        "hotfix: the reader runs whatever our last message was",
+        CHECKIN,
+        "  return ourLastAt.getTime() <= askedAt + CHECKIN_QUESTION_SLACK_MS",
+        "  return true",
+    ),
+    (
+        "hotfix: liked is stored as not yet again",
+        CHECKIN,
+        "  liked: 'good',",
+        "  liked: 'not_yet',",
+    ),
+    (
+        "hotfix: an ok answer is still owed a check-back",
+        CHECKIN,
+        "    (checkin.answer === null || checkin.answer === 'not_yet')",
+        "    (checkin.answer === null || checkin.answer === 'not_yet' || checkin.answer === 'ok')",
+    ),
+    (
         "carry-forward re-derived from the delay",
         TIMING,
         "export const SCAN_CARRY_FORWARD_MS = 5 * 60 * 1000",

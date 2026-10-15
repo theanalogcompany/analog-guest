@@ -374,9 +374,12 @@ post-send classifier, whichever sees it), one per guest per venue-local day.
 **"We asked this visit" has two records and both are read**: that row, and the intention's
 prompted row. Either can be the only one written (a classifier miss, a failed insert, an
 operator-approved send), so arming reads both and a check-in closes the intention outright
-(`promptedThisVisit` and the filter after it in `build-runtime-context.ts`). The guest's next replies are read as good / bad / not yet from the classifier's existing
-`comp_complaint` category and `praisedExperience` flag (`classifyCheckinAnswer`); "not yet" is
-the default, not a detection. Bad is final, good is not.
+(`promptedThisVisit` and the filter after it in `build-runtime-context.ts`). The guest's next replies are read as good / ok / bad / not yet by
+the check-in answer reader (`lib/ai/read-checkin-answer.ts`, TAC-588 hotfix), which reads the
+reply against our question; a classifier `comp_complaint` is still bad, and a failed read
+falls back to the old reading off `praisedExperience`, which is the review-ask flag and set too
+high for "it was good". `ok` ("fine", "not bad") gets no review link and no further question
+(migration 090). Bad is final, good is not.
 
 **Until they say it is good, no OPTIONAL question is asked, for at most two hours from the
 question**; a required one still renders, which is how the check-back gets through

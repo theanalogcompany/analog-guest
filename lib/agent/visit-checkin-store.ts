@@ -54,7 +54,9 @@ function toVisitCheckin(row: CheckinRow): VisitCheckin {
 }
 
 function isAnswer(value: string | null): value is VisitCheckinAnswer {
-  return value === 'good' || value === 'bad' || value === 'not_yet'
+  return (
+    value === 'good' || value === 'ok' || value === 'bad' || value === 'not_yet'
+  )
 }
 
 /**

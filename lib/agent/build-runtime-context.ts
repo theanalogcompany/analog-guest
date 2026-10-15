@@ -1396,6 +1396,7 @@ export async function buildRuntimeContext(input: {
     scanOrderVisit,
     visitLocalDate,
     visitCheckinHold: false,
+    checkinAnswerRead: null,
     // TAC-560: true only on the pause-triggered warm close. Read off the
     // trigger rather than derived, because whether this turn is a close is the
     // caller's decision (the processor claimed it), not something re-inferable

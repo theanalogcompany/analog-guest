@@ -424,6 +424,15 @@ export type RuntimeContext = {
    */
   scanItemQuestion?: { item: string }
   /**
+   * TAC-588 hotfix: this message answers the venue's own question about their
+   * order, as read by the check-in answer reader. Renders one line after the
+   * guest's message (checkin-answer-line.ts). Absent on every other turn.
+   */
+  checkinAnswer?: {
+    item: string | null
+    verdict: import('./read-checkin-answer').CheckinAnswerVerdict
+  }
+  /**
    * TAC-575: this turn is a sign-off, and which one. `happy` and
    * `after_complaint` each render a `## Sign off` block in place of
    * `## Ask for a review` (both need `reviewAsk` set, which carries the

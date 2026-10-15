@@ -22,7 +22,15 @@ import {
 } from '@/lib/agent/instagram-scan-greeting'
 import { settleScanPassport } from '@/lib/agent/scan-arrival-store'
 import { processDueScanItemQuestions } from '@/lib/agent/scan-item-question'
-import { resolveSameVisitOrderAt } from '@/lib/agent/visit-checkin'
+import {
+  classifyCheckinAnswer,
+  nextCheckinAnswer,
+  ourLastWasTheCheckinQuestion,
+  owesCheckback,
+  resolveSameVisitOrderAt,
+} from '@/lib/agent/visit-checkin'
+import { deriveSignOffReviewAsk } from '@/lib/agent/review-ask'
+import { checkinAnswerFactLine } from '@/lib/ai/prompts/checkin-answer-line'
 import { scanItemQuestionInstructions } from '@/lib/ai/prompts/categories/scan-item-question'
 import { resolveScanItemQuestionDisposition } from '@/lib/schemas/approval-policy'
 import {
@@ -1786,6 +1794,158 @@ async function main() {
           menuItems: [],
         })?.item,
         'Blossom Tonic',
+      )
+    },
+  )
+
+  // ---------------------------------------------------------------------------
+  // TAC-588 hotfix: reading the answer to our question
+  // ---------------------------------------------------------------------------
+
+  await check(
+    'UAT 2026-10-15: "it was good" after the scan item question records good, not not_yet',
+    () => {
+      // The turn as it ran: category `reply`, no praise flag. The reader reads
+      // it against "How did the matcha latte land tonight?" as liked.
+      const turn = { category: 'reply', praisedExperience: false }
+      assert.equal(
+        nextCheckinAnswer(
+          null,
+          classifyCheckinAnswer({ ...turn, read: 'liked' }),
+        ),
+        'good',
+      )
+      // The defect, kept as the fallback: with no reader verdict the praise
+      // flag decides, and this turn's reads as not yet.
+      assert.equal(
+        nextCheckinAnswer(null, classifyCheckinAnswer({ ...turn, read: null })),
+        'not_yet',
+      )
+    },
+  )
+
+  await check(
+    'reader verdicts map to stored answers; a classifier complaint still wins',
+    () => {
+      const reply = { category: 'reply', praisedExperience: false }
+      assert.equal(classifyCheckinAnswer({ ...reply, read: 'liked' }), 'good')
+      assert.equal(classifyCheckinAnswer({ ...reply, read: 'ok' }), 'ok')
+      assert.equal(classifyCheckinAnswer({ ...reply, read: 'disliked' }), 'bad')
+      assert.equal(
+        classifyCheckinAnswer({ ...reply, read: 'not_yet' }),
+        'not_yet',
+      )
+      assert.equal(
+        classifyCheckinAnswer({ ...reply, read: 'unclear' }),
+        'not_yet',
+      )
+      assert.equal(
+        classifyCheckinAnswer({
+          category: 'comp_complaint',
+          praisedExperience: false,
+          read: 'liked',
+        }),
+        'bad',
+      )
+      // Fallback with the praise flag set is still good.
+      assert.equal(
+        classifyCheckinAnswer({ category: 'reply', praisedExperience: true }),
+        'good',
+      )
+    },
+  )
+
+  await check(
+    'ruled: ok is an answer: no check-back owed, no review link, and it moves up or to bad but not back',
+    () => {
+      const row = {
+        id: 'c1',
+        venueLocalDate: '2026-09-20',
+        orderedAt: SCAN,
+        askedAt: SCAN,
+        answer: 'ok' as const,
+        answeredAt: SCAN,
+        checkbackClaimedAt: null,
+        checkbackSentAt: null,
+      }
+      assert.equal(owesCheckback(row), false)
+      assert.equal(
+        deriveSignOffReviewAsk({
+          checkinAnswer: 'ok',
+          afterComplaint: false,
+          reviewAskedAt: null,
+          links: [
+            { kind: 'review', url: 'https://example.com/r', label: 'Google' },
+          ],
+        }),
+        null,
+      )
+      assert.equal(nextCheckinAnswer('not_yet', 'ok'), 'ok')
+      assert.equal(nextCheckinAnswer('ok', 'good'), 'good')
+      assert.equal(nextCheckinAnswer('ok', 'bad'), 'bad')
+      assert.equal(nextCheckinAnswer('ok', 'not_yet'), null)
+      assert.equal(nextCheckinAnswer('good', 'ok'), null)
+    },
+  )
+
+  await check(
+    'the reply fact line: approved wording per verdict, none for unclear',
+    () => {
+      const line = (
+        verdict: Parameters<typeof checkinAnswerFactLine>[0]['verdict'],
+      ) => checkinAnswerFactLine({ item: 'matcha latte', verdict })
+      assert.equal(
+        line('liked'),
+        'They are answering your question about the matcha latte: they liked it. Respond to that answer.',
+      )
+      assert.equal(
+        line('ok'),
+        'They are answering your question about the matcha latte: they thought it was ok. Respond to that answer.',
+      )
+      assert.equal(
+        line('disliked'),
+        "They are answering your question about the matcha latte: they didn't like it. Respond to that answer.",
+      )
+      assert.equal(
+        line('not_yet'),
+        "They are answering your question about the matcha latte: they haven't tried it yet or didn't say. Respond to that answer.",
+      )
+      assert.equal(line('unclear'), null)
+      assert.equal(
+        checkinAnswerFactLine({ item: null, verdict: 'liked' }),
+        'They are answering your question about what they got: they liked it. Respond to that answer.',
+      )
+    },
+  )
+
+  await check(
+    'the reader runs only when our newest message is the check-in question (or its check-back)',
+    () => {
+      const row = {
+        id: 'c1',
+        venueLocalDate: '2026-09-20',
+        orderedAt: SCAN,
+        askedAt: at(20 * MINUTE),
+        answer: null,
+        answeredAt: null,
+        checkbackClaimedAt: null,
+        checkbackSentAt: null,
+      }
+      // The question's own message row, a moment after the stamp.
+      assert.equal(
+        ourLastWasTheCheckinQuestion(at(20 * MINUTE + SECOND), row),
+        true,
+      )
+      // A reply of ours about the wifi, three minutes later: not the question.
+      assert.equal(ourLastWasTheCheckinQuestion(at(23 * MINUTE), row), false)
+      // The counter flow's check-back is a question too.
+      assert.equal(
+        ourLastWasTheCheckinQuestion(at(31 * MINUTE), {
+          ...row,
+          checkbackClaimedAt: at(31 * MINUTE),
+          checkbackSentAt: at(31 * MINUTE),
+        }),
+        true,
       )
     },
   )
