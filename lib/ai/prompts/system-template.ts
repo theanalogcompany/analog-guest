@@ -2873,7 +2873,7 @@ import {
 //   every other prompt are byte-identical to v1.107.0.
 //
 // v1.109.0 (TAC-588 hotfix): a reply that answers the venue's own question
-//   about the guest's order is told so, in one line right after the guest's
+//   about the guest's order is told so, in one line just before the guest's
 //   message: "They are answering your question about the {item}: they liked
 //   it / they thought it was ok / they didn't like it / they haven't tried it
 //   yet or didn't say. Respond to that answer." (approved 2026-10-15,

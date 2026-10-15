@@ -17,9 +17,11 @@
 -- never carries the review link (deriveSignOffReviewAsk reads only 'good').
 --
 -- A WIDENING. Every row today satisfies the new check, so it is safe to apply
--- with the current code deployed, and it MUST be applied before the code that
--- writes 'ok' deploys: until then every 'ok' write fails the old check, and the
--- answer is lost on a turn that otherwise goes out.
+-- with the current code deployed, and it MUST be applied BEFORE MERGING the
+-- code that writes 'ok' (Vercel deploys on merge): until then every 'ok' write
+-- fails the old check, and the answer is lost: a guest who said "fine" to
+-- the counter flow's question still gets its check-back, and one who said it
+-- to a scan item question is left at no answer.
 --
 -- NOT ADDITIVE: it drops and re-adds a constraint on a live table, so db:apply
 -- refuses it by design. Apply by hand in Supabase Studio. The constraint name

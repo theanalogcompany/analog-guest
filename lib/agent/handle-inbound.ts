@@ -109,6 +109,8 @@ import {
 } from './intentions/record'
 import {
   classifyCheckinAnswer,
+  ourLastWasTheCheckinQuestion,
+  type VisitCheckin,
   isAwaitingCheckinAnswer,
   nextCheckinAnswer,
   ORDER_READ_WAIT_MS,
@@ -2839,19 +2841,19 @@ async function runInboundTurn(
     // "you don't know yet how they liked it" under a message that says would
     // be false, and the warm close and review link follow the row either way.
     // `classifyCheckinAnswer` is the counter flow's own reader of an answer;
-    // "not yet" leaves the question open for when it fits.
+    // "not yet" leaves the question open for when it fits. NO CHECK-IN ANSWER
+    // READER HERE: nothing was asked (the hello asks nothing), and that reader
+    // is told it is reading an answer to our question about the order. The
+    // praise flag decides, as it did before the hotfix.
     if (
       ctx.scanOrderVisit !== null &&
       ctx.classification.category !== 'opt_out'
     ) {
-      const read = await readAnswerToOurQuestion(ctx, agentRunId)
       const answer = classifyCheckinAnswer({
         category: ctx.classification.category,
         praisedExperience: ctx.classification.praisedExperience === true,
-        read: read?.verdict ?? null,
       })
-      if (answer === 'good' || answer === 'ok' || answer === 'bad') {
-        ctx.checkinAnswerRead = read
+      if (answer === 'good' || answer === 'bad') {
         const scanOrderVisit = ctx.scanOrderVisit
         ctx.scanOrderVisit = null
         ctx.insideVisitCheckin = true
@@ -2951,10 +2953,11 @@ async function runInboundTurn(
     }
 
     // TAC-575: if this guest was asked how their order is on this visit, read
-    // this message as their answer. Post-classify because both signals are the
-    // classifier's (visit-checkin.ts says why no new model call is needed), and
-    // before generation because it never blocks one: fire and forget, like the
-    // extractor below.
+    // this message as their answer. Post-classify because a complaint is still
+    // the classifier's to call. Since the TAC-588 hotfix the answer is read by
+    // the check-in answer reader, AWAITED (at most CHECKIN_ANSWER_READ_WAIT_MS)
+    // because the reply's fact line depends on it; the write itself stays fire
+    // and forget.
     //
     // The row was loaded at context build, so the turn that SENDS the question
     // never reaches here with one, and the guest's order message is never read
@@ -2967,11 +2970,19 @@ async function runInboundTurn(
       // TAC-588 hotfix: read the reply against the question we asked, while
       // the answer is still open. Once it is good or bad only a complaint can
       // move it, and the classifier's category already says that.
+      //
+      // ONLY WHEN THEY ARE ANSWERING IT: our newest delivered message is the
+      // question itself (ourLastWasTheCheckinQuestion), so "perfect thanks"
+      // to a wifi answer is never read as liking the order. Not on a
+      // complaint (the classifier calls those) or an opt-out. Every other turn
+      // reads the old way, off the praise flag.
       const read =
-        checkin.answer === null ||
-        checkin.answer === 'not_yet' ||
-        checkin.answer === 'ok'
-          ? await readAnswerToOurQuestion(ctx, agentRunId)
+        (checkin.answer === null ||
+          checkin.answer === 'not_yet' ||
+          checkin.answer === 'ok') &&
+        ctx.classification.category !== 'comp_complaint' &&
+        ctx.classification.category !== 'opt_out'
+          ? await readAnswerToOurQuestion(ctx, agentRunId, checkin)
           : null
       ctx.checkinAnswerRead = read
       const answer = nextCheckinAnswer(
@@ -4777,6 +4788,7 @@ const CHECKIN_ANSWER_READ_WAIT_MS = 5000
 async function readAnswerToOurQuestion(
   ctx: RuntimeContext,
   agentRunId: string,
+  checkin: VisitCheckin,
 ): Promise<{ item: string | null; verdict: CheckinAnswerVerdict } | null> {
   if (ctx.currentMessage === null) return null
   const inboundAt = ctx.currentMessage.receivedAt.getTime()
@@ -4789,7 +4801,11 @@ async function readAnswerToOurQuestion(
         m.createdAt.getTime() <= inboundAt,
     )
     .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())[0]
-  if (question === undefined) return null
+  if (
+    question === undefined ||
+    !ourLastWasTheCheckinQuestion(question.createdAt, checkin)
+  )
+    return null
   let giveUp: ReturnType<typeof setTimeout> | undefined
   const result = await Promise.race([
     readCheckinAnswer({

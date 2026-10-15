@@ -25,6 +25,7 @@ import { processDueScanItemQuestions } from '@/lib/agent/scan-item-question'
 import {
   classifyCheckinAnswer,
   nextCheckinAnswer,
+  ourLastWasTheCheckinQuestion,
   owesCheckback,
   resolveSameVisitOrderAt,
 } from '@/lib/agent/visit-checkin'
@@ -1913,6 +1914,38 @@ async function main() {
       assert.equal(
         checkinAnswerFactLine({ item: null, verdict: 'liked' }),
         'They are answering your question about what they got: they liked it. Respond to that answer.',
+      )
+    },
+  )
+
+  await check(
+    'the reader runs only when our newest message is the check-in question (or its check-back)',
+    () => {
+      const row = {
+        id: 'c1',
+        venueLocalDate: '2026-09-20',
+        orderedAt: SCAN,
+        askedAt: at(20 * MINUTE),
+        answer: null,
+        answeredAt: null,
+        checkbackClaimedAt: null,
+        checkbackSentAt: null,
+      }
+      // The question's own message row, a moment after the stamp.
+      assert.equal(
+        ourLastWasTheCheckinQuestion(at(20 * MINUTE + SECOND), row),
+        true,
+      )
+      // A reply of ours about the wifi, three minutes later: not the question.
+      assert.equal(ourLastWasTheCheckinQuestion(at(23 * MINUTE), row), false)
+      // The counter flow's check-back is a question too.
+      assert.equal(
+        ourLastWasTheCheckinQuestion(at(31 * MINUTE), {
+          ...row,
+          checkbackClaimedAt: at(31 * MINUTE),
+          checkbackSentAt: at(31 * MINUTE),
+        }),
+        true,
       )
     },
   )

@@ -8,9 +8,10 @@
 // prompt said this message was an answer, or what it said.
 //
 // THE WORDING IS JAIPAL'S, approved 2026-10-15, with "they thought it was ok"
-// added for the lukewarm verdict. Rendered right after "The guest just sent",
-// the last thing before the model writes, because proximity reads as
-// authority in this prompt.
+// added for the lukewarm verdict. Rendered just BEFORE "The guest just sent"
+// (moved there in review): the guest's own message stays the last thing the
+// model reads, so a question riding in the same message ("not yet, do you have
+// oat milk?") is not buried under "Respond to that answer".
 //
 // NOTHING FOR `unclear`: "They are answering your question" would be false
 // for a guest who asked about the wifi instead. With no item in the question

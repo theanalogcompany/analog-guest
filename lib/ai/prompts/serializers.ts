@@ -2881,18 +2881,20 @@ export function runtimeToProse(
     kind: runtime.inboundMedia ?? null,
     described: runtime.inboundDescribedMedia ?? [],
   })
-  lines.push(...media.before)
-  if (runtime.inboundMessage) {
-    lines.push(`The guest just sent: "${runtime.inboundMessage}"`)
-  }
-  lines.push(...media.after)
-  // TAC-588 hotfix: when that message answers our question about their order,
-  // say so and say what it said, right after it (checkin-answer-line.ts).
+  // TAC-588 hotfix: when the message below answers our question about their
+  // order, say so and what it said (checkin-answer-line.ts). JUST BEFORE the
+  // message, not after it: the guest's own words stay the last thing read, so
+  // "Respond to that answer" cannot bury a question that rode in with it.
   const answerLine =
     runtime.checkinAnswer !== undefined
       ? checkinAnswerFactLine(runtime.checkinAnswer)
       : null
   if (answerLine !== null) lines.push(answerLine)
+  lines.push(...media.before)
+  if (runtime.inboundMessage) {
+    lines.push(`The guest just sent: "${runtime.inboundMessage}"`)
+  }
+  lines.push(...media.after)
   // TAC-324: R1 carve-out signal. This is the ONLY place createdVia/timing
   // surfaces in the prompt — without this line the model has no way to know
   // a guest arrived via QR scan, since createdVia isn't rendered anywhere

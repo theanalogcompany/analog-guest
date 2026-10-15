@@ -268,6 +268,34 @@ export function classifyCheckinAnswer(input: {
   return 'not_yet'
 }
 
+/**
+ * How long after the question's own timestamp its message row may land. The
+ * row's `asked_at` (or `checkback_sent_at`) is stamped around the send, a
+ * second or two from the message row's `created_at`; a minute is far past that
+ * and far short of any reply of ours to a message of theirs.
+ */
+export const CHECKIN_QUESTION_SLACK_MS = 60 * 1000
+
+/**
+ * TAC-588 hotfix: is our newest delivered message the check-in question
+ * itself, so this reply is answering it? Only then is the check-in answer
+ * reader run: it is told the venue asked how they liked their order, and
+ * "perfect thanks" to an answer about the wifi must not read as liking it.
+ *
+ * The question is the check-in's own (`askedAt`) or its check-back
+ * (`checkbackSentAt`); our newest message may be either, and no later. Pure.
+ */
+export function ourLastWasTheCheckinQuestion(
+  ourLastAt: Date,
+  checkin: VisitCheckin,
+): boolean {
+  const askedAt = Math.max(
+    checkin.askedAt.getTime(),
+    checkin.checkbackSentAt?.getTime() ?? 0,
+  )
+  return ourLastAt.getTime() <= askedAt + CHECKIN_QUESTION_SLACK_MS
+}
+
 /** How the reader's verdict is stored. A total map, so a new verdict must say. */
 export const CHECKIN_ANSWER_FOR_VERDICT = {
   liked: 'good',
