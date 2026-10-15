@@ -19,13 +19,14 @@ HARNESS = os.path.join("scripts", "harness", "scan-greeting", "harness.ts")
 STORE = "lib/agent/scan-arrival-store.ts"
 TIMING = "lib/agent/scan-arrival.ts"
 PROCESSOR = "lib/agent/instagram-scan-greeting.ts"
+ORDER = "lib/agent/scan-order.ts"
+QUESTION = "lib/agent/scan-item-question.ts"
+CHECKIN = "lib/agent/visit-checkin.ts"
+POLICY = "lib/schemas/approval-policy.ts"
 
-SLEEP = (
-    "    await deps.sleep(\n"
-    "      msUntilScanGreetingDue(scheduled.scannedAt, deps.now()) +\n"
-    "        SCAN_FAST_PATH_WAKE_MARGIN_MS,\n"
-    "    )\n"
-)
+# The top of the fast path's guarded block (TAC-588: it waits for the stamp
+# run before it reads the row and sleeps).
+FAST_PATH_TOP = "  try {\n    if (scheduled.passportSettled !== undefined) {\n"
 
 # (name, file, exact text that must match ONCE, replacement)
 MUTANTS = [
@@ -62,14 +63,14 @@ MUTANTS = [
     (
         "fast path judges at the pre-sleep instant",
         PROCESSOR,
-        "  try {\n" + SLEEP,
-        "  const stale = deps.now()\n  deps = { ...deps, now: () => stale }\n  try {\n" + SLEEP,
+        FAST_PATH_TOP,
+        "  const stale = deps.now()\n  deps = { ...deps, now: () => stale }\n" + FAST_PATH_TOP,
     ),
     (
         "fast path guard does not cover the sleep",
         PROCESSOR,
-        "  try {\n" + SLEEP,
-        "  await deps.sleep(0)\n  try {\n" + SLEEP,
+        FAST_PATH_TOP,
+        "  await deps.sleep(0)\n" + FAST_PATH_TOP,
     ),
     (
         "inbound re-check skipped",
@@ -86,8 +87,158 @@ MUTANTS = [
     (
         "sleep uncapped",
         TIMING,
-        "  return Math.min(Math.max(remaining, 0), 2 * delayMs)",
+        "  return Math.min(Math.max(remaining, 0), cap)",
         "  return Math.max(remaining, 0)",
+    ),
+    (
+        "TAC-588: hello ignores when the images went out",
+        TIMING,
+        "  if (timing.passportSentAt !== null) {",
+        "  if (false) {",
+    ),
+    (
+        "TAC-588: no passport cap, an unsettled run greets at 20s",
+        TIMING,
+        "      PASSPORT_WAIT_CAP_MS,\n  )",
+        "      0 + delayMs,\n  )",
+    ),
+    (
+        "TAC-588: fast path does not wait for the stamp run",
+        PROCESSOR,
+        "      await scheduled.passportSettled.catch(() => undefined)\n",
+        "      void scheduled.passportSettled.catch(() => undefined)\n",
+    ),
+    (
+        "TAC-588: a second settle overwrites the first",
+        STORE,
+        "      .eq('id', id)\n      .is('passport_settled_at', null)\n",
+        "      .eq('id', id)\n",
+    ),
+    (
+        "TAC-588: a bound order no longer lifts the closed check",
+        PROCESSOR,
+        "      order.kind !== 'bound' &&\n",
+        "",
+    ),
+    (
+        "TAC-588: the DISCOVERED item no longer wins",
+        ORDER,
+        "    if (discovered !== undefined) return pick(discovered, true)\n",
+        "",
+    ),
+    (
+        "TAC-588: drinks no longer beat food",
+        ORDER,
+        "  return pick(drink ?? names[0], false)",
+        "  return pick(names[0], false)",
+    ),
+    (
+        "TAC-588: the question backstop keeps questions",
+        TIMING,
+        "      if (!sentence.includes('?')) return true",
+        "      if (true) return true",
+    ),
+    (
+        "TAC-588: an expired code reads as no order",
+        ORDER,
+        "      ? { kind: 'expired' }\n      : NONE",
+        "      ? NONE\n      : NONE",
+    ),
+    (
+        "TAC-588: another guest's order is complimented",
+        ORDER,
+        "  if (row.guest_id !== scan.guestId) return REUSED\n",
+        "",
+    ),
+    (
+        "TAC-588: question due at the EARLIER of order+20 and hello+5",
+        TIMING,
+        "    Math.max(\n      input.orderedAt.getTime() + SCAN_ITEM_QUESTION_AFTER_ORDER_MS,",
+        "    Math.min(\n      input.orderedAt.getTime() + SCAN_ITEM_QUESTION_AFTER_ORDER_MS,",
+    ),
+    (
+        "TAC-588: spacing exemption anchored on nothing",
+        TIMING,
+        "  return lastProactiveSendAt.getTime() >= scannedAt.getTime()",
+        "  return true",
+    ),
+    (
+        "TAC-588: a guest reply no longer cancels the timer",
+        QUESTION,
+        "      row.helloClaimedAt,\n    )\n  )\n    return settleUnasked(supabase, row, now, 'guest_replied')",
+        "      row.helloClaimedAt,\n    ) && false\n  )\n    return settleUnasked(supabase, row, now, 'guest_replied')",
+    ),
+    (
+        "TAC-588: cancellation counts replies from before the hello",
+        QUESTION,
+        "      row.helloClaimedAt,\n    )\n  )\n    return settleUnasked(supabase, row, now, 'guest_replied')",
+        "      row.scannedAt,\n    )\n  )\n    return settleUnasked(supabase, row, now, 'guest_replied')",
+    ),
+    (
+        "TAC-588: a held question is never given up",
+        QUESTION,
+        "  if (isScanItemQuestionTooLate(row.dueAt, now))\n    return settleUnasked(supabase, row, now, 'too_late')",
+        "",
+    ),
+    (
+        "TAC-588: same_visit_order still arms on a receipt-scan visit",
+        CHECKIN,
+        "  if (input.scanOrderKnown === true) return null\n",
+        "",
+    ),
+    (
+        "TAC-588: item question inherits the check-back's HOLD default",
+        POLICY,
+        "  return policy?.scanItemQuestion ?? 'auto_send'",
+        "  return policy?.scanItemQuestion ?? policy?.visitCheckback ?? 'operator_approval'",
+    ),
+    (
+        "review fix: the reply path asks over a taken question",
+        TIMING,
+        "      known && input.itemQuestion !== 'taken' ? input.helloClaimedAt : null,",
+        "      known ? input.helloClaimedAt : null,",
+    ),
+    (
+        "review fix: a re-opened slip counts as a fresh order",
+        ORDER,
+        "    matchedAt.getTime() < scan.scannedAt.getTime() - BIND_CLOCK_SKEW_MS\n",
+        "    false\n",
+    ),
+    (
+        "review fix: an order with no named items is bound",
+        ORDER,
+        "  if (lineItemNames.length === 0) return NONE\n",
+        "",
+    ),
+    (
+        "review fix: an emoji-only remainder is sent",
+        TIMING,
+        "  return { body: hasRenderableContent(kept) ? kept : '', dropped }",
+        "  return { body: kept, dropped }",
+    ),
+    (
+        "review fix: the passport cap ignores when we recorded the scan",
+        TIMING,
+        "  const recorded = timing.recordedAt?.getTime() ?? scanned\n",
+        "  const recorded = scanned\n",
+    ),
+    (
+        "review fix: a question with no hello in front stays owed",
+        PROCESSOR,
+        "    if (itemQuestionScheduled && !greetingOut) {\n      await settleNoHello(supabase, row.id)\n    }\n",
+        "",
+    ),
+    (
+        "review ruling: a used slip asks what they got",
+        ORDER,
+        "  return order?.kind === 'expired' || order?.kind === 'reused'",
+        "  return order?.kind === 'expired'",
+    ),
+    (
+        "review ruling: lassi is not a drink by name",
+        ORDER,
+        "  'lassi',\n",
+        "",
     ),
     (
         "carry-forward re-derived from the delay",

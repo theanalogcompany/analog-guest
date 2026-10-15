@@ -33,7 +33,7 @@ import {
   bodyMentionsMenuItem,
   venueLocalDayKey,
 } from './extract-reported-order'
-import { scanCarryForwardAt } from './scan-arrival'
+import { resolveScanOrderVisit, scanCarryForwardAt } from './scan-arrival'
 import {
   resolveCheckbackDueAt,
   resolveSameVisitOrderAt,
@@ -45,7 +45,16 @@ import { loadComplaintCheckins, loadVisitCheckin } from './visit-checkin-store'
 // "first conversation". warm-close.ts is pure and builds no client at import.
 import { hasAnsweredGuestBefore, reachedGuest } from './retrieval-context'
 import { isFirstConversation, isQuietAfterWarmClose } from './warm-close'
-import { loadPriorGreetings, loadScanCarryForward } from './scan-arrival-store'
+import {
+  greetsHelloOnly,
+  loadScanOrder,
+  pickComplimentItem,
+} from './scan-order'
+import {
+  loadPriorGreetings,
+  loadScanCarryForward,
+  loadScanOrderVisit,
+} from './scan-arrival-store'
 import {
   resolveConversationChannel,
   venueMessagingNumberRequired,
@@ -731,6 +740,7 @@ export async function buildRuntimeContext(input: {
   let visitCheckin: VisitCheckin | null = null
   let visitLocalDate: string | null = null
   let complaintFollowup: RuntimeContext['complaintFollowup'] = null
+  let scanOrderVisit: RuntimeContext['scanOrderVisit'] = null
   if (input.currentMessage) {
     // "Have we heard what they ordered" reuses the visit-history query rather
     // than issuing another: the RAW row count, before extractRecentVisits's
@@ -883,6 +893,58 @@ export async function buildRuntimeContext(input: {
         )
       }
     }
+    // TAC-588: is this reply part of a receipt-scan visit whose order the scan
+    // told us? If so the counter flow's "they named it" arming is off, and,
+    // while the timed item question has not gone and the visit has no
+    // check-in, this reply may ask how they liked it (scan_order_liked).
+    //
+    // FAILS TO TODAY'S FLOW: an unreadable read is no receipt-scan visit,
+    // which is what every reply was before. The cost is one counter-flow
+    // question on a scan visit, never a second item question.
+    let scanOrderKnown = false
+    let scanOrderLikedAt: Date | null = null
+    const scanVisit = await loadScanOrderVisit(
+      supabase,
+      input.venueId,
+      input.guestId,
+    )
+    if (!scanVisit.ok) {
+      console.warn(
+        `[agent] buildRuntimeContext: receipt-scan visit unreadable for guest ${input.guestId}: ${scanVisit.error}. Read as no scan visit.`,
+      )
+    } else if (scanVisit.data !== null) {
+      const timing = resolveScanOrderVisit({
+        helloClaimedAt: scanVisit.data.helloClaimedAt,
+        itemQuestion: scanVisit.data.itemQuestion,
+        inboundAt: input.currentMessage.receivedAt,
+      })
+      scanOrderKnown = timing.known
+      if (
+        timing.likedAt !== null &&
+        visitCheckin === null &&
+        !checkinUnreadable
+      ) {
+        const order = await loadScanOrder(supabase, {
+          venueId: input.venueId,
+          guestId: input.guestId,
+          scanMessageId: scanVisit.data.scanMessageId,
+          scannedAt: scanVisit.data.scannedAt,
+        })
+        const pick =
+          order.kind === 'bound'
+            ? pickComplimentItem({
+                lineItemNames: order.lineItemNames,
+                discoveredLabel: order.discoveredLabel,
+                menuItems: venue.venueInfo.menu.items,
+              })
+            : null
+        if (order.kind === 'bound' && pick !== null) {
+          scanOrderVisit = { item: pick.item, orderedAt: order.orderedAt }
+          scanOrderLikedAt = timing.likedAt
+        }
+      }
+    }
+
     // TAC-575: is this the first message of a counter visit by a guest whose
     // earlier complaint has not been followed up? Read only when a scan is
     // live (`scanAt`), which is what "detected visit" means in the ruling, so
@@ -947,6 +1009,7 @@ export async function buildRuntimeContext(input: {
         venue.venueInfo.menu.items,
       ),
       answeringOurQuestion,
+      scanOrderKnown,
       alreadyAskedThisVisit:
         checkinUnreadable || visitCheckin !== null || promptedThisVisit,
     })
@@ -1066,6 +1129,7 @@ export async function buildRuntimeContext(input: {
       openRecommendationsUnreadable: !activeCommitmentsResult.ok,
       recordedOrderTimes,
       sameVisitOrderAt,
+      scanOrderLikedAt,
       checkbackDueAt,
       rows: intentionRows,
       inboundTimes,
@@ -1135,6 +1199,34 @@ export async function buildRuntimeContext(input: {
         newlyEligible: intentions.newlyEligible.filter(
           (n) => n.key !== 'understand_order',
         ),
+      }
+    }
+
+    // TAC-588: scan_order_liked renders only on a reply that may still carry
+    // it (scanOrderVisit, resolved above), and its line names the item the
+    // hello complimented: the ONE prompt line with a fill-in, because the
+    // guest never named the item and the thread has nothing to point at.
+    // Otherwise it is dropped, like check_back_on_order below, because a row
+    // armed on an earlier turn must stop rendering once the timed question
+    // has gone or the visit has its check-in.
+    {
+      const item = scanOrderVisit?.item ?? null
+      intentions = {
+        ...intentions,
+        open:
+          item === null
+            ? intentions.open.filter((o) => o.key !== 'scan_order_liked')
+            : intentions.open.map((o) =>
+                o.key === 'scan_order_liked'
+                  ? { ...o, promptLine: o.promptLine.replace('{item}', item) }
+                  : o,
+              ),
+        newlyEligible:
+          item === null
+            ? intentions.newlyEligible.filter(
+                (n) => n.key !== 'scan_order_liked',
+              )
+            : intentions.newlyEligible,
       }
     }
 
@@ -1214,6 +1306,7 @@ export async function buildRuntimeContext(input: {
   // that nothing is on file.
   let scanArrival: RuntimeContext['scanArrival'] = null
   if (input.followupTrigger?.reason === 'instagram_scan_arrival') {
+    const scanOrder = input.followupTrigger.instagramScanArrival?.order
     const arrival = await findEarliestAcknowledgedArrival({
       venueId: input.venueId,
       guestId: input.guestId,
@@ -1258,6 +1351,18 @@ export async function buildRuntimeContext(input: {
       afterComplaint:
         input.followupTrigger.instagramScanArrival?.afterComplaint === true,
       priorGreetings: priorGreetings.ok ? priorGreetings.data : [],
+      // TAC-588: the item to compliment, from the order the processor read
+      // off the scan's receipt code. Picked here because this is where the
+      // venue's menu is loaded.
+      order:
+        scanOrder?.kind === 'bound'
+          ? pickComplimentItem({
+              lineItemNames: scanOrder.lineItemNames,
+              discoveredLabel: scanOrder.discoveredLabel,
+              menuItems: venue.venueInfo.menu.items,
+            })
+          : null,
+      helloOnly: greetsHelloOnly(scanOrder),
     }
   }
 
@@ -1288,6 +1393,7 @@ export async function buildRuntimeContext(input: {
     // The serializer omits the block entirely when empty.
     openIntentions: intentions.open,
     visitCheckin,
+    scanOrderVisit,
     visitLocalDate,
     visitCheckinHold: false,
     // TAC-560: true only on the pause-triggered warm close. Read off the
@@ -1298,6 +1404,11 @@ export async function buildRuntimeContext(input: {
     // processor filled in after resolving the answer from `messages`. Nothing
     // here reads the database for them.
     visitCheckback: input.followupTrigger?.reason === 'visit_checkback',
+    scanItemQuestion:
+      input.followupTrigger?.reason === 'visit_checkback' &&
+      input.followupTrigger.visitCheckback?.scanItem !== undefined
+        ? { item: input.followupTrigger.visitCheckback.scanItem }
+        : null,
     inquiryFollowup:
       input.followupTrigger?.reason === 'inquiry_followup' &&
       input.followupTrigger.inquiryFollowup

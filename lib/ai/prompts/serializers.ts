@@ -734,8 +734,33 @@ function formatScanArrival(
     scanArrival.hasRecordedVisit
       ? 'There is a recorded visit on file, so you can speak to them as someone who has been in before.'
       : 'There is no recorded visit on file. Don\'t say "welcome back" and don\'t mention a past visit.',
+    ...formatScanOrder(scanArrival.order ?? null),
     ...formatPriorGreetings(scanArrival.priorGreetings ?? []),
   ].join('\n')
+}
+
+/**
+ * TAC-588: what a receipt scan says they ordered, for the hello's compliment.
+ * Approved wording (ruled 2026-10-14). The item is Square's own line-item
+ * name; the description is the venue's own menu text, verbatim, and renders
+ * only when the menu has one, because the hello is told never to state a
+ * detail these facts do not give it.
+ *
+ * Each value is flattened to one line, so a line break inside a menu
+ * description cannot end the block or start a new one.
+ */
+function formatScanOrder(
+  order: NonNullable<RuntimeContext['scanArrival']>['order'] | null,
+): string[] {
+  if (order === null || order === undefined) return []
+  const flat = (text: string) => text.replace(/\s+/g, ' ').trim()
+  return [
+    `What they ordered: ${flat(order.item)}`,
+    ...(order.firstTime ? ["It's the first time they've ordered it."] : []),
+    ...(order.menuDescription !== null && flat(order.menuDescription) !== ''
+      ? [`What the menu says about it: ${flat(order.menuDescription)}`]
+      : []),
+  ]
 }
 
 /**

@@ -14,6 +14,8 @@ export const CATEGORY_TO_PRIMARY_TAG_PREFERENCE: Partial<
   perk_inquiry: ['mechanic'],
   recommendation_request: ['recommendations', 'menu', 'sourcing'],
   event_question: ['events'],
+  // TAC-588: a receipt-scan hello retrieves against the item it compliments.
+  guest_arrived: ['menu'],
 }
 
 /**

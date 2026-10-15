@@ -49,6 +49,11 @@
 // every Instagram send, and a second copy would be a second definition of the
 // same deadline. Two hours is well inside it anyway.
 
+import {
+  guestHasWrittenSince,
+  loadOwedScanItemQuestion,
+} from './scan-arrival-store'
+import { SCAN_ITEM_QUESTION_MAX_AGE_MS } from './scan-arrival'
 import { randomUUID } from 'node:crypto'
 
 import { createAdminClient } from '@/lib/db/admin'
@@ -137,6 +142,14 @@ export type WarmCloseSkipReason =
    * 2026-10-06: "send nothing more".
    */
   | 'checkback_unanswered'
+  /**
+   * TAC-588: a receipt scan's item question is still owed. Transient, like
+   * checkback_pending: the hello's lull is about ten minutes and the question
+   * is due at the order + twenty, so without this a first conversation would
+   * be closed before it was asked. Ends when the question is asked, given up,
+   * or cancelled by the guest writing back.
+   */
+  | 'scan_question_pending'
   | 'opted_out'
   | 'venue_paused'
   | 'quiet_hours'
@@ -564,6 +577,37 @@ async function considerCandidate(
         return 'checkback_unanswered'
       }
     }
+  }
+
+  // TAC-588: a receipt scan's item question comes first too. Once it goes,
+  // it writes the visit's check-in with the check-back spent, and the block
+  // above takes over (an unanswered one ends the visit, as any check-back's
+  // does). While it is owed and the guest has not written since its hello,
+  // the close waits. A guest who wrote back has cancelled it, so it no longer
+  // holds anything up.
+  const owedQuestion = await loadOwedScanItemQuestion(
+    supabase,
+    candidate.venueId,
+    candidate.guestId,
+    new Date(now.getTime() - SCAN_ITEM_QUESTION_MAX_AGE_MS),
+  )
+  if (!owedQuestion.ok) {
+    console.warn('[warm-close] scan item question unreadable; skipping', {
+      guestId: candidate.guestId,
+      error: owedQuestion.error,
+    })
+    return 'guest_unreadable'
+  }
+  if (
+    owedQuestion.data !== null &&
+    !(await guestHasWrittenSince(
+      supabase,
+      candidate.venueId,
+      candidate.guestId,
+      owedQuestion.data.helloClaimedAt,
+    ))
+  ) {
+    return 'scan_question_pending'
   }
 
   // NO "ALREADY CLOSED IN CONVERSATION" CHECK ANY MORE. TAC-560 stood the timer

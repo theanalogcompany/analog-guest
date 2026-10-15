@@ -85,7 +85,11 @@ import {
 } from '@/lib/messaging/instagram/resolve-external'
 import { recordInstagramTurnNotRun } from '@/lib/messaging/instagram/record-turn'
 import { runScanGreetingFastPath } from '@/lib/agent/instagram-scan-greeting'
-import { scheduleScanArrival } from '@/lib/agent/scan-arrival-store'
+import {
+  scheduleScanArrival,
+  settleScanPassport,
+} from '@/lib/agent/scan-arrival-store'
+import type { ScanCodeBindTarget } from '@/lib/messaging/instagram/handle-events'
 import { rehostMessageAttachments } from '@/lib/messaging/attachments/rehost'
 import { summarizeInstagramPayload } from '@/lib/messaging/instagram/summarize-payload'
 import {
@@ -275,6 +279,11 @@ export async function POST(request: Request): Promise<Response> {
       // discarded. An agent run records its own outcome at the end of
       // handleInbound, so exactly one of these two writes a row.
       const handoff = resolveAgentHandoff(outcome)
+      // A referral carrying one of our receipt codes. Read up front because a
+      // bare scan that carries one chains its bind into its greeting (TAC-588,
+      // below); every other referral that carries one binds on its own, after.
+      const scanCodeTarget = scanCodeBindTargetFor(outcome, looksLikeScanCode)
+      let scanCodeChained = false
       if (handoff.kind === 'run') {
         // TAC-540: show the guest Seen, about a second after they hit send.
         //
@@ -312,26 +321,62 @@ export async function POST(request: Request): Promise<Response> {
         //
         // waitUntil, never awaited: two writes and then a twenty-second sleep
         // must not sit inside Meta's delivery deadline.
+        //
+        // TAC-588: A RECEIPT CODE ON THE SCAN MAKES IT ONE CHAIN. The hello
+        // follows the passport images and compliments the order, so the bind
+        // and the stamp must finish first, and that ordering is now explicit
+        // rather than a race the bind used to win. The row is written first
+        // (`awaitsPassport`), then the bind-and-stamp run and the fast path go
+        // in parallel: the run writes its outcome to the row when it ends
+        // (settleScanPassport), and the fast path waits on that before timing
+        // the hello. The cron reads the same row, so a fast path that dies
+        // still gets the hello out on the same rule.
+        const chained =
+          scanCodeTarget !== null &&
+          scanCodeTarget.messageId === handoff.messageId
+            ? scanCodeTarget
+            : null
+        scanCodeChained = chained !== null
         waitUntil(
           scheduleScanArrival(supabase, {
             messageId: handoff.messageId,
             venueId: handoff.venueId,
             guestId: handoff.guestId,
             hadPriorConversation: handoff.hadPriorConversation,
+            awaitsPassport: chained !== null,
           }).then((scheduled) => {
-            if (scheduled.ok) {
+            if (!scheduled.ok) {
+              console.error(
+                'instagram webhook: scan greeting could not be scheduled',
+                {
+                  event: 'instagram_scan_arrival_not_scheduled',
+                  venueId: handoff.venueId,
+                  guestId: handoff.guestId,
+                  messageId: handoff.messageId,
+                  error: scheduled.error,
+                },
+              )
+              // The greeting is lost, the purchase need not be.
+              return chained !== null
+                ? bindScanCodeAndStamp(supabase, chained).then(() => undefined)
+                : undefined
+            }
+            if (chained === null) {
               return runScanGreetingFastPath(supabase, scheduled.data)
             }
-            console.error(
-              'instagram webhook: scan greeting could not be scheduled',
-              {
-                event: 'instagram_scan_arrival_not_scheduled',
-                venueId: handoff.venueId,
-                guestId: handoff.guestId,
-                messageId: handoff.messageId,
-                error: scheduled.error,
-              },
+            const passportSettled = bindScanCodeAndStamp(
+              supabase,
+              chained,
+            ).then((sentAt) =>
+              settlePassportForGreeting(supabase, scheduled.data.id, sentAt),
             )
+            return Promise.all([
+              passportSettled,
+              runScanGreetingFastPath(supabase, {
+                id: scheduled.data.id,
+                passportSettled,
+              }),
+            ]).then(() => undefined)
           }),
         )
       } else if (handoff.kind === 'record') {
@@ -387,86 +432,17 @@ export async function POST(request: Request): Promise<Response> {
       //
       // Fires on BOTH referral paths, which is the whole point — a guest who
       // scans and says nothing arrives as a standalone referral, and one who
-      // scans and types arrives as a message carrying the same referral.
+      // scans and types arrives as a message carrying the same referral. The
+      // first is chained into its greeting above (TAC-588) and is not bound
+      // again here; this is the second, and any referral the greeting branch
+      // did not take.
       //
       // waitUntil, never awaited, and FAILS OPEN: four DB round trips must not
       // sit inside Meta's delivery deadline, and an unattributed purchase is
-      // recoverable where a lost message is not. It races the scan greeting's
-      // twenty-second delay and wins by orders of magnitude, but nothing here
-      // guarantees that ordering — see reconcileScanCodeFromReferral's header
-      // for what has to change the day a greeting must name what they bought.
-      const scanCodeTarget = scanCodeBindTargetFor(outcome, looksLikeScanCode)
-      if (scanCodeTarget !== null) {
+      // recoverable where a lost message is not.
+      if (scanCodeTarget !== null && !scanCodeChained) {
         waitUntil(
-          reconcileScanCodeFromReferral({
-            venueId: scanCodeTarget.venueId,
-            guestId: scanCodeTarget.guestId,
-            code: scanCodeTarget.code,
-            supabase,
-          }).then((result) => {
-            if (!result.ok) {
-              // A silent degrade needs an event, per
-              // .claude/rules/errors-as-values.md: without this the whole
-              // mechanism could stop binding and leave only a console line.
-              console.error('instagram: scan code bind failed', {
-                event: 'pos_scan_code_bind_failed',
-                venueId: scanCodeTarget.venueId,
-                guestId: scanCodeTarget.guestId,
-                messageId: scanCodeTarget.messageId,
-                errorCode: result.errorCode,
-                error: result.error,
-              })
-              return captureScanCodeUnmatched({
-                venueId: scanCodeTarget.venueId,
-                guestId: scanCodeTarget.guestId,
-                reason: 'db_error',
-                error: result.error,
-              })
-            }
-            if (result.data.status === 'bound') {
-              // TAC-586: the bind gets the guest a passport stamp. Chained
-              // here so it rides the bind's own waitUntil and starts the
-              // moment the purchase is theirs; the scan greeting is in a
-              // separate waitUntil and reads nothing this writes (see
-              // lib/passport/issue-stamp.ts). issuePassportStamp never
-              // throws, so it cannot cost the bind's analytics either.
-              return Promise.all([
-                captureScanCodeBound({
-                  venueId: scanCodeTarget.venueId,
-                  guestId: scanCodeTarget.guestId,
-                  transactionId: result.data.transactionId,
-                  codeAgeMs: result.data.codeAgeMs,
-                  fingerprint: result.data.fingerprint,
-                }),
-                issuePassportStamp(supabase, {
-                  venueId: scanCodeTarget.venueId,
-                  guestId: scanCodeTarget.guestId,
-                  transactionId: result.data.transactionId,
-                }),
-              ]).then(() => undefined)
-            }
-            if (result.data.status === 'payment_not_ingested') {
-              // TAC-586 (ruled 2026-10-14): no stamp and no retry. The slip
-              // prints after Square records the sale, so this should not
-              // happen; if it does, it must be seen, so it gets its own log
-              // line beside the capture below.
-              console.warn('instagram: scan beat its payment; no stamp', {
-                event: 'pos_scan_payment_not_ingested',
-                venueId: scanCodeTarget.venueId,
-                guestId: scanCodeTarget.guestId,
-                messageId: scanCodeTarget.messageId,
-              })
-            }
-            // Every non-bound outcome keeps its own reason rather than being
-            // folded into one miss count. `payment_not_ingested` especially:
-            // it is the guest scanning before Square's webhook landed, which
-            // is a race to answer with a retry, not a defect to fix.
-            return captureScanCodeUnmatched({
-              venueId: scanCodeTarget.venueId,
-              guestId: scanCodeTarget.guestId,
-              reason: result.data.status,
-            })
-          }),
+          bindScanCodeAndStamp(supabase, scanCodeTarget).then(() => undefined),
         )
       }
       // TAC-473: a reply staff typed in the Instagram app clears the card it
@@ -513,5 +489,122 @@ export async function POST(request: Request): Promise<Response> {
       stack,
     })
     return new Response('OK', { status: 200 })
+  }
+}
+
+/**
+ * Bind a receipt code to the guest who scanned it, and on a bind, issue their
+ * passport stamp. Resolves to when both stamp images reached the guest, or
+ * null when nothing was sent: no bind, no passport configured, a failed send.
+ *
+ * NEVER REJECTS. It runs under `waitUntil`, and a bare scan's greeting waits
+ * on it (TAC-588): a rejection here would be both an unhandled one and a hello
+ * timed from nothing. Everything the bind's outcome used to do inline in the
+ * POST handler is here unchanged; only the return value is new.
+ */
+async function bindScanCodeAndStamp(
+  supabase: ReturnType<typeof createAdminClient>,
+  target: ScanCodeBindTarget,
+): Promise<Date | null> {
+  try {
+    const result = await reconcileScanCodeFromReferral({
+      venueId: target.venueId,
+      guestId: target.guestId,
+      code: target.code,
+      supabase,
+    })
+    if (!result.ok) {
+      // A silent degrade needs an event, per
+      // .claude/rules/errors-as-values.md: without this the whole mechanism
+      // could stop binding and leave only a console line.
+      console.error('instagram: scan code bind failed', {
+        event: 'pos_scan_code_bind_failed',
+        venueId: target.venueId,
+        guestId: target.guestId,
+        messageId: target.messageId,
+        errorCode: result.errorCode,
+        error: result.error,
+      })
+      await captureScanCodeUnmatched({
+        venueId: target.venueId,
+        guestId: target.guestId,
+        reason: 'db_error',
+        error: result.error,
+      })
+      return null
+    }
+    if (result.data.status === 'bound') {
+      // TAC-586: the bind gets the guest a passport stamp, the moment the
+      // purchase is theirs. issuePassportStamp never throws, so it cannot cost
+      // the bind's analytics either.
+      const [, stamp] = await Promise.all([
+        captureScanCodeBound({
+          venueId: target.venueId,
+          guestId: target.guestId,
+          transactionId: result.data.transactionId,
+          codeAgeMs: result.data.codeAgeMs,
+          fingerprint: result.data.fingerprint,
+        }),
+        issuePassportStamp(supabase, {
+          venueId: target.venueId,
+          guestId: target.guestId,
+          transactionId: result.data.transactionId,
+        }),
+      ])
+      return stamp.status === 'issued' ? stamp.sentAt : null
+    }
+    if (result.data.status === 'payment_not_ingested') {
+      // TAC-586 (ruled 2026-10-14): no stamp and no retry. The slip prints
+      // after Square records the sale, so this should not happen; if it does,
+      // it must be seen, so it gets its own log line beside the capture below.
+      console.warn('instagram: scan beat its payment; no stamp', {
+        event: 'pos_scan_payment_not_ingested',
+        venueId: target.venueId,
+        guestId: target.guestId,
+        messageId: target.messageId,
+      })
+    }
+    // Every non-bound outcome keeps its own reason rather than being folded
+    // into one miss count. `payment_not_ingested` especially: it is the guest
+    // scanning before Square's webhook landed, which is a race to answer with
+    // a retry, not a defect to fix.
+    await captureScanCodeUnmatched({
+      venueId: target.venueId,
+      guestId: target.guestId,
+      reason: result.data.status,
+    })
+    return null
+  } catch (e) {
+    console.error('instagram: scan code bind threw', {
+      event: 'pos_scan_code_bind_failed',
+      venueId: target.venueId,
+      guestId: target.guestId,
+      messageId: target.messageId,
+      error: e instanceof Error ? e.message : String(e),
+    })
+    return null
+  }
+}
+
+/**
+ * TAC-588: write how the stamp run ended to the scan's row, which is what the
+ * hello is timed from. Never rejects. A failed write is logged and leaves the
+ * row looking unsettled, so the hello goes at the passport cap: late, not lost.
+ */
+async function settlePassportForGreeting(
+  supabase: ReturnType<typeof createAdminClient>,
+  scanArrivalId: string,
+  sentAt: Date | null,
+): Promise<void> {
+  const settled = await settleScanPassport(supabase, scanArrivalId, {
+    settledAt: new Date(),
+    sentAt,
+  })
+  if (!settled.ok) {
+    console.error('instagram: scan passport outcome not recorded', {
+      event: 'instagram_scan_passport_settle_failed',
+      scanArrivalId,
+      error: settled.error,
+    })
   }
 }

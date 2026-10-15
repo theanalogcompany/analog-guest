@@ -19,6 +19,11 @@
 //
 //   Twenty seconds of silence sends the greeting.
 //
+//   TAC-588: a scan of a RECEIPT code binds the order and sends the passport
+//   images first, and the greeting follows the images by a few seconds
+//   instead of the twenty-second timer (scanGreetingDueAt). With no passport,
+//   or a run that sent nothing, the twenty seconds stand.
+//
 //   Separately, anything the guest sends within FIVE MINUTES of the scan is
 //   treated as at-counter, greeted or not: order capture arms off the scan.
 //
@@ -34,6 +39,7 @@
 // message that lands while the greeting is generating crosses it.
 
 import { venueLocalDate } from '@/lib/schemas'
+import { hasRenderableContent } from './sentence-split'
 
 /**
  * How long a scan waits for the guest to say something before the venue
@@ -57,6 +63,11 @@ export const SCAN_GREETING_DELAY_MS = 20 * 1000
  * Same reasoning as TAC-428's rule that an arrival push never fires after the
  * arrival it announces: a catch-up that asserts the present tense is worse
  * than no catch-up.
+ *
+ * TAC-588: measured from the SCAN, never from the order, so a receipt scanned
+ * twenty hours after the order is not stale. Its wording no longer says the
+ * guest is in the shop, but the bound still holds: a hello a quarter of an
+ * hour after they opened the thread answers nothing they did.
  */
 export const SCAN_GREETING_MAX_AGE_MS = 15 * 60 * 1000
 
@@ -90,24 +101,96 @@ export const SCAN_CARRY_FORWARD_MS = 5 * 60 * 1000
  */
 export const SCAN_GREETING_CARRY_FORWARD_MS = 30 * 60 * 1000
 
-/** A pending scan, as the greeting processor and the carry-forward see it. */
+/**
+ * How long after the passport images reached the guest the hello follows them.
+ *
+ * FOUR SECONDS, a choice (TAC-588: the ruling says "a few seconds"). Long
+ * enough that the spread has landed in the thread before the text, short
+ * enough that the images and the hello read as one moment.
+ */
+export const HELLO_AFTER_PASSPORT_MS = 4 * 1000
+
+/**
+ * How long a scan carrying a receipt code waits for its stamp run before the
+ * hello goes anyway.
+ *
+ * SIXTY SECONDS, a choice. A normal run is a render, an upload and two sends,
+ * a few seconds. Its worst case is the send retry ladder (2 s + 6 s) plus the
+ * echo wait (2 s + 6 s) plus the render, about 25 s. Past a minute the run has
+ * died (an instance recycled mid-render), and the hello goes without it. Well
+ * inside SCAN_GREETING_MAX_AGE_MS, so a scan is never stale before its cap.
+ */
+export const PASSPORT_WAIT_CAP_MS = 60 * 1000
+
+/**
+ * A pending scan, as the greeting processor and the carry-forward see it.
+ *
+ * The three passport fields are migration 089's, and they decide when the
+ * hello is due (scanGreetingDueAt). A scan with no receipt code has
+ * `awaitsPassport: false` and nothing else set, and is due exactly as before.
+ */
 export interface ScanArrivalTiming {
   scannedAt: Date
+  /** The scan carried a receipt code, so a stamp run was started for it. */
+  awaitsPassport: boolean
+  /** When that run ended, sent or not. Null while it is still running. */
+  passportSettledAt: Date | null
+  /** When both images reached the guest. Null if the run sent nothing. */
+  passportSentAt: Date | null
+  /**
+   * When WE recorded the scan (the row's `created_at`), when known. The
+   * passport cap counts from the later of this and `scannedAt`: `scannedAt`
+   * is Meta's clock, and a webhook Meta delivered a minute late must not find
+   * its stamp run already out of time.
+   */
+  recordedAt?: Date
 }
 
 /**
- * Has the greeting delay elapsed?
+ * When the hello is due (TAC-588). ONE RULE, read by both runners.
+ *
+ *   no receipt code              the scan + SCAN_GREETING_DELAY_MS, as before
+ *   images sent at T             T + HELLO_AFTER_PASSPORT_MS
+ *   run ended, nothing sent      the scan + SCAN_GREETING_DELAY_MS: no passport
+ *                                configured, an opted-out guest, a failed send,
+ *                                an expired or unknown code, a payment Square
+ *                                has not told us about
+ *   run still going              the scan + PASSPORT_WAIT_CAP_MS, so a run that
+ *                                died costs a minute, never the hello
+ *
+ * The images-sent case can be EARLIER than twenty seconds after the scan, and
+ * that is the point: the hello follows the images, not the clock.
+ */
+export function scanGreetingDueAt(
+  timing: ScanArrivalTiming,
+  delayMs: number = SCAN_GREETING_DELAY_MS,
+): Date {
+  const scanned = timing.scannedAt.getTime()
+  if (!timing.awaitsPassport) return new Date(scanned + delayMs)
+  if (timing.passportSentAt !== null) {
+    return new Date(timing.passportSentAt.getTime() + HELLO_AFTER_PASSPORT_MS)
+  }
+  if (timing.passportSettledAt !== null) return new Date(scanned + delayMs)
+  const recorded = timing.recordedAt?.getTime() ?? scanned
+  return new Date(
+    Math.max(scanned, Number.isFinite(recorded) ? recorded : scanned) +
+      PASSPORT_WAIT_CAP_MS,
+  )
+}
+
+/**
+ * Is the hello due?
  *
  * `>=` rather than `>`: the delay is a floor the guest has had, not a deadline
  * to beat, and a check landing on the exact millisecond should fire rather
  * than leave the row for the next cron tick.
  */
 export function isScanGreetingDue(
-  scannedAt: Date,
+  timing: ScanArrivalTiming,
   now: Date,
   delayMs: number = SCAN_GREETING_DELAY_MS,
 ): boolean {
-  return now.getTime() - scannedAt.getTime() >= delayMs
+  return now.getTime() >= scanGreetingDueAt(timing, delayMs).getTime()
 }
 
 /**
@@ -124,25 +207,30 @@ export const SCAN_FAST_PATH_WAKE_MARGIN_MS = 250
 /**
  * How long the fast path should sleep before the greeting is due.
  *
- * Measured from `scannedAt`, the same clock `isScanGreetingDue` reads. It is
- * the EXACT remainder, and a timer can fire a millisecond short of what it
+ * Measured to scanGreetingDueAt, the same instant `isScanGreetingDue` reads. It
+ * is the EXACT remainder, and a timer can fire a millisecond short of what it
  * was asked for, so a caller that wants the row due on waking adds
  * SCAN_FAST_PATH_WAKE_MARGIN_MS.
  *
  * Floored at zero: a delivery Meta held for longer than the delay is already
- * due. CAPPED at twice the delay: `scannedAt` is Meta's clock, and a
- * timestamp ahead of ours (or simply wrong) must not hold a webhook
- * invocation open for however long it says. Past the cap the row is not due
- * when the sleep ends, the fast path leaves it, and the cron takes it.
+ * due. CAPPED: `scannedAt` is Meta's clock, and a timestamp ahead of ours (or
+ * simply wrong) must not hold a webhook invocation open for however long it
+ * says. Past the cap the row is not due when the sleep ends, the fast path
+ * leaves it, and the cron takes it. The cap is twice the delay for a plain
+ * scan, and the passport wait plus the delay for one with a receipt code
+ * (TAC-588), which is the longest a correct row can need.
  */
 export function msUntilScanGreetingDue(
-  scannedAt: Date,
+  timing: ScanArrivalTiming,
   now: Date,
   delayMs: number = SCAN_GREETING_DELAY_MS,
 ): number {
-  const remaining = scannedAt.getTime() + delayMs - now.getTime()
+  const remaining = scanGreetingDueAt(timing, delayMs).getTime() - now.getTime()
   if (!Number.isFinite(remaining)) return 0
-  return Math.min(Math.max(remaining, 0), 2 * delayMs)
+  const cap = timing.awaitsPassport
+    ? PASSPORT_WAIT_CAP_MS + delayMs
+    : 2 * delayMs
+  return Math.min(Math.max(remaining, 0), cap)
 }
 
 /**
@@ -279,3 +367,154 @@ export function latestGreetings(
  * definition of "which day is it" would be a second definition of that guard.
  */
 export { venueLocalDate }
+
+// ---------------------------------------------------------------------------
+// The receipt-scan hello asks nothing (TAC-588)
+// ---------------------------------------------------------------------------
+
+/**
+ * The hello with every question taken out.
+ *
+ * The receipt-scan greetings say "ask nothing at all", and the item question
+ * has its own moment about twenty minutes after the order. A prompt's "don't"
+ * is a request, so the rule is ALSO made here, in code (decision 0007's lesson
+ * for the getting-to-know-you question).
+ *
+ * A sentence with a `?` in it is dropped; everything else is kept as written,
+ * line breaks included, so the bubbles the venue's texting style splits it
+ * into are unchanged. A bare `?` is the detector, as for
+ * intentionQuestionDroppedForBodyQuestion: this reads our own outbound, where
+ * the copy always punctuates a question.
+ *
+ * `body` is empty when the whole hello was questions, and also when all that
+ * is left has no letter or digit in it ("How's the cortado? ☕" leaves "☕"):
+ * an emoji alone is not a hello. The caller decides what empty means
+ * (handleFollowup regenerates once, then sends nothing). Pure.
+ */
+export function withoutQuestions(body: string): {
+  body: string
+  dropped: number
+} {
+  let dropped = 0
+  const lines = body.split('\n').map((line) => {
+    const sentences = line.match(/[^.!?]+(?:[.!?]+|$)\s*/g) ?? []
+    const kept = sentences.filter((sentence) => {
+      if (!sentence.includes('?')) return true
+      dropped += 1
+      return false
+    })
+    return kept.join('').trim()
+  })
+  const kept = lines
+    .filter((line, i) => line !== '' || body.split('\n')[i]?.trim() === '')
+    .join('\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim()
+  return { body: hasRenderableContent(kept) ? kept : '', dropped }
+}
+
+// ---------------------------------------------------------------------------
+// The item question (TAC-588)
+// ---------------------------------------------------------------------------
+//
+// "How'd you like the cortado?", asked once, about twenty minutes after the
+// ORDER and never sooner than five minutes after the hello. It replaces the
+// counter flow's "how is it so far?" and its ten-to-thirty-minute check-back
+// for a scan visit whose receipt bound an order.
+
+/** The question waits this long after the order. Ruled (TAC-588). */
+export const SCAN_ITEM_QUESTION_AFTER_ORDER_MS = 20 * 60 * 1000
+
+/** And at least this long after the hello. Ruled (TAC-588). */
+export const SCAN_ITEM_QUESTION_AFTER_HELLO_MS = 5 * 60 * 1000
+
+/**
+ * How long past its due time a held question may still go.
+ *
+ * TWO HOURS, a choice: the check-in answer window (CHECKIN_ANSWER_WINDOW_MS),
+ * which is how long "this visit" lasts everywhere else. It bounds a question
+ * held by quiet hours or a card on the operator's desk; past it the question
+ * is given up, not sent late (ruled 2026-10-14, question 2: a scan at 11 pm
+ * can get the hello and no question).
+ */
+export const SCAN_ITEM_QUESTION_MAX_AGE_MS = 2 * 60 * 60 * 1000
+
+/**
+ * When the item question is due: the order + twenty minutes, or the hello +
+ * five, whichever is LATER. A scan at the counter two minutes after paying is
+ * asked at the twenty-minute mark; a slip scanned the next morning is asked
+ * five minutes after its hello. Pure.
+ */
+export function scanItemQuestionDueAt(input: {
+  orderedAt: Date
+  helloAt: Date
+}): Date {
+  return new Date(
+    Math.max(
+      input.orderedAt.getTime() + SCAN_ITEM_QUESTION_AFTER_ORDER_MS,
+      input.helloAt.getTime() + SCAN_ITEM_QUESTION_AFTER_HELLO_MS,
+    ),
+  )
+}
+
+/** Has a held question waited too long to send? `>`, so the bound is inside. */
+export function isScanItemQuestionTooLate(dueAt: Date, now: Date): boolean {
+  return now.getTime() - dueAt.getTime() > SCAN_ITEM_QUESTION_MAX_AGE_MS
+}
+
+/**
+ * Was the last unprompted message to this guest THIS scan's own hello?
+ *
+ * The one-hour spacing rule (proactive-spacing.ts) must not stop the item
+ * question, which is part of the same visit as the hello five to twenty
+ * minutes before it (ruled 2026-10-14). The check-back's version of this,
+ * lastProactiveWasThisVisit, anchors on the order, and for a slip scanned the
+ * next morning that would also excuse an unrelated message from hours before
+ * the scan. Anchored on the scan instead: anything sent at or after it is this
+ * scan's hello. The hour rule stands against everything else.
+ */
+export function lastProactiveWasThisScan(
+  lastProactiveSendAt: Date | null,
+  scannedAt: Date,
+): boolean {
+  if (lastProactiveSendAt === null) return false
+  return lastProactiveSendAt.getTime() >= scannedAt.getTime()
+}
+
+/**
+ * How long after a receipt-scan hello a reply still belongs to that visit:
+ * TWO HOURS, the check-in answer window and the intention's own lifetime
+ * (HOWS_IT_SO_FAR_WINDOW_MS), so one number says "this visit is still going".
+ */
+export const SCAN_ORDER_VISIT_MS = 2 * 60 * 60 * 1000
+
+/**
+ * TAC-588: is this reply part of a receipt-scan visit whose order we know, and
+ * may it carry the item question?
+ *
+ *   known    the reply came within SCAN_ORDER_VISIT_MS of the hello. The
+ *            counter flow's "they just told you what they got" arming
+ *            (same_visit_order) is then off: nobody told us, the scan did.
+ *   likedAt  the hello's claim, while the timed question is still open or
+ *            was cancelled by the guest writing back: their turns may then
+ *            ask instead (scan_order_liked). Null once the timer has taken it
+ *            for a send (in flight, queued for an operator, or sent) or given
+ *            it up, so the visit is never asked twice.
+ *
+ * Pure. The caller also withholds it once the visit has a check-in.
+ */
+export function resolveScanOrderVisit(input: {
+  /** The greeting's claim: the start of "since the hello". */
+  helloClaimedAt: Date
+  itemQuestion: 'open' | 'cancelled' | 'taken'
+  inboundAt: Date
+}): { known: boolean; likedAt: Date | null } {
+  const since = input.inboundAt.getTime() - input.helloClaimedAt.getTime()
+  const known =
+    Number.isFinite(since) && since >= 0 && since <= SCAN_ORDER_VISIT_MS
+  return {
+    known,
+    likedAt:
+      known && input.itemQuestion !== 'taken' ? input.helloClaimedAt : null,
+  }
+}

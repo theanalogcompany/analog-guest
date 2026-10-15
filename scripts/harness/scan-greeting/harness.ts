@@ -20,15 +20,47 @@ import {
   processScanArrival,
   runScanGreetingFastPath,
 } from '@/lib/agent/instagram-scan-greeting'
+import { settleScanPassport } from '@/lib/agent/scan-arrival-store'
+import { processDueScanItemQuestions } from '@/lib/agent/scan-item-question'
+import { resolveSameVisitOrderAt } from '@/lib/agent/visit-checkin'
+import { scanItemQuestionInstructions } from '@/lib/ai/prompts/categories/scan-item-question'
+import { resolveScanItemQuestionDisposition } from '@/lib/schemas/approval-policy'
 import {
+  greetsHelloOnly,
+  isDrink,
+  loadScanOrder,
+  pickComplimentItem,
+} from '@/lib/agent/scan-order'
+import {
+  GUEST_ARRIVED_HELLO_ONLY_INSTRUCTIONS_AFTER_COMPLAINT,
+  GUEST_ARRIVED_HELLO_ONLY_INSTRUCTIONS_NEW,
+  GUEST_ARRIVED_HELLO_ONLY_INSTRUCTIONS_RETURNING,
+  GUEST_ARRIVED_INSTRUCTIONS_AFTER_COMPLAINT,
+  GUEST_ARRIVED_INSTRUCTIONS_NEW,
+  GUEST_ARRIVED_INSTRUCTIONS_RETURNING,
+  GUEST_ARRIVED_ORDER_INSTRUCTIONS_AFTER_COMPLAINT,
+  GUEST_ARRIVED_ORDER_INSTRUCTIONS_NEW,
+  GUEST_ARRIVED_ORDER_INSTRUCTIONS_RETURNING,
+  guestArrivedInstructionsFor,
+} from '@/lib/ai/prompts/categories/guest-arrived'
+import type { MenuItem } from '@/lib/schemas'
+import {
+  HELLO_AFTER_PASSPORT_MS,
   isScanGreetingDue,
   msUntilScanGreetingDue,
+  PASSPORT_WAIT_CAP_MS,
   SCAN_CARRY_FORWARD_MS,
   SCAN_FAST_PATH_WAKE_MARGIN_MS,
   SCAN_GREETING_CARRY_FORWARD_MS,
   SCAN_GREETING_DELAY_MS,
   SCAN_GREETING_MAX_AGE_MS,
+  isScanItemQuestionTooLate,
+  lastProactiveWasThisScan,
+  resolveScanOrderVisit,
   scanCarryForwardAt,
+  scanGreetingDueAt,
+  scanItemQuestionDueAt,
+  withoutQuestions,
 } from '@/lib/agent/scan-arrival'
 
 // With real credentials `handleFollowup` would talk to the real database and
@@ -61,6 +93,17 @@ interface Seed {
   throwOn?: string
   /** Runs inside the claim UPDATE's round trip, before it is applied. */
   beforeClaim?: (arrivals: Row[]) => void
+  /**
+   * TAC-588: what a receipt scan's code resolves to. The scan message's
+   * `referral_ref`, its `pos_tap_events` row, the transaction and the stamp,
+   * each written out longhand rather than built by the code under check.
+   */
+  order?: {
+    referralRef: string | null
+    tap?: Row | null
+    transaction?: Record<string, unknown> | null
+    stamp?: Row | null
+  }
 }
 
 const DAYS = [
@@ -95,6 +138,13 @@ function makeDb(seed: Seed) {
     venue_local_date: null,
     outcome: null,
     resolved_at: null,
+    awaits_passport: false,
+    passport_settled_at: null,
+    passport_sent_at: null,
+    item_question_due_at: null,
+    item_question_claimed_at: null,
+    item_question_sent_at: null,
+    item_question_outcome: null,
     ...row,
   }))
   const messages = seed.messages ?? []
@@ -108,6 +158,7 @@ function makeDb(seed: Seed) {
     id: 'g1',
     opted_out_at: null,
     last_proactive_send_at: null,
+    instagram_scoped_id: 'igsid-1',
     ...seed.guest,
   }
   const stats = { claimWins: 0, resolveWins: 0, updates: 0 }
@@ -126,9 +177,21 @@ function makeDb(seed: Seed) {
 
   function arrivalsSelect() {
     const filters: Filter[] = []
+    const atMost: Filter[] = []
+    const notNull: string[] = []
     const builder = {
       eq(column: string, value: Value) {
         filters.push([column, value])
+        return builder
+      },
+      // TAC-588: the item question's due read.
+      lte(column: string, value: Value) {
+        atMost.push([column, value])
+        return builder
+      },
+      // Only `.not(column, 'is', null)` is ever sent.
+      not(column: string) {
+        notNull.push(column)
         return builder
       },
       is(column: string, value: Value) {
@@ -140,6 +203,13 @@ function makeDb(seed: Seed) {
         await pause()
         const data = arrivals
           .filter((row) => matches(row, filters))
+          .filter((row) => notNull.every((column) => row[column] !== null))
+          .filter((row) =>
+            atMost.every(
+              ([column, value]) =>
+                row[column] !== null && String(row[column]) <= String(value),
+            ),
+          )
           .sort((a, b) =>
             String(a.scanned_at).localeCompare(String(b.scanned_at)),
           )
@@ -156,6 +226,10 @@ function makeDb(seed: Seed) {
     return builder
   }
 
+  type UpdateResult =
+    | { data: null; error: { code: string; message: string } }
+    | { data: { id: Value }[]; error: null }
+
   function arrivalsUpdate(patch: Row) {
     const filters: Filter[] = []
     const builder = {
@@ -167,7 +241,14 @@ function makeDb(seed: Seed) {
         filters.push([column, value])
         return builder
       },
-      async select() {
+      // Awaited directly (no `.select()`), as settleScanPassport does.
+      then<T>(
+        resolve: (value: UpdateResult) => T,
+        reject?: (reason: unknown) => T,
+      ): Promise<T> {
+        return builder.select().then(resolve, reject)
+      },
+      async select(): Promise<UpdateResult> {
         await pause()
         if ('claimed_at' in patch) seed.beforeClaim?.(arrivals)
         // From here to the return is one atomic statement, as in Postgres.
@@ -198,7 +279,24 @@ function makeDb(seed: Seed) {
     return builder
   }
 
-  function messagesSelect() {
+  function messagesSelect(columns?: string) {
+    // TAC-588: the scan-order loader reads the scan's own row by id.
+    if (columns === 'referral_ref') {
+      return {
+        eq: () => ({
+          async maybeSingle() {
+            await pause()
+            return {
+              data:
+                seed.order === undefined
+                  ? null
+                  : { referral_ref: seed.order.referralRef },
+              error: null,
+            }
+          },
+        }),
+      }
+    }
     const filters: Filter[] = []
     let since: string | null = null
     const builder = {
@@ -227,6 +325,19 @@ function makeDb(seed: Seed) {
     return builder
   }
 
+  /** Any number of `.eq()`s, then `.maybeSingle()`: one row or none. */
+  const chain = (data: () => Record<string, unknown> | null) => {
+    const builder = {
+      eq: () => builder,
+      async maybeSingle() {
+        await pause()
+        const row = data()
+        return { data: row ? { ...row } : null, error: null }
+      },
+    }
+    return builder
+  }
+
   const single = (data: () => Record<string, unknown>) => ({
     eq: () => ({
       async maybeSingle() {
@@ -244,8 +355,35 @@ function makeDb(seed: Seed) {
           return { select: arrivalsSelect, update: arrivalsUpdate }
         case 'messages':
           return { select: messagesSelect }
+        case 'pos_tap_events':
+          return { select: () => chain(() => seed.order?.tap ?? null) }
+        case 'transactions':
+          return {
+            select: () => chain(() => seed.order?.transaction ?? null),
+          }
+        case 'passport_stamps':
+          return { select: () => chain(() => seed.order?.stamp ?? null) }
         case 'venues':
-          return { select: () => single(() => ({ ...venue })) }
+          return {
+            // TAC-588: the item question reads every venue at once, with its
+            // config embedded (loadWarmCloseVenues), and awaits the select.
+            select: (columns?: string) =>
+              columns?.includes('venue_configs')
+                ? Promise.resolve({
+                    data: [
+                      {
+                        ...venue,
+                        instagram_account_id: 'ig-1',
+                        venue_configs: {
+                          followup_rules: null,
+                          venue_info: { menu: { highlights: [], items: [] } },
+                        },
+                      },
+                    ],
+                    error: null,
+                  })
+                : single(() => ({ ...venue })),
+          }
         case 'venue_configs':
           return {
             select: () =>
@@ -297,14 +435,27 @@ const PENDING = {
   scanMessageId: 'm-a1',
   scannedAt: SCAN,
   hadPriorConversation: true,
+  awaitsPassport: false,
+  passportSettledAt: null,
+  passportSentAt: null,
 }
+/** A scan with no receipt code: the timing every check before TAC-588 used. */
+const plain = (scannedAt: Date) => ({
+  scannedAt,
+  awaitsPassport: false,
+  passportSettledAt: null,
+  passportSentAt: null,
+})
 
-/** A clock that advances by exactly what was slept. */
+/** A clock that advances by exactly what was slept, or by `advance`. */
 function fakeClock(start: Date) {
   let now = start.getTime()
   const slept: number[] = []
   return {
     slept,
+    advance(ms: number) {
+      now += ms
+    },
     deps: {
       now: () => new Date(now),
       async sleep(ms: number) {
@@ -340,18 +491,24 @@ async function main() {
   )
 
   await check('isScanGreetingDue: false at 19s, true at 20s', () => {
-    assert.equal(isScanGreetingDue(SCAN, at(19 * SECOND)), false)
-    assert.equal(isScanGreetingDue(SCAN, at(20 * SECOND)), true)
+    assert.equal(isScanGreetingDue(plain(SCAN), at(19 * SECOND)), false)
+    assert.equal(isScanGreetingDue(plain(SCAN), at(20 * SECOND)), true)
   })
 
   await check(
     'msUntilScanGreetingDue: fresh, half elapsed, already due, capped, invalid',
     () => {
-      assert.equal(msUntilScanGreetingDue(SCAN, SCAN), 20 * SECOND)
-      assert.equal(msUntilScanGreetingDue(SCAN, at(10 * SECOND)), 10 * SECOND)
-      assert.equal(msUntilScanGreetingDue(SCAN, at(25 * SECOND)), 0)
-      assert.equal(msUntilScanGreetingDue(at(10 * MINUTE), SCAN), 40 * SECOND)
-      assert.equal(msUntilScanGreetingDue(new Date(NaN), SCAN), 0)
+      assert.equal(msUntilScanGreetingDue(plain(SCAN), SCAN), 20 * SECOND)
+      assert.equal(
+        msUntilScanGreetingDue(plain(SCAN), at(10 * SECOND)),
+        10 * SECOND,
+      )
+      assert.equal(msUntilScanGreetingDue(plain(SCAN), at(25 * SECOND)), 0)
+      assert.equal(
+        msUntilScanGreetingDue(plain(at(10 * MINUTE)), SCAN),
+        40 * SECOND,
+      )
+      assert.equal(msUntilScanGreetingDue(plain(new Date(NaN)), SCAN), 0)
     },
   )
 
@@ -384,11 +541,7 @@ async function main() {
     async () => {
       const db = makeDb({ arrivals: [scanRow()] })
       const clock = fakeClock(at(2 * SECOND))
-      await runScanGreetingFastPath(
-        db.client,
-        { id: 'a1', scannedAt: SCAN },
-        clock.deps,
-      )
+      await runScanGreetingFastPath(db.client, { id: 'a1' }, clock.deps)
       const woke = 20 * SECOND + SCAN_FAST_PATH_WAKE_MARGIN_MS
       assert.deepEqual(clock.slept, [woke - 2 * SECOND])
       assert.equal(db.stats.claimWins, 1)
@@ -403,7 +556,7 @@ async function main() {
       let now = SCAN.getTime()
       await runScanGreetingFastPath(
         db.client,
-        { id: 'a1', scannedAt: SCAN },
+        { id: 'a1' },
         {
           now: () => new Date(now),
           async sleep(ms) {
@@ -422,7 +575,7 @@ async function main() {
       const clock = fakeClock(at(SECOND))
       await runScanGreetingFastPath(
         db.client,
-        { id: 'a1', scannedAt: SCAN },
+        { id: 'a1' },
         {
           now: clock.deps.now,
           async sleep(ms) {
@@ -441,7 +594,7 @@ async function main() {
     async () => {
       const scan = new Date('2026-09-20T21:59:50.000Z')
       const arrivals = [scanRow({ scanned_at: scan.toISOString() })]
-      const scheduled = { id: 'a1', scannedAt: scan }
+      const scheduled = { id: 'a1' }
 
       const db = makeDb({ arrivals })
       await runScanGreetingFastPath(db.client, scheduled, fakeClock(scan).deps)
@@ -467,7 +620,7 @@ async function main() {
         const [, cron] = await Promise.all([
           runScanGreetingFastPath(
             db.client,
-            { id: 'a1', scannedAt: SCAN },
+            { id: 'a1' },
             fakeClock(at(20 * SECOND)).deps,
           ),
           processDueScanGreetings(at(21 * SECOND), db.client),
@@ -530,7 +683,7 @@ async function main() {
           ['a1', 'a2'].map((id) =>
             runScanGreetingFastPath(
               db.client,
-              { id, scannedAt: SCAN },
+              { id },
               fakeClock(at(20 * SECOND)).deps,
             ),
           ),
@@ -585,7 +738,7 @@ async function main() {
       const db = makeDb({ arrivals: [scanRow()] })
       await runScanGreetingFastPath(
         db.client,
-        { id: 'a1', scannedAt: SCAN },
+        { id: 'a1' },
         {
           now: () => SCAN,
           async sleep() {
@@ -606,11 +759,7 @@ async function main() {
       arrivals: [scanRow()],
       throwOn: 'instagram_scan_arrivals',
     })
-    await runScanGreetingFastPath(
-      db.client,
-      { id: 'a1', scannedAt: SCAN },
-      fakeClock(SCAN).deps,
-    )
+    await runScanGreetingFastPath(db.client, { id: 'a1' }, fakeClock(SCAN).deps)
   })
 
   await check(
@@ -626,7 +775,7 @@ async function main() {
       })
       await runScanGreetingFastPath(
         db.client,
-        { id: 'a1', scannedAt: SCAN },
+        { id: 'a1' },
         fakeClock(SCAN).deps,
       )
       assert.equal(db.stats.updates, 0)
@@ -642,7 +791,7 @@ async function main() {
       })
       await runScanGreetingFastPath(
         db.client,
-        { id: 'a1', scannedAt: ahead },
+        { id: 'a1' },
         fakeClock(SCAN).deps,
       )
       assert.equal(db.stats.updates, 0)
@@ -658,10 +807,986 @@ async function main() {
       })
       await runScanGreetingFastPath(
         db.client,
-        { id: 'a1', scannedAt: SCAN },
+        { id: 'a1' },
         fakeClock(SCAN).deps,
       )
       assert.equal(db.stats.updates, 0)
+    },
+  )
+
+  // ---------------------------------------------------------------------------
+  // TAC-588: a scan of a receipt code waits for its passport images
+  // ---------------------------------------------------------------------------
+
+  const passport = (over: {
+    settled?: number | null
+    sent?: number | null
+  }) => ({
+    scannedAt: SCAN,
+    awaitsPassport: true,
+    passportSettledAt:
+      over.settled === undefined || over.settled === null
+        ? null
+        : at(over.settled),
+    passportSentAt:
+      over.sent === undefined || over.sent === null ? null : at(over.sent),
+  })
+
+  await check(
+    'TAC-588 constants: hello 4s after the images, 60s passport cap',
+    () => {
+      assert.equal(HELLO_AFTER_PASSPORT_MS, 4 * SECOND)
+      assert.equal(PASSPORT_WAIT_CAP_MS, 60 * SECOND)
+    },
+  )
+
+  await check(
+    'scanGreetingDueAt: no code 20s; sent at 5s -> 9s; ended unsent -> 20s; still running -> 60s',
+    () => {
+      assert.deepEqual(scanGreetingDueAt(plain(SCAN)), at(20 * SECOND))
+      assert.deepEqual(
+        scanGreetingDueAt(passport({ settled: 5 * SECOND, sent: 5 * SECOND })),
+        at(9 * SECOND),
+      )
+      assert.deepEqual(
+        scanGreetingDueAt(
+          passport({ settled: 30 * SECOND, sent: 28 * SECOND }),
+        ),
+        at(32 * SECOND),
+      )
+      assert.deepEqual(
+        scanGreetingDueAt(passport({ settled: 6 * SECOND })),
+        at(20 * SECOND),
+      )
+      // An unsent run that ended after the fallback is already due.
+      assert.equal(
+        isScanGreetingDue(passport({ settled: 45 * SECOND }), at(45 * SECOND)),
+        true,
+      )
+      assert.deepEqual(scanGreetingDueAt(passport({})), at(60 * SECOND))
+    },
+  )
+
+  await check(
+    'msUntilScanGreetingDue: a running stamp waits to the 60s cap, never the old 40s one',
+    () => {
+      assert.equal(
+        msUntilScanGreetingDue(passport({}), at(2 * SECOND)),
+        58 * SECOND,
+      )
+      assert.equal(
+        msUntilScanGreetingDue(passport({}), at(-10 * MINUTE)),
+        PASSPORT_WAIT_CAP_MS + 20 * SECOND,
+      )
+    },
+  )
+
+  await check(
+    'fast path waits for the stamp run, then greets 4s after the images (not at 20s, not at 60s)',
+    async () => {
+      const db = makeDb({ arrivals: [scanRow({ awaits_passport: true })] })
+      const clock = fakeClock(at(SECOND))
+      const passportSettled = (async () => {
+        await pause()
+        await pause()
+        clock.advance(4 * SECOND)
+        Object.assign(db.arrivals[0] ?? {}, {
+          passport_settled_at: at(5 * SECOND).toISOString(),
+          passport_sent_at: at(5 * SECOND).toISOString(),
+        })
+      })()
+      await runScanGreetingFastPath(
+        db.client,
+        { id: 'a1', passportSettled },
+        clock.deps,
+      )
+      const woke = 9 * SECOND + SCAN_FAST_PATH_WAKE_MARGIN_MS
+      assert.equal(db.stats.claimWins, 1)
+      assert.equal(db.arrivals[0]?.claimed_at, at(woke).toISOString())
+    },
+  )
+
+  await check('stamp run ended without sending: the 20s fallback', async () => {
+    const db = makeDb({
+      arrivals: [
+        scanRow({
+          awaits_passport: true,
+          passport_settled_at: at(6 * SECOND).toISOString(),
+        }),
+      ],
+    })
+    const clock = fakeClock(at(6 * SECOND))
+    await runScanGreetingFastPath(
+      db.client,
+      { id: 'a1', passportSettled: Promise.resolve() },
+      clock.deps,
+    )
+    const woke = 20 * SECOND + SCAN_FAST_PATH_WAKE_MARGIN_MS
+    assert.equal(db.arrivals[0]?.claimed_at, at(woke).toISOString())
+  })
+
+  await check(
+    'stamp run never recorded an outcome: the hello goes at the 60s cap',
+    async () => {
+      const db = makeDb({ arrivals: [scanRow({ awaits_passport: true })] })
+      const clock = fakeClock(at(2 * SECOND))
+      await runScanGreetingFastPath(
+        db.client,
+        { id: 'a1', passportSettled: Promise.resolve() },
+        clock.deps,
+      )
+      const woke = 60 * SECOND + SCAN_FAST_PATH_WAKE_MARGIN_MS
+      assert.equal(db.arrivals[0]?.claimed_at, at(woke).toISOString())
+    },
+  )
+
+  await check(
+    'a rejected stamp promise does not escape the fast path, and the cap still greets',
+    async () => {
+      const db = makeDb({ arrivals: [scanRow({ awaits_passport: true })] })
+      await runScanGreetingFastPath(
+        db.client,
+        { id: 'a1', passportSettled: Promise.reject(new Error('boom')) },
+        fakeClock(at(2 * SECOND)).deps,
+      )
+      assert.equal(db.stats.claimWins, 1)
+    },
+  )
+
+  await check(
+    'cron behind a receipt scan: not at 20s or 59s while the run is open, claims at 60s',
+    async () => {
+      const db = makeDb({ arrivals: [scanRow({ awaits_passport: true })] })
+      await processDueScanGreetings(at(20 * SECOND), db.client)
+      await processDueScanGreetings(at(59 * SECOND), db.client)
+      assert.equal(db.stats.updates, 0)
+      await processDueScanGreetings(at(60 * SECOND), db.client)
+      assert.equal(db.stats.claimWins, 1)
+    },
+  )
+
+  await check(
+    'cron behind a receipt scan whose images went at 5s: not at 8.9s, claims at 9s',
+    async () => {
+      const db = makeDb({
+        arrivals: [
+          scanRow({
+            awaits_passport: true,
+            passport_settled_at: at(5 * SECOND).toISOString(),
+            passport_sent_at: at(5 * SECOND).toISOString(),
+          }),
+        ],
+      })
+      await processDueScanGreetings(at(8900), db.client)
+      assert.equal(db.stats.updates, 0)
+      await processDueScanGreetings(at(9 * SECOND), db.client)
+      assert.equal(db.stats.claimWins, 1)
+    },
+  )
+
+  await check(
+    'settleScanPassport writes once: a second outcome cannot move a timed hello',
+    async () => {
+      const db = makeDb({ arrivals: [scanRow({ awaits_passport: true })] })
+      await settleScanPassport(db.client, 'a1', {
+        settledAt: at(5 * SECOND),
+        sentAt: at(5 * SECOND),
+      })
+      await settleScanPassport(db.client, 'a1', {
+        settledAt: at(30 * SECOND),
+        sentAt: null,
+      })
+      assert.equal(
+        db.arrivals[0]?.passport_sent_at,
+        at(5 * SECOND).toISOString(),
+      )
+      assert.equal(
+        db.arrivals[0]?.passport_settled_at,
+        at(5 * SECOND).toISOString(),
+      )
+    },
+  )
+
+  // ---------------------------------------------------------------------------
+  // TAC-588: the order, the item, and a hello that asks nothing
+  // ---------------------------------------------------------------------------
+
+  const menu = (name: string, category: string, description?: string) =>
+    ({
+      name,
+      category,
+      price: 5,
+      modifiers: [],
+      dietary: [],
+      isOffMenu: false,
+      ...(description === undefined ? {} : { description }),
+    }) satisfies MenuItem
+  const MENU: MenuItem[] = [
+    menu('Oat Cortado', 'Espresso Drinks', 'Smooth and nutty, with oat milk.'),
+    menu('Pink Panther', 'Signature Drinks', '   '),
+    menu('Matcha Latte', 'Matcha'),
+    menu('Croissant', 'Pastries', 'Laminated in-house, best warm.'),
+    menu('Sourdough Toast', 'Food'),
+    menu('Iced Sofi', 'Coffee'),
+  ]
+  const pickOf = (names: string[], discovered: string | null = null) =>
+    pickComplimentItem({
+      lineItemNames: names,
+      discoveredLabel: discovered,
+      menuItems: MENU,
+    })
+
+  await check(
+    'item pick: the DISCOVERED item beats a drink, and is marked first time',
+    () => {
+      const pick = pickOf(
+        ['Croissant', 'Oat Cortado', 'Pink Panther'],
+        'Pink Panther',
+      )
+      assert.equal(pick?.item, 'Pink Panther')
+      assert.equal(pick?.firstTime, true)
+      // A blank menu description is no description.
+      assert.equal(pick?.menuDescription, null)
+      // The stamp's label matches by its own key: case and spacing fold.
+      assert.equal(
+        pickOf(['Croissant', 'Pink Panther'], 'pink  PANTHER')?.item,
+        'Pink Panther',
+      )
+    },
+  )
+
+  await check(
+    'item pick: a drink beats food, the first drink in Square order, with its menu description',
+    () => {
+      const pick = pickOf(['Croissant', 'Oat Cortado', 'Matcha Latte'])
+      assert.equal(pick?.item, 'Oat Cortado')
+      assert.equal(pick?.firstTime, false)
+      assert.equal(pick?.menuDescription, 'Smooth and nutty, with oat milk.')
+      // A DISCOVERED label naming nothing on this order falls back to drinks.
+      assert.equal(
+        pickOf(['Croissant', 'Matcha Latte'], 'Chai')?.item,
+        'Matcha Latte',
+      )
+    },
+  )
+
+  await check(
+    'item pick: food only takes the first item; nothing named is null',
+    () => {
+      assert.equal(pickOf(['Croissant', 'Sourdough Toast'])?.item, 'Croissant')
+      assert.equal(pickOf([]), null)
+      assert.equal(pickOf(['  ']), null)
+    },
+  )
+
+  await check(
+    'drink test: the menu category decides when the item is on the menu, the name when it is not',
+    () => {
+      const row = (name: string) =>
+        MENU.find((item) => item.name === name) ?? null
+      // On the menu: the category, not the name. "Iced Sofi" names no drink.
+      assert.equal(isDrink('Iced Sofi', row('Iced Sofi')), true)
+      assert.equal(isDrink('Pink Panther', row('Pink Panther')), true)
+      assert.equal(isDrink('Croissant', row('Croissant')), false)
+      // Off the menu: the name.
+      assert.equal(isDrink('Iced Oat Cortado', null), true)
+      assert.equal(isDrink('Flat White', null), true)
+      assert.equal(isDrink('Almond Croissant', null), false)
+      // Whole words only: "teacake" is not tea.
+      assert.equal(isDrink('Teacake', null), false)
+    },
+  )
+
+  await check(
+    'withoutQuestions: drops the asking sentence, keeps the rest and the line breaks',
+    () => {
+      assert.deepEqual(
+        withoutQuestions(
+          "hey jaipal, good to see you\nthe oat cortado's a great one. what did you get?",
+        ),
+        {
+          body: "hey jaipal, good to see you\nthe oat cortado's a great one.",
+          dropped: 1,
+        },
+      )
+      assert.deepEqual(withoutQuestions('really?! that one is lovely.'), {
+        body: 'that one is lovely.',
+        dropped: 1,
+      })
+      assert.deepEqual(withoutQuestions('hey! the croissant is best warm'), {
+        body: 'hey! the croissant is best warm',
+        dropped: 0,
+      })
+      assert.deepEqual(withoutQuestions('what did you get?'), {
+        body: '',
+        dropped: 1,
+      })
+    },
+  )
+
+  await check(
+    'greeting wording: an order compliments, an expired code says hello only, neither asks as before',
+    () => {
+      const order = {
+        item: 'Oat Cortado',
+        firstTime: false,
+        menuDescription: null,
+      }
+      const pickFor = (over: {
+        prior?: boolean
+        complaint?: boolean
+        order?: typeof order | null
+        expired?: boolean
+      }) =>
+        guestArrivedInstructionsFor({
+          hadPriorConversation: over.prior ?? false,
+          afterComplaint: over.complaint ?? false,
+          order: over.order ?? null,
+          helloOnly: over.expired ?? false,
+        })
+      assert.equal(pickFor({ order }), GUEST_ARRIVED_ORDER_INSTRUCTIONS_NEW)
+      assert.equal(
+        pickFor({ order, prior: true }),
+        GUEST_ARRIVED_ORDER_INSTRUCTIONS_RETURNING,
+      )
+      assert.equal(
+        pickFor({ order, prior: true, complaint: true }),
+        GUEST_ARRIVED_ORDER_INSTRUCTIONS_AFTER_COMPLAINT,
+      )
+      assert.equal(
+        pickFor({ expired: true }),
+        GUEST_ARRIVED_HELLO_ONLY_INSTRUCTIONS_NEW,
+      )
+      assert.equal(
+        pickFor({ expired: true, prior: true }),
+        GUEST_ARRIVED_HELLO_ONLY_INSTRUCTIONS_RETURNING,
+      )
+      assert.equal(
+        pickFor({ expired: true, complaint: true }),
+        GUEST_ARRIVED_HELLO_ONLY_INSTRUCTIONS_AFTER_COMPLAINT,
+      )
+      // No order and no expired code: today's counter wording, unchanged.
+      assert.equal(pickFor({}), GUEST_ARRIVED_INSTRUCTIONS_NEW)
+      assert.equal(
+        pickFor({ prior: true }),
+        GUEST_ARRIVED_INSTRUCTIONS_RETURNING,
+      )
+      assert.equal(
+        pickFor({ complaint: true }),
+        GUEST_ARRIVED_INSTRUCTIONS_AFTER_COMPLAINT,
+      )
+      assert.equal(
+        guestArrivedInstructionsFor(null),
+        GUEST_ARRIVED_INSTRUCTIONS_NEW,
+      )
+    },
+  )
+
+  await check(
+    'greeting wording: every receipt variant asks nothing and never says they are in the shop; hello-only never compliments',
+    () => {
+      const receipt = [
+        GUEST_ARRIVED_ORDER_INSTRUCTIONS_NEW,
+        GUEST_ARRIVED_ORDER_INSTRUCTIONS_RETURNING,
+        GUEST_ARRIVED_ORDER_INSTRUCTIONS_AFTER_COMPLAINT,
+        GUEST_ARRIVED_HELLO_ONLY_INSTRUCTIONS_NEW,
+        GUEST_ARRIVED_HELLO_ONLY_INSTRUCTIONS_RETURNING,
+        GUEST_ARRIVED_HELLO_ONLY_INSTRUCTIONS_AFTER_COMPLAINT,
+      ]
+      for (const text of receipt) {
+        // Ruled 2026-10-15, after the measurements: a hello always, and no
+        // banned-word lists in the prompt.
+        assert.match(text, /Always open with a short hello/)
+        assert.doesNotMatch(text, /enjoy/i)
+        assert.match(text, /ask nothing at all/i)
+        assert.match(text, /may already have left/)
+        assert.doesNotMatch(text, /in the shop right now/)
+        assert.match(text, /Don't mention a passport or a stamp/)
+      }
+      for (const text of receipt.slice(3)) {
+        assert.doesNotMatch(text, /compliment/i)
+      }
+      for (const text of receipt.slice(0, 3)) {
+        assert.match(text, /who made or created it, unless the facts say so/)
+        assert.match(
+          text,
+          /You don't know where they are or how their order is going, and you'll ask about it later, so don't guess or presume\./,
+        )
+      }
+    },
+  )
+
+  const ORDER_SCAN = {
+    venueId: 'v1',
+    guestId: 'g1',
+    scanMessageId: 'm-a1',
+    scannedAt: SCAN,
+  }
+  const tap = (over: Row = {}): Row => ({
+    status: 'matched',
+    received_at: at(-5 * MINUTE).toISOString(),
+    reconciled_transaction_id: 't1',
+    ...over,
+  })
+  const txn = (over: Record<string, unknown> = {}) => ({
+    id: 't1',
+    guest_id: 'g1',
+    occurred_at: at(-5 * MINUTE).toISOString(),
+    // Bound by THIS scan: the bind runs a second after it.
+    matched_at: at(SECOND).toISOString(),
+    retracted_at: null,
+    raw_data: {
+      line_items: [
+        { name: 'Croissant', quantity: 1 },
+        { name: 'Pink Panther', quantity: 1 },
+      ],
+    },
+    ...over,
+  })
+
+  await check(
+    'scan order: a bound code reads the order, its line items and its DISCOVERED label',
+    async () => {
+      const db = makeDb({
+        arrivals: [],
+        order: {
+          referralRef: 'sc_abc',
+          tap: tap(),
+          transaction: txn(),
+          stamp: { kind: 'discovered', label: 'Pink Panther' },
+        },
+      })
+      const order = await loadScanOrder(db.client, ORDER_SCAN)
+      assert.equal(order.kind, 'bound')
+      if (order.kind !== 'bound') return
+      assert.deepEqual(order.lineItemNames, ['Croissant', 'Pink Panther'])
+      assert.equal(order.discoveredLabel, 'Pink Panther')
+      assert.deepEqual(order.orderedAt, at(-5 * MINUTE))
+    },
+  )
+
+  await check(
+    "scan order: none for the counter sign, a retracted order and a payment not yet ingested; reused for another guest's order or a matched code with none",
+    async () => {
+      const kindOf = async (order: Seed['order']) =>
+        (
+          await loadScanOrder(
+            makeDb({ arrivals: [], order }).client,
+            ORDER_SCAN,
+          )
+        ).kind
+      assert.equal(await kindOf({ referralRef: 'LEMILS-COUNTER' }), 'none')
+      assert.equal(await kindOf({ referralRef: null }), 'none')
+      assert.equal(
+        await kindOf({
+          referralRef: 'sc_abc',
+          tap: tap(),
+          transaction: txn({ guest_id: 'g2' }),
+        }),
+        'reused',
+      )
+      assert.equal(
+        await kindOf({
+          referralRef: 'sc_abc',
+          tap: tap({ reconciled_transaction_id: null }),
+        }),
+        'reused',
+      )
+      assert.equal(
+        await kindOf({
+          referralRef: 'sc_abc',
+          tap: tap(),
+          transaction: txn({ retracted_at: at(0).toISOString() }),
+        }),
+        'none',
+      )
+      assert.equal(
+        await kindOf({
+          referralRef: 'sc_abc',
+          tap: tap({ status: 'pending', reconciled_transaction_id: null }),
+        }),
+        'none',
+      )
+    },
+  )
+
+  await check(
+    'scan order: an unbound code past 24h at the scan is expired (pending or already flipped); 23h59m is not',
+    async () => {
+      const kindAt = async (status: string, ageMs: number) =>
+        (
+          await loadScanOrder(
+            makeDb({
+              arrivals: [],
+              order: {
+                referralRef: 'sc_abc',
+                tap: tap({
+                  status,
+                  reconciled_transaction_id: null,
+                  received_at: at(-ageMs).toISOString(),
+                }),
+              },
+            }).client,
+            ORDER_SCAN,
+          )
+        ).kind
+      assert.equal(
+        await kindAt('pending', 24 * 60 * MINUTE + SECOND),
+        'expired',
+      )
+      assert.equal(await kindAt('expired', 25 * 60 * MINUTE), 'expired')
+      assert.equal(await kindAt('pending', 24 * 60 * MINUTE - MINUTE), 'none')
+    },
+  )
+
+  await check(
+    'ruling Q2: a receipt scan with a bound order is greeted after hours; one without an order is not',
+    async () => {
+      // 16:30 in Los Angeles, after the 3 PM close.
+      const late = new Date('2026-09-20T23:30:00.000Z')
+      const row = scanRow({
+        scanned_at: late.toISOString(),
+        awaits_passport: true,
+        passport_settled_at: late.toISOString(),
+      })
+      const pending = {
+        ...PENDING,
+        scannedAt: late,
+        awaitsPassport: true,
+        passportSettledAt: late,
+      }
+      const bound = makeDb({
+        arrivals: [row],
+        order: {
+          referralRef: 'sc_abc',
+          tap: tap(),
+          // Bound by this late scan, a second after it.
+          transaction: txn({
+            matched_at: new Date(late.getTime() + SECOND).toISOString(),
+          }),
+          stamp: null,
+        },
+      })
+      await processScanArrival(
+        bound.client,
+        pending,
+        new Date(late.getTime() + 20 * SECOND),
+      )
+      assert.equal(bound.stats.claimWins, 1)
+
+      const expired = makeDb({
+        arrivals: [row],
+        order: {
+          referralRef: 'sc_abc',
+          tap: tap({
+            status: 'expired',
+            reconciled_transaction_id: null,
+            received_at: new Date(
+              late.getTime() - 25 * 60 * MINUTE,
+            ).toISOString(),
+          }),
+        },
+      })
+      await processScanArrival(
+        expired.client,
+        pending,
+        new Date(late.getTime() + 20 * SECOND),
+      )
+      assert.equal(expired.arrivals[0]?.outcome, 'venue_closed')
+      assert.equal(expired.stats.claimWins, 0)
+    },
+  )
+
+  // ---------------------------------------------------------------------------
+  // TAC-588: the item question
+  // ---------------------------------------------------------------------------
+
+  await check(
+    'item question timing: scans at order +2, +15, +28 min, +3 h and +20 h (hello 10 s after each scan)',
+    () => {
+      const order = SCAN
+      const dueFor = (scanAfterOrderMs: number) =>
+        scanItemQuestionDueAt({
+          orderedAt: order,
+          helloAt: at(scanAfterOrderMs + 10 * SECOND),
+        })
+      // +2: the order + 20 wins.
+      assert.deepEqual(dueFor(2 * MINUTE), at(20 * MINUTE))
+      // +15: hello at 15:10, so hello + 5 = 20:10 wins.
+      assert.deepEqual(dueFor(15 * MINUTE), at(20 * MINUTE + 10 * SECOND))
+      // +28: hello + 5 = 33:10.
+      assert.deepEqual(dueFor(28 * MINUTE), at(33 * MINUTE + 10 * SECOND))
+      // Late scans: always hello + 5.
+      assert.deepEqual(
+        dueFor(3 * 60 * MINUTE),
+        at(3 * 60 * MINUTE + 5 * MINUTE + 10 * SECOND),
+      )
+      assert.deepEqual(
+        dueFor(20 * 60 * MINUTE),
+        at(20 * 60 * MINUTE + 5 * MINUTE + 10 * SECOND),
+      )
+    },
+  )
+
+  await check('item question gives up 2 h after it was due, not at 2 h', () => {
+    const due = at(20 * MINUTE)
+    assert.equal(
+      isScanItemQuestionTooLate(due, at(20 * MINUTE + 2 * 60 * MINUTE)),
+      false,
+    )
+    assert.equal(
+      isScanItemQuestionTooLate(
+        due,
+        at(20 * MINUTE + 2 * 60 * MINUTE + SECOND),
+      ),
+      true,
+    )
+  })
+
+  await check(
+    "spacing: only this scan's own hello is exempt, not a message from before the scan",
+    () => {
+      const late = at(20 * 60 * MINUTE)
+      assert.equal(
+        lastProactiveWasThisScan(at(20 * 60 * MINUTE + 10 * SECOND), late),
+        true,
+      )
+      assert.equal(lastProactiveWasThisScan(late, late), true)
+      // A warm close from the night before is not this visit, even though it
+      // is after the order: the order-anchored rule would have excused it.
+      assert.equal(lastProactiveWasThisScan(at(10 * 60 * MINUTE), late), false)
+      assert.equal(lastProactiveWasThisScan(null, late), false)
+    },
+  )
+
+  await check(
+    'reply turns: a receipt-scan visit lasts 2 h from its hello; the reply may ask only while the timer is open or was cancelled',
+    () => {
+      const hello = at(20 * SECOND)
+      const visit = (
+        itemQuestion: 'open' | 'cancelled' | 'taken',
+        inboundMs: number,
+      ) =>
+        resolveScanOrderVisit({
+          helloClaimedAt: hello,
+          itemQuestion,
+          inboundAt: at(inboundMs),
+        })
+      assert.deepEqual(visit('open', 60 * MINUTE), {
+        known: true,
+        likedAt: hello,
+      })
+      assert.deepEqual(visit('cancelled', 30 * MINUTE), {
+        known: true,
+        likedAt: hello,
+      })
+      // Claimed for a send (in flight, queued or sent) or given up: never a
+      // second ask on their turn.
+      assert.deepEqual(visit('taken', 30 * MINUTE), {
+        known: true,
+        likedAt: null,
+      })
+      // A reply while the hello's later bubbles are still going out counts:
+      // the anchor is the greeting's claim, not its resolve.
+      assert.deepEqual(visit('open', 22 * SECOND), {
+        known: true,
+        likedAt: hello,
+      })
+      assert.deepEqual(visit('open', 20 * SECOND + 2 * 60 * MINUTE + SECOND), {
+        known: false,
+        likedAt: null,
+      })
+    },
+  )
+
+  await check(
+    "counter flow's 'they named it' arming is off on a receipt-scan visit, and unchanged without one",
+    () => {
+      const base = {
+        scanAt: SCAN,
+        guestCreatedVia: 'instagram',
+        guestCreatedAt: at(-60 * MINUTE),
+        inboundAt: at(MINUTE),
+        mentionsMenuItem: true,
+        answeringOurQuestion: true,
+        alreadyAskedThisVisit: false,
+      }
+      assert.deepEqual(resolveSameVisitOrderAt(base), at(MINUTE))
+      assert.equal(
+        resolveSameVisitOrderAt({ ...base, scanOrderKnown: true }),
+        null,
+      )
+    },
+  )
+
+  await check(
+    'approval: nothing set auto-sends; only an explicit hold holds; visitCheckback is not read',
+    () => {
+      assert.equal(resolveScanItemQuestionDisposition(null), 'auto_send')
+      assert.equal(
+        resolveScanItemQuestionDisposition({
+          default: 'auto_send',
+          perCategory: {},
+          visitCheckback: 'operator_approval',
+        }),
+        'auto_send',
+      )
+      assert.equal(
+        resolveScanItemQuestionDisposition({
+          default: 'auto_send',
+          perCategory: {},
+          scanItemQuestion: 'operator_approval',
+        }),
+        'operator_approval',
+      )
+    },
+  )
+
+  await check(
+    'item question wording: names the item, bans the two tenses',
+    () => {
+      const text = scanItemQuestionInstructions('Oat\n  Cortado')
+      assert.match(text, /how they liked the Oat Cortado,/)
+      assert.match(text, /Don't say "how is it" or "how was it"/)
+      assert.match(text, /still finishing it or have already left/)
+    },
+  )
+
+  const greeted = (over: Row = {}): Row =>
+    scanRow({
+      claimed_at: at(20 * SECOND).toISOString(),
+      venue_local_date: '2026-09-20',
+      outcome: 'greeted',
+      resolved_at: at(20 * SECOND).toISOString(),
+      item_question_due_at: at(20 * MINUTE).toISOString(),
+      ...over,
+    })
+
+  await check('item question timer: not read before it is due', async () => {
+    const db = makeDb({ arrivals: [greeted()] })
+    const tick = await processDueScanItemQuestions(at(19 * MINUTE), db.client)
+    assert.equal(tick.scanned, 0)
+    assert.equal(db.arrivals[0]?.item_question_claimed_at, null)
+  })
+
+  await check(
+    'a guest reply after the hello cancels the timer for good: claimed, never sent',
+    async () => {
+      const db = makeDb({
+        arrivals: [greeted()],
+        messages: [inbound(5 * MINUTE)],
+      })
+      const tick = await processDueScanItemQuestions(at(21 * MINUTE), db.client)
+      assert.equal(tick.skipped.guest_replied, 1)
+      assert.equal(
+        db.arrivals[0]?.item_question_claimed_at,
+        at(21 * MINUTE).toISOString(),
+      )
+      assert.equal(db.arrivals[0]?.item_question_outcome, 'cancelled')
+      assert.equal(db.arrivals[0]?.item_question_sent_at, null)
+      const again = await processDueScanItemQuestions(
+        at(22 * MINUTE),
+        db.client,
+      )
+      assert.equal(again.scanned, 0)
+    },
+  )
+
+  await check(
+    'a reply BEFORE the hello (the scan delay) does not cancel it; held past 2 h it is given up',
+    async () => {
+      const before = makeDb({
+        arrivals: [greeted()],
+        messages: [inbound(5 * SECOND)],
+      })
+      const tick = await processDueScanItemQuestions(
+        at(21 * MINUTE),
+        before.client,
+      )
+      assert.equal(tick.skipped.guest_replied, undefined)
+
+      const late = makeDb({ arrivals: [greeted()] })
+      const lateTick = await processDueScanItemQuestions(
+        at(20 * MINUTE + 2 * 60 * MINUTE + SECOND),
+        late.client,
+      )
+      assert.equal(lateTick.skipped.too_late, 1)
+      assert.equal(late.arrivals[0]?.item_question_sent_at, null)
+    },
+  )
+
+  // ---------------------------------------------------------------------------
+  // TAC-588: the review's findings
+  // ---------------------------------------------------------------------------
+
+  await check(
+    'a guest who answers the hello while it is still going out cancels the question',
+    async () => {
+      const db = makeDb({
+        // Claimed at 20 s, resolved at 25 s after its last bubble; they wrote
+        // at 22 s, between the two.
+        arrivals: [greeted({ resolved_at: at(25 * SECOND).toISOString() })],
+        messages: [inbound(22 * SECOND)],
+      })
+      const tick = await processDueScanItemQuestions(at(21 * MINUTE), db.client)
+      assert.equal(tick.skipped.guest_replied, 1)
+    },
+  )
+
+  await check(
+    'a slip opened again after an earlier scan bound it is not a fresh order',
+    async () => {
+      const kindOf = async (matchedMs: number | null) =>
+        (
+          await loadScanOrder(
+            makeDb({
+              arrivals: [],
+              order: {
+                referralRef: 'sc_abc',
+                tap: tap(),
+                transaction: txn({
+                  matched_at:
+                    matchedMs === null ? null : at(matchedMs).toISOString(),
+                }),
+              },
+            }).client,
+            ORDER_SCAN,
+          )
+        ).kind
+      // Bound by yesterday's scan: a used slip, hello only (ruled in review).
+      assert.equal(await kindOf(-24 * 60 * MINUTE), 'reused')
+      assert.equal(await kindOf(null), 'reused')
+      // Bound by this one, Meta's clock a little ahead of ours.
+      assert.equal(await kindOf(-2 * MINUTE), 'bound')
+      assert.equal(await kindOf(SECOND), 'bound')
+    },
+  )
+
+  await check('an order with no named items is no order', async () => {
+    const order = await loadScanOrder(
+      makeDb({
+        arrivals: [],
+        order: {
+          referralRef: 'sc_abc',
+          tap: tap(),
+          transaction: txn({ raw_data: { line_items: [{ name: '  ' }] } }),
+        },
+      }).client,
+      ORDER_SCAN,
+    )
+    assert.equal(order.kind, 'none')
+  })
+
+  await check('withoutQuestions: an emoji left alone is no hello', () => {
+    assert.deepEqual(withoutQuestions("how's the cortado? ☕"), {
+      body: '',
+      dropped: 1,
+    })
+  })
+
+  await check(
+    "the passport cap counts from when we recorded the scan, not Meta's clock",
+    () => {
+      assert.deepEqual(
+        scanGreetingDueAt({ ...passport({}), recordedAt: at(50 * SECOND) }),
+        at(110 * SECOND),
+      )
+      // Recorded before Meta's timestamp (our clock behind): Meta's stands.
+      assert.deepEqual(
+        scanGreetingDueAt({ ...passport({}), recordedAt: at(-5 * SECOND) }),
+        at(60 * SECOND),
+      )
+    },
+  )
+
+  await check(
+    'the item question is scheduled when the hello is claimed, and settled no_hello when the hello never goes',
+    async () => {
+      // handleFollowup fails here (no credentials), so the hello never goes:
+      // the question it was scheduled behind must not stay owed.
+      const db = makeDb({
+        arrivals: [
+          scanRow({
+            awaits_passport: true,
+            passport_settled_at: at(5 * SECOND).toISOString(),
+            passport_sent_at: at(5 * SECOND).toISOString(),
+          }),
+        ],
+        order: { referralRef: 'sc_abc', tap: tap(), transaction: txn() },
+      })
+      await processScanArrival(
+        db.client,
+        {
+          ...PENDING,
+          awaitsPassport: true,
+          passportSettledAt: at(5 * SECOND),
+          passportSentAt: at(5 * SECOND),
+        },
+        at(9 * SECOND),
+      )
+      assert.notEqual(db.arrivals[0]?.item_question_due_at, null)
+      assert.equal(db.arrivals[0]?.item_question_outcome, 'no_hello')
+    },
+  )
+
+  // ---------------------------------------------------------------------------
+  // TAC-588: the PR #392 review's rulings
+  // ---------------------------------------------------------------------------
+
+  await check(
+    'ruled: only the counter sign asks; an expired or a used code gets the hello only',
+    () => {
+      assert.equal(greetsHelloOnly({ kind: 'expired' }), true)
+      assert.equal(greetsHelloOnly({ kind: 'reused' }), true)
+      assert.equal(greetsHelloOnly({ kind: 'none' }), false)
+      assert.equal(greetsHelloOnly(undefined), false)
+      assert.equal(
+        greetsHelloOnly({
+          kind: 'bound',
+          transactionId: 't1',
+          orderedAt: SCAN,
+          lineItemNames: ['Oat Cortado'],
+          discoveredLabel: null,
+        }),
+        false,
+      )
+    },
+  )
+
+  await check(
+    "Le Mil's live menu categories: the four drink categories are drinks, Pastries is not",
+    () => {
+      for (const category of [
+        'Coffee',
+        'Espresso Drinks',
+        'Signature Drinks',
+        'Other Drinks',
+      ]) {
+        assert.equal(
+          isDrink('Anything', menu('Anything', category)),
+          true,
+          category,
+        )
+      }
+      assert.equal(isDrink('Croissant', menu('Croissant', 'Pastries')), false)
+    },
+  )
+
+  await check(
+    "Le Mil's drinks that name no coffee word still read as drinks when their menu row is missed",
+    () => {
+      for (const name of ['Mango Lassi', 'Rose Lassi', 'Blossom Tonic']) {
+        assert.equal(isDrink(name, null), true, name)
+      }
+      // And win the compliment over food on the same order.
+      assert.equal(
+        pickComplimentItem({
+          lineItemNames: ['Almond Croissant', 'Blossom Tonic'],
+          discoveredLabel: null,
+          menuItems: [],
+        })?.item,
+        'Blossom Tonic',
+      )
     },
   )
 

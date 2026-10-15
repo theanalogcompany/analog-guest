@@ -341,9 +341,9 @@ so a halted venue never accumulates recognition state or takes a claim.
 
 ## Intentions
 
-`intentions/`. Ten keys in `definitions.ts`, priority-ordered, arming on
-`visit_confirmed` / `same_visit_order` / `checkback_due` / `first_recorded_order` /
-`open_recommendation` / `recorded_order` / `first_contact`.
+`intentions/`. Eleven keys in `definitions.ts`, priority-ordered, arming on
+`visit_confirmed` / `same_visit_order` / `scan_order_known` / `checkback_due` /
+`first_recorded_order` / `open_recommendation` / `recorded_order` / `first_contact`.
 
 ### Two intentions are required, and a required one renders alone (TAC-575)
 
@@ -421,6 +421,51 @@ the warm close); the reply claims AFTER sending, because by then the question ha
 - Instagram only. 10 and 5 minutes are ruled; the 2-minute quiet floor and the 30-minute
   bound are choices, stated at the constants.
 
+### A receipt scan: hello after the passport, the question timed from the order (TAC-588)
+
+A scan of a RECEIPT code (`sc_`, one per Square payment) binds the order before anything is
+said, so this visit runs differently from the counter flow above (ruled 2026-10-14):
+
+| step | what | where |
+| --- | --- | --- |
+| bind, stamp | one chain in the webhook: write the pending row (`awaits_passport`), bind, stamp, write how it ended (`settleScanPassport`) | `app/api/webhooks/instagram/route.ts` |
+| hello | 4 s after the passport images; 20 s fallback when nothing was sent; 60 s cap | `scanGreetingDueAt`, `scan-arrival.ts` |
+| hello wording | compliments the order (`pickComplimentItem`: DISCOVERED, else first drink, else first item), asks nothing (also in code: `withoutQuestions`), asserts nothing about being in the shop | `guest-arrived.ts`, `scan-order.ts` |
+| item question | `max(order + 20 min, hello + 5 min)`, the visit's check-back; writes the check-in with the check-back spent | `scan-item-question.ts`, from `/api/cron/visit-checkbacks` |
+| guest writes first | the timer is cancelled for good; `scan_order_liked` (`when_it_fits`) may ask on their turns | `resolveScanOrderVisit` |
+
+- **Only an order bound BY THIS SCAN gets the compliment** (`transactions.matched_at` at or
+  after the scan). A code past its 24 hours (`SCAN_CODE_TTL_MS`), and a slip already used by
+  an earlier scan, get a hello with no compliment and no question (`greetsHelloOnly`; ruled:
+  "only the counter sign asks 'what did you get?'"). The counter sign and a payment Square
+  has not reported keep the counter flow above.
+- **"Since the hello" starts at the greeting's CLAIM, never at `resolved_at`**, which is
+  written after the last bubble: a guest who answers the first bubble would otherwise be
+  missed and asked anyway. The due time is written at the claim too, before generation, and
+  settled `no_hello` if the hello never reaches them.
+- **`item_question_outcome` is what lets the reply path ask after a cancel and never after a
+  send**: the claim alone looks the same for both. A send in flight, queued or sent is
+  `taken`, and `scan_order_liked` stays down for it. A queued card that an operator later
+  approves writes no check-in (the check-back's own accepted limit).
+- **A reply that already says how it was is the check-in** (`classifyCheckinAnswer`, in
+  `handle-inbound.ts` beside the counter flow's `orderTurnVerdict`): recorded with the
+  check-back spent, and `scan_order_liked` dropped.
+- **A bound order is greeted whatever the venue's hours**; the question still waits out
+  quiet hours and is given up 2 h after it was due.
+- **The marker for "this visit's hello complimented a bound order" is
+  `instagram_scan_arrivals.item_question_due_at` being set.** The order itself is never
+  copied: `loadScanOrder` follows the scan's referral code to `pos_tap_events`.
+- **`same_visit_order` does not arm on such a visit**: nobody named the order, the scan did.
+- **The spacing exemption is anchored on the scan** (`lastProactiveWasThisScan`), not the
+  order: a slip scanned the next morning must not excuse a message from the night before.
+- **Its approval is `approval_policy.scanItemQuestion`, default AUTO-SEND** (ruled), the
+  one dispositional key that defaults that way. It rides the check-back's trigger
+  (`visitCheckback.scanItem`).
+- **The warm close waits for it** (`scan_question_pending`).
+
+Checks: `scripts/harness/scan-greeting/` (and its mutation pass). Wording:
+`npm run measure-scan-greeting`, against a bar posted on TAC-588 before any run.
+
 `resolveSameVisitOrderAt` is handed `alreadyAskedThisVisit: true` when the check-in could not
 be read. The intention re-arms on a newer event, so reading a failure as "not asked" is how
 one visit gets the question twice.
@@ -444,8 +489,8 @@ never saw.
 ### A first conversation gets to know the guest in a fixed order (TAC-575)
 
 Ruled 2026-10-06, replacing TAC-567/568's "two questions, then the close". On a guest's
-FIRST conversation eight of the ten may be raised, in `priority` order: `understand_order`,
-`hows_it_so_far`, `check_back_on_order`, `learn_name`, `are_they_new_here`, then `are_they_local`, `their_rhythm`, `why_theyre_here`.
+FIRST conversation nine of the eleven may be raised, in `priority` order: `understand_order`,
+`scan_order_liked` (TAC-588, a receipt-scan visit only), `hows_it_so_far`, `check_back_on_order`, `learn_name`, `are_they_new_here`, then `are_they_local`, `their_rhythm`, `why_theyre_here`.
 The two about a PAST order or suggestion stay suppressed.
 
 **No getting-to-know-you question rides on a guest's first reply** (the two order questions,
@@ -618,8 +663,9 @@ Prompt wording cannot reach any of this: see `docs/decisions/0007-intention-ques
 
 ## Proactive sends (TAC-386)
 
-Four paths reach a guest with no inbound behind them (the fourth is TAC-575's timed
-check-back, described under Intentions): the scan greeting (TAC-536; started by
+Five paths reach a guest with no inbound behind them (the fourth is TAC-575's timed
+check-back, the fifth TAC-588's receipt-scan item question, both described under
+Intentions): the scan greeting (TAC-536; started by
 the Instagram webhook's fast path, cron as backstop, so only pausing the venue stops it), the warm
 close (TAC-560; any first Instagram conversation since TAC-575), the inquiry follow-up (TAC-386, `lib/followups/`). **No two within 60
 minutes**, via `proactive-spacing.ts` and `guests.last_proactive_send_at`. A follow-up is NOT

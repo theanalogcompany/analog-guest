@@ -1,3 +1,4 @@
+import type { ComplimentPick, ScanOrder } from './scan-order'
 import type { SlotDropReason } from './pending-slots'
 import type {
   FollowupReason,
@@ -272,6 +273,12 @@ export interface FollowupTrigger {
      * complaint is too old to bring up.
      */
     afterComplaint?: boolean
+    /**
+     * TAC-588: what the scan's receipt code says they ordered, read once by
+     * the processor (loadScanOrder) so the greeting and the item question
+     * see the same answer. Absent is `none`: today's greeting.
+     */
+    order?: ScanOrder
   }
   /**
    * TAC-560: set only when `reason === 'warm_close'`. Typed channel rather than
@@ -333,6 +340,14 @@ export interface FollowupTrigger {
    */
   visitCheckback?: {
     answersMessageId: string
+    /**
+     * TAC-588: set when this is a receipt scan's item question rather than
+     * the check-back it replaces: the item the hello complimented. Swaps the
+     * wording (scan-item-question.ts) and the approval key
+     * (`approval_policy.scanItemQuestion`, default auto-send). Everything
+     * else about the send is the check-back's.
+     */
+    scanItem?: string
   }
   triggeredAt: Date
   metadata?: Record<string, unknown>
@@ -452,6 +467,18 @@ export interface RuntimeContext {
      * sees no other part of the earlier conversation.
      */
     priorGreetings: string[]
+    /**
+     * TAC-588: the item the hello compliments, when the scan bound an order.
+     * Null otherwise, and then the greeting asks what they got, as before.
+     */
+    order: ComplimentPick | null
+    /**
+     * TAC-588: the scan's receipt code bound nothing on this scan: it was
+     * past its twenty-four hours (ruled 2026-10-14, question 3), or already
+     * used by an earlier scan (ruled in the PR #392 review). The hello goes
+     * with no compliment and no question.
+     */
+    helloOnly: boolean
   } | null
   /**
    * TAC-386: the question and our answer, on an inquiry-follow-up turn only.
@@ -466,6 +493,15 @@ export interface RuntimeContext {
   // threaded to composePrompt to replace the follow_up category's instructions,
   // which are written for a message days after a visit.
   visitCheckback: boolean
+  // TAC-588: the item a receipt scan's item question asks about, on that
+  // question's turn only (a visit_checkback trigger carrying `scanItem`).
+  // Null on every other turn, the check-back included.
+  scanItemQuestion: { item: string } | null
+  // TAC-588: on a reply turn inside a receipt-scan visit that may still ask
+  // how they liked it (scan_order_liked): the item the hello complimented and
+  // when it was ordered. handle-inbound writes the visit's check-in from it
+  // when the question goes. Null on every other turn.
+  scanOrderVisit: { item: string; orderedAt: Date } | null
   // TAC-495: the conversation's channel. Set once by build-runtime-context.ts
   // via resolveConversationChannel, from the guest's identifiers, the inbound
   // message's channel and (TAC-469) the guest's last inbound channel. It picks

@@ -187,8 +187,12 @@ export async function processDueVisitCheckbacks(
   return result
 }
 
-/** The venue-wide gates, in the warm close's order and for its reasons. */
-function venueBlocks(
+/**
+ * The venue-wide gates, in the warm close's order and for its reasons. Shared
+ * with the receipt-scan item question (scan-item-question.ts, TAC-588), the
+ * message that replaces this one for a scan visit.
+ */
+export function venueBlocks(
   venue: WarmCloseVenue | null,
   now: Date,
 ): VisitCheckbackSkipReason | null {

@@ -113,28 +113,132 @@ export const GUEST_ARRIVED_INSTRUCTIONS_NEW = `The guest just scanned the sign a
  */
 export const GUEST_ARRIVED_INSTRUCTIONS_AFTER_COMPLAINT = `The guest just scanned the code at the counter, so they are in the shop right now. The last time they were in, they told you something was wrong with what they got. Greet them the way you would someone walking up, say you are glad they came back, and ask what they got today. Do not apologise again, do not repeat what went wrong, and do not offer anything. One or two short lines. You have talked before, so don't introduce yourself.`
 
+// ---------------------------------------------------------------------------
+// TAC-588: a scan of a RECEIPT code
+// ---------------------------------------------------------------------------
+//
+// The scan has already told us what they ordered, so asking "what did you get?"
+// says we weren't paying attention. The hello compliments the order instead,
+// and asks NOTHING: the question about the item comes about twenty minutes
+// after the order, on its own (lib/agent/scan-item-question.ts).
+//
+// THE THREE COMPLIMENT VARIANTS ARE JAIPAL'S WORDING, approved verbatim
+// (ruled 2026-10-14), with additions ruled after the measurements
+// (2026-10-15): "Always open with a short hello" (eight of ten nameless new
+// guests got none; all six variants), no claim about popularity, rank or who
+// made it unless the facts say so ("the most underrated"), and one sentence
+// of INTENT in place of word bans: they may be anywhere and the question
+// comes later, so presume nothing. A second round of banned-word lists was
+// ruled against ("stop tightening by word lists"); the only hard rule is the
+// "?" backstop, in code. The hello-only variants carry no intent sentence:
+// "you'll ask about it later" is false there, since nothing is asked. The order reaches the model as facts in
+// `## Guest just arrived` (formatScanOrder, serializers.ts); this text names no
+// item and quotes no example, so nothing here is a line every guest receives.
+//
+// "MAY STILL BE IN THE SHOP OR MAY ALREADY HAVE LEFT". A receipt code binds for
+// twenty-four hours, and a slip is scanned on the walk out, at home, or the next
+// morning, so the present tense the counter wordings above assert is not ours
+// to assert here.
+//
+// "ASK NOTHING AT ALL" IS ALSO ENFORCED IN CODE (withoutQuestions,
+// lib/agent/scan-arrival.ts), because a prompt's "don't" is a request
+// (decision 0007's lesson).
+//
+// THE HELLO-ONLY VARIANTS, for a receipt code past its day (ruled 2026-10-14,
+// question 3: "a hello only, with no compliment and no question") and for one
+// already used by an earlier scan (ruled in the PR #392 review: "only the
+// counter sign asks 'what did you get?', because only the counter sign means
+// they're in the shop now"). Each is
+// its compliment variant with the compliment sentence REMOVED and nothing
+// else changed: no new wording was written for them, so none needed its own
+// approval beyond the ruling that says what they leave out.
+
+/** A new guest, with a bound order. Approved verbatim. */
+export const GUEST_ARRIVED_ORDER_INSTRUCTIONS_NEW = `The guest just scanned the code on their receipt and has not written anything. They may still be in the shop or may already have left, so say nothing that depends on which. You don't know where they are or how their order is going, and you'll ask about it later, so don't guess or presume. Always open with a short hello, using their name if you know it; if you don't, leave the name out and don't ask for it. Then compliment what they ordered, named under "Guest just arrived", using what the facts say about it: how it tastes, what it goes with. Never a generic line like "great choice", and never a detail the facts don't give you. Say only what the facts say about it: nothing about how popular it is, how it ranks, whether it sells best, or who made or created it, unless the facts say so. Ask nothing at all. Don't mention a passport or a stamp. One or two short lines. Say only what the facts below say about past visits.`
+
+/** A returning guest, with a bound order. Approved verbatim. */
+export const GUEST_ARRIVED_ORDER_INSTRUCTIONS_RETURNING = `The guest just scanned the code on their receipt and has not written anything. They may still be in the shop or may already have left, so say nothing that depends on which. You don't know where they are or how their order is going, and you'll ask about it later, so don't guess or presume. You have talked before, so don't introduce yourself. Always open with a short hello and say it's good to see them, using their name if you know it; if you don't, leave the name out and don't ask for it. Then compliment what they ordered, named under "Guest just arrived", using what the facts say about it: how it tastes, what it goes with. Never a generic line like "great choice", and never a detail the facts don't give you. Say only what the facts say about it: nothing about how popular it is, how it ranks, whether it sells best, or who made or created it, unless the facts say so. Ask nothing at all. Don't mention a passport or a stamp. One or two short lines. Say only what the facts below say about past visits.`
+
+/**
+ * After a complaint, with a bound order. Approved verbatim. Bars the apology,
+ * the details and an offer, for GUEST_ARRIVED_INSTRUCTIONS_AFTER_COMPLAINT's
+ * reasons.
+ */
+export const GUEST_ARRIVED_ORDER_INSTRUCTIONS_AFTER_COMPLAINT = `The guest just scanned the code on their receipt and has not written anything. They may still be in the shop or may already have left, so say nothing that depends on which. You don't know where they are or how their order is going, and you'll ask about it later, so don't guess or presume. The last time they were in, they told you something was wrong with what they got. Always open with a short hello and say you are glad they came back, using their name if you know it; if you don't, leave the name out and don't ask for it. Then compliment what they ordered today, named under "Guest just arrived", using what the facts say about it. Say only what the facts say about it: nothing about how popular it is, how it ranks, whether it sells best, or who made or created it, unless the facts say so. Do not apologise again, do not repeat what went wrong, do not offer anything, and ask nothing at all. Don't mention a passport or a stamp. One or two short lines. You have talked before, so don't introduce yourself.`
+
+/** A new guest whose receipt code was past its day: the compliment sentence removed. */
+export const GUEST_ARRIVED_HELLO_ONLY_INSTRUCTIONS_NEW = `The guest just scanned the code on their receipt and has not written anything. They may still be in the shop or may already have left, so say nothing that depends on which. Always open with a short hello, using their name if you know it; if you don't, leave the name out and don't ask for it. Ask nothing at all. Don't mention a passport or a stamp. One or two short lines. Say only what the facts below say about past visits.`
+
+/** A returning guest whose receipt code was past its day: the compliment sentence removed. */
+export const GUEST_ARRIVED_HELLO_ONLY_INSTRUCTIONS_RETURNING = `The guest just scanned the code on their receipt and has not written anything. They may still be in the shop or may already have left, so say nothing that depends on which. You have talked before, so don't introduce yourself. Always open with a short hello and say it's good to see them, using their name if you know it; if you don't, leave the name out and don't ask for it. Ask nothing at all. Don't mention a passport or a stamp. One or two short lines. Say only what the facts below say about past visits.`
+
+/**
+ * After a complaint, receipt code past its day: the compliment clause removed,
+ * and "ask nothing at all" kept with the three bars it was listed with.
+ */
+export const GUEST_ARRIVED_HELLO_ONLY_INSTRUCTIONS_AFTER_COMPLAINT = `The guest just scanned the code on their receipt and has not written anything. They may still be in the shop or may already have left, so say nothing that depends on which. The last time they were in, they told you something was wrong with what they got. Always open with a short hello and say you are glad they came back, using their name if you know it; if you don't, leave the name out and don't ask for it. Do not apologise again, do not repeat what went wrong, do not offer anything, and ask nothing at all. Don't mention a passport or a stamp. One or two short lines. You have talked before, so don't introduce yourself.`
+
 /**
  * Pick the variant.
  *
- * `afterComplaint` wins over the other two: it is only ever set for a guest
- * with a check-in on file, who has by definition talked with us before.
+ * TWO AXES. Who the guest is (new, returning, after a complaint) and what the
+ * scan says about the order (TAC-588):
+ *
+ *   an order is bound      the compliment wording, which asks nothing
+ *   the code was expired   the hello-only wording, which asks nothing
+ *     or already used
+ *   neither                today's counter wording, which asks what they got
+ *                          (the counter sign, a payment not yet ingested)
+ *
+ * `afterComplaint` wins over the other two guest axes: it is only ever set for
+ * a guest with a check-in on file, who has by definition talked with us before.
  *
  * `null` means the runtime context did not carry a scan-arrival fact on a
  * `guest_arrived` turn, which is a wiring bug rather than a reachable state.
- * It falls back to the NEW-guest variant on purpose: an introduction a guest
- * did not need is odd, and telling a stranger "you have talked before" is
- * false. Falling toward the false one would be the worse failure.
+ * It falls back to the NEW-guest counter variant on purpose: an introduction a
+ * guest did not need is odd, and telling a stranger "you have talked before"
+ * is false. Falling toward the false one would be the worse failure.
  */
 export function guestArrivedInstructionsFor(
   scanArrival: {
     hadPriorConversation: boolean
     afterComplaint?: boolean
+    order?: unknown
+    helloOnly?: boolean
   } | null,
 ): string {
-  if (scanArrival?.afterComplaint === true) {
-    return GUEST_ARRIVED_INSTRUCTIONS_AFTER_COMPLAINT
-  }
+  const variants =
+    scanArrival?.order !== null && scanArrival?.order !== undefined
+      ? ORDER_VARIANTS
+      : scanArrival?.helloOnly === true
+        ? HELLO_ONLY_VARIANTS
+        : COUNTER_VARIANTS
+  if (scanArrival?.afterComplaint === true) return variants.afterComplaint
   return scanArrival?.hadPriorConversation === true
-    ? GUEST_ARRIVED_INSTRUCTIONS_RETURNING
-    : GUEST_ARRIVED_INSTRUCTIONS_NEW
+    ? variants.returning
+    : variants.new
+}
+
+type GreetingVariants = {
+  new: string
+  returning: string
+  afterComplaint: string
+}
+
+const COUNTER_VARIANTS: GreetingVariants = {
+  new: GUEST_ARRIVED_INSTRUCTIONS_NEW,
+  returning: GUEST_ARRIVED_INSTRUCTIONS_RETURNING,
+  afterComplaint: GUEST_ARRIVED_INSTRUCTIONS_AFTER_COMPLAINT,
+}
+
+const ORDER_VARIANTS: GreetingVariants = {
+  new: GUEST_ARRIVED_ORDER_INSTRUCTIONS_NEW,
+  returning: GUEST_ARRIVED_ORDER_INSTRUCTIONS_RETURNING,
+  afterComplaint: GUEST_ARRIVED_ORDER_INSTRUCTIONS_AFTER_COMPLAINT,
+}
+
+const HELLO_ONLY_VARIANTS: GreetingVariants = {
+  new: GUEST_ARRIVED_HELLO_ONLY_INSTRUCTIONS_NEW,
+  returning: GUEST_ARRIVED_HELLO_ONLY_INSTRUCTIONS_RETURNING,
+  afterComplaint: GUEST_ARRIVED_HELLO_ONLY_INSTRUCTIONS_AFTER_COMPLAINT,
 }

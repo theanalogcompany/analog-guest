@@ -45,7 +45,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import type { Database } from '@/db/types'
 import { logger } from '@/lib/observability/logger'
 import { DELIVERED_OUTBOUND_STATUSES } from './group-responses'
-import { latestGreetings } from './scan-arrival'
+import { latestGreetings, type ScanArrivalTiming } from './scan-arrival'
 
 type AdminSupabaseClient = SupabaseClient<Database>
 
@@ -68,12 +68,11 @@ export type ScanArrivalOutcome =
   | 'already_greeted_today'
   | 'errored'
 
-export interface PendingScanArrival {
+export interface PendingScanArrival extends ScanArrivalTiming {
   id: string
   venueId: string
   guestId: string
   scanMessageId: string | null
-  scannedAt: Date
   /**
    * Whether the guest had any message on our record when the scan arrived.
    * Settled at scan time and carried, never recomputed: it picks which of the
@@ -97,9 +96,9 @@ export type StoreResult<T> =
  * greeting delay and the staleness bound both run from this, and Meta's is the
  * one the guest's own action happened on.
  *
- * Returns the row's id AND the `scannedAt` it was written with, so the fast
- * path can time its sleep from the same instant the due check will read
- * without a second round trip.
+ * Returns the row's id and the `scannedAt` it was written with. TAC-588: the
+ * fast path no longer times its sleep from it; it re-reads the row, whose
+ * passport fields decide the timing.
  */
 export async function scheduleScanArrival(
   supabase: AdminSupabaseClient,
@@ -108,6 +107,11 @@ export async function scheduleScanArrival(
     venueId: string
     guestId: string
     hadPriorConversation: boolean
+    /**
+     * TAC-588: the scan carried a receipt code and a stamp run is starting
+     * for it, so the hello waits for that run (scanGreetingDueAt).
+     */
+    awaitsPassport: boolean
   },
 ): Promise<StoreResult<{ id: string; scannedAt: Date }>> {
   const scan = await supabase
@@ -127,6 +131,7 @@ export async function scheduleScanArrival(
       scan_message_id: input.messageId,
       scanned_at: scannedAt,
       had_prior_conversation: input.hadPriorConversation,
+      awaits_passport: input.awaitsPassport,
     })
     .select('id')
     .single()
@@ -140,7 +145,14 @@ export async function scheduleScanArrival(
 }
 
 const PENDING_COLUMNS =
-  'id, venue_id, guest_id, scan_message_id, scanned_at, had_prior_conversation'
+  'id, venue_id, guest_id, scan_message_id, scanned_at, had_prior_conversation, awaits_passport, passport_settled_at, passport_sent_at, created_at'
+
+/** A stored timestamp, or null when it is absent or unreadable. */
+function dateOrNull(value: string | null): Date | null {
+  if (value === null) return null
+  const date = new Date(value)
+  return Number.isFinite(date.getTime()) ? date : null
+}
 
 function toPendingScanArrival(row: {
   id: string
@@ -149,6 +161,10 @@ function toPendingScanArrival(row: {
   scan_message_id: string | null
   scanned_at: string
   had_prior_conversation: boolean
+  awaits_passport: boolean
+  passport_settled_at: string | null
+  passport_sent_at: string | null
+  created_at: string
 }): PendingScanArrival {
   return {
     id: row.id,
@@ -157,6 +173,10 @@ function toPendingScanArrival(row: {
     scanMessageId: row.scan_message_id,
     scannedAt: new Date(row.scanned_at),
     hadPriorConversation: row.had_prior_conversation,
+    awaitsPassport: row.awaits_passport,
+    passportSettledAt: dateOrNull(row.passport_settled_at),
+    passportSentAt: dateOrNull(row.passport_sent_at),
+    recordedAt: dateOrNull(row.created_at) ?? undefined,
   }
 }
 
@@ -196,6 +216,40 @@ export async function loadDueScanArrivals(
     .limit(limit)
   if (error) return { ok: false, error: error.message }
   return { ok: true, data: (data ?? []).map(toPendingScanArrival) }
+}
+
+/**
+ * TAC-588: record how this scan's stamp run ended, which is what the hello is
+ * timed from (scanGreetingDueAt).
+ *
+ * `sentAt` is when both images reached the guest, or null when the run ended
+ * without sending them. Written once, by the run's own chain in the webhook,
+ * and only on a row still waiting (`passport_settled_at is null`), so a late
+ * duplicate cannot move a hello that has already been timed.
+ *
+ * Returns the error rather than throwing. A settle that fails leaves the row
+ * looking like a run still in progress, and the hello goes at the cap
+ * (PASSPORT_WAIT_CAP_MS) instead: a late hello, never a lost one.
+ */
+export async function settleScanPassport(
+  supabase: AdminSupabaseClient,
+  id: string,
+  settled: { settledAt: Date; sentAt: Date | null },
+): Promise<StoreResult<void>> {
+  try {
+    const { error } = await supabase
+      .from('instagram_scan_arrivals')
+      .update({
+        passport_settled_at: settled.settledAt.toISOString(),
+        passport_sent_at: settled.sentAt?.toISOString() ?? null,
+      })
+      .eq('id', id)
+      .is('passport_settled_at', null)
+    if (error) return { ok: false, error: error.message }
+    return { ok: true, data: undefined }
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) }
+  }
 }
 
 export type ClaimResult =
@@ -380,5 +434,339 @@ export async function loadPriorGreetings(
     }
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// The item question (TAC-588)
+// ---------------------------------------------------------------------------
+//
+// Timed off the greeted scan's own row (migration 089): `item_question_due_at`
+// is written when the hello is claimed, `item_question_claimed_at` is the
+// claim taken before the send (or with no send, when the timer is cancelled or
+// given up), `item_question_outcome` says which, and `item_question_sent_at`
+// says it reached the guest.
+//
+// "SINCE THE HELLO" STARTS AT THE GREETING'S CLAIM (`claimed_at`), never at
+// `resolved_at`. The resolve is written after every bubble has gone out, the
+// gaps between them and the post-send writes, so a guest who answers the first
+// bubble does so BEFORE `resolved_at`, and a check anchored there would not
+// see them. The claim is taken right after the greeting confirmed the guest
+// had not written since the scan, so silence is proven up to it.
+
+/** What an item question claim became. Migration 089's free-text column. */
+export type ScanItemQuestionOutcome =
+  | 'sent'
+  | 'queued'
+  | 'cancelled'
+  | 'too_late'
+  | 'no_item'
+  | 'no_hello'
+  | 'refused'
+
+/** How many due questions one tick looks at. */
+export const SCAN_ITEM_QUESTION_SCAN_LIMIT = 50
+
+/**
+ * Owe this greeted scan its item question.
+ *
+ * Only on a row that does not have one yet, so a second runner reaching the
+ * same greeting cannot move a due time already set.
+ */
+export async function scheduleScanItemQuestion(
+  supabase: AdminSupabaseClient,
+  id: string,
+  dueAt: Date,
+): Promise<StoreResult<void>> {
+  try {
+    const { error } = await supabase
+      .from('instagram_scan_arrivals')
+      .update({ item_question_due_at: dueAt.toISOString() })
+      .eq('id', id)
+      .is('item_question_due_at', null)
+    if (error) return { ok: false, error: error.message }
+    return { ok: true, data: undefined }
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) }
+  }
+}
+
+/** A greeted scan owed its item question, as the timer sees it. */
+export interface DueScanItemQuestion {
+  id: string
+  venueId: string
+  guestId: string
+  scanMessageId: string | null
+  scannedAt: Date
+  /** The greeting's claim, the start of "since the hello". See above. */
+  helloClaimedAt: Date
+  dueAt: Date
+}
+
+/**
+ * Greeted scans whose item question is due and unclaimed, oldest first.
+ * Everything else is re-checked per row on `now`.
+ */
+export async function loadDueScanItemQuestions(
+  supabase: AdminSupabaseClient,
+  now: Date,
+  limit: number = SCAN_ITEM_QUESTION_SCAN_LIMIT,
+): Promise<StoreResult<DueScanItemQuestion[]>> {
+  const { data, error } = await supabase
+    .from('instagram_scan_arrivals')
+    .select(
+      'id, venue_id, guest_id, scan_message_id, scanned_at, claimed_at, item_question_due_at',
+    )
+    .not('claimed_at', 'is', null)
+    .is('item_question_claimed_at', null)
+    .lte('item_question_due_at', now.toISOString())
+    .order('item_question_due_at', { ascending: true })
+    .limit(limit)
+  if (error) return { ok: false, error: error.message }
+  const rows: DueScanItemQuestion[] = []
+  for (const row of data ?? []) {
+    const dueAt = dateOrNull(row.item_question_due_at)
+    const helloClaimedAt = dateOrNull(row.claimed_at)
+    const scannedAt = dateOrNull(row.scanned_at)
+    if (dueAt === null || helloClaimedAt === null || scannedAt === null)
+      continue
+    rows.push({
+      id: row.id,
+      venueId: row.venue_id,
+      guestId: row.guest_id,
+      scanMessageId: row.scan_message_id,
+      scannedAt,
+      helloClaimedAt,
+      dueAt,
+    })
+  }
+  return { ok: true, data: rows }
+}
+
+/**
+ * Take this scan's one item question: a compare-and-set on it still being
+ * unclaimed. Also how a cancelled or given-up question is settled, with no
+ * send, so no later tick looks at it again.
+ */
+export async function claimScanItemQuestion(
+  supabase: AdminSupabaseClient,
+  id: string,
+  now: Date,
+): Promise<ClaimResult> {
+  const { data, error } = await supabase
+    .from('instagram_scan_arrivals')
+    .update({ item_question_claimed_at: now.toISOString() })
+    .eq('id', id)
+    .is('item_question_claimed_at', null)
+    .select('id')
+  if (error) return { status: 'failed', error: error.message }
+  return (data ?? []).length === 1 ? { status: 'claimed' } : { status: 'lost' }
+}
+
+/**
+ * Settle a question that will never be asked: the claim and its outcome in
+ * one compare-and-set, so no later tick looks again and the reply path can
+ * tell a cancelled timer from one that is sending.
+ */
+export async function settleScanItemQuestion(
+  supabase: AdminSupabaseClient,
+  id: string,
+  now: Date,
+  outcome: Exclude<ScanItemQuestionOutcome, 'sent' | 'queued'>,
+): Promise<ClaimResult> {
+  const { data, error } = await supabase
+    .from('instagram_scan_arrivals')
+    .update({
+      item_question_claimed_at: now.toISOString(),
+      item_question_outcome: outcome,
+    })
+    .eq('id', id)
+    .is('item_question_claimed_at', null)
+    .select('id')
+  if (error) return { status: 'failed', error: error.message }
+  return (data ?? []).length === 1 ? { status: 'claimed' } : { status: 'lost' }
+}
+
+/**
+ * Give the claim back when nothing reached the guest. Scoped to the claim's
+ * own timestamp and to an unsent question, so it can only undo itself.
+ */
+export async function releaseScanItemQuestionClaim(
+  supabase: AdminSupabaseClient,
+  id: string,
+  claimedAt: Date,
+): Promise<void> {
+  const { error } = await supabase
+    .from('instagram_scan_arrivals')
+    .update({ item_question_claimed_at: null })
+    .eq('id', id)
+    .eq('item_question_claimed_at', claimedAt.toISOString())
+    .is('item_question_sent_at', null)
+  if (error) {
+    logger.warn('[scan-item-question] claim release failed', {
+      scanArrivalId: id,
+      error: error.message,
+    })
+  }
+}
+
+/**
+ * What a claimed send became: `sent` (with when), or the status it kept its
+ * claim on instead (`queued` for an operator, `superseded`, and so on).
+ * One write, so a failure leaves the outcome null on a claimed row, which the
+ * reply path reads as "in flight" and does not ask over.
+ */
+export async function recordScanItemQuestionOutcome(
+  supabase: AdminSupabaseClient,
+  id: string,
+  outcome: { kind: 'sent'; sentAt: Date } | { kind: 'kept'; status: string },
+): Promise<void> {
+  const { error } = await supabase
+    .from('instagram_scan_arrivals')
+    .update(
+      outcome.kind === 'sent'
+        ? {
+            item_question_outcome: 'sent',
+            item_question_sent_at: outcome.sentAt.toISOString(),
+          }
+        : { item_question_outcome: outcome.status },
+    )
+    .eq('id', id)
+  if (error) {
+    logger.warn('[scan-item-question] outcome write failed', {
+      scanArrivalId: id,
+      outcome: outcome.kind,
+      error: error.message,
+    })
+  }
+}
+
+/**
+ * The guest's newest still-owed item question, for the warm close to wait
+ * on (`scan_question_pending`). Owed means: hello claimed, due time set, unclaimed,
+ * and not yet past its max age. Whether the guest has written since its hello
+ * is the caller's to check, because that cancels it.
+ */
+export async function loadOwedScanItemQuestion(
+  supabase: AdminSupabaseClient,
+  venueId: string,
+  guestId: string,
+  dueNoEarlierThan: Date,
+): Promise<StoreResult<{ helloClaimedAt: Date } | null>> {
+  const { data, error } = await supabase
+    .from('instagram_scan_arrivals')
+    .select('claimed_at')
+    .eq('venue_id', venueId)
+    .eq('guest_id', guestId)
+    .not('claimed_at', 'is', null)
+    .is('item_question_claimed_at', null)
+    .gte('item_question_due_at', dueNoEarlierThan.toISOString())
+    .order('item_question_due_at', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+  if (error) return { ok: false, error: error.message }
+  const helloClaimedAt = dateOrNull(data?.claimed_at ?? null)
+  return {
+    ok: true,
+    data: helloClaimedAt === null ? null : { helloClaimedAt },
+  }
+}
+
+/**
+ * Has the guest sent anything since this instant? A real message: a scan row
+ * carries no provider message id, so a second scan is not the guest writing.
+ * Fails CLOSED to true, the direction instagram-scan-greeting.ts takes: the
+ * cost is one question not asked, never one asked over them.
+ */
+export async function guestHasWrittenSince(
+  supabase: AdminSupabaseClient,
+  venueId: string,
+  guestId: string,
+  since: Date,
+): Promise<boolean> {
+  const { data, error } = await supabase
+    .from('messages')
+    .select('id')
+    .eq('venue_id', venueId)
+    .eq('guest_id', guestId)
+    .eq('direction', 'inbound')
+    .not('provider_message_id', 'is', null)
+    .gte('created_at', since.toISOString())
+    .limit(1)
+    .maybeSingle()
+  if (error) {
+    logger.warn(
+      '[scan-arrival] inbound-since read failed; reading as written',
+      {
+        venueId,
+        guestId,
+        error: error.message,
+      },
+    )
+    return true
+  }
+  return data !== null
+}
+
+/** The guest's newest greeted receipt scan, as a reply turn sees it. */
+export interface ScanOrderVisit {
+  id: string
+  scanMessageId: string | null
+  scannedAt: Date
+  /** The greeting's claim, the start of "since the hello". See above. */
+  helloClaimedAt: Date
+  /**
+   * Where the timed question stands. `open`: unclaimed, nobody has asked.
+   * `cancelled`: the guest wrote back first, so their turns may ask.
+   * `taken`: claimed for a send (in flight, queued or sent), or given up.
+   */
+  itemQuestion: 'open' | 'cancelled' | 'taken'
+}
+
+/**
+ * TAC-588: the guest's newest greeted scan whose hello complimented a bound
+ * order. `item_question_due_at` is set on exactly those rows (it is written
+ * when such a hello is CLAIMED, before it is sent, so a reply landing while
+ * it is still going out already sees it), which is what makes it the
+ * marker. Null when there
+ * is none. Returns the error so the caller picks the direction.
+ */
+export async function loadScanOrderVisit(
+  supabase: AdminSupabaseClient,
+  venueId: string,
+  guestId: string,
+): Promise<StoreResult<ScanOrderVisit | null>> {
+  const { data, error } = await supabase
+    .from('instagram_scan_arrivals')
+    .select(
+      'id, scan_message_id, scanned_at, claimed_at, item_question_claimed_at, item_question_outcome',
+    )
+    .eq('venue_id', venueId)
+    .eq('guest_id', guestId)
+    .not('claimed_at', 'is', null)
+    .not('item_question_due_at', 'is', null)
+    .order('scanned_at', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+  if (error) return { ok: false, error: error.message }
+  if (!data) return { ok: true, data: null }
+  const scannedAt = dateOrNull(data.scanned_at)
+  const helloClaimedAt = dateOrNull(data.claimed_at)
+  if (scannedAt === null || helloClaimedAt === null)
+    return { ok: true, data: null }
+  return {
+    ok: true,
+    data: {
+      id: data.id,
+      scanMessageId: data.scan_message_id,
+      scannedAt,
+      helloClaimedAt,
+      itemQuestion:
+        data.item_question_claimed_at === null
+          ? 'open'
+          : data.item_question_outcome === 'cancelled'
+            ? 'cancelled'
+            : 'taken',
+    },
   }
 }

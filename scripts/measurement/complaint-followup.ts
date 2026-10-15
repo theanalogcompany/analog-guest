@@ -621,6 +621,10 @@ async function main(): Promise<void> {
             hasRecordedVisit: true,
             afterComplaint: !controlGreeting,
             priorGreetings: [...(unit.priors ?? [])],
+            // TAC-588: this measures the counter greeting, which knows no
+            // order; the receipt-scan wordings are measured separately.
+            order: null,
+            helloOnly: false,
           }
         : null,
       signOff: isGreeting ? null : 'after_complaint',

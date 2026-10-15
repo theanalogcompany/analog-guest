@@ -18,6 +18,7 @@ import { logger } from '@/lib/observability/logger'
 import type { RAGResult } from '@/lib/rag/types'
 
 import { linkFingerprintToGuest } from './reconcile'
+import { isScanCodeExpired } from './scan-code'
 
 type AdminClient = ReturnType<typeof createAdminClient>
 
@@ -175,15 +176,12 @@ export async function reconcileTapFromInbound(opts: {
 // because the claim is a CAS on `status`, so of two racing inbounds exactly
 // one wins and the other reads `claim_lost`.
 //
-// ORDERING AGAINST THE SCAN GREETING. The greeting for a bare scan is sent
-// after SCAN_GREETING_DELAY_MS (20s), and this bind runs in its own
-// `waitUntil` alongside the scheduling, so in practice it finishes four orders
-// of magnitude before the greeting generates. That is a RACE THIS CODE WINS,
-// not an ordering this code guarantees. It does not matter yet: nothing in the
-// greeting reads the bound transaction today. The moment a greeting is
-// supposed to name what the guest just bought, the ordering has to become
-// explicit -- chained ahead of `scheduleScanArrival` rather than inherited
-// from a sleep.
+// ORDERING AGAINST THE SCAN GREETING. Explicit since TAC-588, when the
+// greeting started naming what the guest bought. For a bare scan, the webhook
+// writes the pending greeting row, then runs this bind and the stamp, writes
+// how that ended to the row, and only then times the hello from it
+// (scanGreetingDueAt). This used to be a race the bind won against a
+// twenty-second sleep.
 //
 // Fails OPEN at the call site, like the SendBlue arm: a reconciliation failure
 // must never cost the 200 or break inbound handling. A guest whose purchase
@@ -214,6 +212,12 @@ export type ScanCodeBindOutcome =
   /** Unknown code, wrong venue, or already matched by an earlier scan. */
   | { status: 'code_not_found' }
   /**
+   * TAC-588: the code is ours and still pending, but older than
+   * SCAN_CODE_TTL_MS. Nothing is claimed or written: it does nothing, whether
+   * or not the expiry cron has got to the row yet.
+   */
+  | { status: 'code_expired' }
+  /**
    * The code is ours and pending, but no `transactions` row exists for its
    * payment yet. The row is left PENDING deliberately so a later retry can
    * still bind it. Not a defect: this is the guest scanning before Square's
@@ -235,8 +239,11 @@ export async function reconcileScanCodeFromReferral(opts: {
   guestId: string
   code: string
   supabase?: AdminClient
+  /** The clock the code's age is read against. Injected by the harness. */
+  now?: Date
 }): Promise<RAGResult<ScanCodeBindOutcome>> {
   const supabase = opts.supabase ?? createAdminClient()
+  const now = opts.now ?? new Date()
 
   // 1. The code, read without claiming it.
   const { data: tap, error: tapError } = await supabase
@@ -260,6 +267,13 @@ export async function reconcileScanCodeFromReferral(opts: {
     // only by `issueScanCode`, which always sets one, so this is unreachable
     // today and reported rather than silently treated as not-found.
     return { ok: true, data: { status: 'code_not_found' } }
+  }
+
+  // TAC-588: a code past its day does nothing. Checked here, before anything
+  // is read or claimed, rather than left to the expiry cron, which runs every
+  // fifteen minutes and would let a code bind that long past its TTL.
+  if (isScanCodeExpired(new Date(tap.received_at), now)) {
+    return { ok: true, data: { status: 'code_expired' } }
   }
 
   // 2. The transaction for that payment. `external_id` is Square's payment id
@@ -372,7 +386,7 @@ export async function reconcileScanCodeFromReferral(opts: {
     data: {
       status: 'bound',
       transactionId: txn.id,
-      codeAgeMs: Number.isNaN(issuedMs) ? null : Date.now() - issuedMs,
+      codeAgeMs: Number.isNaN(issuedMs) ? null : now.getTime() - issuedMs,
       fingerprint,
     },
   }

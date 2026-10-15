@@ -349,6 +349,21 @@ export type RuntimeContext = {
      * nothing.
      */
     priorGreetings?: string[]
+    /**
+     * TAC-588: what they ordered, when the scan bound an order. Renders the
+     * order lines in `## Guest just arrived` and picks the compliment
+     * wording. Absent or null is today's greeting, which asks.
+     */
+    order?: {
+      item: string
+      firstTime: boolean
+      menuDescription: string | null
+    } | null
+    /**
+     * TAC-588: the receipt code was past its day, or already used by an
+     * earlier scan. Picks the hello-only wording: no compliment, no question.
+     */
+    helloOnly?: boolean
   } | null
   /**
    * TAC-575: this reply is the first of a counter visit by a guest whose last
@@ -402,6 +417,12 @@ export type RuntimeContext = {
    * not passed as data: their own message naming it is in the chat history.
    */
   visitCheckback?: boolean
+  /**
+   * TAC-588: a receipt scan's item question, which rides the check-back's
+   * trigger. Its item is passed as data, unlike the check-back's: no message
+   * of the guest's names it, because the scan told us.
+   */
+  scanItemQuestion?: { item: string }
   /**
    * TAC-575: this turn is a sign-off, and which one. `happy` and
    * `after_complaint` each render a `## Sign off` block in place of

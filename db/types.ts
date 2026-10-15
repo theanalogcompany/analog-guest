@@ -1295,12 +1295,19 @@ export type Database = {
       }
       instagram_scan_arrivals: {
         Row: {
+          awaits_passport: boolean
           claimed_at: string | null
           created_at: string
           guest_id: string
           had_prior_conversation: boolean
           id: string
+          item_question_claimed_at: string | null
+          item_question_due_at: string | null
+          item_question_outcome: string | null
+          item_question_sent_at: string | null
           outcome: string | null
+          passport_sent_at: string | null
+          passport_settled_at: string | null
           resolved_at: string | null
           scan_message_id: string | null
           scanned_at: string
@@ -1308,12 +1315,19 @@ export type Database = {
           venue_local_date: string | null
         }
         Insert: {
+          awaits_passport?: boolean
           claimed_at?: string | null
           created_at?: string
           guest_id: string
           had_prior_conversation: boolean
           id?: string
+          item_question_claimed_at?: string | null
+          item_question_due_at?: string | null
+          item_question_outcome?: string | null
+          item_question_sent_at?: string | null
           outcome?: string | null
+          passport_sent_at?: string | null
+          passport_settled_at?: string | null
           resolved_at?: string | null
           scan_message_id?: string | null
           scanned_at: string
@@ -1321,12 +1335,19 @@ export type Database = {
           venue_local_date?: string | null
         }
         Update: {
+          awaits_passport?: boolean
           claimed_at?: string | null
           created_at?: string
           guest_id?: string
           had_prior_conversation?: boolean
           id?: string
+          item_question_claimed_at?: string | null
+          item_question_due_at?: string | null
+          item_question_outcome?: string | null
+          item_question_sent_at?: string | null
           outcome?: string | null
+          passport_sent_at?: string | null
+          passport_settled_at?: string | null
           resolved_at?: string | null
           scan_message_id?: string | null
           scanned_at?: string

@@ -74,6 +74,8 @@ export function formatArmsOn(armsOn: IntentionArmsOn): string {
       return 'The guest was asked how their order is, has not said, and is still chatting five minutes after the order. A later visit re-arms it'
     case 'first_recorded_order':
       return "The guest's earliest recorded order, as soon as one exists. No wait for the conversation to end, and a later order never re-arms it"
+    case 'scan_order_known':
+      return 'A receipt scan told us their order and the hello complimented it, and the guest wrote back before the timed item question went. A later receipt scan re-arms it'
   }
 }
 

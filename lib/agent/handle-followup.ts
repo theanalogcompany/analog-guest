@@ -17,6 +17,7 @@ import {
 import { startAgentTrace } from '@/lib/observability'
 import { capturePostHogEvent, fireRedAlert } from './alerts'
 import { buildRuntimeContext } from './build-runtime-context'
+import { withoutQuestions } from './scan-arrival'
 import type { CommitmentIdentity, SlotDropReason } from './pending-slots'
 import { dispatchReply } from './dispatch-reply'
 import {
@@ -699,7 +700,12 @@ export async function handleFollowup(input: {
     // their content is structured (visit history, guest context, the perk's
     // own reward_description) and is already in the prompt. `''` is the
     // explicit "do not retrieve" answer retrieveKnowledgeStage now requires.
-    const knowledgeQuery = operatorInstructionQuery(input.trigger)
+    //
+    // TAC-588: a receipt-scan hello compliments the item, so it retrieves
+    // against the item's own name. That is real content about a real topic,
+    // for the same reason an operator's note is.
+    const knowledgeQuery =
+      ctx.scanArrival?.order?.item ?? operatorInstructionQuery(input.trigger)
     if (knowledgeQuery) {
       const knowledgeSpan = trace.span('retrieve_knowledge', {
         triggerReason: input.trigger.reason,
@@ -752,7 +758,53 @@ export async function handleFollowup(input: {
       return { status: 'refused', reason }
     }
     const generateSpan = trace.span('generate', { category })
-    const gen = await generateStage(ctx, category)
+    let gen = await generateStage(ctx, category)
+    // TAC-588: a receipt-scan hello asks nothing. The prompt says so; this
+    // makes it true (withoutQuestions, scan-arrival.ts). A hello that was
+    // nothing but questions is regenerated once, and if the second is too it
+    // is NOT SENT: the guest already has the passport images, and holding it
+    // for an operator would need a new approval trigger, which is a change to
+    // the runtime contract this ticket did not ask for.
+    if (gen.status === 'success' && asksNothing(ctx)) {
+      let stripped = withoutQuestions(gen.result.body)
+      if (stripped.body === '') {
+        console.warn(
+          '[agent] scan hello was all questions; regenerating once',
+          {
+            event: 'scan_greeting_question_dropped',
+            agentRunId,
+            dropped: stripped.dropped,
+            outcome: 'regenerated',
+          },
+        )
+        gen = await generateStage(ctx, category)
+        if (gen.status === 'success')
+          stripped = withoutQuestions(gen.result.body)
+      }
+      if (gen.status === 'success') {
+        if (stripped.body === '') {
+          const reason = 'scan_greeting_all_questions'
+          console.warn('[agent] scan hello was all questions twice; not sent', {
+            event: 'scan_greeting_question_dropped',
+            agentRunId,
+            dropped: stripped.dropped,
+            outcome: 'not_sent',
+          })
+          generateSpan.end({ level: 'WARNING', statusMessage: reason })
+          trace.update({ output: { status: 'refused', reason } })
+          return { status: 'refused', reason }
+        }
+        if (stripped.dropped > 0) {
+          console.warn('[agent] scan hello asked something; question dropped', {
+            event: 'scan_greeting_question_dropped',
+            agentRunId,
+            dropped: stripped.dropped,
+            outcome: 'dropped',
+          })
+          gen.result.body = stripped.body
+        }
+      }
+    }
     if (gen.status === 'failed') {
       generateSpan.end({ level: 'ERROR', statusMessage: gen.error })
       await fireRedAlert({
@@ -1568,4 +1620,16 @@ export async function handleFollowup(input: {
     }
     await trace.flushAsync()
   }
+}
+
+/**
+ * TAC-588: is this a receipt-scan hello, whose every wording asks nothing? An
+ * order compliment or an expired code's hello-only. Today's counter greeting
+ * asks what they got, and is left alone.
+ */
+function asksNothing(ctx: RuntimeContext): boolean {
+  return (
+    ctx.scanArrival !== null &&
+    (ctx.scanArrival.order !== null || ctx.scanArrival.helloOnly)
+  )
 }

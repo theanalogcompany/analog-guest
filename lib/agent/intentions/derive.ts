@@ -330,6 +330,14 @@ export interface DeriveOpenIntentionsInput {
    */
   sameVisitOrderAt: Date | null
   /**
+   * TAC-588: the hello of a receipt-scan visit whose order we know, on a reply
+   * that came before its timed item question went; null otherwise. Arms
+   * scan_order_liked. Resolved by the caller through resolveScanOrderVisit
+   * (lib/agent/scan-arrival.ts), which also withholds it once the visit has a
+   * check-in.
+   */
+  scanOrderLikedAt: Date | null
+  /**
    * TAC-575: from when this visit's check-back has been askable on a turn, or
    * null when it is not owed, not yet due, or the guest has moved on. Arms
    * check_back_on_order.
@@ -530,6 +538,15 @@ function armingFor(
       return input.checkbackDueAt === null
         ? null
         : { eligibleAt: input.checkbackDueAt, eventAt: input.checkbackDueAt }
+    // TAC-588. The hello, the same instant on every turn of the visit, so it
+    // never looks newer than itself and a later receipt scan's hello re-arms.
+    case 'scan_order_known':
+      return input.scanOrderLikedAt === null
+        ? null
+        : {
+            eligibleAt: input.scanOrderLikedAt,
+            eventAt: input.scanOrderLikedAt,
+          }
     // TAC-558. The EARLIEST recorded order, and NO conversation-window hold -
     // the contrast with `recorded_order` directly above is documented on the
     // arming kind itself. Reuses recordedOrderTimes rather than adding an input:

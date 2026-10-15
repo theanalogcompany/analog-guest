@@ -87,6 +87,21 @@ export const ApprovalPolicySchema = z.object({
    */
   visitCheckback: DispositionSchema.optional(),
   /**
+   * TAC-588: disposition for the receipt-scan item question ("how'd you like
+   * the cortado?"), about twenty minutes after the order
+   * (lib/agent/scan-item-question.ts). It replaces the check-back for a scan
+   * visit, and is still stored as `follow_up`.
+   *
+   * A KEY OF ITS OWN, and THE DEFAULT IS AUTO-SEND, the one dispositional key
+   * here that defaults that way (ruled 2026-10-14): "if a venue has set no
+   * policy for this message, it sends without approval. Do not inherit
+   * visitCheckback's default of HOLD." A venue holds it with
+   * "scanItemQuestion": "operator_approval"; `hold_all_outbound` still holds
+   * it too, through its own trigger. Owned by
+   * resolveScanItemQuestionDisposition below.
+   */
+  scanItemQuestion: DispositionSchema.optional(),
+  /**
    * Disposition for the review invitation carried by a happy guest's SIGN-OFF
    * (TAC-575): the guest said their order is good, and the conversation is
    * closing.
@@ -256,6 +271,21 @@ export function resolveVisitCheckbackDisposition(
   policy: ApprovalPolicy | null | undefined,
 ): ApprovalDisposition {
   return policy?.visitCheckback ?? 'operator_approval'
+}
+
+/**
+ * TAC-588: effective disposition for the receipt-scan item question.
+ *
+ * 'auto_send' when nothing is set, by ruling (see the field), and only an
+ * explicit "operator_approval" holds it. A malformed policy falls back to the
+ * default policy, which sets none, and so also auto-sends: the ruling names
+ * "nothing set", and an unreadable setting is not a hold anyone asked for. `hold_all_outbound` is
+ * not read here; it is its own approval trigger and still applies.
+ */
+export function resolveScanItemQuestionDisposition(
+  policy: ApprovalPolicy | null | undefined,
+): ApprovalDisposition {
+  return policy?.scanItemQuestion ?? 'auto_send'
 }
 
 /**

@@ -6,10 +6,15 @@
 
 import { logger } from '@/lib/observability/logger'
 import { expireStalePendingTaps } from '@/lib/pos/reconcile-tap'
+import { SCAN_CODE_TTL_MS } from '@/lib/pos/scan-code'
 
-// Pending taps older than this with no send are abandoned. Generous enough to
-// tolerate Square webhook lag + the guest taking a moment to hit send.
-const TAP_TTL_MINUTES = 30
+// Pending taps and scan codes older than this are abandoned. TWENTY-FOUR HOURS
+// since TAC-588: it was thirty minutes, sized for the NFC tap, and receipt
+// codes inherited it, but a slip is scanned on the walk out, at home or the
+// next morning. One value for both (NFC is not live); the reasoning lives on
+// SCAN_CODE_TTL_MS. The bind checks a code's age itself, so this cron only
+// tidies the pending index; it is not what makes a late code do nothing.
+const TAP_TTL_MINUTES = SCAN_CODE_TTL_MS / 60_000
 
 function isAuthorized(request: Request): boolean {
   if (process.env.NODE_ENV !== 'production') return true

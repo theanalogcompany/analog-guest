@@ -92,6 +92,7 @@ function openKeys(over: Partial<DeriveOpenIntentionsInput>): string[] {
     recordedOrderTimes: [],
     sameVisitOrderAt: null,
     checkbackDueAt: null,
+    scanOrderLikedAt: null,
     rows: { prompted: [], eligible: [] },
     inboundTimes: [NOW],
     inboundMessages: [],
@@ -199,6 +200,7 @@ const orderTurn = deriveOpenIntentions({
   recordedOrderTimes: [],
   sameVisitOrderAt: NOW,
   checkbackDueAt: null,
+  scanOrderLikedAt: null,
   rows: { prompted: [], eligible: [] },
   inboundTimes: [NOW],
   inboundMessages: [],
@@ -281,6 +283,7 @@ check(
     recordedOrderTimes: [],
     sameVisitOrderAt: null,
     checkbackDueAt: null,
+    scanOrderLikedAt: null,
     rows: {
       prompted: [],
       eligible: [{ intentionKey: 'hows_it_so_far', eligibleAt: at(-120) }],

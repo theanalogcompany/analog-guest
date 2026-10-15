@@ -101,7 +101,15 @@ export function resolveSameVisitOrderAt(input: {
   /** Our last message to reach the guest asked them something. */
   answeringOurQuestion: boolean
   alreadyAskedThisVisit: boolean
+  /**
+   * TAC-588: this is a receipt-scan visit whose order the scan told us. The
+   * guest never "named what they got", so this arming does not apply; the
+   * visit's question is the timed item question, or scan_order_liked on a
+   * reply. Optional so a caller with no receipt scan in view is unchanged.
+   */
+  scanOrderKnown?: boolean
 }): Date | null {
+  if (input.scanOrderKnown === true) return null
   if (!input.mentionsMenuItem) return null
   if (!input.answeringOurQuestion) return null
   if (input.alreadyAskedThisVisit) return null

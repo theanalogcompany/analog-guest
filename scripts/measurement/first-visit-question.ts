@@ -437,6 +437,7 @@ async function main(): Promise<void> {
         // In production the order turn now carries that question instead.
         sameVisitOrderAt: null,
         checkbackDueAt: null,
+        scanOrderLikedAt: null,
         openRecommendationTimes: [],
         openRecommendationTouchedTimes: [],
         openRecommendationsUnreadable: false,
