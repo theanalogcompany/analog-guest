@@ -360,10 +360,10 @@ export type RuntimeContext = {
       menuDescription: string | null
     } | null
     /**
-     * TAC-588: the receipt code was past its day. Picks the hello-only
-     * wording: no compliment, no question.
+     * TAC-588: the receipt code was past its day, or already used by an
+     * earlier scan. Picks the hello-only wording: no compliment, no question.
      */
-    expiredCode?: boolean
+    helloOnly?: boolean
   } | null
   /**
    * TAC-575: this reply is the first of a counter visit by a guest whose last

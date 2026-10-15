@@ -13,18 +13,23 @@
 // (`reconciled_transaction_id`). Nothing on the scan-arrival row repeats it,
 // so there is nothing to drift.
 //
-// THREE ANSWERS, and the third is the one that matters for wording (ruled
-// 2026-10-14, question 3):
+// FOUR ANSWERS, which pick the hello's wording (ruled 2026-10-14, question 3,
+// and the PR #392 review of the same day):
 //
 //   bound     THIS scan bound an order to this guest. The hello compliments it.
 //   expired   the code is ours but older than SCAN_CODE_TTL_MS, so it bound
-//             nothing. The hello goes with no compliment and no question:
-//             asking "what did you get?" a day after the order reads wrong.
+//             nothing. A hello with no compliment and no question: asking
+//             "what did you get?" a day after the order reads wrong.
+//   reused    the code was ALREADY USED: an earlier scan bound it (a slip
+//             opened again the next day), it was bound to another guest, or
+//             it is matched with no order recorded. The same hello-only
+//             wording as `expired` (ruled in the review: "only the counter
+//             sign asks 'what did you get?', because only the counter sign
+//             means they're in the shop now").
 //   none      no code (the counter sign), a payment Square had not told us
-//             about, a code ALREADY BOUND BY AN EARLIER SCAN (a slip opened
-//             again the next day), an order with no named items, or anything
-//             we could not read. Today's greeting and flow, unchanged: we do
-//             not know what they got THIS time, so it is asked for.
+//             about, an order with no named items, a retracted one, or
+//             anything we could not read. Today's greeting and flow,
+//             unchanged.
 //
 // "THIS SCAN BOUND IT" is read off the transaction's own `matched_at`, which
 // the bind writes: a re-opened slip finds the code matched by yesterday's scan,
@@ -60,9 +65,20 @@ export type ScanOrder =
       discoveredLabel: string | null
     }
   | { kind: 'expired' }
+  | { kind: 'reused' }
   | { kind: 'none' }
 
 const NONE: ScanOrder = { kind: 'none' }
+const REUSED: ScanOrder = { kind: 'reused' }
+
+/**
+ * Does this scan get the hello-only wording (no compliment, no question)? A
+ * receipt code that bound nothing on this scan: past its day, or already
+ * used. Only the counter sign (`none`) still asks what they got. Pure.
+ */
+export function greetsHelloOnly(order: ScanOrder | undefined): boolean {
+  return order?.kind === 'expired' || order?.kind === 'reused'
+}
 
 /**
  * How far before the scan's own timestamp the bind may appear to land. The
@@ -116,8 +132,9 @@ export async function loadScanOrder(
       return await loadBoundOrder(supabase, scan, transactionId)
     }
     if (tap.data.status === 'matched') {
-      // Matched with no transaction recorded: nothing of ours to compliment.
-      return NONE
+      // Matched with no transaction recorded: used, with nothing of ours to
+      // compliment.
+      return REUSED
     }
     // Never bound. Expired if it was already past its day when they scanned,
     // whether or not the expiry cron has flipped the row yet; otherwise it is
@@ -155,10 +172,11 @@ async function loadBoundOrder(
   if (transaction.error)
     return unreadable(scan, 'transaction', transaction.error.message)
   const row = transaction.data
-  // Bound to someone else (a later re-bind), or taken back: not this guest's
-  // order to compliment.
-  if (!row || row.guest_id !== scan.guestId || row.retracted_at !== null)
-    return NONE
+  if (!row) return NONE
+  // Bound to someone else: this slip was already used, by another guest.
+  if (row.guest_id !== scan.guestId) return REUSED
+  // Taken back: not an order to compliment, and not a used slip either.
+  if (row.retracted_at !== null) return NONE
   const orderedAt = new Date(row.occurred_at)
   if (!Number.isFinite(orderedAt.getTime())) return NONE
   // Bound by THIS scan, or by an earlier one (see the header).
@@ -168,7 +186,7 @@ async function loadBoundOrder(
     !Number.isFinite(matchedAt.getTime()) ||
     matchedAt.getTime() < scan.scannedAt.getTime() - BIND_CLOCK_SKEW_MS
   )
-    return NONE
+    return REUSED
   // Nothing named on the order is nothing to compliment, and no question.
   const lineItemNames = parseLineItemNames(row.raw_data)
   if (lineItemNames.length === 0) return NONE
@@ -260,6 +278,10 @@ export const DRINK_NAME_WORDS = [
   'drip',
   'frappe',
   'spritz',
+  // Ruled in the PR #392 review, from Le Mil's live menu: a Square name that
+  // misses its menu row must still read as a drink.
+  'lassi',
+  'tonic',
 ] as const
 
 function hasWord(text: string, words: readonly string[]): boolean {

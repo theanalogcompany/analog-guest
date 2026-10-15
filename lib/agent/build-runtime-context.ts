@@ -45,7 +45,11 @@ import { loadComplaintCheckins, loadVisitCheckin } from './visit-checkin-store'
 // "first conversation". warm-close.ts is pure and builds no client at import.
 import { hasAnsweredGuestBefore, reachedGuest } from './retrieval-context'
 import { isFirstConversation, isQuietAfterWarmClose } from './warm-close'
-import { loadScanOrder, pickComplimentItem } from './scan-order'
+import {
+  greetsHelloOnly,
+  loadScanOrder,
+  pickComplimentItem,
+} from './scan-order'
 import {
   loadPriorGreetings,
   loadScanCarryForward,
@@ -1358,7 +1362,7 @@ export async function buildRuntimeContext(input: {
               menuItems: venue.venueInfo.menu.items,
             })
           : null,
-      expiredCode: scanOrder?.kind === 'expired',
+      helloOnly: greetsHelloOnly(scanOrder),
     }
   }
 

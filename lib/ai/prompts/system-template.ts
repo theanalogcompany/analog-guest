@@ -2847,8 +2847,8 @@ import {
 //   ordered and compliments it instead of asking "what did you get?". Three
 //   new `guest_arrived` wordings (new / returning / after a complaint),
 //   approved verbatim 2026-10-14, plus three hello-only ones for a code past
-//   its twenty-four hours, each its compliment wording with the compliment
-//   sentence removed. All six say "ask nothing at all", and code enforces it
+//   its twenty-four hours or already used by an earlier scan, each its
+//   compliment wording with the compliment sentence removed. All six say "ask nothing at all", and code enforces it
 //   (withoutQuestions, lib/agent/scan-arrival.ts). None asserts the guest is in
 //   the shop: a receipt is scanned on the walk out, at home, or next morning.
 //

@@ -434,10 +434,11 @@ said, so this visit runs differently from the counter flow above (ruled 2026-10-
 | item question | `max(order + 20 min, hello + 5 min)`, the visit's check-back; writes the check-in with the check-back spent | `scan-item-question.ts`, from `/api/cron/visit-checkbacks` |
 | guest writes first | the timer is cancelled for good; `scan_order_liked` (`when_it_fits`) may ask on their turns | `resolveScanOrderVisit` |
 
-- **Only an order bound BY THIS SCAN changes anything** (`transactions.matched_at` at or
-  after the scan). The counter sign, a payment Square has not reported, and a slip opened
-  again after an earlier scan bound it keep the counter flow above. A code past its 24 hours
-  (`SCAN_CODE_TTL_MS`) gets a hello with no compliment and no question.
+- **Only an order bound BY THIS SCAN gets the compliment** (`transactions.matched_at` at or
+  after the scan). A code past its 24 hours (`SCAN_CODE_TTL_MS`), and a slip already used by
+  an earlier scan, get a hello with no compliment and no question (`greetsHelloOnly`; ruled:
+  "only the counter sign asks 'what did you get?'"). The counter sign and a payment Square
+  has not reported keep the counter flow above.
 - **"Since the hello" starts at the greeting's CLAIM, never at `resolved_at`**, which is
   written after the last bubble: a guest who answers the first bubble would otherwise be
   missed and asked anyway. The due time is written at the claim too, before generation, and

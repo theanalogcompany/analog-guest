@@ -1630,6 +1630,6 @@ export async function handleFollowup(input: {
 function asksNothing(ctx: RuntimeContext): boolean {
   return (
     ctx.scanArrival !== null &&
-    (ctx.scanArrival.order !== null || ctx.scanArrival.expiredCode)
+    (ctx.scanArrival.order !== null || ctx.scanArrival.helloOnly)
   )
 }

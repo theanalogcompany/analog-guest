@@ -473,11 +473,12 @@ export interface RuntimeContext {
      */
     order: ComplimentPick | null
     /**
-     * TAC-588: the scan's receipt code was past its twenty-four hours, so it
-     * bound nothing. The hello goes with no compliment and no question
-     * (ruled 2026-10-14, question 3).
+     * TAC-588: the scan's receipt code bound nothing on this scan: it was
+     * past its twenty-four hours (ruled 2026-10-14, question 3), or already
+     * used by an earlier scan (ruled in the PR #392 review). The hello goes
+     * with no compliment and no question.
      */
-    expiredCode: boolean
+    helloOnly: boolean
   } | null
   /**
    * TAC-386: the question and our answer, on an inquiry-follow-up turn only.

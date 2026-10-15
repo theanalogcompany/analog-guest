@@ -137,7 +137,10 @@ export const GUEST_ARRIVED_INSTRUCTIONS_AFTER_COMPLAINT = `The guest just scanne
 // (decision 0007's lesson).
 //
 // THE HELLO-ONLY VARIANTS, for a receipt code past its day (ruled 2026-10-14,
-// question 3: "a hello only, with no compliment and no question"). Each is
+// question 3: "a hello only, with no compliment and no question") and for one
+// already used by an earlier scan (ruled in the PR #392 review: "only the
+// counter sign asks 'what did you get?', because only the counter sign means
+// they're in the shop now"). Each is
 // its compliment variant with the compliment sentence REMOVED and nothing
 // else changed: no new wording was written for them, so none needed its own
 // approval beyond the ruling that says what they leave out.
@@ -175,6 +178,7 @@ export const GUEST_ARRIVED_HELLO_ONLY_INSTRUCTIONS_AFTER_COMPLAINT = `The guest 
  *
  *   an order is bound      the compliment wording, which asks nothing
  *   the code was expired   the hello-only wording, which asks nothing
+ *     or already used
  *   neither                today's counter wording, which asks what they got
  *                          (the counter sign, a payment not yet ingested)
  *
@@ -192,13 +196,13 @@ export function guestArrivedInstructionsFor(
     hadPriorConversation: boolean
     afterComplaint?: boolean
     order?: unknown
-    expiredCode?: boolean
+    helloOnly?: boolean
   } | null,
 ): string {
   const variants =
     scanArrival?.order !== null && scanArrival?.order !== undefined
       ? ORDER_VARIANTS
-      : scanArrival?.expiredCode === true
+      : scanArrival?.helloOnly === true
         ? HELLO_ONLY_VARIANTS
         : COUNTER_VARIANTS
   if (scanArrival?.afterComplaint === true) return variants.afterComplaint

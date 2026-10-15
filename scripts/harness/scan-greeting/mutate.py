@@ -147,8 +147,8 @@ MUTANTS = [
     (
         "TAC-588: another guest's order is complimented",
         ORDER,
-        "  if (!row || row.guest_id !== scan.guestId || row.retracted_at !== null)",
-        "  if (!row || row.retracted_at !== null)",
+        "  if (row.guest_id !== scan.guestId) return REUSED\n",
+        "",
     ),
     (
         "TAC-588: question due at the EARLIER of order+20 and hello+5",
@@ -226,6 +226,18 @@ MUTANTS = [
         "review fix: a question with no hello in front stays owed",
         PROCESSOR,
         "    if (itemQuestionScheduled && !greetingOut) {\n      await settleNoHello(supabase, row.id)\n    }\n",
+        "",
+    ),
+    (
+        "review ruling: a used slip asks what they got",
+        ORDER,
+        "  return order?.kind === 'expired' || order?.kind === 'reused'",
+        "  return order?.kind === 'expired'",
+    ),
+    (
+        "review ruling: lassi is not a drink by name",
+        ORDER,
+        "  'lassi',\n",
         "",
     ),
     (

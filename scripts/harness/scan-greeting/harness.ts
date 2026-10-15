@@ -26,6 +26,7 @@ import { resolveSameVisitOrderAt } from '@/lib/agent/visit-checkin'
 import { scanItemQuestionInstructions } from '@/lib/ai/prompts/categories/scan-item-question'
 import { resolveScanItemQuestionDisposition } from '@/lib/schemas/approval-policy'
 import {
+  greetsHelloOnly,
   isDrink,
   loadScanOrder,
   pickComplimentItem,
@@ -1141,7 +1142,7 @@ async function main() {
           hadPriorConversation: over.prior ?? false,
           afterComplaint: over.complaint ?? false,
           order: over.order ?? null,
-          expiredCode: over.expired ?? false,
+          helloOnly: over.expired ?? false,
         })
       assert.equal(pickFor({ order }), GUEST_ARRIVED_ORDER_INSTRUCTIONS_NEW)
       assert.equal(
@@ -1254,7 +1255,7 @@ async function main() {
   )
 
   await check(
-    "scan order: none for the counter sign, another guest's order, a retracted one, and a payment not yet ingested",
+    "scan order: none for the counter sign, a retracted order and a payment not yet ingested; reused for another guest's order or a matched code with none",
     async () => {
       const kindOf = async (order: Seed['order']) =>
         (
@@ -1271,7 +1272,14 @@ async function main() {
           tap: tap(),
           transaction: txn({ guest_id: 'g2' }),
         }),
-        'none',
+        'reused',
+      )
+      assert.equal(
+        await kindOf({
+          referralRef: 'sc_abc',
+          tap: tap({ reconciled_transaction_id: null }),
+        }),
+        'reused',
       )
       assert.equal(
         await kindOf({
@@ -1634,9 +1642,9 @@ async function main() {
             ORDER_SCAN,
           )
         ).kind
-      // Bound by yesterday's scan.
-      assert.equal(await kindOf(-24 * 60 * MINUTE), 'none')
-      assert.equal(await kindOf(null), 'none')
+      // Bound by yesterday's scan: a used slip, hello only (ruled in review).
+      assert.equal(await kindOf(-24 * 60 * MINUTE), 'reused')
+      assert.equal(await kindOf(null), 'reused')
       // Bound by this one, Meta's clock a little ahead of ours.
       assert.equal(await kindOf(-2 * MINUTE), 'bound')
       assert.equal(await kindOf(SECOND), 'bound')
@@ -1707,6 +1715,67 @@ async function main() {
       )
       assert.notEqual(db.arrivals[0]?.item_question_due_at, null)
       assert.equal(db.arrivals[0]?.item_question_outcome, 'no_hello')
+    },
+  )
+
+  // ---------------------------------------------------------------------------
+  // TAC-588: the PR #392 review's rulings
+  // ---------------------------------------------------------------------------
+
+  await check(
+    'ruled: only the counter sign asks; an expired or a used code gets the hello only',
+    () => {
+      assert.equal(greetsHelloOnly({ kind: 'expired' }), true)
+      assert.equal(greetsHelloOnly({ kind: 'reused' }), true)
+      assert.equal(greetsHelloOnly({ kind: 'none' }), false)
+      assert.equal(greetsHelloOnly(undefined), false)
+      assert.equal(
+        greetsHelloOnly({
+          kind: 'bound',
+          transactionId: 't1',
+          orderedAt: SCAN,
+          lineItemNames: ['Oat Cortado'],
+          discoveredLabel: null,
+        }),
+        false,
+      )
+    },
+  )
+
+  await check(
+    "Le Mil's live menu categories: the four drink categories are drinks, Pastries is not",
+    () => {
+      for (const category of [
+        'Coffee',
+        'Espresso Drinks',
+        'Signature Drinks',
+        'Other Drinks',
+      ]) {
+        assert.equal(
+          isDrink('Anything', menu('Anything', category)),
+          true,
+          category,
+        )
+      }
+      assert.equal(isDrink('Croissant', menu('Croissant', 'Pastries')), false)
+    },
+  )
+
+  await check(
+    "Le Mil's drinks that name no coffee word still read as drinks when their menu row is missed",
+    () => {
+      for (const name of ['Mango Lassi', 'Rose Lassi', 'Blossom Tonic']) {
+        assert.equal(isDrink(name, null), true, name)
+      }
+      // And win the compliment over food on the same order.
+      assert.equal(
+        pickComplimentItem({
+          lineItemNames: ['Almond Croissant', 'Blossom Tonic'],
+          discoveredLabel: null,
+          menuItems: [],
+        })?.item,
+        'Blossom Tonic',
+      )
     },
   )
 

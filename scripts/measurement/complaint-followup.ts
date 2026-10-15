@@ -624,7 +624,7 @@ async function main(): Promise<void> {
             // TAC-588: this measures the counter greeting, which knows no
             // order; the receipt-scan wordings are measured separately.
             order: null,
-            expiredCode: false,
+            helloOnly: false,
           }
         : null,
       signOff: isGreeting ? null : 'after_complaint',

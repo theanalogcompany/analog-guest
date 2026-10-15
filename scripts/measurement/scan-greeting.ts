@@ -238,7 +238,7 @@ async function main(): Promise<void> {
             afterComplaint: variant === 'after_complaint',
             priorGreetings: [],
             order,
-            expiredCode: false,
+            helloOnly: false,
           },
           classification: {
             category: 'guest_arrived',
