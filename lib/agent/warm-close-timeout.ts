@@ -604,7 +604,7 @@ async function considerCandidate(
       supabase,
       candidate.venueId,
       candidate.guestId,
-      owedQuestion.data.helloAt,
+      owedQuestion.data.helloClaimedAt,
     ))
   ) {
     return 'scan_question_pending'

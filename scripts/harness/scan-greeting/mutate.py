@@ -99,8 +99,8 @@ MUTANTS = [
     (
         "TAC-588: no passport cap, an unsettled run greets at 20s",
         TIMING,
-        "  return new Date(scanned + PASSPORT_WAIT_CAP_MS)",
-        "  return new Date(scanned + delayMs)",
+        "      PASSPORT_WAIT_CAP_MS,\n  )",
+        "      0 + delayMs,\n  )",
     ),
     (
         "TAC-588: fast path does not wait for the stamp run",
@@ -165,14 +165,14 @@ MUTANTS = [
     (
         "TAC-588: a guest reply no longer cancels the timer",
         QUESTION,
-        "    await guestHasWrittenSince(supabase, row.venueId, row.guestId, row.helloAt)\n",
-        "    false\n",
+        "      row.helloClaimedAt,\n    )\n  )\n    return settleUnasked(supabase, row, now, 'guest_replied')",
+        "      row.helloClaimedAt,\n    ) && false\n  )\n    return settleUnasked(supabase, row, now, 'guest_replied')",
     ),
     (
         "TAC-588: cancellation counts replies from before the hello",
         QUESTION,
-        "    await guestHasWrittenSince(supabase, row.venueId, row.guestId, row.helloAt)\n",
-        "    await guestHasWrittenSince(supabase, row.venueId, row.guestId, row.scannedAt)\n",
+        "      row.helloClaimedAt,\n    )\n  )\n    return settleUnasked(supabase, row, now, 'guest_replied')",
+        "      row.scannedAt,\n    )\n  )\n    return settleUnasked(supabase, row, now, 'guest_replied')",
     ),
     (
         "TAC-588: a held question is never given up",
@@ -191,6 +191,42 @@ MUTANTS = [
         POLICY,
         "  return policy?.scanItemQuestion ?? 'auto_send'",
         "  return policy?.scanItemQuestion ?? policy?.visitCheckback ?? 'operator_approval'",
+    ),
+    (
+        "review fix: the reply path asks over a taken question",
+        TIMING,
+        "      known && input.itemQuestion !== 'taken' ? input.helloClaimedAt : null,",
+        "      known ? input.helloClaimedAt : null,",
+    ),
+    (
+        "review fix: a re-opened slip counts as a fresh order",
+        ORDER,
+        "    matchedAt.getTime() < scan.scannedAt.getTime() - BIND_CLOCK_SKEW_MS\n",
+        "    false\n",
+    ),
+    (
+        "review fix: an order with no named items is bound",
+        ORDER,
+        "  if (lineItemNames.length === 0) return NONE\n",
+        "",
+    ),
+    (
+        "review fix: an emoji-only remainder is sent",
+        TIMING,
+        "  return { body: hasRenderableContent(kept) ? kept : '', dropped }",
+        "  return { body: kept, dropped }",
+    ),
+    (
+        "review fix: the passport cap ignores when we recorded the scan",
+        TIMING,
+        "  const recorded = timing.recordedAt?.getTime() ?? scanned\n",
+        "  const recorded = scanned\n",
+    ),
+    (
+        "review fix: a question with no hello in front stays owed",
+        PROCESSOR,
+        "    if (itemQuestionScheduled && !greetingOut) {\n      await settleNoHello(supabase, row.id)\n    }\n",
+        "",
     ),
     (
         "carry-forward re-derived from the delay",

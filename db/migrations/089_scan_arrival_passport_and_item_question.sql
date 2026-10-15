@@ -35,6 +35,17 @@
 --                             send, when the guest wrote back first: that
 --                             cancels the timer for good.
 --   item_question_sent_at     set only once the question reached the guest.
+--   item_question_outcome     what the claim became: 'sent', 'queued' (held
+--                             for an operator), 'cancelled' (the guest wrote
+--                             back first), 'too_late', 'no_item', 'no_hello',
+--                             'refused', or another status the send kept its
+--                             claim on ('superseded'). Null while
+--                             unclaimed or while a claimed send is in flight.
+--                             The claim alone cannot tell a cancelled timer
+--                             from one that is sending, and the reply path
+--                             may only ask after a cancel. Free text, no
+--                             CHECK, for the reason below; the writer is
+--                             lib/agent/scan-item-question.ts.
 --
 -- WHAT IS NOT HERE, ON PURPOSE. The bound order's id: it is derived from the
 -- scan's own referral code through pos_tap_events.reconciled_transaction_id,
@@ -56,7 +67,8 @@ alter table instagram_scan_arrivals
   add column passport_sent_at timestamptz,
   add column item_question_due_at timestamptz,
   add column item_question_claimed_at timestamptz,
-  add column item_question_sent_at timestamptz;
+  add column item_question_sent_at timestamptz,
+  add column item_question_outcome text;
 
 comment on column instagram_scan_arrivals.awaits_passport is
   'TAC-588: the scan carried a receipt code, so a passport stamp run was started and the hello waits for it.';
@@ -70,5 +82,7 @@ comment on column instagram_scan_arrivals.item_question_claimed_at is
   'TAC-588: the item question claim, taken before the send, or with no send when the guest wrote back first.';
 comment on column instagram_scan_arrivals.item_question_sent_at is
   'TAC-588: when the item question reached the guest.';
+comment on column instagram_scan_arrivals.item_question_outcome is
+  'TAC-588: what the item question claim became: sent, queued, cancelled, too_late, no_item, no_hello, refused or another kept status. Null while unclaimed or in flight.';
 
 commit;

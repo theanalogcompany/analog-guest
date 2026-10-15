@@ -2858,9 +2858,10 @@ import {
 //   also retrieves knowledge against that item's name, tag `menu`.
 //
 //   The item question, about twenty minutes after the order, is a new
-//   category instruction (scan-item-question.ts) on a new follow-up reason,
-//   and a new intention, `scan_order_liked`, carries it when the guest wrote
-//   back first.
+//   category instruction (scan-item-question.ts) on the check-back's own
+//   follow-up reason (visit_checkback, with `scanItem` set), and a new
+//   intention, `scan_order_liked`, carries it when the guest wrote back
+//   first.
 //
 //   BASELINE RESET for a receipt-scan greeting and for the item question.
 //   The counter greeting (no code, or a payment Square had not reported) and

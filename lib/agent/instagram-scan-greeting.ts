@@ -78,8 +78,10 @@ import {
   claimScanArrival,
   loadDueScanArrivals,
   loadPendingScanArrival,
+  guestHasWrittenSince,
   resolveScanArrival,
   scheduleScanItemQuestion,
+  settleScanItemQuestion,
   type PendingScanArrival,
   type ScanArrivalOutcome,
 } from './scan-arrival-store'
@@ -208,27 +210,7 @@ async function guestWroteSince(
   supabase: AdminSupabaseClient,
   row: PendingScanArrival,
 ): Promise<boolean> {
-  const { data, error } = await supabase
-    .from('messages')
-    .select('id')
-    .eq('venue_id', row.venueId)
-    .eq('guest_id', row.guestId)
-    .eq('direction', 'inbound')
-    .not('provider_message_id', 'is', null)
-    .gte('created_at', row.scannedAt.toISOString())
-    .limit(1)
-    .maybeSingle()
-  if (error) {
-    logger.warn(
-      '[scan-greeting] inbound-since read failed; suppressing this greeting',
-      {
-        scanArrivalId: row.id,
-        error: error.message,
-      },
-    )
-    return true
-  }
-  return data !== null
+  return guestHasWrittenSince(supabase, row.venueId, row.guestId, row.scannedAt)
 }
 
 /** Fails CLOSED, for the reason handle-holding-message.ts gives: nobody sends to someone who left. */
@@ -452,6 +434,9 @@ export async function processScanArrival(
   // True once the greeting is known to be sent or held for an operator. From
   // then on the follow-up it carried stands, whatever throws afterwards.
   let greetingOut = false
+  // TAC-588: whether this call owes the scan's item question, so a throw
+  // before the hello went can settle it.
+  let itemQuestionScheduled = false
   try {
     if (!isScanGreetingDue(row, now)) {
       return { kind: 'not_yet' }
@@ -543,6 +528,30 @@ export async function processScanArrival(
 
     followup = await claimFollowupForGreeting(supabase, row, localDate, now)
 
+    // TAC-588: a hello that compliments a bound order owes the item question,
+    // at the order + twenty minutes and at least five after this hello.
+    // SCHEDULED HERE, BEFORE THE HELLO IS GENERATED, not after it is sent: the
+    // row's due time is also what tells a reply turn it belongs to this
+    // visit, and a guest who answers the first bubble of the hello replies
+    // while the rest is still going out. If the hello then never reaches
+    // them, the question is settled (`no_hello`) below. A failure here costs
+    // the question, never the greeting, so it is logged.
+    if (order.kind === 'bound') {
+      const scheduled = await scheduleScanItemQuestion(
+        supabase,
+        row.id,
+        scanItemQuestionDueAt({ orderedAt: order.orderedAt, helloAt: now }),
+      )
+      itemQuestionScheduled = scheduled.ok
+      if (!scheduled.ok) {
+        logger.error('[scan-greeting] item question not scheduled', {
+          event: 'scan_item_question_not_scheduled',
+          scanArrivalId: row.id,
+          error: scheduled.error,
+        })
+      }
+    }
+
     const agentRunId = randomUUID()
     const outcome = await handleFollowup({
       venueId: row.venueId,
@@ -572,32 +581,8 @@ export async function processScanArrival(
       followup = null
     }
     greetingOut = !RELEASES_CLAIM[outcome.status]
-
-    // TAC-588: a hello that complimented a bound order owes the item
-    // question, at the order + twenty minutes and at least five after this
-    // hello. Only when the hello went (sent, or held for an operator): a
-    // question after a hello that never reached them would be the first word.
-    // A failure here costs the question, never the greeting, so it is logged.
-    if (
-      greetingOut &&
-      order.kind === 'bound' &&
-      order.lineItemNames.length > 0
-    ) {
-      const scheduled = await scheduleScanItemQuestion(
-        supabase,
-        row.id,
-        scanItemQuestionDueAt({
-          orderedAt: order.orderedAt,
-          helloAt: new Date(),
-        }),
-      )
-      if (!scheduled.ok) {
-        logger.error('[scan-greeting] item question not scheduled', {
-          event: 'scan_item_question_not_scheduled',
-          scanArrivalId: row.id,
-          error: scheduled.error,
-        })
-      }
+    if (itemQuestionScheduled && !greetingOut) {
+      await settleNoHello(supabase, row.id)
     }
 
     await resolveScanArrival(
@@ -642,6 +627,9 @@ export async function processScanArrival(
     // release a follow-up the guest has already read. The case this cannot
     // see is handleFollowup itself throwing after its send; that releases,
     // and the guest may be followed up once more.
+    if (itemQuestionScheduled && !greetingOut) {
+      await settleNoHello(supabase, row.id).catch(() => undefined)
+    }
     if (followup !== null && !greetingOut) {
       await releaseComplaintFollowupClaim(supabase, {
         venueId: row.venueId,
@@ -723,6 +711,29 @@ export async function processDueScanGreetings(
   }
 
   return result
+}
+
+/**
+ * TAC-588: the hello this item question was scheduled behind never reached
+ * the guest, so the question is settled unasked: a question with no hello in
+ * front of it would be the first word.
+ */
+async function settleNoHello(
+  supabase: AdminSupabaseClient,
+  scanArrivalId: string,
+): Promise<void> {
+  const settled = await settleScanItemQuestion(
+    supabase,
+    scanArrivalId,
+    new Date(),
+    'no_hello',
+  )
+  if (settled.status === 'failed') {
+    logger.error('[scan-greeting] item question not settled after no hello', {
+      scanArrivalId,
+      error: settled.error,
+    })
+  }
 }
 
 /** The two things the fast path does not own: time passing, and what time it is. */

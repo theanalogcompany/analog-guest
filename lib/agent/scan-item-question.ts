@@ -46,13 +46,15 @@ import { loadPendingRowsBySlot } from './pending-slots'
 import {
   isScanItemQuestionTooLate,
   lastProactiveWasThisScan,
+  SCAN_ITEM_QUESTION_AFTER_HELLO_MS,
 } from './scan-arrival'
 import {
   claimScanItemQuestion,
   guestHasWrittenSince,
   loadDueScanItemQuestions,
-  markScanItemQuestionSent,
+  recordScanItemQuestionOutcome,
   releaseScanItemQuestionClaim,
+  settleScanItemQuestion,
   type DueScanItemQuestion,
 } from './scan-arrival-store'
 import { loadScanOrder, pickComplimentItem } from './scan-order'
@@ -88,6 +90,14 @@ export type ScanItemQuestionSkipReason =
   | 'too_late'
   /** The order no longer resolves to an item (re-bound, retracted). */
   | 'no_item'
+  /**
+   * Generation refused the question (a pre-send check failing closed). That
+   * refusal is deterministic for this turn's inputs, so it is settled, not
+   * retried every minute for two hours.
+   */
+  | 'refused'
+  /** The hello reached the guest less than five minutes ago (it was held). */
+  | 'hello_too_recent'
 
 export interface ProcessScanItemQuestionsResult {
   scanned: number
@@ -160,7 +170,14 @@ async function settleUnasked(
   now: Date,
   reason: 'guest_replied' | 'too_late' | 'no_item',
 ): Promise<ScanItemQuestionSkipReason> {
-  const claim = await claimScanItemQuestion(supabase, row.id, now)
+  // The outcome is what lets the reply path ask after a CANCEL and never
+  // after a send: the claim alone looks the same for both.
+  const claim = await settleScanItemQuestion(
+    supabase,
+    row.id,
+    now,
+    reason === 'guest_replied' ? 'cancelled' : reason,
+  )
   if (claim.status === 'failed') {
     throw new Error(`scan item question claim failed: ${claim.error}`)
   }
@@ -204,7 +221,12 @@ async function considerRow(
   // for good; their reply's own turn may ask instead. Fails closed (an
   // unreadable read cancels), the direction that never asks over them.
   if (
-    await guestHasWrittenSince(supabase, row.venueId, row.guestId, row.helloAt)
+    await guestHasWrittenSince(
+      supabase,
+      row.venueId,
+      row.guestId,
+      row.helloClaimedAt,
+    )
   )
     return settleUnasked(supabase, row, now, 'guest_replied')
 
@@ -232,6 +254,17 @@ async function considerRow(
     return 'guest_wrote_last'
   // The hello is still on an operator's desk, or did not go.
   if (!newest.data.reachedGuest) return 'last_message_not_delivered'
+  // The ruled floor is five minutes after the hello REACHED them. The due
+  // time was set from when the hello was claimed, and a hello held for an
+  // operator can be approved much later: our newest message since the scan
+  // is then that hello, and the question waits out its five minutes.
+  if (
+    newest.data.createdAt.getTime() >= row.scannedAt.getTime() &&
+    now.getTime() - newest.data.createdAt.getTime() <
+      SCAN_ITEM_QUESTION_AFTER_HELLO_MS
+  ) {
+    return 'hello_too_recent'
+  }
 
   const pending = await loadPendingRowsBySlot(row.venueId, row.guestId)
   if (
@@ -285,6 +318,10 @@ async function considerRow(
   // The check-back's map and its asymmetry: nothing reached the guest gives
   // the claim back; a card queued for an operator keeps it, because approving
   // the card sends it and a released claim would send a second.
+  if (result.status === 'refused') {
+    await recordRefusal(supabase, row, agentRunId)
+    return 'refused'
+  }
   if (RELEASES_CLAIM[result.status]) {
     await releaseScanItemQuestionClaim(supabase, row.id, now)
     console.warn('[scan-item-question] did not send; claim released', {
@@ -298,9 +335,18 @@ async function considerRow(
   // On a confirmed send: the sent stamp, the spacing marker so the other
   // unprompted mechanisms can see this one, and the visit's check-in. A fresh
   // clock, not the tick's: `now` was read before generation and the send.
+  if (result.status !== 'sent') {
+    await recordScanItemQuestionOutcome(supabase, row.id, {
+      kind: 'kept',
+      status: result.status,
+    })
+  }
   if (result.status === 'sent') {
     const sentAt = new Date()
-    await markScanItemQuestionSent(supabase, row.id, sentAt)
+    await recordScanItemQuestionOutcome(supabase, row.id, {
+      kind: 'sent',
+      sentAt,
+    })
     await recordProactiveSend(supabase, row.guestId, sentAt)
     const localDate =
       (venue.timezone !== null
@@ -338,4 +384,27 @@ async function considerRow(
     ),
   })
   return 'asked'
+}
+
+/**
+ * A refused question keeps its claim, with the outcome `refused`, and is never
+ * tried again. Deliberately unlike the check-back, whose thirty-minute window
+ * bounds its retries: this one's window is two hours of every-minute ticks.
+ */
+async function recordRefusal(
+  supabase: AdminSupabaseClient,
+  row: DueScanItemQuestion,
+  agentRunId: string,
+): Promise<void> {
+  const { error } = await supabase
+    .from('instagram_scan_arrivals')
+    .update({ item_question_outcome: 'refused' })
+    .eq('id', row.id)
+  console.warn('[scan-item-question] refused; given up', {
+    event: 'scan_item_question_dropped',
+    reason: 'refused',
+    agentRunId,
+    scanArrivalId: row.id,
+    error: error?.message ?? null,
+  })
 }

@@ -434,9 +434,21 @@ said, so this visit runs differently from the counter flow above (ruled 2026-10-
 | item question | `max(order + 20 min, hello + 5 min)`, the visit's check-back; writes the check-in with the check-back spent | `scan-item-question.ts`, from `/api/cron/visit-checkbacks` |
 | guest writes first | the timer is cancelled for good; `scan_order_liked` (`when_it_fits`) may ask on their turns | `resolveScanOrderVisit` |
 
-- **Only a bound order changes anything.** The counter sign, and a payment Square has not
-  reported, keep the counter flow above. A code past its 24 hours (`SCAN_CODE_TTL_MS`) gets a
-  hello with no compliment and no question.
+- **Only an order bound BY THIS SCAN changes anything** (`transactions.matched_at` at or
+  after the scan). The counter sign, a payment Square has not reported, and a slip opened
+  again after an earlier scan bound it keep the counter flow above. A code past its 24 hours
+  (`SCAN_CODE_TTL_MS`) gets a hello with no compliment and no question.
+- **"Since the hello" starts at the greeting's CLAIM, never at `resolved_at`**, which is
+  written after the last bubble: a guest who answers the first bubble would otherwise be
+  missed and asked anyway. The due time is written at the claim too, before generation, and
+  settled `no_hello` if the hello never reaches them.
+- **`item_question_outcome` is what lets the reply path ask after a cancel and never after a
+  send**: the claim alone looks the same for both. A send in flight, queued or sent is
+  `taken`, and `scan_order_liked` stays down for it. A queued card that an operator later
+  approves writes no check-in (the check-back's own accepted limit).
+- **A reply that already says how it was is the check-in** (`classifyCheckinAnswer`, in
+  `handle-inbound.ts` beside the counter flow's `orderTurnVerdict`): recorded with the
+  check-back spent, and `scan_order_liked` dropped.
 - **A bound order is greeted whatever the venue's hours**; the question still waits out
   quiet hours and is given up 2 h after it was due.
 - **The marker for "this visit's hello complimented a bound order" is

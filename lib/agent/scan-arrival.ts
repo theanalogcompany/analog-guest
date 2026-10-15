@@ -39,6 +39,7 @@
 // message that lands while the greeting is generating crosses it.
 
 import { venueLocalDate } from '@/lib/schemas'
+import { hasRenderableContent } from './sentence-split'
 
 /**
  * How long a scan waits for the guest to say something before the venue
@@ -136,6 +137,13 @@ export interface ScanArrivalTiming {
   passportSettledAt: Date | null
   /** When both images reached the guest. Null if the run sent nothing. */
   passportSentAt: Date | null
+  /**
+   * When WE recorded the scan (the row's `created_at`), when known. The
+   * passport cap counts from the later of this and `scannedAt`: `scannedAt`
+   * is Meta's clock, and a webhook Meta delivered a minute late must not find
+   * its stamp run already out of time.
+   */
+  recordedAt?: Date
 }
 
 /**
@@ -163,7 +171,11 @@ export function scanGreetingDueAt(
     return new Date(timing.passportSentAt.getTime() + HELLO_AFTER_PASSPORT_MS)
   }
   if (timing.passportSettledAt !== null) return new Date(scanned + delayMs)
-  return new Date(scanned + PASSPORT_WAIT_CAP_MS)
+  const recorded = timing.recordedAt?.getTime() ?? scanned
+  return new Date(
+    Math.max(scanned, Number.isFinite(recorded) ? recorded : scanned) +
+      PASSPORT_WAIT_CAP_MS,
+  )
 }
 
 /**
@@ -374,8 +386,10 @@ export { venueLocalDate }
  * intentionQuestionDroppedForBodyQuestion: this reads our own outbound, where
  * the copy always punctuates a question.
  *
- * `body` is empty when the whole hello was questions; the caller decides what
- * that means (handleFollowup regenerates once, then sends nothing). Pure.
+ * `body` is empty when the whole hello was questions, and also when all that
+ * is left has no letter or digit in it ("How's the cortado? ☕" leaves "☕"):
+ * an emoji alone is not a hello. The caller decides what empty means
+ * (handleFollowup regenerates once, then sends nothing). Pure.
  */
 export function withoutQuestions(body: string): {
   body: string
@@ -391,14 +405,12 @@ export function withoutQuestions(body: string): {
     })
     return kept.join('').trim()
   })
-  return {
-    body: lines
-      .filter((line, i) => line !== '' || body.split('\n')[i]?.trim() === '')
-      .join('\n')
-      .replace(/\n{3,}/g, '\n\n')
-      .trim(),
-    dropped,
-  }
+  const kept = lines
+    .filter((line, i) => line !== '' || body.split('\n')[i]?.trim() === '')
+    .join('\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim()
+  return { body: hasRenderableContent(kept) ? kept : '', dropped }
 }
 
 // ---------------------------------------------------------------------------
@@ -483,22 +495,26 @@ export const SCAN_ORDER_VISIT_MS = 2 * 60 * 60 * 1000
  *   known    the reply came within SCAN_ORDER_VISIT_MS of the hello. The
  *            counter flow's "they just told you what they got" arming
  *            (same_visit_order) is then off: nobody told us, the scan did.
- *   likedAt  the hello, when the timed question has not gone. The guest
- *            writing back cancelled that timer, so their turns may ask instead
- *            (scan_order_liked). Null once the timer has sent it.
+ *   likedAt  the hello's claim, while the timed question is still open or
+ *            was cancelled by the guest writing back: their turns may then
+ *            ask instead (scan_order_liked). Null once the timer has taken it
+ *            for a send (in flight, queued for an operator, or sent) or given
+ *            it up, so the visit is never asked twice.
  *
  * Pure. The caller also withholds it once the visit has a check-in.
  */
 export function resolveScanOrderVisit(input: {
-  helloAt: Date
-  itemQuestionSentAt: Date | null
+  /** The greeting's claim: the start of "since the hello". */
+  helloClaimedAt: Date
+  itemQuestion: 'open' | 'cancelled' | 'taken'
   inboundAt: Date
 }): { known: boolean; likedAt: Date | null } {
-  const since = input.inboundAt.getTime() - input.helloAt.getTime()
+  const since = input.inboundAt.getTime() - input.helloClaimedAt.getTime()
   const known =
     Number.isFinite(since) && since >= 0 && since <= SCAN_ORDER_VISIT_MS
   return {
     known,
-    likedAt: known && input.itemQuestionSentAt === null ? input.helloAt : null,
+    likedAt:
+      known && input.itemQuestion !== 'taken' ? input.helloClaimedAt : null,
   }
 }

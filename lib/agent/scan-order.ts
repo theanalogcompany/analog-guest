@@ -16,14 +16,21 @@
 // THREE ANSWERS, and the third is the one that matters for wording (ruled
 // 2026-10-14, question 3):
 //
-//   bound     the code bound an order to this guest. The hello compliments it.
+//   bound     THIS scan bound an order to this guest. The hello compliments it.
 //   expired   the code is ours but older than SCAN_CODE_TTL_MS, so it bound
 //             nothing. The hello goes with no compliment and no question:
 //             asking "what did you get?" a day after the order reads wrong.
 //   none      no code (the counter sign), a payment Square had not told us
-//             about, a code already bound by an earlier scan, or anything we
-//             could not read. Today's greeting and flow, unchanged: we
-//             genuinely do not know the order, so it is asked for.
+//             about, a code ALREADY BOUND BY AN EARLIER SCAN (a slip opened
+//             again the next day), an order with no named items, or anything
+//             we could not read. Today's greeting and flow, unchanged: we do
+//             not know what they got THIS time, so it is asked for.
+//
+// "THIS SCAN BOUND IT" is read off the transaction's own `matched_at`, which
+// the bind writes: a re-opened slip finds the code matched by yesterday's scan,
+// and complimenting yesterday's order as new, with a second item question,
+// is exactly what must not happen. The tolerance (BIND_CLOCK_SKEW_MS) covers
+// the scan's time being Meta's clock and `matched_at` ours.
 //
 // FAILS TO `none`. An unreadable read is today's greeting, which asks what they
 // got. The cost is one question we could have avoided; the other direction is
@@ -56,6 +63,15 @@ export type ScanOrder =
   | { kind: 'none' }
 
 const NONE: ScanOrder = { kind: 'none' }
+
+/**
+ * How far before the scan's own timestamp the bind may appear to land. The
+ * bind runs after we receive the scan, so it is always later in fact; the scan
+ * time is Meta's clock, so a little slack. Five minutes, a choice: a second
+ * scan of one slip inside it is the same day, and the once-a-day greeting
+ * rule already keeps it from a second hello.
+ */
+const BIND_CLOCK_SKEW_MS = 5 * 60 * 1000
 
 /**
  * The order a scan bound, read from the scan's own message row.
@@ -99,6 +115,10 @@ export async function loadScanOrder(
     if (tap.data.status === 'matched' && transactionId !== null) {
       return await loadBoundOrder(supabase, scan, transactionId)
     }
+    if (tap.data.status === 'matched') {
+      // Matched with no transaction recorded: nothing of ours to compliment.
+      return NONE
+    }
     // Never bound. Expired if it was already past its day when they scanned,
     // whether or not the expiry cron has flipped the row yet; otherwise it is
     // a payment Square had not told us about, which is `none`.
@@ -116,13 +136,13 @@ export async function loadScanOrder(
 
 async function loadBoundOrder(
   supabase: AdminSupabaseClient,
-  scan: { venueId: string; guestId: string },
+  scan: { venueId: string; guestId: string; scannedAt: Date },
   transactionId: string,
 ): Promise<ScanOrder> {
   const [transaction, stamp] = await Promise.all([
     supabase
       .from('transactions')
-      .select('id, guest_id, occurred_at, raw_data, retracted_at')
+      .select('id, guest_id, occurred_at, raw_data, retracted_at, matched_at')
       .eq('id', transactionId)
       .eq('venue_id', scan.venueId)
       .maybeSingle(),
@@ -141,6 +161,17 @@ async function loadBoundOrder(
     return NONE
   const orderedAt = new Date(row.occurred_at)
   if (!Number.isFinite(orderedAt.getTime())) return NONE
+  // Bound by THIS scan, or by an earlier one (see the header).
+  const matchedAt = row.matched_at === null ? null : new Date(row.matched_at)
+  if (
+    matchedAt === null ||
+    !Number.isFinite(matchedAt.getTime()) ||
+    matchedAt.getTime() < scan.scannedAt.getTime() - BIND_CLOCK_SKEW_MS
+  )
+    return NONE
+  // Nothing named on the order is nothing to compliment, and no question.
+  const lineItemNames = parseLineItemNames(row.raw_data)
+  if (lineItemNames.length === 0) return NONE
 
   // The stamp is optional: a venue with no passport issues none, and an
   // unreadable stamp only costs the "new to them" preference.
@@ -152,7 +183,7 @@ async function loadBoundOrder(
     kind: 'bound',
     transactionId: row.id,
     orderedAt,
-    lineItemNames: parseLineItemNames(row.raw_data),
+    lineItemNames,
     discoveredLabel,
   }
 }

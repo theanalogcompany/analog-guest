@@ -1303,6 +1303,7 @@ export type Database = {
           id: string
           item_question_claimed_at: string | null
           item_question_due_at: string | null
+          item_question_outcome: string | null
           item_question_sent_at: string | null
           outcome: string | null
           passport_sent_at: string | null
@@ -1322,6 +1323,7 @@ export type Database = {
           id?: string
           item_question_claimed_at?: string | null
           item_question_due_at?: string | null
+          item_question_outcome?: string | null
           item_question_sent_at?: string | null
           outcome?: string | null
           passport_sent_at?: string | null
@@ -1341,6 +1343,7 @@ export type Database = {
           id?: string
           item_question_claimed_at?: string | null
           item_question_due_at?: string | null
+          item_question_outcome?: string | null
           item_question_sent_at?: string | null
           outcome?: string | null
           passport_sent_at?: string | null

@@ -910,8 +910,8 @@ export async function buildRuntimeContext(input: {
       )
     } else if (scanVisit.data !== null) {
       const timing = resolveScanOrderVisit({
-        helloAt: scanVisit.data.helloAt,
-        itemQuestionSentAt: scanVisit.data.itemQuestionSentAt,
+        helloClaimedAt: scanVisit.data.helloClaimedAt,
+        itemQuestion: scanVisit.data.itemQuestion,
         inboundAt: input.currentMessage.receivedAt,
       })
       scanOrderKnown = timing.known
