@@ -1,4 +1,5 @@
 import type { EligibleMechanic } from '@/lib/recognition'
+import { checkinAnswerFactLine } from './checkin-answer-line'
 import {
   type ActiveCommitment,
   type BrandPersona,
@@ -2885,6 +2886,13 @@ export function runtimeToProse(
     lines.push(`The guest just sent: "${runtime.inboundMessage}"`)
   }
   lines.push(...media.after)
+  // TAC-588 hotfix: when that message answers our question about their order,
+  // say so and say what it said, right after it (checkin-answer-line.ts).
+  const answerLine =
+    runtime.checkinAnswer !== undefined
+      ? checkinAnswerFactLine(runtime.checkinAnswer)
+      : null
+  if (answerLine !== null) lines.push(answerLine)
   // TAC-324: R1 carve-out signal. This is the ONLY place createdVia/timing
   // surfaces in the prompt — without this line the model has no way to know
   // a guest arrived via QR scan, since createdVia isn't rendered anywhere

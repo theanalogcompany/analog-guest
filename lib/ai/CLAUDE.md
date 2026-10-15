@@ -65,13 +65,14 @@ decision rather than silent drift. A **required** boolean or string is free.
 `correctsPendingReply`, `followUpWorthy`, `praisedExperience`. None is `.optional()`, which
 is what makes the compiler name every site synthesizing a `Classification`.
 
-`PROMPT_VERSION` (`prompts/system-template.ts`, currently v1.108.0) covers the
+`PROMPT_VERSION` (`prompts/system-template.ts`, currently v1.109.0) covers the
 classify/generate contract. Every other module here carries its own, and they are
 deliberately not linked:
 
 `VERIFY_PROSE_PROMISE_PROMPT_VERSION` · `VERIFY_MECHANIC_OFFER_PROMPT_VERSION` · `VERIFY_CANCELLATION_CLAIM_PROMPT_VERSION` ·
 `VERIFY_CLOSED_VENUE_ARRIVAL_PROMPT_VERSION` · `EXTRACT_REPORTED_ORDER_PROMPT_VERSION` ·
-`CLASSIFY_INTENTION_PROMPTS_PROMPT_VERSION` · `DESCRIBE_ATTACHMENT_PROMPT_VERSION`
+`CLASSIFY_INTENTION_PROMPTS_PROMPT_VERSION` · `DESCRIBE_ATTACHMENT_PROMPT_VERSION` ·
+`READ_CHECKIN_ANSWER_PROMPT_VERSION`
 
 A change to one of those never touches the classify/generate contract, so bumping
 `PROMPT_VERSION` alongside it would be a false signal.

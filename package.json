@@ -13,6 +13,7 @@
     "measure-complaint-answer-hold": "tsx --env-file=.env.local scripts/measurement/complaint-answer-hold.ts",
     "measure-complaint-followup": "tsx --env-file=.env.local scripts/measurement/complaint-followup.ts",
     "measure-scan-greeting": "tsx --env-file=.env.local scripts/measurement/scan-greeting.ts",
+    "measure-checkin-answer-reader": "tsx --env-file=.env.local scripts/measurement/checkin-answer-reader.ts",
     "measure-scan-visits": "tsx --env-file=.env.local scripts/measurement/scan-visits-before-after.ts",
     "measure-inquiry-followup": "tsx --env-file=.env.local scripts/measurement/inquiry-followup.ts",
     "measure-follow-up-worthy": "tsx --env-file=.env.local scripts/measurement/follow-up-worthy.ts",

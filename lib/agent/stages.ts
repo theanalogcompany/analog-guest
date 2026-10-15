@@ -3351,6 +3351,7 @@ export function buildAiRuntime(
     inquiryFollowup: ctx.inquiryFollowup ?? undefined,
     visitCheckback: ctx.visitCheckback || undefined,
     scanItemQuestion: ctx.scanItemQuestion ?? undefined,
+    checkinAnswer: ctx.checkinAnswerRead ?? undefined,
     // TAC-575: the sign-off. The kind is decided upstream, by the pause timer
     // and nothing else; this only carries it. The venue's close
     // text rides along on a plain close as a guide to its content.

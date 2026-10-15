@@ -1,3 +1,4 @@
+import type { CheckinAnswerVerdict } from '@/lib/ai/read-checkin-answer'
 import type { ComplimentPick, ScanOrder } from './scan-order'
 import type { SlotDropReason } from './pending-slots'
 import type {
@@ -637,6 +638,13 @@ export interface RuntimeContext {
   // message read as. While true no intention renders (renderableIntentions)
   // and the prompt is told to ask nothing (buildAiRuntime).
   visitCheckinHold: boolean
+  // TAC-588 hotfix: what the check-in answer reader made of this message, when
+  // it answers the venue's own question about their order. Null as built;
+  // handleInbound sets it after classification. Renders the reply's fact line.
+  checkinAnswerRead: {
+    item: string | null
+    verdict: CheckinAnswerVerdict
+  } | null
   // TAC-575: true when this turn belongs to a visit check-in: the guest is
   // inside the answer window of "how is it so far?", or has just answered it
   // in the message that named their order. Praise on such a turn must not

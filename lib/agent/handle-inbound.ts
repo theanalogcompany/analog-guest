@@ -1,4 +1,8 @@
 import { randomUUID } from 'node:crypto'
+import {
+  readCheckinAnswer,
+  type CheckinAnswerVerdict,
+} from '@/lib/ai/read-checkin-answer'
 import { waitUntil } from '@vercel/functions'
 import {
   isAgentLatencyHigh,
@@ -2840,11 +2844,14 @@ async function runInboundTurn(
       ctx.scanOrderVisit !== null &&
       ctx.classification.category !== 'opt_out'
     ) {
+      const read = await readAnswerToOurQuestion(ctx, agentRunId)
       const answer = classifyCheckinAnswer({
         category: ctx.classification.category,
         praisedExperience: ctx.classification.praisedExperience === true,
+        read: read?.verdict ?? null,
       })
-      if (answer === 'good' || answer === 'bad') {
+      if (answer === 'good' || answer === 'ok' || answer === 'bad') {
+        ctx.checkinAnswerRead = read
         const scanOrderVisit = ctx.scanOrderVisit
         ctx.scanOrderVisit = null
         ctx.insideVisitCheckin = true
@@ -2957,11 +2964,22 @@ async function runInboundTurn(
       isAwaitingCheckinAnswer(ctx.visitCheckin, ctx.currentMessage.receivedAt)
     ) {
       const checkin = ctx.visitCheckin
+      // TAC-588 hotfix: read the reply against the question we asked, while
+      // the answer is still open. Once it is good or bad only a complaint can
+      // move it, and the classifier's category already says that.
+      const read =
+        checkin.answer === null ||
+        checkin.answer === 'not_yet' ||
+        checkin.answer === 'ok'
+          ? await readAnswerToOurQuestion(ctx, agentRunId)
+          : null
+      ctx.checkinAnswerRead = read
       const answer = nextCheckinAnswer(
         checkin.answer,
         classifyCheckinAnswer({
           category: ctx.classification.category,
           praisedExperience: ctx.classification.praisedExperience === true,
+          read: read?.verdict ?? null,
         }),
       )
       // Until they say it is good, the venue asks nothing else. Read from what
@@ -2991,6 +3009,7 @@ async function runInboundTurn(
       const firstAnswerThisTurn = checkin.answer === null && answer !== null
       if (
         answerNow === 'good' ||
+        answerNow === 'ok' ||
         answerNow === 'bad' ||
         firstAnswerThisTurn ||
         ctx.classification.category === SIGN_OFF_CATEGORY
@@ -4740,4 +4759,60 @@ function recordComplaintFollowedUp(
       })
     }),
   )
+}
+
+/**
+ * How long a turn waits for the check-in answer reader before falling back to
+ * the old reading. The reply is what is waiting, so a hung call must cost one
+ * unread verdict, never a held reply: the same posture as ORDER_READ_WAIT_MS.
+ */
+const CHECKIN_ANSWER_READ_WAIT_MS = 5000
+
+/**
+ * TAC-588 hotfix: what this message says about the order, read against the
+ * last message of ours that reached the guest (the question, on a check-in
+ * turn). Null when there is no such message, the call failed, or it timed
+ * out: the caller then reads the answer the old way, off the praise flag.
+ */
+async function readAnswerToOurQuestion(
+  ctx: RuntimeContext,
+  agentRunId: string,
+): Promise<{ item: string | null; verdict: CheckinAnswerVerdict } | null> {
+  if (ctx.currentMessage === null) return null
+  const inboundAt = ctx.currentMessage.receivedAt.getTime()
+  const question = [...ctx.recentMessages]
+    .filter(
+      (m) =>
+        m.direction === 'outbound' &&
+        reachedGuest(m) &&
+        m.body.trim() !== '' &&
+        m.createdAt.getTime() <= inboundAt,
+    )
+    .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())[0]
+  if (question === undefined) return null
+  let giveUp: ReturnType<typeof setTimeout> | undefined
+  const result = await Promise.race([
+    readCheckinAnswer({
+      question: question.body,
+      answer: ctx.currentMessage.body,
+    }),
+    new Promise<null>((resolve) => {
+      giveUp = setTimeout(() => resolve(null), CHECKIN_ANSWER_READ_WAIT_MS)
+    }),
+  ])
+  clearTimeout(giveUp)
+  if (result === null || !result.ok) {
+    console.warn('[agent] check-in answer reader unavailable; old reading', {
+      event: 'checkin_answer_reader_fallback',
+      agentRunId,
+      reason: result === null ? 'timed_out' : result.error,
+    })
+    return null
+  }
+  console.log('[agent] check-in answer read', {
+    agentRunId,
+    verdict: result.data.verdict,
+    promptVersion: result.data.promptVersion,
+  })
+  return { item: result.data.item, verdict: result.data.verdict }
 }
