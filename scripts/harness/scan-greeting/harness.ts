@@ -1194,13 +1194,10 @@ async function main() {
         GUEST_ARRIVED_HELLO_ONLY_INSTRUCTIONS_AFTER_COMPLAINT,
       ]
       for (const text of receipt) {
-        // Ruled 2026-10-15, after the first measurement.
+        // Ruled 2026-10-15, after the measurements: a hello always, and no
+        // banned-word lists in the prompt.
         assert.match(text, /Always open with a short hello/)
-        assert.match(text, /Never say "enjoy", "enjoyed" or "enjoying"/)
-        assert.match(
-          text,
-          /nothing about the start, middle or end of their visit/,
-        )
+        assert.doesNotMatch(text, /enjoy/i)
         assert.match(text, /ask nothing at all/i)
         assert.match(text, /may already have left/)
         assert.doesNotMatch(text, /in the shop right now/)
@@ -1211,6 +1208,10 @@ async function main() {
       }
       for (const text of receipt.slice(0, 3)) {
         assert.match(text, /who made or created it, unless the facts say so/)
+        assert.match(
+          text,
+          /You don't know where they are or how their order is going, and you'll ask about it later, so don't guess or presume\./,
+        )
       }
     },
   )

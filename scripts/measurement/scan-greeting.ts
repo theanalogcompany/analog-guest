@@ -12,22 +12,22 @@
 //   Passes when, of the 60:
 //     asks a question, BEFORE the code backstop (withoutQuestions)   <= 3
 //     asks a question, AFTER it                                      0
-//     says they are in the shop ("welcome in", "enjoy your",
-//       "while you're here", "see you at the counter")               0
 //     mentions a passport or a stamp                                 0
 //     names the item it was given                                    >= 57
 //   and, of the 30 with no name, 0 ask for one; of the 30 with a name,
 //   >= 27 use it; of the 20 after a complaint, 0 apologise and 0 offer
 //   anything.
 //
-//   ADDED FOR THE SECOND RUN (ruled 2026-10-15, posted before it):
-//     opens with a hello (hi, hey, hello, good to see you, glad you came
-//       back, welcome)                                                60
-//     "enjoy", "enjoyed", "enjoying", or the start, middle or end of the
-//       visit, now counted under "says they are in the shop"           0
+//   DIAGNOSTICS, REPORTED AND NEVER A BAR (ruled 2026-10-15, after the
+//   second run: "stop tightening by word lists"; the phrase lists stay as
+//   diagnostics only). Each is a phrase or word list, which reads a guest's
+//   situation far worse than a person reading the line does, so it prints a
+//   count and marks the line to read:
+//     says they are in the shop, or presumes how far through the visit they
+//       are ("welcome in", "while you're here", "enjoy", "end a visit" ...)
+//     opens with a hello (hi, hey, hello, good to see, glad you, welcome ...)
 //     an unsupported claim: a superlative or popularity word, or a
 //       capitalised name mid-sentence, that appears nowhere in the facts
-//       the generation was given                                       0
 //
 //   A generation that fails to produce a body voids the run.
 //
@@ -258,16 +258,14 @@ async function main(): Promise<void> {
       bars: {
         questionBeforeBackstop: '<= 3',
         questionAfterBackstop: 0,
-        presence: 0,
         passport: 0,
         namesItem: '>= 57',
         noNameAsksForName: 0,
         nameUsed: '>= 27',
         afterComplaintApologise: 0,
         afterComplaintOffer: 0,
-        opensWithHello: 60,
-        unsupportedClaims: 0,
       },
+      diagnostics: ['presence', 'opensWithHello', 'unsupportedClaims'],
       noControlArm:
         'The comparison is against a bar fixed in advance. The counter greeting asks by design.',
     },
@@ -442,11 +440,13 @@ async function main(): Promise<void> {
   console.log(`\n[tac588] greetings: ${c.total}`)
   console.log(`  asks before the backstop: ${c.questionBefore} (bar <= 3)`)
   console.log(`  asks after the backstop: ${c.questionAfter} (bar 0)`)
-  console.log(`  says they are in the shop: ${c.presence} (bar 0)`)
+  console.log(
+    `  says they are in the shop, or presumes: ${c.presence} (diagnostic)`,
+  )
   console.log(`  mentions a passport or stamp: ${c.passport} (bar 0)`)
   console.log(`  names the item: ${c.namesItem} (bar >= 57)`)
-  console.log(`  opens with a hello: ${c.opensWithHello} (bar 60)`)
-  console.log(`  makes an unsupported claim: ${c.unsupported} (bar 0)`)
+  console.log(`  opens with a hello: ${c.opensWithHello} (diagnostic)`)
+  console.log(`  makes an unsupported claim: ${c.unsupported} (diagnostic)`)
   console.log(
     `  no name, asks for one: ${c.noName.asksForName}/${c.noName.total} (bar 0)`,
   )
@@ -471,11 +471,8 @@ async function main(): Promise<void> {
   const pass =
     c.questionBefore <= 3 &&
     c.questionAfter === 0 &&
-    c.presence === 0 &&
     c.passport === 0 &&
     c.namesItem >= 57 &&
-    c.opensWithHello === 60 &&
-    c.unsupported === 0 &&
     c.noName.asksForName === 0 &&
     c.withName.usesName >= 27 &&
     c.afterComplaint.apologise === 0 &&
