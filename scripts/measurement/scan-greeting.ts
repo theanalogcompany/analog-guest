@@ -20,6 +20,15 @@
 //   >= 27 use it; of the 20 after a complaint, 0 apologise and 0 offer
 //   anything.
 //
+//   ADDED FOR THE SECOND RUN (ruled 2026-10-15, posted before it):
+//     opens with a hello (hi, hey, hello, good to see you, glad you came
+//       back, welcome)                                                60
+//     "enjoy", "enjoyed", "enjoying", or the start, middle or end of the
+//       visit, now counted under "says they are in the shop"           0
+//     an unsupported claim: a superlative or popularity word, or a
+//       capitalised name mid-sentence, that appears nowhere in the facts
+//       the generation was given                                       0
+//
 //   A generation that fails to produce a body voids the run.
 //
 // THERE IS NO CONTROL ARM: the comparison is against that bar. The counter
@@ -28,7 +37,12 @@
 //
 // THE DETECTORS ARE STRING TESTS and under-detect; every body is printed and
 // logged to be read. "Names the item" is the item's name, case-folded, or its
-// last word ("cortado" for "Oat Cortado").
+// last word ("cortado" for "Oat Cortado"), with a Square suffix like
+// "(2 pcs)" stripped and a plural matching its singular (fixed after the
+// first run, where both read real mentions as misses). "Unsupported" compares
+// against everything the prompt carried about the venue: its venue info, menu
+// and persona, the menu description and the knowledge retrieved for the item.
+// A flag is a prompt to read the line, not proof of a fabrication.
 //
 // NOTHING IS SENT AND NOTHING IS WRITTEN. It builds a runtime context for one
 // real guest (read-only), overrides everything a turn reads about them (the
@@ -71,6 +85,73 @@ const PRESENCE_PHRASES = [
   'while you’re here',
   'see you at the counter',
 ]
+/** Ruled 2026-10-15: "enjoy" in any form, and the stage of their visit. */
+const PRESENCE_PATTERNS = [
+  /\benjoy(s|ed|ing)?\b/i,
+  /\b(start|middle|end|rest) of (your|the) (visit|day|morning|afternoon)\b/i,
+  /\bend (a|your|the) visit\b/i,
+  /\bon (your|the) way (out|home)\b/i,
+]
+const presence = (body: string): string[] => [
+  ...has(body, PRESENCE_PHRASES),
+  ...PRESENCE_PATTERNS.filter((p) => p.test(body)).map((p) => p.source),
+]
+const HELLO =
+  /^\W*(hi|hey|hello|hiya|morning|afternoon|evening|good to see|glad you|welcome|nice to see|great to see)\b/i
+const opensWithHello = (body: string): boolean => HELLO.test(body.trim())
+/** Superlatives and popularity claims, flagged unless the facts use them. */
+const CLAIM_WORDS = [
+  'most',
+  'best',
+  'favorite',
+  'favourite',
+  'favorites',
+  'favourites',
+  'underrated',
+  'overrated',
+  'popular',
+  'bestseller',
+  'best-seller',
+  'best-selling',
+  'sells out',
+  'sell out',
+  'number one',
+  '#1',
+  'famous',
+  'everyone loves',
+  'fastest',
+  'walks out the door',
+  'flies out',
+  'top seller',
+]
+const words = (text: string): string[] =>
+  text.toLowerCase().match(/[\p{L}\p{N}#-]+/gu) ?? []
+/**
+ * What in a greeting the facts do not support: claim words the facts never
+ * use, and capitalised words mid-sentence (a person, a place, a maker) that
+ * appear nowhere in them. Sentence-initial words are skipped: "Glad", "The".
+ */
+function unsupported(body: string, facts: string): string[] {
+  const f = facts.toLowerCase()
+  const factWords = new Set(words(facts))
+  const claims = CLAIM_WORDS.filter((w) =>
+    w.includes(' ') || w.includes('-')
+      ? body.toLowerCase().includes(w) && !f.includes(w)
+      : words(body).includes(w) && !factWords.has(w),
+  )
+  const names: string[] = []
+  for (const sentence of body.split(/(?<=[.!?])\s+|\n+/)) {
+    const tokens = sentence.trim().split(/\s+/).slice(1)
+    for (const raw of tokens) {
+      const token = raw.replace(/^[^\p{L}]+|[^\p{L}]+$/gu, '')
+      if (!/^\p{Lu}\p{Ll}+/u.test(token)) continue
+      if (token === 'Maya') continue
+      if (!factWords.has(token.toLowerCase().replace(/'s$/, '')))
+        names.push(token)
+    }
+  }
+  return [...claims, ...names]
+}
 const OFFER_WORDS = [
   'on us',
   'on the house',
@@ -89,9 +170,18 @@ const has = (body: string, words: readonly string[]): string[] => {
   const b = body.toLowerCase()
   return words.filter((w) => b.includes(w))
 }
+/** Lowercased, a Square suffix like "(2 pcs)" stripped, each word singular. */
+const normalizeItem = (text: string): string =>
+  text
+    .toLowerCase()
+    .replace(/\([^)]*\)/g, ' ')
+    .split(/\s+/)
+    .filter((w) => w !== '')
+    .map((w) => w.replace(/(?<=[a-z]{3})(es|s)$/, ''))
+    .join(' ')
 const namesItem = (body: string, item: string): boolean => {
-  const b = body.toLowerCase()
-  const name = item.toLowerCase().trim()
+  const b = normalizeItem(body)
+  const name = normalizeItem(item)
   const last = name.split(/\s+/).at(-1) ?? name
   return b.includes(name) || b.includes(last)
 }
@@ -175,6 +265,8 @@ async function main(): Promise<void> {
         nameUsed: '>= 27',
         afterComplaintApologise: 0,
         afterComplaintOffer: 0,
+        opensWithHello: 60,
+        unsupportedClaims: 0,
       },
       noControlArm:
         'The comparison is against a bar fixed in advance. The counter greeting asks by design.',
@@ -192,6 +284,8 @@ async function main(): Promise<void> {
     presence: 0,
     passport: 0,
     namesItem: 0,
+    opensWithHello: 0,
+    unsupported: 0,
     noName: { total: 0, asksForName: 0 },
     withName: { total: 0, usesName: 0 },
     afterComplaint: { total: 0, apologise: 0, offer: 0 },
@@ -283,10 +377,20 @@ async function main(): Promise<void> {
 
         const raw = gen.data.body
         const after = withoutQuestions(raw).body
+        // Everything the prompt carried that a claim could rest on.
+        const facts = [
+          JSON.stringify(ctx.venue.venueInfo),
+          JSON.stringify(ctx.venue.brandPersona),
+          order.item,
+          order.menuDescription ?? '',
+          ...ctx.knowledgeCorpus.map((k) => k.text),
+        ].join('\n')
         const flags = {
           questionBefore: raw.includes('?'),
           questionAfter: after.includes('?'),
-          presence: has(after, PRESENCE_PHRASES),
+          presence: presence(after),
+          opensWithHello: opensWithHello(after),
+          unsupported: unsupported(after, facts),
           passport: mentionsPassport(after),
           namesItem: namesItem(after, order.item),
           asksForName: asksForName(raw),
@@ -300,6 +404,8 @@ async function main(): Promise<void> {
         if (flags.presence.length > 0) counts.presence += 1
         if (flags.passport) counts.passport += 1
         if (flags.namesItem) counts.namesItem += 1
+        if (flags.opensWithHello) counts.opensWithHello += 1
+        if (flags.unsupported.length > 0) counts.unsupported += 1
         if (named) {
           counts.withName.total += 1
           if (flags.usesName) counts.withName.usesName += 1
@@ -313,7 +419,17 @@ async function main(): Promise<void> {
           if (flags.offers.length > 0) counts.afterComplaint.offer += 1
         }
         log.appendUnit({ id, variant, named, order, raw, after, flags })
-        console.log(`  ${id}  ${JSON.stringify(after)}`)
+        const marks = [
+          flags.opensWithHello ? '' : ' [no hello]',
+          flags.presence.length > 0
+            ? ` [presence: ${flags.presence.join(', ')}]`
+            : '',
+          flags.unsupported.length > 0
+            ? ` [unsupported: ${flags.unsupported.join(', ')}]`
+            : '',
+          flags.namesItem ? '' : ' [item not named]',
+        ].join('')
+        console.log(`  ${id}  ${JSON.stringify(after)}${marks}`)
       }
     }
   }
@@ -329,6 +445,8 @@ async function main(): Promise<void> {
   console.log(`  says they are in the shop: ${c.presence} (bar 0)`)
   console.log(`  mentions a passport or stamp: ${c.passport} (bar 0)`)
   console.log(`  names the item: ${c.namesItem} (bar >= 57)`)
+  console.log(`  opens with a hello: ${c.opensWithHello} (bar 60)`)
+  console.log(`  makes an unsupported claim: ${c.unsupported} (bar 0)`)
   console.log(
     `  no name, asks for one: ${c.noName.asksForName}/${c.noName.total} (bar 0)`,
   )
@@ -356,6 +474,8 @@ async function main(): Promise<void> {
     c.presence === 0 &&
     c.passport === 0 &&
     c.namesItem >= 57 &&
+    c.opensWithHello === 60 &&
+    c.unsupported === 0 &&
     c.noName.asksForName === 0 &&
     c.withName.usesName >= 27 &&
     c.afterComplaint.apologise === 0 &&

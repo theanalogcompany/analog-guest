@@ -1194,6 +1194,13 @@ async function main() {
         GUEST_ARRIVED_HELLO_ONLY_INSTRUCTIONS_AFTER_COMPLAINT,
       ]
       for (const text of receipt) {
+        // Ruled 2026-10-15, after the first measurement.
+        assert.match(text, /Always open with a short hello/)
+        assert.match(text, /Never say "enjoy", "enjoyed" or "enjoying"/)
+        assert.match(
+          text,
+          /nothing about the start, middle or end of their visit/,
+        )
         assert.match(text, /ask nothing at all/i)
         assert.match(text, /may already have left/)
         assert.doesNotMatch(text, /in the shop right now/)
@@ -1201,6 +1208,9 @@ async function main() {
       }
       for (const text of receipt.slice(3)) {
         assert.doesNotMatch(text, /compliment/i)
+      }
+      for (const text of receipt.slice(0, 3)) {
+        assert.match(text, /who made or created it, unless the facts say so/)
       }
     },
   )
