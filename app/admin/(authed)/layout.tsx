@@ -1,9 +1,8 @@
 import { redirect } from 'next/navigation'
-import { AuthError, devAuthBypass, verifyAnalogAdminAccess } from '@/lib/auth'
-import { createServerClient } from '@/lib/db/server'
 import { AdminShell } from '../_components/admin-shell'
 import { DevAuthBanner } from '../_components/dev-auth-banner'
 import { NotAuthorized } from '../_components/not-authorized'
+import { resolveAdminSession } from './_lib/admin-session'
 
 // Auth gate for the protected admin tree. Lives under a (authed) route
 // group so /admin/sign-in and /admin/auth/callback (siblings outside this
@@ -17,44 +16,28 @@ import { NotAuthorized } from '../_components/not-authorized'
 // Authenticated-but-not-authorized renders rather than redirects: the user
 // has identity, just not authorization. Sending them back to sign-in
 // would muddle the failure state.
+//
+// The gate itself is _lib/admin-session.ts, resolved once per request and
+// shared with the pages below - which need the venue scope this confirms, and
+// used to re-derive it with a second copy of the same three round trips.
 
 export default async function AuthedAdminLayout({
   children,
 }: {
   children: React.ReactNode
 }) {
-  // Local-dev bypass (lib/auth/dev-bypass.ts): triple-guarded, null anywhere
-  // but a developer's own `next dev` on localhost.
-  const bypass = await devAuthBypass()
-  if (bypass) {
-    return (
-      <AdminShell email="AUTH DISABLED - LOCAL DEV">
-        <DevAuthBanner />
-        {children}
-      </AdminShell>
-    )
-  }
+  const session = await resolveAdminSession()
 
-  const supabase = await createServerClient()
-  const {
-    data: { session },
-  } = await supabase.auth.getSession()
-
-  if (!session) {
+  if (session.kind === 'no-session') {
     redirect('/admin/sign-in')
   }
-
-  try {
-    await verifyAnalogAdminAccess(session.user.id)
-  } catch (err) {
-    if (err instanceof AuthError && err.status === 403) {
-      return <NotAuthorized email={session.user.email ?? '(unknown email)'} />
-    }
-    throw err
+  if (session.kind === 'not-admin') {
+    return <NotAuthorized email={session.email} />
   }
 
   return (
-    <AdminShell email={session.user.email ?? '(unknown email)'}>
+    <AdminShell email={session.email}>
+      {session.bypassed ? <DevAuthBanner /> : null}
       {children}
     </AdminShell>
   )

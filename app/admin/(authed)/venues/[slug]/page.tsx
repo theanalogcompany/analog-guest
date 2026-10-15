@@ -1,7 +1,7 @@
 import { notFound, redirect } from 'next/navigation'
-import { AuthError, devAuthBypass, verifyAnalogAdminAccess } from '@/lib/auth'
-import { createServerClient } from '@/lib/db/server'
 import { Eyebrow, SectionHeader } from '@/lib/ui'
+import { resolveAdminSession } from '../../_lib/admin-session'
+import { mark, reportRequestTiming } from '../../_lib/request-timing'
 import { loadVenueDetail } from '../../_lib/load-venue-detail'
 import { loadIntentionPrompts } from '../../_lib/load-intention-prompts'
 import { loadVenueCommitments } from '../../_lib/load-venue-commitments'
@@ -30,11 +30,7 @@ import { TeamSection } from './_components/team-section'
 import { TheStorySection } from './_components/the-story-section'
 import { VenueFactsSection } from './_components/venue-facts-section'
 import { VoiceLinkSection } from './_components/voice-link-section'
-import {
-  allowsVenue,
-  grantedVenues,
-  type VenueScope,
-} from '@/lib/auth/venue-scope'
+import { allowsVenue, grantedVenues } from '@/lib/auth/venue-scope'
 
 // TAC-343: /admin/venues/[slug] — the per-venue page. This component itself
 // stays a server component that only loads and computes; all editing lives
@@ -55,29 +51,12 @@ interface PageProps {
 export default async function VenueDetailPage({ params }: PageProps) {
   const { slug } = await params
 
-  let venueScope: VenueScope
-  // Local-dev bypass (lib/auth/dev-bypass.ts): triple-guarded, null anywhere
-  // but a developer's own `next dev` on localhost.
-  const bypass = await devAuthBypass()
-  if (bypass) {
-    venueScope = bypass.venueScope
-  } else {
-    const supabase = await createServerClient()
-    const {
-      data: { session },
-    } = await supabase.auth.getSession()
-    if (!session) redirect('/admin/sign-in')
-
-    try {
-      const op = await verifyAnalogAdminAccess(session.user.id)
-      venueScope = op.venueScope
-    } catch (e) {
-      if (e instanceof AuthError && e.status === 403) redirect('/admin')
-      throw e
-    }
-  }
+  const session = await resolveAdminSession()
+  if (session.kind === 'no-session') redirect('/admin/sign-in')
+  if (session.kind === 'not-admin') redirect('/admin')
 
   const data = await loadVenueDetail(slug)
+  mark('venue')
   if (!data) notFound()
 
   // [slug] is operator-supplied — re-check against the loaded venue's id
@@ -87,7 +66,7 @@ export default async function VenueDetailPage({ params }: PageProps) {
   // allowsVenue answers true for it. TAC-530: this used to be
   // `allowedVenueIds.length > 0 && !includes(...)`, an idiom that is correct
   // here and was the wrong one to copy onto the operator bearer path.
-  if (!allowsVenue(venueScope, data.venue.id)) {
+  if (!allowsVenue(session.venueScope, data.venue.id)) {
     notFound()
   }
 
@@ -105,6 +84,8 @@ export default async function VenueDetailPage({ params }: PageProps) {
     // narrows it to this venue and can only ever narrow, never widen.
     loadIntentionPrompts(grantedVenues([data.venue.id])),
   ])
+  mark('venue-state')
+  reportRequestTiming('/admin/venues/[slug]')
   const { bySection, unclaimed: unclaimedKnowledge } = groupKnowledgeByTag(
     data.knowledgeEntries,
   )

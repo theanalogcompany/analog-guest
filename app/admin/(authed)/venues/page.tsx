@@ -1,42 +1,27 @@
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import { Eyebrow, SectionHeader } from '@/lib/ui'
-import { AuthError, devAuthBypass, verifyAnalogAdminAccess } from '@/lib/auth'
-import { createServerClient } from '@/lib/db/server'
+import { resolveAdminSession } from '../_lib/admin-session'
 import { loadVenues } from '../_lib/load-venues'
-import { type VenueScope } from '@/lib/auth/venue-scope'
+import { mark, reportRequestTiming } from '../_lib/request-timing'
 
 // TAC-343 Stage A: /admin/venues list page. Read-only. Mirrors
-// voices/page.tsx's structure — session + allowlist resolved here (the
-// (authed) layout only confirms analog-admin status, not which venues are
-// allowed), loader does the allowlist-scoped query.
+// voices/page.tsx's structure — the allowlist comes from the gate the
+// (authed) layout already resolved for this request (it confirms
+// analog-admin status, not which venues are allowed), loader does the
+// allowlist-scoped query.
 
 export const dynamic = 'force-dynamic'
 
 export default async function VenuesIndexPage() {
-  let venueScope: VenueScope
-  // Local-dev bypass (lib/auth/dev-bypass.ts): triple-guarded, null anywhere
-  // but a developer's own `next dev` on localhost.
-  const bypass = await devAuthBypass()
-  if (bypass) {
-    venueScope = bypass.venueScope
-  } else {
-    const supabase = await createServerClient()
-    const {
-      data: { session },
-    } = await supabase.auth.getSession()
-    if (!session) redirect('/admin/sign-in')
+  const session = await resolveAdminSession()
+  if (session.kind === 'no-session') redirect('/admin/sign-in')
+  if (session.kind === 'not-admin') redirect('/admin')
 
-    try {
-      const op = await verifyAnalogAdminAccess(session.user.id)
-      venueScope = op.venueScope
-    } catch (e) {
-      if (e instanceof AuthError && e.status === 403) redirect('/admin')
-      throw e
-    }
-  }
+  const venues = await loadVenues(session.venueScope)
+  mark('venues')
 
-  const venues = await loadVenues(venueScope)
+  reportRequestTiming('/admin/venues')
 
   return (
     <div className="flex flex-col gap-8">

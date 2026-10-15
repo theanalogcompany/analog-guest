@@ -1,10 +1,9 @@
 import { redirect } from 'next/navigation'
 import { Card } from '@/components/ui/card'
 import { Eyebrow, SectionHeader } from '@/lib/ui'
-import { AuthError, devAuthBypass, verifyAnalogAdminAccess } from '@/lib/auth'
-import { createServerClient } from '@/lib/db/server'
-import type { VenueScope } from '@/lib/auth/venue-scope'
+import { resolveAdminSession } from '../../_lib/admin-session'
 import { loadVenues } from '../../_lib/load-venues'
+import { mark, reportRequestTiming } from '../../_lib/request-timing'
 import { EMPTY_HUMAN_EVAL, loadHumanEvalPage } from './_lib/load-human-eval'
 import { HumanEvalClient } from './human-eval-client'
 
@@ -26,9 +25,10 @@ import { HumanEvalClient } from './human-eval-client'
 // only worth recording if the thing judged was not being changed underneath
 // it.
 //
-// Session + allowlist resolve here rather than in the (authed) layout - same
-// split as playground/page.tsx and prompt-lab/page.tsx, which confirm
-// analog-admin status but not WHICH venues.
+// The allowlist comes from _lib/admin-session.ts, which the (authed) layout
+// has already resolved for this request - the layout confirms analog-admin
+// status but not WHICH venues, and this page needs the scope. It is the same
+// call, memoized per request, not a second trip through the gate.
 //
 // The venue and the pass come from the URL rather than client state because
 // both are server-loaded: a client-side venue switch would leave one venue's
@@ -41,29 +41,12 @@ export default async function HumanEvalPage({
 }: {
   searchParams: Promise<{ venue?: string; session?: string }>
 }) {
-  let venueScope: VenueScope
-  // Local-dev bypass (lib/auth/dev-bypass.ts): triple-guarded, null anywhere
-  // but a developer's own `next dev` on localhost.
-  const bypass = await devAuthBypass()
-  if (bypass) {
-    venueScope = bypass.venueScope
-  } else {
-    const supabase = await createServerClient()
-    const {
-      data: { session },
-    } = await supabase.auth.getSession()
-    if (!session) redirect('/admin/sign-in')
+  const session = await resolveAdminSession()
+  if (session.kind === 'no-session') redirect('/admin/sign-in')
+  if (session.kind === 'not-admin') redirect('/admin')
 
-    try {
-      const op = await verifyAnalogAdminAccess(session.user.id)
-      venueScope = op.venueScope
-    } catch (e) {
-      if (e instanceof AuthError && e.status === 403) redirect('/admin')
-      throw e
-    }
-  }
-
-  const venues = await loadVenues(venueScope)
+  const venues = await loadVenues(session.venueScope)
+  mark('venues')
   const params = await searchParams
   // Scoped against the loaded list rather than trusted: `?venue=` is a URL
   // parameter, and `loadVenues` is what applied the allowlist.
@@ -72,10 +55,13 @@ export default async function HumanEvalPage({
       ? params.venue
       : (venues[0]?.venueId ?? null)
 
+  // The loader marks its own three queries as it goes.
   const data =
     venueId === null
       ? EMPTY_HUMAN_EVAL
       : await loadHumanEvalPage(venueId, params.session ?? null)
+
+  reportRequestTiming('/admin/tests/human-eval')
 
   return (
     <div className="flex flex-col gap-6">

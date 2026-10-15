@@ -1,10 +1,9 @@
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import { Eyebrow, SectionHeader } from '@/lib/ui'
-import { AuthError, devAuthBypass, verifyAnalogAdminAccess } from '@/lib/auth'
-import { createServerClient } from '@/lib/db/server'
+import { resolveAdminSession } from '../_lib/admin-session'
 import { loadVoices } from '../_lib/load-voices'
-import { type VenueScope } from '@/lib/auth/venue-scope'
+import { mark, reportRequestTiming } from '../_lib/request-timing'
 
 // Voices list page. Header + alphabetical list of voices.
 //
@@ -17,29 +16,14 @@ import { type VenueScope } from '@/lib/auth/venue-scope'
 export const dynamic = 'force-dynamic'
 
 export default async function VoicesIndexPage() {
-  let venueScope: VenueScope
-  // Local-dev bypass (lib/auth/dev-bypass.ts): triple-guarded, null anywhere
-  // but a developer's own `next dev` on localhost.
-  const bypass = await devAuthBypass()
-  if (bypass) {
-    venueScope = bypass.venueScope
-  } else {
-    const supabase = await createServerClient()
-    const {
-      data: { session },
-    } = await supabase.auth.getSession()
-    if (!session) redirect('/admin/sign-in')
+  const session = await resolveAdminSession()
+  if (session.kind === 'no-session') redirect('/admin/sign-in')
+  if (session.kind === 'not-admin') redirect('/admin')
 
-    try {
-      const op = await verifyAnalogAdminAccess(session.user.id)
-      venueScope = op.venueScope
-    } catch (e) {
-      if (e instanceof AuthError && e.status === 403) redirect('/admin')
-      throw e
-    }
-  }
+  const voices = await loadVoices(session.venueScope)
+  mark('voices')
 
-  const voices = await loadVoices(venueScope)
+  reportRequestTiming('/admin/voices')
 
   return (
     // Full-bleed fixed wrapper escapes admin-shell's max-w-5xl. `left` tracks
