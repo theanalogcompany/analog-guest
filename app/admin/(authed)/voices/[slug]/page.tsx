@@ -1,9 +1,9 @@
 import { notFound, redirect } from 'next/navigation'
-import { AuthError, devAuthBypass, verifyAnalogAdminAccess } from '@/lib/auth'
-import { createServerClient } from '@/lib/db/server'
+import { allowsVenue } from '@/lib/auth/venue-scope'
+import { resolveAdminSession } from '../../_lib/admin-session'
+import { mark, reportRequestTiming } from '../../_lib/request-timing'
 import { VoicesClient } from './voices-client'
 import { loadVoicePage } from './_lib/load-voice-page'
-import { allowsVenue, type VenueScope } from '@/lib/auth/venue-scope'
 
 // Per-voice workbench. Server orchestrator pulls everything
 // the client needs in one round trip — venue, persona, corpus, threads,
@@ -37,34 +37,19 @@ export default async function VoicePage({ params, searchParams }: PageProps) {
   const { slug } = await params
   const { guest } = await searchParams
 
-  let venueScope: VenueScope
-  // Local-dev bypass (lib/auth/dev-bypass.ts): triple-guarded, null anywhere
-  // but a developer's own `next dev` on localhost.
-  const bypass = await devAuthBypass()
-  if (bypass) {
-    venueScope = bypass.venueScope
-  } else {
-    const supabase = await createServerClient()
-    const {
-      data: { session },
-    } = await supabase.auth.getSession()
-    if (!session) redirect('/admin/sign-in')
-
-    try {
-      const op = await verifyAnalogAdminAccess(session.user.id)
-      venueScope = op.venueScope
-    } catch (e) {
-      if (e instanceof AuthError && e.status === 403) redirect('/admin')
-      throw e
-    }
-  }
+  const session = await resolveAdminSession()
+  if (session.kind === 'no-session') redirect('/admin/sign-in')
+  if (session.kind === 'not-admin') redirect('/admin')
 
   const data = await loadVoicePage({ slug, selectedGuestId: guest ?? null })
+  mark('voice')
   if (!data) notFound()
 
-  if (!allowsVenue(venueScope, data.venue.id)) {
+  if (!allowsVenue(session.venueScope, data.venue.id)) {
     notFound()
   }
+
+  reportRequestTiming('/admin/voices/[slug]')
 
   return (
     // Full-bleed wrapper: `position: fixed` escapes the admin shell's

@@ -1,9 +1,8 @@
 import { redirect } from 'next/navigation'
 import { Eyebrow, SectionHeader } from '@/lib/ui'
-import { AuthError, devAuthBypass, verifyAnalogAdminAccess } from '@/lib/auth'
-import { createServerClient } from '@/lib/db/server'
-import { type VenueScope } from '@/lib/auth/venue-scope'
+import { resolveAdminSession } from '../_lib/admin-session'
 import { loadVenues } from '../_lib/load-venues'
+import { mark, reportRequestTiming } from '../_lib/request-timing'
 import { PlaygroundClient } from './playground-client'
 
 // The playground (phase 5 of the relationship-engine redesign,
@@ -19,38 +18,23 @@ import { PlaygroundClient } from './playground-client'
 // api/run/v1-arm.ts for the scope of those writes and why they are not a
 // hand-built context instead.
 //
-// Session + allowlist resolve here rather than in the (authed) layout, which
-// confirms analog-admin status but not WHICH venues - same split as
-// intentions/page.tsx and venues/page.tsx. The venue list is the only
-// server-loaded data; guests, timelines and runs go through
-// /admin/playground/api/* so the chat survives every selection change.
+// The allowlist comes from _lib/admin-session.ts, already resolved for this
+// request by the (authed) layout, which confirms analog-admin status but not
+// WHICH venues. The venue list is the only server-loaded data; guests,
+// timelines and runs go through /admin/playground/api/* so the chat survives
+// every selection change.
 
 export const dynamic = 'force-dynamic'
 
 export default async function PlaygroundPage() {
-  let venueScope: VenueScope
-  // Local-dev bypass (lib/auth/dev-bypass.ts): triple-guarded, null anywhere
-  // but a developer's own `next dev` on localhost.
-  const bypass = await devAuthBypass()
-  if (bypass) {
-    venueScope = bypass.venueScope
-  } else {
-    const supabase = await createServerClient()
-    const {
-      data: { session },
-    } = await supabase.auth.getSession()
-    if (!session) redirect('/admin/sign-in')
+  const session = await resolveAdminSession()
+  if (session.kind === 'no-session') redirect('/admin/sign-in')
+  if (session.kind === 'not-admin') redirect('/admin')
 
-    try {
-      const op = await verifyAnalogAdminAccess(session.user.id)
-      venueScope = op.venueScope
-    } catch (e) {
-      if (e instanceof AuthError && e.status === 403) redirect('/admin')
-      throw e
-    }
-  }
+  const venues = await loadVenues(session.venueScope)
+  mark('venues')
 
-  const venues = await loadVenues(venueScope)
+  reportRequestTiming('/admin/playground')
 
   return (
     <div className="flex flex-col gap-6">

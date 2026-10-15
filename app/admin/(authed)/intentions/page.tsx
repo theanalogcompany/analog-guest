@@ -1,17 +1,16 @@
 import { redirect } from 'next/navigation'
 import { SectionShell } from '@/app/admin/_components/section-shell'
 import { Eyebrow, SectionHeader } from '@/lib/ui'
-import { AuthError, devAuthBypass, verifyAnalogAdminAccess } from '@/lib/auth'
-import { createServerClient } from '@/lib/db/server'
 import { INTENTION_DEFINITIONS } from '@/lib/agent/intentions/definitions'
+import { resolveAdminSession } from '../_lib/admin-session'
 import {
   loadIntentionPrompts,
   RECORDED_PROMPTS_LIMIT,
 } from '../_lib/load-intention-prompts'
+import { mark, reportRequestTiming } from '../_lib/request-timing'
 import { DefinitionsList } from './_components/definitions-list'
 import { GatingConditions } from './_components/gating-conditions'
 import { RecordedPromptsList } from './_components/recorded-prompts-list'
-import { type VenueScope } from '@/lib/auth/venue-scope'
 
 // TAC-379: read-only viewer for intentions (TAC-324, redefined by TAC-380). Nothing here
 // creates, edits or retires anything — authoring was cut, because `isSatisfied`
@@ -19,38 +18,23 @@ import { type VenueScope } from '@/lib/auth/venue-scope'
 // verbatim into the slot universal rule R22 names as the sole authority on
 // whether the model pursues an open goal.
 //
-// Session + allowlist resolve here rather than in the (authed) layout, which
-// confirms analog-admin status but not WHICH venues — same split as
-// venues/page.tsx.
+// The allowlist comes from _lib/admin-session.ts, already resolved for this
+// request by the (authed) layout, which confirms analog-admin status but not
+// WHICH venues.
 
 export const dynamic = 'force-dynamic'
 
 export default async function IntentionsPage() {
-  let venueScope: VenueScope
-  // Local-dev bypass (lib/auth/dev-bypass.ts): triple-guarded, null anywhere
-  // but a developer's own `next dev` on localhost.
-  const bypass = await devAuthBypass()
-  if (bypass) {
-    venueScope = bypass.venueScope
-  } else {
-    const supabase = await createServerClient()
-    const {
-      data: { session },
-    } = await supabase.auth.getSession()
-    if (!session) redirect('/admin/sign-in')
-
-    try {
-      const op = await verifyAnalogAdminAccess(session.user.id)
-      venueScope = op.venueScope
-    } catch (e) {
-      if (e instanceof AuthError && e.status === 403) redirect('/admin')
-      throw e
-    }
-  }
+  const session = await resolveAdminSession()
+  if (session.kind === 'no-session') redirect('/admin/sign-in')
+  if (session.kind === 'not-admin') redirect('/admin')
 
   // Degrades to [] on a query failure. The definitions half is a static
   // import and renders regardless.
-  const { rows, hasMore } = await loadIntentionPrompts(venueScope)
+  const { rows, hasMore } = await loadIntentionPrompts(session.venueScope)
+  mark('prompts')
+
+  reportRequestTiming('/admin/intentions')
 
   return (
     <div className="flex flex-col gap-8">

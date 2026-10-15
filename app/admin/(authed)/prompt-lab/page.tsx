@@ -1,9 +1,8 @@
 import { redirect } from 'next/navigation'
 import { Eyebrow, SectionHeader } from '@/lib/ui'
-import { AuthError, devAuthBypass, verifyAnalogAdminAccess } from '@/lib/auth'
-import { createServerClient } from '@/lib/db/server'
-import { type VenueScope } from '@/lib/auth/venue-scope'
+import { resolveAdminSession } from '../_lib/admin-session'
 import { loadVenues } from '../_lib/load-venues'
+import { mark, reportRequestTiming } from '../_lib/request-timing'
 import { EMPTY_STORED_V1, loadStoredV1 } from './_lib/load-stored-v1'
 import { PromptLabClient } from './prompt-lab-client'
 
@@ -38,29 +37,12 @@ export default async function PromptLabPage({
 }: {
   searchParams: Promise<{ venue?: string }>
 }) {
-  let venueScope: VenueScope
-  // Local-dev bypass (lib/auth/dev-bypass.ts): triple-guarded, null anywhere
-  // but a developer's own `next dev` on localhost.
-  const bypass = await devAuthBypass()
-  if (bypass) {
-    venueScope = bypass.venueScope
-  } else {
-    const supabase = await createServerClient()
-    const {
-      data: { session },
-    } = await supabase.auth.getSession()
-    if (!session) redirect('/admin/sign-in')
+  const session = await resolveAdminSession()
+  if (session.kind === 'no-session') redirect('/admin/sign-in')
+  if (session.kind === 'not-admin') redirect('/admin')
 
-    try {
-      const op = await verifyAnalogAdminAccess(session.user.id)
-      venueScope = op.venueScope
-    } catch (e) {
-      if (e instanceof AuthError && e.status === 403) redirect('/admin')
-      throw e
-    }
-  }
-
-  const venues = await loadVenues(venueScope)
+  const venues = await loadVenues(session.venueScope)
+  mark('venues')
   const requested = (await searchParams).venue ?? null
   // Scoped against the loaded list rather than trusted: `?venue=` is a URL
   // parameter, and `loadVenues` is what applied the allowlist.
@@ -71,6 +53,9 @@ export default async function PromptLabPage({
 
   const storedV1 =
     venueId === null ? EMPTY_STORED_V1 : await loadStoredV1(venueId)
+  mark('stored-v1')
+
+  reportRequestTiming('/admin/prompt-lab')
 
   return (
     <div className="flex flex-col gap-6">
