@@ -1,5 +1,7 @@
 import { Card } from '@/components/ui/card'
 import { Eyebrow, SectionHeader } from '@/lib/ui'
+import { resolveAdminSession } from '../../_lib/admin-session'
+import { mark, reportRequestTiming } from '../../_lib/request-timing'
 import { CommitGroup } from './_components/commit-group'
 import { loadGoldenPage, RUNS_LIMIT } from './_lib/load-golden'
 
@@ -15,7 +17,13 @@ import { loadGoldenPage, RUNS_LIMIT } from './_lib/load-golden'
 export const dynamic = 'force-dynamic'
 
 export default async function GoldenPage() {
+  // Awaited before the load so the gate's cost lands on this request's
+  // breakdown: the layout and a page render concurrently, so a page that
+  // never awaits the session reports stages taken while it was still running.
+  await resolveAdminSession()
   const data = await loadGoldenPage()
+  mark('runs')
+  reportRequestTiming('/admin/tests/golden')
   const runCount = data.groups.reduce((n, g) => n + g.runs.length, 0)
 
   return (

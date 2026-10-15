@@ -2,6 +2,8 @@ import { Card } from '@/components/ui/card'
 import { createAdminClient } from '@/lib/db/admin'
 import { createServerClient } from '@/lib/db/server'
 import { Eyebrow, HairlineRow, SectionHeader, StatusDot } from '@/lib/ui'
+import { resolveAdminSession } from '../_lib/admin-session'
+import { mark, reportRequestTiming } from '../_lib/request-timing'
 import { checkApns } from './check-apns'
 import { checkFfmpeg } from './check-ffmpeg'
 import { checkLangfuse } from './check-langfuse'
@@ -55,6 +57,10 @@ async function checkCurrentAdmin(): Promise<CheckRow> {
 }
 
 export default async function HealthPage() {
+  // Awaited before the checks so the gate's cost lands on this request's
+  // breakdown: the layout and a page render concurrently, so a page that
+  // never awaits the session reports stages taken while it was still running.
+  await resolveAdminSession()
   const rows: CheckRow[] = [
     await checkDatabase(),
     checkLangfuse(),
@@ -65,6 +71,8 @@ export default async function HealthPage() {
     await checkPassportRender(),
     await checkCurrentAdmin(),
   ]
+  mark('checks')
+  reportRequestTiming('/admin/health')
 
   return (
     <div className="flex flex-col gap-8">

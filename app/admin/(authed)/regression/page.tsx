@@ -1,5 +1,7 @@
 import { Card } from '@/components/ui/card'
 import { Eyebrow, SectionHeader } from '@/lib/ui'
+import { resolveAdminSession } from '../_lib/admin-session'
+import { mark, reportRequestTiming } from '../_lib/request-timing'
 import { loadRegressionPage, RUNS_LIMIT } from './_lib/load-regression'
 import { RunCard } from './_components/run-card'
 import { ScenarioList } from './_components/scenario-list'
@@ -15,7 +17,13 @@ import { ScenarioList } from './_components/scenario-list'
 export const dynamic = 'force-dynamic'
 
 export default async function RegressionPage() {
+  // Awaited before the load so the gate's cost lands on this request's
+  // breakdown: the layout and a page render concurrently, so a page that
+  // never awaits the session reports stages taken while it was still running.
+  await resolveAdminSession()
   const data = await loadRegressionPage()
+  mark('runs')
+  reportRequestTiming('/admin/regression')
 
   return (
     <div className="flex flex-col gap-8">
