@@ -108,6 +108,7 @@ export function QuestionList({
             {sweep.arm.modelKey} · effort {sweep.arm.effort} ·{' '}
             {sweep.arm.templateVersion}
             {sweep.arm.promptEdited && ' · hand-edited system prompt'}
+            {sweep.arm.templateEdited && ' · edited template'}
             {sweep.arm.promptName !== '' && ` · "${sweep.arm.promptName}"`}
           </span>
         )}

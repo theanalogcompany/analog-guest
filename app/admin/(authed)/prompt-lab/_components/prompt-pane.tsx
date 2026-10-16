@@ -19,8 +19,12 @@ import {
 import {
   V2_TEMPLATE_CURRENT,
   V2_TEMPLATE_VERSIONS,
+  type V2TemplateBlocks,
 } from '@/lib/ai/v2/template-archive'
 import { PromptLibrary } from '../../playground/_components/prompt-library'
+import type { StoredSweep } from '../_lib/sweep-store'
+import { PromotePanel } from './promote-panel'
+import { TemplateEditor } from './template-editor'
 
 // The prompt under test, plus the parameters the call is made with.
 //
@@ -46,6 +50,17 @@ import { PromptLibrary } from '../../playground/_components/prompt-library'
 // loading code and a second chance for the two to disagree about what the
 // prompt is. It is kept in localStorage per venue + template version after
 // that, so a reload does not empty the box.
+//
+// TWO MODES, AND THEY ANSWER DIFFERENT QUESTIONS. Everything above is
+// `composed` mode: the prompt as the model receives it, flat, for ablation.
+// `template` mode edits the TEMPLATE instead - the blocks with their
+// `{placeholders}` intact - and is the only one of the two that can be
+// promoted, because the composed text has one venue's data, one guest's HOUSE
+// NOTES and one moment's clock baked into it. `_components/template-editor.tsx`
+// has the rest of that argument. Mode is session state, deliberately not
+// persisted: it is a view, and the thing worth surviving a reload is the text.
+
+export type PromptMode = 'composed' | 'template'
 
 export function PromptPane({
   venueId,
@@ -62,6 +77,14 @@ export function PromptPane({
   onEffort,
   maxOutputTokens,
   onMaxOutputTokens,
+  mode,
+  onMode,
+  templateBlocks,
+  onTemplateBlock,
+  onClearTemplate,
+  briefed,
+  sweep,
+  askable,
   busy,
 }: {
   venueId: string | null
@@ -80,6 +103,14 @@ export function PromptPane({
   onEffort: (v: string) => void
   maxOutputTokens: number
   onMaxOutputTokens: (v: number) => void
+  mode: PromptMode
+  onMode: (m: PromptMode) => void
+  templateBlocks: V2TemplateBlocks
+  onTemplateBlock: (key: keyof V2TemplateBlocks, text: string) => void
+  onClearTemplate: () => void
+  briefed: boolean | null
+  sweep: StoredSweep | null
+  askable: number
   busy: boolean
 }) {
   const editing = systemText ?? composedSystemText
@@ -163,78 +194,130 @@ export function PromptPane({
         </span>
       </Field>
 
-      <Field label="system prompt">
-        {composedSystemText === '' ? (
-          <span className="text-[11px] italic text-ink-faint">
-            Run any question on the right to load this venue&apos;s composed
-            prompt. It is built by the same pass that generates, so there is no
-            cheaper way to get the real one - and it is kept after that, so this
-            is a one-time cost per venue.
-          </span>
-        ) : (
-          <>
-            <Textarea
-              value={editing}
-              onChange={(e) => onSystemText(e.target.value)}
+      <Field label="editing">
+        <div className="flex gap-1">
+          {(['composed', 'template'] as const).map((m) => (
+            <Button
+              key={m}
+              type="button"
+              size="sm"
+              variant={mode === m ? 'default' : 'outline'}
               disabled={busy}
-              rows={22}
-              spellCheck={false}
-              className="max-h-[36rem] min-h-72 overflow-y-auto font-mono text-[11px] leading-[1.5]"
-            />
-            <div className="flex items-center gap-3">
-              <span className="text-[11px] tabular-nums text-ink-faint">
-                {editing.length.toLocaleString()} chars
-              </span>
-              {systemText !== null && (
-                <>
-                  <span className="text-[11px] text-clay-deep">edited</span>
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="outline"
-                    disabled={busy}
-                    onClick={() => {
-                      onSystemText(null)
-                      onPromptName('')
-                    }}
-                  >
-                    Reset
-                  </Button>
-                </>
-              )}
-            </div>
-            {/* The transcript is NOT in this box and cannot be reached from
-                it. The guest's words are the turn's input; a surface that let
-                them be rewritten in the same place as the house copy is how a
-                reply gets read as an answer to a question nobody asked. */}
-            <span className="text-[11px] leading-relaxed text-ink-faint">
-              Sent as the whole system half. The guest&apos;s message and the
-              scenario&apos;s history are not editable here - each question
-              brings its own.
-            </span>
-          </>
-        )}
+              onClick={() => onMode(m)}
+              className="flex-1"
+            >
+              {m === 'composed' ? 'composed prompt' : 'template'}
+            </Button>
+          ))}
+        </div>
+        <span className="text-[11px] leading-relaxed text-ink-faint">
+          {mode === 'composed'
+            ? 'The prompt as the model receives it, for this venue and this question - placeholders filled, blocks collapsed. The instrument for an ablation, and not promotable.'
+            : 'The template itself, placeholders intact. Each question fills its own venue data and brief, so what a sweep measures here is what would ship.'}
+        </span>
       </Field>
 
-      {venueId !== null && composedSystemText !== '' && (
-        <PromptLibrary
-          venueId={venueId}
-          promptVersion={templateVersion}
-          text={editing}
-          serialization="plain"
-          onLoad={(saved, name) => {
-            onSystemText(saved)
-            // The name rides onto the sweep arm, so a stored sweep says which
-            // saved prompt produced it rather than only that it was edited.
-            onPromptName(name)
-          }}
-          busy={busy}
-        />
+      {mode === 'template' && (
+        <>
+          <TemplateEditor
+            templateVersion={templateVersion}
+            blocks={templateBlocks}
+            onBlock={onTemplateBlock}
+            onClearAll={onClearTemplate}
+            briefed={briefed}
+            busy={busy}
+          />
+          <PromotePanel
+            templateVersion={templateVersion}
+            blocks={templateBlocks}
+            sweep={sweep}
+            askable={askable}
+            busy={busy}
+          />
+        </>
       )}
-      {promptName !== '' && (
-        <span className="text-[11px] text-ink-soft">
-          loaded from &ldquo;{promptName}&rdquo;
-        </span>
+
+      {mode === 'composed' && (
+        <>
+          <Field label="system prompt">
+            {composedSystemText === '' ? (
+              <span className="text-[11px] italic text-ink-faint">
+                Run any question on the right to load this venue&apos;s composed
+                prompt. It is built by the same pass that generates, so there is
+                no cheaper way to get the real one - and it is kept after that,
+                so this is a one-time cost per venue.
+              </span>
+            ) : (
+              <>
+                <Textarea
+                  value={editing}
+                  onChange={(e) => onSystemText(e.target.value)}
+                  disabled={busy}
+                  rows={22}
+                  spellCheck={false}
+                  className="max-h-[36rem] min-h-72 overflow-y-auto font-mono text-[11px] leading-[1.5]"
+                />
+                <div className="flex items-center gap-3">
+                  <span className="text-[11px] tabular-nums text-ink-faint">
+                    {editing.length.toLocaleString()} chars
+                  </span>
+                  {systemText !== null && (
+                    <>
+                      <span className="text-[11px] text-clay-deep">edited</span>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        disabled={busy}
+                        onClick={() => {
+                          onSystemText(null)
+                          onPromptName('')
+                        }}
+                      >
+                        Reset
+                      </Button>
+                    </>
+                  )}
+                </div>
+                {/* The transcript is NOT in this box and cannot be reached
+                    from it. The guest's words are the turn's input; a surface
+                    that let them be rewritten in the same place as the house
+                    copy is how a reply gets read as an answer to a question
+                    nobody asked. */}
+                <span className="text-[11px] leading-relaxed text-ink-faint">
+                  Sent as the whole system half. The guest&apos;s message and
+                  the scenario&apos;s history are not editable here - each
+                  question brings its own.
+                </span>
+              </>
+            )}
+          </Field>
+
+          {/* The library stores the flat system document, so it belongs to
+              this mode only. A template edit's own persistence is
+              `_lib/template-edit-store.ts`, which keeps it per version. */}
+          {venueId !== null && composedSystemText !== '' && (
+            <PromptLibrary
+              venueId={venueId}
+              promptVersion={templateVersion}
+              text={editing}
+              serialization="plain"
+              onLoad={(saved, name) => {
+                onSystemText(saved)
+                // The name rides onto the sweep arm, so a stored sweep says
+                // which saved prompt produced it rather than only that it was
+                // edited.
+                onPromptName(name)
+              }}
+              busy={busy}
+            />
+          )}
+          {promptName !== '' && (
+            <span className="text-[11px] text-ink-soft">
+              loaded from &ldquo;{promptName}&rdquo;
+            </span>
+          )}
+        </>
       )}
     </div>
   )

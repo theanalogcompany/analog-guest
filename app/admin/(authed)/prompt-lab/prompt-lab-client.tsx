@@ -17,16 +17,18 @@ import {
 } from '@/components/ui/select'
 import { GOLDEN_QUESTIONS } from '@/lib/eval/golden-set'
 import { goldenTurnFor } from '@/lib/eval/golden-turn'
+import { templateEditHash } from '@/lib/ai/v2/promote-template'
 import { V2_TEMPLATE_CURRENT } from '@/lib/ai/v2/template-archive'
-import {
-  V2_DEFAULT_EFFORT,
-  V2_MODEL_KEYS,
-  V2_PLAYGROUND_MAX_OUTPUT_TOKENS,
-} from '@/lib/ai/v2/model-call'
 import type { TurnOverrides } from '@/lib/relationship/run-turn'
 import type { VenueListRow } from '../_lib/load-venues'
 import { postRun } from '../playground/_lib/api'
 import type { RunRequestBody } from '../playground/_lib/types'
+import {
+  armServerSnapshot,
+  armSnapshot,
+  saveArm,
+  subscribeArm,
+} from './_lib/arm-store'
 import type { StoredV1Index } from './_lib/load-stored-v1'
 import type { LabRow, LabV2Settled, LabV2State } from './_lib/types'
 import {
@@ -46,7 +48,15 @@ import {
   sweepSnapshot,
   type StoredSweepArm,
 } from './_lib/sweep-store'
-import { PromptPane } from './_components/prompt-pane'
+import {
+  clearTemplateEdit,
+  saveTemplateBlock,
+  subscribeTemplateEdit,
+  templateEditFor,
+  templateEditServerSnapshot,
+  templateEditSnapshot,
+} from './_lib/template-edit-store'
+import { PromptPane, type PromptMode } from './_components/prompt-pane'
 import { QuestionList } from './_components/question-list'
 
 // Client orchestrator for the prompt lab: one prompt, 67 golden questions, a
@@ -68,13 +78,12 @@ import { QuestionList } from './_components/question-list'
 
 const CONCURRENCY = 6
 
-/**
- * Named rather than `V2_MODEL_KEYS[0]`, so reordering that list cannot
- * silently change which model this surface runs. `satisfies` is what makes a
- * rename of the profile key fail `tsc` here instead of at the first request.
- */
-const LAB_DEFAULT_MODEL_KEY =
-  'haiku-5-5' satisfies (typeof V2_MODEL_KEYS)[number]
+// The lab's own model pin is GONE (owner-ruled 2026-10-15). It was
+// `haiku-5-5`, named rather than indexed so reordering the profile list could
+// not silently move it; the default now comes from `V2_DEFAULT_MODEL_KEY`
+// through `_lib/arm-store.ts`, so this surface follows production instead of
+// needing its own edit whenever that moves. The picker still overrides it, and
+// the choice now survives a reload.
 
 export function PromptLabClient({
   venues,
@@ -118,18 +127,54 @@ export function PromptLabClient({
   const [templateVersion, setTemplateVersion] = useState(
     V2_TEMPLATE_CURRENT.version,
   )
-  // The LAB's defaults, which are not production's. Haiku because a sweep is
-  // 58 generations of prompt iteration and it is the cheap seat, and 20k
-  // because thinking is charged against the same budget as the reply - `high`
-  // on haiku spent 213 of 1,000 on a measured turn and `max` truncates at that
-  // ceiling every time, which surfaces as the model failing rather than as a
-  // budget. Production still sends V2_GENERATE_MAX_OUTPUT_TOKENS, and the
-  // field says so underneath it.
-  const [modelKey, setModelKey] = useState<string>(LAB_DEFAULT_MODEL_KEY)
-  const [effort, setEffort] = useState<string>(V2_DEFAULT_EFFORT)
-  const [maxOutputTokens, setMaxOutputTokens] = useState(
-    V2_PLAYGROUND_MAX_OUTPUT_TOKENS,
+
+  /**
+   * Which of the two editors is open. Session state: it is a view, and what
+   * is worth surviving a reload is the text, which both editors persist.
+   */
+  const [mode, setMode] = useState<PromptMode>('composed')
+
+  /**
+   * The TEMPLATE under edit, per version, in localStorage. Only the blocks
+   * that differ from the version's own text are stored, so an untouched
+   * template sends no override at all and composes byte-identically.
+   */
+  const templateEdits = useSyncExternalStore(
+    subscribeTemplateEdit,
+    templateEditSnapshot,
+    templateEditServerSnapshot,
   )
+  const templateBlocks = templateEditFor(templateEdits, templateVersion)
+  // Read inside `runOne` for the same reason `systemTextRef` is: the callback
+  // is rebuilt per run and would otherwise send whichever edit was current
+  // when it was built.
+  const templateBlocksRef = useRef(templateBlocks)
+  templateBlocksRef.current = templateBlocks
+
+  /**
+   * Whether this venue composes the briefed block 2, so the editor can name
+   * the live one. Null until a question has been run - the honest state,
+   * because only the turn knows what the venue's config holds.
+   */
+  const [briefed, setBriefed] = useState<boolean | null>(null)
+  // The call parameters, READ FROM localStorage rather than from useState, so
+  // they survive a reload (owner-ruled 2026-10-15). The model is production's
+  // default now; the 20k output budget is still the lab's own, because
+  // thinking is charged against the same budget as the reply - `high` on haiku
+  // spent 213 of 1,000 on a measured turn and `max` truncates at that ceiling
+  // every time, which surfaces as the model failing rather than as a budget.
+  // Production still sends V2_GENERATE_MAX_OUTPUT_TOKENS, and the field says
+  // so underneath it.
+  //
+  // WHY THIS MATTERS BEYOND CONVENIENCE: a stored sweep records which model
+  // answered it. If the picker reset on reload, the next run would use a
+  // different model than the answers on screen and nothing would say so.
+  const arm = useSyncExternalStore(subscribeArm, armSnapshot, armServerSnapshot)
+  const { modelKey, effort, maxOutputTokens } = arm
+  const setModelKey = (value: string) => saveArm({ modelKey: value })
+  const setEffort = (value: string) => saveArm({ effort: value })
+  const setMaxOutputTokens = (value: number) =>
+    saveArm({ maxOutputTokens: value })
 
   /**
    * The editable baseline: the stable system blocks for this venue at this
@@ -167,6 +212,7 @@ export function PromptLabClient({
     (): StoredSweepArm => ({
       promptName,
       promptEdited: systemText !== null,
+      templateEdited: Object.keys(templateBlocks).length > 0,
       templateVersion,
       modelKey,
       effort,
@@ -175,6 +221,7 @@ export function PromptLabClient({
     [
       promptName,
       systemText,
+      templateBlocks,
       templateVersion,
       modelKey,
       effort,
@@ -183,16 +230,34 @@ export function PromptLabClient({
   )
 
   const overridesOf = useCallback((): TurnOverrides => {
-    const o: TurnOverrides = {
-      modelKey: modelKey as TurnOverrides['modelKey'],
-      effort: effort as TurnOverrides['effort'],
-      maxOutputTokens,
-    }
+    // No casts: the stored arm is parsed through the same profile and effort
+    // enums the override takes, so the types meet on their own. They used to
+    // be `as` casts over plain `useState<string>`, which is how a model key
+    // that no longer exists would have reached a request.
+    const o: TurnOverrides = { modelKey, effort, maxOutputTokens }
     if (systemText !== null) o.systemText = systemText
     if (templateVersion !== V2_TEMPLATE_CURRENT.version)
       o.templateVersion = templateVersion
+    // SENT ONLY WHEN SOMETHING IS EDITED. An empty object would compose
+    // identically, but it would also stamp nothing and mean nothing - and the
+    // store only ever holds blocks that differ, so "non-empty" is the same
+    // question as "edited" rather than a second answer to it.
+    //
+    // It rides ALONGSIDE `systemText`, which wins. That is not a conflict to
+    // resolve here: the pane shows one editor at a time, and a request
+    // carrying both is a saved flat prompt left over from composed mode, which
+    // the trace reports.
+    if (Object.keys(templateBlocks).length > 0)
+      o.templateBlocks = templateBlocks
     return o
-  }, [systemText, modelKey, effort, maxOutputTokens, templateVersion])
+  }, [
+    systemText,
+    modelKey,
+    effort,
+    maxOutputTokens,
+    templateVersion,
+    templateBlocks,
+  ])
 
   /** One question, live. Returns the state it settled on. */
   const runOne = useCallback(
@@ -227,6 +292,9 @@ export function PromptLabClient({
       const result = await postRun(request)
       if (!result.ok) return { status: 'error', error: result.error }
       const trace = result.data.trace
+      // Which block 2 this venue composes, from the venue's own brief rather
+      // than by matching the composed text against a heading.
+      setBriefed(trace.sections.knowledgeBrief.trim() !== '')
       // `composedWithoutPromptEdit` and not `composed`: the editor's baseline
       // has to be the prompt the composer builds, or an edit would be diffed
       // against its own output and the next run would carry nothing.
@@ -243,7 +311,15 @@ export function PromptLabClient({
       // Reset goes back to. `systemTextRef` and not `systemText`: this closure
       // is rebuilt per run and would otherwise capture the state from before
       // it.
-      if (systemTextRef.current === null)
+      //
+      // A TEMPLATE EDIT SUSPENDS IT TOO, and for a sharper reason than an open
+      // flat edit. `composedWithoutPromptEdit` is null unless a systemText or
+      // block override ran, so on a template-mode turn `base` IS the edited
+      // template's composition - recording that as the composed baseline would
+      // give composed mode an edited prompt to diff the next edit against.
+      const blocks = templateBlocksRef.current
+      const templateEdited = Object.keys(blocks).length > 0
+      if (systemTextRef.current === null && !templateEdited)
         rememberBaseline({
           venueId,
           templateVersion: base.promptVersion,
@@ -260,6 +336,11 @@ export function PromptLabClient({
         effort: trace.modelCall.effort,
         durationMs: g.durationMs,
         thinkingTokens: g.thinkingTokens,
+        // The bytes this answer ran on, so Promote can tell an answer from
+        // this template from an answer from the one before the last edit.
+        // Null and not 'unedited' when nothing was sent: the column means "no
+        // template edit ran", and a hash of `{}` would read as one that did.
+        templateHash: templateEdited ? templateEditHash(blocks) : null,
       }
     },
     [venueId, overridesOf],
@@ -396,6 +477,16 @@ export function PromptLabClient({
             onEffort={setEffort}
             maxOutputTokens={maxOutputTokens}
             onMaxOutputTokens={setMaxOutputTokens}
+            mode={mode}
+            onMode={setMode}
+            templateBlocks={templateBlocks}
+            onTemplateBlock={(key, text) =>
+              saveTemplateBlock(templateVersion, key, text)
+            }
+            onClearTemplate={() => clearTemplateEdit(templateVersion)}
+            briefed={briefed}
+            sweep={sweep}
+            askable={askable}
             busy={busy}
           />
         </div>

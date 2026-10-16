@@ -29,6 +29,19 @@ export type LabV2State =
       durationMs: number
       /** Thinking tokens, null when the provider reported no breakdown. */
       thinkingTokens: number | null
+      /**
+       * `templateEditHash` of the template blocks this answer ran on, or null
+       * when none were sent.
+       *
+       * PER CELL, not on the sweep arm, for the reason the sweep store's own
+       * header gives: the arm describes the sweep's start and a question re-run
+       * under an edited template lands in the same column. Promotion asks "how
+       * many of these answers came from the bytes about to be promoted", and
+       * only the cell can answer that. `promptVersion` carries `+hand-edited`
+       * but says nothing about WHICH edit, which is the distinction that
+       * matters once the text has been touched twice.
+       */
+      templateHash: string | null
     }
   /**
    * A failed arm is a FAILURE, never a short answer (`scripts/CLAUDE.md`
@@ -64,6 +77,8 @@ export interface SweepArm {
   /** '' when no saved prompt was loaded. */
   promptName: string
   promptEdited: boolean
+  /** The template's own blocks were edited, which `promptEdited` is not about. */
+  templateEdited: boolean
   templateVersion: string
   modelKey: string
   effort: string

@@ -37,6 +37,13 @@ const V2StateSchema = z.discriminatedUnion('status', [
     effort: z.string().nullable(),
     durationMs: z.number(),
     thinkingTokens: z.number().nullable(),
+    /**
+     * Which template edit produced this answer (`templateEditHash`), null for
+     * none. Defaulted so a sweep stored before template mode existed still
+     * parses - and null is the honest value for one, because those answers
+     * genuinely ran on no template edit.
+     */
+    templateHash: z.string().nullable().default(null),
   }),
   z.object({ status: z.literal('error'), error: z.string() }),
   z.object({ status: z.literal('not_run'), reason: z.string() }),
@@ -55,6 +62,13 @@ const SweepArmSchema = z.object({
    * it.
    */
   promptEdited: z.boolean().default(false),
+  /**
+   * Whether the TEMPLATE was edited - a different claim from `promptEdited`,
+   * which is about the flat composed document. Defaulted for the same reason:
+   * a sweep stored before template mode existed ran on no template edit, so
+   * false is the honest value rather than a backfill.
+   */
+  templateEdited: z.boolean().default(false),
   templateVersion: z.string(),
   modelKey: z.string(),
   effort: z.string(),
