@@ -96,6 +96,13 @@ export function savedTurnsFromPlayground(
       ...(turn.request.outreach !== undefined
         ? { outreach: turn.request.outreach }
         : {}),
+      // Media rides the save too: the description is the entire record of a
+      // photo as far as any prompt is concerned, so a restored turn reruns
+      // against exactly what the agent read. The image itself is not stored
+      // and is not needed - nothing ever showed it to a model.
+      ...(turn.request.media !== undefined
+        ? { media: turn.request.media }
+        : {}),
       ...(turn.request.session !== undefined
         ? { session: turn.request.session }
         : {}),
@@ -136,6 +143,7 @@ export function turnsFromSaved(
       ...(entry.session !== undefined ? { session: entry.session } : {}),
       ...(entry.overrides !== undefined ? { overrides: entry.overrides } : {}),
       ...(entry.outreach !== undefined ? { outreach: entry.outreach } : {}),
+      ...(entry.media !== undefined ? { media: entry.media } : {}),
     }
     turns.push({
       id: nextId(),

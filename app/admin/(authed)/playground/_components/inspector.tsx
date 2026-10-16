@@ -487,6 +487,10 @@ function TraceInspector({
               </SelectContent>
             </Select>
             <EditLabel>mission</EditLabel>
+            <UnreadInputNote
+              templateVersion={edits.templateVersion}
+              placeholder="mission"
+            />
             <EditArea
               value={edits.mission}
               onChange={(v) => set('mission', v)}
@@ -500,18 +504,36 @@ function TraceInspector({
           value={edits.guestProfileText}
           onChange={(v) => set('guestProfileText', v)}
           busy={busy}
+          note={
+            <UnreadInputNote
+              templateVersion={edits.templateVersion}
+              placeholder="guest_profile"
+            />
+          }
         />
         <BriefSection
           title="Interaction memory"
           value={edits.interactionMemoryText}
           onChange={(v) => set('interactionMemoryText', v)}
           busy={busy}
+          note={
+            <UnreadInputNote
+              templateVersion={edits.templateVersion}
+              placeholder="interaction_memory"
+            />
+          }
         />
         <BriefSection
           title="Open moves"
           value={edits.openMovesText}
           onChange={(v) => set('openMovesText', v)}
           busy={busy}
+          note={
+            <UnreadInputNote
+              templateVersion={edits.templateVersion}
+              placeholder="open_moves"
+            />
+          }
         />
         <BriefSection
           title="What you know"
@@ -1229,6 +1251,36 @@ function EditArea({
  * reached no renderer - shown here loudly rather than left to be inferred from
  * a bad reply (lib/ai/v2/venue-profile.ts).
  */
+/**
+ * "This field reaches no prompt on the version you picked."
+ *
+ * DERIVED FROM THE TEMPLATE, never a literal: v2.22.0 emptied HOUSE NOTES down
+ * to the clock, so the state, mission, guest-profile, memory and open-moves
+ * editors below now change nothing on the current version while still changing
+ * the prompt on every archived one. A hardcoded sentence would be a claim about
+ * the template that the template could not contradict - and an edit field that
+ * silently does nothing is what this exists to prevent.
+ *
+ * The placeholder is the thing checked because the placeholder is what `fill`
+ * acts on: a value whose placeholder is absent is dropped on the floor
+ * (lib/ai/v2/compose.ts).
+ */
+function UnreadInputNote({
+  templateVersion,
+  placeholder,
+}: {
+  templateVersion: string
+  placeholder: string
+}) {
+  const set = resolveV2TemplateSet(templateVersion)
+  if (set.guestState.includes(`{${placeholder}}`)) return null
+  return (
+    <EditLabel>
+      not in the prompt on {set.version} · editing this changes nothing
+    </EditLabel>
+  )
+}
+
 function VenueProfileNote({
   render,
 }: {
