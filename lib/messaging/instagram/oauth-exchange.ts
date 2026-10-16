@@ -4,29 +4,40 @@
 // WHY NOT ALL OF THIS THROUGH graph.ts. The code exchange happens against
 // `api.instagram.com`, form-encoded, with the app secret in the BODY — a
 // different host and a different shape from graph.ts's Bearer-header JSON
-// convention. The other two are ordinary Graph calls and do go through it.
+// convention. The long-lived exchange and the refresh live at the Graph root
+// with the token in the query (below). Only the account read and the webhook
+// subscription are ordinary Graph calls, and those go through graph.ts.
 //
-// A DEVIATION WORTH KNOWING, AND ITS LIMIT. Meta's own documentation shows
-// `ig_exchange_token` and `refresh_access_token` with `access_token` in the
-// QUERY STRING. This repo's rule (graph.ts) is that a token never goes in a
-// URL, because URLs reach request logs and error messages. Both calls here
-// send the token in the Authorization header instead, which graph.instagram.com
-// accepts for ordinary Graph reads.
+// THE TOKEN IS IN THE QUERY ON TWO CALLS, AND ONLY TWO. `ig_exchange_token`
+// and `refresh_access_token` send `access_token` in the query string, which
+// is Meta's documented shape for both. graph.ts's rule is that a token never
+// goes in a URL, because URLs reach request logs and error messages, so these
+// two first shipped with the token in the Authorization header instead.
+// graph.instagram.com REFUSED that in production: the first real connect
+// (2026-10-16 UTC, Le Mil's test venue) failed at the long-lived exchange with
+// code 100, HTTP 400, fbtrace Am3ogLhjud8Bdg1cHm2TvJu. Refresh has the same
+// shape and would have failed on every attempt. Every other Graph call still
+// goes through graph.ts with header auth; do not widen the query form beyond
+// `getGraphRoot` below.
 //
-// That last clause is a META-SIDE FACT THIS REPO CANNOT VERIFY. If Meta
-// refuses header auth on these two endpoints, the connect flow fails at the
-// long-lived exchange and the refresh job fails at every attempt. Both fail
-// LOUDLY rather than silently — the callback renders a failure page, and the
-// refresh job alerts on every failure while leaving the old token working, so
-// there is a ten-day margin to notice. It is on the ticket's UAT checklist.
-// If it turns out header auth is refused, the fix is to move the token into
-// the query for these two calls ONLY, and to make certain neither URL is ever
-// logged. Do not "simplify" toward the query form without that second half.
+// WHAT MAKES THAT ACCEPTABLE. No URL built in this module is ever logged,
+// returned, or put in an error. `getGraphRoot` is the only place a token URL
+// is built; a failure carries Meta's code, subcode, type and fbtrace_id, never
+// its message (which can quote the token); and a network failure carries the
+// error's name and cause code, each held to identifier shape, never its
+// message - Node's fetch writes the full URL into the message of a TypeError
+// ("Failed to parse URL from ...") and into `cause.input`.
+// scripts/harness/instagram-token-urls/ fails if any of that stops being
+// true, on every outcome of both calls including a network throw. Run it when
+// you change this file.
 //
-// `client_secret` DOES ride in the query on the long-lived exchange, because
-// Meta requires it there and it is not an auth token. No URL built in this
-// module is ever logged, returned, or put in an error — which is what makes
-// that acceptable rather than merely necessary.
+// OUTSIDE THIS MODULE: `@vercel/otel` instruments `fetch` and names each span
+// with the full URL. lib/observability/span-processor.ts drops fetch spans by
+// instrumentation scope, so they never reach Langfuse, and that filter is now
+// also what keeps these two tokens out of traces. Widening it leaks them.
+//
+// `client_secret` also rides in the query on the long-lived exchange, because
+// Meta requires it there, under the same guarantee.
 
 import {
   INSTAGRAM_GRAPH_BASE_URL,
@@ -85,6 +96,17 @@ function malformed(httpStatus: number): { ok: false; failure: GraphFailure } {
   return { ok: false, failure: { reason: 'malformed_response', httpStatus } }
 }
 
+/**
+ * A field from an error object, kept only when it looks like an identifier
+ * (`TypeError`, `ECONNRESET`, `UND_ERR_CONNECT_TIMEOUT`). Anything else could
+ * be carrying the URL, so it is replaced rather than passed on.
+ */
+function identifierOr(value: unknown, fallback: string): string {
+  return typeof value === 'string' && /^[A-Za-z_][A-Za-z0-9_]*$/.test(value)
+    ? value
+    : fallback
+}
+
 function networkFailure(e: unknown): GraphFailure {
   const name = e instanceof Error ? e.name : typeof e
   if (name === 'TimeoutError' || name === 'AbortError')
@@ -92,9 +114,89 @@ function networkFailure(e: unknown): GraphFailure {
   const cause = e instanceof Error && isRecord(e.cause) ? e.cause : null
   return {
     reason: 'network',
-    errorName: name,
-    causeCode: cause ? stringOrNull(cause.code) : null,
+    errorName: identifierOr(name, 'unknown'),
+    causeCode:
+      cause && cause.code !== undefined && cause.code !== null
+        ? identifierOr(cause.code, 'unknown')
+        : null,
   }
+}
+
+/**
+ * Meta's error, without its message: on these endpoints it can quote the
+ * code, the redirect URI or the token.
+ */
+function graphError(httpStatus: number, parsed: unknown): GraphFailure {
+  const error = isRecord(parsed) && isRecord(parsed.error) ? parsed.error : {}
+  return {
+    reason: 'graph_error',
+    httpStatus,
+    code: typeof error.code === 'number' ? error.code : null,
+    subcode:
+      typeof error.error_subcode === 'number' ? error.error_subcode : null,
+    type: stringOrNull(error.type),
+    fbtraceId: stringOrNull(error.fbtrace_id),
+  }
+}
+
+/**
+ * A missing or nonsensical expires_in must never produce an expiry in the
+ * past: that would make a brand new credential look unrecoverable on the
+ * refresh job's very first pass.
+ */
+function expiresAtFrom(now: Date, expiresIn: unknown): Date {
+  const seconds =
+    typeof expiresIn === 'number' && expiresIn > 0 ? expiresIn : null
+  return new Date(
+    now.getTime() + (seconds === null ? DEFAULT_LONG_LIVED_MS : seconds * 1000),
+  )
+}
+
+/**
+ * One request, its JSON, and Meta's error shaped without its message. Never
+ * logs, returns or embeds `url`: callers here put secrets in it.
+ */
+async function requestJson(
+  url: string,
+  init: RequestInit,
+  fetchImpl: FetchLike,
+): Promise<GraphResult<Record<string, unknown>>> {
+  let response: Response
+  try {
+    response = await fetchImpl(url, {
+      ...init,
+      signal: AbortSignal.timeout(INSTAGRAM_GRAPH_TIMEOUT_MS),
+    })
+  } catch (e) {
+    return { ok: false, failure: networkFailure(e) }
+  }
+
+  let parsed: unknown
+  try {
+    parsed = await response.json()
+  } catch {
+    return malformed(response.status)
+  }
+  if (!response.ok || !isRecord(parsed))
+    return { ok: false, failure: graphError(response.status, parsed) }
+  return { ok: true, value: parsed }
+}
+
+/**
+ * GET at the Graph root with `access_token` in the query — the ONLY place in
+ * this repo a token is put in a URL (see the header).
+ */
+function getGraphRoot(
+  path: '/access_token' | '/refresh_access_token',
+  params: Record<string, string>,
+  fetchImpl: FetchLike,
+): Promise<GraphResult<Record<string, unknown>>> {
+  const query = new URLSearchParams(params)
+  return requestJson(
+    `${INSTAGRAM_GRAPH_ROOT_URL}${path}?${query.toString()}`,
+    { method: 'GET' },
+    fetchImpl,
+  )
 }
 
 /**
@@ -120,44 +222,17 @@ export async function exchangeInstagramCode(
     code: input.code,
   })
 
-  let response: Response
-  try {
-    response = await fetchImpl(
-      `${INSTAGRAM_OAUTH_BASE_URL}/oauth/access_token`,
-      {
-        method: 'POST',
-        headers: { 'content-type': 'application/x-www-form-urlencoded' },
-        body: body.toString(),
-        signal: AbortSignal.timeout(INSTAGRAM_GRAPH_TIMEOUT_MS),
-      },
-    )
-  } catch (e) {
-    return { ok: false, failure: networkFailure(e) }
-  }
-
-  let parsed: unknown
-  try {
-    parsed = await response.json()
-  } catch {
-    return malformed(response.status)
-  }
-  if (!response.ok || !isRecord(parsed)) {
-    // Meta's error message is deliberately not read: on this endpoint it can
-    // quote the code, and on a redirect-uri mismatch it quotes the URI.
-    const error = isRecord(parsed) && isRecord(parsed.error) ? parsed.error : {}
-    return {
-      ok: false,
-      failure: {
-        reason: 'graph_error',
-        httpStatus: response.status,
-        code: typeof error.code === 'number' ? error.code : null,
-        subcode:
-          typeof error.error_subcode === 'number' ? error.error_subcode : null,
-        type: stringOrNull(error.type),
-        fbtraceId: stringOrNull(error.fbtrace_id),
-      },
-    }
-  }
+  const result = await requestJson(
+    `${INSTAGRAM_OAUTH_BASE_URL}/oauth/access_token`,
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      body: body.toString(),
+    },
+    fetchImpl,
+  )
+  if (!result.ok) return result
+  const parsed = result.value
 
   const token = stringOrNull(parsed.access_token)
   // Meta returns this as `user_id`, a number on this endpoint. It is the
@@ -165,82 +240,46 @@ export async function exchangeInstagramCode(
   const rawUserId = parsed.user_id
   const userId =
     typeof rawUserId === 'number' ? String(rawUserId) : stringOrNull(rawUserId)
-  if (token === null || userId === null) return malformed(response.status)
+  if (token === null || userId === null) return malformed(200)
   return { ok: true, value: { token, userId } }
 }
 
 /**
  * Step 2: the short-lived token becomes a long-lived (~60 day) one.
  *
- * The token rides in the Authorization header; only `client_secret` is in the
- * query, because Meta requires it there and it is not an auth token. See the
- * deviation note in this file's header.
+ * The token and `client_secret` both ride in the query, Meta's documented
+ * shape; header auth was refused here in production. See this file's header.
  */
 export async function exchangeForLongLivedToken(
   input: { shortLivedToken: string; appSecret: string; now: Date },
   fetchImpl: FetchLike,
 ): Promise<GraphResult<LongLivedToken>> {
-  const query = new URLSearchParams({
-    grant_type: 'ig_exchange_token',
-    client_secret: input.appSecret,
-  })
-
-  let response: Response
-  try {
-    response = await fetchImpl(
-      `${INSTAGRAM_GRAPH_ROOT_URL}/access_token?${query.toString()}`,
-      {
-        method: 'GET',
-        headers: { authorization: `Bearer ${input.shortLivedToken}` },
-        signal: AbortSignal.timeout(INSTAGRAM_GRAPH_TIMEOUT_MS),
-      },
-    )
-  } catch (e) {
-    return { ok: false, failure: networkFailure(e) }
-  }
-
-  let parsed: unknown
-  try {
-    parsed = await response.json()
-  } catch {
-    return malformed(response.status)
-  }
-  if (!response.ok || !isRecord(parsed)) {
-    const error = isRecord(parsed) && isRecord(parsed.error) ? parsed.error : {}
-    return {
-      ok: false,
-      failure: {
-        reason: 'graph_error',
-        httpStatus: response.status,
-        code: typeof error.code === 'number' ? error.code : null,
-        subcode:
-          typeof error.error_subcode === 'number' ? error.error_subcode : null,
-        type: stringOrNull(error.type),
-        fbtraceId: stringOrNull(error.fbtrace_id),
-      },
-    }
-  }
-
-  const token = stringOrNull(parsed.access_token)
-  if (token === null) return malformed(response.status)
-  // A missing or nonsensical expires_in must never produce an expiry in the
-  // past: that would make a brand new credential look unrecoverable on the
-  // refresh job's very first pass.
-  const seconds =
-    typeof parsed.expires_in === 'number' && parsed.expires_in > 0
-      ? parsed.expires_in
-      : null
-  const expiresAt = new Date(
-    input.now.getTime() +
-      (seconds === null ? DEFAULT_LONG_LIVED_MS : seconds * 1000),
+  const result = await getGraphRoot(
+    '/access_token',
+    {
+      grant_type: 'ig_exchange_token',
+      client_secret: input.appSecret,
+      access_token: input.shortLivedToken,
+    },
+    fetchImpl,
   )
-  return { ok: true, value: { token, expiresAt } }
+  if (!result.ok) return result
+
+  const token = stringOrNull(result.value.access_token)
+  if (token === null) return malformed(200)
+  return {
+    ok: true,
+    value: {
+      token,
+      expiresAt: expiresAtFrom(input.now, result.value.expires_in),
+    },
+  }
 }
 
 /**
- * Keeping a long-lived token alive. Same host, same shape and same deviation
- * as the exchange above, which is why it lives here rather than beside the
- * refresh job that calls it.
+ * Keeping a long-lived token alive. Same host, same shape and same query-string
+ * token as the exchange above, which is why it lives here rather than beside
+ * the refresh job that calls it.
  *
  * IT USES THE GRAPH ROOT, NOT THE VERSIONED BASE. Meta documents
  * `refresh_access_token` at `graph.instagram.com/refresh_access_token`, and
@@ -254,58 +293,20 @@ export async function refreshInstagramLongLivedToken(
   fetchImpl: FetchLike,
   now: Date,
 ): Promise<GraphResult<LongLivedToken>> {
-  const query = new URLSearchParams({ grant_type: 'ig_refresh_token' })
+  const result = await getGraphRoot(
+    '/refresh_access_token',
+    { grant_type: 'ig_refresh_token', access_token: token },
+    fetchImpl,
+  )
+  if (!result.ok) return result
 
-  let response: Response
-  try {
-    response = await fetchImpl(
-      `${INSTAGRAM_GRAPH_ROOT_URL}/refresh_access_token?${query.toString()}`,
-      {
-        method: 'GET',
-        headers: { authorization: `Bearer ${token}` },
-        signal: AbortSignal.timeout(INSTAGRAM_GRAPH_TIMEOUT_MS),
-      },
-    )
-  } catch (e) {
-    return { ok: false, failure: networkFailure(e) }
-  }
-
-  let parsed: unknown
-  try {
-    parsed = await response.json()
-  } catch {
-    return malformed(response.status)
-  }
-  if (!response.ok || !isRecord(parsed)) {
-    const error = isRecord(parsed) && isRecord(parsed.error) ? parsed.error : {}
-    return {
-      ok: false,
-      failure: {
-        reason: 'graph_error',
-        httpStatus: response.status,
-        code: typeof error.code === 'number' ? error.code : null,
-        subcode:
-          typeof error.error_subcode === 'number' ? error.error_subcode : null,
-        type: stringOrNull(error.type),
-        fbtraceId: stringOrNull(error.fbtrace_id),
-      },
-    }
-  }
-
-  const refreshed = stringOrNull(parsed.access_token)
-  if (refreshed === null) return malformed(response.status)
-  const seconds =
-    typeof parsed.expires_in === 'number' && parsed.expires_in > 0
-      ? parsed.expires_in
-      : null
+  const refreshed = stringOrNull(result.value.access_token)
+  if (refreshed === null) return malformed(200)
   return {
     ok: true,
     value: {
       token: refreshed,
-      expiresAt: new Date(
-        now.getTime() +
-          (seconds === null ? DEFAULT_LONG_LIVED_MS : seconds * 1000),
-      ),
+      expiresAt: expiresAtFrom(now, result.value.expires_in),
     },
   }
 }

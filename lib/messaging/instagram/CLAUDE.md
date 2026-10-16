@@ -171,10 +171,15 @@ guarded outbound modules and four non-outbound callers need credentials.
 
 `fetchConnectedAccount` reads **`user_id`, not `id`** - see the routing section.
 
-**Documented deviation:** Meta's docs show `ig_exchange_token` and `refresh_access_token` with
-the token in the query string; both send it in the Authorization header instead. That
-`graph.instagram.com` accepts header auth there is a Meta-side fact this repo cannot verify.
-Both fail loudly if it is wrong.
+**The token is in the query string on exactly two calls.** `ig_exchange_token` and
+`refresh_access_token` first sent it in the Authorization header, against Meta's docs, to keep
+tokens out of URLs. `graph.instagram.com` refused that in production (2026-10-16 UTC, code 100 at
+the long-lived exchange), so both now use Meta's documented query form, through one helper in
+`oauth-exchange.ts`. Every other call keeps header auth. What makes the query form safe is
+that no URL built there is logged, returned or put in an error, including on a network throw;
+`scripts/harness/instagram-token-urls/` fails if that stops being true. Outside the module,
+`@vercel/otel` names fetch spans with the full URL, and only the scope filter in
+`lib/observability/span-processor.ts` keeps them out of Langfuse.
 
 ## Three signature schemes, three parsers
 
