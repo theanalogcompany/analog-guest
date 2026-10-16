@@ -70,6 +70,32 @@ export const SavedPlaygroundSessionSchema = z.object({
  * worse than a large row. It is also absent from the common case, because the
  * inspector sends only the blocks that differ from the composed ones.
  */
+/**
+ * The template's own blocks, hand-edited with their `{placeholders}` intact -
+ * the prompt lab's template mode, mirroring `V2TemplateBlocks`
+ * (lib/ai/v2/template-archive.ts).
+ *
+ * Capped per block at what `promptBlocks` caps a composed block at, for the
+ * same reason: a template block is smaller than the composed one it produces
+ * (the brief arrives through a placeholder rather than inline), so 200k leaves
+ * room to paste a bigger one in without the field being a way to post a
+ * megabyte. The cue is a single bracketed sentence and is capped like one.
+ *
+ * NOT a `z.object({...}).strict()`: Zod strips unknown keys, which is what
+ * lets a turn saved before a block existed still parse. A block dropped from
+ * the set later is refused at the runner by `applyV2TemplateBlocks`, with the
+ * version named - the right place for that refusal, because only the runner
+ * knows which version the turn resolved.
+ */
+export const TemplateBlocksSchema = z.object({
+  frame: z.string().max(200_000).optional(),
+  houseSections: z.string().max(200_000).optional(),
+  houseSectionsBriefed: z.string().max(200_000).optional(),
+  guestState: z.string().max(200_000).optional(),
+  outreachNote: z.string().max(200_000).optional(),
+  outreachCue: z.string().max(2_000).optional(),
+})
+
 export const SavedTurnOverridesSchema = z.object({
   stateKey: z.string().optional(),
   mission: z.string().optional(),
@@ -84,6 +110,7 @@ export const SavedTurnOverridesSchema = z.object({
   // `resolveV2TemplateSet` fails open to the current template with a warning.
   // A hard enum here would reject the whole saved turn over a fixture.
   templateVersion: z.string().max(40).optional(),
+  templateBlocks: TemplateBlocksSchema.optional(),
   voicePackText: z.string().optional(),
   venueProfileText: z.string().optional(),
   // Hand-edited SYSTEM blocks, replaced by label. Capped at the order of the
@@ -114,10 +141,56 @@ export const SavedTurnOverridesSchema = z.object({
     .optional(),
 })
 
+/**
+ * What the guest sent BESIDES words, stated rather than stored - the wire
+ * shape of `DeclaredTurnMedia` (lib/relationship/turn-media.ts).
+ *
+ * ONE DEFINITION, imported by the run route and by a saved turn, because the
+ * two have to agree: a conversation that replays differently than it ran is
+ * the thing this file exists to prevent, and media is the input most likely
+ * to drift (links came first, the uploaded-photo fields second).
+ *
+ * `description` and `nameableItems` are what the DESCRIBE step produced, not
+ * what the image is: the generator is never shown a picture (owner-ruled
+ * 2026-10-11, lib/ai/CLAUDE.md), so the description is the entire record of
+ * the photo as far as any prompt is concerned. That is also why a saved
+ * conversation needs no image to restore faithfully.
+ *
+ * REQUIRES A LINK OR A KIND. `declaredTurnMedia` derives the kind from a
+ * link's extension when none is stated, so a media object with neither
+ * describes nothing - the turn would claim an attachment of no sort at all.
+ */
+export const DeclaredMediaSchema = z
+  .object({
+    /** Links, read for their extension only, exactly as production reads one with no row behind it. */
+    mediaUrls: z.array(z.string().url()).max(10).optional(),
+    /** Stated outright, where an uploaded file or an Instagram link has no usable extension. */
+    kind: z
+      .enum(['photo', 'gif', 'video', 'voice_note', 'other', 'unknown'])
+      .optional(),
+    /** As if the describe step had run and written this. Bounded well past the 200-char cut. */
+    description: z.string().max(400).optional(),
+    /** The menu items that description permits naming, in the menu's own spelling. */
+    nameableItems: z.array(z.string().min(1)).max(10).optional(),
+    /** The guest is replying to one of the venue's stories. */
+    storyReply: z.boolean().optional(),
+  })
+  .refine(
+    (m) => (m.mediaUrls?.length ?? 0) > 0 || m.kind !== undefined,
+    'media needs a link or a stated kind - otherwise there is no attachment to describe',
+  )
+export type DeclaredMediaInput = z.infer<typeof DeclaredMediaSchema>
+
 export const PlaygroundConversationTurnSchema = z
   .object({
-    /** The guest's message(s) for this turn, oldest first. EMPTY only on an outreach turn. */
+    /** The guest's message(s) for this turn, oldest first. EMPTY only on an outreach or media turn. */
     inbound: z.array(z.string().min(1)).max(10),
+    /**
+     * What the guest sent besides words. The second legal empty-inbound shape:
+     * a photo with no caption, which is how every one of the pilot venue's 120
+     * attachments arrived.
+     */
+    media: DeclaredMediaSchema.optional(),
     /**
      * Set when this turn was the venue writing first (v2.21.0). Mirrors
      * `RunRequestBody.outreach`, bounds matching the run route's; the marker
@@ -142,19 +215,34 @@ export const PlaygroundConversationTurnSchema = z
     verdict: z.enum(['send', 'queue', 'block']).nullable(),
   })
   .superRefine((turn, ctx) => {
-    // Same invariant as the run route: inbound empty ⟺ outreach present. A
-    // save predating v2.21.0 has inbound ≥ 1 and no outreach key, so it
-    // trips neither branch and parses unchanged.
-    if (turn.outreach === undefined && turn.inbound.length === 0)
+    // Same invariants as the run route, and they have to stay the same: a
+    // turn the route accepted must save, and a saved turn must re-run. TWO
+    // legal empty-inbound shapes, disjoint - an outreach turn (no inbound
+    // event at all) and a media turn (a photo with no caption). A save
+    // predating v2.21.0 has inbound ≥ 1 and neither key, so it parses
+    // unchanged.
+    if (
+      turn.outreach === undefined &&
+      turn.media === undefined &&
+      turn.inbound.length === 0
+    )
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        message: 'inbound may be empty only on an outreach turn',
+        message:
+          'inbound may be empty only on an outreach turn or a media turn',
       })
     if (turn.outreach !== undefined && turn.inbound.length > 0)
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         message:
           'an outreach turn carries no inbound - it is the venue writing first',
+      })
+    // Media rides an inbound event; an outreach turn has none to carry it.
+    if (turn.outreach !== undefined && turn.media !== undefined)
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message:
+          'an outreach turn has no inbound event, so it cannot carry the guest’s media',
       })
   })
 export type PlaygroundConversationTurn = z.infer<

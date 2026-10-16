@@ -104,6 +104,11 @@ export async function POST(request: Request): Promise<NextResponse> {
     // has no default and this insert does not set it, so reading it would be
     // asking the database to confirm a constant.
     submittedAt: null,
+    // Current by construction: the three stamps above were just read from the
+    // same constants the staleness check compares them against. A literal
+    // rather than a call, for the same reason `submittedAt` is one - this is
+    // the code that made it true, not a question to ask about it.
+    stale: null,
     units: [],
   }
   return NextResponse.json({ session })

@@ -34,6 +34,17 @@
 -- default, no backfill, nothing altered. `npm run db:apply -- 087_human_eval_csv.sql`,
 -- applied BEFORE merging: the export route selects it on the first download
 -- after deploy (root CLAUDE.md, "additive but the deployed code reads it").
+--
+-- ALREADY APPLIED, AND RE-RUNNING THIS FILE NOW FAILS - deliberately noted
+-- rather than left for someone to rediscover. The column went in while this
+-- work was still numbered 085, before #387 and #388 took 085 and 086 for the
+-- passport stamps and this file was renumbered. `db:apply` answers
+-- `42701: column "csv" of relation "human_eval_sessions" already exists`,
+-- which is the correct refusal and not a problem to fix: the live column is
+-- nullable `text` and is the one this file describes. What did NOT move with
+-- the renumber is the stored column comment, which still cross-references
+-- migration 085 - restated in 088, because `add column` cannot be re-run and
+-- `comment on` can.
 
 begin;
 

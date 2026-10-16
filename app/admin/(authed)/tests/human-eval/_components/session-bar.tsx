@@ -35,6 +35,17 @@ import type {
 // there is no CSV link, because the export route refuses an unsubmitted pass.
 // The counts here are advisory - `humanEvalCompleteness` is re-run server-side
 // by the submit route, which is what actually decides (migration 084).
+//
+// NEW PASS IS ITS OWN CONTROL, and before it existed there was none: the
+// client only ever opened a pass when the venue had none at all, so a venue
+// with one pass could never start a second, and a venue whose pass was
+// submitted was frozen onto a read-only page for good. It confirms, because
+// one press is the same 58 x 2 generations the Generate button prices.
+//
+// A STALE PASS SAYS SO, LOUDLY AND IN PLACE. The loader will not open one by
+// itself, so this only ever fires on a pass picked by hand - and then the
+// thing worth saying is not which versions differ but that judging it proves
+// nothing about what is shipping now.
 
 export function SessionBar({
   venues,
@@ -54,6 +65,7 @@ export function SessionBar({
   onGenerate,
   onCancel,
   onSubmit,
+  onNewPass,
 }: {
   venues: VenueListRow[]
   venueId: string | null
@@ -74,6 +86,7 @@ export function SessionBar({
   onGenerate: () => void
   onCancel: () => void
   onSubmit: () => void
+  onNewPass: () => void
 }) {
   const submitted = session?.submittedAt ?? null
   const blockers = completeness === null ? [] : humanEvalBlockers(completeness)
@@ -121,6 +134,10 @@ export function SessionBar({
                       ? 'submitted'
                       : `${s.judged}/${s.generated} judged`}{' '}
                     · {s.v2Model} · {s.venueOpenState}
+                    {/* Marked in the list rather than only after it is open,
+                        so picking one is an informed choice instead of a
+                        surprise. */}
+                    {s.stale ? ' · old engine' : ''}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -149,6 +166,18 @@ export function SessionBar({
               {needComment} need a comment
             </span>
           ) : null}
+          {/* Always available, including on a submitted pass - a frozen pass
+              used to be a dead end with no way out of it. */}
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            disabled={venueId === null || busy}
+            onClick={onNewPass}
+          >
+            New pass
+          </Button>
+
           {submitted !== null ? null : busy ? (
             <Button
               type="button"
@@ -217,6 +246,21 @@ export function SessionBar({
         // verbatim rather than summarised.
         <p className="text-xs text-destructive" role="alert">
           {submitError}
+        </p>
+      ) : null}
+
+      {session?.stale != null ? (
+        // Not a tooltip and not grey: the provenance line below has carried
+        // these versions all along and nobody reads it, which is how a pass
+        // three prompt revisions old got judged as if it were current.
+        <p
+          className="text-xs text-destructive"
+          role="status"
+          data-testid="stale-pass"
+        >
+          This pass was generated under an older engine ({session.stale}).
+          Verdicts on it are not evidence about what is shipping now - start a
+          new pass to judge the current one.
         </p>
       ) : null}
 

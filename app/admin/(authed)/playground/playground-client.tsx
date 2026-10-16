@@ -38,12 +38,14 @@ import {
   turnsFromSaved,
 } from './_lib/history'
 import type {
+  DescribeResponseBody,
   GuestListItem,
   PlaygroundTurn,
   RunRequestBody,
   SavedConversationSummary,
   TimelineMessage,
 } from './_lib/types'
+import type { DeclaredMediaInput } from '@/lib/schemas/playground'
 import { ChatPane } from './_components/chat-pane'
 import { Inspector } from './_components/inspector'
 import { ReplayPane } from './_components/replay-pane'
@@ -105,6 +107,13 @@ function nextTurnId(): string {
  * click and nothing else.
  */
 const DEFAULT_VENUE_NAME = "Le Mil's Coffee"
+
+/**
+ * Mirrors `MAX_UPLOAD_BYTES` in the describe route, and both sit under the
+ * platform's 10MB body limit - over that the body is truncated in transit and
+ * the server can only report a malformed form.
+ */
+const MAX_PHOTO_BYTES = 8_000_000
 
 /**
  * A request with no v1 arm, so one can be attached from the live toggle.
@@ -396,13 +405,56 @@ export function PlaygroundClient({ venues }: { venues: VenueListRow[] }) {
     [activePrompt, v1ArmFor],
   )
 
+  /**
+   * One uploaded photo through the describe endpoint. Throws on a refusal so
+   * the chip can show the reason - the caller turns it into the
+   * nobody-looked-at-it turn rather than losing the attachment.
+   */
+  const onDescribePhoto = useCallback(
+    async (file: File): Promise<DescribeResponseBody> => {
+      if (venueId === null) throw new Error('pick a venue first')
+      // Refused here as well as at the route, because the round trip is the
+      // expensive part: a 20MB upload spends the whole upload before the
+      // server can say no, and the platform truncates the body at 10MB on
+      // the way, so the server's own answer would be about a mangled form
+      // rather than about the size.
+      if (file.size > MAX_PHOTO_BYTES)
+        throw new Error(
+          `that photo is ${(file.size / 1_000_000).toFixed(1)}MB; the limit is ${MAX_PHOTO_BYTES / 1_000_000}MB`,
+        )
+      const form = new FormData()
+      form.set('venueId', venueId)
+      form.set('file', file)
+      const response = await fetch('/admin/playground/api/describe', {
+        method: 'POST',
+        body: form,
+      })
+      const payload: unknown = await response.json().catch(() => null)
+      if (!response.ok) {
+        const message =
+          payload !== null &&
+          typeof payload === 'object' &&
+          'error' in payload &&
+          typeof payload.error === 'string'
+            ? payload.error
+            : `describe returned ${response.status}`
+        throw new Error(message)
+      }
+      return payload as DescribeResponseBody
+    },
+    [venueId],
+  )
+
   const onSend = useCallback(
-    (text: string) => {
+    (text: string, media?: DeclaredMediaInput) => {
       if (venueId === null || busy) return
       const request: RunRequestBody = {
         venueId,
         guestId: null,
-        inbound: [text],
+        // Empty on a media-only turn, which the route allows precisely when
+        // media is present - a photo with no caption is not an empty send.
+        inbound: text.length > 0 ? [text] : [],
+        ...(media !== undefined ? { media } : {}),
         sessionHistory: sessionHistoryFromTurns(turns),
         ...(session !== null ? { session } : {}),
         // The v1 arm is attached by `runNewTurn` from the live toggle - one
@@ -734,6 +786,7 @@ export function PlaygroundClient({ venues }: { venues: VenueListRow[] }) {
             }
             showComposer={mode === 'sandbox'}
             onSend={onSend}
+            onDescribePhoto={onDescribePhoto}
             onSelectTurn={setSelectedTurnId}
             savableTurnCount={savableTurnCount}
             saving={saving}

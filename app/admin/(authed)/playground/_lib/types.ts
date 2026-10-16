@@ -5,7 +5,10 @@ import type { HistoryTurn } from '@/lib/ai/v2/compose'
 // second copy of this shape is a contract that can disagree with itself.
 import type { TestDraft } from '@/lib/agent/handle-inbound'
 import type { GoldenFollowupTrigger } from '@/lib/schemas/golden'
-import type { PlaygroundConversationTurn } from '@/lib/schemas/playground'
+import type {
+  DeclaredMediaInput,
+  PlaygroundConversationTurn,
+} from '@/lib/schemas/playground'
 import type {
   PlaygroundSession,
   TurnOverrides,
@@ -20,6 +23,26 @@ import type {
 export interface GraphStateOption {
   key: string
   label: string
+}
+
+/**
+ * POST /admin/playground/api/describe response: what the describe step would
+ * have recorded about one uploaded photo.
+ *
+ * `description` is NULL for a photo the model could not make out, which is a
+ * real turn shape rather than a failure - the agent is then told a photo
+ * arrived and it cannot see it. The three raw fields below it are for the
+ * operator's eyes, not for any prompt: nothing downstream reads them.
+ */
+export interface DescribeResponseBody {
+  description: string | null
+  nameableItems: string[]
+  legibility: 'clear' | 'unclear'
+  showsVenue: 'yes' | 'no' | 'unsure'
+  peoplePresent: boolean
+  /** 0 means no drink could be named whatever the photo showed. */
+  appearanceNotesOnFile: number
+  promptVersion: string
 }
 
 /** POST /admin/playground/api/run body. Mirrors RunTurnInput minus `now`. */
@@ -40,11 +63,12 @@ export interface RunRequestBody {
   outreach?: { hoursQuiet: number }
   /**
    * What the guest sent besides words, stated rather than stored - a golden
-   * scenario's links. Reaches BOTH arms from this one field, and it is what
-   * makes `inbound: []` legal: a photo with no caption is a media-only turn,
-   * not an empty one.
+   * scenario's links, or a photo uploaded in the playground and described by
+   * the endpoint beside the run route. Reaches BOTH arms from this one field,
+   * and it is what makes `inbound: []` legal: a photo with no caption is a
+   * media-only turn, not an empty one.
    */
-  media?: { mediaUrls: string[] }
+  media?: DeclaredMediaInput
   /**
    * Skip the judge and the post-turn assessor. Only safe where nothing chains
    * off the turn - the route's own schema has the full reasoning.

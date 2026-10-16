@@ -93,6 +93,7 @@ export const loadRegressionPage = cache(
         expectReplyContains: null,
         forbidPolicyKeys: [],
         expectPolicyKeys: [],
+        forbidVolunteeredPrice: false,
         expectEmptyReply: false,
         enabled: false,
         enabledOverridden: false,

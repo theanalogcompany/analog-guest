@@ -6,6 +6,16 @@ paths:
 
 # A V2_PROMPT_VERSION bump ships with a regression run
 
+**If the copy came out of /admin/prompt-lab, Promote wrote you the patch.**
+Template mode there edits the blocks with their `{placeholders}` intact, so a sweep measures
+what would ship, and Promote emits all four edits one bump needs: the changed constants, the
+version, the outgoing version archived as a fixture, and its pinned SHA in the verbatim
+check.
+It refuses unless something was actually run on those exact bytes, and the artifact states
+the coverage it found.
+That is the bookkeeping, not the gate - everything below still applies, and the artifact
+carries this list with it.
+
 Every measured lesson in `lib/ai/v2/template.ts`'s changelog exists as a scenario in
 `REGRESSION_SCENARIOS` in `lib/eval/regression-scenarios.ts`.
 The comments are the record; the harness is the enforcement.

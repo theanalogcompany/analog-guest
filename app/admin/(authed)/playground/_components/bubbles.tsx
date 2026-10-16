@@ -59,6 +59,25 @@ export function GuestBubbles({ texts }: { texts: string[] }) {
 }
 
 /**
+ * Sits with the guest's bubbles when the turn carried a photo, and stands
+ * alone when it carried only a photo.
+ *
+ * SAME REASONING AS `OutreachMarker`: a media-only turn has no text, and
+ * rendering nothing would make the venue's reply read as answering the
+ * previous message. It also says WHICH of the two media turns this was,
+ * because the two produce different prompts and the replies to them are not
+ * comparable - one agent was told what is in the picture and the other was
+ * told only that one arrived.
+ */
+export function GuestMediaMarker({ described }: { described: boolean }) {
+  return (
+    <span className="text-[11px] italic text-ink-faint">
+      photo{described ? ' · described' : ' · nobody looked at it'}
+    </span>
+  )
+}
+
+/**
  * Replaces the guest bubbles on an outreach turn. There is no inbound to
  * render, and rendering nothing would make the venue's reply read as answering
  * the previous guest message - which is the one thing an outreach turn is not.

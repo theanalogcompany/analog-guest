@@ -3,7 +3,12 @@ import { Eyebrow, SectionHeader } from '@/lib/ui'
 import { resolveAdminSession } from '../../_lib/admin-session'
 import { mark, reportRequestTiming } from '../../_lib/request-timing'
 import { CommitGroup } from './_components/commit-group'
-import { loadGoldenPage, RUNS_LIMIT } from './_lib/load-golden'
+import {
+  loadGoldenPage,
+  runsParam,
+  RUNS_LIMIT,
+  RUNS_STEP,
+} from './_lib/load-golden'
 
 // /admin/tests/golden - the questions a guest actually asks, with v1's answer
 // and v2's answer side by side, grouped by the commit the run was made at.
@@ -16,15 +21,28 @@ import { loadGoldenPage, RUNS_LIMIT } from './_lib/load-golden'
 
 export const dynamic = 'force-dynamic'
 
-export default async function GoldenPage() {
+/**
+ * HOW MANY RUNS ARE READ IS A URL PARAMETER, not client state, and the whole
+ * page stays a server component because of it - "show older runs" is a plain
+ * link. The alternative, fetching older runs into client state, would mean
+ * making `RunCard` and `CommitGroup` client components (they are deliberately
+ * server-rendered with no client JS) or duplicating them.
+ */
+export default async function GoldenPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ runs?: string | string[] }>
+}) {
   // Awaited before the load so the gate's cost lands on this request's
   // breakdown: the layout and a page render concurrently, so a page that
   // never awaits the session reports stages taken while it was still running.
   await resolveAdminSession()
-  const data = await loadGoldenPage()
+  const runsShown = runsParam((await searchParams).runs)
+  const data = await loadGoldenPage(runsShown)
   mark('runs')
   reportRequestTiming('/admin/tests/golden')
   const runCount = data.groups.reduce((n, g) => n + g.runs.length, 0)
+  const nextRuns = Math.min(runsShown + RUNS_STEP, RUNS_LIMIT)
 
   return (
     <div className="flex flex-col gap-8">
@@ -34,7 +52,11 @@ export default async function GoldenPage() {
         subtitle={
           data.degraded
             ? 'degraded'
-            : `${data.questionCount} scenarios, ${data.runnableCount} runnable · ${runCount} run${runCount === 1 ? '' : 's'}${data.hasMoreRuns ? ` of more (showing the newest ${RUNS_LIMIT})` : ''}`
+            : `${data.questionCount} scenarios, ${data.runnableCount} runnable · ${
+                data.hasMoreRuns
+                  ? `newest ${runCount} run${runCount === 1 ? '' : 's'}, older ones below`
+                  : `${runCount} run${runCount === 1 ? '' : 's'}`
+              }`
         }
       />
 
@@ -104,6 +126,36 @@ export default async function GoldenPage() {
           {data.groups.map((group) => (
             <CommitGroup key={group.gitSha ?? 'none'} group={group} />
           ))}
+
+          {/* A LINK, not a button: this page has no client JS, and widening
+              the window is a different URL for the same page. It states the
+              ceiling rather than implying "all the rest", because the loader
+              refuses to read past it. */}
+          {data.hasMoreRuns ? (
+            <div className="flex items-baseline gap-3">
+              <a
+                href={`?runs=${nextRuns}`}
+                className="text-sm underline underline-offset-2"
+              >
+                Show older runs
+              </a>
+              <span className="text-xs text-muted-foreground">
+                showing the newest {runCount}
+                {nextRuns > runsShown
+                  ? ` · next ${nextRuns - runsShown} more`
+                  : ` · ${RUNS_LIMIT} is the most this page reads`}
+              </span>
+            </div>
+          ) : runsShown > 1 ? (
+            <a
+              href="?runs=1"
+              className="text-sm underline underline-offset-2"
+              // Only when a wider window is actually open: a reset link on a
+              // page already showing one run is a control that does nothing.
+            >
+              Back to the newest run
+            </a>
+          ) : null}
         </div>
       )}
     </div>

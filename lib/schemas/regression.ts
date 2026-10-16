@@ -77,6 +77,26 @@ export const RegressionScenarioSchema = z.object({
     })
     .optional(),
   /**
+   * Ceiling: no reply may quote a price or name a charge (v2.23.0).
+   *
+   * Set it on a scenario whose script asks nothing about cost. The detector is
+   * `mentionsPrice` in `lib/eval/price-detector.ts` - the SAME function
+   * `scripts/measurement/price-discretion.ts` scores its rate with, so the
+   * harness that tuned the copy and the ceiling that protects it cannot
+   * disagree about what a volunteered price is.
+   *
+   * A CEILING AND NOT A BAR, even though the measurement behind it is a rate.
+   * The rate exists to compare arms across eight questions; here the question
+   * is only "did this come back", and the measured rate after the fix is 0/80.
+   * Any hit is therefore news, not noise.
+   *
+   * NOT A GLOBAL TELL, deliberately, which is the one thing to get right if
+   * this is ever widened: a reply quoting a price is CORRECT whenever the
+   * guest asked what something costs, so a tell in `EMITTED_TELLS` would
+   * breach every scenario that answers a price question properly.
+   */
+  forbidVolunteeredPrice: z.boolean().default(false),
+  /**
    * Ceiling: the final turn must send NOTHING - no bubbles at all.
    *
    * The only guard that can express v2.20.0's opt-out rule, because every

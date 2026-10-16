@@ -183,8 +183,8 @@
 // Block 1 also lost its breakpoint. At ~590 tokens it was under Anthropic's
 // 1024-token minimum cacheable prefix, so the breakpoint it carried could
 // never have produced an entry - a guard with no true positives in its
-// lifetime. THAT SIZE ARGUMENT EXPIRED IN v2.19.0: the frame is now 4,677
-// chars and at or past the floor. The breakpoint stays off for a different
+// lifetime. THAT SIZE ARGUMENT EXPIRED IN v2.19.0, when the frame reached
+// 4,677 chars and the floor with it; it is 5,167 as of v2.22.0. The breakpoint stays off for a different
 // reason, which compose.ts's header states.
 //
 // THE BRIEF STAYS A USER TURN. Moving it into a system block was tried the
@@ -243,6 +243,153 @@
 //
 // SO: before citing any entry below as current, check which model ran. The
 // regression summary line and both harness run logs print it.
+//
+// v2.23.0 (owner-ruled 2026-10-15): PRICE IS ITS OWN FACT - a new block-2
+// section, and the frame's two weaker price mentions removed in the same
+// change. The constant carries the full reasoning; what belongs here is the
+// measurement and the two decisions around it.
+//
+// MEASURED, ARM TO ARM, on the eight-question withhold set in
+// `scripts/measurement/price-discretion.ts` (n=5, 40 samples, Sonnet 5.5,
+// clock pinned to 11:00):
+//
+//   v2.22.0, no such section        10/40 quoted a price = 25.0%  FAIL
+//   v2.23.0, this section           0/40                 =  0.0%  PASS
+//
+// The quote set - four questions that ask a price outright, 20 samples - was
+// 0/20 withheld on BOTH arms, which is the claim that matters second: the fix
+// did not buy discretion by making the agent evasive about cost. "how much
+// extra is oat milk?" still answers "Oat milk is $0.25 extra" 5/5. Bodies on
+// the two formerly-failing questions were read rather than inferred from the
+// rate: availability, exclusivity, Straus and the India story all survive.
+//
+// THE DEFECT WAS NOT SPREAD ACROSS QUESTION SHAPES - it was two questions at
+// 5/5 and six at 0/5, and both failures reproduced ONE sentence of Le Mil's
+// brief. That is why the fix is positional. See the constant.
+//
+// WHY A NEW VERSION RATHER THAN FOLDING INTO v2.22.0, which is the opposite of
+// the call made for the HOUSE NOTES change six hours earlier: by now v2.22.0
+// HAS stored runs naming it. Three of them - golden run a0d61629, regression
+// runs f6a00e92 and b44279ec - were all taken today on the prompt WITHOUT this
+// section. Folding would have left those rows labelled with a version whose
+// copy they never saw, which is the same unlabelled-arm failure the import
+// path's missing `generation_model` column was flagged for in the same hour.
+//
+// NO ARCHIVE ENTRY FOR v2.22.0, and this is a gap rather than an oversight. An
+// archived set is a VERBATIM copy of the strings at a named commit, checked by
+// `scripts/measurement/template-archive-verbatim.ts` against a git SHA.
+// v2.22.0 was never committed - it lived in one uncommitted tree for an
+// afternoon - so there is no SHA to check it against and no honest way to
+// freeze it. It also has nothing to replay: the judges are off, so its three
+// stored runs carry replies but no judgments. If v2.22.0 is ever wanted as a
+// fixture it has to be reconstructed from this file's history, deliberately.
+//
+// v2.22.0 (owner-authored 2026-10-14, approved 2026-10-15): the frame is the
+// owner's own prompt again, promoted out of /admin/prompt-lab a second time,
+// and `# How you sound` COMES BACK for a briefed venue. Same path as v2.20.0,
+// same four placeholders restored on the way in - the pasted document is Le
+// Mil's and this constant is the global default row. Its inline `Your replies
+// are usually 12 to 22 words. Over 40 is rare and needs a reason.` is
+// byte-identical to what `replyLengthClause` renders for that venue today, so
+// `{length_clause}` costs it nothing and keeps decision 0010 intact for every
+// other venue.
+//
+// THE SOURCE DOCUMENT WAS TRUNCATED, which is why its third part is ignored.
+// It ends mid-sentence inside the voice examples, and its HOUSE NOTES carried
+// a hand-typed clock and no relationship sections at all. The frame and the
+// brief both end cleanly before the cut; nothing below is taken from after it.
+//
+// FIVE CHANGES IN THE FRAME:
+//
+//  - `You are proud of the stories behind this business and happy to share.`
+//    is new. `<the_story>` and `<coffee_knowledge>` are a large part of the
+//    brief and nothing in the frame said to offer any of it.
+//  - A CURIOSITY PAIR is new - asking "the way you'd ask a friend across the
+//    counter", with two example questions, plus a patience paragraph - and the
+//    v2.20.0 `invite, never instruct` paragraph it replaces is CUT. The
+//    prohibition survives in the owner's own register ("handing someone a list
+//    of things to send you isn't something you'd ever do"); what is gone is
+//    the "Tell me a bit about it" not "Send me the date, headcount and needs"
+//    contrast pair.
+//    WATCH ITEM: this is the most pursuit-shaped copy this frame has carried,
+//    and it sits in block 1 while v2.11.0 measured the MOVES HEADER as the
+//    unit that actually governs asking. If an interview-y opener comes back,
+//    `bare-hey` and `recommendation-turn-one` are the two scenarios that
+//    bracket it, and the header is the lever before any rewording here.
+//  - `never volunteer price unless asked` joins the discreet line.
+//  - `Always send URLs in a separate bubble.` leads `# Texting style`. It is
+//    the only new line here whose compliance is COUNTABLE, so it ships with a
+//    tell (`url-bubble`) rather than a watch item - a bubble carrying a link
+//    and prose together. No normalizer: re-splitting a bubble is a rewrite of
+//    guest-facing text, which lib/ai/CLAUDE.md reserves.
+//  - `You're glad they wrote, and that shows in how easy you are to talk to`
+//    -> `You're easy to talk to`.
+//
+// THREE DEVIATIONS FROM THE OWNER'S TEXT, each approved 2026-10-15:
+//
+//  1. `You're easy you are to talk to` -> `You're easy to talk to`.
+//  2. The trailing space after `happy to share.` stripped, and the double
+//     blank line in the brief's `<the_cafe>` collapsed to one.
+//  3. Two em dashes and one `café` in the brief's new `<instagram_context>`
+//     replaced with sentence breaks and ASCII. `# Texting style` bans em
+//     dashes and the brief renders AFTER it, where proximity is authority, and
+//     `voice-profile.ts` states the principle this file has honoured since
+//     v2.6.0: the model echoes what it is shown.
+//
+// `# How you sound` IS BACK (owner-ruled 2026-10-15, "keep my own reply
+// examples"), two days after v2.20.0 cut it. That entry's account of the cut
+// stands and is now the account of what this reverses: 65 active
+// `voice_corpus` rows and ~5,700 chars of the team's approved replies are in a
+// briefed prompt again, the standing proximity contradiction every emoji and
+// dash entry here flags is live again, and `{length_clause}` is no longer the
+// only measured input. Two of haiku-5-5's three breaches were attributed to
+// `voice_corpus` rows, so a pack-attributed breach is expected and is a DATA
+// decision per `.claude/rules/v2-template-regression.md`, never a wording arm.
+//
+// HOUSE NOTES IS NOW THE CLOCK AND NOTHING ELSE (owner-ruled 2026-10-15, "we
+// should disable these sections"). The state line, the mission, the guest
+// profile, the interaction memory and the open moves with their header are all
+// out of the prompt. `V2_GUEST_STATE`'s own header is the full account of what
+// that turns off - no mission, no pursuit mechanism, no profile or memory even
+// once the assessor returns, and a judge brief that is one line - and it is
+// the first place to read before adding any of it back.
+//
+// The ruling came from reading the composed prompt in the playground, where
+// those four sections were not what the owner expected to see: the document
+// they were promoted from had only `#Time` at the top of its notes, because
+// the prompt lab's single-block view collapses all three blocks and shows no
+// per-turn brief at all.
+//
+// THE RELATIONSHIP ENGINE ITSELF IS UNTOUCHED. The graph still resolves a
+// state with evidence, `guest_relationship_states` still gets its row, and the
+// gate still conditions on `stateKey`. What changed is that none of it is
+// rendered into a prompt. That makes `lib/relationship` a system whose output
+// no model reads today, which is worth knowing before anyone measures it.
+//
+// NO SEPARATE VERSION FOR IT. The frame half of this bump sat in an
+// uncommitted tree for about an hour before the ruling, so both halves ship as
+// v2.22.0 - checked rather than assumed: zero `eval_judgments` rows carry a
+// v2.22 version (the judges are off globally anyway) and no playground
+// conversation was saved on 2026-10-15, so nothing stored names a v2.22.0 that
+// had those sections in it.
+//
+// THE BRIEF CHANGED IN THE SAME RULING, and it is venue data rather than
+// template copy. Le Mil's `venue_configs.knowledge_brief` is replaced
+// WHOLESALE by the document's `# What you know` ("abandon the original",
+// owner-ruled 2026-10-15), 40,960 -> 41,671 chars. Eight of the ten edits are
+// facts; two are behaviour and are recorded here because nothing in the
+// template says them:
+//
+//  - `<refunds_and_complaints>` says to offer a remake first and not to pass a
+//    drinks complaint to the team, REVERSING the `<house_rules>` paragraph it
+//    replaces. It does not change who sees the draft: `complaint_resolution`
+//    (lib/policy/default-policies.ts) matches a draft that answers the
+//    substance of a complaint, so the reply still queues for an operator, and
+//    a free remake needs a declared `comp` action under this frame's own hard
+//    line. What changed is what the draft says, not whether it auto-sends.
+//  - `<instagram_context>` makes the venue's own feed answerable, the theft
+//    post included. It is the first content in the brief that is about posts
+//    rather than about the house.
 //
 // v2.21.0 (owner-approved 2026-10-13): the OUTREACH lane - the prompt can now
 // compose a venue-initiated turn, for the v2 follow-up system (a conversation
@@ -702,7 +849,7 @@
 // NULL), so a literal handle would put one venue's account in every venue's
 // prompt. Same reason `{venue_name}` stays a placeholder. It needs a
 // venue_info field first.
-export const V2_PROMPT_VERSION = 'v2.21.0-draft'
+export const V2_PROMPT_VERSION = 'v2.23.0-draft'
 
 /** Block 1: ROLE. Static across every venue bar the four placeholders. */
 export const V2_FRAME = `# Who you are
@@ -713,20 +860,28 @@ they can see it.
 If someone from the team has written in this conversation, continue as
 "we". Never introduce yourself or say who you are unless the guest asks.
 
-You're warm but not tryhard. You're glad they wrote, and that shows in how easy you are to talk to, but you don't write in prose.
+You're warm but not tryhard. You're easy to talk to, but you don't write in prose.
+
+You are proud of the stories behind this business and happy to share.
 
 React to the person before the logistics. If they're planning something,
 had a good time, or had a bad one, your first words respond to that,
 briefly and genuinely. Then the facts.
 
-When you need something from a guest, invite, never instruct.
-"Tell me a bit about it" not "Send me the date, headcount and needs".
-Never list fields to fill in.
-
 You have opinions about the menu and share them plainly.
 You're never salesy and never servile.
 
-You're discreet. You use what you know about a guest to be thoughtful, never to show off, and never in a way that feels like you're watching them.
+You're discreet. You use what you know about a guest to be thoughtful, never to show off, never in a way that feels like you're watching them.
+
+You're curious about people, and you show it the way a good host does,
+with easy questions. When you want to know something, you just ask it
+plainly, the way you'd ask a friend across the counter. "What's the
+occasion?" "How many of you?" You never make people work to talk to you.
+You'd never ask someone to describe or explain themselves, and handing
+someone a list of things to send you isn't something you'd ever do.
+
+You're patient. You don't need everything at once. You ask about the
+one thing that matters most and let the rest come up as you talk.
 
 You care about what the guest is actually trying to do, and you notice the details of what they wrote. You respond to their message, not to a generic version of it.
 
@@ -753,9 +908,10 @@ is okay, yes plus the fact is the whole answer.
 Never say the same thing twice in different words.
 
 Unless guests ask for the specifics, you only answer casually. That means addresses,
-prices, links, contact details, and opening times, dates.
+links, contact details, and opening times, dates.
 
 # Texting style
+Always send URLs in a separate bubble.
 Send 1 to 3 short messages.{length_clause}
 Always use obvious abbreviations. Examples: "Advertisement -> Ads". "Street -> St"
 Never use slangy words
@@ -789,6 +945,54 @@ You have genuine interest in the guests, their needs and want to help them achie
 - If an opted-out guest clearly asks to get messages again, welcome them back.`
 
 /**
+ * Price discretion, and it lives in BLOCK 2 - AFTER the venue's facts and not
+ * in the frame's `# Rules` - because the thing it has to beat is a sentence in
+ * those facts.
+ *
+ * WHAT IT IS FOR: the venue's own material carries a price on nearly
+ * everything, and a guest who asked whether something exists was getting the
+ * charge thrown in. Measured on v2.22.0-draft before this section existed:
+ * 25% of replies to eight questions that ask nothing about cost quoted a price
+ * (10/40, n=5). Every one of those ten was the same defect - Le Mil's brief
+ * says "Oat milk is the only non dairy option and costs $0.25 extra", one
+ * sentence welding a price to an availability fact, and the model reproduced
+ * the sentence whole on both "do you have oat milk?" (5/5) and "what milk do
+ * you use?" (5/5). The other six questions were already clean.
+ *
+ * WHY POSITION, NOT WORDING, WAS THE PROBLEM. The frame already said "never
+ * volunteer price unless asked" and listed prices among the things to "only
+ * answer casually", and both lost to that one sentence: later beats earlier in
+ * a composed prompt, and block 2 is later than the frame. A fourth restatement
+ * in the frame would have lost the same way. Those two weaker mentions are
+ * GONE rather than kept alongside this - the prompt's own rule is never to say
+ * the same thing twice in different words, and three half-rules in three
+ * registers is what let the brief win.
+ *
+ * THE UNWELDING SENTENCE IS THE LOAD-BEARING ONE: "where something above
+ * states a price in the same breath as another fact, those are two facts". It
+ * is what makes this generic rather than a rule about oat milk - any venue
+ * whose brief couples a charge to a fact gets the same treatment, and nothing
+ * here names an item, a venue or a figure.
+ *
+ * The last sentence is NOT padding. Without it the rule reads as "prices are
+ * sensitive" and suppresses the answer to "how much is a latte" - which is why
+ * the harness measuring this carries a quote set as a ceiling
+ * (`scripts/measurement/price-discretion.ts`).
+ *
+ * Shared by both block-2 variants, briefed and profile-rendered, because a
+ * rendered venue profile lists a price on every menu item too.
+ */
+const V2_PRICE_IS_ITS_OWN_FACT = `# Price is its own fact
+
+What you know carries a price on nearly everything. A price is part of your
+answer only when the guest asked what something costs. Asking whether you have
+something, what it's like, what's in it, or whether it can be made a certain
+way is not asking what it costs, and what an extra or an add-on costs is a
+price too. Where something above states a price in the same breath as another
+fact, those are two facts, and the one they did not ask for stays unsaid. When
+a guest does ask what something costs, give the figure plainly.`
+
+/**
  * Block 2: the venue's own material. Changes only when an owner edits it, so
  * this is THE LAST STABLE THING IN THE PROMPT AND THE CACHE BREAKPOINT GOES
  * AFTER IT.
@@ -801,6 +1005,8 @@ You have genuine interest in the guests, their needs and want to help them achie
 export const V2_HOUSE_SECTIONS = `# Information about the business you are presenting.
 
 {venue_profile}
+
+${V2_PRICE_IS_ITS_OWN_FACT}
 
 # How you sound
 
@@ -823,20 +1029,29 @@ export const V2_HOUSE_SECTIONS = `# Information about the business you are prese
  * `V2_HOUSE_SECTIONS` stays byte-identical to its pre-v2.18.0 self, which is
  * what makes this bump a no-op for every venue whose brief is NULL.
  *
- * `# How you sound` LEFT IN v2.19.0 (owner-ruled 2026-10-13). A briefed venue
- * no longer sees its voice pack at all, so this is the one block in the prompt
- * with a single section - and `{voice_pack}` is now rendered for an UNBRIEFED
- * venue only, which is the only place `ComposeInput.voicePack` still reaches.
- * That is deliberate, not a leftover: do not "tidy" the input away.
+ * `# How you sound` LEFT IN v2.20.0 AND CAME BACK IN v2.22.0 (owner-ruled
+ * 2026-10-15, "keep my own reply examples"). The cut lasted two days; what it
+ * bought and what the restoration gives back is on V2_PROMPT_VERSION. The
+ * short version: the pack sits later in the prompt than the frame and
+ * out-ranks it by proximity, so a venue whose own corpus carries emoji, a
+ * spelled-out number or a scripted name-ask is arguing with `# Texting style`
+ * again - and the measured account of how the team actually writes is back in
+ * the prompt, which is what decision 0010 is about.
  *
- * What it settles and what it costs is on V2_PROMPT_VERSION. The short
- * version: the pack sat later in the prompt than the frame and out-ranked it
- * by proximity, and now nothing in a briefed prompt argues against the frame,
- * including nothing measured from how the venue's own team writes.
+ * IT IS IN BLOCK 2, NOT HOUSE NOTES, which is where the owner's own document
+ * had it. The pack is static per venue, so here it caches behind the one
+ * breakpoint; in HOUSE NOTES it would re-send ~5,700 chars on every turn for
+ * the one thing the cut was made to take away, proximity.
  */
 export const V2_HOUSE_SECTIONS_BRIEFED = `# What you know
 
-{knowledge_brief}`
+{knowledge_brief}
+
+${V2_PRICE_IS_ITS_OWN_FACT}
+
+# How you sound
+
+{voice_pack}`
 
 /**
  * EVERYTHING VOLATILE, as the LAST SYSTEM BLOCK (owner-ruled 2026-10-09).
@@ -873,37 +1088,62 @@ export const V2_HOUSE_SECTIONS_BRIEFED = `# What you know
  * is here because it cannot be anywhere else: it is derived from the clock, so
  * blocks 1 and 2 are closed to it by construction (compose.ts's header, and
  * lib/relationship/CLAUDE.md on why `renderVenueProfile` taking `now` is safe
- * only because no reader of it is live). It leads the block for the same
- * reason `## What you know` used to - furthest in here from the guest's
- * message.
+ * only because no reader of it is live). SINCE v2.22.0 IT IS THE ONLY SECTION
+ * HERE on an inbound turn - the clock, and on an outreach turn the note.
+ *
+ * WHAT LEFT, owner-ruled 2026-10-15 ("we should disable these sections", after
+ * reading them in the playground and saying they were not expected): the state
+ * line and mission, the guest profile, the interaction memory, and the open
+ * moves with their header. The four of them WERE this block; what remains is
+ * the one line that is not about the guest at all.
+ *
+ * WHAT THAT TURNS OFF, stated in full because none of it fails loudly:
+ *
+ *  - NO MISSION. The graph still resolves a state and the gate still reads
+ *    `stateKey` (policies condition on it), but the model is no longer told
+ *    what the house is trying to do at this stage. `relationship_graphs` rows
+ *    and `guest_relationship_states` are untouched; the mission text is simply
+ *    not rendered anywhere.
+ *  - NO PURSUIT MECHANISM. The moves header is the unit v2.11.0's
+ *    leave-one-out named as the one governing whose turn the question is -
+ *    dropping it was the only one of 22 units that restored an answer, 3/3.
+ *    Asking is now entirely the frame's own curiosity paragraph (v2.22.0), and
+ *    `bare-hey` and `turn-one-move` are where that shows up. Every pursuit bar
+ *    in the regression harness was ALREADY unmeasurable with the assessor off,
+ *    so this does not change a green to a red; it changes what the agent does.
+ *  - NO PROFILE OR MEMORY IN THE PROMPT. Both were written only by the
+ *    assessor, which is off (`ASSESSOR_ENABLED`), so both sections could only
+ *    ever render their fallback sentences - "Nothing on file yet" above a
+ *    transcript that said otherwise was the 2026-10-08 cold-latte failure.
+ *    IF THE ASSESSOR COMES BACK ON, it will write a profile and a memory that
+ *    nothing renders. That is the thing to re-add here first.
+ *  - THE JUDGE'S BRIEF IS NOW THE CLOCK. `composePrompt` returns this block as
+ *    `guestState` and the judge takes it as `situationBrief`, so Recognition
+ *    and Reading the guest are scored against one line. The `tested` flag is
+ *    what keeps that honest rather than a filler 3 (lib/eval/judge.ts).
+ *
+ * THE COMPOSER STILL RECEIVES ALL FIVE INPUTS, and that is deliberate: every
+ * archived set from v2.17.0 to v2.21.0 carries their placeholders, and `fill`
+ * ignores a value whose placeholder is absent. Do not tidy them out of
+ * `ComposeInput` - the same note `voicePack` carries.
  */
 export const V2_GUEST_STATE = `HOUSE NOTES (yours alone - the guest never sees this)
 
 ## Right now
-{now_line}
-
-## Where this relationship stands
-{state_line}
-Your aim right now: {mission}
-
-## This guest
-{guest_profile}
-
-## What you have asked and offered before
-{interaction_memory}
-
-## What you're trying to learn at this stage
-These are open in parallel - pick whichever fits this moment best; your one question is for these, unless the guest shows trouble or hurry. If one was raised before and went nowhere, let it rest.
-{open_moves}{followup_note}`
+{now_line}{followup_note}`
 
 /**
  * The outreach section, filling `{followup_note}` on an OUTREACH turn only -
  * an inbound turn fills '' and composes byte-identically to v2.20.0. Leading
- * blank lines are the join with `{open_moves}` above. `{hours_quiet}` is the
+ * blank lines are the join with `{now_line}` above (they joined `{open_moves}`
+ * until v2.22.0 emptied this block of everything else). `{hours_quiet}` is the
  * one substitution, done by the composer.
  *
  * It sits LAST in HOUSE NOTES deliberately: proximity is authority, and the
- * outreach turn exists for this thread and nothing else.
+ * outreach turn exists for this thread and nothing else. Since v2.22.0 it is
+ * also the only thing in here besides the clock, so on an outreach turn this
+ * note IS the brief - which is the one place that bump made the block stronger
+ * rather than thinner.
  */
 export const V2_FOLLOWUP_NOTE = `
 

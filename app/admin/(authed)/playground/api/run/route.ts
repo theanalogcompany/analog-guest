@@ -15,6 +15,10 @@ import { DEFAULT_RELATIONSHIP_GRAPH } from '@/lib/relationship/default-graph'
 import { parseRelationshipGraph } from '@/lib/relationship/schema'
 import { runTurn } from '@/lib/relationship/run-turn'
 import { GOLDEN_FOLLOWUP_TRIGGERS } from '@/lib/schemas/golden'
+import {
+  DeclaredMediaSchema,
+  TemplateBlocksSchema,
+} from '@/lib/schemas/playground'
 import type { RunResponseBody } from '../../_lib/types'
 import {
   draftV1ForReplay,
@@ -33,6 +37,18 @@ import {
 // No PostHog, no Langfuse spans of its own. The operator is staring at the
 // trace - they ARE the observability surface, same posture as the voices
 // regenerate route.
+
+/**
+ * The link the v1 arm is given for a photo uploaded in the playground, which
+ * has no link of its own.
+ *
+ * `.invalid` IS RESERVED (RFC 2606) and can never resolve, which is the point:
+ * v1's sandbox arm writes the link onto a synthetic bodyless row and reads its
+ * extension, and nothing on that path fetches it. A plausible-looking URL here
+ * would be a thing that might one day be requested.
+ */
+const UPLOADED_PHOTO_PLACEHOLDER_URL =
+  'https://playground.invalid/uploaded-photo.jpg'
 
 // Three sequential model calls (generate, then judge/assessor concurrent)
 // plus retrieval: 15-45s observed. 120 gives headroom without letting a hung
@@ -97,6 +113,11 @@ const OverridesSchema = z.object({
   // `resolveV2TemplateSet` fails open to the current template with a warning.
   // A hard enum here would reject the whole saved turn over a fixture.
   templateVersion: z.string().max(40).optional(),
+  // The template's own blocks, hand-edited, placeholders intact - the prompt
+  // lab's template mode. ONE DEFINITION, shared with the saved conversation
+  // (lib/schemas/playground.ts), for the reason that file gives: a turn this
+  // route accepted must save, and a saved turn must re-run.
+  templateBlocks: TemplateBlocksSchema.optional(),
   voicePackText: z.string().optional(),
   venueProfileText: z.string().optional(),
   // Hand-edited SYSTEM blocks, replaced by label. Capped at the order of the
@@ -141,7 +162,7 @@ const PostBodySchema = z
     inbound: z.array(z.string().min(1)).max(10),
     /**
      * What the guest sent besides words, STATED rather than stored - a golden
-     * scenario's links, mirroring `DeclaredTurnMedia`.
+     * scenario's links, or a photo uploaded in the playground and described.
      *
      * BOTH ARMS GET IT, from this one field: v2 as `declaredMedia`, v1 as the
      * bodyless attachment row `materializeTranscript` writes. Without it the
@@ -149,12 +170,13 @@ const PostBodySchema = z
      * a text turn on both arms - a row a human then judged as though the
      * photo had been there.
      *
-     * Links only, no description: nothing looks at the image on either arm,
-     * so the extension is all either one reads (lib/eval/golden-turn.ts).
+     * IT IS NO LONGER LINKS-ONLY. An uploaded photo has no link, and the
+     * describe endpoint beside this one has already looked at it, so the
+     * description rides here - which is the whole of what any prompt ever
+     * learns about a picture. `DeclaredMediaSchema` is shared with the saved
+     * conversation so a turn that ran can also be stored and re-run.
      */
-    media: z
-      .object({ mediaUrls: z.array(z.string().url()).min(1).max(10) })
-      .optional(),
+    media: DeclaredMediaSchema.optional(),
     sessionHistory: z.array(HistoryTurnSchema).max(200).optional(),
     session: SessionSchema.optional(),
     overrides: OverridesSchema.optional(),
@@ -473,7 +495,21 @@ async function runV1Arm(
             // attachment row both webhooks store - so the two arms answer a
             // turn that mentions the same photo rather than one of them
             // answering a turn without it.
-            mediaUrls: body.media?.mediaUrls,
+            //
+            // AN UPLOADED PHOTO HAS NO LINK, and v1 reads a link for its
+            // extension and nothing else (it never fetches one on a sandbox
+            // run), so it is handed a placeholder whose extension says photo.
+            // The alternative is the failure this field was added to fix,
+            // one arm answering a turn the other one's guest never sent.
+            ...(body.media === undefined
+              ? {}
+              : {
+                  mediaUrls:
+                    body.media.mediaUrls !== undefined &&
+                    body.media.mediaUrls.length > 0
+                      ? body.media.mediaUrls
+                      : [UPLOADED_PHOTO_PLACEHOLDER_URL],
+                }),
             // Undefined stays slot 0 inside the arm, so the playground's own
             // behaviour is unchanged. A fan-out caller (/admin/tests/human-eval)
             // passes its worker index.

@@ -95,6 +95,7 @@ import {
   REGRESSION_SCENARIOS,
 } from '@/lib/eval/regression-scenarios'
 import { countEmoji } from '@/lib/ai/emoji-cadence'
+import { extractUrls } from '@/lib/ai/url-detector'
 import { EITHER_OR_QUESTION } from '@/lib/ai/v2/normalize-output'
 import { loadVoicePack } from '@/lib/rag/voice-pack'
 import {
@@ -195,6 +196,25 @@ const REGISTER_PATTERNS: Array<{ tell: RegressionTell; pattern: RegExp }> = [
 const DASH_PATTERN = /—|\s–\s/
 
 /**
+ * v2.22.0: `Always send URLs in a separate bubble`. Not a REGISTER_PATTERN
+ * because the breach is a RELATION between a bubble's link and the rest of
+ * it, not a phrase.
+ *
+ * `extractUrls` is the link half, reused rather than re-expressed: it is the
+ * one definition of what a draft sends (lib/policy/gate.ts says so), and it
+ * wants a scheme or a path - so a bare "lemils.com" in a sentence is prose,
+ * not a link, and does not breach. The prose half is any word surviving the
+ * removal of every link, which is what the line forbids and nothing softer:
+ * "here: <link>" breaches on the same rule as a paragraph with a link in it.
+ */
+function sharesBubbleWithProse(bubble: string): boolean {
+  const urls = extractUrls(bubble)
+  if (urls.length === 0) return false
+  const rest = urls.reduce((text, url) => text.replace(url, ' '), bubble)
+  return /[a-z0-9]/i.test(rest)
+}
+
+/**
  * Every tell `bubbleBreaches` can produce: the pattern list plus the four
  * checked by their own code below. Hand-written because that is what it is
  * asserting - `assertLiveTells` compares it to the list the admin page
@@ -207,6 +227,7 @@ const EMITTED_TELLS: RegressionTell[] = [
   'dash',
   'either-or',
   'two-questions',
+  'url-bubble',
 ]
 
 function normalize(text: string): string {
@@ -302,6 +323,7 @@ async function checkBubbles(
     // Same pattern the generation-seam strip uses (one definition): a hit
     // here means a shape stripEitherOrQuestion did not catch.
     if (EITHER_OR_QUESTION.test(bubble)) add('either-or', bubble)
+    if (sharesBubbleWithProse(bubble)) add('url-bubble', bubble)
     for (const { tell, pattern } of REGISTER_PATTERNS) {
       if (pattern.test(bubble)) add(tell, bubble)
     }
@@ -742,6 +764,12 @@ async function importRunLog(
         // asserting it on every unknown scenario would fail every imported
         // run. Off, like the bars.
         expectEmptyReply: false,
+        // Off for the identical reason, and the reason is sharper here: a
+        // quoted price is CORRECT when the guest asked what something costs,
+        // and the script is what says whether they did. With no definition
+        // there is no script, so this ceiling would fail every imported run
+        // that answered a price question properly.
+        forbidVolunteeredPrice: false,
       },
       samples,
       BAR_MIN,

@@ -31,7 +31,11 @@ import {
   replaceSystemText,
   type PromptBlockOverride,
 } from '@/lib/ai/v2/prompt-text'
-import { resolveV2TemplateSet } from '@/lib/ai/v2/template-archive'
+import {
+  applyV2TemplateBlocks,
+  resolveV2TemplateSet,
+  type V2TemplateBlocks,
+} from '@/lib/ai/v2/template-archive'
 import { retrieveKnowledgeContext } from '@/lib/rag/retrieve'
 import {
   renderVenueProfile,
@@ -172,6 +176,29 @@ export interface TurnOverrides {
    * this is resolved before the sections are built rather than at compose time.
    */
   templateVersion?: string
+  /**
+   * The TEMPLATE'S OWN BLOCKS, hand-edited, with their `{placeholders}` still
+   * in them - the prompt lab's template mode.
+   *
+   * THE DIFFERENCE FROM `systemText`, which is the whole reason both exist:
+   * `systemText` replaces the composed OUTPUT, so it carries one venue's data,
+   * one guest's HOUSE NOTES and one moment's clock, and the composer is out of
+   * the loop. This replaces the TEMPLATE, so every question in a sweep still
+   * gets its own venue data and its own brief filled in - which is what makes
+   * an edit measured here the same thing that would ship if it were promoted
+   * into `lib/ai/v2/template.ts`.
+   *
+   * Layered onto whatever `templateVersion` resolved to, strings only, and an
+   * edit that adds a placeholder or names a block the version does not carry
+   * FAILS THE TURN. `applyV2TemplateBlocks` holds all of it.
+   *
+   * It composes with `systemText` and `promptBlocks` in the only order that
+   * makes sense, and is therefore the WEAKEST of the three: this builds the
+   * blocks, then a block override replaces one by label, then `systemText`
+   * replaces all of them. A turn sending both edits the template and then
+   * throws the result away, which the trace shows.
+   */
+  templateBlocks?: V2TemplateBlocks
   /**
    * The model and its call parameters, for a human comparing two models on one
    * turn. Absent means production's: `V2_GENERATION_MODEL`'s profile, no
@@ -756,7 +783,25 @@ export async function runTurn(input: RunTurnInput): Promise<TurnTrace> {
 
   // The template this turn composes on, resolved HERE and not at compose time,
   // because an archived version can need a lane the current one deleted.
-  const templates = resolveV2TemplateSet(o.templateVersion)
+  const resolvedTemplates = resolveV2TemplateSet(o.templateVersion)
+
+  // Hand-edited template blocks, layered on. REFUSED EDITS DO NOT COMPOSE:
+  // the turn falls back to the resolved set so the trace still shows a real
+  // prompt, and generation is refused below with the reason - the same shape
+  // as the outreach refusals, and for the same reason. A composed prompt with
+  // an operator's edit silently dropped is the one outcome worth more than a
+  // dead turn.
+  //
+  // Layered BEFORE the retrieval lane reads `usesRetrieval`, which an edit
+  // cannot change, so the lane is the resolved version's either way.
+  const templateOverride =
+    o.templateBlocks === undefined
+      ? null
+      : applyV2TemplateBlocks(resolvedTemplates, o.templateBlocks)
+  const templates =
+    templateOverride?.ok === true ? templateOverride.set : resolvedTemplates
+  const templateBlocksError =
+    templateOverride?.ok === false ? templateOverride.error : null
 
   // RETRIEVAL IS BACK ONLY FOR A VERSION THAT HAD IT. v2.18.0 dropped the call;
   // running v2.17.0's wording with its `{knowledge}` placeholder fed by nothing
@@ -1000,6 +1045,14 @@ export async function runTurn(input: RunTurnInput): Promise<TurnTrace> {
     // the moves header's "your one question is for these" would argue with
     // the outreach note's "pick the thread up", and later-beats-earlier is a
     // lever, not a guarantee. An explicit playground override still wins.
+    //
+    // THE CURRENT TEMPLATE RENDERS NONE OF THIS (v2.22.0 emptied HOUSE NOTES
+    // down to the clock), so this value reaches a prompt only on an archived
+    // set that still carries `{open_moves}` - v2.17.0 through v2.21.0. It is
+    // computed either way because the trace reports what the engine decided,
+    // which is what keeps the graph viewer and the move-status render honest
+    // about a mechanism the prompt has stopped reading. Same reasoning as
+    // `venueProfile`, which the briefed path also ignores.
     openMoves:
       o.openMovesText ??
       (input.outreach !== undefined ? '' : renderOpenMoves(moves, memory)),
@@ -1109,6 +1162,28 @@ export async function runTurn(input: RunTurnInput): Promise<TurnTrace> {
           },
     composed,
   }
+
+  // A REFUSED TEMPLATE EDIT is a dead turn, checked first because it is about
+  // the prompt itself: an outreach turn on an unusable edit should report the
+  // edit, not the lane. `applyV2TemplateBlocks` says what it refuses and why,
+  // and the error names the block and the placeholder - a sweep of 62
+  // questions must not spend 62 generations discovering a typo, which is also
+  // why the lab validates with the same function before it starts.
+  if (templateBlocksError !== null)
+    return {
+      ...base,
+      situations: null,
+      generation: {
+        ok: false,
+        error: `the template edit was refused, so this turn composed on ${resolvedTemplates.version} as it ships: ${templateBlocksError}`,
+      },
+      semantic: null,
+      gate: null,
+      judge: null,
+      actualJudge: null,
+      assessor: null,
+      totalDurationMs: Date.now() - started,
+    }
 
   // An outreach turn that cannot run honestly is a DEAD TURN, never a turn
   // quietly composed as something else. Three refusals, each named for the

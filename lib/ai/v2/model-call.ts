@@ -114,8 +114,13 @@ export function resolveV2Effort(
 /**
  * v2 generation is a SWITCH, not a constant (owner-ruled 2026-10-12: "v2
  * only", then "leave it as a switch for now"). `V2_GENERATION_MODEL` selects
- * a profile; unset means 4.6, which is the behaviour every measured lesson in
- * `lib/ai/v2/template.ts` was measured on.
+ * a profile; unset means `V2_DEFAULT_MODEL_KEY`, which is Sonnet 5.5 as of
+ * 2026-10-15.
+ *
+ * THAT DEFAULT MOVED, and what it costs is on `V2_DEFAULT_MODEL_KEY`. The
+ * short version: every measured lesson in `lib/ai/v2/template.ts` was taken
+ * on 4.6, so those numbers are now evidence about a model the default is no
+ * longer on. Set `V2_GENERATION_MODEL=sonnet-4-6` to reproduce any of them.
  *
  * WHY A PROFILE AND NOT A MODEL ID. The two models disagree on how the call
  * must be MADE, so a bare string switch would send 5.5 parameters it rejects
@@ -181,7 +186,34 @@ export interface V2ModelProfile {
   forcesOutputFormat: boolean
 }
 
-export const V2_DEFAULT_MODEL_KEY = 'sonnet-4-6'
+/**
+ * What a v2 turn generates on when `V2_GENERATION_MODEL` is unset.
+ *
+ * SONNET 5.5 AS OF 2026-10-15 (owner-ruled, "sonnet 5.5 for v2 default"),
+ * from 4.6. Three things follow, and none of them fails loudly:
+ *
+ *  1. EVERY NUMBER IN THE TEMPLATE CHANGELOG WAS MEASURED ON 4.6. They are
+ *     evidence about a prompt on that model, not about the wording, and the
+ *     harnesses print which profile ran - read that line before citing one.
+ *     `V2_GENERATION_MODEL=sonnet-4-6` reproduces them exactly.
+ *  2. NO `temperature`. 5.5 rejects the parameter, so `sendsTemperature` is
+ *     false and `V2_GENERATE_TEMPERATURE` does not reach the call. That knob
+ *     was ruled in on 2026-10-05 to suppress question stacking and register
+ *     drift, and on the 8-scenario probe of 2026-10-12 those are exactly the
+ *     two 5.5 breached (`two-questions`, `call-you`) where 4.6 breached none.
+ *     Suppressing them is now copy's job, and the frame rewritten on
+ *     2026-10-14 is the copy that has to do it.
+ *  3. The probe also put 5.5 at 6/8 against 4.6's 7/8, with one
+ *     `unverified_link` - a link in a guest-facing reply the gate could not
+ *     verify, the only failure of a different kind either model produced.
+ *     Neither cell is stable at n=6: with no temperature there is no head of
+ *     the distribution, so a per-scenario verdict on 5.5 is a sighting.
+ *
+ * So this default is a decision about which model the product ships on, taken
+ * knowing the measurements say the other one scored higher on a small probe.
+ * The regression run on the current template is what would argue with it.
+ */
+export const V2_DEFAULT_MODEL_KEY = 'sonnet-5-5'
 
 /**
  * `satisfies` rather than a bare record, so the keys are a closed set the
