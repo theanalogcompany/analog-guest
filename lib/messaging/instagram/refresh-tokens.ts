@@ -33,8 +33,9 @@
 // stays as a redundant net rather than the primary.
 //
 // THE GRAPH CALL ITSELF lives in oauth-exchange.ts beside the long-lived
-// exchange: same host, same shape, and the same documented deviation about
-// header auth. It uses the Graph ROOT, not the versioned base, because that
+// exchange: same host, same shape, and the token in the query string as Meta
+// documents (header auth was refused in production; that file's header says
+// what keeps the URL from leaking). It uses the Graph ROOT, not the versioned base, because that
 // is where Meta documents `refresh_access_token` — going through graphRequest
 // prefixed /v25.0 and contradicted the comment stating the fact, on the one
 // call that runs unattended for sixty days (found in code review).

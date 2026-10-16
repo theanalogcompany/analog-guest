@@ -4,7 +4,9 @@
 // WHY NOT ALL OF THIS THROUGH graph.ts. The code exchange happens against
 // `api.instagram.com`, form-encoded, with the app secret in the BODY — a
 // different host and a different shape from graph.ts's Bearer-header JSON
-// convention. The other two are ordinary Graph calls and do go through it.
+// convention. The long-lived exchange and the refresh live at the Graph root
+// with the token in the query (below). Only the account read and the webhook
+// subscription are ordinary Graph calls, and those go through graph.ts.
 //
 // THE TOKEN IS IN THE QUERY ON TWO CALLS, AND ONLY TWO. `ig_exchange_token`
 // and `refresh_access_token` send `access_token` in the query string, which
@@ -12,7 +14,7 @@
 // goes in a URL, because URLs reach request logs and error messages, so these
 // two first shipped with the token in the Authorization header instead.
 // graph.instagram.com REFUSED that in production: the first real connect
-// (2026-10-16, Le Mil's test venue) failed at the long-lived exchange with
+// (2026-10-16 UTC, Le Mil's test venue) failed at the long-lived exchange with
 // code 100, HTTP 400, fbtrace Am3ogLhjud8Bdg1cHm2TvJu. Refresh has the same
 // shape and would have failed on every attempt. Every other Graph call still
 // goes through graph.ts with header auth; do not widen the query form beyond

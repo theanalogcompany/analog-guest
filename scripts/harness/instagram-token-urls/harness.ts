@@ -6,7 +6,7 @@
 //
 // WHY IT EXISTS. The long-lived exchange and the token refresh put the access
 // token in the query string, because graph.instagram.com refused header auth
-// on both in production (2026-10-16). That is only safe while no URL is ever
+// on both in production (2026-10-16 UTC). That is only safe while no URL is ever
 // logged, returned, or put in an error. Nothing else enforces that, and the
 // easy regression is a well-meant `console.error(url)` or `e.message` on a
 // failure path nobody exercises.
@@ -410,7 +410,24 @@ function sourceChecks(): Check[] {
   const raw = readFileSync('lib/messaging/instagram/oauth-exchange.ts', 'utf8')
   const code = raw.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '')
   const rootUrlBuilds = code.match(/\$\{INSTAGRAM_GRAPH_ROOT_URL\}/g) ?? []
+  const importSources = [...code.matchAll(/\bfrom\s+'([^']+)'/g)].map(
+    (m) => m[1],
+  )
+  const tokenQueryKeys = code.match(/\baccess_token:/g) ?? []
   return [
+    [
+      // Every leak check above watches the result and the console. A new
+      // import is a new place a URL could go (a span, an alert, a capture)
+      // that they do not watch, so it has to come with a check here.
+      'the module imports nothing but ./graph',
+      importSources.length > 0 && importSources.every((s) => s === './graph'),
+      importSources.join(', '),
+    ],
+    [
+      'access_token is a query key in exactly the two getGraphRoot calls',
+      tokenQueryKeys.length === 2,
+      `${tokenQueryKeys.length} found`,
+    ],
     [
       'the module never calls console',
       !/\bconsole\s*\./.test(code),

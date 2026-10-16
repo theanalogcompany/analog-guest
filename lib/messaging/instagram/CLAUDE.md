@@ -173,7 +173,7 @@ guarded outbound modules and four non-outbound callers need credentials.
 
 **The token is in the query string on exactly two calls.** `ig_exchange_token` and
 `refresh_access_token` first sent it in the Authorization header, against Meta's docs, to keep
-tokens out of URLs. `graph.instagram.com` refused that in production (2026-10-16, code 100 at
+tokens out of URLs. `graph.instagram.com` refused that in production (2026-10-16 UTC, code 100 at
 the long-lived exchange), so both now use Meta's documented query form, through one helper in
 `oauth-exchange.ts`. Every other call keeps header auth. What makes the query form safe is
 that no URL built there is logged, returned or put in an error, including on a network throw;
