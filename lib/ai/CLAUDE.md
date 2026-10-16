@@ -10,8 +10,13 @@ Loads only when you work in this directory. Prompt **copy** rules live in
 anything analytical or idempotent.
 
 **v2 generation is the one exception, and it is a switch.** `V2_GENERATION_MODEL` picks a key
-in `V2_MODEL_PROFILES` (`v2/model-call.ts`); unset means `claude-sonnet-4-6`, so nothing moves
-by default. That module holds everything about how a v2 call may be made - profiles, effort
+in `V2_MODEL_PROFILES` (`v2/model-call.ts`); unset means `claude-sonnet-5-5` as of 2026-10-15,
+owner-ruled. v1 is untouched and still on `claude-sonnet-4-6` - that is the whole reason the
+two are split.
+**Every measured v2 lesson predates that move**, so set `V2_GENERATION_MODEL=sonnet-4-6` to
+reproduce one, and note that 5.5 rejects `temperature`, which is the knob question stacking
+and register drift were being suppressed with. `V2_DEFAULT_MODEL_KEY`'s own header has the
+numbers. That module holds everything about how a v2 call may be made - profiles, effort
 levels, the token and temperature constants - and **imports no provider SDK**, so the
 playground's model picker and the Zod boundaries can read it without pulling
 `@ai-sdk/anthropic` into a browser bundle or a schema module. `client.ts` keeps only the
