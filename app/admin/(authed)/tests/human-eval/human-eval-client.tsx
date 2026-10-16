@@ -304,6 +304,41 @@ export function HumanEvalClient({
       return created.data.session
     }, [session, venueId])
 
+  /**
+   * Open a fresh pass and go to it.
+   *
+   * NOT `ensureSession`, WHICH IS THE WHOLE POINT. That one returns the pass
+   * already on screen and only ever creates when there is none, so before this
+   * existed a venue with one pass could not start a second and a venue whose
+   * pass was submitted was stuck on a read-only page for good.
+   *
+   * Navigates rather than setting state, so the loader re-runs and the picker,
+   * the counts and the provenance line all describe the new pass. The id is
+   * named explicitly instead of trusting "newest wins": the loader deliberately
+   * skips passes generated under older code, and a brand new pass is only
+   * current until someone edits a prompt.
+   *
+   * Generates nothing. A pass is a cheap empty row; the 58 x 2 live
+   * generations are the Generate button, priced on its label.
+   */
+  const onNewPass = useCallback(() => {
+    if (venueId === null || busy) return
+    if (
+      !window.confirm(
+        'Start a new pass against the current engine? The pass on screen is left exactly as it is.',
+      )
+    )
+      return
+    void (async () => {
+      const created = await postPass(venueId)
+      if (!created.ok) {
+        setFatal(created.error)
+        return
+      }
+      window.location.search = `?venue=${venueId}&session=${created.data.session.id}`
+    })()
+  }, [venueId, busy])
+
   const onGenerate = useCallback(() => {
     if (busy || venueId === null || readOnly) return
     setBusy(true)
@@ -507,6 +542,7 @@ export function HumanEvalClient({
         onGenerate={onGenerate}
         onCancel={onCancel}
         onSubmit={onSubmit}
+        onNewPass={onNewPass}
       />
 
       {fatal !== null ? (

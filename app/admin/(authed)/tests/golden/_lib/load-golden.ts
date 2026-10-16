@@ -21,7 +21,33 @@ import {
   type GoldenV2,
 } from '@/lib/schemas/golden'
 
+/**
+ * How many runs the page paints with no `?runs=` on the URL.
+ *
+ * ONE (owner-ruled 2026-10-15). It was 20, and every one of them came back
+ * with ITS UNITS - a full run is 62 question rows carrying both engines'
+ * replies, so a first paint was reading and rendering north of a thousand
+ * rows to show a page whose top item is the only one usually wanted. The
+ * older runs did not stop existing; they moved behind a link.
+ */
+export const INITIAL_RUNS = 1
+
+/** The ceiling on `?runs=`, unchanged: the page still states the cap it shows. */
 export const RUNS_LIMIT = 20
+
+/** How many more a "show older runs" link asks for each time. */
+export const RUNS_STEP = 5
+
+/**
+ * `?runs=` to a row count. Anything unreadable, absent or out of range falls
+ * back to the initial window rather than to the ceiling - a typo in the URL
+ * must not quietly load twenty runs' worth of units.
+ */
+export function runsParam(raw: string | string[] | undefined): number {
+  const value = Number(Array.isArray(raw) ? raw[0] : raw)
+  if (!Number.isInteger(value) || value < 1) return INITIAL_RUNS
+  return Math.min(value, RUNS_LIMIT)
+}
 
 export interface GoldenUnitView {
   question: GoldenQuestion | null
@@ -86,7 +112,10 @@ export interface GoldenPageData {
    */
   gaps: GoldenGap[]
   groups: CommitGroup[]
+  /** Runs older than the window exist - the page offers to widen it. */
   hasMoreRuns: boolean
+  /** How many runs this render asked for, so the page can offer the next step. */
+  runsShown: number
 }
 
 /**
@@ -109,7 +138,16 @@ function goldenGaps(): GoldenGap[] {
   }))
 }
 
-export const loadGoldenPage = cache(async (): Promise<GoldenPageData> => {
+export const loadGoldenPage = cache(
+  async (runsShown: number = INITIAL_RUNS): Promise<GoldenPageData> => {
+    const data = await loadGoldenRuns(runsShown)
+    return { ...data, runsShown }
+  },
+)
+
+const loadGoldenRuns = async (
+  runsShown: number,
+): Promise<Omit<GoldenPageData, 'runsShown'>> => {
   const supabase = createAdminClient()
   const byKey = new Map(GOLDEN_QUESTIONS.map((q) => [q.key, q]))
   const gaps = goldenGaps()
@@ -124,7 +162,7 @@ export const loadGoldenPage = cache(async (): Promise<GoldenPageData> => {
       'id, git_sha, git_subject, git_dirty, v1_prompt_version, v2_prompt_version, venue_open_state, clock_injected, questions_total, full_run, started_at, finished_at, venues(name)',
     )
     .order('started_at', { ascending: false })
-    .limit(RUNS_LIMIT + 1)
+    .limit(runsShown + 1)
   if (runsResult.error) {
     return {
       degraded: `golden_runs unreadable (${runsResult.error.message}) - has migration 078 been applied?`,
@@ -135,8 +173,8 @@ export const loadGoldenPage = cache(async (): Promise<GoldenPageData> => {
       hasMoreRuns: false,
     }
   }
-  const runRows = (runsResult.data ?? []).slice(0, RUNS_LIMIT)
-  const hasMoreRuns = (runsResult.data ?? []).length > RUNS_LIMIT
+  const runRows = (runsResult.data ?? []).slice(0, runsShown)
+  const hasMoreRuns = (runsResult.data ?? []).length > runsShown
 
   const unitsResult =
     runRows.length === 0
@@ -225,4 +263,4 @@ export const loadGoldenPage = cache(async (): Promise<GoldenPageData> => {
     groups,
     hasMoreRuns,
   }
-})
+}

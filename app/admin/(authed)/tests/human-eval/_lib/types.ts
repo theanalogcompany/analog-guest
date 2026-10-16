@@ -61,6 +61,18 @@ export interface HumanEvalSessionView {
    * only state in which its CSV exists (migration 084).
    */
   submittedAt: string | null
+  /**
+   * What about this pass's code state is no longer current, as a sentence, or
+   * null when it matches. Computed on load by comparing the three stamps
+   * against the code doing the comparing.
+   *
+   * A STALE PASS IS NEVER WHAT THE PAGE OPENS ON - the loader skips past it.
+   * This exists for the one that was asked for by `?session=`, where the
+   * answer is to say so rather than to refuse: a verdict given today against
+   * v2.18 is not evidence about v2.21, which is why the versions are stamped
+   * at all, and judging an old pass unknowingly is the whole failure.
+   */
+  stale: string | null
   units: HumanEvalUnitView[]
 }
 
@@ -74,6 +86,13 @@ export interface HumanEvalSessionSummary {
   judged: number
   /** Submitted passes are labelled in the picker - they are the finished ones. */
   submittedAt: string | null
+  /**
+   * Generated under code that is no longer current. Listed anyway and marked:
+   * removing them would make a submitted pass unreachable, and its CSV with
+   * it. Picking one is a deliberate act, which is the difference between this
+   * and what the page opens on by itself.
+   */
+  stale: boolean
 }
 
 export interface HumanEvalPageData {
@@ -89,7 +108,12 @@ export interface HumanEvalPageData {
    */
   excluded: Array<{ key: string; question: string; reason: string }>
   sessions: HumanEvalSessionSummary[]
-  /** The pass on screen - the newest, or the one `?session=` names. */
+  /**
+   * The pass on screen: the one `?session=` names, or the newest generated
+   * under the CURRENT code. Null when neither exists - including when passes
+   * exist but every one of them is stale, which renders as the empty state
+   * and a new pass rather than as old answers to judge.
+   */
   session: HumanEvalSessionView | null
   hasMoreSessions: boolean
 }

@@ -12,34 +12,37 @@ import { csvFilename, toCsv } from './csv'
 import type { GoldenQuestion } from '@/lib/schemas/golden'
 
 /**
- * Column order, and the header row.
+ * Column order, and the header row. SEVEN COLUMNS (owner-ruled 2026-10-15).
  *
- * `history` and `inbound` sit LEFT of the two replies on purpose: they are
- * what the engines were given, and an answer read without them is not
- * interpretable. "no record on my end, I only know what you tell me" is
+ * `history`, `inbound` and `media` sit LEFT of the two replies on purpose:
+ * they are what the engines were given, and an answer read without them is
+ * not interpretable. "no record on my end, I only know what you tell me" is
  * correct or a miss depending entirely on whether the transcript mentions an
- * order. `inbound` is also the only honest record of a burst - `question` is
- * a display label there, while the engines were handed several messages.
+ * order. `inbound` is also the only honest record of a burst, and now the only
+ * record of the question at all - `question_key`, `group` and `question` were
+ * among the eleven columns cut, and `inbound` carries that text for every
+ * scenario that does not override it.
+ *
+ * WHAT WENT, so nobody reads the cut as data that stopped being recorded: v1's
+ * category, recognition state and substitute; v2's state, gate verdict and
+ * matched rows; and both error columns. All of it is still in `golden_runs`
+ * and on the page - this is the spreadsheet's shape, not the record's.
+ *
+ * THE ERROR COLUMNS ARE THE ONE CUT WITH A CONSEQUENCE, and it is handled
+ * rather than accepted: a failed arm used to leave `v1_reply` empty with the
+ * reason in `v1_error`, so dropping the reason would turn a failure into a
+ * blank cell reading as "the engine said nothing" - the false claim the
+ * export's own comment warns about. The reason now goes in the reply cell,
+ * prefixed, so a failure is never silent and never mistaken for a reply.
  */
 export const GOLDEN_CSV_COLUMNS = [
-  'question_key',
-  'group',
-  'question',
   'history',
   'inbound',
   'media',
   'v1_reply',
   'v2_reply',
-  'v1_category',
-  'v1_recognition_state',
-  'v1_substitute',
-  'v2_state',
-  'v2_gate',
-  'v2_gate_matched',
   'v1_ms',
   'v2_ms',
-  'v1_error',
-  'v2_error',
 ] as const
 
 export type GoldenCsvRow = Record<(typeof GOLDEN_CSV_COLUMNS)[number], string>

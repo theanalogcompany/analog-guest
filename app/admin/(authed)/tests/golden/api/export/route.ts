@@ -81,42 +81,30 @@ export async function GET(request: Request): Promise<NextResponse> {
       const v1Data = v1.success ? v1.data : null
       const v2Data = v2.success ? v2.data : null
       return {
-        question_key: row.question_key,
-        group: question?.group ?? 'orphan',
-        question: question?.question ?? '(question no longer in the set)',
         // The input, beside the answers. Shared with the human-evaluation
         // export rather than built here - goldenInputCells says why, and it
         // is the one place that decides what an orphan key's transcript reads
-        // as.
+        // as. `inbound` is also where the question itself now reads, the
+        // `question` column having been cut.
         ...goldenInputCells(question),
+        // A FAILED ARM CARRIES ITS REASON HERE since the error columns went
+        // (GOLDEN_CSV_COLUMNS says why). An empty cell would read as the
+        // engine having answered with nothing, which is a different and false
+        // claim; the prefix is what stops the reason being read as a reply.
         v1_reply:
           v1Data === null
             ? 'UNREADABLE stored column'
             : v1Data.ok
               ? v1Data.bubbles.join('\n')
-              : '',
+              : `ERROR ${v1Data.stage}: ${v1Data.error}`,
         v2_reply:
           v2Data === null
             ? 'UNREADABLE stored column'
             : v2Data.ok
               ? v2Data.messages.join('\n')
-              : '',
-        v1_category: v1Data?.ok ? v1Data.category : '',
-        v1_recognition_state: v1Data?.ok ? v1Data.recognitionState : '',
-        v1_substitute: v1Data?.ok ? (v1Data.substitute ?? '') : '',
-        v2_state: v2Data?.ok ? v2Data.stateKey : '',
-        v2_gate: v2Data?.ok ? (v2Data.gateVerdict ?? '') : '',
-        v2_gate_matched: v2Data?.ok ? v2Data.gateMatched.join(' ') : '',
+              : `ERROR ${v2Data.stage}: ${v2Data.error}`,
         v1_ms: v1Data === null ? '' : String(v1Data.durationMs),
         v2_ms: v2Data === null ? '' : String(v2Data.durationMs),
-        v1_error:
-          v1Data !== null && !v1Data.ok
-            ? `${v1Data.stage}: ${v1Data.error}`
-            : '',
-        v2_error:
-          v2Data !== null && !v2Data.ok
-            ? `${v2Data.stage}: ${v2Data.error}`
-            : '',
       }
     })
 
