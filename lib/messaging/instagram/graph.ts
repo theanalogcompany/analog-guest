@@ -7,7 +7,10 @@
 //
 // The rules, the same as the webhook's (TAC-458):
 //   - The token goes in the Authorization header, never the URL. A URL ends up
-//     in error messages and request logs; a header does not.
+//     in error messages and request logs; a header does not. Two exceptions,
+//     both in oauth-exchange.ts and both forced by Meta refusing header auth:
+//     the long-lived exchange and the token refresh. That file's header says
+//     what keeps their URLs from leaking.
 //   - A failure carries Meta's error code, subcode, type and fbtrace_id, and
 //     NEVER Meta's error message. The message quotes the object it failed on
 //     ("Object with ID '...' does not exist"), which here is a guest's scoped
