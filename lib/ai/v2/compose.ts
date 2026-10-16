@@ -16,7 +16,7 @@ import { V2_TEMPLATE_CURRENT, type V2TemplateSet } from './template-archive'
 // recorded because it was quoted in three places. It used to be SIZE: at
 // ~2,100 chars (~590 tokens) the block sat under Anthropic's 1024-token
 // minimum cacheable prefix, so the breakpoint it held for months could never
-// have produced an entry. The owner's hand-written frame is 4,677 chars, which
+// have produced an entry. The owner's hand-written frame is 5,167 chars, which
 // by any chars-per-token estimate is at or past that floor, so that argument
 // is GONE.
 //

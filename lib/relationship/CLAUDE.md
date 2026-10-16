@@ -23,6 +23,18 @@ Etiquette is the model's job, informed by facts; quality is measured by the judg
 
 **Kept, untouched** (the test is "outside a single model call's reach"): coalescing, proactive spacing, the opt-out TCPA rail, the operator approval queue, Langfuse.
 
+**READ THIS BEFORE REASONING ABOUT ANY ROW IN THAT TABLE: since v2.22.0 the prompt renders
+none of it** (owner-ruled 2026-10-15, "we should disable these sections").
+HOUSE NOTES is the venue's clock and, on an outreach turn, the follow-up note.
+The state mission, the guest profile, the interaction memory and the open moves are all still
+computed, still traced, still stored - and no model reads them.
+So the moves are not the intentions' successor in behaviour today, only in design: asking is
+whatever the frame's own curiosity paragraph produces.
+What this turns off, section by section, is on `V2_GUEST_STATE` in `lib/ai/v2/template.ts`,
+and that header is the first thing to read before putting any of it back - the profile and
+memory lines matter most, because the assessor returning would write records nothing renders.
+The graph still decides a state with evidence, and the policy gate still conditions on it.
+
 **Bubble CADENCE is code, even though bubble CONTENT is the model's.**
 Every message in `messages: string[]` is ready at the same instant, so with no pacing a three-bubble reply arrives as one block.
 `bubble-pacing.ts` is the one rule: the delay before each bubble after the first is its own character count times `MS_PER_CHAR`, floored and capped.
@@ -37,8 +49,8 @@ The cache is prefix-keyed, so **one volatile section poisons everything in front
 | block | content | volatility | cached |
 | --- | --- | --- | --- |
 | system 1 ROLE | who you are, how you answer, texting style, intention, rules | static | no, see below |
-| system 2 THE HOUSE | the venue's knowledge; plus the voice pack **only for a venue with no brief** | per venue | **yes, breakpoint** |
-| system 3 HOUSE NOTES | the venue's clock, state mission, guest profile, interaction memory, open moves | per turn | no |
+| system 2 THE HOUSE | the venue's knowledge, then `# Price is its own fact`, then the voice pack - the pack for **every** venue since v2.22.0 | per venue | **yes, breakpoint** |
+| system 3 HOUSE NOTES | the venue's clock, and on an outreach turn the follow-up note - **nothing else since v2.22.0** | per turn | no |
 | turns | the transcript, then the guest's message(s), verbatim, never wrapped | per turn | no |
 
 **The transcript is not cached, and that is the price of block 3's position** (owner-ruled
@@ -71,7 +83,7 @@ carries no `V2_PROMPT_VERSION` bump.
 **Block 1 carries no breakpoint**, and **not for the reason this file gave until v2.20.0**.
 At ~590 tokens the block was under Anthropic's 1024-token minimum cacheable prefix, so the
 breakpoint it used to carry could never have produced an entry.
-The owner's hand-written frame is 4,677 chars and at or past that floor, so that argument is
+The owner's hand-written frame is 5,167 chars and at or past that floor, so that argument is
 gone.
 What holds instead: the breakpoint after block 2 already makes blocks 1 and 2 a single cached
 prefix, and a second breakpoint between them would only pay off if block 2 changed often,
@@ -83,15 +95,37 @@ v2.12.0 off-channel-redirect failure mode, which `off-channel-redirect` in the r
 harness is the tell for. It leads block 3 so it is at least the furthest thing in that block
 from the guest's message.
 
-**A briefed venue no longer sees its voice pack** (v2.20.0, owner-ruled 2026-10-13).
-`V2_HOUSE_SECTIONS_BRIEFED` is `# What you know` and nothing else, so `# How you sound` and
-its 65 approved `voice_corpus` rows reach only a venue whose brief is NULL.
-That settles the contradiction every emoji and dash entry in the template changelog flags -
-the pack sat later in the prompt than the frame and out-ranked it - and it costs the one
-measured account of how the venue's own team writes, leaving `{length_clause}` as the only
-measured input in a briefed prompt.
-`ComposeInput.voicePack` is still loaded and still rendered on the unbriefed path; it is not
-dead, do not tidy it away.
+**Every venue sees its voice pack again** (v2.22.0, owner-ruled 2026-10-15, "keep my own
+reply examples").
+v2.20.0 cut `# How you sound` from `V2_HOUSE_SECTIONS_BRIEFED` for two days; both blocks now
+carry it, so the 65 approved `voice_corpus` rows are back in a briefed prompt.
+What that reopens is the contradiction every emoji and dash entry in the template changelog
+flags: the pack sits later in the prompt than the frame and out-ranks it by proximity, so a
+breach attributed to a corpus row is a **data** decision, never a wording arm
+(`.claude/rules/v2-template-regression.md`).
+What it buys back is the only measured account of how the venue's own team writes, which is
+decision 0010's whole subject - for two days `{length_clause}` was the sole measured input in
+a briefed prompt.
+It is in **block 2**, where the pack caches behind the one breakpoint, and not in HOUSE NOTES
+where the owner's own document had it: the pack is static per venue, so HOUSE NOTES would
+re-send ~5,700 chars every turn to buy the one thing the cut was made to remove.
+
+**A rule that has to beat the brief goes in block 2, after it** (v2.23.0). The same proximity
+effect the voice pack has over the frame applies to the brief, and it is the only reason
+`# Price is its own fact` is not in the frame's `# Rules`.
+The frame already said "never volunteer price unless asked" and listed prices among the
+things to answer "casually", and both lost to one sentence of Le Mil's brief welding a charge
+to an availability fact - 25% of replies to questions that asked nothing about cost quoted a
+price (10/40, n=5, v2.22.0), and the same eight questions are 0/80 at n=10 with the section
+in (`npm run measure-price-discretion`).
+So the ordering inside block 2 is load-bearing, not cosmetic: brief, then the rules that
+override it, then the voice pack.
+A fourth restatement in the frame would have lost the same way the first two did - **the
+mechanism was position, not wording**, and the two weak mentions were removed rather than
+left to dilute it.
+The ceiling that keeps it honest is a quote set, not just a withhold set: a prompt that never
+says a number scores perfectly and cannot answer "how much is a latte"
+(`price-asked` in `REGRESSION_SCENARIOS`).
 
 **The venue's clock is in HOUSE NOTES, and that is the only block it may reach** (v2.20.0).
 `{now_line}` is `venueNowLine` over `venues.timezone` (`lib/ai/v2/now-line.ts`), because the
@@ -151,6 +185,7 @@ it came from.
 Hard predicates (`lib/relationship/schema.ts`, closed vocabulary) bound the **frontier**; the post-turn assessor chooses within it, with hysteresis, and can never promote past a failed hard predicate.
 Transitions persist in `guest_relationship_states` with `decided_by` and `evidence` - a state row without evidence is a bug.
 States are not monotonic: regression (lapsed guests) is a graph-data concern, not a code special case.
+A resolved state still reaches the **policy gate** (`decideDispatch` conditions rows on `stateKey`), and since v2.22.0 it reaches **nothing in the prompt** - the mission it carries is no longer rendered.
 
 ## The post-turn assessor and the judge
 

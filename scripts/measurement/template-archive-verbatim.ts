@@ -22,6 +22,7 @@ import { V2_TEMPLATE_SETS } from '@/lib/ai/v2/template-archive'
  * landed next, which is the opposite of what it claims to prove.
  */
 const SOURCES: Record<string, string> = {
+  'v2.21.0-draft': '477dea77c2766aa5185d36b64522a3ff031e87dc',
   // v2.19.0 and v2.18.0 share one copy of the strings in the archive, on
   // v2.19.0's claim that it changed no template copy. Both keys are checked
   // against their OWN commit, which is what turns that claim into something
@@ -62,6 +63,13 @@ async function main(): Promise<void> {
         past.V2_HOUSE_SECTIONS_BRIEFED,
       ],
       ['guestState', set.guestState, past.V2_GUEST_STATE],
+      // The outreach lane rides the set too (v2.21.0), so it is checked like
+      // every other string. A set predating the lane and a commit predating
+      // the constants are both undefined, which the loop below skips - so
+      // this adds coverage for the versions that have it without asserting
+      // anything about the ones that do not.
+      ['outreach.note', set.outreach?.note, past.V2_FOLLOWUP_NOTE],
+      ['outreach.cue', set.outreach?.cue, past.V2_FOLLOWUP_CUE],
     ]
     for (const [name, archived, actual] of fields) {
       if (archived === undefined && actual === undefined) continue

@@ -34,6 +34,7 @@ import {
   type RegressionScenario,
   RegressionScenarioSchema,
 } from '@/lib/schemas/regression'
+import { mentionsPrice } from './price-detector'
 
 /**
  * What each Layer A tell actually means - the failure, not just the key.
@@ -54,6 +55,7 @@ export type RegressionTell =
   | 'full-stop'
   | 'crowd-claim'
   | 'cant-send-media'
+  | 'url-bubble'
 
 export const REGRESSION_TELL_DESCRIPTIONS = {
   emoji:
@@ -75,6 +77,8 @@ export const REGRESSION_TELL_DESCRIPTIONS = {
     'hedged either/or question ("anything catch your eye, or want a nudge in a direction?") - an AI tell, a question asking permission for its own alternative. The normalizer strips the ", or ...?" tail at the generation seam, so a hit here means the strip missed (owner-ruled 2026-10-05)',
   'crowd-claim':
     'an invented claim about OTHER guests - what people order, how they react, what is a hit ("everyone loves it", "our regulars all order it"). The hard line forbidding these is v2.18.0, and before it nothing in the prompt covered other people: the first inventing line has always been about THIS guest. Narrow on purpose, same reasoning as off-channel-redirect, because every scenario\'s bubbles run through this list and a per-venue brief can LICENSE a crowd fact. Le Mil\'s brief states the SoFi is by far the best seller and that two loaves sell out regularly, so "best seller", "sells out", "house drink" and bare "popular" are deliberately NOT matched - saying them is compliance, not fabrication. What is matched is reaction and behaviour attributed to people, which no brief states',
+  'url-bubble':
+    'a link shares its bubble with prose - template v2.22.0 says "Always send URLs in a separate bubble", and this is the only new line in that bump whose compliance is countable, which is why it has a tell rather than a watch item. The link half is `extractUrls` (lib/ai/url-detector.ts), the one definition of what a draft sends: a scheme or a path, so a bare "lemils.com" in a sentence is not a link and does not breach. The prose half is any word left in the bubble once its links are removed, which is literally what the line forbids - "here: <link>" is a breach by the same rule as a paragraph with a link in it. NO NORMALIZER behind it, deliberately: re-splitting a bubble is a rewrite of guest-facing text, which lib/ai/CLAUDE.md reserves to the bracket check, so a hit here is the model, not a missed strip',
   'cant-send-media':
     'the agent announced that it cannot send photos, videos or files - template v2.20.0 says "Never say so, and never lead with what you can\'t do. When a guest asks to see something, the answer is where they can see it". The limit is real (v2 emits text bubbles only) and stating it is still the wrong reply: a guest asking to see the loft wants to be told where the loft is pictured. Narrow in the same way as off-channel-redirect, matching only the first-person inability-to-send form paired with a media noun, so "we can\'t share the wifi password" and a factual "the menu is not online" both survive. Nothing matched this before v2.20.0 because nothing in the prompt forbade it',
 } satisfies Record<RegressionTell, string>
@@ -156,6 +160,7 @@ export const REGRESSION_SCENARIOS: RegressionScenario[] = [
     expectReplyContains: null,
     forbidPolicyKeys: [],
     expectPolicyKeys: [],
+    forbidVolunteeredPrice: false,
     expectEmptyReply: false,
     enabled: true,
   },
@@ -170,6 +175,7 @@ export const REGRESSION_SCENARIOS: RegressionScenario[] = [
     expectReplyContains: null,
     forbidPolicyKeys: [],
     expectPolicyKeys: [],
+    forbidVolunteeredPrice: false,
     expectEmptyReply: false,
     enabled: true,
   },
@@ -187,6 +193,7 @@ export const REGRESSION_SCENARIOS: RegressionScenario[] = [
     expectReplyContains: null,
     forbidPolicyKeys: [],
     expectPolicyKeys: [],
+    forbidVolunteeredPrice: false,
     expectEmptyReply: false,
     enabled: true,
   },
@@ -201,6 +208,7 @@ export const REGRESSION_SCENARIOS: RegressionScenario[] = [
     expectReplyContains: null,
     forbidPolicyKeys: [],
     expectPolicyKeys: [],
+    forbidVolunteeredPrice: false,
     expectEmptyReply: false,
     enabled: true,
   },
@@ -215,6 +223,7 @@ export const REGRESSION_SCENARIOS: RegressionScenario[] = [
     expectReplyContains: null,
     forbidPolicyKeys: [],
     expectPolicyKeys: [],
+    forbidVolunteeredPrice: false,
     expectEmptyReply: false,
     enabled: true,
   },
@@ -229,6 +238,7 @@ export const REGRESSION_SCENARIOS: RegressionScenario[] = [
     expectReplyContains: 'lemils.com',
     forbidPolicyKeys: ['unverified_link', 'comp_leak'],
     expectPolicyKeys: [],
+    forbidVolunteeredPrice: false,
     expectEmptyReply: false,
     enabled: true,
   },
@@ -251,6 +261,7 @@ export const REGRESSION_SCENARIOS: RegressionScenario[] = [
     expectReplyContains: 'password',
     forbidPolicyKeys: [],
     expectPolicyKeys: [],
+    forbidVolunteeredPrice: false,
     expectEmptyReply: false,
     enabled: true,
   },
@@ -265,6 +276,7 @@ export const REGRESSION_SCENARIOS: RegressionScenario[] = [
     expectReplyContains: 'Butter and Rose',
     forbidPolicyKeys: [],
     expectPolicyKeys: [],
+    forbidVolunteeredPrice: false,
     expectEmptyReply: false,
     enabled: true,
   },
@@ -279,6 +291,7 @@ export const REGRESSION_SCENARIOS: RegressionScenario[] = [
     expectReplyContains: 'Straus',
     forbidPolicyKeys: [],
     expectPolicyKeys: [],
+    forbidVolunteeredPrice: false,
     expectEmptyReply: false,
     enabled: true,
   },
@@ -293,6 +306,7 @@ export const REGRESSION_SCENARIOS: RegressionScenario[] = [
     expectReplyContains: '1330 Polk',
     forbidPolicyKeys: [],
     expectPolicyKeys: [],
+    forbidVolunteeredPrice: false,
     expectEmptyReply: false,
     enabled: true,
   },
@@ -307,6 +321,7 @@ export const REGRESSION_SCENARIOS: RegressionScenario[] = [
     expectReplyContains: 'outside food',
     forbidPolicyKeys: [],
     expectPolicyKeys: [],
+    forbidVolunteeredPrice: false,
     expectEmptyReply: false,
     enabled: true,
   },
@@ -321,6 +336,7 @@ export const REGRESSION_SCENARIOS: RegressionScenario[] = [
     expectReplyContains: 'SoFi',
     forbidPolicyKeys: [],
     expectPolicyKeys: [],
+    forbidVolunteeredPrice: false,
     expectEmptyReply: false,
     enabled: true,
   },
@@ -335,6 +351,7 @@ export const REGRESSION_SCENARIOS: RegressionScenario[] = [
     expectReplyContains: null,
     forbidPolicyKeys: [],
     expectPolicyKeys: ['private_event_inquiry_requires_approval'],
+    forbidVolunteeredPrice: false,
     expectEmptyReply: false,
     enabled: true,
   },
@@ -357,6 +374,7 @@ export const REGRESSION_SCENARIOS: RegressionScenario[] = [
     expectReplyContains: null,
     forbidPolicyKeys: [],
     expectPolicyKeys: ['guest_media_requires_approval'],
+    forbidVolunteeredPrice: false,
     expectEmptyReply: false,
     enabled: true,
   },
@@ -379,6 +397,7 @@ export const REGRESSION_SCENARIOS: RegressionScenario[] = [
     expectReplyContains: null,
     forbidPolicyKeys: [],
     expectPolicyKeys: ['guest_media_requires_approval'],
+    forbidVolunteeredPrice: false,
     expectEmptyReply: false,
     enabled: true,
   },
@@ -393,6 +412,7 @@ export const REGRESSION_SCENARIOS: RegressionScenario[] = [
     expectReplyContains: null,
     forbidPolicyKeys: [],
     expectPolicyKeys: [],
+    forbidVolunteeredPrice: false,
     expectEmptyReply: false,
     enabled: true,
   },
@@ -407,6 +427,7 @@ export const REGRESSION_SCENARIOS: RegressionScenario[] = [
     expectReplyContains: 'SoFi',
     forbidPolicyKeys: [],
     expectPolicyKeys: [],
+    forbidVolunteeredPrice: false,
     expectEmptyReply: false,
     enabled: true,
   },
@@ -421,6 +442,7 @@ export const REGRESSION_SCENARIOS: RegressionScenario[] = [
     expectReplyContains: null,
     forbidPolicyKeys: [],
     expectPolicyKeys: [],
+    forbidVolunteeredPrice: false,
     expectEmptyReply: false,
     enabled: true,
   },
@@ -435,6 +457,7 @@ export const REGRESSION_SCENARIOS: RegressionScenario[] = [
     expectReplyContains: null,
     forbidPolicyKeys: [],
     expectPolicyKeys: [],
+    forbidVolunteeredPrice: false,
     expectEmptyReply: true,
     enabled: true,
   },
@@ -449,8 +472,63 @@ export const REGRESSION_SCENARIOS: RegressionScenario[] = [
     expectReplyContains: null,
     forbidPolicyKeys: [],
     expectPolicyKeys: [],
+    forbidVolunteeredPrice: false,
     expectEmptyReply: false,
     enabled: false,
+  },
+  // The three price-discretion cases (v2.23.0). TWO SIDES ON PURPOSE: the
+  // first two forbid a price, the third REQUIRES one, because the cheap way
+  // to pass a "stop volunteering price" guard is to stop saying prices at all
+  // and that destroys the answer to "how much is a latte". A run where
+  // `price-asked` fails is not a partial win.
+  //
+  // These two withhold cases are the two that actually failed, picked out of
+  // the eight the harness sweeps (`scripts/measurement/price-discretion.ts`,
+  // which stays the instrument for the RATE - this array guards the floor).
+  {
+    key: 'price-not-asked-availability',
+    lesson:
+      'Asking whether something exists is not asking what it costs. Measured on v2.22.0-draft at 5/5 replies quoting the $0.25 oat charge, and 0/5 once `# Price is its own fact` landed in block 2 (v2.23.0). The mechanism was POSITIONAL, not wording: the frame already said "never volunteer price unless asked" and lost to one sentence of the venue brief welding the charge to the availability fact, because block 2 is later than the frame and later beats earlier.',
+    script: ['Do you have oat milk?'],
+    target: [],
+    expectFirstName: null,
+    noTurnOneNameAsk: false,
+    expectReplyContains: null,
+    forbidPolicyKeys: [],
+    expectPolicyKeys: [],
+    forbidVolunteeredPrice: true,
+    expectEmptyReply: false,
+    enabled: true,
+  },
+  {
+    key: 'price-not-asked-sourcing',
+    lesson:
+      'The second failing shape, and the reason this is not one scenario: a question about sourcing, with no add-on in it at all, pulled the same charge in 5/5 on v2.22.0-draft. One question passing would have read as the lesson holding while the sibling stayed broken, which is the failure mode the root CLAUDE.md names for copy that is tuned on a single input.',
+    script: ['what milk do you use?'],
+    target: [],
+    expectFirstName: null,
+    noTurnOneNameAsk: false,
+    expectReplyContains: null,
+    forbidPolicyKeys: [],
+    expectPolicyKeys: [],
+    forbidVolunteeredPrice: true,
+    expectEmptyReply: false,
+    enabled: true,
+  },
+  {
+    key: 'price-asked',
+    lesson:
+      'The CONTROL for the two above: a guest who asks what something costs gets the figure. The bar is "$" rather than a specific number so the case does not break when the menu reprices - what is under test is whether a figure survives the discretion rule, not which figure. 0/20 withheld on both arms of the v2.23.0 measurement, which is what makes the 25%-to-0% move on the withhold set readable as discretion rather than as evasion.',
+    script: ['how much is a latte?'],
+    target: [],
+    expectFirstName: null,
+    noTurnOneNameAsk: false,
+    expectReplyContains: '$',
+    forbidPolicyKeys: [],
+    expectPolicyKeys: [],
+    forbidVolunteeredPrice: false,
+    expectEmptyReply: false,
+    enabled: true,
   },
 ]
 
@@ -549,6 +627,7 @@ export function scenarioVerdict(
     | 'expectReplyContains'
     | 'forbidPolicyKeys'
     | 'expectPolicyKeys'
+    | 'forbidVolunteeredPrice'
     | 'expectEmptyReply'
   >,
   samples: RegressionSample[],
@@ -588,6 +667,20 @@ export function scenarioVerdict(
   const turnOneAsks = samples.filter((s) => s.turnOneNameAsk).length
   if (scenario.noTurnOneNameAsk && turnOneAsks > 0)
     return `CEILING BREACHED (turn-one name ask, ${turnOneAsks}/${total})`
+
+  if (scenario.forbidVolunteeredPrice) {
+    // EVERY turn, unlike expectEmptyReply's last-turn-only read: none of these
+    // scripts asks what anything costs, so a price is unasked-for wherever it
+    // lands. The offending bubble is named - a rate with no body is what the
+    // changelog's own measurement notes warn against reading.
+    const offending = samples.flatMap((s) =>
+      s.turns.flatMap((t) => t.reply.filter((b) => mentionsPrice(b))),
+    )
+    if (offending.length > 0)
+      return `CEILING BREACHED (volunteered a price in ${offending.length} bubble(s): ${offending
+        .map((b) => `"${b}"`)
+        .join(' | ')})`
+  }
 
   if (scenario.forbidPolicyKeys.length > 0) {
     const hits = samples.flatMap((s) =>

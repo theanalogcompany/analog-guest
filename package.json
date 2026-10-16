@@ -43,7 +43,7 @@
     "measure-first-contact-replay": "tsx --env-file=.env.local scripts/measurement/first-contact-replay.ts",
     "measure-judge-variance": "tsx --env-file=.env.local scripts/measurement/judge-variance.ts",
     "measure-turn-one-move": "tsx --env-file=.env.local scripts/measurement/turn-one-move.ts",
-    "measure-template-regression": "tsx --env-file=.env.local scripts/measurement/template-regression.ts",
+    "measure-template-regression": "tsx --env-file=\"$(dirname \"$(git rev-parse --path-format=absolute --git-common-dir)\")/.env.local\" scripts/measurement/template-regression.ts",
     "verify-template-archive": "tsx scripts/measurement/template-archive-verbatim.ts",
     "measure-prose-promise": "tsx --env-file=.env.local scripts/measurement/prose-promise-catch-rate.ts",
     "measure-warm-close": "tsx --env-file=.env.local scripts/measurement/warm-close-variety.ts",
@@ -62,7 +62,8 @@
     "measure-media-history-reaction": "tsx --env-file=\"$(dirname \"$(git rev-parse --path-format=absolute --git-common-dir)\")/.env.local\" scripts/measurement/media-history-reaction.ts",
     "measure-media-describe": "tsx --env-file=\"$(dirname \"$(git rev-parse --path-format=absolute --git-common-dir)\")/.env.local\" scripts/measurement/media-describe.ts",
     "rehost-pending-attachments": "tsx --env-file=\"$(dirname \"$(git rev-parse --path-format=absolute --git-common-dir)\")/.env.local\" scripts/rehost-pending-attachments.ts",
-    "measure-golden-set": "tsx --env-file=\"$(dirname \"$(git rev-parse --path-format=absolute --git-common-dir)\")/.env.local\" scripts/measurement/golden-set.ts"
+    "measure-golden-set": "tsx --env-file=\"$(dirname \"$(git rev-parse --path-format=absolute --git-common-dir)\")/.env.local\" scripts/measurement/golden-set.ts",
+    "measure-price-discretion": "tsx --env-file=\"$(dirname \"$(git rev-parse --path-format=absolute --git-common-dir)\")/.env.local\" scripts/measurement/price-discretion.ts"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^3.0.71",
