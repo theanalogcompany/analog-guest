@@ -2885,7 +2885,19 @@ import {
 //   BASELINE RESET only for a turn that answers a check-in question. Every
 //   other prompt is byte-identical to v1.108.0.
 //
-export const PROMPT_VERSION = 'v1.109.0'
+// v1.110.0: a receipt-scan hello for a guest with an EARLIER order on file
+//   states both orders. `## Guest just arrived` gains "What they ordered last
+//   time: ..." (Square's item names) beside a bound order, and a fourth order
+//   wording is picked in place of the returning one: welcome back, today's
+//   order, last time's order, nothing else (approved 2026-10-17: "Welcome
+//   back! Today it's the {new item}. Last time you had the {past item}.").
+//   A first order, an unreadable earlier order, and an afterComplaint guest
+//   keep their existing wording.
+//
+//   BASELINE RESET only for a receipt-scan hello with an earlier order. Every
+//   other prompt is byte-identical to v1.109.0.
+//
+export const PROMPT_VERSION = 'v1.110.0'
 
 export const SYSTEM_TEMPLATE = `You work at a hospitality venue (cafe, bakery, restaurant). You communicate with its guests via iMessage, in whatever voice the venue has configured below — its own collective voice, its owner's, or a named staff member's.
 

@@ -26,6 +26,7 @@
     "run-test-scenarios": "tsx --env-file=.env.local scripts/run-test-scenarios.ts",
     "ingest-response-review": "tsx --env-file=.env.local scripts/ingest-response-review.ts",
     "seed-venue": "tsx --env-file=.env.local scripts/seed-venue.ts",
+    "square-fake-sale": "tsx --env-file=.env.local scripts/square-fake-sale.ts",
     "square-e2e": "tsx --env-file=.env.local scripts/square-e2e.ts",
     "pos-scan-code": "tsx --env-file=.env.local scripts/pos-scan-code.ts",
     "passport-check": "tsx scripts/harness/passport/harness.ts",

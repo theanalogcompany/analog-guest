@@ -40,20 +40,26 @@
 //     terminal, no card and no cloud propagation to measure. A number from here
 //     would be unrelated to the real one, not a cautious estimate of it.
 
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 
+import { GET as getPrintJobs } from '@/app/api/devices/[deviceId]/print-jobs/route'
+import { loadScanOrder, pickComplimentItem } from '@/lib/agent/scan-order'
+import { guestArrivedInstructionsFor } from '@/lib/ai/prompts/categories/guest-arrived'
+import { formatScanArrival } from '@/lib/ai/prompts/serializers'
 import { createAdminClient } from '@/lib/db/admin'
 import {
   processInstagramDelivery,
   scanCodeBindTargetFor,
 } from '@/lib/messaging/instagram/handle-events'
-import { ingestTransaction } from '@/lib/pos/ingest-transaction'
 import { linkFingerprintToGuest } from '@/lib/pos/reconcile'
 import { reconcileScanCodeFromReferral } from '@/lib/pos/reconcile-tap'
 import { issueScanCode, looksLikeScanCode } from '@/lib/pos/scan-code'
 import { buildScanLink } from '@/lib/pos/scan-link'
-import { squareClientFromEnv } from '@/lib/pos/square/client'
-import { parseSquareWebhook } from '@/lib/pos/square/parse-webhook'
+import {
+  createSandboxPayment,
+  ingestViaWebhook,
+  type SnakePayment,
+} from './lib/square-sandbox'
 
 const VENUE = '5cd8231f-6c54-4ac2-9c60-b75d2801f579' // Mock Sextant Coffee Roasters
 const LOCATION = 'LAVV773570DWH' // sandbox default location
@@ -71,7 +77,6 @@ const IG_HANDLE = 'e2e.testvenue'
 const SHORTLINK = 'SHORTLINK'
 
 const db = createAdminClient()
-const { client } = squareClientFromEnv()
 
 let passed = 0
 let failed = 0
@@ -83,67 +88,8 @@ function check(label: string, ok: boolean, detail?: string): void {
   else failed++
 }
 
-type SnakePayment = {
-  id: string
-  created_at?: string
-  status?: string
-  location_id?: string
-  order_id?: string
-  amount_money: { amount: number; currency?: string }
-  card_details: { card: { fingerprint?: string } }
-}
-
 async function createOrderAndPayment(itemName: string): Promise<SnakePayment> {
-  const order = await client.orders.create({
-    idempotencyKey: randomUUID(),
-    order: {
-      locationId: LOCATION,
-      lineItems: [
-        {
-          name: itemName,
-          quantity: '1',
-          basePriceMoney: { amount: BigInt(650), currency: 'USD' },
-        },
-      ],
-    },
-  })
-  const pay = await client.payments.create({
-    idempotencyKey: randomUUID(),
-    sourceId: 'cnon:card-nonce-ok',
-    amountMoney: { amount: BigInt(650), currency: 'USD' },
-    orderId: order.order!.id!,
-    locationId: LOCATION,
-  })
-  const p = pay.payment!
-  // Re-serialize the SDK (camelCase) payment into the snake_case shape Square
-  // delivers on a webhook, so parse + map run exactly as in production.
-  return {
-    id: p.id!,
-    created_at: p.createdAt,
-    status: p.status,
-    location_id: p.locationId,
-    order_id: p.orderId,
-    amount_money: {
-      amount: Number(p.amountMoney!.amount),
-      currency: p.amountMoney!.currency ?? 'USD',
-    },
-    card_details: { card: { fingerprint: p.cardDetails?.card?.fingerprint } },
-  }
-}
-
-async function ingestViaWebhook(payment: SnakePayment): Promise<void> {
-  const envelope = {
-    merchant_id: 'TEST_MERCHANT',
-    type: 'payment.created',
-    event_id: 'evt_' + randomUUID(),
-    data: { type: 'payment', object: { payment } },
-  }
-  const parsed = parseSquareWebhook(JSON.stringify(envelope))
-  if (!parsed.ok) throw new Error('parse failed: ' + parsed.error)
-  const ev = parsed.data[0]
-  if (ev.kind !== 'transaction')
-    throw new Error('expected transaction event, got ' + ev.kind)
-  await ingestTransaction(ev.data)
+  return createSandboxPayment(itemName, LOCATION)
 }
 
 /**
@@ -272,6 +218,7 @@ async function main(): Promise<void> {
   if (!(await preflight())) process.exit(1)
 
   const createdExternalIds: string[] = []
+  const runStart = new Date(Date.now() - 60_000).toISOString()
 
   // Setup: ensure the venue's Square connection + a test guest exist.
   await db.from('pos_credentials').upsert(
@@ -538,10 +485,216 @@ async function main(): Promise<void> {
       replay.kind === 'bind' && replay.status === 'code_not_found',
       replay.kind === 'bind' ? replay.status : replay.kind,
     )
+
+    // ------------------------------------------------------------------------
+    // The printer half and the two customer flows (receipt printer).
+    // ------------------------------------------------------------------------
+    console.log(
+      '\nTEST 7 — the printer feed serves the same link the QR carries',
+    )
+    const printerId = 'e2e-printer'
+    const printerToken = 'e2e-' + randomUUID()
+    await db.from('pos_devices').delete().eq('device_id', printerId)
+    await db.from('pos_devices').insert({
+      device_id: printerId,
+      venue_id: VENUE,
+      location_external_id: LOCATION,
+      device_token_hash: createHash('sha256')
+        .update(printerToken)
+        .digest('hex'),
+    })
+    const feed = (token: string | null, since: string) =>
+      getPrintJobs(
+        new Request(
+          `https://x.test/api/devices/${printerId}/print-jobs?since=${encodeURIComponent(since)}`,
+          { headers: token ? { authorization: `Bearer ${token}` } : {} },
+        ),
+        { params: Promise.resolve({ deviceId: printerId }) },
+      )
+    check(
+      'no token is refused with 401',
+      (await feed(null, runStart)).status === 401,
+    )
+    check(
+      'a wrong token is refused with 401',
+      (await feed('nope', runStart)).status === 401,
+    )
+    const feedRes = await feed(printerToken, runStart)
+    check(
+      'a valid token gets 200',
+      feedRes.status === 200,
+      String(feedRes.status),
+    )
+    const feedBody = (await feedRes.json()) as {
+      cursor: string | null
+      jobs: { id: string; at: string; url: string }[]
+    }
+    const job3 = feedBody.jobs.find((j) => j.url.endsWith(issued.data.code))
+    check(
+      "the job for payment 3 carries TEST 4's exact link",
+      job3?.url === (link.ok ? link.url : null),
+      job3?.url ?? `jobs=${feedBody.jobs.length}`,
+    )
+    check(
+      'the job url is the ig.me form the QR must encode',
+      /^https:\/\/ig\.me\/m\/[A-Za-z0-9._]+\?ref=sc_[A-Za-z0-9_-]{32}$/.test(
+        job3?.url ?? '',
+      ),
+    )
+    const feedAgain = (await (await feed(printerToken, runStart)).json()) as {
+      jobs: { url: string }[]
+    }
+    check(
+      're-polling serves the same links (no new codes minted)',
+      JSON.stringify(feedAgain.jobs.map((j) => j.url)) ===
+        JSON.stringify(feedBody.jobs.map((j) => j.url)),
+    )
+
+    console.log('\nTEST 8 — FLOW 1, new customer: scan states their order')
+    const { data: scan3 } = await db
+      .from('messages')
+      .select('id, guest_id, created_at')
+      .eq('venue_id', VENUE)
+      .eq('referral_ref', issued.data.code)
+      // TEST 6's replay wrote a second row with the same ref; the first is the scan.
+      .order('created_at', { ascending: true })
+      .limit(1)
+      .maybeSingle()
+    const order3 = await loadScanOrder(db, {
+      venueId: VENUE,
+      guestId: igGuestId ?? '',
+      scanMessageId: scan3?.id ?? null,
+      scannedAt: new Date(scan3?.created_at ?? Date.now()),
+    })
+    check(
+      'the scan reads back as a bound order',
+      order3.kind === 'bound',
+      order3.kind,
+    )
+    if (order3.kind === 'bound') {
+      check(
+        'it names what they ordered',
+        order3.lineItemNames.join(',') === 'Iced SoFi',
+        order3.lineItemNames.join(','),
+      )
+      check(
+        'no earlier order on file for a new customer',
+        (order3.previousLineItemNames ?? null) === null,
+      )
+      const pick3 = pickComplimentItem({
+        lineItemNames: order3.lineItemNames,
+        discoveredLabel: order3.discoveredLabel,
+        menuItems: [],
+      })
+      const arrival3 = {
+        hadPriorConversation: false,
+        hasRecordedVisit: false,
+        afterComplaint: false,
+        priorGreetings: [],
+        order: pick3,
+        previousOrder: order3.previousLineItemNames ?? null,
+        helloOnly: false,
+      }
+      const facts3 = formatScanArrival(arrival3)
+      check(
+        "the facts state today's order",
+        facts3.includes('What they ordered: Iced SoFi'),
+      )
+      check('the facts state no past order', !facts3.includes('last time'))
+      check(
+        'new-customer wording is picked',
+        guestArrivedInstructionsFor(arrival3).includes(
+          'Always open with a short hello,',
+        ),
+      )
+    }
+    const { data: tx3 } = await db
+      .from('transactions')
+      .select('guest_id')
+      .eq('external_id', pay3.id)
+      .maybeSingle()
+    check(
+      'the customer ID is stored against the transaction',
+      !!tx3?.guest_id && tx3.guest_id === igGuestId,
+    )
+
+    console.log(
+      '\nTEST 9 — FLOW 2, returning customer: second receipt states new and past order',
+    )
+    // pay4 (Oat Cortado) was auto-attributed to this guest by fingerprint in
+    // TEST 5, with no scan: the realistic returning-customer case. Its receipt
+    // prints a code, and that code is scanned now.
+    const issued4 = await issueScanCode({
+      venueId: VENUE,
+      providerPaymentId: pay4.id,
+      locationExternalId: LOCATION,
+      supabase: db,
+    })
+    check('a code is issued for the second receipt', issued4.ok)
+    if (!issued4.ok) throw new Error('issueScanCode failed: ' + issued4.error)
+    const bound4 = await deliverScanAndBind(issued4.data.code)
+    check(
+      'the second scan bound or recognised its order',
+      bound4.kind === 'bind',
+      bound4.kind === 'bind' ? bound4.status : bound4.kind,
+    )
+    const { data: scan4 } = await db
+      .from('messages')
+      .select('id, created_at')
+      .eq('venue_id', VENUE)
+      .eq('referral_ref', issued4.data.code)
+      .maybeSingle()
+    const order4 = await loadScanOrder(db, {
+      venueId: VENUE,
+      guestId: igGuestId ?? '',
+      scanMessageId: scan4?.id ?? null,
+      scannedAt: new Date(scan4?.created_at ?? Date.now()),
+    })
+    check(
+      'the second scan reads back as a bound order',
+      order4.kind === 'bound',
+      order4.kind,
+    )
+    if (order4.kind === 'bound') {
+      check(
+        "it names today's order",
+        order4.lineItemNames.join(',') === 'Oat Cortado',
+        order4.lineItemNames.join(','),
+      )
+      check(
+        'it names the past order',
+        (order4.previousLineItemNames ?? []).join(',') === 'Iced SoFi',
+        (order4.previousLineItemNames ?? []).join(',') || 'none',
+      )
+      const arrival4 = {
+        hadPriorConversation: true,
+        hasRecordedVisit: true,
+        afterComplaint: false,
+        priorGreetings: [],
+        order: pickComplimentItem({
+          lineItemNames: order4.lineItemNames,
+          discoveredLabel: order4.discoveredLabel,
+          menuItems: [],
+        }),
+        previousOrder: order4.previousLineItemNames ?? null,
+        helloOnly: false,
+      }
+      const facts4 = formatScanArrival(arrival4)
+      check(
+        'the facts state both orders',
+        facts4.includes('What they ordered: Oat Cortado') &&
+          facts4.includes('What they ordered last time: Iced SoFi'),
+      )
+      check(
+        'the returning wording is picked',
+        guestArrivedInstructionsFor(arrival4).includes('welcome back'),
+      )
+    }
   } finally {
     // Cleanup so the test is re-runnable and leaves no residue. Children
     // before parents: messages and scan arrivals reference the guest, and
     // pos_tap_events references the transactions.
+    await db.from('pos_devices').delete().eq('device_id', 'e2e-printer')
     const igGuestId = await findIgTestGuest()
     if (igGuestId) {
       await db.from('messages').delete().eq('guest_id', igGuestId)

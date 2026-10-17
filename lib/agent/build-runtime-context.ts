@@ -1362,6 +1362,10 @@ export async function buildRuntimeContext(input: {
               menuItems: venue.venueInfo.menu.items,
             })
           : null,
+      previousOrder:
+        scanOrder?.kind === 'bound'
+          ? (scanOrder.previousLineItemNames ?? null)
+          : null,
       helloOnly: greetsHelloOnly(scanOrder),
     }
   }
