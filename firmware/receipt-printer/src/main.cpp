@@ -68,7 +68,13 @@ static void pollOnce() {
   tls.setTimeout(10);
 
   String url = String("https://") + API_HOST + "/api/devices/" + DEVICE_ID + "/print-jobs";
-  if (cursor.length() > 0) url += "?since=" + cursor;
+  if (cursor.length() > 0) {
+    // The feed's timestamps end in "+00:00"; a raw "+" in a query string reads
+    // back as a space and the server rejects the cursor with a 500.
+    String since = cursor;
+    since.replace("+", "%2B");
+    url += "?since=" + since;
+  }
 
   HTTPClient http;
   if (!http.begin(tls, url)) {
