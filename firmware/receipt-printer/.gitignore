@@ -1,0 +1,4 @@
+.pio/
+include/config.h
+include/certs.h
+.vscode/
