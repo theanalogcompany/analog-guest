@@ -724,7 +724,7 @@ function formatOpenStatus(
  * Every line is Jaipal's wording. No em dash: R3 bans them in output and the
  * prompt should not model one.
  */
-function formatScanArrival(
+export function formatScanArrival(
   scanArrival: NonNullable<RuntimeContext['scanArrival']>,
 ): string {
   return [
@@ -736,6 +736,10 @@ function formatScanArrival(
       ? 'There is a recorded visit on file, so you can speak to them as someone who has been in before.'
       : 'There is no recorded visit on file. Don\'t say "welcome back" and don\'t mention a past visit.',
     ...formatScanOrder(scanArrival.order ?? null),
+    ...formatPreviousOrder(
+      scanArrival.order ?? null,
+      scanArrival.previousOrder,
+    ),
     ...formatPriorGreetings(scanArrival.priorGreetings ?? []),
   ].join('\n')
 }
@@ -762,6 +766,24 @@ function formatScanOrder(
       ? [`What the menu says about it: ${flat(order.menuDescription)}`]
       : []),
   ]
+}
+
+/**
+ * What the guest ordered LAST time, so a returning guest's hello can say both
+ * orders. Renders only beside a bound order, and only when there is one on
+ * file; a guest with none is greeted as new. Square's own item names,
+ * flattened to one line each.
+ */
+function formatPreviousOrder(
+  order: unknown,
+  previousOrder: readonly string[] | null | undefined,
+): string[] {
+  if (order === null || order === undefined) return []
+  const names = (previousOrder ?? [])
+    .map((n) => n.replace(/\s+/g, ' ').trim())
+    .filter((n) => n !== '')
+  if (names.length === 0) return []
+  return [`What they ordered last time: ${names.join(', ')}`]
 }
 
 /**

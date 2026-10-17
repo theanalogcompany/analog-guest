@@ -165,6 +165,7 @@ export function categoryInstructionsFor(
     afterComplaint?: boolean
     order?: unknown
     helloOnly?: boolean
+    previousOrder?: string[] | null
   } | null = null,
   // TAC-386: a per-turn exception, on the same reasoning as the scan-arrival one
   // above. An inquiry follow-up stores `category: 'follow_up'`, but that

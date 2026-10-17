@@ -474,6 +474,12 @@ export interface RuntimeContext {
      */
     order: ComplimentPick | null
     /**
+     * The guest's most recent earlier order (Square line item names), when
+     * this scan bound an order and they had one. Null or absent: greet as a
+     * new guest and state no past order.
+     */
+    previousOrder?: string[] | null
+    /**
      * TAC-588: the scan's receipt code bound nothing on this scan: it was
      * past its twenty-four hours (ruled 2026-10-14, question 3), or already
      * used by an earlier scan (ruled in the PR #392 review). The hello goes

@@ -63,6 +63,14 @@ export type ScanOrder =
       lineItemNames: string[]
       /** The item this order's passport stamp DISCOVERED, if it did. */
       discoveredLabel: string | null
+      /**
+       * The guest's most recent EARLIER order at this venue, by Square's line
+       * item names. Null for a first order, and also when it could not be
+       * read: both greet as a new guest, because stating a past order we
+       * cannot show they made is the worse error. Absent where a caller
+       * builds one by hand.
+       */
+      previousLineItemNames?: string[] | null
     }
   | { kind: 'expired' }
   | { kind: 'reused' }
@@ -197,12 +205,71 @@ async function loadBoundOrder(
     !stamp.error && stamp.data?.kind === 'discovered'
       ? (stamp.data.label ?? null)
       : null
+  const previousLineItemNames = await loadPreviousLineItemNames(
+    supabase,
+    scan,
+    {
+      id: row.id,
+      occurredAt: row.occurred_at,
+    },
+  )
   return {
     kind: 'bound',
     transactionId: row.id,
     orderedAt,
     lineItemNames,
     discoveredLabel,
+    previousLineItemNames,
+  }
+}
+
+/** How many earlier orders to look through for one with named items. */
+const PREVIOUS_ORDER_SCAN_LIMIT = 5
+
+/**
+ * The guest's latest earlier order that names its items.
+ *
+ * FAILS CLOSED TO NULL, which greets as a new guest: a failed read must not
+ * invent a past order, and the cost of null is one missing sentence. Scoped on
+ * `venue_id` AND `guest_id`: an order from another venue or another guest is
+ * never "last time". Retracted orders are not orders. Never throws.
+ */
+async function loadPreviousLineItemNames(
+  supabase: AdminSupabaseClient,
+  scan: { venueId: string; guestId: string },
+  current: { id: string; occurredAt: string },
+): Promise<string[] | null> {
+  try {
+    const { data, error } = await supabase
+      .from('transactions')
+      .select('id, raw_data')
+      .eq('venue_id', scan.venueId)
+      .eq('guest_id', scan.guestId)
+      .is('retracted_at', null)
+      .lt('occurred_at', current.occurredAt)
+      .neq('id', current.id)
+      .order('occurred_at', { ascending: false })
+      .limit(PREVIOUS_ORDER_SCAN_LIMIT)
+    if (error) {
+      logger.warn('[scan-order] previous order unreadable; greeting as new', {
+        venueId: scan.venueId,
+        guestId: scan.guestId,
+        error: error.message,
+      })
+      return null
+    }
+    for (const row of data ?? []) {
+      const names = parseLineItemNames(row.raw_data)
+      if (names.length > 0) return names
+    }
+    return null
+  } catch (e) {
+    logger.warn('[scan-order] previous order read threw; greeting as new', {
+      venueId: scan.venueId,
+      guestId: scan.guestId,
+      error: e instanceof Error ? e.message : String(e),
+    })
+    return null
   }
 }
 

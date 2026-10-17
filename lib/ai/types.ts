@@ -364,6 +364,8 @@ export type RuntimeContext = {
      * earlier scan. Picks the hello-only wording: no compliment, no question.
      */
     helloOnly?: boolean
+    /** The guest's most recent earlier order, as Square names its items. */
+    previousOrder?: string[] | null
   } | null
   /**
    * TAC-575: this reply is the first of a counter visit by a guest whose last

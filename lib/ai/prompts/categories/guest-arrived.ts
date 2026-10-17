@@ -160,6 +160,15 @@ export const GUEST_ARRIVED_ORDER_INSTRUCTIONS_NEW = `The guest just scanned the 
 export const GUEST_ARRIVED_ORDER_INSTRUCTIONS_RETURNING = `The guest just scanned the code on their receipt and has not written anything. They may still be in the shop or may already have left, so say nothing that depends on which. You don't know where they are or how their order is going, and you'll ask about it later, so don't guess or presume. You have talked before, so don't introduce yourself. Always open with a short hello and say it's good to see them, using their name if you know it; if you don't, leave the name out and don't ask for it. Then compliment what they ordered, named under "Guest just arrived", using what the facts say about it: how it tastes, what it goes with. Never a generic line like "great choice", and never a detail the facts don't give you. Say only what the facts say about it: nothing about how popular it is, how it ranks, whether it sells best, or who made or created it, unless the facts say so. Ask nothing at all. Don't mention a passport or a stamp. One or two short lines. Say only what the facts below say about past visits.`
 
 /**
+ * A returning guest, with a bound order AND an earlier order on file. Approved
+ * wording (2026-10-17): "Welcome back! Today it's the {new item}. Last time you
+ * had the {past item}." The shape is stated and no phrase is quoted, because a
+ * quoted line gets copied (the prior-greetings block is the one exception).
+ * Both items are Square's own names, under "Guest just arrived".
+ */
+export const GUEST_ARRIVED_ORDER_INSTRUCTIONS_RETURNING_PAST_ORDER = `The guest just scanned the code on their receipt and has not written anything. They may still be in the shop or may already have left, so say nothing that depends on which. You don't know where they are or how their order is going, and you'll ask about it later, so don't guess or presume. They have ordered here before. Always open with a short welcome back, using their name if you know it; if you don't, leave the name out and don't ask for it. Then say what they ordered today and what they ordered last time, both named under "Guest just arrived", using those item names as given. Say nothing else about either order: no detail the facts don't give you, and nothing about how popular it is. Ask nothing at all. Don't mention a passport or a stamp. One or two short lines.`
+
+/**
  * After a complaint, with a bound order. Approved verbatim. Bars the apology,
  * the details and an offer, for GUEST_ARRIVED_INSTRUCTIONS_AFTER_COMPLAINT's
  * reasons.
@@ -205,8 +214,19 @@ export function guestArrivedInstructionsFor(
     afterComplaint?: boolean
     order?: unknown
     helloOnly?: boolean
+    previousOrder?: string[] | null
   } | null,
 ): string {
+  // A bound order plus an earlier one on file: state both. `afterComplaint`
+  // still wins, whose wording bars everything but the glad-you-came-back.
+  if (
+    scanArrival?.order !== null &&
+    scanArrival?.order !== undefined &&
+    scanArrival.afterComplaint !== true &&
+    (scanArrival.previousOrder?.length ?? 0) > 0
+  ) {
+    return GUEST_ARRIVED_ORDER_INSTRUCTIONS_RETURNING_PAST_ORDER
+  }
   const variants =
     scanArrival?.order !== null && scanArrival?.order !== undefined
       ? ORDER_VARIANTS
