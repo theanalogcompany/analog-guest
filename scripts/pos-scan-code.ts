@@ -3,11 +3,14 @@
 //   npm run pos-scan-code -- --venue <venueId> --payment <squarePaymentId>
 //   npm run pos-scan-code -- --venue <venueId> --latest
 //
-// THIS STANDS IN FOR THE PRINTER. The eventual flow has a printer at the
-// register receiving the code and rendering the QR; none exists yet, so this
-// prints the URL to a terminal and you point a phone's camera at a QR you
-// generate from it (or just open the link on the phone). Everything after the
-// scan is the production path.
+// Without `--printer` THIS STANDS IN FOR THE PRINTER: it prints the URL to a
+// terminal and you point a phone's camera at a QR you generate from it (or
+// just open the link on the phone). With `--printer <host[:port]>` it sends
+// the QR to a LAN ESC/POS receipt printer (raw TCP, port 9100 by default), so
+// run it from a machine on the printer's network. Everything after the scan is
+// the production path.
+//
+//   npm run pos-scan-code -- --venue <venueId> --latest --printer 192.168.1.50
 //
 // `--latest` reads the venue's most recent `transactions` row with
 // `source = 'square'`, which is the honest shortcut while codes are issued by
@@ -18,7 +21,10 @@
 // issuing and link rules live in lib/pos/scan-code.ts and lib/pos/scan-link.ts
 // so this file cannot drift from what the server does.
 
+import { Socket } from 'node:net'
+
 import { createAdminClient } from '@/lib/db/admin'
+import { buildQrSlip } from '@/lib/pos/escpos-qr'
 import { issueScanCode } from '@/lib/pos/scan-code'
 import { buildScanLink } from '@/lib/pos/scan-link'
 
@@ -26,24 +32,48 @@ type Args = {
   venueId: string
   paymentId: string | null
   latest: boolean
+  printer: { host: string; port: number } | null
 }
 
 function parseArgs(argv: readonly string[]): Args | string {
   let venueId: string | null = null
   let paymentId: string | null = null
   let latest = false
+  let printer: Args['printer'] = null
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i]
     if (arg === '--venue') venueId = argv[++i] ?? null
     else if (arg === '--payment') paymentId = argv[++i] ?? null
     else if (arg === '--latest') latest = true
-    else return `unknown argument: ${arg}`
+    else if (arg === '--printer') {
+      const [host, port] = (argv[++i] ?? '').split(':')
+      if (!host) return '--printer needs <host[:port]>'
+      printer = { host, port: port ? Number(port) : 9100 }
+      if (!Number.isInteger(printer.port)) return `bad printer port: ${port}`
+    } else return `unknown argument: ${arg}`
   }
   if (!venueId) return 'missing --venue <venueId>'
   if (!paymentId && !latest) return 'need either --payment <id> or --latest'
   if (paymentId && latest)
     return '--payment and --latest are mutually exclusive'
-  return { venueId, paymentId, latest }
+  return { venueId, paymentId, latest, printer }
+}
+
+/** Send bytes to the printer and resolve once they are flushed and the socket closed. */
+function sendToPrinter(
+  printer: { host: string; port: number },
+  payload: Buffer,
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const socket = new Socket()
+    socket.setTimeout(8000, () => {
+      socket.destroy(new Error('printer timed out'))
+    })
+    socket.once('error', reject)
+    socket.connect(printer.port, printer.host, () => {
+      socket.end(payload, () => setTimeout(resolve, 300))
+    })
+  })
 }
 
 async function main(): Promise<void> {
@@ -53,7 +83,8 @@ async function main(): Promise<void> {
     console.error(
       '\nusage:\n' +
         '  npm run pos-scan-code -- --venue <venueId> --payment <squarePaymentId>\n' +
-        '  npm run pos-scan-code -- --venue <venueId> --latest',
+        '  npm run pos-scan-code -- --venue <venueId> --latest\n' +
+        '  add --printer <host[:port]> to print the QR on a LAN receipt printer',
     )
     process.exit(1)
   }
@@ -145,6 +176,19 @@ async function main(): Promise<void> {
     `code     ${issued.data.code}${issued.data.created ? '' : '  (already issued)'}`,
   )
   console.log(`link     ${link.url}`)
+  if (args.printer) {
+    try {
+      await sendToPrinter(args.printer, buildQrSlip(link.url))
+    } catch (e) {
+      console.error(
+        `error: printer ${args.printer.host}:${args.printer.port}: ${e instanceof Error ? e.message : e}\n` +
+          '  (the code is issued; re-run the same command to print it again)',
+      )
+      process.exit(1)
+    }
+    console.log(`printed  sent to ${args.printer.host}:${args.printer.port}`)
+  }
+
   console.log('')
   console.log(
     'Open that link on a phone signed into Instagram, or render it as a QR and\n' +
