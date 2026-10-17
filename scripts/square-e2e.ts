@@ -51,13 +51,15 @@ import {
   processInstagramDelivery,
   scanCodeBindTargetFor,
 } from '@/lib/messaging/instagram/handle-events'
-import { ingestTransaction } from '@/lib/pos/ingest-transaction'
 import { linkFingerprintToGuest } from '@/lib/pos/reconcile'
 import { reconcileScanCodeFromReferral } from '@/lib/pos/reconcile-tap'
 import { issueScanCode, looksLikeScanCode } from '@/lib/pos/scan-code'
 import { buildScanLink } from '@/lib/pos/scan-link'
-import { squareClientFromEnv } from '@/lib/pos/square/client'
-import { parseSquareWebhook } from '@/lib/pos/square/parse-webhook'
+import {
+  createSandboxPayment,
+  ingestViaWebhook,
+  type SnakePayment,
+} from './lib/square-sandbox'
 
 const VENUE = '5cd8231f-6c54-4ac2-9c60-b75d2801f579' // Mock Sextant Coffee Roasters
 const LOCATION = 'LAVV773570DWH' // sandbox default location
@@ -75,7 +77,6 @@ const IG_HANDLE = 'e2e.testvenue'
 const SHORTLINK = 'SHORTLINK'
 
 const db = createAdminClient()
-const { client } = squareClientFromEnv()
 
 let passed = 0
 let failed = 0
@@ -87,67 +88,8 @@ function check(label: string, ok: boolean, detail?: string): void {
   else failed++
 }
 
-type SnakePayment = {
-  id: string
-  created_at?: string
-  status?: string
-  location_id?: string
-  order_id?: string
-  amount_money: { amount: number; currency?: string }
-  card_details: { card: { fingerprint?: string } }
-}
-
 async function createOrderAndPayment(itemName: string): Promise<SnakePayment> {
-  const order = await client.orders.create({
-    idempotencyKey: randomUUID(),
-    order: {
-      locationId: LOCATION,
-      lineItems: [
-        {
-          name: itemName,
-          quantity: '1',
-          basePriceMoney: { amount: BigInt(650), currency: 'USD' },
-        },
-      ],
-    },
-  })
-  const pay = await client.payments.create({
-    idempotencyKey: randomUUID(),
-    sourceId: 'cnon:card-nonce-ok',
-    amountMoney: { amount: BigInt(650), currency: 'USD' },
-    orderId: order.order!.id!,
-    locationId: LOCATION,
-  })
-  const p = pay.payment!
-  // Re-serialize the SDK (camelCase) payment into the snake_case shape Square
-  // delivers on a webhook, so parse + map run exactly as in production.
-  return {
-    id: p.id!,
-    created_at: p.createdAt,
-    status: p.status,
-    location_id: p.locationId,
-    order_id: p.orderId,
-    amount_money: {
-      amount: Number(p.amountMoney!.amount),
-      currency: p.amountMoney!.currency ?? 'USD',
-    },
-    card_details: { card: { fingerprint: p.cardDetails?.card?.fingerprint } },
-  }
-}
-
-async function ingestViaWebhook(payment: SnakePayment): Promise<void> {
-  const envelope = {
-    merchant_id: 'TEST_MERCHANT',
-    type: 'payment.created',
-    event_id: 'evt_' + randomUUID(),
-    data: { type: 'payment', object: { payment } },
-  }
-  const parsed = parseSquareWebhook(JSON.stringify(envelope))
-  if (!parsed.ok) throw new Error('parse failed: ' + parsed.error)
-  const ev = parsed.data[0]
-  if (ev.kind !== 'transaction')
-    throw new Error('expected transaction event, got ' + ev.kind)
-  await ingestTransaction(ev.data)
+  return createSandboxPayment(itemName, LOCATION)
 }
 
 /**
