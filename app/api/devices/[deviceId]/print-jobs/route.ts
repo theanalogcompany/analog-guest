@@ -73,6 +73,11 @@ export async function GET(
     }
 
     const since = new URL(request.url).searchParams.get('since')
+    // A malformed cursor is the caller's mistake, not ours: a raw "+" in
+    // "...+00:00" reads back as a space and used to reach the query as a 500.
+    if (since && Number.isNaN(Date.parse(since))) {
+      return Response.json({ error: 'invalid_since' }, { status: 400 })
+    }
     let query = supabase
       .from('transactions')
       .select('id, external_id, occurred_at')
